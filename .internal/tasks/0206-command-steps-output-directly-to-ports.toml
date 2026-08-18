@@ -1,0 +1,73 @@
+schema-version = "0.2"
+key = "0206"
+title = "Command and check steps output directly to output ports"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Prompt steps may already output directly to an output port — the runtime
+has a first-class finalization branch for it ("accepted direct output
+port value is available", transitions.rs ~1058), the ledger carries
+accepted-port-values, and the validator's only guard is the sensible
+not-consumed rule (a directly written port is never read back as input).
+Command and check steps are the one exception: validate.rs ~1702 rejects
+Kind::Port for them ("command-backed sequence items must output to
+slots"), forcing the echo-slot indirection (slot:commit-output feeding
+port:commit-report via value:) the owner has ruled against.
+
+Extend the existing mechanism to command frames; do not build a new one:
+
+1. Validator: the Command|Check arm routes Kind::Port through the same
+   checks the prompt path gets — validate_direct_output_port_not_consumed
+   plus schema compatibility (command capture is text; a check's P565
+   ok/argv verdict must match the port's object schema — reuse the
+   port/slot compat helper at validate.rs ~4465).
+2. Runtime command acceptance: when a command item's output ref is a
+   port, the captured value lands as an accepted-port-values entry
+   instead of a slot revision.
+3. Evidence: the accepted-port-value shape gains serde-optional
+   command-execution and producer-evidence fields, so a directly written
+   port carries the argv/exit provenance a slot revision would — old
+   ledgers must deserialize byte-identically.
+4. Ledger contract and readiness: validate_accepted_port_values and
+   replay accept the new fields; prove (not assume) the finalization
+   branch keys off accepted-port-values generally.
+5. Version discipline, done properly per the layer-2 doctrine: add "0.5"
+   to SUPPORTED_SCHEMA_VERSIONS with a no-op migration step, floor-gate
+   the construct ("command output to a port requires schema-version 0.5
+   or newer"), and let the migrate.rs release-gate tests force the
+   fixture arms; the CDK default schema-version bumps to "0.5".
+
+The live acceptance case: implement's shared/stage/git.ts commitSubmit
+(cdk.input.command git commit -m ... -> output: port.commitReport) —
+currently the family does not build; this task turns that exact spelling
+into the blessed one, with no CDK changes at all.
+"""
+scope = """
+## Decisions
+- Owner ruling 2026-08-18: no hidden-slot sugar in the CDK — the runtime
+  supports the direct write for real. Option A (synthesized backing
+  slot) is rejected; do not implement it as a fallback.
+- A check step may output to [slot, port] together; the not-consumed
+  rule applies only to the port half (a check gating a loop still needs
+  its slot).
+- Optional ports written inside a conditional branch (implement's
+  Maybe Commit) follow the existing optional-absence semantics unchanged.
+"""
+validation = """
+## Watch
+- Ledger byte-compat: every pre-existing ledger must deserialize and
+  replay unchanged; new fields are additive and skip-serializing-if-none.
+- COMMAND_CAPTURE_LIMIT and truncation-is-a-typed-failure semantics
+  apply to port destinations exactly as to slots.
+- Old binaries meeting a 0.5 trait must refuse with the version-floor
+  message, not an unknown-field decode error.
+
+## Done when
+implement builds, exports, and checks clean with commitSubmit writing
+port:commit-report directly and no commit-output echo slot anywhere; a
+fixture-harness proof shows the command's argv/exit evidence on the
+accepted port value and the value in the run's final outputs; a
+check-to-port case and a not-consumed rejection case are proven; the
+migrate.rs release gates pass with the 0.5 step; cargo test --workspace
+is green.
+"""
