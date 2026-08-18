@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0206"
 title = "Command and check steps output directly to output ports"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
 content = """
 Prompt steps may already output directly to an output port — the runtime
