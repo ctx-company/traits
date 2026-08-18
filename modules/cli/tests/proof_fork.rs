@@ -602,14 +602,30 @@ fn fork_lock_finalization_leaves_other_vendored_dependencies_untouched_even_when
 
 /// Lock finalization's `dependency::sync` write pass unconditionally
 /// establishes the nested-ignore invariant (`ensure_nested_gitignore`) on
-/// its target root whenever the merged dependency set is non-empty — and
-/// fork's finalization always has a non-empty set here, since the
-/// build-derived `@fixture/dep` pin counts. Absent `vendor_root_override`
-/// redirection of *that* call too, the real consumer's `.ctx/.gitignore`
-/// would be created or appended to mid-fork, with nothing to undo it when a
-/// later step (here, the same malformed-trust-store failure as
-/// `fork_trust_read_failure_preserves_installed_dependency`) aborts the
-/// fork. Deletes the file outright before forking (the strongest form of
+/// its target root whenever the merged `dependencies` set is non-empty.
+/// That set is *hand-authored* project/package declarations only —
+/// build-derived (digest-carrying) rows like `@fixture/dep` are filtered
+/// out of it and handled separately via `stamped_dependencies`, and the
+/// forked alias itself is removed from the projected manifest before this
+/// pass runs — so an unrelated, ordinary path dependency that survives the
+/// fork is installed here specifically to keep the post-detach
+/// `dependencies` set non-empty and actually exercise the guarded branch.
+/// Absent `vendor_root_override` redirection of that branch, the real
+/// consumer's `.ctx/.gitignore` would be created or appended to mid-fork,
+/// with nothing to undo it when a later step aborts the fork.
+///
+/// The failure is forced the same way as
+/// `fork_remove_failure_leaves_no_audit_or_scratch_residue` — denying write
+/// on the vendored root's parent so `distribution::remove`'s vendor-backup
+/// rename fails — rather than a malformed trust store: a malformed trust
+/// store fails inside `dependency::sync` itself (every write pass resolves
+/// the target trait's own trust verdict via `resolve_named` before this
+/// guarded line is ever reached), so it can never actually exercise lock
+/// finalization succeeding and a *later* step failing. The vendor-root
+/// permission denial only ever blocks `distribution::remove`, which runs
+/// strictly after lock finalization has already completed.
+///
+/// Deletes the file outright before forking (the strongest form of
 /// "canonical entries absent") and asserts it is still absent afterward —
 /// not merely unchanged content, but unchanged existence.
 #[test]
@@ -617,6 +633,7 @@ fn fork_lock_finalization_failure_leaves_ctx_gitignore_untouched() {
     let scratch = ScratchRoot::new("p0213-fork-gitignore-untouched");
     let home = scratch.home();
     let id = "fixture-fork-gitignore-untouched";
+    let other_id = "fixture-fork-gitignore-untouched-sibling";
 
     let producer = home.join("producer");
     fs::create_dir_all(&producer).unwrap();
@@ -645,6 +662,7 @@ fn fork_lock_finalization_failure_leaves_ctx_gitignore_untouched() {
         &home,
     );
     let producer_root = producer.join(".ctx/traits/authored").join(id);
+    build_forkable_producer(&home.join("other-producer"), &home, other_id);
 
     let consumer = home.join("consumer");
     fs::create_dir_all(&consumer).unwrap();
@@ -658,6 +676,21 @@ fn fork_lock_finalization_failure_leaves_ctx_gitignore_untouched() {
     let alias = install_path_dependency(&consumer, &home, &producer_root, None);
     assert_eq!(alias, id);
 
+    // A project-level `[[dependency]]` entry (the legacy hand-authored
+    // table `dependency::sync`'s merged `dependencies` set is built from —
+    // distinct from the `[dependencies]` npm/path-install table `dependency
+    // add` writes, which this guarded branch never sees) pointing at the
+    // unrelated `other-producer` package, unconnected to the fork target,
+    // so `dependencies` remains genuinely non-empty after `id` is removed
+    // from the projected post-detach manifest. Hand-appended since no CLI
+    // surface writes this legacy array table.
+    let manifest_path = consumer.join(".ctx/traits/config.toml");
+    let mut config_text = fs::read_to_string(&manifest_path).unwrap();
+    config_text.push_str(&format!(
+        "\n[[vendor.dependency]]\nalias = \"other\"\nid = \"{other_id}\"\nversion = \"0.1.0\"\n\n[vendor.dependency.source]\npath = \"../other-producer/.ctx/traits/authored/{other_id}\"\n"
+    ));
+    fs::write(&manifest_path, &config_text).unwrap();
+
     // Force the strongest precondition: no `.ctx/.gitignore` at all, not
     // merely one missing a canonical entry.
     let gitignore_path = consumer.join(".ctx/.gitignore");
@@ -667,15 +700,22 @@ fn fork_lock_finalization_failure_leaves_ctx_gitignore_untouched() {
         "precondition: .ctx/.gitignore must be absent before forking"
     );
 
-    let trust_store_path = home.join("ctx/trust.toml");
-    fs::create_dir_all(trust_store_path.parent().unwrap()).unwrap();
-    fs::write(&trust_store_path, "this is not valid toml [[[\n").unwrap();
+    // Deny write on the vendored root's parent directory: `distribution::
+    // remove`'s vendor-backup rename needs to add/remove entries there, so
+    // this fails that rename specifically, after fork's own copy/build/
+    // lock-finalization steps have already succeeded.
+    let vendor_root = consumer.join(".ctx/traits/vendored");
+    let original_mode = fs::metadata(&vendor_root).unwrap().permissions().mode();
+    fs::set_permissions(&vendor_root, fs::Permissions::from_mode(0o555)).unwrap();
 
     let result = run_ctx(&["traits", "fork", id], &consumer, &home);
+
+    fs::set_permissions(&vendor_root, fs::Permissions::from_mode(original_mode)).unwrap();
+
     let (stdout, stderr) = utf8(&result);
     assert!(
         !result.status.success(),
-        "fork must fail loudly when the trust store cannot be decoded\nstdout: {stdout}\nstderr: {stderr}"
+        "fork must fail loudly when distribution::remove itself cannot detach\nstdout: {stdout}\nstderr: {stderr}"
     );
 
     assert!(
