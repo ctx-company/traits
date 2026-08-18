@@ -4,14 +4,16 @@
 //!
 //! One transaction: copy the vendored authoring subset into a freshly
 //! claimed authored root, rebuild it through the normal CDK build path
-//! ([`crate::app::schema_synth_build`]), lock it, record forked-from
-//! provenance, detach the vendored dependency (manifest declaration +
-//! project lock entry + vendored tree, via
-//! [`ctx_traits_io::distribution::remove`]), and report trust by canonical
-//! digest. The authored root is claimed atomically first (the `create`
-//! precedent); any failure after that point removes everything under it, so
-//! a failed fork never leaves a half-copied authored package, and the
-//! manifest/lock/vendored tree stay untouched.
+//! ([`crate::app::schema_synth_build`]), lock it against a projected
+//! post-detach dependency set, record forked-from provenance, detach the
+//! vendored dependency (manifest declaration + project lock entry +
+//! vendored tree, via [`ctx_traits_io::distribution::remove`] — the one
+//! true, self-rolling-back mutation, deliberately run last), and report
+//! trust by canonical digest. The authored root is claimed atomically first
+//! (the `create` precedent); any failure before `distribution::remove`
+//! removes everything under it and touches nothing else, so a failed fork
+//! never leaves a half-copied authored package, a false audit record, or a
+//! scratch-backup leak, and the manifest/lock/vendored tree stay untouched.
 
 use camino::Utf8Path;
 use ctx_traits_core::project_lock::TraitLockEntry;
@@ -23,7 +25,9 @@ use crate::app::command_handlers::print_json_report;
 use crate::app::lifecycle_reporting::current_utf8_dir;
 use crate::app::new::trust_status_line;
 use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
-use crate::app::schema_synth_build::{CdkBuildRouted, record_lock_evidence, route_cdk_build};
+use crate::app::schema_synth_build::{
+    CdkBuildRouted, record_lock_evidence, record_lock_evidence_with_manifest, route_cdk_build,
+};
 
 pub(crate) fn handle_fork(id: &str, json: bool) -> crate::Result<CommandOutput<()>> {
     let repo_root = current_utf8_dir()?;
@@ -150,18 +154,19 @@ fn default_variant_trait(traits: &[TraitLockEntry]) -> crate::Result<&TraitLockE
     }
 }
 
-/// A sibling backup path for `vendored_root`, unique per process/instant —
-/// same naming shape as `distribution::remove`'s own internal rollback
-/// backups, kept private to this module since it exists only to give the
-/// post-detach lock-finalization rollback below a scratch location.
-fn vendored_fork_backup_path(vendored_root: &Utf8Path) -> camino::Utf8PathBuf {
+/// A sibling scratch-file path for `manifest_path`, unique per
+/// process/instant, matching `distribution::remove`'s own internal backup
+/// naming shape. Used only to hold the projected post-detach manifest text
+/// fork's pre-detach lock finalization reads from; never the real project
+/// manifest.
+fn fork_projection_scratch_path(manifest_path: &Utf8Path) -> camino::Utf8PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    vendored_root.with_file_name(format!(
-        "{}.fork-backup-{}-{nanos}",
-        vendored_root.file_name().unwrap_or("dir"),
+    manifest_path.with_file_name(format!(
+        "{}.fork-projection-{}-{nanos}",
+        manifest_path.file_name().unwrap_or("file"),
         std::process::id(),
     ))
 }
@@ -207,12 +212,11 @@ fn fork_after_claim(
                 // `route_cdk_build`'s family report does not carry each
                 // variant's canonical digest, so an interim lock sync reads
                 // it back off the just-written `trait.lock`. This first sync
-                // still runs while the forked alias is a live project
-                // dependency, so its `dependencies` rows are provisional —
-                // the post-detach `record_lock_evidence` pass below re-syncs
-                // every variant once more after detach to reconcile that
-                // away; upsert-by-`(id, variant)` semantics make the second
-                // pass authoritative.
+                // still runs against the live (pre-projection) project
+                // manifest, so its `dependencies` rows are provisional — the
+                // projected-manifest finalization pass below re-syncs every
+                // variant once more to reconcile that away; upsert-by-`(id,
+                // variant)` semantics make the second pass authoritative.
                 for variant in &family_report.variants {
                     record_lock_evidence(Utf8Path::new(&variant.target), false)?;
                 }
@@ -286,95 +290,55 @@ fn fork_after_claim(
         &rebuilt_canonical_digest,
     )?;
 
-    // Snapshot everything `distribution::remove` is about to delete, before
-    // calling it: lock finalization below still has to run after the
-    // detach (so it sees the post-detach dependency set — see the comment
-    // there), which makes `distribution::remove` a fallible step in the
-    // *middle* of this transaction rather than its last one. A finalization
-    // failure after a successful detach must not strand the fork half-done
-    // (dependency removed, no working authored replacement), so on that
-    // failure this snapshot is replayed to put the project manifest,
-    // project lock, and vendored tree back exactly as they were.
+    // Lock finalization must observe the *post-detach* dependency set —
+    // `dependency::sync` merges the live project-level `[dependencies]`
+    // into the authored package's own `trait.lock`, and the forked alias
+    // is about to be removed from there. Rather than run finalization after
+    // `distribution::remove` (making that irreversible detach a step in the
+    // *middle* of this transaction, with the false-audit-record and
+    // scratch-backup residue that implies on a later failure), project the
+    // post-detach manifest text into a scratch file — never the real
+    // project manifest — and finalize against that projection now, while
+    // `distribution::remove` is still unreached. This makes `remove` this
+    // transaction's one true, self-rolling-back, last mutation: any
+    // finalization failure here has touched nothing outside the authored
+    // root the outer error handler already cleans up.
     let project_manifest_path = scope.manifest_path("toml");
-    let project_manifest_before = ctx_traits_io::read::read_text(&project_manifest_path)?;
-    let project_lock_path = scope.lock_path();
-    let project_lock_before = ctx_traits_io::read::read_text(&project_lock_path)?;
-    let vendored_backup = vendored_fork_backup_path(vendored_root);
-    ctx_traits_io::fork::backup_tree(vendored_root, &vendored_backup)?;
-
-    let remove_report = ctx_traits_io::distribution::remove(scope, alias)?;
-
-    // Lock finalization happens only now, after the alias is gone from
-    // project configuration: `dependency::sync` merges the *current*
-    // project-level `[dependencies]` into every package's own `trait.lock`,
-    // so finalizing before detach would freeze a stale row for the very
-    // dependency this command just removed. Running it here instead means
-    // the authored package's lock reflects the post-detach dependency set —
-    // the forked alias absent, everything else the package (or project)
-    // still legitimately depends on still represented — while build-derived
-    // pins (`sync_derived_dependency_locks`) are unaffected by detach and
-    // stay correct either way.
+    let projected_manifest_text =
+        ctx_traits_io::distribution::manifest_text_without_dependency(scope, alias)?;
+    let scratch_manifest_path = fork_projection_scratch_path(&project_manifest_path);
+    ctx_traits_io::write::write_text(&scratch_manifest_path, &projected_manifest_text)?;
     let finalize = (|| -> crate::Result<String> {
         match &family_variant_targets {
             None => {
-                record_lock_evidence(camino::Utf8Path::new(&generated[0]), false)?;
+                record_lock_evidence_with_manifest(
+                    camino::Utf8Path::new(&generated[0]),
+                    false,
+                    Some(&scratch_manifest_path),
+                )?;
                 Ok(ctx_traits_io::layout::package_lock_path(authored_root).to_string())
             }
             Some(targets) => {
                 for target in targets {
-                    record_lock_evidence(target, false)?;
+                    record_lock_evidence_with_manifest(
+                        target,
+                        false,
+                        Some(&scratch_manifest_path),
+                    )?;
                 }
                 Ok(ctx_traits_io::layout::package_lock_path(authored_root).to_string())
             }
         }
     })();
+    let _ = std::fs::remove_file(scratch_manifest_path.as_std_path());
+    let lock = finalize?;
 
-    let lock = match finalize {
-        Ok(lock) => {
-            let _ = std::fs::remove_dir_all(vendored_backup.as_std_path());
-            lock
-        }
-        Err(error) => {
-            // Best-effort replay of the pre-detach snapshot: every step
-            // failure is folded into the returned message alongside
-            // `error` rather than swallowed or allowed to mask it, so a
-            // rollback-step failure is never silently reported as success.
-            let mut notes = Vec::new();
-            if let Err(source) =
-                ctx_traits_io::write::write_text(&project_manifest_path, &project_manifest_before)
-            {
-                notes.push(format!(
-                    "could not restore {project_manifest_path}: {source}"
-                ));
-            }
-            if let Err(source) =
-                ctx_traits_io::write::write_text(&project_lock_path, &project_lock_before)
-            {
-                notes.push(format!("could not restore {project_lock_path}: {source}"));
-            }
-            if vendored_root.exists()
-                && let Err(source) = std::fs::remove_dir_all(vendored_root.as_std_path())
-            {
-                notes.push(format!("could not clear {vendored_root}: {source}"));
-            } else if let Err(source) =
-                std::fs::rename(vendored_backup.as_std_path(), vendored_root.as_std_path())
-            {
-                notes.push(format!(
-                    "could not restore vendored tree from backup {vendored_backup}: {source}"
-                ));
-            }
-            return Err(if notes.is_empty() {
-                error
-            } else {
-                crate::Error::Command {
-                    message: format!(
-                        "{error}; additionally, restoring the detached dependency failed: {}",
-                        notes.join("; ")
-                    ),
-                }
-            });
-        }
-    };
+    // The sole irreversible mutation in this transaction, run last: it is
+    // already fully self-atomic (manifest declaration, project lock entry,
+    // vendored tree, and the append-only Remove audit record all commit or
+    // roll back together), so a failure here leaves the original dependency
+    // installed with nothing further for fork to undo.
+    let remove_report = ctx_traits_io::distribution::remove(scope, alias)?;
 
     Ok(ForkReport {
         id: package_id.to_string(),

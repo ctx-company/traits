@@ -8,10 +8,12 @@
 //! (manifest declaration, project lock entry, vendored tree) is gone.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use support::{
-    ScratchRoot, git_init, repo_root, require_success, run_ctx, symlink_node_modules, utf8,
+    ScratchRoot, git_init, private_node_modules, require_success, run_ctx, symlink_node_modules,
+    utf8, write_locked_dependency_fixture,
 };
 
 /// A real, CDK-buildable authored package at
@@ -72,117 +74,6 @@ fn install_path_dependency(
         home,
     );
     alias.unwrap_or(id).to_string()
-}
-
-/// A private `node_modules` for a fixture project: every entry of the
-/// repository's own installed `node_modules` symlinked in individually
-/// (never the whole directory — [`support::symlink_node_modules`] does that
-/// and shares one real directory across every caller, which would collide
-/// with this fixture's own `@fixture/dep` package), so a caller can add its
-/// own real package directories alongside them. Mirrors
-/// `proof_trait_composition.rs`'s helper of the same shape; kept local
-/// since integration-test binaries share no lib.
-fn private_node_modules(proj: &Path) -> PathBuf {
-    let node_modules = proj.join("node_modules");
-    fs::create_dir_all(&node_modules).unwrap();
-    for entry in fs::read_dir(repo_root().join("node_modules")).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(entry.path(), node_modules.join(&name))
-            .unwrap_or_else(|error| panic!("cannot symlink {name:?}: {error}"));
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(entry.path(), node_modules.join(&name))
-            .unwrap_or_else(|error| panic!("cannot symlink {name:?}: {error}"));
-    }
-    node_modules
-}
-
-const DEP_PACKAGE_JSON: &str = "{\n  \"name\": \"@fixture/dep\",\n  \"version\": \"1.0.0\"\n}\n";
-const DEP_SHARED_MJS: &str =
-    "export const summaryText = \"Describe what this trait should accomplish.\";\n";
-
-/// A minimal, independently synthesizable CDK source for `@fixture/dep`
-/// itself, built through the ordinary `ctx traits init`/`build` lifecycle
-/// so its own `trait.lock` self entry is production-written.
-fn dep_trait_source() -> &'static str {
-    "import { agent, input, port, procedure, sequence, slot, trait } from \"@ctx-traits/cdk\";\n\
-\n\
-const summary = slot.text(\"summary\");\n\
-const output = port.output.text({ id: \"summary\", value: summary });\n\
-const worker = agent(\"worker\", { description: \"Completes the starter task.\" });\n\
-\n\
-export const draft = trait({\n\
-  id: \"fixture-dep\",\n\
-  name: \"fixture-dep\",\n\
-  description: \"A fixture dependency trait package.\",\n\
-  port: output,\n\
-  procedure: procedure({\n\
-    description: \"A fixture dependency trait package.\",\n\
-    sequence: sequence.prompt({\n\
-      id: \"run\",\n\
-      agent: worker,\n\
-      prompt: input.prompt`Describe the task for this trait.`,\n\
-      output: summary,\n\
-    }),\n\
-  }),\n\
-});\n"
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) {
-    for entry in fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let dest_path = dst.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            fs::create_dir_all(&dest_path).unwrap();
-            copy_dir_recursive(&entry.path(), &dest_path);
-        } else {
-            fs::copy(entry.path(), &dest_path).unwrap();
-        }
-    }
-}
-
-/// Builds `@fixture/dep` as its own real trait project in a scratch
-/// directory, then copies the resulting package (`trait.toml`,
-/// `trait.lock`, `generated/`, `source/`) into `dep_root` alongside a
-/// `package.json` and the plain `shared.mjs` helper consumers import —
-/// exactly `proof_trait_composition.rs`'s `write_locked_dependency_fixture`.
-fn write_locked_dependency_fixture(dep_root: &Path, label: &str) {
-    let dep_scratch = ScratchRoot::new(label);
-    let dep_home = dep_scratch.home();
-    let dep_proj = dep_home.join("dep-repo");
-    fs::create_dir_all(&dep_proj).unwrap();
-    git_init(&dep_proj);
-    private_node_modules(&dep_proj);
-
-    require_success(
-        "`ctx traits init fixture-dep` for the dependency fixture",
-        &["traits", "init", "fixture-dep"],
-        &dep_proj,
-        &dep_home,
-    );
-    let dep_source_path = dep_proj.join(".ctx/traits/authored/fixture-dep/source/index.ts");
-    fs::write(&dep_source_path, dep_trait_source()).unwrap();
-    require_success(
-        "building the dependency fixture's own trait package",
-        &[
-            "traits",
-            "build",
-            ".ctx/traits/authored/fixture-dep/source/index.ts",
-        ],
-        &dep_proj,
-        &dep_home,
-    );
-
-    let dep_package_root = dep_proj.join(".ctx/traits/authored/fixture-dep");
-    fs::create_dir_all(dep_root).unwrap();
-    copy_dir_recursive(&dep_package_root, dep_root);
-    fs::write(dep_root.join("package.json"), DEP_PACKAGE_JSON).unwrap();
-    fs::write(dep_root.join("shared.mjs"), DEP_SHARED_MJS).unwrap();
-    assert!(
-        dep_root.join("trait.lock").exists(),
-        "copying the dependency fixture's build output did not carry a trait.lock"
-    );
 }
 
 /// Single-trait fixture source that imports the `@fixture/dep` bare
@@ -442,16 +333,15 @@ fn fork_lock_matches_post_detach_dependencies_and_preserves_derived_pins() {
     );
 }
 
-/// A post-detach lock-finalization failure (a conflicting dependency
-/// declaration surfaced only after the alias is removed from project
-/// config) must not strand the fork half-done: the project manifest,
-/// project lock, and vendored tree must all be restored to exactly what
-/// they were before `fork` ran, and no authored package must be left
-/// behind. The single-trait branch runs no lock sync before the detach, so
-/// this is the first point a conflicting `[[dependency]]`/`[dependencies]`
-/// pair can surface — regression guard for treating
-/// `distribution::remove` as a step in the middle of the transaction
-/// (post-detach finalization can still fail) rather than its last one.
+/// A lock-finalization failure (a conflicting dependency declaration
+/// surfaced against the projected post-detach dependency set) must not
+/// strand the fork half-done: since finalization now runs against a scratch
+/// manifest projection strictly *before* `distribution::remove`, the
+/// project manifest, project lock, and vendored tree must never be touched
+/// at all (nothing to restore), and no authored package must be left
+/// behind. Regression guard for the transaction ordering: finalization is
+/// the fallible step and it must resolve before `distribution::remove`
+/// becomes reachable, never after.
 #[test]
 fn fork_lock_finalization_failure_preserves_installed_dependency() {
     let scratch = ScratchRoot::new("p0213-fork-lock-finalization-failure");
@@ -586,5 +476,131 @@ fn fork_trust_read_failure_preserves_installed_dependency() {
     assert!(
         vendored_path.is_dir(),
         "a fork that fails on trust resolution must leave the vendored dependency in place"
+    );
+}
+
+/// Every regular file under `dir`, keyed by its path relative to `dir` and
+/// sorted, so two trees compare byte-for-byte regardless of directory-entry
+/// iteration order.
+fn collect_tree(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                walk(root, &path, out);
+            } else {
+                let rel = path.strip_prefix(root).unwrap().to_path_buf();
+                out.push((rel, fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// `distribution::remove` failing on its own (a permission-denied rename,
+/// unrelated to fork's own lock-finalization projection, which by this
+/// point has already succeeded) must leave no residue: the project
+/// manifest, project lock, and vendored tree stay full-tree-byte-identical,
+/// no authored package survives, no `Remove` audit record is appended (the
+/// audit journal directory never even gets created), and no
+/// `*.fork-projection-*` scratch sibling is left next to the project
+/// manifest. Regression guard for treating `distribution::remove` as
+/// fork's one true, last, self-rolling-back mutation: this proof forces
+/// *that* step itself to fail, distinct from
+/// `fork_lock_finalization_failure_preserves_installed_dependency` (which
+/// forces the projected-manifest finalization step, strictly before
+/// `remove` is ever reached, to fail instead).
+#[test]
+fn fork_remove_failure_leaves_no_audit_or_scratch_residue() {
+    let scratch = ScratchRoot::new("p0213-fork-remove-failure");
+    let home = scratch.home();
+    let id = "fixture-fork-remove-failure";
+    let producer_root = build_forkable_producer(&home.join("producer"), &home, id);
+
+    let consumer = home.join("consumer");
+    fs::create_dir_all(&consumer).unwrap();
+    git_init(&consumer);
+    symlink_node_modules(&consumer);
+    install_path_dependency(&consumer, &home, &producer_root, None);
+
+    let manifest_path = consumer.join(".ctx/traits/config.toml");
+    let lock_path = consumer.join(".ctx/traits/config.lock");
+    let vendor_root = consumer.join(".ctx/traits/vendored");
+    let vendored_path = vendor_root.join(id);
+    let manifest_before = fs::read(&manifest_path).unwrap();
+    let lock_before = fs::read(&lock_path).unwrap();
+    let vendored_tree_before = collect_tree(&vendored_path);
+    // `install_path_dependency` above already appended its own `Install`
+    // audit record, so the journal is non-empty by this point — snapshot
+    // its full contents (not mere existence) and assert byte-identical
+    // after the forced failure, proving no `Remove` line was appended.
+    let audit_root = home.join("ctx/audit");
+    let audit_before = collect_tree(&audit_root);
+
+    // Deny write on the vendored root's parent directory: `distribution::
+    // remove`'s vendor-backup rename needs to add/remove entries there, so
+    // this fails that rename specifically, after fork's own copy/build/
+    // lock-finalization steps (which only ever read `vendored_path`) have
+    // already succeeded.
+    let original_mode = fs::metadata(&vendor_root).unwrap().permissions().mode();
+    fs::set_permissions(&vendor_root, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let result = run_ctx(&["traits", "fork", id], &consumer, &home);
+
+    fs::set_permissions(&vendor_root, fs::Permissions::from_mode(original_mode)).unwrap();
+
+    let (stdout, stderr) = utf8(&result);
+    assert!(
+        !result.status.success(),
+        "fork must fail loudly when distribution::remove itself cannot detach\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    assert!(
+        !consumer.join(".ctx/traits/authored").join(id).exists(),
+        "a fork that fails inside distribution::remove must leave no authored package"
+    );
+    assert_eq!(
+        manifest_before,
+        fs::read(&manifest_path).unwrap(),
+        "a fork that fails inside distribution::remove must leave the project manifest untouched"
+    );
+    assert_eq!(
+        lock_before,
+        fs::read(&lock_path).unwrap(),
+        "a fork that fails inside distribution::remove must leave the project lock untouched"
+    );
+    assert!(
+        vendored_path.is_dir(),
+        "a fork that fails inside distribution::remove must leave the vendored dependency in place"
+    );
+    assert_eq!(
+        vendored_tree_before,
+        collect_tree(&vendored_path),
+        "a fork that fails inside distribution::remove must leave the vendored tree \
+         full-tree-byte-identical, not merely present"
+    );
+    assert_eq!(
+        audit_before,
+        collect_tree(&audit_root),
+        "a fork that fails inside distribution::remove must append no Remove audit record"
+    );
+    let leftover_scratch_manifests: Vec<_> = fs::read_dir(manifest_path.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".fork-projection-")
+        })
+        .collect();
+    assert!(
+        leftover_scratch_manifests.is_empty(),
+        "a fork that fails inside distribution::remove must leave no scratch manifest \
+         projection sibling: {leftover_scratch_manifests:?}"
     );
 }

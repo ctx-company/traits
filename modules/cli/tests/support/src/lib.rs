@@ -130,6 +130,126 @@ pub fn symlink_node_modules(proj: &Path) {
         .unwrap_or_else(|error| panic!("cannot symlink node_modules: {error}"));
 }
 
+/// A private `node_modules` for a fixture project: every entry of the
+/// repository's own installed `node_modules` symlinked in individually
+/// (never the whole directory — [`symlink_node_modules`] does that and
+/// shares one real directory across every caller, which would make a
+/// caller's own `@fixture/dep` package land inside the *repository's* real
+/// `node_modules`), so a caller can add its own real package directories
+/// alongside them. Shared by `proof_trait_composition` and `proof_fork`
+/// (previously duplicated verbatim in both).
+pub fn private_node_modules(proj: &Path) -> PathBuf {
+    let node_modules = proj.join("node_modules");
+    std::fs::create_dir_all(&node_modules).unwrap();
+    for entry in std::fs::read_dir(repo_root().join("node_modules")).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(entry.path(), node_modules.join(&name))
+            .unwrap_or_else(|error| panic!("cannot symlink {name:?}: {error}"));
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(entry.path(), node_modules.join(&name))
+            .unwrap_or_else(|error| panic!("cannot symlink {name:?}: {error}"));
+    }
+    node_modules
+}
+
+const FIXTURE_DEP_PACKAGE_JSON: &str =
+    "{\n  \"name\": \"@fixture/dep\",\n  \"version\": \"1.0.0\"\n}\n";
+const FIXTURE_DEP_SHARED_MJS: &str =
+    "export const summaryText = \"Describe what this trait should accomplish.\";\n";
+
+/// A minimal, independently synthesizable CDK source for `@fixture/dep`
+/// itself — the dependency is a real trait package, built through the
+/// ordinary `ctx traits init`/`build` lifecycle so its own `trait.lock` self
+/// entry is written by production code (`ctx_traits_io::dependency::sync`'s
+/// "self" load via `record_lock_evidence`), not hand-typed. `shared.mjs` is
+/// the plain importable helper `@fixture/dep`'s *consumers* pull in — it is
+/// not part of this trait's own canonical/port and is added to the package
+/// root separately after this build.
+fn fixture_dep_trait_source() -> &'static str {
+    "import { agent, input, port, procedure, sequence, slot, trait } from \"@ctx-traits/cdk\";\n\
+\n\
+const summary = slot.text(\"summary\");\n\
+const output = port.output.text({ id: \"summary\", value: summary });\n\
+const worker = agent(\"worker\", { description: \"Completes the starter task.\" });\n\
+\n\
+export const draft = trait({\n\
+  id: \"fixture-dep\",\n\
+  name: \"fixture-dep\",\n\
+  description: \"A fixture dependency trait package.\",\n\
+  port: output,\n\
+  procedure: procedure({\n\
+    description: \"A fixture dependency trait package.\",\n\
+    sequence: sequence.prompt({\n\
+      id: \"run\",\n\
+      agent: worker,\n\
+      prompt: input.prompt`Describe the task for this trait.`,\n\
+      output: summary,\n\
+    }),\n\
+  }),\n\
+});\n"
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) {
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let dest_path = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&dest_path).unwrap();
+            copy_dir_recursive(&entry.path(), &dest_path);
+        } else {
+            std::fs::copy(entry.path(), &dest_path).unwrap();
+        }
+    }
+}
+
+/// Builds `@fixture/dep` as its own real trait project in a scratch
+/// directory (via `ctx traits init` + `build`, so its `trait.lock` self
+/// entry is production-written), then copies the resulting package —
+/// `trait.toml`, `trait.lock`, `generated/`, `source/` — into `dep_root`
+/// alongside a `package.json` and the plain `shared.mjs` helper consumers
+/// import. Shared by `proof_trait_composition` and `proof_fork` (previously
+/// duplicated verbatim in both); `label` names the scratch root the
+/// dependency build runs in.
+pub fn write_locked_dependency_fixture(dep_root: &Path, label: &str) {
+    let dep_scratch = ScratchRoot::new(label);
+    let dep_home = dep_scratch.home();
+    let dep_proj = dep_home.join("dep-repo");
+    std::fs::create_dir_all(&dep_proj).unwrap();
+    git_init(&dep_proj);
+    private_node_modules(&dep_proj);
+
+    require_success(
+        "`ctx traits init fixture-dep` for the dependency fixture",
+        &["traits", "init", "fixture-dep"],
+        &dep_proj,
+        &dep_home,
+    );
+    let dep_source_path = dep_proj.join(".ctx/traits/authored/fixture-dep/source/index.ts");
+    std::fs::write(&dep_source_path, fixture_dep_trait_source()).unwrap();
+    require_success(
+        "building the dependency fixture's own trait package",
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/authored/fixture-dep/source/index.ts",
+        ],
+        &dep_proj,
+        &dep_home,
+    );
+
+    let dep_package_root = dep_proj.join(".ctx/traits/authored/fixture-dep");
+    std::fs::create_dir_all(dep_root).unwrap();
+    copy_dir_recursive(&dep_package_root, dep_root);
+    std::fs::write(dep_root.join("package.json"), FIXTURE_DEP_PACKAGE_JSON).unwrap();
+    std::fs::write(dep_root.join("shared.mjs"), FIXTURE_DEP_SHARED_MJS).unwrap();
+    assert!(
+        dep_root.join("trait.lock").exists(),
+        "copying the dependency fixture's build output did not carry a trait.lock"
+    );
+}
+
 /// A private, per-test scratch root under the OS temp directory, removed on
 /// drop. Never shared across tests: each caller gets its own directory named
 /// with this process's pid and a process-local monotonic counter, so

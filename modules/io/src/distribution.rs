@@ -1252,6 +1252,31 @@ pub fn resolve_installed_operand<'a>(
     }
 }
 
+/// The manifest document text at this scope with `alias`'s `[dependencies]`
+/// (or scoped-equivalent) entry removed, computed purely in memory — this
+/// writes nothing to disk. `ctx traits fork` uses it to finalize the
+/// authored package's lock against the dependency set as it will read
+/// *after* [`remove`] runs, without touching the real project manifest
+/// before `remove` becomes the transaction's one true, self-rolling-back
+/// mutation.
+pub fn manifest_text_without_dependency(
+    scope: &DistributionScope,
+    alias: &str,
+) -> crate::Result<String> {
+    let manifest_path = scope.manifest_path("toml");
+    let text = crate::read::read_text(&manifest_path)?;
+    let mut document = text.parse::<toml_edit::DocumentMut>().map_err(|source| {
+        crate::parse::Error::TomlEditDecode {
+            context: format!("parse {manifest_path} for fork projection"),
+            source: Box::new(source),
+        }
+    })?;
+    if let Some(deps) = get_nested_table_mut(&mut document, scope.dependencies_table_path()) {
+        deps.remove(alias);
+    }
+    Ok(document.to_string())
+}
+
 /// Remove one project-installed npm package: manifest entry, project-lock
 /// entry, and vendor directory. `operand` may be either the manifest alias
 /// or the exact npm package name.

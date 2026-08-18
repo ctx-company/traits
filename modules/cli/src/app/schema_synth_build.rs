@@ -358,10 +358,23 @@ fn authored_package_source(id: &str) -> Option<camino::Utf8PathBuf> {
 /// package around it, and a built-in store package is read-only. Neither is
 /// an error in `build`'s own terms.
 pub(crate) fn record_lock_evidence(target: &camino::Utf8Path, relock: bool) -> crate::Result<()> {
+    record_lock_evidence_with_manifest(target, relock, None)
+}
+
+/// [`record_lock_evidence`] with an overridable project-manifest path: `ctx
+/// traits fork` uses this to finalize a lock against a projected
+/// post-detach dependency set (a scratch file, never the real project
+/// manifest) so lock finalization can fail *before* the transaction's one
+/// true mutation ([`ctx_traits_io::distribution::remove`]) runs.
+pub(crate) fn record_lock_evidence_with_manifest(
+    target: &camino::Utf8Path,
+    relock: bool,
+    manifest_path: Option<&camino::Utf8Path>,
+) -> crate::Result<()> {
     let repo_root = crate::app::lifecycle_reporting::current_utf8_dir()?;
     ctx_traits_io::dependency::sync(ctx_traits_io::dependency::SyncRequest {
         repo_root: &repo_root,
-        manifest_path: None,
+        manifest_path,
         trait_file: Some(target),
         mode: ctx_traits_io::dependency::SyncMode::Write,
     })?;

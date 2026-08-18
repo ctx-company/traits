@@ -11,17 +11,6 @@ use camino::Utf8Path;
 /// build-owned bytes, not a copy of the vendored ones.
 const AUTHORING_SUBSET_DIRS: &[&str] = &["source", "resources", "reference"];
 
-/// Recursively copy the entire `source` tree into `dest` (created if
-/// absent) via [`crate::publish::copy_safe`]. Used to snapshot the full
-/// vendored package tree before the irreversible `distribution::remove`
-/// detach, so a later failure in post-detach lock finalization can restore
-/// exactly what was there — unlike [`copy_authoring_subset`], this copies
-/// everything (`generated/`, `package.json`, etc.), not just the authoring
-/// subset.
-pub fn backup_tree(source: &Utf8Path, dest: &Utf8Path) -> crate::Result<()> {
-    crate::publish::copy_safe(source, dest, &[])
-}
-
 /// Copy `trait.toml` plus the authoring subset directories from a vendored
 /// package root into a freshly claimed (empty) authored package root.
 /// No-symlink recursive copy via [`crate::publish::copy_safe`], the one safe
