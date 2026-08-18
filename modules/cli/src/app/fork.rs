@@ -150,6 +150,22 @@ fn default_variant_trait(traits: &[TraitLockEntry]) -> crate::Result<&TraitLockE
     }
 }
 
+/// A sibling backup path for `vendored_root`, unique per process/instant —
+/// same naming shape as `distribution::remove`'s own internal rollback
+/// backups, kept private to this module since it exists only to give the
+/// post-detach lock-finalization rollback below a scratch location.
+fn vendored_fork_backup_path(vendored_root: &Utf8Path) -> camino::Utf8PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    vendored_root.with_file_name(format!(
+        "{}.fork-backup-{}-{nanos}",
+        vendored_root.file_name().unwrap_or("dir"),
+        std::process::id(),
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fork_after_claim(
     scope: &DistributionScope,
@@ -270,6 +286,22 @@ fn fork_after_claim(
         &rebuilt_canonical_digest,
     )?;
 
+    // Snapshot everything `distribution::remove` is about to delete, before
+    // calling it: lock finalization below still has to run after the
+    // detach (so it sees the post-detach dependency set — see the comment
+    // there), which makes `distribution::remove` a fallible step in the
+    // *middle* of this transaction rather than its last one. A finalization
+    // failure after a successful detach must not strand the fork half-done
+    // (dependency removed, no working authored replacement), so on that
+    // failure this snapshot is replayed to put the project manifest,
+    // project lock, and vendored tree back exactly as they were.
+    let project_manifest_path = scope.manifest_path("toml");
+    let project_manifest_before = ctx_traits_io::read::read_text(&project_manifest_path)?;
+    let project_lock_path = scope.lock_path();
+    let project_lock_before = ctx_traits_io::read::read_text(&project_lock_path)?;
+    let vendored_backup = vendored_fork_backup_path(vendored_root);
+    ctx_traits_io::fork::backup_tree(vendored_root, &vendored_backup)?;
+
     let remove_report = ctx_traits_io::distribution::remove(scope, alias)?;
 
     // Lock finalization happens only now, after the alias is gone from
@@ -282,16 +314,65 @@ fn fork_after_claim(
     // still legitimately depends on still represented — while build-derived
     // pins (`sync_derived_dependency_locks`) are unaffected by detach and
     // stay correct either way.
-    let lock = match &family_variant_targets {
-        None => {
-            record_lock_evidence(camino::Utf8Path::new(&generated[0]), false)?;
-            ctx_traits_io::layout::package_lock_path(authored_root).to_string()
-        }
-        Some(targets) => {
-            for target in targets {
-                record_lock_evidence(target, false)?;
+    let finalize = (|| -> crate::Result<String> {
+        match &family_variant_targets {
+            None => {
+                record_lock_evidence(camino::Utf8Path::new(&generated[0]), false)?;
+                Ok(ctx_traits_io::layout::package_lock_path(authored_root).to_string())
             }
-            ctx_traits_io::layout::package_lock_path(authored_root).to_string()
+            Some(targets) => {
+                for target in targets {
+                    record_lock_evidence(target, false)?;
+                }
+                Ok(ctx_traits_io::layout::package_lock_path(authored_root).to_string())
+            }
+        }
+    })();
+
+    let lock = match finalize {
+        Ok(lock) => {
+            let _ = std::fs::remove_dir_all(vendored_backup.as_std_path());
+            lock
+        }
+        Err(error) => {
+            // Best-effort replay of the pre-detach snapshot: every step
+            // failure is folded into the returned message alongside
+            // `error` rather than swallowed or allowed to mask it, so a
+            // rollback-step failure is never silently reported as success.
+            let mut notes = Vec::new();
+            if let Err(source) =
+                ctx_traits_io::write::write_text(&project_manifest_path, &project_manifest_before)
+            {
+                notes.push(format!(
+                    "could not restore {project_manifest_path}: {source}"
+                ));
+            }
+            if let Err(source) =
+                ctx_traits_io::write::write_text(&project_lock_path, &project_lock_before)
+            {
+                notes.push(format!("could not restore {project_lock_path}: {source}"));
+            }
+            if vendored_root.exists()
+                && let Err(source) = std::fs::remove_dir_all(vendored_root.as_std_path())
+            {
+                notes.push(format!("could not clear {vendored_root}: {source}"));
+            } else if let Err(source) =
+                std::fs::rename(vendored_backup.as_std_path(), vendored_root.as_std_path())
+            {
+                notes.push(format!(
+                    "could not restore vendored tree from backup {vendored_backup}: {source}"
+                ));
+            }
+            return Err(if notes.is_empty() {
+                error
+            } else {
+                crate::Error::Command {
+                    message: format!(
+                        "{error}; additionally, restoring the detached dependency failed: {}",
+                        notes.join("; ")
+                    ),
+                }
+            });
         }
     };
 

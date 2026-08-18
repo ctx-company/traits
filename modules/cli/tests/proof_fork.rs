@@ -442,6 +442,93 @@ fn fork_lock_matches_post_detach_dependencies_and_preserves_derived_pins() {
     );
 }
 
+/// A post-detach lock-finalization failure (a conflicting dependency
+/// declaration surfaced only after the alias is removed from project
+/// config) must not strand the fork half-done: the project manifest,
+/// project lock, and vendored tree must all be restored to exactly what
+/// they were before `fork` ran, and no authored package must be left
+/// behind. The single-trait branch runs no lock sync before the detach, so
+/// this is the first point a conflicting `[[dependency]]`/`[dependencies]`
+/// pair can surface — regression guard for treating
+/// `distribution::remove` as a step in the middle of the transaction
+/// (post-detach finalization can still fail) rather than its last one.
+#[test]
+fn fork_lock_finalization_failure_preserves_installed_dependency() {
+    let scratch = ScratchRoot::new("p0213-fork-lock-finalization-failure");
+    let home = scratch.home();
+    let id = "fixture-fork-lock-conflict";
+    let producer_root = build_forkable_producer(&home.join("producer"), &home, id);
+
+    // A package-level `[dependencies]` entry the forked package's own
+    // trait.toml carries forward unchanged from the vendored copy — its
+    // default `id` (the alias, `conflict-dep`) will not match the
+    // project-level declaration below, so `merge_declarations` refuses
+    // the pair exactly when the post-detach `record_lock_evidence` call
+    // reads the package manifest's dependencies.
+    let producer_manifest = producer_root.join("trait.toml");
+    let mut producer_manifest_text = fs::read_to_string(&producer_manifest).unwrap();
+    producer_manifest_text.push_str(
+        "\n[dependencies.conflict-dep]\nversion = \"1.0.0\"\nnpm = \"conflict-dep-pkg\"\n",
+    );
+    fs::write(&producer_manifest, &producer_manifest_text).unwrap();
+
+    let consumer = home.join("consumer");
+    fs::create_dir_all(&consumer).unwrap();
+    git_init(&consumer);
+    symlink_node_modules(&consumer);
+    let alias = install_path_dependency(&consumer, &home, &producer_root, None);
+    assert_eq!(alias, id);
+
+    // A project-level `[[dependency]]` entry for the same alias with a
+    // different `id`, unrelated to the alias being forked — hand-appended
+    // since no CLI surface writes this legacy array table.
+    let manifest_path = consumer.join(".ctx/traits/config.toml");
+    let mut config_text = fs::read_to_string(&manifest_path).unwrap();
+    config_text.push_str(
+        "\n[[vendor.dependency]]\nalias = \"conflict-dep\"\nid = \"conflict-dep-other-id\"\nversion = \"2.0.0\"\n",
+    );
+    fs::write(&manifest_path, &config_text).unwrap();
+
+    let manifest_before = fs::read(&manifest_path).unwrap();
+    let lock_path = consumer.join(".ctx/traits/config.lock");
+    let lock_before = fs::read(&lock_path).unwrap();
+    let vendored_path = consumer.join(".ctx/traits/vendored").join(id);
+    assert!(
+        vendored_path.is_dir(),
+        "precondition: {id} must be vendored before forking it"
+    );
+
+    let result = run_ctx(&["traits", "fork", id], &consumer, &home);
+    let (stdout, stderr) = utf8(&result);
+    assert!(
+        !result.status.success(),
+        "fork must fail loudly on a post-detach dependency conflict\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("conflicting") || stdout.contains("conflicting"),
+        "fork failure did not name the dependency conflict\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    assert!(
+        !consumer.join(".ctx/traits/authored").join(id).exists(),
+        "a fork that fails on lock finalization must leave no authored package"
+    );
+    assert_eq!(
+        manifest_before,
+        fs::read(&manifest_path).unwrap(),
+        "a fork that fails on lock finalization must restore the project manifest"
+    );
+    assert_eq!(
+        lock_before,
+        fs::read(&lock_path).unwrap(),
+        "a fork that fails on lock finalization must restore the project lock"
+    );
+    assert!(
+        vendored_path.is_dir(),
+        "a fork that fails on lock finalization must restore the vendored dependency"
+    );
+}
+
 /// A trust-store read failure (malformed `trust.toml`) must abort `fork`
 /// entirely before the irreversible detach: the project manifest, project
 /// lock, and vendored tree must stay byte-identical, and no authored
