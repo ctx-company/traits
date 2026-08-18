@@ -1,8 +1,13 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { changedFiles } from "../data.ts";
+import { slot } from "../data.ts";
+
+export const baseline = cdk.stage({
+  input: cdk.input.command`git rev-parse HEAD`,
+  output: slot.diffBase,
+});
 
 export const capture = cdk.stage({
-  input: cdk.input.command`git diff --name-status HEAD`,
-  output: changedFiles,
+  input: cdk.input.command`git diff --name-status ${slot.diffBase}`,
+  output: slot.changedFiles,
 });

@@ -7,6 +7,7 @@ export default function () {
     metadata: { tag: [...shared.metadata.tag, "multi-agent"] },
   });
 
+  shared.stage.diff.baseline("Capture the session base");
   shared.stage.draft.compose("Draft the implementation plan");
 
   cdk.flow.loop("Doubly-reviewed refinement", (loop) => {
