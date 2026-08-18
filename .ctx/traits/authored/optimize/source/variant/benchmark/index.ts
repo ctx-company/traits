@@ -21,9 +21,9 @@ const resetRound = () =>
 // (target reached takes precedence over pure iteration exhaustion).
 const runReasonGate = () =>
   flow.match("Deterministically branch on the actual completion cause", condition.lte(shared.data.bestMetric, improvementTarget), {
-    [flow.True]: () =>
+    [condition.True]: () =>
       shared.stage.summary.deriveSummaryStage("Derive the typed benchmark summary (target reached)", "target-reached", reviews),
-    [flow.False]: () =>
+    [condition.False]: () =>
       shared.stage.summary.deriveSummaryStage(
         "Derive the typed benchmark summary (iteration limit reached)",
         "iteration-limit-reached",
@@ -44,13 +44,13 @@ export default function () {
   stage.setup.setupStage("Prepare and verify the isolated workbench");
 
   flow.match("Gate mutation on isolated-worktree readiness", condition.fieldEquals(shared.data.readinessSlot, "status", "ready"), {
-    [flow.True]: () => {
+    [condition.True]: () => {
       shared.stage.git.captureInitialRef("Capture the immutable baseline commit");
       shared.stage.git.captureBestRef("Capture the fixed reset ref");
       shared.stage.baseline.measureBaselineStage("Measure the baseline", benchmarkCommand);
 
       flow.match("Require a usable trusted baseline", condition.fieldEquals(shared.data.baselineResult, "status", "ok"), {
-        [flow.True]: () => {
+        [condition.True]: () => {
           shared.stage.baseline.seedBestStage("Seed trusted best state and history");
           seedReviews();
 
@@ -58,10 +58,10 @@ export default function () {
             "Complete immediately when the baseline already meets the target",
             condition.lte(shared.data.bestMetric, improvementTarget),
             {
-              [flow.True]: () => {
+              [condition.True]: () => {
                 shared.stage.summary.deriveSummaryStage("Derive the typed benchmark summary (already met)", "target-reached", reviews);
               },
-              [flow.False]: () => {
+              [condition.False]: () => {
                 flow.loop("Run the iteration-capped benchmark round budget", (loop) => {
                   loop.maxIterations(12, { onExhausted: "continue" });
                   resetRound();
@@ -73,12 +73,12 @@ export default function () {
                     "Route on the review verdict",
                     condition.fieldEquals(reviewVerdictSlot, "status", "approved"),
                     {
-                      [flow.True]: () => {
+                      [condition.True]: () => {
                         shared.stage.measure.measureAggregateStage("Measure the candidate", benchmarkCommand, shared.data.candidateResult);
                         stage.decide.deriveMarginStage("Derive whether the candidate clears the noise threshold");
                         stage.decide.decideCandidateWithMargin();
                       },
-                      [flow.False]: () => {
+                      [condition.False]: () => {
                         stage.decide.recordReviewRejected();
                       },
                     },
@@ -100,12 +100,12 @@ export default function () {
             },
           );
         },
-        [flow.False]: () => {
+        [condition.False]: () => {
           shared.stage.summary.baselineFailureSummaryStage("Report the unusable baseline");
         },
       });
     },
-    [flow.False]: () => {
+    [condition.False]: () => {
       shared.stage.summary.abortSummaryStage("Report the preflight abort");
     },
   });

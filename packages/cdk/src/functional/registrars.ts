@@ -7,7 +7,7 @@
  * layer").
  */
 import type { BranchCheckValue, GuardValue } from "../condition.js";
-import { condition, lowerCheckGuard } from "../condition.js";
+import { CONDITION_FALSE, CONDITION_OTHERWISE, CONDITION_TRUE, condition, lowerCheckGuard } from "../condition.js";
 import type { JsonValue } from "../generated.js";
 import type {
   CheckResultValue,
@@ -370,14 +370,13 @@ function flowUntil(cond: BranchCheckValue): void {
   scope.loop.untilCondition = cond;
 }
 
-const FLOW_TRUE: unique symbol = Symbol("flow.True");
-const FLOW_FALSE: unique symbol = Symbol("flow.False");
-const FLOW_OTHERWISE: unique symbol = Symbol("flow.Otherwise");
-
 type MatchArmCallback = () => void;
-export type GuardMatchArms = { readonly [FLOW_TRUE]?: MatchArmCallback; readonly [FLOW_FALSE]?: MatchArmCallback };
+export type GuardMatchArms = {
+  readonly [CONDITION_TRUE]?: MatchArmCallback;
+  readonly [CONDITION_FALSE]?: MatchArmCallback;
+};
 export type FieldMatchArms = {
-  readonly [FLOW_OTHERWISE]?: MatchArmCallback;
+  readonly [CONDITION_OTHERWISE]?: MatchArmCallback;
   readonly [key: string]: MatchArmCallback | undefined;
 };
 
@@ -401,22 +400,22 @@ function flowMatch(
   const frame = captureAuthorFrame();
   forbidPositionalUntil(title, "flow.match", frame);
   const symbolKeys = Object.getOwnPropertySymbols(arms);
-  const isGuardSubject = symbolKeys.includes(FLOW_TRUE) || symbolKeys.includes(FLOW_FALSE);
+  const isGuardSubject = symbolKeys.includes(CONDITION_TRUE) || symbolKeys.includes(CONDITION_FALSE);
   if (isGuardSubject) {
     const guardArms = arms as GuardMatchArms;
-    const trueArm = guardArms[FLOW_TRUE];
-    const falseArm = guardArms[FLOW_FALSE];
+    const trueArm = guardArms[CONDITION_TRUE];
+    const falseArm = guardArms[CONDITION_FALSE];
     if (trueArm !== undefined && typeof trueArm !== "function") {
-      throw buildError(title, "flow.match arm [flow.True] must be a callback", frame);
+      throw buildError(title, "flow.match arm [condition.True] must be a callback", frame);
     }
     if (falseArm !== undefined && typeof falseArm !== "function") {
-      throw buildError(title, "flow.match arm [flow.False] must be a callback", frame);
+      throw buildError(title, "flow.match arm [condition.False] must be a callback", frame);
     }
     if (trueArm === undefined && falseArm === undefined) {
-      throw buildError(title, "flow.match requires at least one of [flow.True]/[flow.False]", frame);
+      throw buildError(title, "flow.match requires at least one of [condition.True]/[condition.False]", frame);
     }
-    const trueItems = trueArm === undefined ? undefined : runArmScope(title, "[flow.True]", trueArm);
-    const falseItems = falseArm === undefined ? undefined : runArmScope(title, "[flow.False]", falseArm);
+    const trueItems = trueArm === undefined ? undefined : runArmScope(title, "[condition.True]", trueArm);
+    const falseItems = falseArm === undefined ? undefined : runArmScope(title, "[condition.False]", falseArm);
     const item = sequence.branch(id, {
       title,
       check: subject as BranchCheckValue,
@@ -428,7 +427,7 @@ function flowMatch(
   }
 
   const fieldArms = arms as FieldMatchArms;
-  const otherwiseArm = fieldArms[FLOW_OTHERWISE];
+  const otherwiseArm = fieldArms[CONDITION_OTHERWISE];
   const entries = Object.entries(fieldArms) as [string, MatchArmCallback | undefined][];
   for (const [key, value] of entries) {
     if (typeof value !== "function") {
@@ -436,12 +435,13 @@ function flowMatch(
     }
   }
   if (otherwiseArm !== undefined && typeof otherwiseArm !== "function") {
-    throw buildError(title, "flow.match arm [flow.Otherwise] must be a callback", frame);
+    throw buildError(title, "flow.match arm [condition.Otherwise] must be a callback", frame);
   }
   if (entries.length === 0) {
     throw buildError(title, "flow.match requires at least one value arm", frame);
   }
-  const otherwiseItems = otherwiseArm === undefined ? undefined : runArmScope(title, "[flow.Otherwise]", otherwiseArm);
+  const otherwiseItems =
+    otherwiseArm === undefined ? undefined : runArmScope(title, "[condition.Otherwise]", otherwiseArm);
   let nested: SequenceHandle | undefined;
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     // oxlint-disable-next-line typescript/no-non-null-assertion -- index stays within [0, entries.length)
@@ -607,9 +607,6 @@ export const flow = {
   untilAny: flowUntilAny,
   match: flowMatch,
   parallel: flowParallel,
-  True: FLOW_TRUE,
-  False: FLOW_FALSE,
-  Otherwise: FLOW_OTHERWISE,
   Abort: FLOW_ABORT_ARM,
   Continue: "continue" as const,
 };

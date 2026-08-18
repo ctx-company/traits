@@ -18,13 +18,13 @@ export default function () {
   stage.setup.setupStage("Prepare and verify the isolated workbench");
 
   flow.match("Gate mutation on isolated-worktree readiness", condition.fieldEquals(shared.data.readinessSlot, "status", "ready"), {
-    [flow.True]: () => {
+    [condition.True]: () => {
       shared.stage.git.captureInitialRef("Capture the immutable baseline commit");
       shared.stage.git.captureBestRef("Capture the fixed reset ref");
       shared.stage.baseline.measureBaselineStage("Measure the baseline", experimentCommand);
 
       flow.match("Require a usable trusted baseline", condition.fieldEquals(shared.data.baselineResult, "status", "ok"), {
-        [flow.True]: () => {
+        [condition.True]: () => {
           shared.stage.baseline.seedBestStage("Seed trusted best state and history");
 
           flow.loop("Run the iteration-capped experiment budget", (loop) => {
@@ -37,12 +37,12 @@ export default function () {
 
           shared.stage.summary.deriveSummaryStage("Derive the typed experiment summary", "iteration-limit-reached");
         },
-        [flow.False]: () => {
+        [condition.False]: () => {
           shared.stage.summary.baselineFailureSummaryStage("Report the unusable baseline");
         },
       });
     },
-    [flow.False]: () => {
+    [condition.False]: () => {
       shared.stage.summary.abortSummaryStage("Report the preflight abort");
     },
   });

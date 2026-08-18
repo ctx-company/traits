@@ -38,7 +38,7 @@ export function decideCandidate(
     ...extraGuards,
   ]);
   return flow.match("Apply the declared keep/discard decision", keepGuard, {
-    [flow.True]: () => {
+    [condition.True]: () => {
       git.deriveCommitMessage("Derive the kept-candidate commit message");
       git.stageCandidate("Stage the kept candidate");
       git.commitCandidate("Commit the kept candidate");
@@ -55,7 +55,7 @@ export function decideCandidate(
         ],
       });
     },
-    [flow.False]: () => {
+    [condition.False]: () => {
       git.resetCandidate("Discard the non-improving candidate");
       git.cleanCandidate("Remove untracked candidate files");
       cdk.step.project("Record the discarded candidate", {

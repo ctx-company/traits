@@ -16,8 +16,8 @@
   },
   "port:experiment-command": {
     "file": ".ctx/traits/authored/optimize/source/variant/experiment/data.ts",
-    "start": 11,
-    "end": 11
+    "start": 13,
+    "end": 13
   },
   "port:max-delta-lines": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
@@ -26,8 +26,8 @@
   },
   "port:metric-field": {
     "file": ".ctx/traits/authored/optimize/source/variant/experiment/data.ts",
-    "start": 7,
-    "end": 7
+    "start": 8,
+    "end": 8
   },
   "port:objective": {
     "file": ".ctx/traits/authored/optimize/source/variant/experiment/data.ts",

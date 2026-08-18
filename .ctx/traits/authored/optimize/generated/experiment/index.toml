@@ -1,5 +1,5 @@
 id = "optimize"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Experiment"
 description = "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements."

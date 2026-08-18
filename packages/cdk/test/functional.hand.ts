@@ -251,7 +251,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
           b: () => {
             step.command("B Step", { cmd: "echo b" });
           },
-          [flow.Otherwise]: () => {
+          [condition.Otherwise]: () => {
             step.command("Other Step", { cmd: "echo other" });
           },
         });
@@ -288,10 +288,10 @@ describe("functional layer emits byte-identical canonical to the object layer (0
       const approved = signal({ id: "approved", description: "The change was approved." });
       const proc = procedure.from({ description: "d" }, () => {
         flow.match("Route Decision", condition.signal(approved), {
-          [flow.True]: () => {
+          [condition.True]: () => {
             step.command("Merge", { cmd: "echo merge" });
           },
-          [flow.False]: () => {
+          [condition.False]: () => {
             step.command("Revise", { cmd: "echo revise" });
           },
         });

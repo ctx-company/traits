@@ -25,6 +25,16 @@ import type { SequenceOutputValue } from "./sequence.js";
  * `condition.*`-built predicate, or a nested array of the same.
  */
 export type GuardValue = string | RefHandle<"signal" | "condition"> | GuardHandle | readonly GuardValue[];
+
+/**
+ * The unique symbols backing `condition.True`/`condition.False`/
+ * `condition.Otherwise`, the `flow.match` arm keys. Minted exactly once,
+ * here, and never re-exported — `functional/registrars.ts` imports these
+ * consts directly so the symbol identity can't fork.
+ */
+export const CONDITION_TRUE: unique symbol = Symbol("condition.True");
+export const CONDITION_FALSE: unique symbol = Symbol("condition.False");
+export const CONDITION_OTHERWISE: unique symbol = Symbol("condition.Otherwise");
 /**
  * The check-position value `sequence.branch`'s `check` field accepts: an
  * ordinary guard, or an as-yet-unplaced `sequence.check(...)` step handle
@@ -257,6 +267,22 @@ export interface ConditionFunction {
    * @example `condition.unsafe({ condition: "condition:other" })`
    */
   unsafe(json: JsonObject): GuardHandle;
+  /**
+   * The `flow.match` arm key for a guard subject's true branch.
+   * @example `flow.match("route", check, { [condition.True]: () => {...} })`
+   */
+  readonly True: typeof CONDITION_TRUE;
+  /**
+   * The `flow.match` arm key for a guard subject's false branch.
+   * @example `flow.match("route", check, { [condition.False]: () => {...} })`
+   */
+  readonly False: typeof CONDITION_FALSE;
+  /**
+   * The `flow.match` arm key for a field subject's fallback branch, run when
+   * no value arm matched.
+   * @example `flow.match("route", status, { approved: () => {...}, [condition.Otherwise]: () => {...} })`
+   */
+  readonly Otherwise: typeof CONDITION_OTHERWISE;
 }
 
 /**
@@ -478,6 +504,9 @@ export const condition: ConditionFunction = {
   all: conditionAll,
   any: conditionAny,
   unsafe: (json: JsonObject): GuardHandle => guardHandle(json as Mutable<CanonicalGuardPredicate>),
+  True: CONDITION_TRUE,
+  False: CONDITION_FALSE,
+  Otherwise: CONDITION_OTHERWISE,
 };
 
 /**
