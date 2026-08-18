@@ -339,15 +339,15 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 Ok(CommandOutput::new(()))
             }
             Some(cli::TraitsCommand::Init { name, json }) => handle_init(name.as_deref(), json),
-            Some(cli::TraitsCommand::New { name, from, json }) => {
+            Some(cli::TraitsCommand::Create { name, from, json }) => {
                 match (name.as_deref(), from.as_deref()) {
                     (None, None) => crate::app::new::handle_list_templates(json),
                     (Some(name), Some(from)) => crate::app::new::handle_new(name, from, json),
                     (Some(_), None) => Err(crate::Error::Command {
-                        message: "ctx traits new <name> requires --from <template>".to_string(),
+                        message: "ctx traits create <name> requires --from <template>".to_string(),
                     }),
                     (None, Some(_)) => Err(crate::Error::Command {
-                        message: "ctx traits new --from <template> requires a name".to_string(),
+                        message: "ctx traits create --from <template> requires a name".to_string(),
                     }),
                 }
             }

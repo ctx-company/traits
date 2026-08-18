@@ -47,12 +47,11 @@ struct SurfaceReport {
 /// generate a report for a command absent from this table, so a newly added
 /// `TraitsCommand` variant cannot silently go unclassified.
 const GROUPS: &[&str] = &[
-    "manage",
+    "core",
     "author",
+    "manage",
+    "ai-assistance",
     "execute",
-    "trust",
-    "dependencies",
-    "maintain",
     "hidden",
 ];
 
@@ -65,24 +64,28 @@ const GROUPS: &[&str] = &[
 /// dropped row.
 fn classify(name: &str) -> Result<&'static str, String> {
     let group = match name {
-        "init" | "new" | "list" => "manage",
-        "build" | "check" | "diff" | "explain" | "generate" | "refine" | "critique" | "export"
-        | "migrate" | "host" => "author",
+        // The 2026-08-18 regroup: five release groups (core / author /
+        // manage / ai-assistance / execute); everything else — including
+        // former release commands
+        // `export`/`host`/`migrate`/`activate`/`explain`/`config`/`task`,
+        // which stay runnable — is `hidden`.
+        "init" | "doctor" | "cache" => "core",
+        "build" | "create" | "import" => "author",
+        "list" | "check" | "trust" | "dependency" | "diff" => "manage",
+        "generate" | "refine" | "critique" => "ai-assistance",
         "run" | "merge" => "execute",
-        "activate" | "review" | "trust" => "trust",
-        // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info` are now
+        // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info` are
         // hidden aliases under `dependency`; they stay classified so the
         // hidden-command help path keeps working for the deprecation window.
-        "dependency" | "vendor" | "install" | "remove" | "update" | "outdated" | "info"
-        | "publish" | "import" => "dependencies",
-        "doctor" | "cache" | "config" | "task" => "maintain",
-        "claim-gate" | "hygiene" | "cost" | "prepare-public" | "context-contracts" | "policy"
+        "vendor" | "install" | "remove" | "update" | "outdated" | "info" | "publish" | "export"
+        | "host" | "migrate" | "activate" | "review" | "config" | "task" | "explain"
+        | "claim-gate" | "hygiene" | "cost" | "prepare-public" | "context-contracts" | "policy"
         | "evidence" | "compatibility" | "subagent" | "inspect" | "manifest" | "schema"
-        | "sdk-generate" | "synth" | "generate-evals" | "import-refresh" | "run-info"
-        | "session" | "mcp" | "drive" | "call" | "run-status" | "run-frame" | "next" | "set"
-        | "deactivate" | "deprecate" | "eval" | "prompt" | "preview" | "search" | "resolve"
-        | "pack" | "context" | "hook" | "help" | "stats" | "story" | "tui-demo" | "edit"
-        | "running" => "hidden",
+        | "sdk-generate" | "synth" | "generate-evals" | "generate-round" | "refine-round"
+        | "import-round" | "import-refresh" | "run-info" | "session" | "mcp" | "drive" | "call"
+        | "run-status" | "run-frame" | "next" | "set" | "deactivate" | "deprecate" | "eval"
+        | "prompt" | "preview" | "search" | "resolve" | "pack" | "context" | "hook" | "help"
+        | "stats" | "story" | "tui-demo" | "edit" | "running" => "hidden",
         other => {
             return Err(format!(
                 "ctx traits help --json: unclassified command {other:?}; add it to the release-group classification in help_surface.rs"

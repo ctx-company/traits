@@ -1,6 +1,6 @@
 // Teaching template: implement-phase
 //
-// Scaffolded by `ctx traits new <name> --from implement-phase`. Teaches the
+// Scaffolded by `ctx traits create <name> --from implement-phase`. Teaches the
 // same shape as this repository's own dogfood `.ctx/traits/implement-phase/`
 // procedure — draft an approach, implement it, review the result — but is
 // deliberately portable rather than a verbatim copy: the live procedure

@@ -132,7 +132,7 @@ pub(crate) fn handle_synth(
 
 /// Evidence produced by one `ctx traits build` run: the resolved target and
 /// source-map paths, and the underlying CDK synthesis outcome. Extracted so
-/// `ctx traits new` (P271) can build a freshly instantiated template's
+/// `ctx traits create` (P271) can build a freshly instantiated template's
 /// source through the exact same path `ctx traits build` uses — including
 /// package/source identity enforcement — without duplicating any of this
 /// logic or driving the CLI recursively.
@@ -145,7 +145,7 @@ pub(crate) struct BuildEvidence {
 
 /// Build a CDK authoring source into canonical output and a source map,
 /// enforcing package/source identity, and write both to disk. Shared by
-/// `ctx traits new`'s package materialization and `trait_editor.rs`'s
+/// `ctx traits create`'s package materialization and `trait_editor.rs`'s
 /// preview path — both single-trait-only callers that must synthesize the
 /// source exactly once. [`handle_build`] instead calls
 /// [`route_cdk_build`] directly, since it must also accept native family
@@ -343,7 +343,7 @@ fn authored_package_source(id: &str) -> Option<camino::Utf8PathBuf> {
 /// dependencies to resolve, used purely because it is the other caller of
 /// this same projection.
 ///
-/// `ctx traits new` has always done build-then-lock in one command
+/// `ctx traits create` has always done build-then-lock in one command
 /// (`new.rs`), which is why scaffolding never hit this; `build` simply
 /// skipped the second half. The projection upserts by `(id, variant)`, so
 /// calling it once per family variant accumulates the whole family into one

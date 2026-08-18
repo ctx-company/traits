@@ -687,30 +687,25 @@ pub enum CommandPresentation {
 pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "doctor",
     "init",
-    "new",
+    "create",
     "list",
     "build",
     "check",
     "diff",
-    "explain",
-    "export",
-    "host",
     "generate",
     "refine",
     "critique",
-    "migrate",
     "run",
     "merge",
-    "activate",
     "trust",
     "import",
     "cache",
-    "config",
-    "task",
     // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info`/`publish`
     // moved under this group and are now hidden aliases, so they are no longer
     // visible top-level commands and must not appear above. Their subcommands render
-    // through the same panels they always did.
+    // through the same panels they always did. The 2026-08-18 regroup likewise
+    // hid `export`/`host`/`migrate`/`activate`/`explain`/`config`/`task` and
+    // renamed `new` to `create`.
     "dependency",
 ];
 
@@ -727,11 +722,8 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
     use CommandPresentation::Panel;
 
     let presentation = match name {
-        "doctor" | "init" | "new" | "list" | "build" | "host" | "generate" | "refine"
-        | "critique" | "migrate" | "merge" | "activate" | "trust" | "import" | "cache"
-        | "config" | "check" | "diff" | "explain" | "export" | "run" | "dependency" | "task" => {
-            Panel
-        }
+        "doctor" | "init" | "create" | "list" | "build" | "generate" | "refine" | "critique"
+        | "merge" | "trust" | "import" | "cache" | "check" | "diff" | "run" | "dependency" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \
@@ -1180,9 +1172,15 @@ mod tests {
         assert_eq!(presentation_for("init"), Ok(CommandPresentation::Panel));
         assert_eq!(presentation_for("check"), Ok(CommandPresentation::Panel));
         assert_eq!(presentation_for("diff"), Ok(CommandPresentation::Panel));
-        assert_eq!(presentation_for("explain"), Ok(CommandPresentation::Panel));
-        assert_eq!(presentation_for("export"), Ok(CommandPresentation::Panel));
+        assert_eq!(presentation_for("create"), Ok(CommandPresentation::Panel));
+        assert_eq!(
+            presentation_for("dependency"),
+            Ok(CommandPresentation::Panel)
+        );
         assert_eq!(presentation_for("run"), Ok(CommandPresentation::Panel));
+        // Hidden by the 2026-08-18 regroup: no longer registry-visible.
+        assert!(presentation_for("explain").is_err());
+        assert!(presentation_for("export").is_err());
     }
 
     #[test]

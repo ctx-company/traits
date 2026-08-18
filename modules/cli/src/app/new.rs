@@ -1,4 +1,4 @@
-//! `ctx traits new` — deterministic, template-backed package scaffolding
+//! `ctx traits create` — deterministic, template-backed package scaffolding
 //! (P271).
 //!
 //! Distinct from `ctx traits generate`: `new` is deterministic and offline
@@ -52,10 +52,10 @@ pub(crate) fn handle_list_templates(json: bool) -> crate::Result<CommandOutput<(
             for (id, purpose) in &rows {
                 template_rows.push(PanelRow::toned(*id, purpose.clone(), RowTone::Default));
             }
-            let panel = Panel::new("ctx", "new", PanelStatus::Passed("passed".to_string()))
+            let panel = Panel::new("ctx", "create", PanelStatus::Passed("passed".to_string()))
                 .row(PanelRow::toned(
                     "usage",
-                    "ctx traits new <name> --from <template>",
+                    "ctx traits create <name> --from <template>",
                     RowTone::Default,
                 ))
                 .section(PanelSection::new("templates", template_rows));
@@ -80,7 +80,7 @@ pub(crate) fn handle_new(name: &str, from: &str, json: bool) -> crate::Result<Co
     let template = ctx_traits_core::builtin_templates::template(from).ok_or_else(|| {
         crate::Error::Command {
             message: format!(
-                "unknown template {from:?}; run `ctx traits new` with no arguments to list templates"
+                "unknown template {from:?}; run `ctx traits create` with no arguments to list templates"
             ),
         }
     })?;
@@ -93,7 +93,7 @@ pub(crate) fn handle_new(name: &str, from: &str, json: bool) -> crate::Result<Co
     if !ctx_traits_io::package_scaffold::claim_root(package.root(), "new trait package root")? {
         return Err(crate::Error::Command {
             message: format!(
-                "{} already exists; ctx traits new never overwrites an existing package",
+                "{} already exists; ctx traits create never overwrites an existing package",
                 package.root()
             ),
         });
@@ -201,7 +201,7 @@ fn new_report_panel(report: &NewReport) -> Panel {
             (RowTone::Default, PanelStatus::Passed("passed".to_string()))
         }
     };
-    Panel::new("ctx", "new", status)
+    Panel::new("ctx", "create", status)
         .row(PanelRow::toned(
             "template",
             report.template_id,
@@ -269,7 +269,7 @@ fn new_report_json(report: &NewReport) -> NewReportJson<'_> {
     }
 }
 
-/// Everything `ctx traits new`'s success report needs, resolved once so both
+/// Everything `ctx traits create`'s success report needs, resolved once so both
 /// the styled and plain renderers stay in lockstep.
 struct NewReport {
     template_id: &'static str,

@@ -1,0 +1,50 @@
+schema-version = "0.2"
+key = "0213"
+title = "ctx traits fork: fork a vendored package into the authored tree"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Owner-requested command, already documented on the website's QUICKSTART >
+Usage page (Author group): "Fork a vendored package into the authored tree —
+yours to edit from there."
+
+`ctx traits fork <id>` takes a package materialized under
+`.ctx/traits/vendored/<id>` and produces an editable authored package at
+`.ctx/traits/authored/<id>`:
+
+- Copies the package source (trait.toml, source/, resources/) into the
+  authored layout; never overwrites an existing authored package — an
+  existing `.ctx/traits/authored/<id>` is a loud error, byte-untouched
+  (the `create` precedent).
+- Rebuilds through the normal CDK build path so generated/ and the digest
+  are correct by construction, and records provenance (forked-from: the
+  vendored package's id, version, and canonical digest) in the authored
+  package's manifest metadata.
+- Detaches the dependency: the vendor lock entry for <id> is removed (or
+  flagged) so resolution prefers the authored fork, and `ctx traits check`
+  reports the fork relationship instead of lock drift.
+- Trust: the fork's canonical digest is whatever this machine has on file
+  for that exact digest — a byte-identical fork inherits an existing
+  verdict; any edit changes the digest and goes through normal review
+  (`create`'s rule).
+- Surface: visible in the Author help group (after `create`, before
+  `import` — the Usage page order); classified "author" in
+  help_surface.rs; added to the presentation registry with a Panel
+  default output; `--json` like every command.
+"""
+validation = """
+## Watch
+
+- Resolution must not see two packages with one id: the detach step is part
+  of the command, not a follow-up chore the operator forgets.
+- Fork of a package with unbuildable source (foreign import leftovers)
+  should fail before writing anything, not leave a half-copied authored
+  package.
+
+## Done when
+
+`ctx traits fork <id>` produces a building, checkable authored package with
+forked-from provenance; the vendored entry no longer shadows it; re-running
+errors loudly; the command appears in the Author help group and
+`help --json`; output-style proof matches the panel registry shape.
+"""

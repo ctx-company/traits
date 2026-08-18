@@ -1,4 +1,4 @@
-//! First-party teaching templates consumed by `ctx traits new` (P271).
+//! First-party teaching templates consumed by `ctx traits create` (P271).
 //!
 //! Templates are deterministic authoring inputs, not resolvable runtime
 //! traits: they are never embedded into [`crate::builtin_trait_packages`]'s
@@ -6,7 +6,7 @@
 //! never appear in `ctx traits list`'s built-in section. `build.rs` embeds
 //! each template's two authoring files (`trait.toml`, `source/index.ts`) as
 //! static UTF-8 strings; this module only exposes them and the pure,
-//! marker-based instantiation operation `ctx traits new` calls to produce a
+//! marker-based instantiation operation `ctx traits create` calls to produce a
 //! draft package's authoring files.
 //!
 //! Core performs no IO here, matching [`crate::builtin_trait_packages`]:

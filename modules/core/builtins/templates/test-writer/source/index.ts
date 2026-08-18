@@ -1,6 +1,6 @@
 // Teaching template: test-writer
 //
-// Scaffolded by `ctx traits new <name> --from test-writer`. Another
+// Scaffolded by `ctx traits create <name> --from test-writer`. Another
 // single-prompt, single-schema trait, shaped like `research-summarize` but
 // worth keeping separate: it demonstrates a *list of nested objects* schema
 // (each proposed test case is its own small object), which is the shape

@@ -1,6 +1,6 @@
 // Teaching template: pr-description
 //
-// Scaffolded by `ctx traits new <name> --from pr-description`. The last of
+// Scaffolded by `ctx traits create <name> --from pr-description`. The last of
 // the five single-prompt templates: a flat schema (no nested arrays), the
 // simplest structured-output shape. Compare against `code-review` (an array
 // of nested findings) and `test-writer` (an array of nested cases) once you

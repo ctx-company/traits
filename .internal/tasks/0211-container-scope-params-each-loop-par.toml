@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0211"
+title = "Containers configure through scope params: each for forEach, flow.until family retires"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Per 0207 ruling 5. One idiom across containers: the body receives its scope
+handle and all scoped configuration is calls on it.
+
+- forEach: `items.forEach("Title", (item, each) => { ... })` — the body
+  gains `each` as second parameter; the options object
+  (ForEachRegistrarOptions: limit, maxItems, concurrent, onComplete,
+  itemSchema) retires into `each.limit(n)`, `each.maxItems(n)`,
+  `each.concurrent()`, `each.itemSchema(s)`; onComplete routes through
+  `effect.onComplete` (0209's raise point) instead.
+- loop: `flow.until`/`flow.untilAll`/`flow.untilAny` free-standing forms are
+  deleted; the loop-param spellings (`loop.until(...)` etc., already present
+  in LoopParam) are the only spelling. Positional checkpoint semantics
+  (steps after the until run only on another round) are unchanged.
+- `items.forEach` keeps its data-anchored spelling; `flow.forEach` is not
+  added (0207 ruling 5).
+
+The one non-mechanical bit: `each.itemSchema(...)` inverts today's order —
+the item slot's typed field proxy is currently minted before the body runs
+(forEachItemSlot, registrars.ts ~196). The item handle must resolve field
+refs lazily, with a loud build error when a field is accessed before the
+schema is declared (precedent for param-call rules: maxIterations required,
+until at most once).
+"""
+validation = """
+## Watch
+
+- Inherited element schema (the `[element]` ref off the iterated list) stays
+  the default; `each.itemSchema` remains the override, exactly as the opts
+  field is today.
+- Existing single-parameter bodies `(item) => {}` must keep building — the
+  second parameter is additive.
+
+## Done when
+
+forEach opts object and free-standing until family are gone; `each` carries
+the knobs; lazy item-schema resolution errors cleanly on access-before-
+declare; authored traits (3 forEach sites) migrated; canonicals
+byte-identical; CDK tests pass.
+"""
+
+[relations]
+depends-on = ["0207", "0209"]

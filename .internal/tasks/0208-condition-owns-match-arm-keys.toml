@@ -1,0 +1,34 @@
+schema-version = "0.2"
+key = "0208"
+title = "condition.{True, False, Otherwise} replace the flow match-arm keys"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Per 0207 ruling 1. The three unique symbols minted in
+packages/cdk/src/functional/registrars.ts (FLOW_TRUE/FLOW_FALSE/
+FLOW_OTHERWISE, exposed as `flow.True`/`flow.False`/`flow.Otherwise`) move to
+the `condition` namespace in packages/cdk/src/condition.ts, keeping symbol
+identity in one place so `flow.match`'s GuardMatchArms/FieldMatchArms typing
+keeps working unchanged. Hard move: the `flow.` spellings are deleted, not
+aliased.
+
+Sweep authored traits (8 uses of True/False across
+.ctx/traits/authored/*/source/) and the website CDK REFERENCE flow page's
+match example.
+"""
+validation = """
+## Watch
+
+- Symbol identity must not fork: a trait authored against `condition.True`
+  and matched against a stale `flow.True` symbol would silently never match
+  at the type level. One symbol, re-exported nowhere.
+
+## Done when
+
+`flow.True`/`flow.False`/`flow.Otherwise` no longer exist; `condition.True`/
+`condition.False`/`condition.Otherwise` drive both match forms; authored
+traits build byte-identical canonicals; CDK tests pass.
+"""
+
+[relations]
+depends-on = ["0207"]
