@@ -519,7 +519,7 @@ pub(crate) fn handle_dependency_init(
     let Some(manifest) = ctx_traits_io::distribution::read_package_manifest(&package_root)? else {
         return Err(crate::Error::Command {
             message: format!(
-                "no trait package at {package_root}: expected a trait.toml here (run `ctx traits new` first)"
+                "no trait package at {package_root}: expected a trait.toml here (run `ctx traits create` first)"
             ),
         });
     };

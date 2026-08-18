@@ -183,7 +183,7 @@ fn generate_builtin_trait_packages(out_dir: &str) {
     .expect("write builtin_trait_packages.rs");
 }
 
-/// Exact set of first-party teaching templates consumed by `ctx traits new`.
+/// Exact set of first-party teaching templates consumed by `ctx traits create`.
 /// Deliberately kept separate from [`BUILTIN_TRAIT_PACKAGE_IDS`]: templates
 /// are authoring inputs for scaffolding a draft package, never resolvable
 /// runtime traits, so they never enter the built-in trait catalog or the
@@ -201,7 +201,7 @@ const BUILTIN_TEMPLATES_DIR: &str = "builtins/templates";
 
 /// Embed each template's authoring inputs (`trait.toml`, every
 /// `source/**/*.ts` file) as UTF-8 static strings. Only authoring files are
-/// embedded — no `generated/` or `trait.lock`, since `ctx traits new` always rebuilds and
+/// embedded — no `generated/` or `trait.lock`, since `ctx traits create` always rebuilds and
 /// re-locks a freshly instantiated package rather than trusting a stale
 /// committed artifact. Feature-gated identically to
 /// [`generate_builtin_trait_packages`] so templates ship in native CLI

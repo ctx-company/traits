@@ -1,0 +1,42 @@
+schema-version = "0.2"
+key = "0210"
+title = "Slot sink method: findings.<name>(operation.Append) replaces operation.over at authoring sites"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Per 0207 ruling 4. Slot handles gain one hidden, non-enumerable method (the
+`.optional()`/`.forEach` pattern in packages/cdk/src/slot.ts, withHiddenField)
+that takes a `operation.*` value and returns the same OutputSinkHandle
+`operation.over(slot, op)` builds today:
+
+    output: findings.<name>(operation.Append)
+    output: review.<name>(operation.SetField("status"))
+
+Name: owner leans `.with`; `.write` is the precise alternative (the canonical
+type is literally WriteOperation). Get the owner's final word before landing;
+whichever wins takes an operation and nothing else, forever.
+
+`operation.over` remains the object-layer form the method lowers through
+(the functional layer may not reach around the object layer, 0106); authored
+traits migrate to the method spelling (3 sites use operation.over/Append
+today).
+"""
+validation = """
+## Watch
+
+- Hidden-field attachment must survive the object-schema field proxy — an
+  object-schema slot's proxy wraps the handle (fieldRefProxy); attach the
+  method where `.optional` is attached so both scalar and object slots carry
+  it.
+- Never serializes into the canonical declaration (non-enumerable, like
+  `.optional`).
+
+## Done when
+
+The method exists on every slot handle, typed per write mode (append needs a
+list slot, increment a number slot — same overloads operation.over carries);
+authored traits use it; canonicals byte-identical; CDK tests pass.
+"""
+
+[relations]
+depends-on = ["0207"]

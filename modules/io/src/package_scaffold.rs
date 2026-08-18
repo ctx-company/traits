@@ -1,6 +1,6 @@
 //! Shared package-root claiming and exclusive file creation primitives.
 //!
-//! Both `ctx traits init` ([`crate::init`]) and `ctx traits new`
+//! Both `ctx traits init` ([`crate::init`]) and `ctx traits create`
 //! (template-backed scaffolding, `modules/cli/src/app/new.rs`) need the same
 //! safety guarantee before populating a brand-new `.ctx/traits/<id>/`
 //! package: claim the root directory atomically, then write every authored

@@ -687,30 +687,25 @@ pub enum CommandPresentation {
 pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "doctor",
     "init",
-    "new",
+    "create",
     "list",
     "build",
     "check",
     "diff",
-    "explain",
-    "export",
-    "host",
     "generate",
     "refine",
     "critique",
-    "migrate",
     "run",
     "merge",
-    "activate",
     "trust",
     "import",
     "cache",
-    "config",
-    "task",
     // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info`/`publish`
     // moved under this group and are now hidden aliases, so they are no longer
     // visible top-level commands and must not appear above. Their subcommands render
-    // through the same panels they always did.
+    // through the same panels they always did. The 2026-08-18 regroup likewise
+    // hid `export`/`host`/`migrate`/`activate`/`explain`/`config`/`task` and
+    // renamed `new` to `create`.
     "dependency",
 ];
 
@@ -727,9 +722,8 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
     use CommandPresentation::Panel;
 
     let presentation = match name {
-        "doctor" | "init" | "new" | "list" | "build" | "host" | "generate" | "refine"
-        | "critique" | "migrate" | "merge" | "activate" | "trust" | "import" | "cache"
-        | "config" | "check" | "diff" | "explain" | "export" | "run" | "dependency" | "task" => {
+        "doctor" | "init" | "create" | "list" | "build" | "generate" | "refine" | "critique"
+        | "merge" | "trust" | "import" | "cache" | "check" | "diff" | "run" | "dependency" => {
             Panel
         }
         other => {

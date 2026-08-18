@@ -1,0 +1,29 @@
+schema-version = "0.2"
+key = "0212"
+title = "Sweep authored traits and website CDK docs to the unified control surface"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Closing sweep for 0208-0211, per 0207 ruling 6 (hard moves, no aliases):
+
+- Authored traits (.ctx/traits/authored/*/source/): True/False arm keys,
+  exhaustion policy strings, operation.over sites, forEach opts objects,
+  any flow.until spellings. Rebuild every family; ctx traits check clean.
+- Website (~/ctx-company/ctx-company-website, content/traits/docs/):
+  the CDK REFERENCE pages flow, loop, parallel, effect, condition, slots and
+  the AUTHORING pages where examples touch the old spellings. House style:
+  bold ids, no inline code in prose, tables per facet.
+- The CONCEPTS slots-and-ports page still shows retired API from before the
+  reference pages existed — retire it or rewrite as a short concept intro
+  deferring to the reference (flag to owner if unclear).
+"""
+validation = """
+## Done when
+
+No old spelling remains in authored traits or docs; every family rebuilds
+byte-identical canonicals (the CDK moves are authoring-surface only); the
+website builds; docs examples compile against the new CDK.
+"""
+
+[relations]
+depends-on = ["0208", "0209", "0210", "0211"]

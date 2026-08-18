@@ -1,0 +1,52 @@
+schema-version = "0.2"
+key = "0209"
+title = "signal.{Abort, Continue, Skip, Park} verbs raised through effect.on<Event>"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Per 0207 rulings 2 and 3. The authoring-surface changes, all lowering to
+today's canonical forms (no core/runtime semantics change):
+
+- `signal` gains the verb constants `Abort`, `Continue`, `Skip`, `Park`
+  (Object.assign onto the existing declaration constructor, like `slot`).
+- Exhaustion policy: `loop.maxIterations(4, { onExhausted: signal.Abort })`
+  replaces the "abort"/"continue" strings and retires `flow.Abort`/
+  `flow.Continue` (sequence.ts ExhaustionPolicy spellings stay canonical).
+- Parallel branch failure: `effect.onFailure(signal.Skip | signal.Park |
+  signal.Abort)` replaces `par.onFailure("skip" | "park" | "panel-fail")`;
+  `signal.Abort` lowers to the canonical panel-fail policy. The ParParam
+  method is deleted; today's throwing `effect.onFailure` stub
+  (registrars.ts ~627) becomes the real registrar and attaches to
+  nearestScope("parallel").
+- The loop-abort arm `flow.when(title, cond, flow.Abort)` respells as
+  `flow.when(title, cond, signal.Abort)`.
+
+Validator rules (build-time, in the functional layer where possible):
+at most one verb signal per event; site-legal verbs only (Skip on
+exhaustion, Continue on branch failure are loud build errors); verb signals
+are raise-only — `condition.signal(signal.Verb)` is rejected with a message
+saying observation is reserved, not undefined.
+
+Announcements and decisions coexist on one event: `effect.onFailure` may be
+called with a declared signal (announce) and once with a verb (decide).
+"""
+validation = """
+## Watch
+
+- The canonical document must not change shape: verbs are authoring
+  spellings for existing policy strings. Diff built canonicals of every
+  authored trait before/after — byte-identical is the proof.
+- `signal.Abort` means "fail the enclosing structure and propagate" — it is
+  not `flow.error` (run terminal). Keep that boundary in the docs and in
+  error messages.
+
+## Done when
+
+The four verbs exist; the three old spellings (`flow.Abort`/`flow.Continue`,
+`par.onFailure`, policy strings at authoring sites) are gone; validator
+rules fire as build errors with named sites; authored traits rebuilt
+byte-identical; CDK tests pass.
+"""
+
+[relations]
+depends-on = ["0207"]

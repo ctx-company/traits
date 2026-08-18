@@ -1,0 +1,59 @@
+schema-version = "0.2"
+key = "0207"
+title = "Contract: CDK control-surface unification (signal verbs, condition arms, scope params)"
+status = "done"
+raised = "2026-08-18"
+content = """
+Decision record from the 2026-08-18 owner brainstorm. Cite it, don't
+re-litigate; implementation is 0208-0212.
+
+## Rulings
+
+1. **Match-arm keys move to condition**: `condition.{True, False, Otherwise}`
+   replace `flow.{True, False, Otherwise}`. `Otherwise` stays (owner: sounds
+   better than `Else`); no alias. `Always` is reserved for a possible future
+   constant-true guard, never a fallback arm.
+
+2. **Outcome verbs become signals**: `signal.{Abort, Continue, Skip, Park}`
+   is the closed decision vocabulary. It replaces `flow.Abort`/`flow.Continue`,
+   the exhaustion-policy strings ("abort"/"continue"), and the parallel
+   branch-failure policies ("skip"/"park"/"panel-fail" — panel-fail maps to
+   `signal.Abort`). `Park`, not `Await`: it is the product's existing word for
+   "stopped resumably, pending an operator" (ParallelBranchOutcome::Parked,
+   parked merges/runs).
+
+3. **effect.on<Event> is the one raise point**, for announcements and
+   decisions alike: `effect.onX(declaredSignal)` announces (fires the signal),
+   `effect.onX(signal.Verb)` decides (structural response). Both may be
+   attached to the same event ("on failure, Park and fire alert"). Rules:
+   at most one verb signal per event; only site-legal verbs (Skip on
+   exhaustion, Continue on branch failure are build errors); verb signals are
+   raise-only — `condition.signal(signal.Skip)` is rejected loudly, reserving
+   observation semantics for later. `par.onFailure` retires into
+   `effect.onFailure`. (Today's `effect.onFailure` only throws "no target
+   here" — the slot is already reserved.)
+
+4. **Slot sink method**: one hidden method on slot handles taking the
+   `operation.*` vocabulary replaces bare `operation.over(slot, op)` at
+   authoring sites: `output: findings.<name>(operation.Append)`. Name is the
+   one open call — owner leans `.with`, `.write` is the precise alternative;
+   whichever lands, it takes an operation and nothing else, forever.
+
+5. **Containers configure through their scope param**: every container body
+   receives its scope handle — `loop`, `par`, and a new `each` for forEach
+   (`items.forEach("Title", (item, each) => { each.maxItems(5); ... })`).
+   The free-standing `flow.until`/`untilAll`/`untilAny` retire (loop-param
+   spelling only); forEach's options object retires. `items.forEach` keeps its
+   data-anchored spelling; `flow.forEach` is not added.
+
+6. **Hard moves, no deprecated re-exports** (owner precedent: new -> create).
+   All spellings lower to unchanged canonical forms, so rebuilt traits stay
+   byte-identical; exposure in authored traits is small (8 uses of
+   True/False, 3 forEach opts sites, string exhaustion policies).
+"""
+validation = """
+## Done when
+
+The rulings above are cited by 0208-0212 and none is re-opened without a new
+owner ruling.
+"""

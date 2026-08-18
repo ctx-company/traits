@@ -1,6 +1,6 @@
 // Teaching template: code-review
 //
-// Scaffolded by `ctx traits new <name> --from code-review`. This file is a
+// Scaffolded by `ctx traits create <name> --from code-review`. This file is a
 // complete, buildable v2 CDK trait source — the same authoring surface every
 // hand-authored trait uses (see modules/core/builtins/traits/*/source for
 // the first-party meta-traits this pattern is drawn from). Read the comments
@@ -17,7 +17,7 @@
 //
 // `ctx traits build` compiles this file to `generated/index.toml` (the
 // canonical trait document) and `generated/index.map` (a source map from
-// every canonical construct back to this file). `ctx traits new` also runs
+// every canonical construct back to this file). `ctx traits create` also runs
 // `ctx traits sync` immediately after, writing `trait.lock` — the same
 // build + lock path `ctx traits build` and `ctx traits sync` use directly.
 

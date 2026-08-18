@@ -26,45 +26,38 @@ pub(crate) const TRAITS_TAGLINE: &str =
 /// force a rewrite of the ~40-arm hidden-command match in
 /// `command_handlers.rs`). This function builds the achievable equivalent: a
 /// fully custom, bounded help body replacing clap's auto-rendered flat
-/// `Commands:` wall with six genuine headed sections (P453's release
-/// surface). It intentionally mirrors each visible variant's doc comment
-/// below; hidden variants never appear here and stay directly invocable
-/// regardless. Kept at or below 40 terminal rows (see
-/// `scripts/goldens/traits-help.txt`, pinned by the byte-compare harness).
+/// `Commands:` wall with five genuine headed sections (P453's release
+/// surface, regrouped by the 2026-08-18 owner ruling: core / author /
+/// manage / ai assistance / execute, commands ordered most-important-first
+/// within each group). It intentionally mirrors each visible variant's doc
+/// comment below; hidden variants never appear here and stay directly
+/// invocable regardless. Kept at or below 40 terminal rows.
 fn traits_help_text() -> String {
     format!(
         "ctx.traits — {TRAITS_TAGLINE}.
 
 Usage: ctx traits [OPTIONS] [COMMAND] [--json]  (bare `ctx traits` opens the dashboard on a TTY)
-Manage:
+Core:
   init        Scaffold .ctx/traits/config.toml and .ctx/traits/, and optionally a starter package
-  new         Scaffold a new trait package from a template, or list available templates
-  list        List local trait packages from .ctx/traits, plus the built-in meta-trait packages
+  doctor      Inspect a folder of Agent-Skills-style files before importing (or, with --migrate-config, the legacy agent-config migration)
+  cache       Cache lifecycle commands
 Author:
   build       Compile a named trait or explicit TypeScript/JavaScript source path into the canonical trait document
+  create      Scaffold a new trait package from a template, or list available templates
+  import      Import an Agent Skills SKILL.md into a draft-status, unreviewed canonical trait package
+Manage:
+  list        List local trait packages from .ctx/traits, plus the built-in meta-trait packages
   check       Check a trait for validation, audit, and drift
+  trust       Report or record this machine's local trust decisions: <trait>, approve, block, list [--stale]
+  dependency  Packages this project depends on, and publishing your own: install (all declared), add <pkg>, remove, update, outdated, info, publish
   diff        Show layer-aware diff for a trait
-  explain     Explain why a trait would or wouldn't activate for a task
+AI Assistance:
   generate    Use a model to draft a new trait from a brief
   refine      Use a model to revise an existing canonical trait
   critique    Use a model to write an advisory design critique of a canonical trait
-  migrate     Mechanically migrate a canonical trait to a newer supported schema-version
-  export      Export a trait to a compatibility profile directory
-  host        Place, refresh, or remove exported traits on host tools (install/update/remove)
 Execute:
   run         Run a trait end to end through configured harnesses
   merge       Land a completed `--worktree` run (--park-on-overlap restores strict overlap handling, --deep uses a judgment-capable merger)
-Trust:
-  activate    Activate a trait for resolver eligibility
-  trust       Report or record this machine's local trust decisions: <trait>, approve, block, list [--stale]
-Dependencies:
-  dependency  Packages this project depends on, and publishing your own: install (all declared), add <pkg>, remove, update, outdated, info, publish
-  import      Import an Agent Skills SKILL.md into a draft-status, unreviewed canonical trait package
-Maintain:
-  doctor      Inspect a folder of Agent-Skills-style files before importing (or, with --migrate-config, the legacy agent-config migration)
-  cache       Cache lifecycle commands
-  config      TypeScript config authoring commands (build)
-  task        Task board document commands (import)
 Options:
       --session <SESSION>  Run-session ID or ledger path for commands such as `set`
   -h, --help                Print help
@@ -312,18 +305,19 @@ pub enum TraitsCommand {
     /// internal path `ctx traits build` uses, and locks it through the
     /// same internal path `ctx traits vendor` uses.
     ///
-    /// `new` is deterministic and offline except for invoking the local
-    /// CDK build runtime — unlike `generate`, it never calls a model.
+    /// `create` (2026-08-18 rename of `new`, no compatibility alias) is
+    /// deterministic and offline except for invoking the local CDK build
+    /// runtime — unlike `generate`, it never calls a model.
     /// Never overwrites an existing package: an existing
     /// `.ctx/traits/<id>` is left byte-for-byte untouched and reported as
-    /// an explicit error. The result is always `status = "draft"`; `new`
+    /// an explicit error. The result is always `status = "draft"`; `create`
     /// itself writes no trust verdict and never auto-activates or
     /// auto-approves — the machine trust for the generated canonical
     /// digest is whatever this machine already has on file for that exact
     /// digest (unreviewed, unless an identical canonical output already
     /// has a machine trust record from a prior review). Use `ctx traits
     /// check` and `ctx traits trust approve` next.
-    New {
+    Create {
         /// Human-readable trait name to slugify into a trait ID. Required
         /// together with `--from`; omitted entirely to list templates.
         name: Option<String>,
@@ -651,6 +645,10 @@ pub enum TraitsCommand {
     },
     /// Explain why a trait would or wouldn't activate for a task, or emit a
     /// deterministic explain report with --scaffold.
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    #[command(hide = true)]
     Explain {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -872,6 +870,10 @@ pub enum TraitsCommand {
     /// reports that its canonical digest moved — trust re-approval follows.
     /// Refuses rather than guessing when a construct can't be mechanically
     /// rewritten or the migrated output fails to round-trip decode.
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    #[command(hide = true)]
     Migrate {
         /// Trait name to migrate. Pass an explicit canonical trait file path
         /// as an escape hatch.
@@ -1595,6 +1597,10 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Activate a trait for resolver eligibility (lifecycle transition).
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    #[command(hide = true)]
     Activate {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1814,7 +1820,7 @@ pub enum TraitsCommand {
     /// P497: refuses on a trust-blocked trait (no escape) or an unreviewed
     /// trait (pass `--allow-unreviewed`); a draft trait always exports, with
     /// a visible advisory.
-    #[command(alias = "render")]
+    #[command(alias = "render", hide = true)]
     Export {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1864,6 +1870,10 @@ pub enum TraitsCommand {
     },
     /// Host-placement lifecycle: place, refresh, or remove exported traits
     /// on host tools' expected locations (see `ctx traits host --help`).
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    #[command(hide = true)]
     Host {
         /// Emit structured JSON (applies to whichever subcommand is given).
         #[arg(long)]
@@ -1993,6 +2003,10 @@ pub enum TraitsCommand {
         settings: bool,
     },
     /// TypeScript config authoring commands (P457).
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    #[command(hide = true)]
     Config {
         /// Emit structured JSON. Applies to whichever config subcommand is
         /// given; equivalent to that subcommand's own `--json`.
@@ -2013,6 +2027,10 @@ pub enum TraitsCommand {
         subcommand: CacheCommand,
     },
     /// Task board document commands.
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    #[command(hide = true)]
     Task {
         /// Emit structured JSON. Applies to whichever task subcommand is
         /// given; equivalent to that subcommand's own `--json`.

@@ -240,7 +240,8 @@ fn config_build_default_output_matches_the_panel_registry_shape() {
         &scratch.home(),
     );
 
-    assert_matches_registry_claim("config", "ctx", "config build", &stdout);
+    // Hidden since the 2026-08-18 regroup: shape still proven, no registry claim.
+    assert_plain_panel_structure("ctx", "config build", &stdout);
 }
 
 /// A built, checked-out trait under a fresh scratch repo — the shared
@@ -316,7 +317,8 @@ fn migrate_default_output_matches_the_panel_registry_shape() {
         &fixture.home,
     );
 
-    assert_matches_registry_claim("migrate", "ctx", "migrate", &stdout);
+    // Hidden since the 2026-08-18 regroup: shape still proven, no registry claim.
+    assert_plain_panel_structure("ctx", "migrate", &stdout);
 }
 
 #[test]
@@ -357,7 +359,8 @@ fn explain_default_output_matches_the_panel_registry_shape() {
         &fixture.home,
     );
 
-    assert_matches_registry_claim("explain", "ctx", "explain", &stdout);
+    // Hidden since the 2026-08-18 regroup: shape still proven, no registry claim.
+    assert_plain_panel_structure("ctx", "explain", &stdout);
 }
 
 #[test]
@@ -370,21 +373,22 @@ fn export_default_output_matches_the_panel_registry_shape() {
         &fixture.home,
     );
 
-    assert_matches_registry_claim("export", "ctx", "export", &stdout);
+    // Hidden since the 2026-08-18 regroup: shape still proven, no registry claim.
+    assert_plain_panel_structure("ctx", "export", &stdout);
 }
 
 #[test]
-fn new_default_output_matches_the_panel_registry_shape() {
+fn create_default_output_matches_the_panel_registry_shape() {
     let scratch = ScratchRoot::new("p467-new-panel-shape");
     let repo = scratch_repo(&scratch);
     let stdout = require_success(
-        "`ctx traits new` with no arguments (lists templates)",
-        &["traits", "new"],
+        "`ctx traits create` with no arguments (lists templates)",
+        &["traits", "create"],
         &repo,
         &scratch.home(),
     );
 
-    assert_matches_registry_claim("new", "ctx", "new", &stdout);
+    assert_matches_registry_claim("create", "ctx", "create", &stdout);
 }
 
 #[test]
@@ -447,7 +451,8 @@ fn host_install_default_output_matches_the_panel_registry_shape() {
         &fixture.home,
     );
 
-    assert_matches_registry_claim("host", "ctx", "host-install", &stdout);
+    // Hidden since the 2026-08-18 regroup: shape still proven, no registry claim.
+    assert_plain_panel_structure("ctx", "host-install", &stdout);
 }
 
 #[test]
@@ -495,7 +500,8 @@ fn activate_default_output_matches_the_panel_registry_shape() {
         &fixture.home,
     );
 
-    assert_matches_registry_claim("activate", "ctx", "activate", &stdout);
+    // Hidden since the 2026-08-18 regroup: shape still proven, no registry claim.
+    assert_plain_panel_structure("ctx", "activate", &stdout);
 }
 
 #[test]

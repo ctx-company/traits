@@ -1,6 +1,6 @@
 // Teaching template: research-summarize
 //
-// Scaffolded by `ctx traits new <name> --from research-summarize`. A single
+// Scaffolded by `ctx traits create <name> --from research-summarize`. A single
 // prompt step that turns a question plus supplied source material into a
 // structured summary — the smallest complete shape for a "read this and
 // tell me what it means" trait: one input pair, one schema, one output.
