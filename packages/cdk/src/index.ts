@@ -33,10 +33,10 @@ export {
 export type {
   DefineTraitFields,
   DefineVariantFields,
+  EachParam,
   FieldMatchArms,
   FlowErrorOptions,
   FlowSuccessOptions,
-  ForEachRegistrarOptions,
   GuardMatchArms,
   LoopParam,
   ParParam,

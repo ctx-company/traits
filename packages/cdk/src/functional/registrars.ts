@@ -35,7 +35,7 @@ import type { SchemaValue } from "../schema.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
 import type { TerminalBinding } from "../sequence.js";
 import type { SessionTitleSinkInput } from "../sink.js";
-import { slot } from "../slot.js";
+import { lazyForEachItem, slot } from "../slot.js";
 import { signalVerbLabel, signalVerbOf } from "../signal-verb.js";
 import type { SignalVerb, SignalVerbName } from "../signal-verb.js";
 import type { AuthorFrame, RegisteredItem, Scope } from "./context.js";
@@ -113,7 +113,7 @@ function itemsOf(scope: Scope): readonly SequenceHandle[] {
 
 /**
  * Positional lowering (0102/0106): anything about to be registered after
- * `flow.until` in its OWN loop scope (not a nested block scope) must carry
+ * `loop.until` in its OWN loop scope (not a nested block scope) must carry
  * `not(cond)` — every container kind composes or refuses via this shared
  * guard, so none can silently skip the checkpoint (reviewer verdict on 0106
  * round 1: `flow.loop`/`items.forEach`/`flow.when` leaves were wrapped, but
@@ -123,7 +123,7 @@ function positionalUntilGuard(): GuardValue | undefined {
   const loopScope = nearestScope("loop");
   if (loopScope?.loop?.untilCondition === undefined) return undefined;
   if (currentScope("flow positional lowering") !== loopScope) return undefined;
-  return condition.not(lowerCheckGuard(loopScope.loop.untilCondition, "flow.until").guard);
+  return condition.not(lowerCheckGuard(loopScope.loop.untilCondition, "loop.until").guard);
 }
 
 /** Composes `positionalUntilGuard()` into `fields.when`, for container kinds whose object-layer constructor accepts `when` directly. */
@@ -142,15 +142,15 @@ function requireBuild(caller: string): void {
  * Refuses a container kind whose object-layer constructor cannot carry the
  * positional `not(until)` guard without changing arm routing (`flow.match`,
  * `flow.parallel`) — silence is the one unacceptable outcome (0106 review),
- * so registering one of these directly into a loop scope after `flow.until`
+ * so registering one of these directly into a loop scope after `loop.until`
  * is a loud build error instead of a silently unguarded emission.
  */
 function forbidPositionalUntil(title: string, containerLabel: string, frame: AuthorFrame | undefined): void {
   if (positionalUntilGuard() === undefined) return;
   throw buildError(
     title,
-    `${containerLabel} registered after flow.until in this loop cannot be guarded without changing arm routing — ` +
-      "restructure so it is not positioned after flow.until in the enclosing loop",
+    `${containerLabel} registered after loop.until in this loop cannot be guarded without changing arm routing — ` +
+      "restructure so it is not positioned after loop.until in the enclosing loop",
     frame,
   );
 }
@@ -212,18 +212,33 @@ installAgentPromptLowering((agentHandle, title, promptOpts) => {
   return item;
 });
 
-export interface ForEachRegistrarOptions {
-  readonly limit?: number;
-  readonly maxItems?: number;
-  readonly concurrent?: boolean;
-  readonly onComplete?: ForEachSequenceFields["onComplete"];
+/**
+ * The `each` scope param an `items.forEach` body receives (0211) — every
+ * knob the pre-0211 `ForEachRegistrarOptions` opts object carried, now
+ * called on the param instead: `each.limit(n)`, `each.maxItems(n)`,
+ * `each.concurrent()`. `onComplete` moved to `effect.onComplete` (routes
+ * into the same for-each's `onComplete` field, generalized from
+ * `flow.loop`-only). Each method is callable at most once, and only from
+ * directly inside its OWN `items.forEach` body — calling an outer `each`
+ * from within a nested `items.forEach` is a build error, closing the
+ * aliasing hole `LoopParam` otherwise tolerates.
+ */
+export interface EachParam {
+  /** At most once. */
+  limit(n: number): void;
+  /** At most once. */
+  maxItems(n: number): void;
+  /** At most once. */
+  concurrent(): void;
   /**
    * Explicit item-slot schema, overriding the one inherited from the
    * iterated list. Passing an object-schema handle also mints typed field
    * refs on the item slot (`item.foo`), which the inherited ref string
-   * cannot.
+   * cannot. At most once, and must run before any field access on the
+   * body's `item` param — the item handle resolves lazily, so a field
+   * accessed before this call is a build error naming this rule.
    */
-  readonly itemSchema?: SchemaValue;
+  itemSchema(schemaValue: SchemaValue): void;
 }
 
 /**
@@ -250,15 +265,73 @@ function inheritedElementSchema(over: SlotHandle): SchemaValue | undefined {
   return schemaRef.slice(1, -1) as unknown as SchemaValue;
 }
 
-installSlotForEachLowering((slotHandle, titleText, opts, body) => {
+/** Builds the `each` scope param for one `items.forEach` body — every method guards that it's called from directly inside `ownScope`, never an outer/aliased for-each scope. */
+function buildEachParam(
+  ownScope: Scope,
+  title: string,
+  frame: AuthorFrame | undefined,
+  materializeItemSchema: (schemaValue: SchemaValue) => void,
+): EachParam {
+  const guardOwnScope = (methodLabel: string): NonNullable<Scope["forEach"]> => {
+    if (nearestScope("for-each") !== ownScope) {
+      throw buildError(title, `${methodLabel} called outside its own items.forEach body`, frame);
+    }
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- runInScope("for-each", ...) always populates scope.forEach
+    return ownScope.forEach!;
+  };
+  return {
+    limit(n) {
+      const state = guardOwnScope("each.limit(...)");
+      if (state.limitValue !== undefined) throw buildError(title, "each.limit(...) called more than once", frame);
+      state.limitValue = n;
+    },
+    maxItems(n) {
+      const state = guardOwnScope("each.maxItems(...)");
+      if (state.maxItemsValue !== undefined) {
+        throw buildError(title, "each.maxItems(...) called more than once", frame);
+      }
+      state.maxItemsValue = n;
+    },
+    concurrent() {
+      const state = guardOwnScope("each.concurrent(...)");
+      if (state.concurrent !== undefined) throw buildError(title, "each.concurrent(...) called more than once", frame);
+      state.concurrent = true;
+    },
+    itemSchema(schemaValue) {
+      const state = guardOwnScope("each.itemSchema(...)");
+      if (state.itemSchemaCalled) throw buildError(title, "each.itemSchema(...) called more than once", frame);
+      state.itemSchemaCalled = true;
+      materializeItemSchema(schemaValue);
+    },
+  };
+}
+
+installSlotForEachLowering((slotHandle, titleText, body) => {
   requireBuild(`items.forEach(${JSON.stringify(titleText)})`);
   const id = mintId(titleText);
   const frame = captureAuthorFrame();
-  const itemSlot = forEachItemSlot(slotHandle, id, opts?.itemSchema);
-  const { scope } = runInScope("for-each", `items.forEach(${JSON.stringify(titleText)})`, () => body(itemSlot));
-  checkDuplicateTitles(scope.items, `items.forEach(${JSON.stringify(titleText)})`);
+  const label = `items.forEach(${JSON.stringify(titleText)})`;
+  let materializedItemSlot: SlotHandle | undefined;
+  const lazyItem = lazyForEachItem(id, (prop) => {
+    throw buildError(
+      titleText,
+      `item field ${JSON.stringify(prop)} accessed before each.itemSchema(...) declared the item schema — declare the schema first (an inherited element schema mints no field refs)`,
+      frame,
+    );
+  });
+  const { scope } = runInScope("for-each", label, () => {
+    const ownScope = currentScope(label);
+    const eachParam = buildEachParam(ownScope, titleText, frame, (schemaValue) => {
+      materializedItemSlot = forEachItemSlot(slotHandle, id, schemaValue);
+      lazyItem.materialize(materializedItemSlot);
+    });
+    body(lazyItem.proxy, eachParam);
+  });
+  checkDuplicateTitles(scope.items, label);
   if (scope.items.length === 0) throw buildError(titleText, "items.forEach registered no steps", frame);
-  const forEachOpts = opts ?? {};
+  const itemSlot = materializedItemSlot ?? forEachItemSlot(slotHandle, id, undefined);
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- runInScope("for-each", ...) always populates scope.forEach
+  const forEachState = scope.forEach!;
   const item = sequence.forEach(
     id,
     withPositionalWhen({
@@ -266,13 +339,13 @@ installSlotForEachLowering((slotHandle, titleText, opts, body) => {
       over: slotHandle,
       item: itemSlot,
       body: itemsOf(scope),
-      limit: forEachOpts.limit,
-      maxItems: forEachOpts.maxItems,
-      concurrent: forEachOpts.concurrent,
-      onComplete: forEachOpts.onComplete,
+      limit: forEachState.limitValue,
+      maxItems: forEachState.maxItemsValue,
+      concurrent: forEachState.concurrent,
+      ...(forEachState.onComplete.length === 0 ? {} : { onComplete: forEachState.onComplete }),
     } as Omit<ForEachSequenceFields, "id" | "kind">),
   );
-  registerItem(`items.forEach(${JSON.stringify(titleText)})`, item, titleText);
+  registerItem(label, item, titleText);
   return item;
 });
 
@@ -293,11 +366,11 @@ export interface LoopParam {
   ): void;
   /** Overrides the loop's emitted canonical id (0109 F2), when it must differ from `idFromTitle(title)`. Callable at most once. */
   id(overrideId: string): void;
-  /** Wrapper over `flow.until` — the loop's exit guard, on the param the body already holds. */
+  /** The loop's exit guard, on the param the body already holds — the only spelling (0211 retired the free-standing `flow.until`). Callable at most once. */
   until(cond: BranchCheckValue): void;
-  /** Wrapper over `flow.untilAll` — exits once EVERY guard holds. */
+  /** Exits once EVERY guard holds. Callable at most once. */
   untilAll(guards: readonly GuardValue[]): void;
-  /** Wrapper over `flow.untilAny` — exits once ANY guard holds. */
+  /** Exits once ANY guard holds. Callable at most once. */
   untilAny(guards: readonly GuardValue[]): void;
 }
 
@@ -420,12 +493,12 @@ function flowWhen(
 }
 
 function flowUntil(cond: BranchCheckValue): void {
-  const scope = currentScope("flow.until(...)");
+  const scope = currentScope("loop.until(...)");
   if (scope.kind !== "loop" || scope.loop === undefined) {
-    throw new Error("flow.until(...) is only valid directly inside a flow.loop body");
+    throw new Error("loop.until(...) is only valid directly inside a flow.loop body");
   }
   if (scope.loop.untilCondition !== undefined) {
-    throw buildError(undefined, "a loop may declare at most one flow.until", captureAuthorFrame());
+    throw buildError(undefined, "a loop may declare at most one loop.until", captureAuthorFrame());
   }
   scope.loop.untilCondition = cond;
 }
@@ -560,12 +633,12 @@ function flowParallel(title: string, body: (par: ParParam) => void): SequenceHan
   return item;
 }
 
-/** Sugar over `flow.until(condition.all([...]))` — the loop exits once EVERY guard holds. */
+/** Sugar over `loop.until(condition.all([...]))` — the loop exits once EVERY guard holds. */
 function flowUntilAll(guards: readonly GuardValue[]): void {
   flowUntil(condition.all(guards));
 }
 
-/** Sugar over `flow.until(condition.any([...]))` — the loop exits once ANY guard holds. */
+/** Sugar over `loop.until(condition.any([...]))` — the loop exits once ANY guard holds. */
 function flowUntilAny(guards: readonly GuardValue[]): void {
   flowUntil(condition.any(guards));
 }
@@ -654,9 +727,6 @@ export const flow = {
   success: flowSuccess,
   errorWhen: flowErrorWhen,
   successWhen: flowSuccessWhen,
-  until: flowUntil,
-  untilAll: flowUntilAll,
-  untilAny: flowUntilAny,
   match: flowMatch,
   parallel: flowParallel,
 };
@@ -672,10 +742,14 @@ const PARALLEL_FAILURE_VERBS: Readonly<Partial<Record<SignalVerbName, ParallelBr
 };
 
 export const effect = {
+  /** Attaches to the nearest enclosing `flow.loop` or `items.forEach` (0211 generalized this from `flow.loop`-only) — innermost wins when the two nest. */
   onComplete(signal: SignalOutputValue): void {
-    const scope = nearestScope("loop");
-    if (scope?.loop === undefined) throw new Error("effect.onComplete(...) requires an enclosing flow.loop");
-    scope.loop.onComplete.push(signal);
+    const scope = nearestScope(["loop", "for-each"]);
+    const state = scope?.loop ?? scope?.forEach;
+    if (state === undefined) {
+      throw new Error("effect.onComplete(...) requires an enclosing flow.loop or items.forEach");
+    }
+    state.onComplete.push(signal);
   },
   /**
    * Attaches to the nearest enclosing `flow.parallel` (0209): a declared

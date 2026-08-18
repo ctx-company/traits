@@ -87,7 +87,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
           loop.maxIterations(4);
           worker.prompt("Implement", { input: input.prompt`Apply ${draft}.`, output: workSummary });
           smart.prompt("Review", { input: input.prompt`Review ${workSummary}.`, output: verdict });
-          flow.until(condition.fieldEquals(verdict, "status", "approved"));
+          loop.until(condition.fieldEquals(verdict, "status", "approved"));
         });
       });
       return toDraftJson(trait("bounded-loop", { name: "Bounded Loop", summary: "s", procedure: proc }));
@@ -143,7 +143,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
         flow.loop("Checkpoint Loop", (loop) => {
           loop.maxIterations(3);
           step.command("First", { cmd: "echo first" });
-          flow.until(condition.equals(done, true));
+          loop.until(condition.equals(done, true));
           step.command("Second", { cmd: "echo second" });
         });
       });
@@ -344,7 +344,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
     function viaFunctional() {
       const files = slot.texts("files");
       const proc = procedure.from({ description: "d" }, () => {
-        files.forEach("Review Each", {}, (currentFile) => {
+        files.forEach("Review Each", (currentFile) => {
           step.command("Review File", { input: input.command`review ${currentFile}` });
         });
       });
@@ -376,7 +376,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
         flow.loop("Outer", (outerLoop) => {
           outerLoop.maxIterations(3);
           step.command("First", { cmd: "echo first" });
-          flow.until(condition.equals(done, true));
+          outerLoop.until(condition.equals(done, true));
           flow.loop("Inner", (innerLoop) => {
             innerLoop.maxIterations(2);
             step.command("Inner Step", { cmd: "echo inner" });
@@ -417,8 +417,8 @@ describe("functional layer emits byte-identical canonical to the object layer (0
         flow.loop("Outer", (loop) => {
           loop.maxIterations(3);
           step.command("First", { cmd: "echo first" });
-          flow.until(condition.equals(done, true));
-          files.forEach("Review Each", {}, (currentFile) => {
+          loop.until(condition.equals(done, true));
+          files.forEach("Review Each", (currentFile) => {
             step.command("Review File", { input: input.command`review ${currentFile}` });
           });
         });
@@ -461,7 +461,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
         flow.loop("Outer", (loop) => {
           loop.maxIterations(3);
           step.command("First", { cmd: "echo first" });
-          flow.until(condition.equals(done, true));
+          loop.until(condition.equals(done, true));
           flow.when("Trailing Block", condition.equals(dirty, true), () => {
             step.command("Trailing Step", { cmd: "echo trailing" });
           });

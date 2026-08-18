@@ -9,10 +9,10 @@ export { attachProcedureFrom } from "./procedure.js";
 export type { ProcedureFromFields, ProcedureFromFunction } from "./procedure.js";
 export { effect, flow, step } from "./registrars.js";
 export type {
+  EachParam,
   FieldMatchArms,
   FlowErrorOptions,
   FlowSuccessOptions,
-  ForEachRegistrarOptions,
   GuardMatchArms,
   LoopParam,
   ParParam,

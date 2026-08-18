@@ -64,7 +64,7 @@ export default function () {
       include: [shared.data.verdict1.optional()],
     });
 
-    flow.until(condition.equals(shared.data.verdict1.status, "approved"));
+    loop.until(condition.equals(shared.data.verdict1.status, "approved"));
   });
 
   shared.stage.commit.shippingCommitTail({

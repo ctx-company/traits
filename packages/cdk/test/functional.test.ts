@@ -85,20 +85,20 @@ describe("functional layer build rules (0106)", () => {
           loop.untilAny([condition.empty(slot.text("param-until-d"))]);
         });
       }),
-    ).toThrow(/at most one flow\.until/);
+    ).toThrow(/at most one loop\.until/);
   });
 
-  it("a second flow.until in one loop scope throws", () => {
+  it("a second loop.until in one loop scope throws", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.loop("Two Untils", (loop) => {
           loop.maxIterations(2);
           step.command("A", { cmd: "echo a" });
-          flow.until(condition.empty(slot.text("first-cond-slot")));
-          flow.until(condition.empty(slot.text("second-cond-slot")));
+          loop.until(condition.empty(slot.text("first-cond-slot")));
+          loop.until(condition.empty(slot.text("second-cond-slot")));
         });
       }),
-    ).toThrow(/at most one flow\.until/);
+    ).toThrow(/at most one loop\.until/);
   });
 
   it("loop.maxIterations is required — a loop with no way out is a build error", () => {
@@ -239,7 +239,7 @@ describe("functional layer build rules (0106)", () => {
     ).toThrow(/requires at least one value arm/);
   });
 
-  it("flow.match registered after flow.until in a loop throws, naming the block — silently unguarded emission is not acceptable", () => {
+  it("flow.match registered after loop.until in a loop throws, naming the block — silently unguarded emission is not acceptable", () => {
     const done = slot.boolean("match-after-until-done");
     const subject = slot({
       id: "match-after-until-subject",
@@ -250,7 +250,7 @@ describe("functional layer build rules (0106)", () => {
         flow.loop("Outer", (loop) => {
           loop.maxIterations(2);
           step.command("First", { cmd: "echo first" });
-          flow.until(condition.equals(done, true));
+          loop.until(condition.equals(done, true));
           flow.match("Trailing Match", subject.kind, {
             a: () => {
               step.command("A", { cmd: "echo a" });
@@ -258,23 +258,23 @@ describe("functional layer build rules (0106)", () => {
           });
         });
       }),
-    ).toThrow(/"Trailing Match".*registered after flow\.until.*cannot be guarded/);
+    ).toThrow(/"Trailing Match".*registered after loop\.until.*cannot be guarded/);
   });
 
-  it("flow.parallel registered after flow.until in a loop throws, naming the block — silently unguarded emission is not acceptable", () => {
+  it("flow.parallel registered after loop.until in a loop throws, naming the block — silently unguarded emission is not acceptable", () => {
     const done = slot.boolean("parallel-after-until-done");
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.loop("Outer", (loop) => {
           loop.maxIterations(2);
           step.command("First", { cmd: "echo first" });
-          flow.until(condition.equals(done, true));
+          loop.until(condition.equals(done, true));
           flow.parallel("Trailing Parallel", () => {
             step.command("A", { cmd: "echo a" });
           });
         });
       }),
-    ).toThrow(/"Trailing Parallel".*registered after flow\.until.*cannot be guarded/);
+    ).toThrow(/"Trailing Parallel".*registered after loop\.until.*cannot be guarded/);
   });
 
   it("a build that throws mid-body still frees the build slot for the next one", () => {
@@ -330,7 +330,7 @@ describe("functional layer build rules (0106)", () => {
         loop.maxIterations(1);
         loop.id("building");
         step.command("Round", { cmd: "echo round", output: out });
-        flow.until(condition.not(condition.empty(out)));
+        loop.until(condition.not(condition.empty(out)));
       });
     });
     const built = toDraftJson(
@@ -423,18 +423,18 @@ describe("functional layer build rules (0106)", () => {
     });
   });
 
-  it("step.project registered after flow.until in its own loop is a build error", () => {
+  it("step.project registered after loop.until in its own loop is a build error", () => {
     const gate = slot.text("project-until-gate");
     const target = slot.text("project-until-target");
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.loop("Loop", (loop) => {
           loop.maxIterations(2);
-          flow.until(condition.not(condition.empty(gate)));
+          loop.until(condition.not(condition.empty(gate)));
           step.project("Late Project", { projections: [{ source: gate, destination: target }] });
         });
       }),
-    ).toThrow(/step\.project registered after flow\.until/);
+    ).toThrow(/step\.project registered after loop\.until/);
   });
 });
 
@@ -1066,7 +1066,7 @@ describe("effect.session.title (0110)", () => {
   });
 });
 
-describe("items.forEach typed item slots (0153)", () => {
+describe("items.forEach typed item slots (0153) + each scope param (0211)", () => {
   const draftSlots = (built: unknown): readonly { id: string; schema: string }[] =>
     (built as { slot?: readonly { id: string; schema: string }[] }).slot ?? [];
 
@@ -1075,7 +1075,7 @@ describe("items.forEach typed item slots (0153)", () => {
     const items = slot.array(reviewItem, "fe-items");
     const out = slot.text("fe-out");
     const proc = procedure.from({ description: "d" }, () => {
-      items.forEach("Handle each item", {}, (item) => {
+      items.forEach("Handle each item", (item) => {
         step.command("Echo", { cmd: "echo hi", output: out });
         void item;
       });
@@ -1085,11 +1085,12 @@ describe("items.forEach typed item slots (0153)", () => {
     expect(itemSlot?.schema).toBe("schema:fe-review-item");
   });
 
-  it("an explicit itemSchema override wins over inheritance", () => {
+  it("an explicit each.itemSchema override wins over inheritance", () => {
     const items = slot.texts("fe-override-items");
     const out = slot.text("fe-override-out");
     const proc = procedure.from({ description: "d" }, () => {
-      items.forEach("Handle overridden", { itemSchema: schema.text() }, (item) => {
+      items.forEach("Handle overridden", (item, each) => {
+        each.itemSchema(schema.text());
         step.command("Echo", { cmd: "echo hi", output: out });
         void item;
       });
@@ -1103,7 +1104,7 @@ describe("items.forEach typed item slots (0153)", () => {
     const raw = slot.any("fe-raw");
     const out = slot.text("fe-fallback-out");
     const proc = procedure.from({ description: "d" }, () => {
-      raw.forEach("Handle raw", {}, (item) => {
+      raw.forEach("Handle raw", (item) => {
         step.command("Echo", { cmd: "echo hi", output: out });
         void item;
       });
@@ -1111,5 +1112,128 @@ describe("items.forEach typed item slots (0153)", () => {
     const built = toDraftJson(trait("fe-fallback", { name: "FE Fallback", summary: "s", procedure: proc }));
     const itemSlot = draftSlots(built).find((declared) => declared.id === "handle-raw-item");
     expect(itemSlot?.schema).toBe("schema:any");
+  });
+
+  it("each.limit/maxItems/concurrent land in the emitted for-each fields", () => {
+    const items = slot.texts("fe-knobs-items");
+    const out = slot.text("fe-knobs-out");
+    const proc = procedure.from({ description: "d" }, () => {
+      items.forEach("Handle knobs", (item, each) => {
+        each.limit(3);
+        each.maxItems(3);
+        each.concurrent();
+        step.command("Echo", { cmd: "echo hi", output: out });
+        void item;
+      });
+    });
+    const built = toDraftJson(trait("fe-knobs", { name: "FE Knobs", summary: "s", procedure: proc })) as {
+      procedure: { sequence: readonly { id: string; "max-items"?: number; concurrent?: boolean }[] };
+    };
+    const forEachItem = built.procedure.sequence.find((entry) => entry.id === "handle-knobs");
+    expect(forEachItem).toMatchObject({ "max-items": 3, concurrent: true });
+  });
+
+  it("each.limit called twice throws", () => {
+    const items = slot.texts("fe-limit-twice-items");
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        items.forEach("Handle limit twice", (item, each) => {
+          each.limit(1);
+          each.limit(2);
+          step.command("Echo", { cmd: "echo hi" });
+          void item;
+        });
+      }),
+    ).toThrow(/each\.limit\(\.\.\.\) called more than once/);
+  });
+
+  it("each.itemSchema called twice throws", () => {
+    const items = slot.texts("fe-schema-twice-items");
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        items.forEach("Handle schema twice", (item, each) => {
+          each.itemSchema(schema.text());
+          each.itemSchema(schema.text());
+          step.command("Echo", { cmd: "echo hi" });
+          void item;
+        });
+      }),
+    ).toThrow(/each\.itemSchema\(\.\.\.\) called more than once/);
+  });
+
+  it("calling the outer each from inside a nested items.forEach body throws — no aliasing across scopes", () => {
+    const outerItems = slot.texts("fe-nested-outer-items");
+    const innerItems = slot.texts("fe-nested-inner-items");
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        outerItems.forEach("Outer", (outerItem, outerEach) => {
+          void outerItem;
+          innerItems.forEach("Inner", (innerItem) => {
+            step.command("Echo", { cmd: "echo hi" });
+            void innerItem;
+            outerEach.maxItems(1);
+          });
+        });
+      }),
+    ).toThrow(/each\.maxItems\(\.\.\.\) called outside its own items\.forEach body/);
+  });
+
+  it("an item field accessed before each.itemSchema(...) declares the schema is a loud build error", () => {
+    const items = slot.array(schema.object("fe-lazy-item", { note: schema.text() }), "fe-lazy-items");
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        items.forEach("Handle lazy", (item) => {
+          const fieldItem = item as unknown as Record<string, unknown>;
+          step.command("Echo", { cmd: "echo hi", input: input.command`echo ${fieldItem["note"] as never}` });
+        });
+      }),
+    ).toThrow(/item field "note" accessed before each\.itemSchema\(\.\.\.\) declared the item schema/);
+  });
+
+  it("a field accessed after each.itemSchema(...) declares an object schema reaches the built draft", () => {
+    const items = slot.texts("fe-lazy-declared-items");
+    expect(() => {
+      const proc = procedure.from({ description: "d" }, () => {
+        items.forEach("Handle lazy declared", (item, each) => {
+          each.itemSchema(schema.object("fe-lazy-declared-schema", { note: schema.text() }));
+          const fieldItem = item as unknown as { readonly note: never };
+          flow.when("Note Is Set", condition.equals(fieldItem.note, "set"), () => {
+            step.command("Echo", { cmd: "echo hi" });
+          });
+        });
+      });
+      return toDraftJson(trait("fe-lazy-declared", { name: "FE Lazy Declared", summary: "s", procedure: proc }));
+    }).not.toThrow();
+  });
+
+  it("effect.onComplete inside items.forEach attaches to the for-each's own onComplete", () => {
+    const items = slot.texts("fe-oncomplete-items");
+    const complete = signal({ id: "fe-oncomplete-signal", description: "The for-each finished a round." });
+    const proc = procedure.from({ description: "d" }, () => {
+      items.forEach("Handle complete", (item) => {
+        effect.onComplete(complete);
+        step.command("Echo", { cmd: "echo hi" });
+        void item;
+      });
+    });
+    const built = toDraftJson(trait("fe-oncomplete", { name: "FE OnComplete", summary: "s", procedure: proc })) as {
+      procedure: { sequence: readonly { id: string; "on-complete"?: readonly string[] }[] };
+    };
+    const forEachItem = built.procedure.sequence.find((entry) => entry.id === "handle-complete");
+    expect(forEachItem?.["on-complete"]).toEqual(["signal:fe-oncomplete-signal"]);
+  });
+
+  it("effect.onComplete outside any flow.loop/items.forEach still throws, naming both container kinds", () => {
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        effect.onComplete("some-signal" as never);
+      }),
+    ).toThrow(/requires an enclosing flow\.loop or items\.forEach/);
+  });
+
+  it("flow no longer exposes until/untilAll/untilAny — loop.until is the only spelling", () => {
+    expect((flow as { readonly until?: unknown }).until).toBeUndefined();
+    expect((flow as { readonly untilAll?: unknown }).untilAll).toBeUndefined();
+    expect((flow as { readonly untilAny?: unknown }).untilAny).toBeUndefined();
   });
 });

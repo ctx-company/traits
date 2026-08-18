@@ -87,7 +87,7 @@ export default function () {
                   // the target is met — pure round exhaustion is handled by the loop's
                   // own maxIterations/onExhausted, never by this until (the roundComplete
                   // half only guards against terminating mid-commit/mid-reset).
-                  flow.until(
+                  loop.until(
                     condition.all([
                       condition.equals(roundComplete, "complete"),
                       condition.lte(shared.data.bestMetric, improvementTarget),

@@ -22,7 +22,7 @@ import type {
   SignalOutputValue,
 } from "../sequence.js";
 import { isThenable } from "./internal.js";
-import type { ForEachRegistrarOptions } from "./registrars.js";
+import type { EachParam } from "./registrars.js";
 
 /** Best-effort authoring location captured at a registrar call site. */
 export interface AuthorFrame {
@@ -85,11 +85,21 @@ export interface ParallelScopeState {
   onFailureAnnounce?: string | RefHandle<"signal">;
 }
 
+export interface ForEachScopeState {
+  limitValue?: number;
+  maxItemsValue?: number;
+  concurrent?: boolean;
+  /** Set once `each.itemSchema(...)` has materialized the item slot — guards the at-most-once rule and tells the lowering not to mint the default (inherited/`slot.any`) item slot at scope close. */
+  itemSchemaCalled: boolean;
+  readonly onComplete: SignalOutputValue[];
+}
+
 export interface Scope {
   readonly kind: ScopeKind;
   readonly items: RegisteredItem[];
   readonly loop?: LoopScopeState;
   readonly parallel?: ParallelScopeState;
+  readonly forEach?: ForEachScopeState;
 }
 
 interface BuildFrame {
@@ -161,12 +171,13 @@ export function currentScope(caller: string): Scope {
   return scope;
 }
 
-/** The nearest enclosing scope of `kind`, or `undefined` if none is open. */
-export function nearestScope(kind: ScopeKind): Scope | undefined {
+/** The nearest enclosing scope of `kind` (or, given several kinds, the nearest enclosing scope of ANY of them — innermost wins), or `undefined` if none is open. */
+export function nearestScope(kind: ScopeKind | readonly ScopeKind[]): Scope | undefined {
   if (activeBuild === undefined) return undefined;
+  const kinds: readonly ScopeKind[] = Array.isArray(kind) ? kind : [kind];
   for (let index = activeBuild.scopes.length - 1; index >= 0; index -= 1) {
     const scope = activeBuild.scopes[index];
-    if (scope !== undefined && scope.kind === kind) return scope;
+    if (scope !== undefined && kinds.includes(scope.kind)) return scope;
   }
   return undefined;
 }
@@ -178,6 +189,7 @@ function pushScope(kind: ScopeKind, caller: string): Scope {
     items: [],
     ...(kind === "loop" ? { loop: { abortIfArms: [], maxIterationsCalled: false, onComplete: [], onAbort: [] } } : {}),
     ...(kind === "parallel" ? { parallel: {} } : {}),
+    ...(kind === "for-each" ? { forEach: { itemSchemaCalled: false, onComplete: [] } } : {}),
   };
   build.scopes.push(scope);
   return scope;
@@ -235,8 +247,7 @@ type AgentPromptLowering = (
 type SlotForEachLowering = (
   slotHandle: SlotHandle,
   title: string,
-  opts: ForEachRegistrarOptions | undefined,
-  body: (item: SlotHandle) => void,
+  body: (item: SlotHandle, each: EachParam) => void,
 ) => SequenceHandle;
 
 let agentPromptLowering: AgentPromptLowering | undefined;
@@ -266,15 +277,14 @@ export function dispatchAgentPrompt(
 export function dispatchSlotForEach(
   slotHandle: SlotHandle,
   title: string,
-  opts: ForEachRegistrarOptions | undefined,
-  body: (item: SlotHandle) => void,
+  body: (item: SlotHandle, each: EachParam) => void,
 ): SequenceHandle {
   if (slotForEachLowering === undefined) {
     throw new Error(
       'slot.forEach: the functional layer has not loaded — import "@ctx-traits/cdk" before calling .forEach(...)',
     );
   }
-  return slotForEachLowering(slotHandle, title, opts, body);
+  return slotForEachLowering(slotHandle, title, body);
 }
 
 // ---------------------------------------------------------------------------

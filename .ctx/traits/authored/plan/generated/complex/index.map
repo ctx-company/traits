@@ -46,8 +46,8 @@
   },
   "prompt:write-the-slice": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
-    "start": 45,
-    "end": 45
+    "start": 46,
+    "end": 46
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -176,8 +176,8 @@
   },
   "sequence:write-each-slice-body/write-the-slice": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
-    "start": 44,
-    "end": 44
+    "start": 45,
+    "end": 45
   },
   "slot:board-check": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",

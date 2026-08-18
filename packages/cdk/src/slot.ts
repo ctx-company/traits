@@ -1,5 +1,5 @@
 import { dispatchSlotForEach, recordTraitMint } from "./functional/context.js";
-import type { ForEachRegistrarOptions } from "./functional/registrars.js";
+import type { EachParam } from "./functional/registrars.js";
 import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
 import type {
   DeclaredSlotHandle,
@@ -13,7 +13,7 @@ import type {
 import { optionalSlot as optionalSlotInput } from "./input.js";
 import { attachMeta, metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
-import { refText } from "./ref.js";
+import { ref, refText } from "./ref.js";
 import { schemaArray } from "./schema.js";
 import type { SchemaValue } from "./schema.js";
 
@@ -287,17 +287,14 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   const withForEach = withHiddenField(
     withOptional,
     "forEach",
-    (title: string, opts: ForEachRegistrarOptions | undefined, body: (item: SlotHandle) => void) =>
-      dispatchSlotForEach(withOptional, title, opts, body) as SequenceHandle,
+    (title: string, body: (item: SlotHandle, each: EachParam) => void) =>
+      dispatchSlotForEach(withOptional, title, body) as SequenceHandle,
   );
   // `.with` is the authoring-form spelling of `operation.over(slot, op)`
   // (0210, 0207 ruling 4) — a pure delegation, not a new declaration path,
   // attached the same non-enumerable way so it never reaches the canonical.
-  return withHiddenField(
-    withForEach,
-    "with",
-    ((op?: WriteOperation) => operationOver(resolved, op as never)) as SlotSink<unknown>,
-  );
+  return withHiddenField(withForEach, "with", ((op?: WriteOperation) =>
+    operationOver(resolved, op as never)) as SlotSink<unknown>);
 }
 
 /** One declared object-schema field's canonical shape, as it appears in `declaration.fields`. */
@@ -412,4 +409,40 @@ function fieldRefProxy(
       return fieldRef;
     },
   }) as SlotHandle | FieldRef;
+}
+
+/**
+ * A lazily-materialized `items.forEach` item handle (0211): the body
+ * receives `proxy` immediately, before the real item slot (whose schema
+ * `each.itemSchema(...)` may still declare) is minted. Whole-value uses
+ * (interpolation, `.optional()`, `.with(...)`) build against the stable
+ * `ref.slot` target — the ref string is already correct even before a real
+ * slot exists — but any other field access before `materialize(...)` is a
+ * loud build error (`onFieldAccess`), since an inherited/undeclared item
+ * schema mints no field refs to read. `registrars.ts`'s `items.forEach`
+ * lowering owns the actual mint (`each.itemSchema` or the default fallback
+ * at scope close) and calls `materialize` with the real handle exactly once.
+ */
+export function lazyForEachItem(
+  loopId: string,
+  onFieldAccess: (prop: string) => never,
+): { readonly proxy: SlotHandle; readonly materialize: (real: SlotHandle) => void } {
+  const itemRef = ref.slot(`${loopId}-item`);
+  let real: SlotHandle | undefined;
+  const proxy = new Proxy(itemRef as object, {
+    get(target, prop, receiver) {
+      if (real !== undefined) return Reflect.get(real as object, prop, receiver);
+      if (typeof prop === "symbol" || Object.hasOwn(target, prop)) return Reflect.get(target, prop, receiver);
+      if (prop === "optional") return () => optionalSlotInput(itemRef);
+      if (prop === "with") return (op?: WriteOperation) => operationOver(itemRef, op as never);
+      return onFieldAccess(prop);
+    },
+  }) as SlotHandle;
+  return {
+    proxy,
+    materialize(value: SlotHandle) {
+      if (real !== undefined) throw new Error("lazyForEachItem: materialized more than once");
+      real = value;
+    },
+  };
 }

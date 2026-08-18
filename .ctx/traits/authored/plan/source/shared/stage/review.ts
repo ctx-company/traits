@@ -45,6 +45,6 @@ export function loop(reviewer: AgentHandle, composer: AgentHandle) {
       });
     });
 
-    flow.until(condition.equals(verdict.status, "approved"));
+    reviewLoop.until(condition.equals(verdict.status, "approved"));
   });
 }

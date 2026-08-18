@@ -19,7 +19,7 @@ export default function () {
     shared.stage.review.primary("Review refactor");
     shared.stage.review.secondary("Cross-review refactor");
 
-    cdk.flow.untilAll([
+    loop.untilAll([
       cdk.condition.equals(shared.data.verdict1.status, "approved"),
       cdk.condition.equals(shared.data.verdict2.status, "approved"),
     ]);

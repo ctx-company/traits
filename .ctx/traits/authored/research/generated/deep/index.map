@@ -46,18 +46,18 @@
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 128,
-    "end": 128
+    "start": 129,
+    "end": 129
   },
   "prompt:building-review-1": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 139,
-    "end": 139
+    "start": 140,
+    "end": 140
   },
   "prompt:building-review-2": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 148,
-    "end": 148
+    "start": 149,
+    "end": 149
   },
   "prompt:ingest-the-brief": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
@@ -71,18 +71,18 @@
   },
   "prompt:research-the-stream": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 108,
-    "end": 108
+    "start": 109,
+    "end": 109
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 168,
-    "end": 168
+    "start": 169,
+    "end": 169
   },
   "prompt:triangulate-the-findings": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 118,
-    "end": 118
+    "start": 119,
+    "end": 119
   },
   "resource:citation-style": {
     "file": ".ctx/traits/authored/research/source/shared/resource.ts",
@@ -141,18 +141,18 @@
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 127,
-    "end": 127
+    "start": 128,
+    "end": 128
   },
   "sequence:building-body/building-review-1": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 138,
-    "end": 138
+    "start": 139,
+    "end": 139
   },
   "sequence:building-body/building-review-2": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 147,
-    "end": 147
+    "start": 148,
+    "end": 148
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -186,8 +186,8 @@
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 124,
-    "end": 124
+    "start": 125,
+    "end": 125
   },
   "sequence:procedure/ingest": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
@@ -231,13 +231,13 @@
   },
   "sequence:procedure/triangulate-the-findings": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 117,
-    "end": 117
+    "start": 118,
+    "end": 118
   },
   "sequence:research-each-stream-body/research-the-stream": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 107,
-    "end": 107
+    "start": 108,
+    "end": 108
   },
   "slot:brief-tracks": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",

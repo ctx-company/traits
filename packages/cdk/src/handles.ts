@@ -1,5 +1,5 @@
 import type { SettingHandle as ConfigSettingHandle } from "@ctx-traits/config";
-import type { ForEachRegistrarOptions } from "./functional/registrars.js";
+import type { EachParam } from "./functional/registrars.js";
 import type { CanonicalGuardPredicate, JsonValue, RefKind, WriteOperation } from "./generated.js";
 import type { CdkObject } from "./meta.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
@@ -78,8 +78,8 @@ export type SlotHandle<Value = unknown> = Handle<"slot", Value>;
  */
 export type DeclaredSlotHandle<Value = unknown> = SlotHandle<Value> & {
   readonly optional: () => OptionalSlotRead<Value>;
-  /** `.forEach` is attached non-enumerably at mint time (0106, `slot.ts`) — `items.forEach` is THE for-each spelling (0102). */
-  readonly forEach: (title: string, opts: ForEachRegistrarOptions, body: (item: SlotHandle) => void) => SequenceHandle;
+  /** `.forEach` is attached non-enumerably at mint time (0106, `slot.ts`) — `items.forEach` is THE for-each spelling (0102). The body's second parameter, `each`, is where every knob (`limit`/`maxItems`/`concurrent`/`itemSchema`) lives (0211). */
+  readonly forEach: (title: string, body: (item: SlotHandle, each: EachParam) => void) => SequenceHandle;
   /** `.with` is attached non-enumerably at mint time (0210, `slot.ts`) — the authoring form of `operation.over(slot, op)`. */
   readonly with: SlotSink<Value>;
 };
@@ -210,8 +210,9 @@ export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"o
  * list-valued slot, increment a number-valued slot, `merge`/`set-field` and
  * no-arg/`replace` are available on every slot.
  */
-export type SlotSink<Value> =
-  ((operation: "merge" | Extract<WriteOperation, { readonly "set-field": string }>) => OutputSinkHandle<JsonValue>) &
+export type SlotSink<Value> = ((
+  operation: "merge" | Extract<WriteOperation, { readonly "set-field": string }>,
+) => OutputSinkHandle<JsonValue>) &
   ((operation?: "replace") => OutputSinkHandle<Value>) &
   // `unknown` here is the intersection identity (`T & unknown` = `T`) — a non-list/non-number
   // value contributes no append/increment call signature beyond the two above.

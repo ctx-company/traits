@@ -45,4 +45,7 @@ byte-identical; CDK tests pass.
 """
 
 [relations]
-depends-on = ["0207", "0209"]
+depends-on = [
+    "0207",
+    "0209",
+]

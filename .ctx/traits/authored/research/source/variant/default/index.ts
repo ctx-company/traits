@@ -67,7 +67,7 @@ export default function () {
       include: [shared.data.briefTracks.optional(), shared.data.deliverableSections.optional(), shared.data.doneCriteria.optional()],
     });
 
-    flow.until(
+    loop.until(
       condition.all([condition.count(shared.data.briefTracks).atLeast(1), condition.count(shared.data.deliverableSections).atLeast(1)]),
     );
   });
@@ -83,7 +83,7 @@ export default function () {
       include: [shared.data.streamPlan.optional()],
     });
 
-    flow.until(streamCountValid);
+    loop.until(streamCountValid);
   });
 
   // Seeds the guaranteed empty dossier list the per-stream loop appends
@@ -95,7 +95,8 @@ export default function () {
     projections: [{ source: operation.literal([]), destination: shared.data.dossiers }],
   });
 
-  shared.data.streamPlan.forEach("Research each stream", { maxItems: 5 }, (stream) => {
+  shared.data.streamPlan.forEach("Research each stream", (stream, each) => {
+    each.maxItems(5);
     worker.prompt("Research the stream", {
       input: input.prompt`
                 Research exactly one stream — ${stream} — for the topic ${shared.data.topic}. Do not research any other stream's focus; other streams run in their own frames.
@@ -137,7 +138,7 @@ export default function () {
     });
 
 
-    flow.until(condition.equals(shared.data.verdict1.status, "approved"));
+    loop.until(condition.equals(shared.data.verdict1.status, "approved"));
   });
 
   shared.stage.commit.shippingCommitTail({

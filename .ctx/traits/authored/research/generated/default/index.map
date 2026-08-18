@@ -41,13 +41,13 @@
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 120,
-    "end": 120
+    "start": 121,
+    "end": 121
   },
   "prompt:building-review": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 130,
-    "end": 130
+    "start": 131,
+    "end": 131
   },
   "prompt:ingest-the-brief": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
@@ -61,18 +61,18 @@
   },
   "prompt:research-the-stream": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 100,
-    "end": 100
+    "start": 101,
+    "end": 101
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 145,
-    "end": 145
+    "start": 146,
+    "end": 146
   },
   "prompt:triangulate-the-findings": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 110,
-    "end": 110
+    "start": 111,
+    "end": 111
   },
   "resource:citation-style": {
     "file": ".ctx/traits/authored/research/source/shared/resource.ts",
@@ -131,13 +131,13 @@
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 119,
-    "end": 119
+    "start": 120,
+    "end": 120
   },
   "sequence:building-body/building-review": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 129,
-    "end": 129
+    "start": 130,
+    "end": 130
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -171,8 +171,8 @@
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 116,
-    "end": 116
+    "start": 117,
+    "end": 117
   },
   "sequence:procedure/ingest": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
@@ -216,13 +216,13 @@
   },
   "sequence:procedure/triangulate-the-findings": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 109,
-    "end": 109
+    "start": 110,
+    "end": 110
   },
   "sequence:research-each-stream-body/research-the-stream": {
     "file": ".ctx/traits/authored/research/source/variant/default/index.ts",
-    "start": 99,
-    "end": 99
+    "start": 100,
+    "end": 100
   },
   "slot:brief-tracks": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",

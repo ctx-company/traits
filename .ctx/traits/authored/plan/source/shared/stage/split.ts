@@ -44,6 +44,6 @@ export function slices(agent: AgentHandle) {
       include: [slicePlan.optional()],
     });
 
-    flow.until(sliceCountValid);
+    loop.until(sliceCountValid);
   });
 }
