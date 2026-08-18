@@ -77,15 +77,15 @@ fn classify(name: &str) -> Result<&'static str, String> {
         // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info` are
         // hidden aliases under `dependency`; they stay classified so the
         // hidden-command help path keeps working for the deprecation window.
-        "vendor" | "install" | "remove" | "update" | "outdated" | "info" | "publish"
-        | "export" | "host" | "migrate" | "activate" | "review" | "config" | "task" | "explain"
+        "vendor" | "install" | "remove" | "update" | "outdated" | "info" | "publish" | "export"
+        | "host" | "migrate" | "activate" | "review" | "config" | "task" | "explain"
         | "claim-gate" | "hygiene" | "cost" | "prepare-public" | "context-contracts" | "policy"
         | "evidence" | "compatibility" | "subagent" | "inspect" | "manifest" | "schema"
-        | "sdk-generate" | "synth" | "generate-evals" | "import-refresh" | "run-info"
-        | "session" | "mcp" | "drive" | "call" | "run-status" | "run-frame" | "next" | "set"
-        | "deactivate" | "deprecate" | "eval" | "prompt" | "preview" | "search" | "resolve"
-        | "pack" | "context" | "hook" | "help" | "stats" | "story" | "tui-demo" | "edit"
-        | "running" => "hidden",
+        | "sdk-generate" | "synth" | "generate-evals" | "generate-round" | "refine-round"
+        | "import-round" | "import-refresh" | "run-info" | "session" | "mcp" | "drive" | "call"
+        | "run-status" | "run-frame" | "next" | "set" | "deactivate" | "deprecate" | "eval"
+        | "prompt" | "preview" | "search" | "resolve" | "pack" | "context" | "hook" | "help"
+        | "stats" | "story" | "tui-demo" | "edit" | "running" => "hidden",
         other => {
             return Err(format!(
                 "ctx traits help --json: unclassified command {other:?}; add it to the release-group classification in help_surface.rs"

@@ -723,9 +723,7 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
 
     let presentation = match name {
         "doctor" | "init" | "create" | "list" | "build" | "generate" | "refine" | "critique"
-        | "merge" | "trust" | "import" | "cache" | "check" | "diff" | "run" | "dependency" => {
-            Panel
-        }
+        | "merge" | "trust" | "import" | "cache" | "check" | "diff" | "run" | "dependency" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \
@@ -1174,9 +1172,15 @@ mod tests {
         assert_eq!(presentation_for("init"), Ok(CommandPresentation::Panel));
         assert_eq!(presentation_for("check"), Ok(CommandPresentation::Panel));
         assert_eq!(presentation_for("diff"), Ok(CommandPresentation::Panel));
-        assert_eq!(presentation_for("explain"), Ok(CommandPresentation::Panel));
-        assert_eq!(presentation_for("export"), Ok(CommandPresentation::Panel));
+        assert_eq!(presentation_for("create"), Ok(CommandPresentation::Panel));
+        assert_eq!(
+            presentation_for("dependency"),
+            Ok(CommandPresentation::Panel)
+        );
         assert_eq!(presentation_for("run"), Ok(CommandPresentation::Panel));
+        // Hidden by the 2026-08-18 regroup: no longer registry-visible.
+        assert!(presentation_for("explain").is_err());
+        assert!(presentation_for("export").is_err());
     }
 
     #[test]
