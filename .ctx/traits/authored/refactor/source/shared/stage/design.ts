@@ -1,10 +1,10 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart1 } from "../agent.ts";
+import { smart } from "../agent.ts";
 import { plan, refactorFrame, target } from "../data.ts";
 
 export const draft = cdk.stage({
-  agent: smart1,
+  agent: smart,
   input: cdk.input.prompt`
     Design the refactor for the framed problem ${refactorFrame} on ${target}.
     Stay within the framing's constraints.

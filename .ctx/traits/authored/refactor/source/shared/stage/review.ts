@@ -1,7 +1,7 @@
 import * as agents from "@ctx-traits/agents";
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart1, smart2 } from "../agent.ts";
+import { smart, smart } from "../agent.ts";
 import { plan, target, verdict1, verdict2, workSummary } from "../data.ts";
 import { architectureDialect } from "../resource.ts";
 
@@ -11,7 +11,7 @@ const PROMPT =
     Cite the smell id or the deep-module violation for every blocker. ${agents.INTEGRITY_DOCTRINE}`;
 
 export const primary = cdk.stage({
-  agent: smart1,
+  agent: smart,
   input: cdk.input.prompt(PROMPT, {
     target,
     plan,
@@ -23,7 +23,7 @@ export const primary = cdk.stage({
 });
 
 export const secondary = cdk.stage({
-  agent: smart2,
+  agent: smart,
   input: cdk.input.prompt(PROMPT, {
     target,
     plan,
@@ -46,7 +46,7 @@ const JUDGE_PROMPT =
 // (0200 round-2 review blocker). Quick and guarded already require `target`
 // through their checklist stage, so omitting it here costs them nothing.
 export const judge = cdk.stage({
-  agent: smart1,
+  agent: smart,
   input: cdk.input.prompt(JUDGE_PROMPT, {
     plan,
     workSummary,
