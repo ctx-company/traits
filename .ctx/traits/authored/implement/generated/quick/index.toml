@@ -285,6 +285,7 @@ text = """
     Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
     Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
     Optionally attached work summary from previous rounds: {slot:work-summary}
+    Attached verdicts are the source of truth — always follow their guidance.
   
 
 

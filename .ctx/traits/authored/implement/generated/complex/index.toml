@@ -61,13 +61,19 @@ description = 'Task to implement, named by its file in .internal/tasks/ — the 
 [[slot]]
 id = "changed-files"
 schema = "schema:text"
-description = "Names and change-kinds of every file changed this round — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
-hint = "git diff --name-status output, excluding runtime state; it omits untracked files."
+description = "Names and change-kinds of every file changed since the session base — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
+hint = "git diff --name-status against slot:diff-base; covers committed and uncommitted changes, omits untracked files."
 
 [[slot]]
 id = "commit-message"
 schema = "schema:text"
 description = "Commit message for the completed task; injected directly into the git commit command step."
+
+[[slot]]
+id = "diff-base"
+schema = "schema:text"
+description = "Commit the session started from — the fixed base every changed-files capture diffs against."
+hint = "git rev-parse HEAD captured before any work; worker commits during the loop never move it."
 
 [[slot]]
 id = "draft"
@@ -312,6 +318,7 @@ text = """
     Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
     Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
     Optionally attached work summary from previous rounds: {slot:work-summary}
+    Attached verdicts are the source of truth — always follow their guidance.
   
 
 
@@ -413,6 +420,7 @@ output = ["slot:work-summary"]
 [[sequence.doubly-reviewed-refinement-body.sequence]]
 id = "capture-the-changed-files"
 title = "Capture the changed files"
+input = ["slot:diff-base"]
 output = ["slot:changed-files"]
 
 [sequence.doubly-reviewed-refinement-body.sequence.command]
@@ -420,7 +428,7 @@ argv = [
     "git",
     "diff",
     "--name-status",
-    "HEAD",
+    "{slot:diff-base}",
 ]
 
 [[sequence.doubly-reviewed-refinement-body.sequence]]
@@ -455,6 +463,18 @@ output = ["slot:review-verdict-2"]
 description = "Reviewed implementation: implement, review, refine & commit."
 input = ["port:task"]
 output = ["port:commit-report"]
+
+[[procedure.sequence]]
+id = "capture-the-session-base"
+title = "Capture the session base"
+output = ["slot:diff-base"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "rev-parse",
+    "HEAD",
+]
 
 [[procedure.sequence]]
 id = "draft-the-implementation-plan"
