@@ -208,6 +208,8 @@ pub fn summarize_run_info(
                 text_shorthand,
                 submission: if text_shorthand {
                     "text-shorthand".to_string()
+                } else if schema_accepts_flag_shorthand(&port.schema) {
+                    "flag-shorthand".to_string()
                 } else {
                     "json-value-required".to_string()
                 },
@@ -330,7 +332,14 @@ pub fn schema_accepts_text_shorthand(schema: &str) -> bool {
     schema == "schema:text"
 }
 
-/// Parse exact trait args (`--<port-id> value`) into runtime initial values.
+/// Whether a schema can be filled by bare-flag shorthand: `--<port-id>`
+/// alone sets the port to `true`; `--<port-id>=false` sets it to `false`.
+pub fn schema_accepts_flag_shorthand(schema: &str) -> bool {
+    schema == "schema:boolean"
+}
+
+/// Parse exact trait args (`--<port-id> value`, or bare `--<port-id>` for a
+/// boolean port) into runtime initial values.
 pub fn parse_trait_arguments(
     trait_ref: &Trait,
     tokens: &[String],
@@ -357,17 +366,9 @@ pub fn parse_trait_arguments(
             }
             .into());
         }
-        let (raw_name, value, consumed) = if let Some((name, value)) = token[2..].split_once('=') {
-            (name, value.to_string(), 1)
-        } else {
-            let Some(value) = tokens.get(index + 1) else {
-                return Err(crate::manifest::Error::InvalidField {
-                    field_path: format!("trait-args[{index}]"),
-                    message: format!("argument {token:?} requires a value"),
-                }
-                .into());
-            };
-            (token.trim_start_matches("--"), value.clone(), 2)
+        let (raw_name, explicit_value) = match token[2..].split_once('=') {
+            Some((name, value)) => (name, Some(value)),
+            None => (&token[2..], None),
         };
         let Some(port) = accepted.get(raw_name) else {
             return Err(crate::manifest::Error::InvalidField {
@@ -386,7 +387,55 @@ pub fn parse_trait_arguments(
             }
             .into());
         }
-        if !schema_accepts_text_shorthand(&port.schema) {
+        let (value, consumed) = if schema_accepts_flag_shorthand(&port.schema) {
+            // A boolean port is a flag: bare `--flag` means true and never
+            // consumes the next token, so `--flag other-flag-value` parses
+            // exactly like `--flag --other flag-value` would.
+            match explicit_value {
+                None => {
+                    // A following non-flag token can never be valid here;
+                    // refuse it now with the flag named instead of letting
+                    // the next iteration report a generic parse error.
+                    if let Some(next) = tokens.get(index + 1)
+                        && !next.starts_with("--")
+                    {
+                        return Err(crate::manifest::Error::InvalidField {
+                            field_path: format!("trait-args[{index}]"),
+                            message: format!(
+                                "boolean argument --{raw_name} takes no separate value; pass bare --{raw_name} for true or --{raw_name}=false"
+                            ),
+                        }
+                        .into());
+                    }
+                    (serde_json::Value::Bool(true), 1)
+                }
+                Some("true") => (serde_json::Value::Bool(true), 1),
+                Some("false") => (serde_json::Value::Bool(false), 1),
+                Some(other) => {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: format!("trait-args[{index}]"),
+                        message: format!(
+                            "boolean argument --{raw_name} accepts bare --{raw_name} (true), --{raw_name}=true, or --{raw_name}=false; got {other:?}"
+                        ),
+                    }
+                    .into());
+                }
+            }
+        } else if schema_accepts_text_shorthand(&port.schema) {
+            match explicit_value {
+                Some(value) => (serde_json::Value::String(value.to_string()), 1),
+                None => {
+                    let Some(value) = tokens.get(index + 1) else {
+                        return Err(crate::manifest::Error::InvalidField {
+                            field_path: format!("trait-args[{index}]"),
+                            message: format!("argument {token:?} requires a value"),
+                        }
+                        .into());
+                    };
+                    (serde_json::Value::String(value.clone()), 2)
+                }
+            }
+        } else {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: format!("trait-args[{index}]"),
                 message: format!(
@@ -394,10 +443,10 @@ pub fn parse_trait_arguments(
                     port.schema
                 ),
             }.into());
-        }
+        };
         values.push(StepSlotOutput {
             ref_text: format!("port:{raw_name}"),
-            value: serde_json::Value::String(value),
+            value,
             source: Some(ValueSource::HostInput),
             producer_evidence: Some(producer_evidence.to_string()),
             command_execution: None,
@@ -456,6 +505,8 @@ fn start_examples(
         .map(|port| {
             if port.text_shorthand {
                 format!("{} <value>", port.argument)
+            } else if schema_accepts_flag_shorthand(&port.schema) {
+                format!("{}[=true|false]", port.argument)
             } else {
                 format!("{} <json-via---input-or---set>", port.argument)
             }
@@ -498,5 +549,166 @@ fn empty_to_none(value: &str) -> String {
         "none".to_string()
     } else {
         value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod trait_argument_tests {
+    use super::*;
+
+    /// Scratch fixture: one text input, one boolean input, one prompt step
+    /// consuming them — the smallest trait the argument parser can run
+    /// against.
+    const FIXTURE: &str = r#"
+id = "flag-fixture"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Flag fixture"
+description = "Trait-argument parser fixture with a boolean input port."
+
+[[port]]
+id = "goal"
+direction = "input"
+schema = "schema:text"
+description = "What to do."
+
+[[port]]
+id = "dry-run"
+direction = "input"
+schema = "schema:boolean"
+optional = true
+description = "Plan without acting."
+
+[[agent]]
+id = "worker"
+description = "Does the work."
+summary = "Worker role."
+
+[[slot]]
+id = "result"
+schema = "schema:text"
+description = "The outcome."
+
+[prompt.work]
+text = "Do the goal."
+
+[procedure]
+description = "One step."
+
+[[procedure.sequence]]
+id = "work"
+title = "Work"
+agent = "agent:worker"
+prompt = "prompt:work"
+input = ["port:goal", "port:dry-run"]
+output = ["slot:result"]
+"#;
+
+    fn fixture() -> Trait {
+        crate::encoding::decode_trait(crate::encoding::Encoding::Toml, FIXTURE)
+            .expect("fixture decodes")
+    }
+
+    fn parse(tokens: &[&str]) -> crate::Result<Vec<StepSlotOutput>> {
+        let tokens: Vec<String> = tokens.iter().map(|token| token.to_string()).collect();
+        parse_trait_arguments(&fixture(), &tokens, "test")
+    }
+
+    #[test]
+    fn bare_flag_sets_boolean_port_true() {
+        let values = parse(&["--dry-run"]).expect("bare flag parses");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].ref_text, "port:dry-run");
+        assert_eq!(values[0].value, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn bare_flag_does_not_consume_the_next_argument() {
+        let values = parse(&["--dry-run", "--goal", "ship it"]).expect("mixed args parse");
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].value, serde_json::Value::Bool(true));
+        assert_eq!(
+            values[1].value,
+            serde_json::Value::String("ship it".to_string())
+        );
+    }
+
+    #[test]
+    fn explicit_false_sets_boolean_port_false() {
+        let values = parse(&["--dry-run=false"]).expect("explicit false parses");
+        assert_eq!(values[0].value, serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn explicit_true_sets_boolean_port_true() {
+        let values = parse(&["--dry-run=true"]).expect("explicit true parses");
+        assert_eq!(values[0].value, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn non_boolean_flag_value_is_refused() {
+        let error = parse(&["--dry-run=maybe"]).expect_err("bad flag value refused");
+        assert!(
+            error.to_string().contains("--dry-run=false"),
+            "error names the accepted forms: {error}"
+        );
+    }
+
+    #[test]
+    fn separate_value_after_flag_is_refused_naming_the_flag() {
+        let error = parse(&["--dry-run", "true"]).expect_err("separate value refused");
+        assert!(
+            error.to_string().contains("takes no separate value"),
+            "error explains flag form: {error}"
+        );
+    }
+
+    #[test]
+    fn unknown_bare_argument_reports_unknown_not_missing_value() {
+        let error = parse(&["--nonsense"]).expect_err("unknown argument refused");
+        assert!(
+            error.to_string().contains("unknown trait argument"),
+            "unknown port beats missing-value: {error}"
+        );
+    }
+
+    /// The parsed Bool survives the runtime's initial-value schema gate:
+    /// a bare flag lands in accepted-port-values as a real boolean, not a
+    /// rejected attempt.
+    #[test]
+    fn parsed_flag_value_is_accepted_at_run_start() {
+        let trait_ref = fixture();
+        let values = parse(&["--dry-run", "--goal", "ship it"]).expect("args parse");
+        let state = crate::procedure::runtime::start_procedure_run(
+            &trait_ref,
+            crate::procedure::run::Id::new("run-flag-shorthand-test").expect("run id"),
+            values,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("run starts");
+        assert!(
+            state.rejected_attempts.is_empty(),
+            "no initial value rejected"
+        );
+        let flag = state
+            .accepted_port_values
+            .iter()
+            .find(|value| value.ref_text == "port:dry-run")
+            .expect("flag port accepted");
+        assert_eq!(flag.value, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn text_port_still_requires_a_value() {
+        let error = parse(&["--goal"]).expect_err("text port without value refused");
+        assert!(
+            error.to_string().contains("requires a value"),
+            "text shorthand unchanged: {error}"
+        );
     }
 }
