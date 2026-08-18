@@ -1,15 +1,14 @@
 id = "implement"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.25.0"
-name = "Implement (Complex)"
+name = "Basic"
 description = "Reviewed implementation: implement, review, refine & commit."
-variant = "implement-complex"
+variant = "basic"
 
 [metadata]
 tag = [
     "implementation",
     "review",
-    "multi-agent",
 ]
 
 [[intent.require]]
@@ -45,25 +44,12 @@ id = "unbounded-loop"
 [[intent.avoid]]
 id = "rubber-stamp-review"
 
-[[behavior.tone]]
-id = "direct"
-
-[[behavior.tone]]
-id = "technical"
-
-[[behavior.method]]
-id = "evidence-first"
-
-[behavior.verbosity]
-id = "brief"
-
 [[port]]
 id = "commit-report"
 direction = "output"
 schema = "schema:text"
 optional = true
 description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
-value = "slot:commit-output"
 
 [[port]]
 id = "task"
@@ -81,11 +67,6 @@ hint = "git diff --name-status output, excluding runtime state; it omits untrack
 id = "commit-message"
 schema = "schema:text"
 description = "Commit message for the completed task; injected directly into the git commit command step."
-
-[[slot]]
-id = "commit-output"
-schema = "schema:text"
-description = "Output evidence from the git commit command step: committed hash and subject."
 
 [[slot]]
 id = "draft"
@@ -123,7 +104,7 @@ hint = "Cumulative across rounds: your own summary from the previous round arriv
 id = "task-board"
 path = ".internal/tasks"
 root = "repo"
-hint = "Repo-root directory for the task board: one TaskDocument TOML file per task, named <key>-kebab-slug.toml; agents read task files with their own tools and never inline them."
+hint = "Repo-root directory for the task board."
 trigger = "on-demand"
 
 [[schema]]
@@ -294,31 +275,11 @@ id = "worker"
 description = "Implementation Work"
 summary = "Implementation role."
 
-[prompt.cross-review-the-implementation]
-text = """
-
-    Review the working tree's implemented state for {port:task} against the task file's own contract as source of truth.
-    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication.
-    Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
-    Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
-    Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
-  
-
-
-    Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-2)
-  """
-input = [
-    "port:task",
-    "slot:work-summary",
-    "slot:changed-files",
-]
-output = ["slot:review-verdict-2"]
-
 [prompt.draft-the-implementation-plan]
 text = """
 
-    Draft the implementation plan for {port:task} — its file lives in .internal/tasks/ (matched by key, name, or filename); read it and the relevant code with your tools.
-    Scope, files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation.
+    Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
+    Scope, files to touch, approach, reuse opportunities, validation plan, risks.
 """
 input = ["port:task"]
 output = ["slot:draft"]
@@ -328,12 +289,13 @@ text = """
 
     Implement {port:task} following the draft {slot:draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
     Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
-    If a reviewer verdict from the previous round is present, fix the blockers it names, largest first.
-
+    Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
+    Optionally attached work summary from previous rounds: {slot:work-summary}
+  
 
 
     Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary
-"""
+  """
 input = [
     "port:task",
     "slot:draft",
@@ -363,13 +325,13 @@ output = ["slot:review-verdict-1"]
 [prompt.write-the-commit-message]
 text = """
 
-        The work for {port:task} is being committed.
-        Write a concise commit message from the work summary {slot:work-summary}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
-    
+    The work for {port:task} is being committed.
+    Write a concise commit message from the work summary into {slot:work-summary}.
+  
 
 
-    Return exactly the finished commit message — the runtime injects it into the git commit step (slot:commit-message)
-"""
+    Return exactly the finished commit message into (slot:commit-message).
+  """
 input = [
     "port:task",
     "slot:work-summary",
@@ -403,7 +365,7 @@ argv = [
 id = "commit-the-work"
 title = "Commit the work"
 input = ["slot:commit-message"]
-output = ["slot:commit-output"]
+output = ["port:commit-report"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
 argv = [
@@ -413,7 +375,7 @@ argv = [
     "{slot:commit-message}",
 ]
 
-[[sequence.doubly-reviewed-refinement-body.sequence]]
+[[sequence.reviewed-refinement-body.sequence]]
 id = "implement-the-task"
 title = "Implement the task"
 agent = "agent:worker"
@@ -427,23 +389,20 @@ input = [
 ]
 output = ["slot:work-summary"]
 
-[[sequence.doubly-reviewed-refinement-body.sequence]]
+[[sequence.reviewed-refinement-body.sequence]]
 id = "capture-the-changed-files"
 title = "Capture the changed files"
 output = ["slot:changed-files"]
 
-[sequence.doubly-reviewed-refinement-body.sequence.command]
+[sequence.reviewed-refinement-body.sequence.command]
 argv = [
     "git",
     "diff",
     "--name-status",
     "HEAD",
-    "--",
-    ".",
-    ":(exclude).agents/runs",
 ]
 
-[[sequence.doubly-reviewed-refinement-body.sequence]]
+[[sequence.reviewed-refinement-body.sequence]]
 id = "review-the-implementation"
 title = "Review the implementation"
 agent = "agent:smart"
@@ -456,20 +415,6 @@ input = [
     "slot:changed-files",
 ]
 output = ["slot:review-verdict-1"]
-
-[[sequence.doubly-reviewed-refinement-body.sequence]]
-id = "cross-review-the-implementation"
-title = "Cross-review the implementation"
-agent = "agent:smart"
-prompt = "prompt:cross-review-the-implementation"
-input = [
-    "port:task",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:review-verdict-2", optional = true },
-    "slot:work-summary",
-    "slot:changed-files",
-]
-output = ["slot:review-verdict-2"]
 
 [procedure]
 description = "Reviewed implementation: implement, review, refine & commit."
@@ -485,20 +430,15 @@ input = ["port:task"]
 output = ["slot:draft"]
 
 [[procedure.sequence]]
-id = "doubly-reviewed-refinement"
-title = "Doubly-reviewed refinement"
+id = "reviewed-refinement"
+title = "Reviewed refinement"
 kind = "loop"
-sequence = "sequence:doubly-reviewed-refinement-body"
+sequence = "sequence:reviewed-refinement-body"
 max-iterations = 10
 on-exhausted = "abort"
 
-[[procedure.sequence.until.all]]
+[procedure.sequence.until]
 slot = "slot:review-verdict-1"
-field = "status"
-equals = "approved"
-
-[[procedure.sequence.until.all]]
-slot = "slot:review-verdict-2"
 field = "status"
 equals = "approved"
 

@@ -5,15 +5,93 @@ generated-at = "not-recorded"
 
 [[trait]]
 id = "implement"
+variant = "basic"
+requested-version = "0.25.0"
+resolved-version = "0.25.0"
+
+[trait.digests]
+source = "sha256:ecbdf9a745fe363d1647558fff8b23e9e9e45259ea346a88332dca10076a9605"
+canonical = "sha256:f0724a58d709da0f052184bfa7b0a639c183ecf0c333077ed09701bd99837a24"
+model-visible = "sha256:515e93908e8cad4af5ace80602380ed02cf1dbcec2a6319cf75e9c51d7f36bd5"
+resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/implement-basic/SKILL.md"
+digest = "sha256:81daf6ded8b36b239f9bcc7f9367d96117483dd355e811575b5897c89fa6b1c8"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.2.4"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:ecbdf9a745fe363d1647558fff8b23e9e9e45259ea346a88332dca10076a9605"
+canonical = "sha256:f0724a58d709da0f052184bfa7b0a639c183ecf0c333077ed09701bd99837a24"
+model-visible = "sha256:515e93908e8cad4af5ace80602380ed02cf1dbcec2a6319cf75e9c51d7f36bd5"
+render = "sha256:cae9577f21afc0344cb2911396417e10c23e3ddea6b095a051a58fd1b6c0905e"
+generated-markdown = "sha256:81daf6ded8b36b239f9bcc7f9367d96117483dd355e811575b5897c89fa6b1c8"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.commit-report output contract has no title",
+    "port.commit-report output contract has no format guidance",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/implement-basic/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]
+
+[[trait]]
+id = "implement"
 variant = "complex"
 requested-version = "0.25.0"
 resolved-version = "0.25.0"
 
 [trait.digests]
-source = "sha256:b6bdcd5f09bea2da51fe03aa909bb99504a2f68df92f65db8474b6f5ed942098"
-canonical = "sha256:2dfb26b4d68965b69b2ca2bd60ccd5d10f8da81b22d2c57db1b26a2d95892018"
-model-visible = "sha256:3f52ff36894d3429d109b6a2cd19cf66adf5628493de7ca619c703867eafb7d3"
+source = "sha256:b4da83a2bebc88b1a78af6ea88aeab658b4fcf0dd5364b907c4ed8b61f704f6a"
+canonical = "sha256:8f181f39f442f1e1001af6a6ed8daf51f74a55bbeccbabef04fbd589b2c093e5"
+model-visible = "sha256:2d57b31ce8586da8c02528fd74671f220ad2b4ad253e6b98366d854185ac413d"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/implement-complex/SKILL.md"
+digest = "sha256:68daefd4f71ab0c1564de507a31c98d9766ff64021ca682d069da87a327575fc"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.2.4"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:b4da83a2bebc88b1a78af6ea88aeab658b4fcf0dd5364b907c4ed8b61f704f6a"
+canonical = "sha256:8f181f39f442f1e1001af6a6ed8daf51f74a55bbeccbabef04fbd589b2c093e5"
+model-visible = "sha256:2d57b31ce8586da8c02528fd74671f220ad2b4ad253e6b98366d854185ac413d"
+render = "sha256:53623b7ef045c2343efd424bb82f1db209c8a76893e92e6d7f787e25c6727c87"
+generated-markdown = "sha256:68daefd4f71ab0c1564de507a31c98d9766ff64021ca682d069da87a327575fc"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.commit-report output contract has no title",
+    "port.commit-report output contract has no format guidance",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/implement-complex/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]
 
 [[trait]]
 id = "implement"
@@ -177,15 +255,43 @@ requested-version = "0.25.0"
 resolved-version = "0.25.0"
 
 [trait.digests]
-source = "sha256:313163d852bd2cd9c18fda25b33b00ebf87b9a08fd52c32e79f4f70bbefa18af"
-canonical = "sha256:ac4d828027e32c5eac5b36778a4b17431506d4d256916b43785084066f7e5e0a"
-model-visible = "sha256:fc2513cb5c556edc173ed4edeadf6be8fa9719c8449a0b317c3dcb1b78ea261a"
+source = "sha256:29b92f1d73461bbb0b5e5664c3676c97a111783e68df5e1fee0199710dff55e3"
+canonical = "sha256:fcbc254dc0856f508a107b89f86a6265928b5717b3e317449efe306bdf739317"
+model-visible = "sha256:d4d845c5a2e1b06092f7106ad7b8db161591ae1d05f8a46a9ad6f8a967a278cd"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/implement-quick/SKILL.md"
-digest = "sha256:855bf4f6320842339a89f85b00d858a770da79be2c201ca392e152c44d4a764b"
+digest = "sha256:3c89e8d28f4c89dd7a2ddc2061f71a2258c8b5a4abdcc3b562c4d50986c734e5"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.2.4"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:29b92f1d73461bbb0b5e5664c3676c97a111783e68df5e1fee0199710dff55e3"
+canonical = "sha256:fcbc254dc0856f508a107b89f86a6265928b5717b3e317449efe306bdf739317"
+model-visible = "sha256:d4d845c5a2e1b06092f7106ad7b8db161591ae1d05f8a46a9ad6f8a967a278cd"
+render = "sha256:8595b8a787f179423e469c8d85b068b11af6278e3b4257e2ca142d5c82437507"
+generated-markdown = "sha256:3c89e8d28f4c89dd7a2ddc2061f71a2258c8b5a4abdcc3b562c4d50986c734e5"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.commit-report output contract has no title",
+    "port.commit-report output contract has no format guidance",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/implement-quick/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]
 
 [[trait]]
 id = "implement"

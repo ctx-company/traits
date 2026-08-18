@@ -534,6 +534,8 @@ fn accepted_slot_values_before(
                 producer_harness: None,
                 producer_check_verdict: false,
                 acceptance: AcceptanceStatus::Accepted,
+                position_path: Vec::new(),
+                acceptance_order: None,
                 schema_validation: Vec::new(),
             })
         })
@@ -735,6 +737,12 @@ fn command_frame(
             .next()
             .map(|sink| sink.ref_text().to_string())
             .unwrap_or_else(|| "slot:command-output".to_string()),
+        additional_output_refs: item
+            .output
+            .iter()
+            .skip(1)
+            .map(|sink| sink.ref_text().to_string())
+            .collect(),
         permission_code: "blocked-command-permission-required".to_string(),
         reason: "command steps run only when the controlled runtime reaches this frame and command permission explicitly allows the argv".to_string(),
     })

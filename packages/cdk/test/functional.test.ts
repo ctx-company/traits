@@ -657,6 +657,40 @@ describe("defineVariant/useVariant hook-style families", () => {
     expect((draft?.["procedure"] as JsonObject | undefined)?.["description"]).toBe("One step.");
   });
 
+  it("0206: a family variant's command step may write directly to an output port at the native-variant schema-version", async () => {
+    const commitReport = port.output.text({
+      id: "commit-report",
+      description: "Direct command output port.",
+    });
+    const commitVariant = (ctx: unknown) => {
+      void ctx;
+      defineVariant("commit", { description: "One command step writing to a port." });
+      step.command("Commit", {
+        input: input.command`git commit -m msg`,
+        output: commitReport,
+      });
+      return { commitReport };
+    };
+    const family = evaluateTraitFunction(function () {
+      defineTrait("port-write-family", { version: "0.1.0" });
+      useVariant(commitVariant).default();
+    });
+    if (!isTraitFamilyHandle(family)) {
+      throw new Error("expected a trait family handle");
+    }
+    const resolved = await resolveTraitFamily(family);
+    const commit = resolved.variants.find((entry) => entry.path === "commit");
+    const draft = commit?.draft as JsonObject | undefined;
+    expect(
+      draft?.["schema-version"],
+      "every native-variant leaf is stamped at the 0.5 floor a direct command-to-port write requires",
+    ).toBe("0.5");
+    const sequence = (draft?.["procedure"] as JsonObject | undefined)?.["sequence"] as
+      | readonly JsonObject[]
+      | undefined;
+    expect(sequence?.[0]?.["output"]).toEqual(["port:commit-report"]);
+  });
+
   it("an explicit id keeps the display-form first argument off the public variant key", async () => {
     const displayVariant = (ctx: unknown) => {
       void ctx;

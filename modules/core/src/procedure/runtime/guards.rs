@@ -1526,6 +1526,8 @@ mod present_tests {
             producer_harness: None,
             producer_check_verdict: false,
             acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
             schema_validation: Vec::new(),
         }
     }
@@ -1795,6 +1797,8 @@ mod p434_keep_guard_tests {
             producer_harness: None,
             producer_check_verdict: false,
             acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
             schema_validation: Vec::new(),
         }
     }
@@ -1965,6 +1969,8 @@ mod absent_evidence_guard_tests {
             producer_harness: None,
             producer_check_verdict: false,
             acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
             schema_validation: Vec::new(),
         }
     }
@@ -2121,6 +2127,8 @@ mod nested_field_path_tests {
             producer_harness: None,
             producer_check_verdict: false,
             acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
             schema_validation: Vec::new(),
         }
     }

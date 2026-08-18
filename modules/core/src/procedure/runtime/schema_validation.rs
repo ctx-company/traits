@@ -27,6 +27,8 @@ fn validate_initial_port_value(trait_ref: &Trait, value: StepSlotOutput) -> crat
             producer_harness: value.producer_harness,
             producer_check_verdict: false,
             acceptance: AcceptanceStatus::Rejected,
+            position_path: Vec::new(),
+            acceptance_order: None,
             schema_validation: vec![SchemaValidation {
                 ref_text: "runtime.input".to_string(),
                 schema_ref: None,
@@ -73,6 +75,8 @@ fn validate_initial_port_value(trait_ref: &Trait, value: StepSlotOutput) -> crat
         producer_harness: value.producer_harness,
         producer_check_verdict: false,
         acceptance,
+        position_path: Vec::new(),
+        acceptance_order: None,
         schema_validation: vec![validation],
     })
 }
@@ -283,6 +287,10 @@ fn runtime_value_for_output_sink(
         producer_harness: output.producer_harness,
         producer_check_verdict: is_check,
         acceptance,
+        // Stamped by the caller (`apply_step_output`) for an accepted
+        // direct output-port value only — see `Value::position_path`.
+        position_path: Vec::new(),
+        acceptance_order: None,
         schema_validation: vec![validation],
     })
 }

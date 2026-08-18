@@ -5,21 +5,21 @@ name = "Implement"
 status = "ready"
 
 [family]
-default = "implement"
+default = "basic"
 
 [family.variant]
 
-[family.variant.implement-quick]
-path = "generated/implement-quick/index.toml"
-aliases = ["implement-implement-quick"]
+[family.variant.basic]
+path = "generated/basic/index.toml"
+aliases = ["implement-basic"]
 
-[family.variant.implement]
-path = "generated/implement/index.toml"
-aliases = ["implement-implement"]
+[family.variant.quick]
+path = "generated/quick/index.toml"
+aliases = ["implement-quick"]
 
-[family.variant.implement-complex]
-path = "generated/implement-complex/index.toml"
-aliases = ["implement-implement-complex"]
+[family.variant.complex]
+path = "generated/complex/index.toml"
+aliases = ["implement-complex"]
 
 [publish]
 name = "@ctx-traits/implement"
@@ -32,7 +32,7 @@ total-seconds = 10800
 max-retries = 3
 idle-seconds = 1200
 
-[variant.implement-quick.budget]
+[variant.quick.budget]
 frame-seconds = 1800
 total-seconds = 21600
 idle-seconds = 600

@@ -35,7 +35,7 @@ pub fn validate_run_ledger_contract(
     validate_ask_decisions_contract(trait_ref, &sequence, ledger, &mut diagnostics);
     validate_accepted_port_values(trait_ref, ledger, &mut diagnostics)?;
     validate_accepted_slot_values(trait_ref, proc, ledger, &mut diagnostics)?;
-    validate_accepted_output_port_values(trait_ref, ledger, &mut diagnostics)?;
+    validate_accepted_output_port_values(trait_ref, &sequence, ledger, &mut diagnostics)?;
     validate_accepted_sequence_outputs(
         &sequence_contract,
         &accepted_evidence,

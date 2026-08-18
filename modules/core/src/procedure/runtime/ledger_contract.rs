@@ -1287,59 +1287,100 @@ fn validate_revision_command_evidence(
     item: &crate::r#trait::procedure::SequenceItem,
     diagnostics: &mut Vec<String>,
 ) {
+    let historical = historical_ledger_before(context.ledger, revision.acceptance_order, &revision.position_path);
+    validate_command_provenance(
+        item,
+        &historical,
+        "slot-revisions",
+        index,
+        revision.source.as_ref(),
+        revision.command_execution.as_ref(),
+        revision.slot_ref.as_str(),
+        revision.submitted_payload.as_ref().map(|payload| &payload.value),
+        diagnostics,
+    );
+}
+
+/// The state a command/check activation would have seen as of the moment
+/// `acceptance_order`/`position_path` recorded its evidence — every value
+/// accepted no later, with parallel-branch isolation buffers cleared so a
+/// still-unmerged branch's staged writes never leak into the replay.
+fn historical_ledger_before(
+    ledger: &State,
+    acceptance_order: usize,
+    position_path: &[PathSegment],
+) -> State {
+    let mut historical = ledger.clone();
+    historical.accepted_slot_values =
+        accepted_slot_values_before(ledger, acceptance_order, position_path);
+    for frame in &mut historical.control_stack {
+        frame.parallel_buffer.accepted_slot_values.clear();
+        frame.parallel_buffer.accepted_output_port_values.clear();
+    }
+    historical
+}
+
+/// Shared core behind command/check provenance replay (task 0206): the
+/// third-and-now-fourth site that must agree with `check_output_value`'s one
+/// constructor, factored so a `SlotRevision` and a directly-written output
+/// port `Value` are verified by the same logic instead of two copies
+/// drifting apart. `output_ref` is the specific ref this write landed on
+/// (a check may declare two, `[slot, port]`); `command.output_refs()` is
+/// checked to contain it rather than requiring exact equality with the
+/// frame's primary `output_slot`, so both halves of a dual-sink check pass.
+#[allow(clippy::too_many_arguments)]
+fn validate_command_provenance(
+    item: &crate::r#trait::procedure::SequenceItem,
+    historical: &State,
+    label: &str,
+    index: usize,
+    source: Option<&ValueSource>,
+    command_execution: Option<&CommandExecutionEvidence>,
+    output_ref: &str,
+    submitted_value: Option<&JsonValue>,
+    diagnostics: &mut Vec<String>,
+) {
     let command_plan = match command_plan_for_item(item, "runtime.ledger.command") {
         Ok(plan) => plan,
         Err(error) => {
             diagnostics.push(format!(
-                "slot-revisions[{index}] command declaration cannot be resolved: {error}"
+                "{label}[{index}] command declaration cannot be resolved: {error}"
             ));
             return;
         }
     };
     let Some(plan) = command_plan else {
-        if revision.command_execution.is_some()
-            || revision.source == Some(ValueSource::CommandOutput)
-        {
+        if command_execution.is_some() || source == Some(&ValueSource::CommandOutput) {
             diagnostics.push(format!(
-                "slot-revisions[{index}] non-command output claims command provenance"
+                "{label}[{index}] non-command output claims command provenance"
             ));
         }
         return;
     };
-    if revision.source != Some(ValueSource::CommandOutput) {
+    if source != Some(&ValueSource::CommandOutput) {
         diagnostics.push(format!(
-            "slot-revisions[{index}] command output source must be command-output"
+            "{label}[{index}] command output source must be command-output"
         ));
     }
-    let Some(evidence) = revision.command_execution.as_ref() else {
+    let Some(evidence) = command_execution else {
         diagnostics.push(format!(
-            "slot-revisions[{index}] command output is missing execution evidence"
+            "{label}[{index}] command output is missing execution evidence"
         ));
         return;
     };
-    let mut historical = context.ledger.clone();
-    historical.accepted_slot_values = accepted_slot_values_before(
-        context.ledger,
-        revision.acceptance_order,
-        &revision.position_path,
-    );
-    for frame in &mut historical.control_stack {
-        frame.parallel_buffer.accepted_slot_values.clear();
-        frame.parallel_buffer.accepted_output_port_values.clear();
-    }
-    match command_frame(item, &plan, &historical) {
+    match command_frame(item, &plan, historical) {
         Ok(command) => {
             if evidence.argv != command.argv
                 || evidence.output_slot != command.output_slot
                 || evidence.executable_digest != command.executable_digest
             {
                 diagnostics.push(format!(
-                    "slot-revisions[{index}] command execution does not match its declared activation"
+                    "{label}[{index}] command execution does not match its declared activation"
                 ));
             }
-            if evidence.output_slot != revision.slot_ref.as_str() {
+            if !command.output_refs().any(|declared| declared == output_ref) {
                 diagnostics.push(format!(
-                    "slot-revisions[{index}] command execution output slot does not match the revision"
+                    "{label}[{index}] command execution output does not match the recorded write"
                 ));
             }
             let succeeded = command_execution_succeeded(evidence, &command);
@@ -1357,25 +1398,72 @@ fn validate_revision_command_evidence(
                         &command,
                         &crate::procedure::session::CheckEvidence::from_ledger(evidence),
                     );
-                let submitted_verdict = revision
-                    .submitted_payload
-                    .as_ref()
-                    .map(|payload| &payload.value);
-                if submitted_verdict != Some(&expected) {
+                if submitted_value != Some(&expected) {
                     diagnostics.push(format!(
-                        "slot-revisions[{index}] check verdict does not replay from its command execution"
+                        "{label}[{index}] check verdict does not replay from its command execution"
                     ));
                 }
             } else if !succeeded {
                 diagnostics.push(format!(
-                    "slot-revisions[{index}] command execution was not successful"
+                    "{label}[{index}] command execution was not successful"
                 ));
             }
         }
         Err(error) => diagnostics.push(format!(
-            "slot-revisions[{index}] command activation cannot be replayed: {error}"
+            "{label}[{index}] command activation cannot be replayed: {error}"
         )),
     }
+}
+
+/// Mirror of `validate_revision_command_evidence` for a directly-written
+/// output port (task 0206): nothing else replays `command_execution` on
+/// `accepted_output_port_values`, so a forged command-provenance port value
+/// would otherwise pass readiness. Skips the replay (rather than weakening
+/// it) when `position_path`/`acceptance_order` are absent — true only for a
+/// ledger written before this field existed, since every current write path
+/// stamps both.
+fn validate_output_port_command_evidence(
+    trait_ref: &Trait,
+    sequence: &[crate::procedure::run::EffectiveSequenceItem<'_>],
+    ledger: &State,
+    label: &str,
+    index: usize,
+    value: &Value,
+    diagnostics: &mut Vec<String>,
+) {
+    let has_provenance_claim =
+        value.command_execution.is_some() || value.source == ValueSource::CommandOutput;
+    let Some(acceptance_order) = value.acceptance_order else {
+        if has_provenance_claim {
+            diagnostics.push(format!(
+                "{label}[{index}] value {} claims command provenance without a position to replay it from",
+                value.ref_text
+            ));
+        }
+        return;
+    };
+    let Some(item) = item_at_execution_path(trait_ref, sequence, ledger, &value.position_path)
+    else {
+        if has_provenance_claim {
+            diagnostics.push(format!(
+                "{label}[{index}] value {} claims command provenance without a declared command activation",
+                value.ref_text
+            ));
+        }
+        return;
+    };
+    let historical = historical_ledger_before(ledger, acceptance_order, &value.position_path);
+    validate_command_provenance(
+        item,
+        &historical,
+        label,
+        index,
+        Some(&value.source),
+        value.command_execution.as_ref(),
+        value.ref_text.as_str(),
+        Some(&value.value),
+        diagnostics,
+    );
 }
 
 fn validate_projection_revision(

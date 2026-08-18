@@ -98,6 +98,11 @@ pub const MIGRATION_STEPS: &[MigrationStep] = &[
         to: "0.4",
         rewrite: rename_summary_to_description_0_3_to_0_4,
     },
+    MigrationStep {
+        from: "0.4",
+        to: "0.5",
+        rewrite: bump_0_4_to_0_5,
+    },
 ];
 
 /// The only 0.2 -> 0.3 rewrite: every 0.3-gated feature (`variant`,
@@ -137,6 +142,14 @@ fn rename_summary_to_description_0_3_to_0_4(doc: &mut DocumentMut) -> Result<Ste
         ],
         assisted_needed: Vec::new(),
     })
+}
+
+/// 0.4 -> 0.5: command/check steps may now output directly to an output
+/// port (task 0206), which is purely additive — every 0.4 document is
+/// already valid 0.5, so this step only bumps the declared version.
+fn bump_0_4_to_0_5(doc: &mut DocumentMut) -> Result<StepOutcome, Error> {
+    doc["schema-version"] = toml_edit::value("0.5");
+    Ok(StepOutcome::rewrite("schema-version: \"0.4\" -> \"0.5\""))
 }
 
 /// A planned (or, once written by the caller, applied) migration.
@@ -281,6 +294,14 @@ name = "Demo"
 summary = "A demo trait."
 "#;
 
+    const V04: &str = r#"
+schema-version = "0.4"
+id = "example/demo"
+version = "1.0.0"
+name = "Demo"
+description = "A demo trait."
+"#;
+
     #[test]
     fn plans_a_pure_version_bump() {
         let plan = plan_migration(V02, "0.3").expect("0.2 -> 0.3 migrates");
@@ -406,6 +427,7 @@ summary = "A demo trait."
             match version {
                 "0.2" => V02,
                 "0.3" => V03,
+                "0.4" => V04,
                 other => panic!("add a minimal fixture for schema {other} (task 0029)"),
             }
         }

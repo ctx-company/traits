@@ -220,6 +220,27 @@ pub struct Value {
     pub acceptance: AcceptanceStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schema_validation: Vec<SchemaValidation>,
+    /// Where in the run this value was accepted, so a directly-written
+    /// output port (task 0206) can replay its command provenance the same
+    /// way a `SlotRevision` does — reconstructing the historical state
+    /// `accepted_slot_values_before` this write for argv-interpolation
+    /// replay. Additive and empty for every value written before this field
+    /// existed (including every slot-revision-derived `Value`, which never
+    /// persists this shape directly); ledger-contract replay skips the
+    /// interpolation-sensitive comparison when absent rather than weaken
+    /// verification of values that do carry it.
+    #[serde(
+        default,
+        rename = "position-path",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub position_path: Vec<PathSegment>,
+    #[serde(
+        default,
+        rename = "acceptance-order",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub acceptance_order: Option<usize>,
 }
 
 /// Resource evidence supplied by the IO edge before frame generation.

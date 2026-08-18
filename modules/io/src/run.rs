@@ -4492,6 +4492,7 @@ mod resolve_command_bounds_tests {
             capture_bytes: None,
             success_exit_code: Vec::new(),
             output_slot: "slot:gate".to_string(),
+            additional_output_refs: Vec::new(),
             permission_code: "permission".to_string(),
             reason: "reason".to_string(),
         }
@@ -4589,6 +4590,131 @@ mod resolve_command_bounds_tests {
         let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(Some(&policy), &command);
         assert_eq!(timeout_ms, None);
         assert_eq!(idle_timeout_ms, None);
+    }
+}
+
+#[cfg(test)]
+mod command_port_final_output_tests {
+    use super::*;
+
+    // 0206 done-when: a fixture-driven proof that runs an actual command
+    // through the real execution adapter (`advance_command_frames`, not a
+    // hand-built `CallSubmission`) and asserts the accepted port value both
+    // carries argv/exit evidence and is present in the run's structured
+    // final outputs.
+    const FIXTURE: &str = r#"
+id = "command-port-final-output-fixture"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Command port final output fixture"
+description = "0206 fixture: a command step whose direct port write is a declared procedure output."
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+description = "Direct command output port."
+
+[procedure]
+description = "One command step writing to a declared output port."
+output = ["port:commit-report"]
+
+[[procedure.sequence]]
+id = "commit"
+title = "Commit"
+kind = "command"
+cmd = "printf hello-port"
+output = ["port:commit-report"]
+"#;
+
+    fn fixture_trait() -> ctx_traits_core::Trait {
+        ctx_traits_core::encoding::decode_trait(ctx_traits_core::encoding::Encoding::Toml, FIXTURE)
+            .expect("0206 final-output fixture must decode")
+    }
+
+    #[test]
+    fn command_execution_adapter_carries_evidence_into_final_outputs() {
+        let trait_ref = fixture_trait();
+        let request: ctx_traits_core::procedure::session::StartRequest =
+            serde_json::from_value(serde_json::json!({
+                "session-id": "session-command-port-final-output",
+                "run-id": "run-command-port-final-output",
+                "provenance": {
+                    "started-by": { "surface": "test", "caller": "0206-final-output" },
+                    "state-source": "test",
+                },
+            }))
+            .expect("start request");
+        let session = ctx_traits_core::procedure::session::start_run_session(
+            &trait_ref,
+            &ctx_traits_core::manifest::PackageStatus::Ready,
+            &ctx_traits_core::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts");
+        assert_eq!(
+            session.status,
+            ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired,
+            "the fixture's only step is a command frame awaiting permission"
+        );
+
+        let advanced = advance_command_frames(
+            &trait_ref,
+            Utf8Path::new("."),
+            session,
+            None,
+            None,
+            &BTreeMap::new(),
+            None,
+        )
+        .expect("the command executes through the real adapter");
+        assert!(
+            advanced.failure.is_none(),
+            "printf must succeed: {:?}",
+            advanced.failure
+        );
+        let session = advanced.session;
+        assert_eq!(
+            session.status,
+            ctx_traits_core::procedure::session::Status::Completed,
+            "the single-step run completes once the command is accepted"
+        );
+
+        let accepted = session
+            .accepted_output_port_values
+            .iter()
+            .find(|value| value.ref_text == "port:commit-report")
+            .expect("the port value lands in accepted_output_port_values");
+        assert_eq!(accepted.value, serde_json::json!("hello-port"));
+        let evidence = accepted
+            .command_execution
+            .as_ref()
+            .expect("a direct command-to-port write must carry its command evidence");
+        assert_eq!(
+            evidence.argv,
+            vec!["printf".to_string(), "hello-port".to_string()]
+        );
+        assert_eq!(evidence.exit_code, Some(0));
+
+        let completion = session
+            .completion
+            .as_ref()
+            .expect("the completed run carries a completion notification");
+        let final_output = completion
+            .final_outputs
+            .iter()
+            .find(|output| output.port_ref.to_string() == "port:commit-report")
+            .expect("the port's value is present in the run's structured final outputs");
+        assert_eq!(final_output.value, serde_json::json!("hello-port"));
+        assert_eq!(
+            session
+                .final_output_summary
+                .iter()
+                .find(|output| output.port_ref.to_string() == "port:commit-report")
+                .map(|output| &output.value),
+            Some(&serde_json::json!("hello-port")),
+            "session.final_output_summary must mirror the completion's final outputs"
+        );
     }
 }
 
@@ -4737,16 +4863,19 @@ fn advance_command_frames(
                     stdout_truncated: outcome.stdout_truncated,
                     stderr_truncated: outcome.stderr_truncated,
                 };
-            produced_slots.insert(
-                output_slot.clone(),
-                ctx_traits_core::procedure::session::check_output_value(
-                    verdict,
-                    command,
-                    &ctx_traits_core::procedure::session::CheckEvidence::from_submission(
-                        &submission_evidence,
-                    ),
+            let verdict_record = ctx_traits_core::procedure::session::check_output_value(
+                verdict,
+                command,
+                &ctx_traits_core::procedure::session::CheckEvidence::from_submission(
+                    &submission_evidence,
                 ),
             );
+            // A check may declare a second output ref alongside its slot — a
+            // direct output port (task 0206, `[slot, port]`) — in which case
+            // both halves carry the identical verdict record.
+            for output_ref in command.output_refs() {
+                produced_slots.insert(output_ref.to_string(), verdict_record.clone());
+            }
             let response = ctx_traits_core::procedure::session::submit_run_call(
                 trait_ref,
                 session,
@@ -5124,31 +5253,126 @@ enum CommandOutputRoute {
     Typed,
 }
 
-/// Classify a command's output slot into its P397 routing behavior by
-/// inspecting the slot's declared schema (if any).
+/// Classify a command's output (a slot or, since task 0206, a direct output
+/// port) into its P397 routing behavior by inspecting its declared schema
+/// (if any).
 fn classify_command_output_route(
     trait_ref: &ctx_traits_core::Trait,
-    output_slot: &str,
+    output_ref: &str,
 ) -> CommandOutputRoute {
-    let Some(slot_id) = output_slot.strip_prefix("slot:") else {
+    if let Some(slot_id) = output_ref.strip_prefix("slot:") {
+        let Some(schema) = trait_ref
+            .slots
+            .iter()
+            .find(|slot| slot.id == slot_id)
+            .and_then(|slot| slot.schema.as_ref())
+        else {
+            return CommandOutputRoute::Envelope;
+        };
+        return match schema {
+            ctx_traits_core::schema::form::Schema::Builtin(
+                ctx_traits_core::schema::form::Builtin::Text,
+            ) => CommandOutputRoute::Text,
+            ctx_traits_core::schema::form::Schema::Builtin(
+                ctx_traits_core::schema::form::Builtin::Any,
+            ) => CommandOutputRoute::Envelope,
+            _ => CommandOutputRoute::Typed,
+        };
+    }
+    let Some(port_id) = output_ref.strip_prefix("port:") else {
         return CommandOutputRoute::Envelope;
     };
-    let Some(schema) = trait_ref
-        .slots
-        .iter()
-        .find(|slot| slot.id == slot_id)
-        .and_then(|slot| slot.schema.as_ref())
-    else {
+    let Some(port) = trait_ref.ports.iter().find(|port| port.id == port_id) else {
         return CommandOutputRoute::Envelope;
     };
-    match schema {
-        ctx_traits_core::schema::form::Schema::Builtin(
-            ctx_traits_core::schema::form::Builtin::Text,
-        ) => CommandOutputRoute::Text,
-        ctx_traits_core::schema::form::Schema::Builtin(
-            ctx_traits_core::schema::form::Builtin::Any,
-        ) => CommandOutputRoute::Envelope,
-        _ => CommandOutputRoute::Typed,
+    // The validator only accepts schema:text or schema:any command output
+    // ports (task 0206); every other schema is rejected before a run ever
+    // reaches this classification, so there is no typed-port route to serve.
+    match port.schema.as_str() {
+        "schema:text" => CommandOutputRoute::Text,
+        _ => CommandOutputRoute::Envelope,
+    }
+}
+
+#[cfg(test)]
+mod classify_command_output_route_tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"
+id = "classify-route-fixture"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Classify Route Fixture"
+description = "0206 fixture: port routing must mirror slot routing."
+
+[[port]]
+id = "text-port"
+direction = "output"
+schema = "schema:text"
+description = "Text port."
+
+[[port]]
+id = "any-port"
+direction = "output"
+schema = "schema:any"
+description = "Any port."
+
+[[port]]
+id = "typed-port"
+direction = "output"
+schema = "schema:route-object"
+description = "Typed port."
+
+[[schema]]
+id = "route-object"
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+"#;
+
+    fn fixture_trait() -> ctx_traits_core::Trait {
+        ctx_traits_core::encoding::decode_trait(ctx_traits_core::encoding::Encoding::Toml, FIXTURE)
+            .expect("0206 route fixture must decode")
+    }
+
+    #[test]
+    fn text_port_routes_as_text_same_as_a_text_slot() {
+        let trait_ref = fixture_trait();
+        assert_eq!(
+            classify_command_output_route(&trait_ref, "port:text-port"),
+            CommandOutputRoute::Text
+        );
+    }
+
+    #[test]
+    fn any_port_routes_as_envelope() {
+        let trait_ref = fixture_trait();
+        assert_eq!(
+            classify_command_output_route(&trait_ref, "port:any-port"),
+            CommandOutputRoute::Envelope
+        );
+    }
+
+    #[test]
+    fn typed_port_falls_back_to_envelope_since_the_validator_rejects_it() {
+        // A typed port never reaches a live command run — the validator
+        // refuses it at 0206's text-compatibility gate — so this route only
+        // needs to be a safe default, not a JSON-parse path.
+        let trait_ref = fixture_trait();
+        assert_eq!(
+            classify_command_output_route(&trait_ref, "port:typed-port"),
+            CommandOutputRoute::Envelope
+        );
+    }
+
+    #[test]
+    fn undeclared_port_falls_back_to_envelope_rather_than_panicking() {
+        let trait_ref = fixture_trait();
+        assert_eq!(
+            classify_command_output_route(&trait_ref, "port:not-declared"),
+            CommandOutputRoute::Envelope
+        );
     }
 }
 

@@ -437,7 +437,7 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     ...(sessionTitleSinkInput === undefined
       ? {}
       : { sink: { "session-title": sessionTitleSinkDraft(sessionTitleSinkInput) } }),
-    "schema-version": fields["schema-version"] ?? "0.4",
+    "schema-version": fields["schema-version"] ?? "0.5",
     version: fields.version ?? "0.1.0",
     behavior: normalizeBehavior(fields.behavior),
     intent: normalizeIntent(fields.intent),
@@ -556,11 +556,11 @@ export type CustomSlug = string & { readonly __customSlugBrand: never };
 /** A lowercase trait identifier. Literal ids are checked for slug syntax by `trait`. */
 export type Slug = Lowercase<string>;
 /**
- * The canonical trait document schema version. `"0.4"` is reserved for
+ * The canonical trait document schema version. `"0.5"` is reserved for
  * native-variant leaves (`variant`/`variant.import` under `trait(id, {
  * variants })`) and is injected automatically — never authored directly.
  */
-export type SchemaVersion = "0.2" | "0.3" | "0.4";
+export type SchemaVersion = "0.2" | "0.3" | "0.4" | "0.5";
 /** A three-component semantic version for trait releases. */
 export type SemVer = `${number}.${number}.${number}`;
 export type Tone = GuidanceInput<ToneBuiltIn>;

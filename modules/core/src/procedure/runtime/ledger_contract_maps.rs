@@ -339,8 +339,9 @@ fn collect_runtime_produced_refs_from_items(
             item.output
                 .ref_texts()
                 .filter(|ref_text| {
-                    Reference::parse(ref_text)
-                        .is_ok_and(|parsed| parsed.kind() == Kind::Slot && !parsed.is_qualified())
+                    Reference::parse(ref_text).is_ok_and(|parsed| {
+                        matches!(parsed.kind(), Kind::Slot | Kind::Port) && !parsed.is_qualified()
+                    })
                 })
                 .map(ToString::to_string),
         );
@@ -386,6 +387,7 @@ fn local_sequence_id(ref_text: Option<&str>) -> Option<String> {
 
 fn validate_accepted_output_port_values(
     trait_ref: &Trait,
+    sequence: &[crate::procedure::run::EffectiveSequenceItem<'_>],
     ledger: &State,
     diagnostics: &mut Vec<String>,
 ) -> crate::Result<()> {
@@ -398,6 +400,8 @@ fn validate_accepted_output_port_values(
         .collect();
     validate_accepted_output_port_value_collection(
         trait_ref,
+        sequence,
+        ledger,
         &produced_output_ports,
         &ledger.accepted_output_port_values,
         "accepted output port",
@@ -407,6 +411,8 @@ fn validate_accepted_output_port_values(
     for (index, buffer) in recorded_effect_buffers(ledger).into_iter().enumerate() {
         validate_accepted_output_port_value_collection(
             trait_ref,
+            sequence,
+            ledger,
             &produced_output_ports,
             &buffer.accepted_output_port_values,
             &format!("parallel effect buffer[{index}] accepted output port"),
@@ -417,8 +423,11 @@ fn validate_accepted_output_port_values(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_accepted_output_port_value_collection(
     trait_ref: &Trait,
+    sequence: &[crate::procedure::run::EffectiveSequenceItem<'_>],
+    ledger: &State,
     produced_output_ports: &BTreeSet<String>,
     values: &[Value],
     context: &str,
@@ -426,7 +435,7 @@ fn validate_accepted_output_port_value_collection(
     diagnostics: &mut Vec<String>,
 ) -> crate::Result<()> {
     let mut seen = BTreeSet::new();
-    for value in values {
+    for (index, value) in values.iter().enumerate() {
         if check_duplicates && !seen.insert(value.ref_text.as_str()) {
             diagnostics.push(format!(
                 "{context} values contain duplicate ref {}",
@@ -464,6 +473,12 @@ fn validate_accepted_output_port_value_collection(
             ));
             continue;
         }
+        // 0206: a direct output-port write may itself carry command/check
+        // provenance (a forged claim here would otherwise pass readiness —
+        // nothing else replays `command_execution` on this collection).
+        validate_output_port_command_evidence(
+            trait_ref, sequence, ledger, context, index, value, diagnostics,
+        );
         // The reserved error-record port (0189 authored terminals) is
         // deliberately NEVER declared — authors are refused from declaring
         // it — so its accepted value has no declared schema to check against

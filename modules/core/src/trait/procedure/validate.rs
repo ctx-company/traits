@@ -348,7 +348,7 @@ fn validate_sequence_item_declaration(
 
     let kind = item.effective_kind();
     validate_item_shape(item, kind, base)?;
-    validate_item_refs(trait_ref, item, kind, base, sets)?;
+    validate_item_refs(trait_ref, item, base, sets)?;
 
     match kind {
         SequenceKind::Prompt => {
@@ -416,7 +416,7 @@ fn validate_sequence_item_declaration(
             if item.output.len() != 1 {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.output"),
-                    message: "command-backed sequence items must declare exactly one output slot"
+                    message: "command-backed sequence items must declare exactly one output"
                         .to_string(),
                 }
                 .into());
@@ -428,12 +428,43 @@ fn validate_sequence_item_declaration(
                     message: format!("invalid typed ref {:?}", output.ref_text()),
                 }
             })?;
-            if parsed.kind() != Kind::Slot {
+            if !matches!(parsed.kind(), Kind::Slot | Kind::Port) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.output[0]"),
-                    message: "command-backed sequence items must output to a slot".to_string(),
+                    message: "command-backed sequence items must output to a slot or an output port"
+                        .to_string(),
                 }
                 .into());
+            }
+            if parsed.kind() == Kind::Port {
+                if !crate::r#trait::schema_version_at_least(trait_ref.schema_version.as_str(), "0.5")
+                {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: format!("{base}.output[0]"),
+                        message:
+                            "command output to a port requires schema-version \"0.5\" or newer"
+                                .to_string(),
+                    }
+                    .into());
+                }
+                let port_schema = trait_ref
+                    .ports
+                    .iter()
+                    .find(|port| port.id == parsed.id())
+                    .map(|port| port.schema.clone());
+                if let Some(port_schema) = port_schema
+                    && !schema_refs_compatible(&port_schema, "schema:text")
+                {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: format!("{base}.output[0]"),
+                        message: format!(
+                            "output port schema {port_schema:?} is incompatible with a \
+                             command's text capture; only schema:text or schema:any are \
+                             supported"
+                        ),
+                    }
+                    .into());
+                }
             }
         }
         SequenceKind::Check => {
@@ -456,34 +487,102 @@ fn validate_sequence_item_declaration(
                 plan.executable_digest_from.as_deref(),
                 base,
             )?;
-            if item.output.len() != 1 {
+            if item.output.is_empty() || item.output.len() > 2 {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.output"),
-                    message: "check sequence items must declare exactly one output slot"
+                    message: "check sequence items must declare one output (a slot or a port) \
+                         or two outputs (one slot and one port)"
                         .to_string(),
                 }
                 .into());
             }
-            let output = item.output.iter().next().expect("count checked");
-            if *output.operation() != WriteOperation::Replace {
+            let mut slot_output: Option<(usize, &OutputSink)> = None;
+            let mut port_output: Option<(usize, &OutputSink)> = None;
+            for (index, output) in item.output.iter().enumerate() {
+                let field_path = format!("{base}.output[{index}]");
+                if *output.operation() != WriteOperation::Replace {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path,
+                        message: "check output must use replace write semantics".to_string(),
+                    }
+                    .into());
+                }
+                let parsed = Reference::parse(output.ref_text()).map_err(|_| {
+                    crate::manifest::Error::InvalidField {
+                        field_path: field_path.clone(),
+                        message: format!("invalid typed ref {:?}", output.ref_text()),
+                    }
+                })?;
+                match parsed.kind() {
+                    Kind::Slot if slot_output.is_none() => slot_output = Some((index, output)),
+                    Kind::Port if port_output.is_none() => port_output = Some((index, output)),
+                    Kind::Slot | Kind::Port => {
+                        return Err(crate::manifest::Error::InvalidField {
+                            field_path,
+                            message:
+                                "check sequence item must declare at most one slot output and \
+                                 at most one port output"
+                                    .to_string(),
+                        }
+                        .into());
+                    }
+                    _ => {
+                        return Err(crate::manifest::Error::InvalidField {
+                            field_path,
+                            message: "check output must be a slot or an output port".to_string(),
+                        }
+                        .into());
+                    }
+                }
+            }
+            if item.output.len() == 2 && (slot_output.is_none() || port_output.is_none()) {
                 return Err(crate::manifest::Error::InvalidField {
-                    field_path: format!("{base}.output[0]"),
-                    message: "check output slot must use replace write semantics".to_string(),
+                    field_path: format!("{base}.output"),
+                    message: "check sequence item with two outputs must declare one slot and one port"
+                        .to_string(),
                 }
                 .into());
             }
-            let output_ref = validate_local_slot_ref(
-                output.ref_text(),
-                &format!("{base}.output[0]"),
-                sets.slot_ids,
-            )?;
-            let schema_ref = local_slot_schema(trait_ref, output_ref.id());
-            if let Some(problem) = check_output_schema_problem(trait_ref, schema_ref.as_deref()) {
-                return Err(crate::manifest::Error::InvalidField {
-                    field_path: format!("{base}.output[0]"),
-                    message: problem,
+            if let Some((index, output)) = slot_output {
+                let field_path = format!("{base}.output[{index}]");
+                let output_ref =
+                    validate_local_slot_ref(output.ref_text(), &field_path, sets.slot_ids)?;
+                let schema_ref = local_slot_schema(trait_ref, output_ref.id());
+                if let Some(problem) = check_output_schema_problem(trait_ref, schema_ref.as_deref())
+                {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path,
+                        message: problem,
+                    }
+                    .into());
                 }
-                .into());
+            }
+            if let Some((index, output)) = port_output {
+                let field_path = format!("{base}.output[{index}]");
+                if !crate::r#trait::schema_version_at_least(trait_ref.schema_version.as_str(), "0.5")
+                {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path,
+                        message:
+                            "command output to a port requires schema-version \"0.5\" or newer"
+                                .to_string(),
+                    }
+                    .into());
+                }
+                let parsed = Reference::parse(output.ref_text()).expect("validated above");
+                let port_schema = trait_ref
+                    .ports
+                    .iter()
+                    .find(|port| port.id == parsed.id())
+                    .map(|port| port.schema.clone());
+                if let Some(problem) = check_output_schema_problem(trait_ref, port_schema.as_deref())
+                {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path,
+                        message: problem,
+                    }
+                    .into());
+                }
             }
         }
         SequenceKind::Project => validate_project_item(trait_ref, item, base, sets.slot_ids)?,
@@ -1531,7 +1630,6 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
 fn validate_item_refs(
     trait_ref: &Trait,
     item: &SequenceItem,
-    kind: SequenceKind,
     base: &str,
     sets: &SequenceValidationSets<'_>,
 ) -> crate::Result<()> {
@@ -1696,13 +1794,6 @@ fn validate_item_refs(
                         "direct sequence output port {:?} is not a declared output-direction port",
                         parsed.id()
                     ),
-                }
-                .into());
-            }
-            Kind::Port if matches!(kind, SequenceKind::Command | SequenceKind::Check) => {
-                return Err(crate::manifest::Error::InvalidField {
-                    field_path: format!("{base}.output[{j}]"),
-                    message: "command-backed sequence items must output to slots".to_string(),
                 }
                 .into());
             }
@@ -4445,6 +4536,12 @@ fn list_element_schema(schema_ref: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Whether two schema refs are compatible for a direct write: identical, or
+/// either side is the `schema:any` wildcard.
+fn schema_refs_compatible(a: &str, b: &str) -> bool {
+    a == b || a == "schema:any" || b == "schema:any"
+}
+
 fn validate_slot_backed_port_schema(
     trait_ref: &Trait,
     port_id: &str,
@@ -4462,7 +4559,7 @@ fn validate_slot_backed_port_schema(
     let Some(slot_schema) = slot.schema.as_ref().map(ToString::to_string) else {
         return Ok(());
     };
-    if port.schema != slot_schema && port.schema != "schema:any" && slot_schema != "schema:any" {
+    if !schema_refs_compatible(&port.schema, &slot_schema) {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("port[{port_id}].value"),
             message: format!(
@@ -5576,6 +5673,202 @@ sequence = [
         assert!(
             format!("{error}").contains("whole-list replace write"),
             "error must point at the replace shape: {error}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 0206: command/check steps output directly to output ports
+    // -----------------------------------------------------------------
+
+    /// A schema-version to splice into the 0206 command/check port fixture,
+    /// and whether the command item's output is a port (`slot:*` otherwise).
+    fn command_port_fixture(schema_version: &str) -> String {
+        format!(
+            r#"
+id = "command-port-fixture"
+schema-version = "{schema_version}"
+version = "0.1.0"
+name = "Command port fixture"
+description = "0206 fixture: a command step writing directly to an output port."
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+description = "Direct command output port."
+
+[procedure]
+description = "One command step writing to a port."
+
+[[procedure.sequence]]
+id = "commit"
+title = "Commit"
+kind = "command"
+cmd = "git commit -m msg"
+output = ["port:commit-report"]
+"#
+        )
+    }
+
+    #[test]
+    fn command_output_port_accepted_at_schema_version_0_5() {
+        let trait_ref =
+            crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &command_port_fixture("0.5"))
+                .expect("0206 fixture must decode");
+        validate(&trait_ref).expect("command output to a declared port is accepted at 0.5");
+    }
+
+    #[test]
+    fn command_output_port_refused_below_schema_version_0_5() {
+        let error = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            &command_port_fixture("0.4"),
+        )
+        .expect_err("command output to a port below the 0.5 floor must be refused");
+        assert!(
+            format!("{error}").contains("schema-version \"0.5\" or newer"),
+            "error must name the version floor, not decode as an unknown-field error: {error}"
+        );
+    }
+
+    #[test]
+    fn command_output_port_not_consumed_is_rejected() {
+        let mut src = command_port_fixture("0.5");
+        src.push_str(
+            r#"
+[[procedure.sequence]]
+id = "echo-back"
+title = "Echo back"
+kind = "prompt"
+prompt = "prompt:echo"
+input = ["port:commit-report"]
+output = ["port:commit-report"]
+
+[prompt.echo]
+text = "Echo the report."
+"#,
+        );
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &src)
+            .expect_err("a directly-written output port must not be consumed as input");
+        assert!(
+            format!("{error}").contains("must not be consumed as internal state"),
+            "error must name the not-consumed rule: {error}"
+        );
+    }
+
+    #[test]
+    fn command_output_port_schema_text_is_accepted() {
+        let trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            &command_port_fixture("0.5"),
+        )
+        .expect("0206 fixture must decode");
+        validate(&trait_ref)
+            .expect("a schema:text command output port is compatible with the text capture");
+    }
+
+    #[test]
+    fn command_output_port_incompatible_schema_is_rejected() {
+        let src = command_port_fixture("0.5").replace(
+            "schema = \"schema:text\"\ndescription = \"Direct command output port.\"",
+            "schema = \"schema:command-typed\"\ndescription = \"Direct command output port.\"\n\n[[schema]]\nid = \"command-typed\"\n\n[schema.fields.ok]\nschema = \"schema:boolean\"\nrequired = true",
+        );
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &src)
+            .expect_err("a typed command output port is incompatible with the text capture and must be refused");
+        assert!(
+            format!("{error}").contains("incompatible with a command's text capture"),
+            "error must name the text-capture incompatibility: {error}"
+        );
+    }
+
+    fn check_port_fixture(outputs: &str) -> String {
+        format!(
+            r#"
+id = "check-port-fixture"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Check port fixture"
+description = "0206 fixture: a check step writing directly to an output port."
+
+[[port]]
+id = "verdict-report"
+direction = "output"
+schema = "schema:check-verdict"
+description = "Direct check output port."
+
+[[slot]]
+id = "verdict"
+schema = "schema:check-verdict"
+description = "Check verdict slot."
+
+[[schema]]
+id = "check-verdict"
+description = "P565 verdict shape."
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+
+[schema.fields.argv]
+schema = "[schema:text]"
+required = true
+
+[procedure]
+description = "One check step writing to a port."
+
+[[procedure.sequence]]
+id = "gate"
+title = "Gate"
+kind = "check"
+cmd = "true"
+{outputs}
+"#
+        )
+    }
+
+    #[test]
+    fn check_output_port_accepted_at_schema_version_0_5() {
+        let trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            &check_port_fixture(r#"output = ["port:verdict-report"]"#),
+        )
+        .expect("0206 check-port fixture must decode");
+        validate(&trait_ref).expect("check output to a declared port is accepted at 0.5");
+    }
+
+    #[test]
+    fn check_output_slot_and_port_accepted_together() {
+        let trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            &check_port_fixture(r#"output = ["slot:verdict", "port:verdict-report"]"#),
+        )
+        .expect("0206 dual-sink check fixture must decode");
+        validate(&trait_ref)
+            .expect("a check may write its slot and its port together, per the scope ruling");
+    }
+
+    #[test]
+    fn check_output_rejects_two_slots() {
+        let error = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            &check_port_fixture(r#"output = ["slot:verdict", "slot:verdict"]"#),
+        )
+        .expect_err("two outputs of the same kind is never the blessed shape");
+        assert!(
+            format!("{error}").contains("duplicate sequence output sink"),
+            "error must name the offending shape: {error}"
+        );
+    }
+
+    #[test]
+    fn check_output_port_schema_must_match_p565_verdict_shape() {
+        let mut src = check_port_fixture(r#"output = ["port:verdict-report"]"#);
+        src = src.replace("schema = \"schema:check-verdict\"\ndescription = \"Direct check output port.\"", "schema = \"schema:text\"\ndescription = \"Direct check output port.\"");
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &src)
+            .expect_err("a check's port output must satisfy the same P565 shape as its slot output");
+        assert!(
+            format!("{error}").contains("ok") && format!("{error}").contains("argv"),
+            "error must name the required verdict shape: {error}"
         );
     }
 }

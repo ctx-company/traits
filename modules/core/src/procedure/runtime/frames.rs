@@ -74,8 +74,27 @@ pub struct CommandFrame {
     )]
     pub success_exit_code: Vec<i32>,
     pub output_slot: String,
+    /// Extra declared output refs beyond `output_slot` — populated only for
+    /// a check with two output sinks ([slot, port]; task 0206). `output_slot`
+    /// keeps the first sink's ref text unchanged for byte-compat; this field
+    /// is additive and empty for every other command/check shape, so it
+    /// never appears in a pre-0206 ledger.
+    #[serde(
+        default,
+        rename = "additional-output-refs",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub additional_output_refs: Vec<String>,
     pub permission_code: String,
     pub reason: String,
+}
+
+impl CommandFrame {
+    /// Every declared output ref this frame writes to, `output_slot` first.
+    pub fn output_refs(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.output_slot.as_str())
+            .chain(self.additional_output_refs.iter().map(String::as_str))
+    }
 }
 
 /// One authored `{resource:<id>}` argv position: the zero-based `argv`

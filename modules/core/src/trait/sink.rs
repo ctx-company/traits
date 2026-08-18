@@ -443,6 +443,8 @@ mod tests {
             producer_harness: None,
             producer_check_verdict: false,
             acceptance: crate::procedure::runtime::AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
             schema_validation: Vec::new(),
         }
     }

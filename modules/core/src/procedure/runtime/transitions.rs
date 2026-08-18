@@ -717,6 +717,13 @@ pub fn apply_step_output(
             return reject_step_output(trait_ref, state, ready.sequence_index, report);
         }
     }
+    // All outputs accepted by this single activation (a check's `[slot,
+    // port]` pair, in particular) must replay against the same pre-activation
+    // historical cutoff — one sibling must never see another sibling's write
+    // as "history". Snapshot the order once, before recording either half,
+    // rather than re-deriving it per output (which would let the port half
+    // see the slot half's just-recorded revision as prior state).
+    let activation_acceptance_order = next_acceptance_order(&state);
     for (runtime_value, operation, submitted_payload, prior_value) in accepted_slot_values {
         let revision = slot_revision_from_value(
             &runtime_value,
@@ -728,7 +735,7 @@ pub fn apply_step_output(
                         projection: None,
             },
             SlotRevisionContext {
-                acceptance_order: next_acceptance_order(&state),
+                acceptance_order: activation_acceptance_order,
                 position_path: &producer_path,
                 loop_context: ready.loop_context.as_ref(),
                 for_each_context: ready.for_each_context.as_ref(),
@@ -736,7 +743,13 @@ pub fn apply_step_output(
         )?;
         record_accepted_slot_value(&mut state, runtime_value, revision);
     }
-    for runtime_value in accepted_output_port_values {
+    for mut runtime_value in accepted_output_port_values {
+        // Stamp where/when this direct port write was accepted (task 0206),
+        // so ledger-contract replay can reconstruct the historical state
+        // needed to re-verify argv-interpolated command provenance the same
+        // way a `SlotRevision` does — see `Value::position_path`.
+        runtime_value.position_path = producer_path.clone();
+        runtime_value.acceptance_order = Some(activation_acceptance_order);
         record_accepted_output_port_value(&mut state, runtime_value);
     }
     record_emitted_signals(&mut state, accepted_signals);

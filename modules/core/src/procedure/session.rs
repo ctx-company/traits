@@ -2930,20 +2930,20 @@ fn command_evidence_matches_current_frame(
         // core independently recomputes it from trusted exit evidence rather
         // than trusting a caller-supplied value. The argv is recomputed from
         // the frame's own command, never copied from the submission, so a
-        // caller cannot mislabel which command produced the verdict.
+        // caller cannot mislabel which command produced the verdict. A check
+        // with two declared output refs ([slot, port], task 0206) submits the
+        // identical verdict record under every one of them.
         let verdict = check_verdict(evidence, command);
-        return submission.produced_slots.len() == 1
-            && submission
-                .produced_slots
-                .get(&command.output_slot)
-                .is_some_and(|value| {
-                    *value
-                        == check_output_value(
-                            verdict,
-                            command,
-                            &CheckEvidence::from_submission(evidence),
-                        )
-                });
+        let expected =
+            check_output_value(verdict, command, &CheckEvidence::from_submission(evidence));
+        let refs: Vec<&str> = command.output_refs().collect();
+        return submission.produced_slots.len() == refs.len()
+            && refs.iter().all(|output_ref| {
+                submission
+                    .produced_slots
+                    .get(*output_ref)
+                    .is_some_and(|value| *value == expected)
+            });
     }
     if command_execution_succeeded(evidence, command) {
         submission.produced_slots.len() == 1
@@ -3479,6 +3479,7 @@ mod check_output_tests {
             capture_bytes: None,
             success_exit_code: Vec::new(),
             output_slot: "slot:gate".to_string(),
+            additional_output_refs: Vec::new(),
             permission_code: String::new(),
             reason: String::new(),
         }
@@ -4253,6 +4254,457 @@ equals = "approved"
         assert_eq!(
             response.accepted_slot_values[0].source,
             ValueSource::ModelOutput
+        );
+    }
+}
+
+/// 0206 regression fixtures: command/check steps writing directly to an
+/// output port, end to end through `submit_run_call` — the same path
+/// `modules/io/src/run.rs` drives, exercised here without a real process.
+#[cfg(test)]
+mod direct_output_port_tests {
+    use super::*;
+
+    const COMMAND_PORT_FIXTURE: &str = r#"
+id = "command-direct-port-fixture"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Command Direct Port Fixture"
+description = "0206 fixture: a command step writing directly to an output port."
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+description = "Direct command output port."
+
+[procedure]
+description = "One command step writing to a port."
+
+[[procedure.sequence]]
+id = "commit"
+title = "Commit"
+kind = "command"
+cmd = "git commit -m msg"
+output = ["port:commit-report"]
+"#;
+
+    const CHECK_PORT_FIXTURE: &str = r#"
+id = "check-direct-port-fixture"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Check Direct Port Fixture"
+description = "0206 fixture: a check step writing directly to an output port."
+
+[[port]]
+id = "verdict-report"
+direction = "output"
+schema = "schema:check-verdict"
+description = "Direct check output port."
+
+[[slot]]
+id = "verdict"
+schema = "schema:check-verdict"
+description = "Check verdict slot."
+
+[[schema]]
+id = "check-verdict"
+description = "P565 verdict shape."
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+
+[schema.fields.argv]
+schema = "[schema:text]"
+required = true
+
+[procedure]
+description = "One check step writing to a port."
+
+[[procedure.sequence]]
+id = "gate"
+title = "Gate"
+kind = "check"
+cmd = "true"
+output = ["slot:verdict", "port:verdict-report"]
+"#;
+
+    // 0206 regression: the check's own output slot is *also* an interpolated
+    // command input, seeded by a prior step. A dual-sink check must replay
+    // its port half against the state that existed BEFORE this activation
+    // (the seeded value the argv was actually built from), not against the
+    // slot half's just-recorded new value.
+    const CHECK_PORT_SELF_INTERPOLATED_FIXTURE: &str = r#"
+id = "check-direct-port-self-interpolated-fixture"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Check Direct Port Self-Interpolated Fixture"
+description = "0206 fixture: dual-sink check whose slot output is also an argv input."
+
+[[port]]
+id = "verdict-report"
+direction = "output"
+schema = "schema:check-verdict"
+description = "Direct check output port."
+
+[[slot]]
+id = "verdict"
+schema = "schema:check-verdict"
+description = "Check verdict slot, seeded before the check runs."
+
+[[schema]]
+id = "check-verdict"
+description = "P565 verdict shape."
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+
+[schema.fields.argv]
+schema = "[schema:text]"
+required = true
+
+[procedure]
+description = "Seed the verdict slot, then run a check that reads it as argv and overwrites it."
+
+[[procedure.sequence]]
+id = "seed"
+title = "Seed prior verdict"
+kind = "project"
+output = ["slot:verdict"]
+
+[[procedure.sequence.projection]]
+destination = "slot:verdict"
+
+[procedure.sequence.projection.source]
+literal = { ok = true, argv = ["seed"] }
+
+[[procedure.sequence]]
+id = "gate"
+title = "Gate"
+kind = "check"
+output = ["slot:verdict", "port:verdict-report"]
+
+[procedure.sequence.command]
+argv = ["check", "{slot:verdict}"]
+"#;
+
+    fn fixture_trait(src: &str) -> crate::r#trait::Trait {
+        toml::from_str(src).expect("0206 fixture trait parses")
+    }
+
+    fn start_session(trait_ref: &crate::r#trait::Trait, id: &str) -> Session {
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": format!("session-{id}"),
+            "run-id": format!("run-{id}"),
+            "provenance": {
+                "started-by": { "surface": "test", "caller": id },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        start_run_session(
+            trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts")
+    }
+
+    fn command_submission(
+        session: &Session,
+        produced_slots: BTreeMap<String, JsonValue>,
+        argv: &[&str],
+        output_slot: &str,
+    ) -> CallSubmission {
+        let template = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.call_template.as_ref())
+            .expect("current frame template")
+            .clone();
+        CallSubmission {
+            session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+            run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+            state_digest: Some(template.state_digest.clone()),
+            expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+            expected_run_index: Some(template.expected_run_index),
+            expected_source_index: template.expected_source_index,
+            expected_position_path: template.expected_position_path.clone(),
+            produced_slots,
+            signals: Default::default(),
+            warnings: Vec::new(),
+            command_execution: Some(CommandExecutionEvidence {
+                argv: argv.iter().map(|part| (*part).to_string()).collect(),
+                output_slot: output_slot.to_string(),
+                executable_digest: None,
+                exit_code: Some(0),
+                timed_out: false,
+                stdout: None,
+                stderr: None,
+                stdout_truncated: false,
+                stderr_truncated: false,
+            }),
+            caller: Some(CallerProvenance {
+                surface: "local-runtime-command".to_string(),
+                caller: "0206-fixture".to_string(),
+                agent: None,
+                harness: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn command_output_port_is_accepted_and_carries_command_evidence() {
+        let trait_ref = fixture_trait(COMMAND_PORT_FIXTURE);
+        let session = start_session(&trait_ref, "command-port");
+        let output_slot = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.command.as_ref())
+            .expect("command frame")
+            .output_slot
+            .clone();
+        assert_eq!(output_slot, "port:commit-report");
+        let submission = command_submission(
+            &session,
+            [(output_slot.clone(), serde_json::json!("commit report text"))]
+                .into_iter()
+                .collect(),
+            &["git", "commit", "-m", "msg"],
+            &output_slot,
+        );
+        let response = submit_run_call(&trait_ref, session, submission).expect("call is accepted");
+        assert!(
+            response.missing_required_outputs.is_empty(),
+            "the port output was produced: {:?}",
+            response.missing_required_outputs
+        );
+        let accepted = response
+            .accepted_slot_values
+            .iter()
+            .find(|value| value.ref_text == output_slot)
+            .expect("accepted output includes the port value");
+        assert_eq!(accepted.source, ValueSource::CommandOutput);
+        assert!(
+            accepted.command_execution.is_some(),
+            "a direct command-to-port write must carry its command evidence"
+        );
+        let persisted = response
+            .session
+            .ledger
+            .accepted_output_port_values
+            .iter()
+            .find(|value| value.ref_text == output_slot)
+            .expect("the port value lands in accepted_output_port_values, not a slot revision");
+        assert!(
+            persisted.acceptance_order.is_some(),
+            "0206: position stamped for replay"
+        );
+        let report = validate_run_ledger_contract(&trait_ref, &response.session.ledger)
+            .expect("ledger contract validates");
+        assert!(
+            report.contract_valid,
+            "a genuine command-to-port write must validate clean: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn check_output_slot_and_port_both_receive_the_identical_verdict() {
+        let trait_ref = fixture_trait(CHECK_PORT_FIXTURE);
+        let session = start_session(&trait_ref, "check-port");
+        let command = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.command.as_ref())
+            .expect("command frame")
+            .clone();
+        assert_eq!(command.output_slot, "slot:verdict");
+        assert_eq!(
+            command.additional_output_refs,
+            vec!["port:verdict-report".to_string()]
+        );
+        let evidence = CommandExecutionEvidence {
+            argv: command.argv.clone(),
+            output_slot: command.output_slot.clone(),
+            executable_digest: None,
+            exit_code: Some(0),
+            timed_out: false,
+            stdout: None,
+            stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
+        };
+        let verdict =
+            check_output_value(true, &command, &CheckEvidence::from_submission(&evidence));
+        let mut submission = command_submission(
+            &session,
+            [
+                (command.output_slot.clone(), verdict.clone()),
+                ("port:verdict-report".to_string(), verdict.clone()),
+            ]
+            .into_iter()
+            .collect(),
+            &command.argv.iter().map(String::as_str).collect::<Vec<_>>(),
+            &command.output_slot,
+        );
+        submission.command_execution = Some(evidence);
+        let response = submit_run_call(&trait_ref, session, submission).expect("call is accepted");
+        assert!(
+            response.missing_required_outputs.is_empty(),
+            "both declared outputs were produced: {:?}",
+            response.missing_required_outputs
+        );
+        assert!(
+            response
+                .session
+                .ledger
+                .slot_revisions
+                .iter()
+                .any(|revision| revision.slot_ref.as_str() == "slot:verdict"
+                    && revision.submitted_payload.as_ref().map(|p| &p.value) == Some(&verdict)),
+            "the slot half must carry the same verdict record"
+        );
+        assert!(
+            response
+                .session
+                .ledger
+                .accepted_output_port_values
+                .iter()
+                .any(|value| value.ref_text == "port:verdict-report" && value.value == verdict),
+            "the port half must carry the identical verdict record"
+        );
+        let report = validate_run_ledger_contract(&trait_ref, &response.session.ledger)
+            .expect("ledger contract validates");
+        assert!(
+            report.contract_valid,
+            "a genuine dual-sink check must validate clean: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn dual_output_check_replays_when_its_own_slot_is_also_an_interpolated_argv_input() {
+        let trait_ref = fixture_trait(CHECK_PORT_SELF_INTERPOLATED_FIXTURE);
+        let session = start_session(&trait_ref, "check-port-self-interpolated");
+        let command = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.command.as_ref())
+            .expect("the seed project item auto-advances to the check's command frame")
+            .clone();
+        assert_eq!(command.output_slot, "slot:verdict");
+        assert_eq!(
+            command.additional_output_refs,
+            vec!["port:verdict-report".to_string()]
+        );
+        assert_eq!(
+            command.argv,
+            vec![
+                "check".to_string(),
+                serde_json::json!({"ok": true, "argv": ["seed"]}).to_string()
+            ],
+            "argv must be built from the seeded prior value, not the check's own new verdict"
+        );
+        let evidence = CommandExecutionEvidence {
+            argv: command.argv.clone(),
+            output_slot: command.output_slot.clone(),
+            executable_digest: None,
+            exit_code: Some(0),
+            timed_out: false,
+            stdout: None,
+            stderr: None,
+            stdout_truncated: false,
+            stderr_truncated: false,
+        };
+        let verdict =
+            check_output_value(true, &command, &CheckEvidence::from_submission(&evidence));
+        let mut submission = command_submission(
+            &session,
+            [
+                (command.output_slot.clone(), verdict.clone()),
+                ("port:verdict-report".to_string(), verdict.clone()),
+            ]
+            .into_iter()
+            .collect(),
+            &command.argv.iter().map(String::as_str).collect::<Vec<_>>(),
+            &command.output_slot,
+        );
+        submission.command_execution = Some(evidence);
+        let response = submit_run_call(&trait_ref, session, submission).expect("call is accepted");
+        assert!(
+            response.missing_required_outputs.is_empty(),
+            "both declared outputs were produced: {:?}",
+            response.missing_required_outputs
+        );
+        let report = validate_run_ledger_contract(&trait_ref, &response.session.ledger)
+            .expect("ledger contract validates");
+        assert!(
+            report.contract_valid,
+            "a genuine dual-sink check must replay clean even when its own slot fed the argv: {:?}",
+            report.diagnostics
+        );
+
+        let mut forged_ledger = response.session.ledger.clone();
+        let forged = forged_ledger
+            .accepted_output_port_values
+            .iter_mut()
+            .find(|value| value.ref_text == "port:verdict-report")
+            .expect("the genuine port value is present to forge");
+        forged.command_execution.as_mut().expect("evidence").argv =
+            vec!["check".to_string(), "forged".to_string()];
+        let forged_report =
+            validate_run_ledger_contract(&trait_ref, &forged_ledger).expect("ledger contract runs");
+        assert!(
+            !forged_report.contract_valid,
+            "forged command-provenance on the port half must still fail readiness"
+        );
+    }
+
+    #[test]
+    fn forged_command_provenance_on_a_port_value_fails_ledger_readiness() {
+        let trait_ref = fixture_trait(COMMAND_PORT_FIXTURE);
+        let session = start_session(&trait_ref, "forged-port");
+        let output_slot = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.command.as_ref())
+            .expect("command frame")
+            .output_slot
+            .clone();
+        let submission = command_submission(
+            &session,
+            [(output_slot.clone(), serde_json::json!("commit report text"))]
+                .into_iter()
+                .collect(),
+            &["git", "commit", "-m", "msg"],
+            &output_slot,
+        );
+        let response = submit_run_call(&trait_ref, session, submission).expect("call is accepted");
+        let mut forged_ledger = response.session.ledger.clone();
+        let forged = forged_ledger
+            .accepted_output_port_values
+            .iter_mut()
+            .find(|value| value.ref_text == output_slot)
+            .expect("the genuine port value is present to forge");
+        forged.command_execution.as_mut().expect("evidence").argv =
+            vec!["rm".to_string(), "-rf".to_string(), "/".to_string()];
+        let report =
+            validate_run_ledger_contract(&trait_ref, &forged_ledger).expect("ledger contract runs");
+        assert!(
+            !report.contract_valid,
+            "a forged command-provenance port value must fail readiness"
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("does not match its declared activation")),
+            "diagnostics must name the mismatched activation: {:?}",
+            report.diagnostics
         );
     }
 }

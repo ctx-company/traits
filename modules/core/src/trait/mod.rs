@@ -158,7 +158,7 @@ impl<'de> Deserialize<'de> for SchemaVersion {
 /// order. Bump when a new schema version is introduced; never remove an
 /// entry a released binary already reads. Adding a version here requires a
 /// `MIGRATION_STEPS` entry; see migrate.rs release-gate tests / task 0029.
-pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["0.2", "0.3", "0.4"];
+pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["0.2", "0.3", "0.4", "0.5"];
 
 /// Whether this binary supports decoding a canonical document declaring
 /// `schema_version`.
@@ -519,7 +519,7 @@ impl Trait {
     /// Returns the first invalid slug's structured diagnostic, or `Ok(())`.
     pub fn validate_taxonomy(&self) -> crate::Result<()> {
         match (&self.variant, self.schema_version.as_str()) {
-            (Some(_), "0.3" | "0.4") => {}
+            (Some(_), version) if schema_version_at_least(version, "0.3") => {}
             (Some(_), _) => {
                 return Err(Error::invalid_field(
                     "variant",

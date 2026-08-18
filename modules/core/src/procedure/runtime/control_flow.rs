@@ -1562,6 +1562,8 @@ fn resolve_parallel_barrier(
                     producer_harness: None,
                     producer_check_verdict: false,
                     acceptance: AcceptanceStatus::Accepted,
+                    position_path: Vec::new(),
+                    acceptance_order: None,
                     schema_validation: Vec::new(),
                 };
                 let revision = slot_revision_from_value(
@@ -1623,6 +1625,8 @@ fn resolve_parallel_barrier(
                 producer_harness: None,
                 producer_check_verdict: false,
                 acceptance: AcceptanceStatus::Accepted,
+                position_path: Vec::new(),
+                acceptance_order: None,
                 schema_validation: Vec::new(),
             };
             // Stage the candidate destination value at the now-current active
