@@ -436,9 +436,9 @@ output = ["slot:diff-base"]
 
 [procedure.sequence.command]
 argv = [
-    "git",
-    "rev-parse",
-    "HEAD",
+    "sh",
+    "-c",
+    'printf %s "$(git rev-parse HEAD)"',
 ]
 
 [[procedure.sequence]]

@@ -10,15 +10,15 @@ requested-version = "0.25.0"
 resolved-version = "0.25.0"
 
 [trait.digests]
-source = "sha256:c55c31742d688ebf4d4d05391535947a553e90668aa7398ecc3706ba06a70b1a"
-canonical = "sha256:2c4036465ca29cda79a5eb1d85327b43d960ae895688683a17b43c3eeabefa65"
-model-visible = "sha256:9ee06da201dfc63727b91052d5c823a4ac170787cdf69032ef4be2722c86c872"
+source = "sha256:297581954d31cbed28a2dab5ea67e89038c8a2ed7f41bc37a3b33e35fcd03039"
+canonical = "sha256:3fc39bdd99ded26f9d207be4ca1c151767c2e569472b09d58e5607c152511300"
+model-visible = "sha256:82cb4cf25b629290e1f9d71dd5302062b33a23382fa1d2e32f3a3e51284875be"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/implement-basic/SKILL.md"
-digest = "sha256:a84c53e4b2e167c66ef5aab04cb2db3292188ccec87f6803506edb5319797261"
+digest = "sha256:d460f2b82c003f747a98762ae16a81416e2b10ad331399fda7639e6a59c9744e"
 
 [[trait.projection]]
 target-profile = "agent-skills"
@@ -26,17 +26,18 @@ renderer-version = "0.2.4"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
-source = "sha256:c55c31742d688ebf4d4d05391535947a553e90668aa7398ecc3706ba06a70b1a"
-canonical = "sha256:2c4036465ca29cda79a5eb1d85327b43d960ae895688683a17b43c3eeabefa65"
-model-visible = "sha256:9ee06da201dfc63727b91052d5c823a4ac170787cdf69032ef4be2722c86c872"
-render = "sha256:67817e05bbed2023a9268a0512ccb06a3073d4e92b41d24e689958e6216b162a"
-generated-markdown = "sha256:a84c53e4b2e167c66ef5aab04cb2db3292188ccec87f6803506edb5319797261"
+source = "sha256:297581954d31cbed28a2dab5ea67e89038c8a2ed7f41bc37a3b33e35fcd03039"
+canonical = "sha256:3fc39bdd99ded26f9d207be4ca1c151767c2e569472b09d58e5607c152511300"
+model-visible = "sha256:82cb4cf25b629290e1f9d71dd5302062b33a23382fa1d2e32f3a3e51284875be"
+render = "sha256:d445dbfe50ac6d2cb993f54276bc1d25d721342d7c4d9aadc063f7076ba33864"
+generated-markdown = "sha256:d460f2b82c003f747a98762ae16a81416e2b10ad331399fda7639e6a59c9744e"
 
 [trait.projection.warnings]
 semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
 advisory-policy = [
     "port.commit-report output contract has no title",
     "port.commit-report output contract has no format guidance",
+    'section "Procedure" redacted: 1 blocking finding(s) remained after field sanitation',
 ]
 
 [trait.projection.static-output]
@@ -55,9 +56,9 @@ requested-version = "0.25.0"
 resolved-version = "0.25.0"
 
 [trait.digests]
-source = "sha256:20bc88ed137a48b969157e80fb35edc30dd8582df07c6e2c8bc26c3a4025671e"
-canonical = "sha256:053c23df0964c24e605be9c113bf0a9ee6d940fa8ac319b473bf0c6b278b5e05"
-model-visible = "sha256:144f24e04ab781246a9e47b5822b5bc31ee3773a2d3c318273c545de1b9296ed"
+source = "sha256:6bd2ce68ee51121b517107482f025d5fa509e7eeee807847887a716b4a9bf985"
+canonical = "sha256:fa0615e5ba61cb69a2d93b2f02d2daa6c4595902809fe75036a2ced51069607a"
+model-visible = "sha256:39199e1d327b3a627261524d28b7e57e54d26b8bd9913d3721b686972a5fcaaa"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]
