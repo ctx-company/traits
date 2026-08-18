@@ -7,7 +7,8 @@ export const gather = cdk.stage({
   agent: smart1,
   input: cdk.input.prompt`
     Survey ${target} for refactoring opportunities.
-    Read the target and its callers/callees with your tools — explore organically.
+    Read the target with your tools.
+    Read its callers/callees with your tools — explore organically.
 `,
   output: cdk.output.prompt`
     Return a numbered candidate list — for each:

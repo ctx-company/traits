@@ -1,37 +1,35 @@
-import { condition, defineVariant, flow } from "@ctx-traits/cdk";
+import * as cdk from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 
-import * as stage from "./stage/index.ts";
-
 export default function () {
-  defineVariant("Complex", {
-    metadata: { tag: shared.metadata.tag },
+  cdk.defineVariant("Complex", {
     description: "Refactor procedure: survey, frame, design, implement, refine, and commit.",
+    metadata: { tag: shared.metadata.tag },
   });
 
   shared.stage.survey.gather("Survey the target");
   shared.stage.frame.select("Frame the problem");
   shared.stage.design.draft("Design the boundary");
 
-  flow.loop("Doubly-reviewed verbatim refinement", (loop) => {
+  cdk.flow.loop("Doubly-reviewed verbatim refinement", (loop) => {
     loop.maxIterations(6, { onExhausted: "continue" });
 
     shared.stage.implement.apply("Implement the design specification");
-    stage.review.first("Review refactor");
-    stage.review.second("Cross-review refactor");
+    shared.stage.review.primary("Review refactor");
+    shared.stage.review.secondary("Cross-review refactor");
 
-    loop.untilAll([
-      condition.fieldEquals(stage.review.first.output, "status", "approved"),
-      condition.fieldEquals(stage.review.second.output, "status", "approved"),
+    cdk.flow.untilAll([
+      cdk.condition.equals(shared.data.verdict1.status, "approved"),
+      cdk.condition.equals(shared.data.verdict2.status, "approved"),
     ]);
   });
 
-  stage.git.status("Check working tree status");
-  flow.when("Maybe Commit", condition.not(condition.empty(stage.git.status.output)), () => {
-    stage.git.commitMessage("Write the commit message");
-    stage.git.commitStage("Stage all changes");
-    stage.git.commitSubmit("Commit the refactor");
+  shared.stage.git.status("Check working tree status");
+  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.stage.git.status.output), () => {
+    shared.stage.git.commitMessage("Write the commit message");
+    shared.stage.git.commitStage("Stage all changes");
+    shared.stage.git.commitSubmit("Commit the refactor");
   });
 
   return { commitReport: shared.data.commitReport };

@@ -1,15 +1,17 @@
-import { defineTrait, useIntent, useResource, useVariant } from "@ctx-traits/cdk";
+import * as cdk from "@ctx-traits/cdk";
+
 import * as shared from "./shared/index.ts";
-import { default as variants } from "./variant/index.ts";
+import * as variant from "./variant/index.ts";
 
 export default function () {
-  defineTrait("Refactor", { version: "0.12.0" });
+  cdk.defineTrait("Refactor", { version: "0.13.0" });
 
-  useIntent(shared.intent);
-  useResource([shared.resource.architectureDialect, shared.resource.smellCatalog]);
+  cdk.useIntent(shared.INTENT);
+  cdk.useBehavior(shared.BEHAVIOR);
+  cdk.useResource([shared.resource.architectureDialect, shared.resource.smellCatalog]);
 
-  useVariant(variants.quick).default();
-  useVariant(variants.guarded);
-  useVariant(variants.guided);
-  useVariant(variants.complex);
+  cdk.useVariant(variant.quick).default();
+  cdk.useVariant(variant.guarded);
+  cdk.useVariant(variant.guided);
+  cdk.useVariant(variant.complex);
 }

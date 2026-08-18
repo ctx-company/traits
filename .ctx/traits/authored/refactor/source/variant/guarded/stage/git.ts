@@ -5,13 +5,13 @@
 // shell — and the path is deliberately hardcoded for now.
 import * as cdk from "@ctx-traits/cdk";
 
-import { commitMessage as commitMessageSlot, commitOutput } from "#trait/shared/data.ts";
+import { slot } from "#trait/shared/data.ts";
 
-export * from "#trait/variant/quick/stage/git.ts";
+export * from "#trait/shared/stage/git.ts";
 
 export const commitSubmit = cdk.stage({
   input: cdk.input
-    .command`env CTX_GATE_STATE_DIR=/Users/rpunkfu/ctx-company/ctx-gate/.ctx/gate/state ctx-gate run -- git commit -m ${commitMessageSlot}`,
-  output: commitOutput,
+    .command`env CTX_GATE_STATE_DIR=/Users/rpunkfu/ctx-company/ctx-gate/.ctx/gate/state ctx-gate run -- git commit -m ${slot.commitMessage}`,
+  output: slot.commitOutput,
   timeoutMs: 28_800_000,
 });

@@ -16,8 +16,8 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 72,
-    "end": 72
+    "start": 66,
+    "end": 66
   },
   "port:target": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
@@ -26,23 +26,23 @@
   },
   "prompt:checklist-the-target": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 20,
-    "end": 20
+    "start": 17,
+    "end": 17
   },
   "prompt:implement-the-checklist": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 21,
+    "end": 21
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/authored/refactor/source/shared/stage/review.ts",
-    "start": 10,
-    "end": 10
+    "start": 50,
+    "end": 50
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 31,
-    "end": 31
+    "start": 28,
+    "end": 28
   },
   "resource:architecture-dialect": {
     "file": ".ctx/traits/authored/refactor/source/shared/resource.ts",
@@ -56,68 +56,68 @@
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 104,
-    "end": 104
+    "start": 125,
+    "end": 125
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 84,
-    "end": 84
+    "start": 91,
+    "end": 91
   },
   "schema:deviation-report": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 160,
-    "end": 160
+    "start": 181,
+    "end": 181
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/refactor/source/shared/schema.ts",
-    "start": 9,
-    "end": 9
+    "start": 4,
+    "end": 4
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-refactor-awaiting-ctx-gate-approval": {
-    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 33,
-    "end": 33
-  },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
-    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 32,
-    "end": 32
-  },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
-    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 31,
-    "end": 31
-  },
-  "sequence:procedure/check-working-tree-status": {
-    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 29,
-    "end": 29
-  },
-  "sequence:procedure/checklist-the-target": {
-    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 20,
-    "end": 20
-  },
-  "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
     "start": 30,
     "end": 30
   },
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
+    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
+    "start": 29,
+    "end": 29
+  },
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
+    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
+    "start": 28,
+    "end": 28
+  },
+  "sequence:procedure/check-working-tree-status": {
+    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
+    "start": 26,
+    "end": 26
+  },
+  "sequence:procedure/checklist-the-target": {
+    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
+    "start": 17,
+    "end": 17
+  },
+  "sequence:procedure/maybe-commit": {
+    "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
+    "start": 27,
+    "end": 27
+  },
   "sequence:procedure/reviewed-refinement": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 22,
-    "end": 22
+    "start": 19,
+    "end": 19
   },
   "sequence:reviewed-refinement-body/implement-the-checklist": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 21,
+    "end": 21
   },
   "sequence:reviewed-refinement-body/review-the-implementation": {
     "file": ".ctx/traits/authored/refactor/source/variant/guarded/index.ts",
-    "start": 25,
-    "end": 25
+    "start": 22,
+    "end": 22
   },
   "slot:commit-message": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
@@ -126,8 +126,8 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 60,
-    "end": 60
+    "start": 61,
+    "end": 61
   },
   "slot:deviation-report": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
@@ -136,8 +136,8 @@
   },
   "slot:git-status": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 65,
-    "end": 65
+    "start": 54,
+    "end": 54
   },
   "slot:plan": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
@@ -146,13 +146,13 @@
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 82,
-    "end": 82
+    "start": 74,
+    "end": 74
   },
   "slot:review-verdict-2": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 88,
-    "end": 88
+    "start": 80,
+    "end": 80
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",

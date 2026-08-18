@@ -16,8 +16,8 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 72,
-    "end": 72
+    "start": 66,
+    "end": 66
   },
   "prompt:build-the-checklist": {
     "file": ".ctx/traits/authored/refactor/source/variant/guided/index.ts",
@@ -31,8 +31,8 @@
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/authored/refactor/source/shared/stage/review.ts",
-    "start": 10,
-    "end": 10
+    "start": 50,
+    "end": 50
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/refactor/source/variant/guided/index.ts",
@@ -56,23 +56,23 @@
   },
   "schema:annotations-doc": {
     "file": ".ctx/traits/authored/refactor/source/variant/guided/schema.ts",
-    "start": 25,
-    "end": 25
+    "start": 28,
+    "end": 28
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 104,
-    "end": 104
+    "start": 125,
+    "end": 125
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 84,
-    "end": 84
+    "start": 91,
+    "end": 91
   },
   "schema:deviation-report": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 160,
-    "end": 160
+    "start": 181,
+    "end": 181
   },
   "schema:line-point": {
     "file": ".ctx/traits/authored/refactor/source/variant/guided/schema.ts",
@@ -81,8 +81,8 @@
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/refactor/source/shared/schema.ts",
-    "start": 9,
-    "end": 9
+    "start": 4,
+    "end": 4
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-refactor": {
     "file": ".ctx/traits/authored/refactor/source/variant/guided/index.ts",
@@ -146,8 +146,8 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 60,
-    "end": 60
+    "start": 61,
+    "end": 61
   },
   "slot:deviation-report": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
@@ -156,8 +156,8 @@
   },
   "slot:git-status": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 65,
-    "end": 65
+    "start": 54,
+    "end": 54
   },
   "slot:plan": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
@@ -166,13 +166,13 @@
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 82,
-    "end": 82
+    "start": 74,
+    "end": 74
   },
   "slot:review-verdict-2": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",
-    "start": 88,
-    "end": 88
+    "start": 80,
+    "end": 80
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/refactor/source/shared/data.ts",

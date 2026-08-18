@@ -1,31 +1,34 @@
-import { schema } from "@ctx-traits/cdk";
+import * as cdk from "@ctx-traits/cdk";
 
-export const linePoint = schema.object(
+export const linePoint = cdk.schema.object(
   "line-point",
   {
-    number: schema.field(schema.integer(), { description: "1-based line number." }),
-    column: schema.field(schema.integer(), { description: "1-based column within the line." }),
+    number: cdk.schema.field(cdk.schema.integer(), { description: "1-based line number." }),
+    column: cdk.schema.field(cdk.schema.integer(), { description: "1-based column within the line." }),
   },
   { description: "One end of an exact text range." },
 );
 
-export const annotation = schema.object(
+export const annotation = cdk.schema.object(
   "annotation",
   {
-    file: schema.field(schema.text(), { description: "Repo-relative path of the annotated file." }),
-    lines: schema.field(schema.union([schema.list(schema.integer()), schema.list(linePoint)]), {
-      description:
-        "Whole-line form: [start, end] line numbers, BOTH inclusive. Free-text form: exactly two line-point objects marking the start and end of the exact range.",
-    }),
-    text: schema.field(schema.text(), { description: "The human's instruction for this annotated range." }),
+    file: cdk.schema.field(cdk.schema.text(), { description: "Repo-relative path of the annotated file." }),
+    lines: cdk.schema.field(
+      cdk.schema.union([cdk.schema.list(cdk.schema.integer()), cdk.schema.list(linePoint)]),
+      {
+        description:
+          "Whole-line form: [start, end] line numbers, BOTH inclusive. Free-text form: exactly two line-point objects marking the start and end of the exact range.",
+      },
+    ),
+    text: cdk.schema.field(cdk.schema.text(), { description: "The human's instruction for this annotated range." }),
   },
   { description: "One human annotation captured by ctx-annotate." },
 );
 
-export const annotations = schema.object(
+export const annotations = cdk.schema.object(
   "annotations-doc",
   {
-    annotations: schema.list(annotation),
+    annotations: cdk.schema.list(annotation),
   },
   { description: "The typed ctx-annotate output document." },
 );
