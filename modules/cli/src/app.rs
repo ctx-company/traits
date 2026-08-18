@@ -20,6 +20,7 @@ pub mod entry;
 pub mod error;
 mod eval;
 mod explain_inspect;
+mod fork;
 mod frame_prompt;
 mod generate;
 mod guide;

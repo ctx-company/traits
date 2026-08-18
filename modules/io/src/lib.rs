@@ -38,6 +38,7 @@ pub mod error;
 pub mod export;
 pub mod family_manifest;
 pub mod file_lock;
+pub mod fork;
 pub mod git_fetch;
 pub mod git_process;
 pub mod gitignore;

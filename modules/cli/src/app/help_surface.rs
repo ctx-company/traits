@@ -70,7 +70,7 @@ fn classify(name: &str) -> Result<&'static str, String> {
         // `export`/`host`/`migrate`/`activate`/`explain`/`config`/`task`,
         // which stay runnable — is `hidden`.
         "init" | "doctor" | "cache" => "core",
-        "build" | "create" | "import" => "author",
+        "build" | "create" | "fork" | "import" => "author",
         "list" | "check" | "trust" | "dependency" | "diff" => "manage",
         "generate" | "refine" | "critique" => "ai-assistance",
         "run" | "merge" => "execute",

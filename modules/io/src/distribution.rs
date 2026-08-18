@@ -136,7 +136,7 @@ impl DistributionScope {
         }
     }
 
-    fn read_manifest(&self) -> crate::Result<ctx_traits_core::manifest::ProjectManifest> {
+    pub fn read_manifest(&self) -> crate::Result<ctx_traits_core::manifest::ProjectManifest> {
         match self {
             // Project scope's manifest is the `[vendor]` table of the
             // committed config document (0177), not a bare `ProjectManifest`
@@ -176,7 +176,7 @@ impl DistributionScope {
         }
     }
 
-    fn read_lock(&self) -> crate::Result<Option<ProjectLock>> {
+    pub fn read_lock(&self) -> crate::Result<Option<ProjectLock>> {
         let lock_path = self.lock_path();
         crate::project_lock::read_lock_at(&lock_path, self.boundary(), |entry| {
             self.resolve_lock_paths(entry)
@@ -1210,7 +1210,7 @@ fn normalize_operand_identity(operand: &str) -> String {
 /// @scope/name` must work after `ctx traits install @scope/name` even when
 /// the alias differs, and the same holds for the exact `path:` spelling
 /// originally passed to `add`.
-fn resolve_installed_operand<'a>(
+pub fn resolve_installed_operand<'a>(
     manifest: &'a ctx_traits_core::manifest::ProjectManifest,
     operand: &str,
 ) -> crate::Result<&'a str> {

@@ -44,6 +44,7 @@ Core:
 Author:
   build       Compile a named trait or explicit TypeScript/JavaScript source path into the canonical trait document
   create      Scaffold a new trait package from a template, or list available templates
+  fork        Fork an installed vendored dependency into an editable authored package
   import      Import an Agent Skills SKILL.md into a draft-status, unreviewed canonical trait package
 Manage:
   list        List local trait packages from .ctx/traits, plus the built-in meta-trait packages
@@ -326,6 +327,31 @@ pub enum TraitsCommand {
         /// research-summarize, test-writer, or pr-description.
         #[arg(long)]
         from: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fork an installed vendored dependency into an editable authored package.
+    ///
+    /// Turns `.ctx/traits/vendored/<id>` into `.ctx/traits/authored/<id>` in
+    /// one transaction: copies the authoring subset (trait.toml, source/,
+    /// resources/, reference/), rebuilds through the normal CDK build path,
+    /// locks the result, records forked-from provenance (the vendored
+    /// package's id, version, and canonical digest) in the authored
+    /// manifest, then detaches the dependency (manifest declaration,
+    /// project lock entry, and vendored tree all removed) so resolution
+    /// sees only the authored fork. Never overwrites an existing authored
+    /// package at that path: an existing `.ctx/traits/authored/<id>` is a
+    /// loud error, byte-untouched, same as `create`. A build failure after
+    /// the copy leaves no authored residue and the vendored dependency
+    /// untouched. A byte-identical rebuild inherits this machine's existing
+    /// trust verdict for that canonical digest; any edit changes the digest
+    /// and goes through normal review.
+    Fork {
+        /// Installed dependency's manifest alias or exact source identity
+        /// (npm package name, `path:<path>`, or `git+<url>[#path=<path>]`).
+        id: String,
 
         /// Emit structured JSON.
         #[arg(long)]

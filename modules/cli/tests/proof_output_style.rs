@@ -391,6 +391,64 @@ fn create_default_output_matches_the_panel_registry_shape() {
     assert_matches_registry_claim("create", "ctx", "create", &stdout);
 }
 
+/// `fork`'s default output over a real path-installed, CDK-buildable
+/// dependency (0213): a producer repo scaffolded by `ctx traits init` +
+/// `ctx traits build` (same real-node-build precedent as
+/// `build_default_output_matches_the_panel_registry_shape`), path-installed
+/// into a consumer repo, then forked.
+#[test]
+fn fork_default_output_matches_the_panel_registry_shape() {
+    let scratch = ScratchRoot::new("p467-fork-panel-shape");
+    let home = scratch.home();
+    let id = "fixture-fork-panel";
+
+    let producer = home.join("producer");
+    fs::create_dir_all(&producer).unwrap();
+    git_init(&producer);
+    symlink_node_modules(&producer);
+    require_success(
+        "`ctx traits init <id>` in the producer",
+        &["traits", "init", id],
+        &producer,
+        &home,
+    );
+    require_success(
+        "initial explicit-path `ctx traits build` in the producer",
+        &[
+            "traits",
+            "build",
+            &format!(".ctx/traits/authored/{id}/source/index.ts"),
+        ],
+        &producer,
+        &home,
+    );
+
+    let repo = home.join("consumer");
+    fs::create_dir_all(&repo).unwrap();
+    git_init(&repo);
+    symlink_node_modules(&repo);
+    require_success(
+        "`ctx traits dependency add path:<producer>`",
+        &[
+            "traits",
+            "dependency",
+            "add",
+            &format!("path:../producer/.ctx/traits/authored/{id}"),
+        ],
+        &repo,
+        &home,
+    );
+
+    let stdout = require_success(
+        "`ctx traits fork <id>`",
+        &["traits", "fork", id],
+        &repo,
+        &home,
+    );
+
+    assert_matches_registry_claim("fork", "ctx", "fork", &stdout);
+}
+
 #[test]
 fn build_default_output_matches_the_panel_registry_shape() {
     let scratch = ScratchRoot::new("p467-build-panel-shape");

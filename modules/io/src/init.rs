@@ -316,6 +316,7 @@ pub(crate) fn package_manifest_text(trait_id: &str, name: &str) -> crate::Result
         budget: None,
         variant: Default::default(),
         defaults: None,
+        forked_from: None,
     };
     Ok(ctx_traits_core::encoding::encode(
         ctx_traits_core::encoding::Encoding::Toml,

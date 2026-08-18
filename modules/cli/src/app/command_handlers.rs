@@ -351,6 +351,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     }),
                 }
             }
+            Some(cli::TraitsCommand::Fork { id, json }) => {
+                crate::app::fork::handle_fork(&id, json)
+            }
             Some(cli::TraitsCommand::List { json, verbose }) => handle_list(json, verbose),
             Some(cli::TraitsCommand::Stats {
                 since,

@@ -488,6 +488,9 @@ pub(crate) fn build_check_report(
                     report = report.with_synth_provenance(vec![provenance]);
                 }
             }
+            if let Some(forked_from) = forked_from_summary(trait_root)? {
+                report = report.with_section(Section::ForkedFrom, &forked_from, true);
+            }
             Ok(report)
         }
         Err(e) => {
@@ -2041,6 +2044,28 @@ fn package_json_drift_failure(package_root: &camino::Utf8Path) -> Option<String>
         )),
         Err(error) => Some(format!("{package_json_path} is unreadable: {error}")),
     }
+}
+
+/// `[forked-from]` provenance row (0213): present only for a package `ctx
+/// traits fork` produced. No drift machinery needed — the fork detaches the
+/// vendor lock entry it forked from, so there is nothing left to drift
+/// against.
+fn forked_from_summary(package_root: &camino::Utf8Path) -> crate::Result<Option<String>> {
+    let manifest_path = ctx_traits_io::layout::package_manifest_path(package_root);
+    let Some(manifest_text) = ctx_traits_io::read::read_optional_text(&manifest_path)? else {
+        return Ok(None);
+    };
+    let Some(manifest) =
+        ctx_traits_core::manifest::decode_package_manifest(&manifest_text, manifest_path.as_str())?
+    else {
+        return Ok(None);
+    };
+    Ok(manifest.forked_from.map(|forked_from| {
+        format!(
+            "{}@{}, canonical {}",
+            forked_from.id, forked_from.version, forked_from.canonical_digest
+        )
+    }))
 }
 
 fn native_family_drift_check(

@@ -95,6 +95,9 @@ pub enum Section {
     Extensions,
     Metadata,
     CandidateLifecycleTrust,
+    /// Fork provenance (`[forked-from]` in `trait.toml`, 0213) — present
+    /// only for a package `ctx traits fork` produced.
+    ForkedFrom,
 }
 
 impl Section {
@@ -126,6 +129,7 @@ impl Section {
             Section::Extensions => "extensions",
             Section::Metadata => "metadata",
             Section::CandidateLifecycleTrust => "candidate-lifecycle-trust",
+            Section::ForkedFrom => "forked-from",
         }
     }
 }

@@ -243,27 +243,27 @@ struct BuildReportJson<'a> {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
-struct FamilyVariantReportJson {
-    name: String,
-    target: String,
-    source_map: String,
-    aliases: Vec<String>,
+pub(crate) struct FamilyVariantReportJson {
+    pub(crate) name: String,
+    pub(crate) target: String,
+    pub(crate) source_map: String,
+    pub(crate) aliases: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
-struct FamilyBuildReportJson {
-    source: String,
-    family: String,
-    version: String,
-    manifest: String,
-    variants: Vec<FamilyVariantReportJson>,
+pub(crate) struct FamilyBuildReportJson {
+    pub(crate) source: String,
+    pub(crate) family: String,
+    pub(crate) version: String,
+    pub(crate) manifest: String,
+    pub(crate) variants: Vec<FamilyVariantReportJson>,
 }
 
 /// Either shape `handle_build` writes: an ordinary single-trait package or a
 /// native family's published variants. Produced by [`route_cdk_build`], which
 /// synthesizes `path` exactly once and branches on the result — never both.
-enum CdkBuildRouted {
+pub(crate) enum CdkBuildRouted {
     Single(Box<BuildEvidence>),
     Family(FamilyBuildReportJson),
 }
@@ -276,7 +276,11 @@ enum CdkBuildRouted {
 /// through the same write/identity-enforcement tail [`build_cdk_package`]
 /// uses. `handle_build` is the only caller — it must accept both source
 /// shapes without a second synthesis of the same source.
-fn route_cdk_build(path: &str, format: &str, out: Option<&str>) -> crate::Result<CdkBuildRouted> {
+pub(crate) fn route_cdk_build(
+    path: &str,
+    format: &str,
+    out: Option<&str>,
+) -> crate::Result<CdkBuildRouted> {
     let output_format = ctx_traits_core::synth::OutputFormat::parse(format).ok_or_else(|| {
         crate::Error::Command {
             message: format!("unsupported build format {format:?}; expected toml, json, or yaml"),
@@ -353,7 +357,7 @@ fn authored_package_source(id: &str) -> Option<camino::Utf8PathBuf> {
 /// belongs to: an `--out` redirect targets a caller-chosen path with no
 /// package around it, and a built-in store package is read-only. Neither is
 /// an error in `build`'s own terms.
-fn record_lock_evidence(target: &camino::Utf8Path, relock: bool) -> crate::Result<()> {
+pub(crate) fn record_lock_evidence(target: &camino::Utf8Path, relock: bool) -> crate::Result<()> {
     let repo_root = crate::app::lifecycle_reporting::current_utf8_dir()?;
     ctx_traits_io::dependency::sync(ctx_traits_io::dependency::SyncRequest {
         repo_root: &repo_root,

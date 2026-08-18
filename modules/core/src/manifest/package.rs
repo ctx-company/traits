@@ -62,6 +62,30 @@ pub struct PackageManifest {
     /// are task 0170's territory.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub authoring_dependencies: BTreeMap<String, String>,
+
+    /// `[forked-from]`: provenance recorded by `ctx traits fork` (0213) —
+    /// the vendored package this authored package was forked from, at the
+    /// moment of the fork. Lives outside every digest (the canonical digest
+    /// covers `generated/index.toml` only), so recording it never perturbs
+    /// trust identity. For a forked native family, `canonical_digest` is the
+    /// default variant's digest; per-variant digests live in the rebuilt
+    /// `trait.lock`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkedFrom>,
+}
+
+/// Fork provenance: exactly which vendored package/version/digest an
+/// authored package was copied from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ForkedFrom {
+    /// The vendored package's `[package].id`.
+    pub id: String,
+    /// The vendored package's locked `resolved-version` at fork time.
+    pub version: String,
+    /// The vendored package's locked default-variant canonical digest at
+    /// fork time.
+    pub canonical_digest: String,
 }
 
 /// Publication identity: the npm name, registry, and access this package is

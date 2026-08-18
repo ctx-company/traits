@@ -236,7 +236,7 @@ fn new_report_panel(report: &NewReport) -> Panel {
         ))
         .row(PanelRow::toned(
             "status",
-            trust_status_line(report),
+            trust_status_line_for(report),
             status_tone,
         ))
 }
@@ -283,19 +283,30 @@ struct NewReport {
     trust: ctx_traits_core::r#trait::TrustVerdict,
 }
 
-fn trust_status_line(report: &NewReport) -> String {
-    match report.trust {
+fn trust_status_line_for(report: &NewReport) -> String {
+    trust_status_line(&report.trait_id, report.trust, "draft")
+}
+
+/// Shared trust status line for a just-built package's report: `create`'s
+/// wording, parameterized by `verb` (`"draft"` for `create`, `"forked"` for
+/// `ctx traits fork`) so both commands render the exact same trust-by-digest
+/// story instead of two copies of it drifting apart.
+pub(crate) fn trust_status_line(
+    trait_id: &str,
+    trust: ctx_traits_core::r#trait::TrustVerdict,
+    verb: &str,
+) -> String {
+    match trust {
         ctx_traits_core::r#trait::TrustVerdict::Verified
         | ctx_traits_core::r#trait::TrustVerdict::Blocked => format!(
-            "status: draft (this machine already has a trust verdict for this exact canonical \
-             digest: {}; run `ctx traits check {}` to review it)",
-            report.trust.display_name(),
-            report.trait_id
+            "status: {verb} (this machine already has a trust verdict for this exact canonical \
+             digest: {}; run `ctx traits check {trait_id}` to review it)",
+            trust.display_name(),
         ),
         ctx_traits_core::r#trait::TrustVerdict::Unreviewed => format!(
-            "status: draft (no trust verdict on this machine for this canonical digest; run \
-             `ctx traits check {}` then `ctx traits trust approve {}` before activating)",
-            report.trait_id, report.trait_id
+            "status: {verb} (no trust verdict on this machine for this canonical digest; run \
+             `ctx traits check {trait_id}` then `ctx traits trust approve {trait_id}` before \
+             activating)",
         ),
     }
 }
