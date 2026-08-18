@@ -15,7 +15,7 @@ export default function () {
     shared.stage.diff.capture("Capture the changed files");
     shared.stage.review.primary("Review the implementation");
 
-    loop.maxIterations(10, { onExhausted: "abort" });
+    loop.maxIterations(10, { onExhausted: cdk.signal.Abort });
     loop.until(cdk.condition.equals(shared.data.verdict1.status, "approved"));
   });
 

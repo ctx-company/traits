@@ -3,7 +3,7 @@
 // implement-quick: no leftovers adjudication, no dual review. The reviewer
 // loop is bounded and parks honestly (typed park report) on exhaustion.
 import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
-import { condition, defineVariant, flow, input, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, input, signal, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 import { scopeNote } from "./data.ts";
@@ -42,7 +42,7 @@ export default function () {
   });
 
   flow.loop("Researching", (loop) => {
-    loop.maxIterations(3, { onExhausted: "abort" });
+    loop.maxIterations(3, { onExhausted: signal.Abort });
 
     worker.prompt("Researching Produce", {
       input: input.prompt`

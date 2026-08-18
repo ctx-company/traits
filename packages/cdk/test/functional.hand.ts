@@ -171,14 +171,14 @@ describe("functional layer emits byte-identical canonical to the object layer (0
     expectByteIdentical(viaFunctional(), viaObject());
   });
 
-  it("flow.when(..., flow.Abort) inside a loop lowers to abortIf", () => {
+  it("flow.when(..., signal.Abort) inside a loop lowers to abortIf", () => {
     function viaFunctional() {
       const cap = slot.number("cap");
       const proc = procedure.from({ description: "d" }, () => {
         flow.loop("Bounded", (loop) => {
           loop.maxIterations(3);
           step.command("Work", { cmd: "echo work" });
-          flow.when("Give up", condition.gte(cap, 3), flow.Abort);
+          flow.when("Give up", condition.gte(cap, 3), signal.Abort);
         });
       });
       return toDraftJson(trait("abort-arm", { name: "Abort Arm", summary: "s", procedure: proc }));
@@ -504,7 +504,7 @@ describe("functional layer emits byte-identical canonical to the object layer (0
           effect.onComplete(complete);
           effect.onAbort(gaveUp);
           step.command("Work", { cmd: "echo work" });
-          flow.when("Give up", condition.gte(cap, 3), flow.Abort);
+          flow.when("Give up", condition.gte(cap, 3), signal.Abort);
         });
       });
       return toDraftJson(trait("effect-loop", { name: "Effect Loop", summary: "s", procedure: proc }));

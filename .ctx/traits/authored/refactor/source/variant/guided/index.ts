@@ -14,7 +14,7 @@ export default function () {
   stage.checklist.compose("Build the checklist");
 
   cdk.flow.loop("Reviewed refinement", (loop) => {
-    loop.maxIterations(2, { onExhausted: "continue" });
+    loop.maxIterations(2, { onExhausted: cdk.signal.Continue });
     shared.stage.implement.apply("Implement the checklist");
     shared.stage.review.judge("Review the implementation");
     loop.until(cdk.condition.equals(shared.data.verdict1.status, "approved"));

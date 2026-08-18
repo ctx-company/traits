@@ -15,7 +15,7 @@
 // entire campaign into one model answer (~18KB observed) before the report
 // was written.
 import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
-import { condition, defineVariant, flow, input, operation, step, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, input, operation, signal, step, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 
@@ -53,7 +53,7 @@ export default function () {
   shared.stage.derive.deriveReportPathStep("report.md");
 
   flow.loop("Ingest", (loop) => {
-    loop.maxIterations(3, { onExhausted: "abort" });
+    loop.maxIterations(3, { onExhausted: signal.Abort });
 
     smart.prompt("Ingest the brief", {
       input: input.prompt`
@@ -73,7 +73,7 @@ export default function () {
   });
 
   flow.loop("Planning", (loop) => {
-    loop.maxIterations(3, { onExhausted: "abort" });
+    loop.maxIterations(3, { onExhausted: signal.Abort });
 
     smart.prompt("Plan the streams", {
       input: input.prompt`
@@ -114,7 +114,7 @@ export default function () {
   });
 
   flow.loop("Building", (loop) => {
-    loop.maxIterations(6, { onExhausted: "abort" });
+    loop.maxIterations(6, { onExhausted: signal.Abort });
 
     worker.prompt("Building Produce", {
       input: input.prompt`

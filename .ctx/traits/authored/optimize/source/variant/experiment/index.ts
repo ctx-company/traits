@@ -1,4 +1,4 @@
-import { condition, defineVariant, flow, method, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, method, signal, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 import { experimentCommand } from "./data.ts";
@@ -28,7 +28,7 @@ export default function () {
           shared.stage.baseline.seedBestStage("Seed trusted best state and history");
 
           flow.loop("Run the iteration-capped experiment budget", (loop) => {
-            loop.maxIterations(20, { onExhausted: "continue" });
+            loop.maxIterations(20, { onExhausted: signal.Continue });
             stage.propose.proposeStage("Propose one fresh bounded experiment");
             stage.apply.applyStage("Apply the proposed candidate");
             shared.stage.measure.measureAggregateStage("Measure the candidate", experimentCommand, shared.data.candidateResult);
