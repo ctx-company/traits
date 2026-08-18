@@ -387,6 +387,13 @@ fn fork_lock_finalization_failure_preserves_installed_dependency() {
         vendored_path.is_dir(),
         "precondition: {id} must be vendored before forking it"
     );
+    let vendored_tree_before = collect_tree(&vendored_path);
+    // `install_path_dependency` above already appended its own `Install`
+    // audit record, so the journal is non-empty by this point — snapshot
+    // its full contents (not mere existence) and assert byte-identical
+    // after the forced failure, proving no `Remove` line was appended.
+    let audit_root = home.join("ctx/audit");
+    let audit_before = collect_tree(&audit_root);
 
     let result = run_ctx(&["traits", "fork", id], &consumer, &home);
     let (stdout, stderr) = utf8(&result);
@@ -416,6 +423,47 @@ fn fork_lock_finalization_failure_preserves_installed_dependency() {
     assert!(
         vendored_path.is_dir(),
         "a fork that fails on lock finalization must restore the vendored dependency"
+    );
+    assert_eq!(
+        vendored_tree_before,
+        collect_tree(&vendored_path),
+        "a fork that fails on lock finalization must leave the vendored tree \
+         full-tree-byte-identical, not merely present"
+    );
+    assert_eq!(
+        audit_before,
+        collect_tree(&audit_root),
+        "a fork that fails on lock finalization must append no Remove audit record"
+    );
+    let leftover_scratch_manifests: Vec<_> = fs::read_dir(manifest_path.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".fork-projection-")
+        })
+        .collect();
+    assert!(
+        leftover_scratch_manifests.is_empty(),
+        "a fork that fails on lock finalization must leave no scratch manifest projection \
+         sibling: {leftover_scratch_manifests:?}"
+    );
+    let leftover_scratch_vendor_roots: Vec<_> = fs::read_dir(manifest_path.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".fork-vendor-scratch-")
+        })
+        .collect();
+    assert!(
+        leftover_scratch_vendor_roots.is_empty(),
+        "a fork that fails on lock finalization must leave no scratch vendor-root sibling: \
+         {leftover_scratch_vendor_roots:?}"
     );
 }
 
@@ -549,6 +597,91 @@ fn fork_lock_finalization_leaves_other_vendored_dependencies_untouched_even_when
         "a fork that fails after lock finalization must leave every other project dependency's \
          installed vendored tree full-tree-byte-identical, even when that dependency's live \
          source changed before the fork ran"
+    );
+}
+
+/// Lock finalization's `dependency::sync` write pass unconditionally
+/// establishes the nested-ignore invariant (`ensure_nested_gitignore`) on
+/// its target root whenever the merged dependency set is non-empty — and
+/// fork's finalization always has a non-empty set here, since the
+/// build-derived `@fixture/dep` pin counts. Absent `vendor_root_override`
+/// redirection of *that* call too, the real consumer's `.ctx/.gitignore`
+/// would be created or appended to mid-fork, with nothing to undo it when a
+/// later step (here, the same malformed-trust-store failure as
+/// `fork_trust_read_failure_preserves_installed_dependency`) aborts the
+/// fork. Deletes the file outright before forking (the strongest form of
+/// "canonical entries absent") and asserts it is still absent afterward —
+/// not merely unchanged content, but unchanged existence.
+#[test]
+fn fork_lock_finalization_failure_leaves_ctx_gitignore_untouched() {
+    let scratch = ScratchRoot::new("p0213-fork-gitignore-untouched");
+    let home = scratch.home();
+    let id = "fixture-fork-gitignore-untouched";
+
+    let producer = home.join("producer");
+    fs::create_dir_all(&producer).unwrap();
+    git_init(&producer);
+    let producer_node_modules = private_node_modules(&producer);
+    write_locked_dependency_fixture(
+        &producer_node_modules.join("@fixture/dep"),
+        "p0213-fork-gitignore-dep-producer",
+    );
+    require_success(
+        "`ctx traits init <id>`",
+        &["traits", "init", id],
+        &producer,
+        &home,
+    );
+    let producer_source_rel = format!(".ctx/traits/authored/{id}/source/index.ts");
+    fs::write(
+        producer.join(&producer_source_rel),
+        derived_dep_fixture_source(id),
+    )
+    .unwrap();
+    require_success(
+        "initial `ctx traits build` with a derived dependency",
+        &["traits", "build", &producer_source_rel],
+        &producer,
+        &home,
+    );
+    let producer_root = producer.join(".ctx/traits/authored").join(id);
+
+    let consumer = home.join("consumer");
+    fs::create_dir_all(&consumer).unwrap();
+    git_init(&consumer);
+    let consumer_node_modules = private_node_modules(&consumer);
+    write_locked_dependency_fixture(
+        &consumer_node_modules.join("@fixture/dep"),
+        "p0213-fork-gitignore-dep-consumer",
+    );
+
+    let alias = install_path_dependency(&consumer, &home, &producer_root, None);
+    assert_eq!(alias, id);
+
+    // Force the strongest precondition: no `.ctx/.gitignore` at all, not
+    // merely one missing a canonical entry.
+    let gitignore_path = consumer.join(".ctx/.gitignore");
+    let _ = fs::remove_file(&gitignore_path);
+    assert!(
+        !gitignore_path.exists(),
+        "precondition: .ctx/.gitignore must be absent before forking"
+    );
+
+    let trust_store_path = home.join("ctx/trust.toml");
+    fs::create_dir_all(trust_store_path.parent().unwrap()).unwrap();
+    fs::write(&trust_store_path, "this is not valid toml [[[\n").unwrap();
+
+    let result = run_ctx(&["traits", "fork", id], &consumer, &home);
+    let (stdout, stderr) = utf8(&result);
+    assert!(
+        !result.status.success(),
+        "fork must fail loudly when the trust store cannot be decoded\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    assert!(
+        !gitignore_path.exists(),
+        "a fork that fails after lock finalization must not have created .ctx/.gitignore \
+         from an owned scratch-directory sync pass"
     );
 }
 

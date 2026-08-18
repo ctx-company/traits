@@ -181,7 +181,17 @@ pub fn sync(request: SyncRequest<'_>) -> crate::Result<SyncReport> {
     // below, not after: if this fails, sync must return an error having
     // changed nothing, rather than leaving vendored/locked state committed
     // to a caller that sees a failure (P446).
-    if request.mode == SyncMode::Write && !dependencies.is_empty() {
+    //
+    // Skipped entirely when `vendor_root_override` is set: physical vendor
+    // copies then land under a caller-owned scratch root, never
+    // `repo_root`'s live `.ctx/traits/vendored`, so there is nothing there
+    // for `repo_root`'s `.ctx/.gitignore` to need covering — and the real
+    // repo's `.gitignore` must stay byte-identical on every fork exit path,
+    // including failure, which this call has no way to roll back.
+    if request.mode == SyncMode::Write
+        && !dependencies.is_empty()
+        && request.vendor_root_override.is_none()
+    {
         crate::gitignore::ensure_nested_gitignore(request.repo_root)?;
     }
 
