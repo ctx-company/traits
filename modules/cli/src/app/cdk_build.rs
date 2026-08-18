@@ -866,6 +866,7 @@ fn stamp_derived_dependencies(
                     manifest_path: None,
                     trait_file: Some(&canonical_path),
                     mode: ctx_traits_io::dependency::SyncMode::VerifyLocked,
+                    vendor_root_override: None,
                 })?;
             if !self_check.passed {
                 return Err(crate::Error::Command {

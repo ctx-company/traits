@@ -151,6 +151,7 @@ pub(crate) fn handle_new(name: &str, from: &str, json: bool) -> crate::Result<Co
         manifest_path: None,
         trait_file: Some(evidence.target_path.as_path()),
         mode: ctx_traits_io::dependency::SyncMode::Write,
+        vendor_root_override: None,
     })?;
 
     // Consult the same identity-bound machine trust history `ctx traits check`

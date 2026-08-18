@@ -479,6 +479,79 @@ fn fork_trust_read_failure_preserves_installed_dependency() {
     );
 }
 
+/// Lock finalization (both the single-trait and family branches) sync-writes
+/// the *full* merged project dependency set, not just the package being
+/// forked — so a second, unrelated project dependency is present in that
+/// set. If its live source changes after install but before a fork that
+/// later fails (here, the same malformed-trust-store failure as
+/// `fork_trust_read_failure_preserves_installed_dependency`), the unrelated
+/// dependency's installed vendored tree must stay exactly as it was: lock
+/// finalization vendors into a scratch directory
+/// (`fork_vendor_scratch_root`), never the live `.ctx/traits/vendored` tree,
+/// so there is no window in which an unrelated dependency could be
+/// refreshed from its live source mid-fork and left that way by a later
+/// failure.
+#[test]
+fn fork_lock_finalization_leaves_other_vendored_dependencies_untouched_even_when_their_live_source_changes()
+ {
+    let scratch = ScratchRoot::new("p0213-fork-unrelated-dep-untouched");
+    let home = scratch.home();
+    let id = "fixture-fork-unrelated-dep-target";
+    let other_id = "fixture-fork-unrelated-dep-sibling";
+    let producer_root = build_forkable_producer(&home.join("producer"), &home, id);
+    let other_producer_root =
+        build_forkable_producer(&home.join("other-producer"), &home, other_id);
+
+    let consumer = home.join("consumer");
+    fs::create_dir_all(&consumer).unwrap();
+    git_init(&consumer);
+    symlink_node_modules(&consumer);
+    let alias = install_path_dependency(&consumer, &home, &producer_root, None);
+    assert_eq!(alias, id);
+    let other_spec = format!("path:../other-producer/.ctx/traits/authored/{other_id}");
+    require_success(
+        "`ctx traits dependency add path:<other-producer>`",
+        &["traits", "dependency", "add", other_spec.as_str()],
+        &consumer,
+        &home,
+    );
+
+    let other_vendored_path = consumer.join(".ctx/traits/vendored").join(other_id);
+    assert!(
+        other_vendored_path.is_dir(),
+        "precondition: {other_id} must be vendored before forking {id}"
+    );
+    let other_vendored_before = collect_tree(&other_vendored_path);
+
+    // Change the unrelated dependency's *live* source after install: absent
+    // scratch redirection, fork's lock finalization would detect this via
+    // `package_subset_matches` and re-copy it straight into the live
+    // vendored tree while finalizing the forked package's own lock.
+    let other_manifest = other_producer_root.join("trait.toml");
+    let mut other_manifest_text = fs::read_to_string(&other_manifest).unwrap();
+    other_manifest_text.push_str("\n# live source changed after install, before fork\n");
+    fs::write(&other_manifest, &other_manifest_text).unwrap();
+
+    let trust_store_path = home.join("ctx/trust.toml");
+    fs::create_dir_all(trust_store_path.parent().unwrap()).unwrap();
+    fs::write(&trust_store_path, "this is not valid toml [[[\n").unwrap();
+
+    let result = run_ctx(&["traits", "fork", id], &consumer, &home);
+    let (stdout, stderr) = utf8(&result);
+    assert!(
+        !result.status.success(),
+        "fork must fail loudly when the trust store cannot be decoded\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    assert_eq!(
+        other_vendored_before,
+        collect_tree(&other_vendored_path),
+        "a fork that fails after lock finalization must leave every other project dependency's \
+         installed vendored tree full-tree-byte-identical, even when that dependency's live \
+         source changed before the fork ran"
+    );
+}
+
 /// A native `trait(id, { variants })` family fixture source with two
 /// variants, `id` parameterized so each test gets a distinct alias/package
 /// id — used by the family fork-conflict regression below.

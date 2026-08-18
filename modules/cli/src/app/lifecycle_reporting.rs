@@ -154,6 +154,7 @@ pub(crate) fn handle_sync_all(
                     manifest_path: manifest.map(camino::Utf8Path::new),
                     trait_file: Some(package.trait_path.as_path()),
                     mode,
+                    vendor_root_override: None,
                 },
             )?);
         }
@@ -185,6 +186,7 @@ pub(crate) fn handle_sync(
         manifest_path,
         trait_file,
         mode,
+        vendor_root_override: None,
     })?;
     match OutputMode::select(json, false) {
         OutputMode::Json => {

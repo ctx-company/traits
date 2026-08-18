@@ -184,6 +184,23 @@ fn fork_projection_scratch_path(manifest_path: &Utf8Path) -> camino::Utf8PathBuf
     ))
 }
 
+/// A sibling scratch-directory path for `manifest_path`, unique per
+/// process/instant, that lock finalization vendors unrelated project
+/// dependencies into instead of the live `.ctx/traits/vendored` tree. Owned
+/// from creation: every exit path below removes it wholesale and folds a
+/// cleanup failure into the returned error, same as
+/// [`fork_projection_scratch_path`]'s file.
+fn fork_vendor_scratch_root(manifest_path: &Utf8Path) -> camino::Utf8PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    manifest_path.with_file_name(format!(
+        ".fork-vendor-scratch-{}-{nanos}",
+        std::process::id(),
+    ))
+}
+
 /// Route the CDK build (single vs. family) and finalize the authored
 /// package's lock against `scratch_manifest_path`'s projected post-detach
 /// dependency set, returning the generated target paths, the lock path, and
@@ -192,10 +209,24 @@ fn fork_projection_scratch_path(manifest_path: &Utf8Path) -> camino::Utf8PathBuf
 /// exactly one sync pass — the family branch's digest lookup and its lock
 /// finalization are the same write, not an interim live-manifest pass
 /// followed by a second projected one.
+///
+/// `scratch_vendor_root` redirects where lock finalization physically
+/// vendors *other* project dependencies while computing this trait's own
+/// lock evidence: `dependency::sync` in write mode always vendors the full
+/// merged project+package+trait dependency set, not just this package's own
+/// declarations, so without redirection it would copy (and, for a changed
+/// source, overwrite) unrelated dependencies straight into the live
+/// project's `.ctx/traits/vendored` — a side effect on packages fork never
+/// touches, outside the authored root, that a later failure (trust read,
+/// detach) could not roll back. Every lock entry's recorded digests come
+/// from the dependency's own loaded source, never from the vendored copy
+/// (`ctx_traits_io::dependency::lock_entry_for`), so redirecting the copy
+/// destination changes nothing about the resulting lock content.
 fn fork_build_and_lock(
     source_path: &str,
     authored_root: &Utf8Path,
     scratch_manifest_path: &Utf8Path,
+    scratch_vendor_root: &Utf8Path,
 ) -> crate::Result<(Vec<String>, String, String)> {
     match route_cdk_build(source_path, "toml", None)? {
         CdkBuildRouted::Single(evidence) => {
@@ -210,6 +241,7 @@ fn fork_build_and_lock(
                 &evidence.target_path,
                 false,
                 Some(scratch_manifest_path),
+                Some(scratch_vendor_root),
             )?;
             Ok((
                 vec![evidence.target_path.to_string()],
@@ -223,6 +255,7 @@ fn fork_build_and_lock(
                     Utf8Path::new(&variant.target),
                     false,
                     Some(scratch_manifest_path),
+                    Some(scratch_vendor_root),
                 )?;
             }
             let manifest_path = ctx_traits_io::layout::package_manifest_path(authored_root);
@@ -263,6 +296,48 @@ fn fork_build_and_lock(
                 canonical_digest,
             ))
         }
+    }
+}
+
+/// `std::fs::remove_dir_all`, tolerant of the directory never having been
+/// created at all: lock finalization only creates `scratch_vendor_root` if
+/// the projected dependency set is non-empty, so a fork with no project
+/// dependencies leaves nothing to clean up and that must not read as a
+/// cleanup failure.
+fn remove_dir_all_if_exists(root: &Utf8Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(root.as_std_path()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// `std::fs::remove_file`, tolerant of the file never having been created:
+/// a failed write may have created nothing at all.
+fn remove_file_if_exists(path: &Utf8Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path.as_std_path()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Write the projected post-detach manifest to `path`, cleaning up on
+/// failure: a write that fails partway can leave a partial file behind, and
+/// this scratch file is owned from its very first write attempt, not just
+/// from a successful one.
+fn write_scratch_manifest(path: &Utf8Path, text: &str) -> crate::Result<()> {
+    match ctx_traits_io::write::write_text(path, text) {
+        Ok(()) => Ok(()),
+        Err(error) => match remove_file_if_exists(path) {
+            Ok(()) => Err(error.into()),
+            Err(cleanup_error) => Err(crate::Error::Command {
+                message: format!(
+                    "{error}; additionally failed to remove {path} after a failed write: \
+                     {cleanup_error}"
+                ),
+            }),
+        },
     }
 }
 
@@ -317,19 +392,35 @@ fn fork_after_claim(
     // first write: every exit path below removes it and folds a cleanup
     // failure into the returned error, matching this function's own
     // "residue-free on failure" contract for the authored root.
+    //
+    // The same sync also vendors *every* merged project dependency, not just
+    // this package's own — so its physical vendor-copy destination is
+    // likewise redirected to an owned scratch directory
+    // ([`fork_vendor_scratch_root`]), never the live `.ctx/traits/vendored`
+    // tree, and removed on every exit path the same way.
     let project_manifest_path = scope.manifest_path("toml");
     let projected_manifest_text =
         ctx_traits_io::distribution::manifest_text_without_dependency(scope, alias)?;
     let scratch_manifest_path = fork_projection_scratch_path(&project_manifest_path);
-    ctx_traits_io::write::write_text(&scratch_manifest_path, &projected_manifest_text)?;
+    write_scratch_manifest(&scratch_manifest_path, &projected_manifest_text)?;
+    let scratch_vendor_root = fork_vendor_scratch_root(&project_manifest_path);
 
-    let build_result =
-        fork_build_and_lock(source_path.as_str(), authored_root, &scratch_manifest_path);
-    let scratch_cleanup = std::fs::remove_file(scratch_manifest_path.as_std_path());
+    let build_result = fork_build_and_lock(
+        source_path.as_str(),
+        authored_root,
+        &scratch_manifest_path,
+        &scratch_vendor_root,
+    );
+    let manifest_cleanup = std::fs::remove_file(scratch_manifest_path.as_std_path());
+    let vendor_cleanup = remove_dir_all_if_exists(&scratch_vendor_root);
     let (generated, lock, rebuilt_canonical_digest) = fold_cleanup_result(
-        build_result,
-        scratch_cleanup,
-        &format!("remove scratch projection {scratch_manifest_path}"),
+        fold_cleanup_result(
+            build_result,
+            manifest_cleanup,
+            &format!("remove scratch projection {scratch_manifest_path}"),
+        ),
+        vendor_cleanup,
+        &format!("remove scratch vendor directory {scratch_vendor_root}"),
     )?;
 
     let manifest_path = ctx_traits_io::layout::package_manifest_path(authored_root);

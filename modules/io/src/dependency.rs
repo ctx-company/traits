@@ -115,6 +115,14 @@ pub struct SyncRequest<'a> {
     pub manifest_path: Option<&'a Utf8Path>,
     pub trait_file: Option<&'a Utf8Path>,
     pub mode: SyncMode,
+    /// When set, `SyncMode::Write` vendors dependency content under this
+    /// root instead of `repo_root`'s live `.ctx/traits/vendored`. Source
+    /// resolution (including relative path dependencies) still resolves
+    /// against `repo_root` unchanged — only the physical vendor-copy
+    /// destination moves. `ctx traits fork` uses this to finalize a lock
+    /// without publishing any dependency into the live project's vendored
+    /// tree before its own transaction has committed.
+    pub vendor_root_override: Option<&'a Utf8Path>,
 }
 
 pub fn sync(request: SyncRequest<'_>) -> crate::Result<SyncReport> {
@@ -204,8 +212,9 @@ pub fn sync(request: SyncRequest<'_>) -> crate::Result<SyncReport> {
                 ),
             );
         }
+        let vendor_root_base = request.vendor_root_override.unwrap_or(request.repo_root);
         let vendored_root = crate::layout::vendored_dependency_root(
-            request.repo_root,
+            vendor_root_base,
             &declaration.dependency.alias,
         )?;
         let vendored_path = format!(
