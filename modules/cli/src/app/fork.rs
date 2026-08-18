@@ -26,7 +26,7 @@ use crate::app::lifecycle_reporting::current_utf8_dir;
 use crate::app::new::trust_status_line;
 use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 use crate::app::schema_synth_build::{
-    CdkBuildRouted, record_lock_evidence, record_lock_evidence_with_manifest, route_cdk_build,
+    CdkBuildRouted, record_lock_evidence_with_manifest, route_cdk_build,
 };
 
 pub(crate) fn handle_fork(id: &str, json: bool) -> crate::Result<CommandOutput<()>> {
@@ -125,10 +125,23 @@ pub(crate) fn handle_fork(id: &str, json: bool) -> crate::Result<CommandOutput<(
             }
             Ok(CommandOutput::new(()))
         }
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(package.root().as_std_path());
-            Err(error)
-        }
+        Err(error) => Err(cleanup_authored_root_then_return(package.root(), error)),
+    }
+}
+
+/// Remove the authored root fork just claimed, folding a cleanup failure
+/// into the returned error instead of discarding it — a caller must learn
+/// that the claimed root may still be on disk, not just that the fork
+/// itself failed.
+fn cleanup_authored_root_then_return(root: &Utf8Path, error: crate::Error) -> crate::Error {
+    match std::fs::remove_dir_all(root.as_std_path()) {
+        Ok(()) => error,
+        Err(cleanup_error) => crate::Error::Command {
+            message: format!(
+                "{error}; additionally failed to remove {root} after the failed fork: \
+                 {cleanup_error}"
+            ),
+        },
     }
 }
 
@@ -171,6 +184,109 @@ fn fork_projection_scratch_path(manifest_path: &Utf8Path) -> camino::Utf8PathBuf
     ))
 }
 
+/// Route the CDK build (single vs. family) and finalize the authored
+/// package's lock against `scratch_manifest_path`'s projected post-detach
+/// dependency set, returning the generated target paths, the lock path, and
+/// the rebuilt canonical digest (the default variant's, for a family). The
+/// only place either single or family lock evidence is written, so there is
+/// exactly one sync pass — the family branch's digest lookup and its lock
+/// finalization are the same write, not an interim live-manifest pass
+/// followed by a second projected one.
+fn fork_build_and_lock(
+    source_path: &str,
+    authored_root: &Utf8Path,
+    scratch_manifest_path: &Utf8Path,
+) -> crate::Result<(Vec<String>, String, String)> {
+    match route_cdk_build(source_path, "toml", None)? {
+        CdkBuildRouted::Single(evidence) => {
+            let canonical_digest = evidence
+                .outcome
+                .response
+                .provenance
+                .canonical_digest
+                .as_str()
+                .to_string();
+            record_lock_evidence_with_manifest(
+                &evidence.target_path,
+                false,
+                Some(scratch_manifest_path),
+            )?;
+            Ok((
+                vec![evidence.target_path.to_string()],
+                ctx_traits_io::layout::package_lock_path(authored_root).to_string(),
+                canonical_digest,
+            ))
+        }
+        CdkBuildRouted::Family(family_report) => {
+            for variant in &family_report.variants {
+                record_lock_evidence_with_manifest(
+                    Utf8Path::new(&variant.target),
+                    false,
+                    Some(scratch_manifest_path),
+                )?;
+            }
+            let manifest_path = ctx_traits_io::layout::package_manifest_path(authored_root);
+            let family_table = ctx_traits_io::family_manifest::read_family_table(&manifest_path)?
+                .ok_or_else(|| crate::Error::Command {
+                message: format!("{manifest_path} declares no [family] after build"),
+            })?;
+            let document =
+                ctx_traits_io::lockfile::read_lockfile(authored_root)?.ok_or_else(|| {
+                    crate::Error::Command {
+                        message: format!("no trait.lock written for {authored_root} after build"),
+                    }
+                })?;
+            let default_entry = document
+                .traits
+                .iter()
+                .find(|entry| entry.variant.as_deref() == Some(family_table.default.as_str()))
+                .ok_or_else(|| crate::Error::Command {
+                    message: format!(
+                        "trait.lock has no entry for default variant {:?}",
+                        family_table.default
+                    ),
+                })?;
+            let canonical_digest = default_entry
+                .digests
+                .as_ref()
+                .and_then(|digests| digests.canonical.clone())
+                .ok_or_else(|| crate::Error::Command {
+                    message: "default-variant lock entry has no canonical digest".to_string(),
+                })?;
+            Ok((
+                family_report
+                    .variants
+                    .iter()
+                    .map(|variant| variant.target.clone())
+                    .collect(),
+                ctx_traits_io::layout::package_lock_path(authored_root).to_string(),
+                canonical_digest,
+            ))
+        }
+    }
+}
+
+/// Fold an `std::io::Error` cleanup failure into `result`'s error, rather
+/// than discarding it: a caller must learn that a cleanup step (e.g.
+/// removing the fork projection scratch file) also failed, not just that
+/// the primary operation did.
+fn fold_cleanup_result<T>(
+    result: crate::Result<T>,
+    cleanup: std::io::Result<()>,
+    cleanup_label: &str,
+) -> crate::Result<T> {
+    match (result, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(cleanup_error)) => Err(crate::Error::Command {
+            message: format!("fork succeeded but failed to {cleanup_label}: {cleanup_error}"),
+        }),
+        (Err(error), Ok(())) => Err(error),
+        (Err(error), Err(cleanup_error)) => Err(crate::Error::Command {
+            message: format!("{error}; additionally failed to {cleanup_label}: {cleanup_error}"),
+        }),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fork_after_claim(
     scope: &DistributionScope,
@@ -189,85 +305,32 @@ fn fork_after_claim(
             message: format!("{authored_root} has no CDK authoring source after copy"),
         })?;
 
-    // Route determination (single vs. family) and the digest needed for the
-    // trust check below never touch `dependency::sync`'s project-dependency
-    // merge, so both are safe to resolve before the alias is detached.
-    let (generated, family_variant_targets, rebuilt_canonical_digest) =
-        match route_cdk_build(source_path.as_str(), "toml", None)? {
-            CdkBuildRouted::Single(evidence) => {
-                let canonical_digest = evidence
-                    .outcome
-                    .response
-                    .provenance
-                    .canonical_digest
-                    .as_str()
-                    .to_string();
-                (
-                    vec![evidence.target_path.to_string()],
-                    None,
-                    canonical_digest,
-                )
-            }
-            CdkBuildRouted::Family(family_report) => {
-                // `route_cdk_build`'s family report does not carry each
-                // variant's canonical digest, so an interim lock sync reads
-                // it back off the just-written `trait.lock`. This first sync
-                // still runs against the live (pre-projection) project
-                // manifest, so its `dependencies` rows are provisional — the
-                // projected-manifest finalization pass below re-syncs every
-                // variant once more to reconcile that away; upsert-by-`(id,
-                // variant)` semantics make the second pass authoritative.
-                for variant in &family_report.variants {
-                    record_lock_evidence(Utf8Path::new(&variant.target), false)?;
-                }
-                let manifest_path = ctx_traits_io::layout::package_manifest_path(authored_root);
-                let family_table = ctx_traits_io::family_manifest::read_family_table(
-                    &manifest_path,
-                )?
-                .ok_or_else(|| crate::Error::Command {
-                    message: format!("{manifest_path} declares no [family] after build"),
-                })?;
-                let document =
-                    ctx_traits_io::lockfile::read_lockfile(authored_root)?.ok_or_else(|| {
-                        crate::Error::Command {
-                            message: format!(
-                                "no trait.lock written for {authored_root} after build"
-                            ),
-                        }
-                    })?;
-                let default_entry = document
-                    .traits
-                    .iter()
-                    .find(|entry| entry.variant.as_deref() == Some(family_table.default.as_str()))
-                    .ok_or_else(|| crate::Error::Command {
-                        message: format!(
-                            "trait.lock has no entry for default variant {:?}",
-                            family_table.default
-                        ),
-                    })?;
-                let canonical_digest = default_entry
-                    .digests
-                    .as_ref()
-                    .and_then(|digests| digests.canonical.clone())
-                    .ok_or_else(|| crate::Error::Command {
-                        message: "default-variant lock entry has no canonical digest".to_string(),
-                    })?;
-                let targets: Vec<camino::Utf8PathBuf> = family_report
-                    .variants
-                    .iter()
-                    .map(|variant| camino::Utf8PathBuf::from(&variant.target))
-                    .collect();
-                (
-                    family_report
-                        .variants
-                        .iter()
-                        .map(|variant| variant.target.clone())
-                        .collect(),
-                    Some(targets),
-                    canonical_digest,
-                )
-            }
-        };
+    // Every lock write below — the family branch's digest-discovery sync
+    // included — must observe the *post-detach* dependency set:
+    // `dependency::sync` merges the live project-level `[dependencies]` into
+    // whatever `trait_file` it is pointed at, and the forked alias (still
+    // installed at this point) is one of them. Syncing against the live
+    // project manifest would resolve that declaration and re-vendor
+    // `alias`'s own installed tree from its live source mid-fork, before the
+    // fork has even succeeded. So the post-detach manifest is projected into
+    // a scratch file — never the real project manifest — and owned from its
+    // first write: every exit path below removes it and folds a cleanup
+    // failure into the returned error, matching this function's own
+    // "residue-free on failure" contract for the authored root.
+    let project_manifest_path = scope.manifest_path("toml");
+    let projected_manifest_text =
+        ctx_traits_io::distribution::manifest_text_without_dependency(scope, alias)?;
+    let scratch_manifest_path = fork_projection_scratch_path(&project_manifest_path);
+    ctx_traits_io::write::write_text(&scratch_manifest_path, &projected_manifest_text)?;
+
+    let build_result =
+        fork_build_and_lock(source_path.as_str(), authored_root, &scratch_manifest_path);
+    let scratch_cleanup = std::fs::remove_file(scratch_manifest_path.as_std_path());
+    let (generated, lock, rebuilt_canonical_digest) = fold_cleanup_result(
+        build_result,
+        scratch_cleanup,
+        &format!("remove scratch projection {scratch_manifest_path}"),
+    )?;
 
     let manifest_path = ctx_traits_io::layout::package_manifest_path(authored_root);
     ctx_traits_io::fork::write_forked_from(
@@ -289,49 +352,6 @@ fn fork_after_claim(
         package_id,
         &rebuilt_canonical_digest,
     )?;
-
-    // Lock finalization must observe the *post-detach* dependency set —
-    // `dependency::sync` merges the live project-level `[dependencies]`
-    // into the authored package's own `trait.lock`, and the forked alias
-    // is about to be removed from there. Rather than run finalization after
-    // `distribution::remove` (making that irreversible detach a step in the
-    // *middle* of this transaction, with the false-audit-record and
-    // scratch-backup residue that implies on a later failure), project the
-    // post-detach manifest text into a scratch file — never the real
-    // project manifest — and finalize against that projection now, while
-    // `distribution::remove` is still unreached. This makes `remove` this
-    // transaction's one true, self-rolling-back, last mutation: any
-    // finalization failure here has touched nothing outside the authored
-    // root the outer error handler already cleans up.
-    let project_manifest_path = scope.manifest_path("toml");
-    let projected_manifest_text =
-        ctx_traits_io::distribution::manifest_text_without_dependency(scope, alias)?;
-    let scratch_manifest_path = fork_projection_scratch_path(&project_manifest_path);
-    ctx_traits_io::write::write_text(&scratch_manifest_path, &projected_manifest_text)?;
-    let finalize = (|| -> crate::Result<String> {
-        match &family_variant_targets {
-            None => {
-                record_lock_evidence_with_manifest(
-                    camino::Utf8Path::new(&generated[0]),
-                    false,
-                    Some(&scratch_manifest_path),
-                )?;
-                Ok(ctx_traits_io::layout::package_lock_path(authored_root).to_string())
-            }
-            Some(targets) => {
-                for target in targets {
-                    record_lock_evidence_with_manifest(
-                        target,
-                        false,
-                        Some(&scratch_manifest_path),
-                    )?;
-                }
-                Ok(ctx_traits_io::layout::package_lock_path(authored_root).to_string())
-            }
-        }
-    })();
-    let _ = std::fs::remove_file(scratch_manifest_path.as_std_path());
-    let lock = finalize?;
 
     // The sole irreversible mutation in this transaction, run last: it is
     // already fully self-atomic (manifest declaration, project lock entry,

@@ -1252,6 +1252,31 @@ pub fn resolve_installed_operand<'a>(
     }
 }
 
+/// Parse `text` as a manifest document and remove `alias`'s `[dependencies]`
+/// (or scoped-equivalent) entry, returning the re-serialized text. The one
+/// implementation of "what does this manifest look like with this
+/// dependency gone" — [`manifest_text_without_dependency`] (a pure
+/// in-memory projection) and [`remove`] (the committed detach) both route
+/// through it so the post-detach dependency set they each describe can
+/// never drift apart.
+fn manifest_text_removing_dependency(
+    scope: &DistributionScope,
+    manifest_path: &Utf8Path,
+    text: &str,
+    alias: &str,
+) -> crate::Result<String> {
+    let mut document = text.parse::<toml_edit::DocumentMut>().map_err(|source| {
+        crate::parse::Error::TomlEditDecode {
+            context: format!("parse {manifest_path} to remove dependency {alias:?}"),
+            source: Box::new(source),
+        }
+    })?;
+    if let Some(deps) = get_nested_table_mut(&mut document, scope.dependencies_table_path()) {
+        deps.remove(alias);
+    }
+    Ok(document.to_string())
+}
+
 /// The manifest document text at this scope with `alias`'s `[dependencies]`
 /// (or scoped-equivalent) entry removed, computed purely in memory — this
 /// writes nothing to disk. `ctx traits fork` uses it to finalize the
@@ -1265,16 +1290,7 @@ pub fn manifest_text_without_dependency(
 ) -> crate::Result<String> {
     let manifest_path = scope.manifest_path("toml");
     let text = crate::read::read_text(&manifest_path)?;
-    let mut document = text.parse::<toml_edit::DocumentMut>().map_err(|source| {
-        crate::parse::Error::TomlEditDecode {
-            context: format!("parse {manifest_path} for fork projection"),
-            source: Box::new(source),
-        }
-    })?;
-    if let Some(deps) = get_nested_table_mut(&mut document, scope.dependencies_table_path()) {
-        deps.remove(alias);
-    }
-    Ok(document.to_string())
+    manifest_text_removing_dependency(scope, &manifest_path, &text, alias)
 }
 
 /// Remove one project-installed npm package: manifest entry, project-lock
@@ -1294,16 +1310,7 @@ pub fn remove(scope: &DistributionScope, operand: &str) -> crate::Result<RemoveR
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "no project manifest"),
         }
     })?;
-    let mut document = text.parse::<toml_edit::DocumentMut>().map_err(|source| {
-        crate::parse::Error::TomlEditDecode {
-            context: format!("parse {manifest_path} for remove"),
-            source: Box::new(source),
-        }
-    })?;
-    if let Some(deps) = get_nested_table_mut(&mut document, scope.dependencies_table_path()) {
-        deps.remove(&alias);
-    }
-    let manifest_text = document.to_string();
+    let manifest_text = manifest_text_removing_dependency(scope, &manifest_path, &text, &alias)?;
 
     let lock_path = scope.lock_path();
     assert_no_symlink_ancestors(&lock_path, scope.boundary())?;

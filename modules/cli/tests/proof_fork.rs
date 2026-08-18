@@ -479,6 +479,150 @@ fn fork_trust_read_failure_preserves_installed_dependency() {
     );
 }
 
+/// A native `trait(id, { variants })` family fixture source with two
+/// variants, `id` parameterized so each test gets a distinct alias/package
+/// id — used by the family fork-conflict regression below.
+fn family_fixture_source(id: &str) -> String {
+    format!(
+        "import {{ agent, input, port, procedure, sequence, slot, trait, variant }} from \"@ctx-traits/cdk\";\n\
+\n\
+const summary = slot.text(\"summary\");\n\
+const output = port.output.text({{ id: \"summary\", value: summary }});\n\
+const worker = agent(\"worker\", {{ description: \"Completes the starter task.\" }});\n\
+\n\
+const variantFixture = (name) => variant({{\n\
+  name,\n\
+  summary: `The ${{name}} variant.`,\n\
+  procedure: procedure({{\n\
+    description: \"Describe what this trait should accomplish.\",\n\
+    output,\n\
+    sequence: sequence.prompt({{\n\
+      id: \"run\",\n\
+      agent: worker,\n\
+      prompt: input.prompt`Describe the task for this trait.`,\n\
+      output: summary,\n\
+    }}),\n\
+  }}),\n\
+}});\n\
+\n\
+export const draft = trait(\"{id}\", {{\n\
+  variants: {{\n\
+    default: variantFixture(\"default\").default(),\n\
+    quick: variantFixture(\"quick\"),\n\
+  }},\n\
+}});\n"
+    )
+}
+
+/// A real, CDK-buildable native-family authored package at
+/// `<repo>/.ctx/traits/authored/<id>`, analogous to
+/// [`build_forkable_producer`] but publishing two variants under
+/// `generated/<name>/` instead of a single `generated/index.toml`.
+fn build_forkable_family_producer(repo: &Path, home: &Path, id: &str) -> PathBuf {
+    fs::create_dir_all(repo).unwrap();
+    git_init(repo);
+    symlink_node_modules(repo);
+    require_success(
+        "`ctx traits init <id>`",
+        &["traits", "init", id],
+        repo,
+        home,
+    );
+    let source_rel = format!(".ctx/traits/authored/{id}/source/index.ts");
+    fs::write(repo.join(&source_rel), family_fixture_source(id)).unwrap();
+    require_success(
+        "initial family `ctx traits build`",
+        &["traits", "build", &source_rel],
+        repo,
+        home,
+    );
+    repo.join(".ctx/traits/authored").join(id)
+}
+
+/// A family fork whose post-detach lock finalization fails on a conflicting
+/// dependency declaration (mirroring
+/// `fork_lock_finalization_failure_preserves_installed_dependency`, but
+/// forcing the failure through the *family* branch's per-variant lock sync)
+/// must not have refreshed the forked alias's own installed vendored tree
+/// from its live source first: with lock finalization for every variant
+/// routed through the single projected-manifest sync pass (never an interim
+/// pass against the live project manifest), there is no window in which a
+/// later failure could have already re-vendored `id`'s installed copy.
+/// Regression guard distinguishing this from the single-trait case: a
+/// family's canonical digest used to be discovered by a *separate*,
+/// pre-projection sync pass per variant before this fix.
+#[test]
+fn fork_family_lock_finalization_failure_leaves_vendored_tree_untouched() {
+    let scratch = ScratchRoot::new("p0213-fork-family-lock-conflict");
+    let home = scratch.home();
+    let id = "fixture-fork-family-conflict";
+    let producer_root = build_forkable_family_producer(&home.join("producer"), &home, id);
+
+    let producer_manifest = producer_root.join("trait.toml");
+    let mut producer_manifest_text = fs::read_to_string(&producer_manifest).unwrap();
+    producer_manifest_text.push_str(
+        "\n[dependencies.conflict-dep]\nversion = \"1.0.0\"\nnpm = \"conflict-dep-pkg\"\n",
+    );
+    fs::write(&producer_manifest, &producer_manifest_text).unwrap();
+
+    let consumer = home.join("consumer");
+    fs::create_dir_all(&consumer).unwrap();
+    git_init(&consumer);
+    symlink_node_modules(&consumer);
+    let alias = install_path_dependency(&consumer, &home, &producer_root, None);
+    assert_eq!(alias, id);
+
+    let manifest_path = consumer.join(".ctx/traits/config.toml");
+    let mut config_text = fs::read_to_string(&manifest_path).unwrap();
+    config_text.push_str(
+        "\n[[vendor.dependency]]\nalias = \"conflict-dep\"\nid = \"conflict-dep-other-id\"\nversion = \"2.0.0\"\n",
+    );
+    fs::write(&manifest_path, &config_text).unwrap();
+
+    let manifest_before = fs::read(&manifest_path).unwrap();
+    let lock_path = consumer.join(".ctx/traits/config.lock");
+    let lock_before = fs::read(&lock_path).unwrap();
+    let vendored_path = consumer.join(".ctx/traits/vendored").join(id);
+    assert!(
+        vendored_path.is_dir(),
+        "precondition: {id} must be vendored before forking it"
+    );
+    let vendored_tree_before = collect_tree(&vendored_path);
+
+    let result = run_ctx(&["traits", "fork", id], &consumer, &home);
+    let (stdout, stderr) = utf8(&result);
+    assert!(
+        !result.status.success(),
+        "family fork must fail loudly on a post-detach dependency conflict\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("conflicting") || stdout.contains("conflicting"),
+        "family fork failure did not name the dependency conflict\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    assert!(
+        !consumer.join(".ctx/traits/authored").join(id).exists(),
+        "a family fork that fails on lock finalization must leave no authored package"
+    );
+    assert_eq!(
+        manifest_before,
+        fs::read(&manifest_path).unwrap(),
+        "a family fork that fails on lock finalization must leave the project manifest untouched"
+    );
+    assert_eq!(
+        lock_before,
+        fs::read(&lock_path).unwrap(),
+        "a family fork that fails on lock finalization must leave the project lock untouched"
+    );
+    assert_eq!(
+        vendored_tree_before,
+        collect_tree(&vendored_path),
+        "a family fork that fails on lock finalization must leave the installed vendored tree \
+         full-tree-byte-identical — it must never have been refreshed from its live source by an \
+         interim, pre-projection lock sync"
+    );
+}
+
 /// Every regular file under `dir`, keyed by its path relative to `dir` and
 /// sorted, so two trees compare byte-for-byte regardless of directory-entry
 /// iteration order.
