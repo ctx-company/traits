@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.4"
-version = "0.12.0"
+version = "0.13.0"
 name = "Quick"
 description = "Refactor one module or entity quickly: checklist, implementation, review, fixing, commit."
 variant = "quick"
@@ -260,7 +260,8 @@ summary = "Implementation role."
 text = """
 
     Turn {port:target} into an actionable refactoring checklist.
-    Read the target with your tools; list concrete steps only — no framing prose, no illustrative design.
+    Read the target with your tools.
+    List concrete steps only — no framing prose, no illustrative design.
     Keep it to what honestly fits one quick run.
 
 
@@ -281,8 +282,10 @@ text = """
 
 
     Return exactly two outputs:
-    - the work summary, replacing any prior one: what changed, files, gate results, open concerns (slot:work-summary)
-    - the complete deviation report: every rejected-but-considered proposal, including any new ones this round (slot:deviation-report)
+    - the work summary, replacing any prior one:
+      what changed, files, gate results, open concerns (slot:work-summary)
+    - the complete deviation report:
+      every rejected-but-considered proposal, including any new ones this round (slot:deviation-report)
 """
 input = ["slot:plan"]
 output = [
@@ -294,6 +297,7 @@ output = [
 text = """
 Review the implemented state of the working tree against the plan {slot:plan}.
     Current work summary: {slot:work-summary}.
+    Your own verdict from the previous round, if any: {slot:review-verdict-1}.
     Cite the smell id or the deep-module violation for every blocker. Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
                     Consult the phase contract {slot:plan} and house rules {resource:architecture-dialect}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
                     Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {resource:architecture-dialect} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
@@ -310,18 +314,16 @@ output = ["slot:review-verdict-1"]
 [prompt.write-the-commit-message]
 text = """
 
-    The review for the refactor of {port:target} has ended and the work is being
-    committed. The final reviewer verdict is {slot:review-verdict-1}.
-    Write the commit message from the checklist {slot:plan}.
+    The refinement for the refactor of {port:target} has ended and the work is being committed.
+    Write the commit message from the plan {slot:plan}.
+    Final reviewer verdicts: {slot:review-verdict-1} & {slot:review-verdict-2}.
 
 
 
-    Return exactly the finished commit message — the runtime injects it into
-    the git commit step (slot:commit-message)
+    Return exactly the finished commit message into (slot:commit-message).
 """
 input = [
     "port:target",
-    "slot:review-verdict-1",
     "slot:plan",
 ]
 output = ["slot:commit-message"]
@@ -333,8 +335,9 @@ agent = "agent:scribe"
 prompt = "prompt:write-the-commit-message"
 input = [
     "port:target",
-    "slot:review-verdict-1",
     "slot:plan",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
 ]
 output = ["slot:commit-message"]
 
@@ -387,6 +390,7 @@ prompt = "prompt:review-the-implementation"
 input = [
     "slot:plan",
     "slot:work-summary",
+    { slot = "slot:review-verdict-1", optional = true },
     "resource:architecture-dialect",
 ]
 output = ["slot:review-verdict-1"]
