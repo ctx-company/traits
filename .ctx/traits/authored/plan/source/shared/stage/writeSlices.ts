@@ -55,7 +55,7 @@ export function tasks(agent: AgentHandle, maxSlices: number) {
           grounding,
         },
       ),
-      output: operation.over(receipts, operation.Append),
+      output: receipts.with(operation.Append),
     });
   });
 }

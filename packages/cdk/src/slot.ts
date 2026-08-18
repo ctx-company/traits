@@ -8,6 +8,7 @@ import type {
   OutputSinkHandle,
   SequenceHandle,
   SlotHandle,
+  SlotSink,
 } from "./handles.js";
 import { optionalSlot as optionalSlotInput } from "./input.js";
 import { attachMeta, metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
@@ -192,7 +193,9 @@ export const slot: SlotFunction = Object.assign(slotFn, {
  * slot would need a hand-written `{ slot, operation }` sink object, with no
  * check that `operation` is a value the runtime actually recognizes.
  * `operation.over(slot, operation.Append)` returns a typed `OutputSinkHandle`
- * usable directly as a sequence step's `output`.
+ * usable directly as a sequence step's `output`. `slot.with(operation.Append)`
+ * (0210) is the authoring form; this is the object layer it lowers through —
+ * the functional layer may not reach around it (0106).
  *
  * @param slotHandle The destination slot.
  * @example
@@ -281,11 +284,19 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   // `.forEach` is the functional layer's `items.forEach` spelling (0106,
   // 0102) — attached the same way as `.optional`, non-enumerable so it never
   // reaches the canonical declaration.
-  return withHiddenField(
+  const withForEach = withHiddenField(
     withOptional,
     "forEach",
     (title: string, opts: ForEachRegistrarOptions | undefined, body: (item: SlotHandle) => void) =>
       dispatchSlotForEach(withOptional, title, opts, body) as SequenceHandle,
+  );
+  // `.with` is the authoring-form spelling of `operation.over(slot, op)`
+  // (0210, 0207 ruling 4) — a pure delegation, not a new declaration path,
+  // attached the same non-enumerable way so it never reaches the canonical.
+  return withHiddenField(
+    withForEach,
+    "with",
+    ((op?: WriteOperation) => operationOver(resolved, op as never)) as SlotSink<unknown>,
   );
 }
 

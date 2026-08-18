@@ -1,6 +1,6 @@
 import type { SettingHandle as ConfigSettingHandle } from "@ctx-traits/config";
 import type { ForEachRegistrarOptions } from "./functional/registrars.js";
-import type { CanonicalGuardPredicate, RefKind } from "./generated.js";
+import type { CanonicalGuardPredicate, JsonValue, RefKind, WriteOperation } from "./generated.js";
 import type { CdkObject } from "./meta.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
 
@@ -80,6 +80,8 @@ export type DeclaredSlotHandle<Value = unknown> = SlotHandle<Value> & {
   readonly optional: () => OptionalSlotRead<Value>;
   /** `.forEach` is attached non-enumerably at mint time (0106, `slot.ts`) — `items.forEach` is THE for-each spelling (0102). */
   readonly forEach: (title: string, opts: ForEachRegistrarOptions, body: (item: SlotHandle) => void) => SequenceHandle;
+  /** `.with` is attached non-enumerably at mint time (0210, `slot.ts`) — the authoring form of `operation.over(slot, op)`. */
+  readonly with: SlotSink<Value>;
 };
 /**
  * A declared object-schema slot handle: `DeclaredSlotHandle`'s `.optional()`
@@ -201,6 +203,20 @@ export type PromptTemplate<Input = unknown> = CdkHandle<"prompt-template", Input
   readonly extend: PromptTemplateExtend<Input>;
 };
 export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"output-sink", Value>;
+/**
+ * The call signature of a slot handle's `.with` method (0210, 0207 ruling
+ * 4) — the authoring-form spelling of `operation.over(slot, op)`, typed per
+ * write mode exactly like `operation.over`'s own overloads: append needs a
+ * list-valued slot, increment a number-valued slot, `merge`/`set-field` and
+ * no-arg/`replace` are available on every slot.
+ */
+export type SlotSink<Value> =
+  ((operation: "merge" | Extract<WriteOperation, { readonly "set-field": string }>) => OutputSinkHandle<JsonValue>) &
+  ((operation?: "replace") => OutputSinkHandle<Value>) &
+  // `unknown` here is the intersection identity (`T & unknown` = `T`) — a non-list/non-number
+  // value contributes no append/increment call signature beyond the two above.
+  (Value extends readonly (infer Element)[] ? (operation: "append") => OutputSinkHandle<Element> : unknown) &
+  (Value extends number ? (operation: "increment") => OutputSinkHandle<number> : unknown);
 /**
  * An `output.text`/`output.of(schema)` instruction-output: carries the
  * compiled instruction text (and, for `.of`, the schema ref) until the step

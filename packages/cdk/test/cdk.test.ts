@@ -57,6 +57,7 @@ import type {
   SessionHandle,
   SignalFields,
   SlotHandle,
+  SlotSink,
 } from "@ctx-traits/cdk";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -2370,6 +2371,93 @@ describe("public brands and values", () => {
     expectTypeOf(textSlot).toMatchTypeOf<PortHandle<string>>();
     // @ts-expect-error Append requires an array-valued slot.
     operation.over(textSlot, operation.Append);
+  });
+});
+
+describe("slot.with (0210)", () => {
+  it("produces a draft identical to operation.over for the same slot/operation", () => {
+    const draftFor = (output: OutputSinkHandle<string>) =>
+      toDraftJson(
+        trait("slot-with-draft-equality", {
+          version: "0.1.0",
+          description: "s",
+          name: "Slot With Draft Equality",
+          procedure: procedure({
+            description: "One step appending to a list slot.",
+            sequence: [sequence.command("append", { cmd: "true", output })],
+          }),
+          slot: [slot.texts("findings")],
+        }),
+      );
+
+    const listSlot = slot.texts("findings");
+    expect(draftFor(listSlot.with(operation.Append))).toEqual(draftFor(operation.over(listSlot, operation.Append)));
+  });
+
+  it("never serializes .with itself into the canonical slot declaration", () => {
+    const listSlot = slot.texts("with-not-canonical");
+    const draft = toDraftJson(
+      trait("slot-with-not-canonical", {
+        version: "0.1.0",
+        description: "s",
+        name: "Slot With Not Canonical",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        slot: [listSlot],
+      }),
+    ) as { readonly slot?: readonly Record<string, unknown>[] };
+
+    const declared = draft.slot?.find((entry) => entry.id === "with-not-canonical");
+    expect(declared).toEqual({
+      id: "with-not-canonical",
+      schema: "[schema:text]",
+      description: "Runtime slot with-not-canonical.",
+    });
+  });
+
+  it("coexists with the object-schema field proxy: .with still returns a sink and field access still mints a FieldRef", () => {
+    const noteSchema = schema.object("slot-with-proxy-note", { status: schema.text() });
+    const noteSlot = slot({ id: "slot-with-proxy-note-slot", schema: noteSchema });
+
+    const sink = noteSlot.with(operation.SetField("status"));
+    expect(sink).toBeDefined();
+    expectTypeOf(noteSlot.status).toMatchTypeOf<FieldRef<string>>();
+
+    const draft = toDraftJson(
+      trait("slot-with-proxy-survival", {
+        version: "0.1.0",
+        description: "s",
+        name: "Slot With Proxy Survival",
+        procedure: procedure({
+          description: "One step setting a field.",
+          sequence: [sequence.command("set-status", { cmd: "true", output: sink })],
+        }),
+        slot: [noteSlot],
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual([
+      { slot: "slot:slot-with-proxy-note-slot", operation: { "set-field": "status" } },
+    ]);
+  });
+
+  it("types .with per write mode exactly like operation.over's overloads", () => {
+    const textSlot = slot.text("slot-with-typed-text");
+    const listSlot = slot.texts("slot-with-typed-list");
+    const numberSlot = slot.number("slot-with-typed-number");
+
+    expectTypeOf(listSlot.with).toMatchTypeOf<SlotSink<readonly string[]>>();
+    expectTypeOf(listSlot.with(operation.Append)).toMatchTypeOf<OutputSinkHandle<string>>();
+    expectTypeOf(numberSlot.with(operation.Increment)).toMatchTypeOf<OutputSinkHandle<number>>();
+    expectTypeOf(textSlot.with()).toMatchTypeOf<OutputSinkHandle<string>>();
+    expectTypeOf(textSlot.with(operation.Replace)).toMatchTypeOf<OutputSinkHandle<string>>();
+    // No-arg/`replace` short-circuits to the slot handle itself at runtime too, matching operation.over.
+    expect(textSlot.with()).toBe(textSlot);
+    expect(textSlot.with(operation.Replace)).toBe(textSlot);
+
+    // @ts-expect-error Append requires an array-valued slot.
+    textSlot.with(operation.Append);
+    // @ts-expect-error Increment requires a number-valued slot.
+    textSlot.with(operation.Increment);
   });
 });
 
