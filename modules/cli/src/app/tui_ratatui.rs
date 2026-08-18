@@ -8,7 +8,7 @@
 
 use std::io::{IsTerminal, Stderr, Write};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Once, mpsc};
+use std::sync::{Arc, Condvar, Mutex, Once, Weak, mpsc};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
@@ -105,6 +105,14 @@ impl PaneScreen {
 }
 
 const INLINE_RESIZE_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Bound on [`await_draining_pumps`]: generous against the pump's worst-case
+/// latency to observe `stop` (~100ms poll + up to 50ms paused-sleep), never
+/// unbounded — expiry fails construction (propagated as `io::Error`, the same
+/// "TUI unavailable" path every other construction failure already takes)
+/// rather than hanging, and rather than silently proceeding into the exact
+/// race this handshake exists to close.
+const PUMP_HANDOFF_DEADLINE: Duration = Duration::from_millis(500);
 
 /// The inline pane owns the terminal's complete row budget. Ratatui 0.29
 /// cannot resize an existing `Viewport::Inline`, so a size change rebuilds
@@ -245,6 +253,108 @@ struct PumpControl {
     input_generation: Arc<AtomicU64>,
     wake: Mutex<Option<Arc<dyn Fn() + Send + Sync + 'static>>>,
     ctrl_c_policy: CtrlCPolicy,
+    /// Set (via [`PumpExitGuard`]'s `Drop`) the instant the pump thread's
+    /// `loop` returns, on every exit path — stop observed, poll error, read
+    /// error, or a dead key/mouse channel. [`await_draining_pumps`] polls
+    /// this alongside `stop` to know when a torn-down pane's reader has
+    /// actually released crossterm's process-global event source, not just
+    /// been asked to.
+    exited: AtomicBool,
+    /// The pump thread's own id, recorded at the top of its closure.
+    /// [`await_draining_pumps`] skips an entry whose owner is the calling
+    /// thread — defends against a pump's wake closure ever driving pane
+    /// construction on the pump thread itself, which would otherwise wait on
+    /// its own exit.
+    owner_thread: Mutex<Option<std::thread::ThreadId>>,
+}
+
+/// Process-global registry of every pump ever spawned, `Weak` so a torn-down
+/// pane's `PumpControl` is freed normally once nothing else holds it. Paired
+/// with [`PUMP_CONDVAR`] and a dummy [`PUMP_WAIT_LOCK`] so
+/// [`await_draining_pumps`] can block, with a bound, until the pumps it cares
+/// about report `exited`.
+static PUMP_REGISTRY: Mutex<Vec<Weak<PumpControl>>> = Mutex::new(Vec::new());
+static PUMP_CONDVAR: Condvar = Condvar::new();
+static PUMP_WAIT_LOCK: Mutex<()> = Mutex::new(());
+
+/// RAII guard held for the lifetime of a pump thread's closure: whichever of
+/// its several `return` points fires, `Drop` marks the pump `exited` and
+/// wakes every waiter, so no return path can forget to signal it.
+struct PumpExitGuard(Arc<PumpControl>);
+
+impl Drop for PumpExitGuard {
+    fn drop(&mut self) {
+        self.0.exited.store(true, Ordering::SeqCst);
+        PUMP_CONDVAR.notify_all();
+    }
+}
+
+/// Blocks the calling thread, up to `deadline` total, until every registered
+/// pump that is mid-teardown (`stop == true`) has observed it (`exited ==
+/// true`) — the handshake that closes the race documented on
+/// [`inline_capable_screen`]: a fresh cursor query must never race a dying
+/// pane's reader for the same crossterm-internal reply. A live, merely
+/// suspended pump (`stop == false`) is never waited on, and an entry owned by
+/// the calling thread is skipped so a wake closure can never make
+/// construction wait on itself.
+///
+/// Returns `Err` the instant a pump neither exits nor is skippable within
+/// `deadline` — construction must never proceed past this point with such a
+/// pump still alive, since that is exactly the race this handshake exists to
+/// close. This includes the self-owned case: a stopped-but-unexited pump
+/// whose `owner_thread` is the calling thread cannot be waited on (that would
+/// deadlock the pump against itself), so it is treated as a handoff failure
+/// rather than silently skipped. The caller (`new_with_options`) propagates
+/// the error through its own `io::Result`, which every call site already
+/// treats as "TUI unavailable, fall back to status progress" — the same
+/// fallback used for every other construction failure, not a new failure
+/// mode.
+fn await_draining_pumps(deadline: Duration) -> std::io::Result<()> {
+    let current_thread = std::thread::current().id();
+    let start = Instant::now();
+    let pumps: Vec<Arc<PumpControl>> = {
+        let mut registry = match PUMP_REGISTRY.lock() {
+            Ok(registry) => registry,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        registry.retain(|weak| weak.strong_count() > 0);
+        registry.iter().filter_map(Weak::upgrade).collect()
+    };
+    for pump in pumps {
+        if !pump.stop.load(Ordering::SeqCst) || pump.exited.load(Ordering::SeqCst) {
+            continue;
+        }
+        if let Ok(owner) = pump.owner_thread.lock()
+            && *owner == Some(current_thread)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "a predecessor input pump owned by this thread has not exited; cannot wait on itself",
+            ));
+        }
+        let elapsed = start.elapsed();
+        if elapsed >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "a predecessor input pump did not exit before the handoff deadline",
+            ));
+        }
+        let remaining = deadline - elapsed;
+        let guard = match PUMP_WAIT_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let (_guard, timeout) = PUMP_CONDVAR
+            .wait_timeout_while(guard, remaining, |()| !pump.exited.load(Ordering::SeqCst))
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if timeout.timed_out() && !pump.exited.load(Ordering::SeqCst) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "a predecessor input pump did not exit before the handoff deadline",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// One ratatui alternate-screen pane for a live `--progress tui` run: an RAII
@@ -401,6 +511,16 @@ impl RatatuiPane {
         // drive loop's own `drive.rs` call — both call sites are idempotent
         // via the same `Once`.
         crate::app::interrupt::install();
+        // P0199: a torn-down predecessor pane's input pump can still be
+        // draining crossterm's process-global event reader for up to ~150ms
+        // after `leave()` flips `stop`. Waiting here — before raw mode, and
+        // therefore before the inline viewport's cursor-position query below
+        // — closes the race documented on `inline_capable_screen`: no reader
+        // still alive to eat/contend the `ESC[6n` reply this construction is
+        // about to issue. A pump that still hasn't exited by the deadline
+        // fails construction outright (see `await_draining_pumps`) instead of
+        // letting the race it detected happen anyway.
+        await_draining_pumps(PUMP_HANDOFF_DEADLINE)?;
         enable_raw_mode()?;
         if let Err(err) = execute!(std::io::stderr(), EnableFocusChange) {
             let _ = execute!(std::io::stderr(), DisableFocusChange);
@@ -507,11 +627,20 @@ impl RatatuiPane {
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(None),
             ctrl_c_policy,
+            exited: AtomicBool::new(false),
+            owner_thread: Mutex::new(None),
         });
         let (sender, keys) = mpsc::channel();
         {
             let pump = Arc::clone(&pump);
+            if let Ok(mut registry) = PUMP_REGISTRY.lock() {
+                registry.push(Arc::downgrade(&pump));
+            }
             std::thread::spawn(move || {
+                if let Ok(mut owner) = pump.owner_thread.lock() {
+                    *owner = Some(std::thread::current().id());
+                }
+                let _exit_guard = PumpExitGuard(Arc::clone(&pump));
                 loop {
                     if pump.stop.load(Ordering::SeqCst) {
                         return;
@@ -624,6 +753,8 @@ impl RatatuiPane {
                 input_generation: Arc::new(AtomicU64::new(0)),
                 wake: Mutex::new(None),
                 ctrl_c_policy: CtrlCPolicy::RequestStop,
+                exited: AtomicBool::new(true),
+                owner_thread: Mutex::new(None),
             }),
             inline_size: None,
             last_inline_resize: Instant::now(),
@@ -1239,6 +1370,8 @@ mod tests {
                 })
             })),
             ctrl_c_policy: CtrlCPolicy::RequestStop,
+            exited: AtomicBool::new(false),
+            owner_thread: Mutex::new(None),
         };
         notify_input(&control);
         notify_input(&control);
@@ -1267,6 +1400,8 @@ mod tests {
                 })
             })),
             ctrl_c_policy: CtrlCPolicy::RequestStop,
+            exited: AtomicBool::new(false),
+            owner_thread: Mutex::new(None),
         };
 
         assert!(control.focused.load(Ordering::SeqCst));
@@ -1277,6 +1412,99 @@ mod tests {
         assert!(control.focused.load(Ordering::SeqCst));
         assert_eq!(control.input_generation.load(Ordering::SeqCst), 2);
         assert_eq!(wakes.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn draining_pump_handoff_never_proceeds_before_exit() {
+        // A stopped-but-not-yet-exited pump, registered exactly the way a
+        // real spawn does, must make `await_draining_pumps` return `Err`
+        // rather than returning `Ok` once the deadline elapses — the
+        // invariant `new_with_options` depends on to never issue a cursor
+        // query while this pump could still be draining crossterm's reader.
+        let pump = Arc::new(PumpControl {
+            stop: AtomicBool::new(true),
+            paused: AtomicBool::new(false),
+            focused: AtomicBool::new(true),
+            resize_size: AtomicU32::new(0),
+            mouse_anchor: AtomicU32::new(0),
+            mouse_current: AtomicU32::new(0),
+            mouse_selecting: AtomicBool::new(false),
+            mouse_up_pending: AtomicBool::new(false),
+            mouse_dirty: AtomicBool::new(false),
+            input_generation: Arc::new(AtomicU64::new(0)),
+            wake: Mutex::new(None),
+            ctrl_c_policy: CtrlCPolicy::RequestStop,
+            exited: AtomicBool::new(false),
+            owner_thread: Mutex::new(None),
+        });
+        // Register from a background thread so the recorded owner is
+        // guaranteed foreign to the thread that calls `await_draining_pumps`
+        // below — otherwise the self-wait skip would exempt this pump and
+        // the test would prove nothing.
+        let registered = Arc::clone(&pump);
+        std::thread::spawn(move || {
+            {
+                let mut owner = registered.owner_thread.lock().expect("lock owner_thread");
+                *owner = Some(std::thread::current().id());
+            }
+            {
+                let mut registry = PUMP_REGISTRY.lock().expect("lock PUMP_REGISTRY");
+                registry.push(Arc::downgrade(&registered));
+            }
+        })
+        .join()
+        .expect("owner thread finishes");
+
+        let result = await_draining_pumps(Duration::from_millis(50));
+        assert!(
+            result.is_err(),
+            "handoff must fail rather than silently proceed while the pump is still un-exited"
+        );
+        assert!(!pump.exited.load(Ordering::SeqCst));
+
+        // Clean up so this synthetic entry can't affect a later test in the
+        // same process — mark it exited and let opportunistic pruning drop
+        // it on the next real call.
+        pump.exited.store(true, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn draining_pump_handoff_rejects_same_thread_conflict() {
+        // A stopped-but-unexited pump owned by the *calling* thread must
+        // fail the handoff, not be silently skipped as "not our problem" —
+        // skipping it would let `new_with_options` proceed to a cursor query
+        // while this thread's own predecessor pump could still be draining.
+        let pump = Arc::new(PumpControl {
+            stop: AtomicBool::new(true),
+            paused: AtomicBool::new(false),
+            focused: AtomicBool::new(true),
+            resize_size: AtomicU32::new(0),
+            mouse_anchor: AtomicU32::new(0),
+            mouse_current: AtomicU32::new(0),
+            mouse_selecting: AtomicBool::new(false),
+            mouse_up_pending: AtomicBool::new(false),
+            mouse_dirty: AtomicBool::new(false),
+            input_generation: Arc::new(AtomicU64::new(0)),
+            wake: Mutex::new(None),
+            ctrl_c_policy: CtrlCPolicy::RequestStop,
+            exited: AtomicBool::new(false),
+            owner_thread: Mutex::new(Some(std::thread::current().id())),
+        });
+        {
+            let mut registry = PUMP_REGISTRY.lock().expect("lock PUMP_REGISTRY");
+            registry.push(Arc::downgrade(&pump));
+        }
+
+        let result = await_draining_pumps(Duration::from_millis(50));
+        assert!(
+            result.is_err(),
+            "handoff must fail for a self-owned unexited pump, not proceed as if it were skippable"
+        );
+        assert!(!pump.exited.load(Ordering::SeqCst));
+
+        // Clean up so this synthetic entry can't affect a later test in the
+        // same process.
+        pump.exited.store(true, Ordering::SeqCst);
     }
 
     #[test]
@@ -1313,6 +1541,8 @@ mod tests {
                 })
             })),
             ctrl_c_policy: CtrlCPolicy::RequestStop,
+            exited: AtomicBool::new(false),
+            owner_thread: Mutex::new(None),
         };
         let (sender, _keys) = mpsc::channel();
 
