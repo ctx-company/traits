@@ -1,5 +1,5 @@
 id = "research"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Research (Deep)"
 description = "Research one topic exhaustively: extract the brief's tracks and demanded report structure, plan 4-6 streams (counterevidence mandatory) covering every track, research each stream in its own frame (full reading notes on disk, typed dossier in the ledger), triangulate, apply Chain-of-Verification, then a bounded dual-reviewer refinement loop, then commit report.md, bibliography.md, evidence.csv, and verification.md following the brief's own structure."

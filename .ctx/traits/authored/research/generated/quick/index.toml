@@ -1,5 +1,5 @@
 id = "research"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Research (Quick)"
 description = "Research one topic quickly: an inline scope note, one bounded worker research pass, a single bounded reviewer loop, then commit brief.md and sources.md."

@@ -4,12 +4,7 @@
     "start": 21,
     "end": 21
   },
-  "agent:smart-1": {
-    "file": "packages/toolkit/src/agent.ts",
-    "start": 35,
-    "end": 35
-  },
-  "agent:smart-2": {
+  "agent:smart": {
     "file": "packages/toolkit/src/agent.ts",
     "start": 35,
     "end": 35

@@ -1,5 +1,5 @@
 id = "plan"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.5.0"
 name = "Plan"
 description = "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus 10-15-minute children with typed relations, the format the board dispatch machinery actually resolves."

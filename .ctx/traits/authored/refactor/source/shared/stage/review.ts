@@ -1,7 +1,7 @@
 import * as agents from "@ctx-traits/agents";
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart, smart } from "../agent.ts";
+import { smart } from "../agent.ts";
 import { plan, target, verdict1, verdict2, workSummary } from "../data.ts";
 import { architectureDialect } from "../resource.ts";
 

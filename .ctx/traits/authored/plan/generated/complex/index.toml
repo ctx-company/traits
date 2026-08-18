@@ -1,5 +1,5 @@
 id = "plan"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.5.0"
 name = "Plan (Complex)"
 description = "Turn described work into board-ready TaskDocument TOML task files, then grind an independent-reviewer verdict loop over the written board until approved — coverage, sizing, dependencies, and format all blockable."

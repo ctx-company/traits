@@ -1,5 +1,5 @@
 id = "refactor"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.13.0"
 name = "Complex"
 description = "Refactor procedure: survey, frame, design, implement, refine, and commit."
@@ -254,22 +254,17 @@ allowed = [
 
 [[agent]]
 id = "scribe"
-description = "Writes the commit message from the agreed design and survey record; git staging and committing run as command steps."
+description = "Writes the commit message and summary.; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [[agent]]
-id = "smart-1"
+id = "smart"
 description = "Surveys, frames, designs, and reviews."
 summary = "Review role."
 
 [[agent]]
-id = "smart-2"
-description = "Independent reviewer."
-summary = "Review role."
-
-[[agent]]
 id = "worker"
-description = "Implements the agreed refactor design and applies reviewer fixes."
+description = "Implements the agreed refactor design."
 summary = "Implementation role."
 
 [prompt.cross-review-refactor]
@@ -456,7 +451,7 @@ output = [
 [[sequence.doubly-reviewed-verbatim-refinement-body.sequence]]
 id = "review-refactor"
 title = "Review refactor"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:review-refactor"
 input = [
     "port:target",
@@ -469,7 +464,7 @@ output = ["slot:review-verdict-1"]
 [[sequence.doubly-reviewed-verbatim-refinement-body.sequence]]
 id = "cross-review-refactor"
 title = "Cross-review refactor"
-agent = "agent:smart-2"
+agent = "agent:smart"
 prompt = "prompt:cross-review-refactor"
 input = [
     "port:target",
@@ -487,7 +482,7 @@ output = ["port:commit-report"]
 [[procedure.sequence]]
 id = "survey-the-target"
 title = "Survey the target"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:survey-the-target"
 input = ["port:target"]
 output = ["slot:survey"]
@@ -495,7 +490,7 @@ output = ["slot:survey"]
 [[procedure.sequence]]
 id = "frame-the-problem"
 title = "Frame the problem"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:frame-the-problem"
 input = [
     "slot:survey",
@@ -506,7 +501,7 @@ output = ["slot:refactor-frame"]
 [[procedure.sequence]]
 id = "design-the-boundary"
 title = "Design the boundary"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:design-the-boundary"
 input = [
     "slot:refactor-frame",

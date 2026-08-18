@@ -1,5 +1,5 @@
 id = "refactor"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.13.0"
 name = "Quick"
 description = "Refactor one module or entity quickly: checklist, implementation, review, fixing, commit."
@@ -243,31 +243,28 @@ allowed = [
 
 [[agent]]
 id = "scribe"
-description = "Writes the commit message from the agreed design and survey record; git staging and committing run as command steps."
+description = "Writes the commit message and summary.; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [[agent]]
-id = "smart-1"
+id = "smart"
 description = "Surveys, frames, designs, and reviews."
 summary = "Review role."
 
 [[agent]]
 id = "worker"
-description = "Implements the agreed refactor design and applies reviewer fixes."
+description = "Implements the agreed refactor design."
 summary = "Implementation role."
 
 [prompt.checklist-the-target]
 text = """
 
     Turn {port:target} into an actionable refactoring checklist.
-    Read the target with your tools.
-    List concrete steps only — no framing prose, no illustrative design.
-    Keep it to what honestly fits one quick run.
+  
 
 
-
-    Return the checklist (slot:plan).
-"""
+    Return the checklist plan: slot:plan.
+  """
 input = ["port:target"]
 output = ["slot:plan"]
 
@@ -385,7 +382,7 @@ output = [
 [[sequence.reviewed-refinement-body.sequence]]
 id = "review-the-implementation"
 title = "Review the implementation"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:review-the-implementation"
 input = [
     "slot:plan",
@@ -403,7 +400,7 @@ output = ["port:commit-report"]
 [[procedure.sequence]]
 id = "checklist-the-target"
 title = "Checklist the target"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:checklist-the-target"
 input = ["port:target"]
 output = ["slot:plan"]

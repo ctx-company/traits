@@ -1,5 +1,5 @@
 id = "refactor"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.13.0"
 name = "Guided"
 description = "Collect human annotations interactively, plan them as a checklist, implement every item in a reviewed loop, and commit."
@@ -283,17 +283,17 @@ allowed = [
 
 [[agent]]
 id = "scribe"
-description = "Writes the commit message from the agreed design and survey record; git staging and committing run as command steps."
+description = "Writes the commit message and summary.; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [[agent]]
-id = "smart-1"
+id = "smart"
 description = "Surveys, frames, designs, and reviews."
 summary = "Review role."
 
 [[agent]]
 id = "worker"
-description = "Implements the agreed refactor design and applies reviewer fixes."
+description = "Implements the agreed refactor design."
 summary = "Implementation role."
 
 [prompt.build-the-checklist]
@@ -420,7 +420,7 @@ output = [
 [[sequence.reviewed-refinement-body.sequence]]
 id = "review-the-implementation"
 title = "Review the implementation"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:review-the-implementation"
 input = [
     "slot:plan",
@@ -446,7 +446,7 @@ timeout-ms = 3600000
 [[procedure.sequence]]
 id = "build-the-checklist"
 title = "Build the checklist"
-agent = "agent:smart-1"
+agent = "agent:smart"
 prompt = "prompt:build-the-checklist"
 input = ["slot:annotations"]
 output = ["slot:plan"]

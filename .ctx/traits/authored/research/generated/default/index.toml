@@ -1,5 +1,5 @@
 id = "research"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Research (Default)"
 description = "Research one topic end to end: extract the brief's tracks and demanded report structure, plan 2-5 non-overlapping streams covering every track, research each stream in its own frame (full reading notes on disk, typed dossier in the ledger), triangulate, then a bounded single-reviewer refinement loop, then commit report.md, bibliography.md, and evidence.csv following the brief's own structure."
