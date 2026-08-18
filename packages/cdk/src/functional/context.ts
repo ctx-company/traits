@@ -13,7 +13,7 @@
 
 import { onSettingMint } from "@ctx-traits/config";
 import type { BranchCheckValue } from "../condition.js";
-import type { Handle, ResourceHandle, SequenceHandle, SettingHandle, SlotHandle } from "../handles.js";
+import type { Handle, RefHandle, ResourceHandle, SequenceHandle, SettingHandle, SlotHandle } from "../handles.js";
 import type { MetaDeclaration } from "../meta.js";
 import type {
   ExhaustionSignalValue,
@@ -79,7 +79,10 @@ export interface LoopScopeState {
 }
 
 export interface ParallelScopeState {
+  /** The `effect.onFailure(signal.{Skip, Park, Abort})` decision (0209), mapped to a policy string. */
   onFailurePolicy?: ParallelBranchFailurePolicy;
+  /** The `effect.onFailure(declaredSignal)` announce (0209) — a bare signal ref, coexists with a decision verb. */
+  onFailureAnnounce?: string | RefHandle<"signal">;
 }
 
 export interface Scope {

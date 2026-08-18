@@ -217,6 +217,7 @@ export type {
   RubricFields,
   RuleFields,
   SignalFields,
+  SignalFunction,
 } from "./procedure.js";
 /** The object-layer `procedure(...)` builder, augmented with `procedure.from(fields, body)` (0106) — one exported symbol, both call shapes. */
 export const procedure = attachProcedureFrom(procedureBase);
@@ -264,6 +265,7 @@ export type {
   SequenceInputValue,
   SequenceOutputValue,
 } from "./sequence.js";
+export type { SignalVerb, SignalVerbName } from "./signal-verb.js";
 export { session } from "./session.js";
 export type { SessionBinding, SessionFunction, SessionLifecycle, SessionOptions } from "./session.js";
 export type { SessionTitleSinkInput, SinkFields } from "./sink.js";

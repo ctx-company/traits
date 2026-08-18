@@ -16,6 +16,7 @@ import { collectMany, compact, compactAs, normalizeValue, validateSlug } from ".
 import type { Mutable } from "./normalize.js";
 import { refText } from "./ref.js";
 import type { SequenceOutputValue } from "./sequence.js";
+import { signalVerbLabel, signalVerbOf } from "./signal-verb.js";
 
 /**
  * The value set a guard position accepts: a bare ref string, a typed
@@ -350,13 +351,21 @@ export interface ConditionOutputFunction {
  * @see {@link sequence}
  */
 export const condition: ConditionFunction = {
-  signal: (signalRef: string | RefHandle): GuardHandle =>
-    guardHandle(
+  signal: (signalRef: string | RefHandle): GuardHandle => {
+    const verbName = signalVerbOf(signalRef);
+    if (verbName !== undefined) {
+      throw new Error(
+        `condition.signal(${signalVerbLabel(verbName)}) — signal verbs are raise-only; observation is reserved, ` +
+          "not undefined. Guard on a declared signal(...) handle instead.",
+      );
+    }
+    return guardHandle(
       { signal: refText(signalRef, "condition.signal") },
       {
         declarations: collectMany([signalRef]),
       },
-    ),
+    );
+  },
   equals: function equals<Value extends JsonValue>(
     target: string | RefHandle<RefKind, Value> | FieldRef<Value>,
     value: Value,

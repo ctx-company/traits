@@ -17,6 +17,7 @@ import {
   resource,
   schema,
   seats,
+  signal,
   slot,
   stage,
   step,
@@ -156,11 +157,11 @@ describe("functional layer build rules (0106)", () => {
     ).toThrow(/par\.maxAtOnce is parked/);
   });
 
-  it("flow.when(..., flow.Abort) outside a loop throws", () => {
+  it("flow.when(..., signal.Abort) outside a loop throws", () => {
     const cap = slot.number("outside-loop-cap");
     expect(() =>
       procedure.from({ description: "d" }, () => {
-        flow.when("Give up", condition.gte(cap, 3), flow.Abort);
+        flow.when("Give up", condition.gte(cap, 3), signal.Abort);
       }),
     ).toThrow(/requires an enclosing flow\.loop/);
   });
@@ -178,15 +179,52 @@ describe("functional layer build rules (0106)", () => {
     ).toThrow(/requires an enclosing flow\.loop/);
   });
 
-  it("effect.onFailure always throws — a loop declares no failure of its own to route", () => {
+  it("effect.onFailure outside a flow.parallel throws — a loop declares no failure of its own to route", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.loop("Has No Failure Route", (loop) => {
           loop.maxIterations(1);
-          effect.onFailure();
+          effect.onFailure(signal.Skip);
         });
       }),
     ).toThrow(/no target here/);
+  });
+
+  it("effect.onFailure(signal.Continue) is not a legal branch-failure verb", () => {
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.parallel("Fan Out", () => {
+          step.command("A", { cmd: "echo a" });
+          effect.onFailure(signal.Continue as never);
+        });
+      }),
+    ).toThrow(/is not legal here/);
+  });
+
+  it("a second effect.onFailure decision verb in one flow.parallel throws", () => {
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.parallel("Fan Out Twice", () => {
+          step.command("A", { cmd: "echo a" });
+          effect.onFailure(signal.Skip);
+          effect.onFailure(signal.Park);
+        });
+      }),
+    ).toThrow(/decision verb already declared once/);
+  });
+
+  it("loop.maxIterations({ onExhausted: signal.Skip }) is not legal — only Abort/Continue govern exhaustion", () => {
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.loop("Bad Exhaustion", (loop) => {
+          loop.maxIterations(2, { onExhausted: signal.Skip as never });
+        });
+      }),
+    ).toThrow(/is not legal here/);
+  });
+
+  it("condition.signal(signal.Skip) is rejected — verb signals are raise-only", () => {
+    expect(() => condition.signal(signal.Skip as never)).toThrow(/signal\.Skip.*raise-only/);
   });
 
   it("flow.match requires at least one value arm", () => {

@@ -1,5 +1,5 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
-import { condition, flow, input } from "@ctx-traits/cdk";
+import { condition, flow, input, signal } from "@ctx-traits/cdk";
 
 import { doneCriteria, receipts, revisionLog, slicePlan, taskInput, verdict, workItems } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
@@ -12,7 +12,7 @@ import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
  */
 export function loop(reviewer: AgentHandle, composer: AgentHandle) {
   flow.loop("Reviewing", (reviewLoop) => {
-    reviewLoop.maxIterations(4, { onExhausted: "abort" });
+    reviewLoop.maxIterations(4, { onExhausted: signal.Abort });
 
     reviewer.prompt("Review the board", {
       input: input.prompt(

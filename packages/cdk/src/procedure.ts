@@ -22,6 +22,8 @@ import {
 } from "./normalize.js";
 import { schema } from "./schema.js";
 import { materializeSequenceItem, normalizeMaterializedSequenceItem, validateNoDuplicateTitles } from "./sequence.js";
+import { SIGNAL_ABORT, SIGNAL_CONTINUE, SIGNAL_PARK, SIGNAL_SKIP } from "./signal-verb.js";
+import type { SignalVerb } from "./signal-verb.js";
 
 /** Scalar-or-array predicate list, matching the canonical `PredicateList` authoring shape. */
 type PredicateFields = string | readonly string[];
@@ -448,6 +450,26 @@ export function rule(fields: RuleFields): CanonicalRule {
   });
 }
 /**
+ * Signal builder call signature, plus the four `signal.{Abort, Continue,
+ * Skip, Park}` verb constants (0209): raise-only decisions an authoring site
+ * passes to `loop.maxIterations({ onExhausted })`, `flow.when(title, cond,
+ * signal.Abort)`, or `effect.onFailure(...)` instead of a bare policy
+ * string. A verb is never itself a declared signal — `condition.signal`
+ * rejects one, since a verb is raised, not observed.
+ */
+export interface SignalFunction {
+  (fields: SignalFields): SignalHandle;
+  /** Fail the enclosing structure (loop/parallel branch) and propagate — not a run-terminal `flow.error`. */
+  readonly Abort: SignalVerb<"abort">;
+  /** Proceed past the enclosing structure's exhaustion/failure as a normal outcome. */
+  readonly Continue: SignalVerb<"continue">;
+  /** Drop the failed unit (a parallel branch) and proceed without it. */
+  readonly Skip: SignalVerb<"skip">;
+  /** Set the failed unit aside for later, honest triage instead of silently dropping it. */
+  readonly Park: SignalVerb<"park">;
+}
+
+/**
  * Declares a signal emitted by sequence steps: a named event a step's
  * `onComplete` field raises, that guards elsewhere (`condition.signal`) or
  * `onFailure` routes can react to.
@@ -462,12 +484,22 @@ export function rule(fields: RuleFields): CanonicalRule {
  * @example `signal({ id: "approved", description: "The reviewer approved the change." })`
  * @see {@link sequence}
  */
-export function signal(fields: SignalFields): SignalHandle {
+function signalFn(fields: SignalFields): SignalHandle {
   const declaration = compact({ ...fields });
   const handle = withDeclaration("signal", `signal:${fields.id}`, declaration, {});
   recordTraitMint("signal", fields.id, `signal:${fields.id}`, declaration);
   return handle;
 }
+
+// `Object.assign`'s typing doesn't preserve the merged value's call signature
+// precisely (see `slot.ts`'s identical note) — `signalFn` is independently
+// checked as a real function above; this is the one cast bridging the merge.
+export const signal: SignalFunction = Object.assign(signalFn, {
+  Abort: SIGNAL_ABORT,
+  Continue: SIGNAL_CONTINUE,
+  Skip: SIGNAL_SKIP,
+  Park: SIGNAL_PARK,
+}) as SignalFunction;
 
 /**
  * `T` deliberately not narrowed to `SequenceHandle`: `ProcedureFields.sequence`'s declared type

@@ -1,5 +1,5 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
-import { condition, flow, input } from "@ctx-traits/cdk";
+import { condition, flow, input, signal } from "@ctx-traits/cdk";
 
 import { doneCriteria, grounding, nextKey, slicePlan, taskInput, workItems } from "../data.ts";
 
@@ -27,7 +27,7 @@ const sliceCountValid = condition.any(
  */
 export function slices(agent: AgentHandle) {
   flow.loop("Planning", (loop) => {
-    loop.maxIterations(3, { onExhausted: "abort" });
+    loop.maxIterations(3, { onExhausted: signal.Abort });
 
     agent.prompt("Split the work into slices", {
       id: "split",

@@ -11,7 +11,7 @@ export default function () {
   shared.stage.draft.compose("Draft the implementation plan");
 
   cdk.flow.loop("Doubly-reviewed refinement", (loop) => {
-    loop.maxIterations(10, { onExhausted: "abort" });
+    loop.maxIterations(10, { onExhausted: cdk.signal.Abort });
 
     shared.stage.work.implement("Implement the task");
     shared.stage.diff.capture("Capture the changed files");

@@ -63,7 +63,7 @@ export default function () {
               },
               [flow.False]: () => {
                 flow.loop("Run the iteration-capped benchmark round budget", (loop) => {
-                  loop.maxIterations(12, { onExhausted: "continue" });
+                  loop.maxIterations(12, { onExhausted: cdk.signal.Continue });
                   resetRound();
                   stage.scope.scopeStage("Scope one bounded benchmark-improvement attempt (smart-1)");
                   stage.draft.draftStage("Turn the scope into a concrete worker draft (smart-1)");

@@ -12,6 +12,7 @@ import type { JsonValue } from "../generated.js";
 import type {
   CheckResultValue,
   FieldRef,
+  RefHandle,
   SequenceHandle,
   SequenceLinearHandle,
   SettingHandle,
@@ -25,6 +26,7 @@ import type {
   ForEachSequenceFields,
   LoopSequenceFields,
   ParallelBranchFailurePolicy,
+  ParallelOptions,
   ProjectSequenceFields,
   SignalOutputValue,
 } from "../sequence.js";
@@ -34,6 +36,8 @@ import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js
 import type { TerminalBinding } from "../sequence.js";
 import type { SessionTitleSinkInput } from "../sink.js";
 import { slot } from "../slot.js";
+import { signalVerbLabel, signalVerbOf } from "../signal-verb.js";
+import type { SignalVerb, SignalVerbName } from "../signal-verb.js";
 import type { AuthorFrame, RegisteredItem, Scope } from "./context.js";
 import {
   captureAuthorFrame,
@@ -54,6 +58,45 @@ function buildError(title: string | undefined, rule: string, frame: AuthorFrame 
   const subject = title === undefined ? "(untitled)" : JSON.stringify(title);
   const prefix = frame === undefined ? "" : `${frame.file}: `;
   return new Error(`${prefix}step titled ${subject} — ${rule}`);
+}
+
+/**
+ * Site-legality mapping for a `signal.*` verb (0209): resolves `value`
+ * through `legal` (verb name -> this site's canonical string). Shared by
+ * every registrar that turns a raised verb into a stored policy value, so
+ * the brand check (`signalVerbOf`) lives exactly once; each call site still
+ * phrases its own error (`buildError` inside a step/container,  plain
+ * `Error` for a scope-less registrar like `effect.onComplete`).
+ */
+function mapLegalVerb<Mapped extends string>(
+  value: unknown,
+  legal: Readonly<Partial<Record<SignalVerbName, Mapped>>>,
+): { readonly verbName: SignalVerbName | undefined; readonly mapped: Mapped | undefined; readonly allowed: string } {
+  const verbName = signalVerbOf(value);
+  const allowed = (Object.keys(legal) as SignalVerbName[]).map(signalVerbLabel).join(" or ");
+  return { verbName, mapped: verbName === undefined ? undefined : legal[verbName], allowed };
+}
+
+/** `mapLegalVerb` for a step/container registrar — throws `buildError`, naming the site and title. */
+function requireLegalVerb<Mapped extends string>(
+  value: unknown,
+  legal: Readonly<Partial<Record<SignalVerbName, Mapped>>>,
+  siteLabel: string,
+  title: string | undefined,
+  frame: AuthorFrame | undefined,
+): Mapped {
+  const { verbName, mapped, allowed } = mapLegalVerb(value, legal);
+  if (verbName === undefined) {
+    throw buildError(title, `${siteLabel} requires ${allowed} — got ${JSON.stringify(value)}`, frame);
+  }
+  if (mapped === undefined) {
+    throw buildError(
+      title,
+      `${siteLabel}: ${signalVerbLabel(verbName)} is not legal here — allowed: ${allowed}`,
+      frame,
+    );
+  }
+  return mapped;
 }
 
 /** Re-runs the 0104 collision rule at scope close, so a build error surfaces at authoring time instead of waiting for `procedure()`'s own re-check. */
@@ -237,9 +280,17 @@ installSlotForEachLowering((slotHandle, titleText, opts, body) => {
 // flow.*
 // ---------------------------------------------------------------------------
 
+const LOOP_EXHAUSTION_VERBS: Readonly<Partial<Record<SignalVerbName, ExhaustionPolicy>>> = {
+  abort: "abort",
+  continue: "continue",
+};
+
 export interface LoopParam {
   /** Required, callable once — a loop with no way out is not authorable (0102). */
-  maxIterations(bound: number | SettingHandle<number>, opts?: { readonly onExhausted?: ExhaustionPolicy }): void;
+  maxIterations(
+    bound: number | SettingHandle<number>,
+    opts?: { readonly onExhausted?: SignalVerb<"abort" | "continue"> },
+  ): void;
   /** Overrides the loop's emitted canonical id (0109 F2), when it must differ from `idFromTitle(title)`. Callable at most once. */
   id(overrideId: string): void;
   /** Wrapper over `flow.until` — the loop's exit guard, on the param the body already holds. */
@@ -276,7 +327,15 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
       }
       scope.loop.maxIterationsCalled = true;
       scope.loop.maxIterationsValue = bound;
-      if (opts?.onExhausted !== undefined) scope.loop.onExhausted = opts.onExhausted;
+      if (opts?.onExhausted !== undefined) {
+        scope.loop.onExhausted = requireLegalVerb(
+          opts.onExhausted,
+          LOOP_EXHAUSTION_VERBS,
+          "loop.maxIterations({ onExhausted })",
+          title,
+          frame,
+        );
+      }
     },
     id(overrideId) {
       const scope = nearestScope("loop");
@@ -316,23 +375,24 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
   return item;
 }
 
-const FLOW_ABORT_ARM = "abort" as const;
+const LOOP_ABORT_ARM_VERBS: Readonly<Partial<Record<SignalVerbName, "abort">>> = { abort: "abort" };
 
-function flowWhen(title: string, cond: BranchCheckValue, arm: typeof FLOW_ABORT_ARM): void;
+function flowWhen(title: string, cond: BranchCheckValue, arm: SignalVerb<"abort">): void;
 function flowWhen(title: string, cond: BranchCheckValue, body: () => void): SequenceHandle;
 function flowWhen(title: string, cond: BranchCheckValue, opts: IdOverride, body: () => void): SequenceHandle;
 function flowWhen(
   title: string,
   cond: BranchCheckValue,
-  thirdArg: typeof FLOW_ABORT_ARM | IdOverride | (() => void),
+  thirdArg: SignalVerb | IdOverride | (() => void),
   maybeBody?: () => void,
 ): SequenceHandle | void {
   requireBuild(`flow.when(${JSON.stringify(title)})`);
   const frame = captureAuthorFrame();
-  if (thirdArg === FLOW_ABORT_ARM) {
+  if (signalVerbOf(thirdArg) !== undefined) {
+    requireLegalVerb(thirdArg, LOOP_ABORT_ARM_VERBS, "flow.when(..., <verb>)", title, frame);
     const loopScope = nearestScope("loop");
     if (loopScope?.loop === undefined) {
-      throw buildError(title, "flow.when(..., flow.Abort) requires an enclosing flow.loop", frame);
+      throw buildError(title, "flow.when(..., signal.Abort) requires an enclosing flow.loop", frame);
     }
     loopScope.loop.abortIfArms.push({ title, condition: cond });
     return undefined;
@@ -464,8 +524,6 @@ function flowMatch(
 }
 
 export interface ParParam {
-  /** Sets the branch-failure policy applied to every branch registered in this `flow.parallel` block. */
-  onFailure(policy: ParallelBranchFailurePolicy): void;
   /** Reserved surface (0102 ledger): accepts the call, emits nothing, and always throws. */
   maxAtOnce(n: number): void;
 }
@@ -483,13 +541,6 @@ function flowParallel(title: string, body: (par: ParParam) => void): SequenceHan
   forbidPositionalUntil(title, "flow.parallel", frame);
   const label = `flow.parallel(${JSON.stringify(title)})`;
   const parParam: ParParam = {
-    onFailure(policy) {
-      const scope = nearestScope("parallel");
-      if (scope?.parallel === undefined) {
-        throw buildError(title, "par.onFailure(...) called outside its own flow.parallel body", frame);
-      }
-      scope.parallel.onFailurePolicy = policy;
-    },
     maxAtOnce() {
       throw new Error("par.maxAtOnce is parked — see the 0102 ledger");
     },
@@ -499,11 +550,12 @@ function flowParallel(title: string, body: (par: ParParam) => void): SequenceHan
   if (scope.items.length === 0) throw buildError(title, "flow.parallel registered no branches", frame);
   const branches = scope.items.map((registered) => branchRefFor(id, registered));
   const policy = scope.parallel?.onFailurePolicy as ParallelBranchFailurePolicy | undefined;
-  const item = sequence.parallel(
-    id,
-    branches,
-    policy === undefined ? {} : { branchFailure: branches.map((branch) => ({ branch, onFailure: policy })) },
-  );
+  const announce = scope.parallel?.onFailureAnnounce;
+  const options: ParallelOptions = {
+    ...(policy === undefined ? {} : { branchFailure: branches.map((branch) => ({ branch, onFailure: policy })) }),
+    ...(announce === undefined ? {} : { onFailure: announce }),
+  };
+  const item = sequence.parallel(id, branches, options);
   registerItem(label, item, title);
   return item;
 }
@@ -543,7 +595,7 @@ export interface FlowSuccessOptions extends IdOverride {
  * message becomes the report headline and stop reason, the evidence (if
  * given) the typed record on the reserved `flow-error` output port. Inside a
  * `flow.loop` this still ends the RUN, never just the loop — loop-scoped
- * aborts remain `flow.Abort`.
+ * aborts remain `signal.Abort`.
  */
 function flowError(title: string, opts: FlowErrorOptions = {}): SequenceHandle {
   requireBuild(`flow.error(${JSON.stringify(title)})`);
@@ -610,13 +662,17 @@ export const flow = {
   True: FLOW_TRUE,
   False: FLOW_FALSE,
   Otherwise: FLOW_OTHERWISE,
-  Abort: FLOW_ABORT_ARM,
-  Continue: "continue" as const,
 };
 
 // ---------------------------------------------------------------------------
 // effect.*
 // ---------------------------------------------------------------------------
+
+const PARALLEL_FAILURE_VERBS: Readonly<Partial<Record<SignalVerbName, ParallelBranchFailurePolicy>>> = {
+  skip: "skip",
+  park: "park",
+  abort: "panel-fail",
+};
 
 export const effect = {
   onComplete(signal: SignalOutputValue): void {
@@ -624,10 +680,39 @@ export const effect = {
     if (scope?.loop === undefined) throw new Error("effect.onComplete(...) requires an enclosing flow.loop");
     scope.loop.onComplete.push(signal);
   },
-  onFailure(): void {
-    throw new Error(
-      "effect.onFailure(...) has no target here — a flow.loop declares no failure of its own to route (0102)",
-    );
+  /**
+   * Attaches to the nearest enclosing `flow.parallel` (0209): a declared
+   * signal (string or `RefHandle<"signal">`) announces the panel-level
+   * failure recovery route, once; a verb (`signal.Skip`/`signal.Park`/
+   * `signal.Abort` — `signal.Continue` is not a branch-failure outcome)
+   * decides every branch's failure policy, once. Both may be called in the
+   * same `flow.parallel` body, in either order.
+   */
+  onFailure(target: SignalVerb<"abort" | "skip" | "park"> | string | RefHandle<"signal">): void {
+    const scope = nearestScope("parallel");
+    if (scope?.parallel === undefined) {
+      throw new Error(
+        "effect.onFailure(...) has no target here — a flow.loop declares no failure of its own to route (0102)",
+      );
+    }
+    if (signalVerbOf(target) === undefined) {
+      if (scope.parallel.onFailureAnnounce !== undefined) {
+        throw new Error("effect.onFailure(...) announce already declared once — canonical on-failure is single-valued");
+      }
+      scope.parallel.onFailureAnnounce = target as string | RefHandle<"signal">;
+      return;
+    }
+    if (scope.parallel.onFailurePolicy !== undefined) {
+      throw new Error("effect.onFailure(...) decision verb already declared once");
+    }
+    const { verbName, mapped, allowed } = mapLegalVerb(target, PARALLEL_FAILURE_VERBS);
+    if (mapped === undefined) {
+      // `verbName` is defined here — the caller already routed non-verb `target` values to the announce branch above.
+      throw new Error(
+        `effect.onFailure(${signalVerbLabel(verbName as SignalVerbName)}) is not legal here — allowed: ${allowed}`,
+      );
+    }
+    scope.parallel.onFailurePolicy = mapped;
   },
   onAbort(signal: ExhaustionSignalValue): void {
     const scope = nearestScope("loop");

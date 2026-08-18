@@ -13,7 +13,7 @@ export default function () {
   shared.stage.design.draft("Design the boundary");
 
   cdk.flow.loop("Doubly-reviewed verbatim refinement", (loop) => {
-    loop.maxIterations(6, { onExhausted: "continue" });
+    loop.maxIterations(6, { onExhausted: cdk.signal.Continue });
 
     shared.stage.implement.apply("Implement the design specification");
     shared.stage.review.primary("Review refactor");

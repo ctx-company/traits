@@ -10,7 +10,7 @@
 // identical note in variant/default/index.ts. This replaces the 0153-era
 // single-turn research step and its one campaign-wide findings slot.
 import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
-import { condition, defineVariant, flow, input, operation, step, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, input, operation, signal, step, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 
@@ -55,7 +55,7 @@ export default function () {
   shared.stage.derive.deriveReportPathStep("report.md");
 
   flow.loop("Ingest", (loop) => {
-    loop.maxIterations(3, { onExhausted: "abort" });
+    loop.maxIterations(3, { onExhausted: signal.Abort });
 
     smart1.prompt("Ingest the brief", {
       input: input.prompt`
@@ -82,7 +82,7 @@ export default function () {
   });
 
   flow.loop("Planning", (loop) => {
-    loop.maxIterations(3, { onExhausted: "abort" });
+    loop.maxIterations(3, { onExhausted: signal.Abort });
 
     smart1.prompt("Plan the streams", {
       input: input.prompt`
@@ -122,7 +122,7 @@ export default function () {
   });
 
   flow.loop("Building", (loop) => {
-    loop.maxIterations(8, { onExhausted: "abort" });
+    loop.maxIterations(8, { onExhausted: signal.Abort });
 
     worker.prompt("Building Produce", {
       input: input.prompt`
