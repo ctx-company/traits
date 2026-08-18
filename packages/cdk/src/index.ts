@@ -180,6 +180,7 @@ export type {
   SettingHandle,
   SignalHandle,
   SlotHandle,
+  SlotSink,
   SlotWithFields,
   TraitFamilyHandle,
   TraitHandle,

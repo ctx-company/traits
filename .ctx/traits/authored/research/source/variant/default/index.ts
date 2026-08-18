@@ -102,7 +102,7 @@ export default function () {
                 Apply ${shared.resource.researchStandards}: cite every factual claim, rate sources per the canonical A-E scale (${shared.resource.sourceQualityGuide}), format citations per ${shared.resource.citationStyle}, and note any counterevidence encountered.
                 As you read, accumulate full reading notes in ${shared.data.outputDir}/${shared.data.topicSlug}/notes/<stream-id>.md (create directories as needed): quotes with attribution, per-source assessments, dead ends, and everything a later writer needs to reconstruct your reasoning. Write the notes file incrementally as you research — it is the stream's evidence corpus, never an after-the-fact summary.
                 Return the stream's dossier: its stream-id, the notes file's repo-relative path, a cited summary, key claims (each with rating and citation inline), one sources entry per consulted source ("<A-E> | <citation or url> | <what it supports>"), and open questions.`,
-      output: operation.over(shared.data.dossiers, operation.Append),
+      output: shared.data.dossiers.with(operation.Append),
     });
   });
 
