@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0208"
 title = "condition.{True, False, Otherwise} replace the flow match-arm keys"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
 content = """
 Per 0207 ruling 1. The three unique symbols minted in

@@ -4,8 +4,7 @@ title = "ctx traits fork: fork a vendored package into the authored tree"
 status = "ready"
 raised = "2026-08-18"
 content = """
-Owner-requested command, already documented on the website's QUICKSTART >
-Usage page (Author group): "Fork a vendored package into the authored tree —
+Owner-requested command: "Fork a vendored package into the authored tree —
 yours to edit from there."
 
 `ctx traits fork <id>` takes a package materialized under

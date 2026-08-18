@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0209"
 title = "signal.{Abort, Continue, Skip, Park} verbs raised through effect.on<Event>"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
 content = """
 Per 0207 rulings 2 and 3. The authoring-surface changes, all lowering to

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0210"
 title = "Slot sink method: findings.<name>(operation.Append) replaces operation.over at authoring sites"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
 content = """
 Per 0207 ruling 4. Slot handles gain one hidden, non-enumerable method (the
