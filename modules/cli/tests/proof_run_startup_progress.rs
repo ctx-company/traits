@@ -5,7 +5,9 @@ use std::process::Command;
 
 use std::path::PathBuf;
 
-use support::{ScratchRoot, ctx_bin, git_init, require_success, strip_escapes};
+use support::{
+    ScratchRoot, ctx_bin, git_init, require_success, run_pty_with_cursor_reply, strip_escapes,
+};
 
 struct Fixture {
     _scratch: ScratchRoot,
@@ -289,32 +291,15 @@ fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
     // `script` deliberately leaves cursor-position queries unanswered. Expect
     // provides the missing terminal reply so this covers the successful inline
     // owner path rather than the allocation-fallback case above.
-    let output = Command::new("expect")
-        .args([
-            "-c",
-            r#"
-                set timeout 30
-                set child_status {}
-                spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml; status=\$?; stty -a > .ctx/startup-success-termios; printf '__STARTUP_HANDOFF_COMPLETE__\\n'; exit \$status"
-                expect {
-                    -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
-                    eof { set child_status [wait] }
-                }
-                if {[lindex $child_status 3] != 0} { exit 1 }
-            "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "startup PTY failed: {output:?}");
-    let output = String::from_utf8_lossy(&output.stdout);
+    let (exit_code, output) = run_pty_with_cursor_reply(
+        &ctx_bin(),
+        "traits run --file .ctx/traits/demo/generated/index.toml",
+        &fixture.repo,
+        &fixture.home,
+        "__STARTUP_HANDOFF_COMPLETE__",
+        ".ctx/startup-success-termios",
+    );
+    assert_eq!(exit_code, 0, "startup PTY failed: {output:?}");
     assert!(
         saw_startup_pane(&output),
         "sized PTY did not allocate the startup pane: {output:?}"

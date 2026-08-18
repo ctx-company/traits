@@ -475,6 +475,74 @@ pub fn pin_volatile_ledger_fields(text: &str) -> String {
     pinned
 }
 
+/// Runs `ctx <args>` under `expect` on a sized PTY, answering every
+/// crossterm `ESC[6n` cursor-position query with a synthetic reply so the
+/// inline pane's construction never stalls, then reports the child's own
+/// exit code (recovered from `expect`'s `[wait]`, not `expect`'s own status)
+/// alongside the full raw stdout stream. Extracted after this recipe was
+/// copied inline into two proof files (`proof_run_startup_progress.rs`,
+/// `proof_task_queue_refusal_teardown.rs`); a third proof
+/// (`proof_task_queue_pane_handoff.rs`) and both prior call sites now share
+/// this implementation instead.
+pub fn run_pty_with_cursor_reply(
+    binary: &Path,
+    args: &str,
+    cwd: &Path,
+    home: &Path,
+    marker: &str,
+    termios_file: &str,
+) -> (i32, String) {
+    let output = Command::new("expect")
+        .args([
+            "-c",
+            &format!(
+                r#"
+                set timeout 30
+                set child_status {{}}
+                spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_BIN) {args}; status=\$?; stty -a > {termios_file}; printf '{marker}\n'; exit \$status"
+                expect {{
+                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue }}
+                    eof {{ set child_status [wait] }}
+                }}
+                puts "__CHILD_EXIT__[lindex $child_status 3]__"
+            "#
+            ),
+        ])
+        .current_dir(cwd)
+        .env_clear()
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env("XDG_CACHE_HOME", home)
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("TERM", "xterm-256color")
+        .env("CTX_STARTUP_BIN", binary)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "PTY driver failed: {output:?}");
+    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
+    let exit_tag_start = raw
+        .find("__CHILD_EXIT__")
+        .unwrap_or_else(|| panic!("expect never reported the child's exit code: {raw:?}"));
+    let after_tag = &raw[exit_tag_start + "__CHILD_EXIT__".len()..];
+    let exit_code: i32 = after_tag[..after_tag.find("__").unwrap()].parse().unwrap();
+    (exit_code, raw)
+}
+
+/// `restore_terminal`'s `Show` (`\x1b[?25h`) is the one escape sequence an
+/// inline pane's teardown always emits and nowhere else on this path — so
+/// slicing the raw PTY stream at its *last* occurrence, before stripping
+/// escapes, proves content arrived on a cooked terminal after the pane
+/// actually handed the screen back, not merely somewhere in the byte
+/// history before a later repaint could have painted over it.
+pub fn text_after_terminal_restore(raw: &str) -> String {
+    const CURSOR_SHOW: &str = "\u{1b}[?25h";
+    let boundary = raw
+        .rfind(CURSOR_SHOW)
+        .unwrap_or_else(|| panic!("terminal restore (cursor show) escape never appeared: {raw:?}"))
+        + CURSOR_SHOW.len();
+    strip_escapes(&raw[boundary..])
+}
+
 pub fn git_init_on_branch(dir: &Path, branch: &str) {
     for args in [
         &["init", "--quiet"][..],

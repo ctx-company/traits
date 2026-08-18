@@ -7,7 +7,10 @@
 use std::fs;
 use std::process::Command;
 
-use support::{ScratchRoot, ctx_bin, git_init, require_success, strip_escapes};
+use support::{
+    ScratchRoot, ctx_bin, git_init, require_success, run_pty_with_cursor_reply,
+    text_after_terminal_restore,
+};
 
 struct Fixture {
     _scratch: ScratchRoot,
@@ -149,59 +152,15 @@ fn empty_charter_fixture() -> Fixture {
     }
 }
 
-/// `restore_terminal`'s `Show` (`\x1b[?25h`, `tui_ratatui.rs:187,192`) is
-/// the one escape sequence the inline pane's teardown always emits, and it
-/// is emitted nowhere else on this path (no `Hide` is ever sent, so
-/// `Show` marks the real restoration point rather than a mid-run
-/// redraw). Slicing the raw PTY stream at its *last* occurrence, before
-/// stripping escapes, proves the assertions below hold for content that
-/// arrived on a cooked terminal after the pane handed the screen back —
-/// not merely content that appeared somewhere in the byte history before
-/// a later repaint could have painted over it.
-fn text_after_terminal_restore(raw: &str) -> String {
-    const CURSOR_SHOW: &str = "\u{1b}[?25h";
-    let boundary = raw
-        .rfind(CURSOR_SHOW)
-        .unwrap_or_else(|| panic!("terminal restore (cursor show) escape never appeared: {raw:?}"))
-        + CURSOR_SHOW.len();
-    strip_escapes(&raw[boundary..])
-}
-
 fn run_under_pty(fixture: &Fixture, args: &str, marker: &str, termios_file: &str) -> (i32, String) {
-    let output = Command::new("expect")
-        .args([
-            "-c",
-            &format!(
-                r#"
-                set timeout 30
-                set child_status {{}}
-                spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_BIN) {args}; status=\$?; stty -a > {termios_file}; printf '{marker}\n'; exit \$status"
-                expect {{
-                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue }}
-                    eof {{ set child_status [wait] }}
-                }}
-                puts "__CHILD_EXIT__[lindex $child_status 3]__"
-            "#
-            ),
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "PTY driver failed: {output:?}");
-    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-    let exit_tag_start = raw
-        .find("__CHILD_EXIT__")
-        .unwrap_or_else(|| panic!("expect never reported the child's exit code: {raw:?}"));
-    let after_tag = &raw[exit_tag_start + "__CHILD_EXIT__".len()..];
-    let exit_code: i32 = after_tag[..after_tag.find("__").unwrap()].parse().unwrap();
-    (exit_code, raw)
+    run_pty_with_cursor_reply(
+        &ctx_bin(),
+        args,
+        &fixture.repo,
+        &fixture.home,
+        marker,
+        termios_file,
+    )
 }
 
 #[test]
