@@ -1,0 +1,98 @@
+schema-version = "0.2"
+key = "0216"
+title = "An exit guard is a way out: the implement loop drops its round ceiling"
+status = "done"
+raised = "2026-08-19"
+content = """
+Owner ruling 2026-08-19: the implement family's review loop runs until the
+reviewers approve, with no round ceiling.
+
+## Why the ceiling had to go
+
+A `maxIterations` bound on a review loop does not decide correctness — it
+decides when to abandon work the reviewer has not yet accepted. Hitting it
+produces `max-iterations-exhausted`: a run with real, reviewed, unapproved
+work in a worktree and no merge. ctx-codecheck 0006.5 (2026-08-19) spent ten
+rounds on the same recurring blocker and stopped one round short of nothing
+in particular; the ceiling added no information the reviewer had not already
+given.
+
+The run's own budgets are the real outer stop and always were:
+`max-frames`, `frame-seconds`, `total-seconds`. Those bound cost. The loop
+bound only bounded patience.
+
+## Why this is not "no way out"
+
+0102's rule is that a loop with no way out is not authorable. A bound is only
+ONE way out. The canonical has always accepted an unbounded loop that declares
+an exit guard — `validate.rs`: "unbounded loop must declare until or abort-if
+— a loop with neither a bound nor an exit guard can never end" — and the
+runtime is proven against it by the 0093 unbounded-loop fixture (advance past
+every revise, stop the moment the guard holds).
+
+The CDK was simply stricter than the contract it lowers to: `flow.loop`
+demanded `maxIterations` unconditionally. That is now relaxed to the
+canonical's own rule — a bound, OR `until`/`untilAll`/`untilAny`, OR a
+`flow.when(..., signal.Abort)` arm. A loop with none of the three is still a
+build error, now phrased as "a loop needs a way out".
+
+`on-exhausted` goes with the bound: the validator already refuses
+`on-exhausted` without `max-iterations`, since an unbounded loop cannot
+exhaust.
+
+## What changed
+
+- `packages/cdk/src/functional/registrars.ts`: the `flow.loop` way-out rule.
+- implement:basic and implement:complex: `loop.maxIterations(10, {
+  onExhausted: Abort })` removed; both keep their `until`/`untilAll` verdict
+  guards. Canonical drops `max-iterations` and `on-exhausted`, nothing else.
+- Other families keep their bounds. research's per-phase loops and optimize's
+  attempt budget bound WORK, not patience — an experiment budget of 12 is the
+  point of the trait, not a giveup threshold.
+
+## Follow-ups, deliberately not done here
+
+1. **The bound should be an operator knob, not a literal.** `maxIterations`
+   already accepts a `SettingHandle<number>`, so a `[setting]` on the implement
+   package would let an operator cap rounds for a cheap dispatch without
+   re-authoring the trait. Unbounded is the right default; a knob is the right
+   escape.
+2. **A loop that cannot converge should be visible before the budget kills
+   it.** ctx-codecheck 0006.5 repeated one blocker id with `recurrence-of`
+   pointing at itself for nine rounds. That is a detectable signal — a
+   "no progress across N rounds" surface would end such a run with a reason,
+   where the round ceiling only ended it with a count.
+"""
+validation = """
+## Done when
+
+`flow.loop` accepts a guarded unbounded loop and still refuses one with no way
+out at all; implement:basic and implement:complex build with no
+`max-iterations`/`on-exhausted` in canonical and their verdict guards intact.
+
+## Evidence (2026-08-19)
+
+- CDK: "a loop with neither a bound nor an exit guard is a build error",
+  "an exit guard alone is a way out — no maxIterations needed" (asserts the
+  emitted loop carries `until` and no `max-iterations`), "a flow.when abort arm
+  is a way out on its own". 258 CDK tests green.
+- `ctx traits build implement`: basic and complex canonical lose exactly
+  `max-iterations = 10` and `on-exhausted = "abort"`; quick unchanged.
+- `just test` (the per-round gate) green.
+
+## Owner steps remaining
+
+The trait digest changed, so the machine trust record no longer covers it and
+`export` refuses. To clear the projection-lock drift `ctx traits check
+implement` now reports:
+
+    ctx traits trust approve implement
+    ctx traits export implement --update-skill-lock
+
+Trust approval is an owner decision and was deliberately left unrun. Runs are
+unaffected — they execute the rebuilt canonical; only the agent-skills
+projection is stale until the export.
+
+Vendored copies in sibling repos (ctx-notify, ctx-codecheck) still carry the
+old bounded implement and need a dependency update to pick this up.
+"""

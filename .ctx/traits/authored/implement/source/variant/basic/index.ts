@@ -15,7 +15,9 @@ export default function () {
     shared.step.diff.capture("Capture the changed files");
     shared.step.review.primary("Review the implementation");
 
-    loop.maxIterations(10, { onExhausted: cdk.signal.Abort });
+    // No round ceiling: the loop ends when the reviewer approves, and the
+    // run's own frame/time budgets are the outer stop. A ceiling here only
+    // decided when to abandon work the reviewer had not yet accepted.
     loop.until(cdk.condition.equals(shared.data.verdict1.status, "approved"));
   });
 

@@ -354,7 +354,14 @@ const LOOP_EXHAUSTION_VERBS: Readonly<Partial<Record<SignalVerbName, ExhaustionP
 };
 
 export interface LoopParam {
-  /** Required, callable once — a loop with no way out is not authorable (0102). */
+  /**
+   * A round ceiling, callable at most once. Required only when the loop
+   * declares no exit guard: a loop with no way out at all is not authorable
+   * (0102), but `until`/`untilAll`/`untilAny` or a `flow.when(..., signal.Abort)`
+   * arm is a way out, and the canonical accepts an unbounded loop that has one.
+   * Omit it when the loop should run until its guard holds and the run's own
+   * frame/time budgets are the outer stop.
+   */
   maxIterations(
     bound: number | SettingHandle<number>,
     opts?: { readonly onExhausted?: SignalVerb<"abort" | "continue"> },
@@ -424,10 +431,22 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
   // oxlint-disable-next-line typescript/no-non-null-assertion -- runInScope("loop", ...) always populates scope.loop
   const loopState = scope.loop!;
   const id = loopState.idOverride ?? mintId(title);
-  if (!loopState.maxIterationsCalled) {
-    throw buildError(title, "loop.maxIterations(...) is required — no-way-out is not authorable", frame);
-  }
   const abortIf = combineAbortIfArms(loopState.abortIfArms);
+  // No-way-out is still not authorable — but a bound is only ONE way out.
+  // The canonical has always allowed an unbounded loop that declares an exit
+  // guard ("unbounded loop must declare until or abort-if", validate.rs), and
+  // the runtime is proven against it (0093's unbounded-loop fixture: advance
+  // past every revise, stop the moment the guard holds). Requiring
+  // `maxIterations` unconditionally was the authoring layer being stricter
+  // than the contract it lowers to, and it forced every review loop to carry
+  // an arbitrary round ceiling that decides nothing except when to give up.
+  if (!loopState.maxIterationsCalled && loopState.untilCondition === undefined && abortIf === undefined) {
+    throw buildError(
+      title,
+      "a loop needs a way out: declare loop.maxIterations(...), or an exit guard via loop.until/untilAll/untilAny or flow.when(..., signal.Abort)",
+      frame,
+    );
+  }
   const fields = withPositionalWhen<Omit<LoopSequenceFields, "id" | "kind">>({
     title,
     body: itemsOf(scope),

@@ -11,8 +11,9 @@ export default function () {
   shared.step.draft.compose("Draft the implementation plan");
 
   cdk.flow.loop("Doubly-reviewed refinement", (loop) => {
-    loop.maxIterations(10, { onExhausted: cdk.signal.Abort });
-
+    // No round ceiling: the loop ends when both reviewers approve, and the
+    // run's own frame/time budgets are the outer stop. A ceiling here only
+    // decided when to abandon work the reviewers had not yet accepted.
     shared.step.work.implement("Implement the task");
     shared.step.diff.capture("Capture the changed files");
     shared.step.review.primary("Review the implementation");

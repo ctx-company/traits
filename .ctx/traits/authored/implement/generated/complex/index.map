@@ -26,8 +26,8 @@
   },
   "prompt:cross-review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 20,
+    "end": 20
   },
   "prompt:draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
@@ -36,18 +36,18 @@
   },
   "prompt:implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 16,
-    "end": 16
+    "start": 17,
+    "end": 17
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 19,
+    "end": 19
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 29,
-    "end": 29
+    "start": 30,
+    "end": 30
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
@@ -76,38 +76,38 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 32,
+    "end": 32
+  },
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
     "start": 31,
     "end": 31
   },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
     "start": 30,
     "end": 30
   },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
-    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 29,
-    "end": 29
-  },
   "sequence:doubly-reviewed-refinement-body/capture-the-changed-files": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 18,
+    "end": 18
+  },
+  "sequence:doubly-reviewed-refinement-body/cross-review-the-implementation": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 20,
+    "end": 20
+  },
+  "sequence:doubly-reviewed-refinement-body/implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
     "start": 17,
     "end": 17
   },
-  "sequence:doubly-reviewed-refinement-body/cross-review-the-implementation": {
+  "sequence:doubly-reviewed-refinement-body/review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
     "start": 19,
     "end": 19
-  },
-  "sequence:doubly-reviewed-refinement-body/implement-the-task": {
-    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 16,
-    "end": 16
-  },
-  "sequence:doubly-reviewed-refinement-body/review-the-implementation": {
-    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 18,
-    "end": 18
   },
   "sequence:procedure/capture-the-session-base": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
@@ -116,8 +116,8 @@
   },
   "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 28,
+    "end": 28
   },
   "sequence:procedure/doubly-reviewed-refinement": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
@@ -131,8 +131,8 @@
   },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
-    "start": 28,
-    "end": 28
+    "start": 29,
+    "end": 29
   },
   "slot:changed-files": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",

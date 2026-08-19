@@ -100,14 +100,40 @@ describe("functional layer build rules (0106)", () => {
     ).toThrow(/at most one loop\.until/);
   });
 
-  it("loop.maxIterations is required — a loop with no way out is a build error", () => {
+  it("a loop with neither a bound nor an exit guard is a build error", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
-        flow.loop("No Budget", () => {
+        flow.loop("No Way Out", () => {
           step.command("A", { cmd: "echo a" });
         });
       }),
-    ).toThrow(/loop\.maxIterations.*is required/);
+    ).toThrow(/a loop needs a way out/);
+  });
+
+  /// The canonical has always accepted an unbounded loop that declares an
+  /// exit guard; the authoring layer used to be stricter than the contract it
+  /// lowers to, forcing an arbitrary round ceiling on every review loop.
+  it("an exit guard alone is a way out — no maxIterations needed", () => {
+    const built = procedure.from({ description: "d" }, () => {
+      flow.loop("Guarded Unbounded", (loop) => {
+        step.command("A", { cmd: "echo a" });
+        loop.until(condition.empty(slot.text("unbounded-guard-slot")));
+      });
+    });
+    const loopItem = (built as { readonly sequence?: readonly Record<string, unknown>[] }).sequence?.[0];
+    expect(loopItem?.["max-iterations"]).toBeUndefined();
+    expect(loopItem?.until).toBeDefined();
+  });
+
+  it("a flow.when abort arm is a way out on its own", () => {
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.loop("Abort Armed", () => {
+          step.command("A", { cmd: "echo a" });
+          flow.when("Give up", condition.empty(slot.text("abort-arm-slot")), signal.Abort);
+        });
+      }),
+    ).not.toThrow();
   });
 
   it("loop.maxIterations called twice throws", () => {

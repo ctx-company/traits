@@ -454,8 +454,6 @@ id = "reviewed-refinement"
 title = "Reviewed refinement"
 kind = "loop"
 sequence = "sequence:reviewed-refinement-body"
-max-iterations = 10
-on-exhausted = "abort"
 
 [procedure.sequence.until]
 slot = "slot:review-verdict-1"
