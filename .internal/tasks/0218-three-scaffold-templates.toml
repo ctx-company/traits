@@ -1,0 +1,71 @@
+schema-version = "0.2"
+key = "0218"
+title = "Three scaffold templates: review, implement, research"
+status = "ready"
+raised = "2026-08-19"
+content = """
+`ctx traits create` carries five templates — code-review, implement-phase,
+pr-description, research-summarize, test-writer. Three of them
+(pr-description, research-summarize, test-writer) are referenced nowhere
+but `build.rs` and two clap doc-comment strings: no test instantiates them,
+no page documents them. All five author on the object layer, which is not
+the surface the reference docs teach.
+
+Replace all five with three, named for what they do: `review`, `implement`,
+`research`.
+
+Each template is:
+
+- one file, no variants (0217 fixes the skeleton)
+- free of the task board: no `port:task`, no `task-board` resource, no
+  `.internal/tasks/` prose. A free-text goal port, not a board key
+- a plain input to output shape: required text input, deterministic
+  capture where it helps, one or two agent steps, typed output ports
+- short. No refinement loops, no second reviewer, no commit tail, no
+  doctrine resources, no hand-written object schemas
+
+The authored families are the source material, reduced to their honest
+core:
+
+- `review`: a git range in; resolve it with a command step; capture
+  `diff --stat` and `log --oneline` as an index, never patch bodies; one
+  reviewer step producing a typed verdict and a review document. The
+  authored `review` family is already board-free and its whole procedure
+  is 47 lines — copy its shape.
+- `implement`: a work spec in (free text, not a task key); one planning
+  step; one implementation step; one review step producing a verdict.
+  This is `implement-quick` plus a single non-looping review pass.
+- `research`: a topic in and an optional output directory with a default;
+  derive slug and report path with command steps so the deliverable path
+  is predictable; one scoping step; one research step writing the
+  deliverable; one review step. This is `research-quick` with the loop
+  unrolled and the doctrine resources dropped.
+
+Conventions worth carrying from the families: output ports optional and
+bound to a slot with `value:`, because a branch may not run; command steps
+for anything deterministic, never agent prose; an empty-string slot as the
+park signal behind a `flow.when`.
+"""
+validation = """
+## Watch
+
+- The template set is hardcoded in two places that both need editing:
+  `modules/core/build.rs` BUILTIN_TEMPLATE_IDS (which must stay sorted —
+  it is the display order) and two clap doc-comment strings in
+  `modules/cli/src/app/surface/cli.rs` that list the ids by hand.
+- `modules/cli/src/app/cdk_build.rs` carries routing commentary naming
+  `implement-phase`; check it before deleting that template.
+- `modules/cli/tests/proof_output_style.rs` runs bare `ctx traits create`
+  and asserts the panel shape. It does not assert the template set today —
+  decide whether it should.
+
+## Done when
+
+`ctx traits create` lists exactly review, implement, research; each
+instantiates into a package that passes `ctx traits build` and
+`ctx traits check`; none of the three reads a task board; the five old
+template directories are gone along with every reference to them.
+"""
+
+[relations]
+depends-on = ["0217"]

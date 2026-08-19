@@ -1,0 +1,56 @@
+schema-version = "0.2"
+key = "0220"
+title = "spec: a design rubric that is used, not a 75 KB schema nobody reads"
+status = "ready"
+raised = "2026-08-19"
+content = """
+`trait-spec` is a procedure-less package carrying two resources: a 75 KB
+`agent-traits.schema.json` and a 2.3 KB `design-rubric.md`. Five other
+built-ins declare it as a path dependency and splice both into their
+prompts.
+
+Three facts decide this task:
+
+- No Rust code reads either file. They exist purely as prompt text.
+- The schema JSON is a frozen snapshot. `schema_for!(Trait)` exists in
+  `modules/core/src/schema.rs` and backs `ctx traits schema`, but nothing
+  regenerates the resource from it and nothing diff-checks the two. It can
+  drift silently, and has.
+- It is the largest single contributor to the embedded binary payload.
+
+Owner ruling 2026-08-19: shrink it to the rubric, and make the rubric
+actually count when traits are generated.
+
+- Rename the package `spec`.
+- Drop `agent-traits.schema.json` and every prompt reference to it.
+- Keep and improve `design-rubric.md`: it is now the whole reason the
+  package exists, so it should read like guidance a trait author can act
+  on, not like a table of contents.
+- Verify the rubric is genuinely used by `generate`, `refine`, `critique`,
+  and `import` — that the prompts ask for something the rubric decides,
+  rather than naming the resource and moving on.
+
+A trait that needs the canonical schema can be pointed at
+`ctx traits schema`, which is true by construction.
+"""
+validation = """
+## Watch
+
+- Dependency resolution hard-fails on a missing or mismatched dependency,
+  verifying id, version, and lifecycle gates. The rename touches every
+  dependent's `trait.toml` and their `{resource:trait-spec/...}` prompt
+  refs together, or all five break at startup.
+- `modules/core/build.rs` embeds declared resources by parsing each
+  package's `generated/index.toml`, with a unit test asserting declared
+  resources equal embedded non-manifest files. Dropping a resource must
+  go through the canonical, not just the directory.
+- Two stale lockfiles reference `.ctx/traits/vendor/trait-spec`, a path
+  that no longer exists. Cosmetic, but fix while here.
+
+## Done when
+
+The package is `spec`, carries only the rubric, and every dependent builds
+and runs against it; no prompt mentions the schema resource; and the four
+generating built-ins demonstrably consult the rubric rather than merely
+citing it.
+"""

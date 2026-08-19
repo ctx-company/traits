@@ -1,0 +1,59 @@
+schema-version = "0.2"
+key = "0219"
+title = "Built-in traits: five that earn their place, named without the suffix"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Seven packages ship embedded in the binary. `generate-evals` backs a
+hidden subcommand, is classified "hidden" in the help surface, and has
+zero test coverage anywhere. Owner ruling 2026-08-19: it goes.
+
+The remaining five carry a `-trait` suffix that says nothing — every one
+of them is a trait. Rename:
+
+    generate-trait  -> generate
+    refine-trait    -> refine
+    critique-trait  -> critique
+    explain-trait   -> explain
+    import-trait    -> import
+
+(`trait-spec` is handled by 0220 and keeps its own arc.)
+
+Delete `generate-evals` FIRST. `modules/io/src/run.rs` treats every
+hyphen-prefix of an alias as a candidate built-in id, so a package named
+`generate` would prefix-match `generate-evals` and mint a spurious
+built-in-tier candidate. Removing it first makes the rename safe; doing
+the rename first introduces a real resolution bug.
+
+The id lives in each package's `generated/index.toml`, so every rename
+moves that package's canonical digest. Trust is keyed on canonical digest:
+existing machine approvals for these five are void after the rename, and
+the proofs that approve by id need updating.
+"""
+validation = """
+## Watch
+
+- Two hardcoded id lists must agree: `modules/core/build.rs`
+  BUILTIN_TRAIT_PACKAGE_IDS and the EXPECTED_IDS list in
+  `modules/core/src/builtin_trait_packages.rs`, whose test name says
+  "seven".
+- `modules/core/Cargo.toml`'s feature comment already omits `import-trait`
+  — it is stale before this task starts. Fix it rather than copying it.
+- `modules/io/src/builtin_store.rs` doc comments say "All seven packages
+  are always published together".
+- The role map in `modules/cli/src/app/generate.rs` maps each id to an
+  agent role; every renamed id appears there.
+- `.docs/PRODUCT.md`'s built-in table is stale in a second way: it claims
+  `explain-trait` is contract-only and never executed, while two call
+  sites run it.
+- There is no compatibility alias for built-in ids: resolution is exact.
+  A rename is a hard break for anyone scripting the old names, which the
+  owner has accepted.
+
+## Done when
+
+`generate-evals` is gone with every reference; the five renamed packages
+build, check, and run under their new ids; the built-in count is correct
+everywhere it is asserted or documented; and the alias prefix-match hazard
+is confirmed absent by resolving `generate` with no spurious candidate.
+"""

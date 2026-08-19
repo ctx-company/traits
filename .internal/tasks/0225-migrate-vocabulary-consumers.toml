@@ -1,0 +1,52 @@
+schema-version = "0.2"
+key = "0225"
+title = "Migrate every vocabulary consumer, and harvest what was inlined"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Ten authored trait source files select vocabulary through the old
+spellings, across roughly fifty call sites, plus eleven more files calling
+`useIntent`/`useBehavior` with those constants. Every one moves to the
+0224 surface.
+
+Alongside the mechanical migration, a judgement pass the owner asked for:
+wherever a trait, template, or vendored package inlines its own guidance
+value instead of selecting a built-in, decide whether it deserves to be
+vocabulary or should go.
+
+Known inlined values: the vendored `refactor-default` package declares
+`taste-only-findings` and an `interface-widening` override, both with
+local summaries, in a schema-version 0.2 document. Sweep for others rather
+than assuming that is the whole set.
+
+For each: if it names something a second trait would plausibly select,
+reword it to the 0222 standard and add it to the catalog. If it is one
+trait's private phrasing, drop it and let that trait carry the words in
+its own prompt. Do not preserve an inlined value merely because it exists.
+
+Rebuild and relock every affected package in the same commit as the
+source migration.
+"""
+validation = """
+## Watch
+
+- Rendered guidance moves even where the canonical does not, so
+  model-visible digests and lockfiles move. Regenerate together or check
+  reports drift.
+- The vendored 0.2 document may not be regenerable from source. Decide
+  explicitly whether to migrate it in place or tolerate the old shape at
+  decode time, the way pre-0.4 documents are already tolerated.
+- A slug that exists in the catalog but that no trait selects, and no
+  trait plausibly would, is a candidate for deletion in this pass too —
+  the harvest runs in both directions.
+
+## Done when
+
+No source selects a retired spelling; every authored and vendored package
+builds, checks, and relocks clean; each inlined value is either in the
+catalog in neutral-topic wording or deliberately gone, with the reasoning
+recorded.
+"""
+
+[relations]
+depends-on = ["0224"]

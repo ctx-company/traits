@@ -1,0 +1,43 @@
+schema-version = "0.2"
+key = "0226"
+title = "Skill exports are something the user asks for, not repository furniture"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Five rendered `SKILL.md` files sit committed under `.agents/skills/`, one
+per authored family, and their digests ride in the lockfiles. Nothing at
+runtime reads them: they are the agent-skills export profile, the artifact
+that lets another tool consume a ctx trait natively.
+
+Because they are committed and digest-pinned, every change to rendered
+guidance drags them along — they turned up in the blast radius of a
+vocabulary rewording that has nothing to do with host interop.
+
+Owner ruling 2026-08-19: they should not be in the tree. An export digest
+belongs in the lockfile only when the user explicitly exported.
+
+- Remove the committed `.agents/skills/` exports and ignore the path.
+- Make the skill-lock entry conditional on an explicit export rather than
+  something `check` expects to find.
+- `check` must not report drift for an export the user never asked for.
+
+The export path itself stays exactly as it is: `ctx traits export` and the
+host install flows are unaffected. This is about what the repository
+carries by default.
+"""
+validation = """
+## Watch
+
+- Distinguish "no export recorded" from "export recorded and drifted".
+  The first is normal and silent; the second is a real finding and must
+  stay one.
+- `--update-skill-lock` is threaded through the export path and the
+  landing recipes; make sure a project that does export still gets drift
+  detection.
+
+## Done when
+
+A fresh clone carries no rendered SKILL.md; `ctx traits check` is clean on
+a project that has never exported; a project that exports once still gets
+a recorded digest and still sees drift when the render changes.
+"""

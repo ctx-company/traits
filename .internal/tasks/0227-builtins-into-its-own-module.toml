@@ -1,0 +1,54 @@
+schema-version = "0.2"
+key = "0227"
+title = "builtins moves out of core into its own module"
+status = "ready"
+raised = "2026-08-19"
+content = """
+`modules/core/builtins/` holds three unrelated things that core happens to
+host: the embedded trait packages, the scaffold templates, and the
+vocabulary catalog. Core's build script carries all three, and core's
+Cargo feature gates two of them.
+
+Move the tree to `modules/builtin`.
+
+The split that must survive the move is the feature separation, and it is
+not symmetric:
+
+- The vocabulary catalog is built unconditionally. Core's renderer resolves
+  guidance through it, and wasm-core needs it.
+- The trait packages and templates are behind the
+  `builtin-trait-packages` feature, enabled by io and cli and deliberately
+  NOT by wasm-core or wasm-plugin, because embedding them would bloat the
+  wasm artifacts.
+
+So the new module carries both, with the same gate: vocabulary always,
+packages and templates only under the feature. If that separation
+collapses, wasm builds grow by the size of the embedded packages, which is
+the reason the gate exists.
+
+Runs after 0218, 0219, and 0220, so only the surviving set gets moved and
+the move happens once.
+"""
+validation = """
+## Watch
+
+- The build script computes SHA-256 digests per embedded file and guards
+  against leaking absolute home paths into generated output. Both behaviors
+  move with it.
+- Path-shape predicates in `modules/io/src/layout/` recognize built-in
+  package and template roots by directory shape; they encode the old
+  location.
+- There is no drift gate over this tree today: a `source/index.ts` edited
+  without rebuilding its `generated/index.toml` ships silently. The move is
+  a natural moment to add one, and it should be a scratch-fixture
+  behavioral check, not a file inventory.
+
+## Done when
+
+`modules/builtin` owns the tree, core depends on it, wasm-core still builds
+without the packages, every built-in and template resolves as before, and
+the embedded-bytes self-consistency test still passes from the new home.
+"""
+
+[relations]
+depends-on = ["0218", "0219", "0220"]

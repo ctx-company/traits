@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0221"
+title = "Vocabulary defines meaning; the trait decides the facet"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Owner ruling 2026-08-19, and the contract the rest of the arc depends on:
+the built-in catalog says what a thing IS. Whether it is a require, a
+focus, an avoid, or a block is the trait's editorial decision, made at the
+call site. Those are two separate things and the catalog currently
+conflates them.
+
+Today the catalog splits intent across four facet-bound catalogs —
+`[intent_require]`, `[intent_focus]`, `[intent_avoid]`, `[intent_block]` —
+so a slug is born a require and can never be a focus. Behavior is already
+axis-namespaced internally (`[behavior_method]`, `[behavior_tone]`,
+`[behavior_verbosity]`, and five more) but split across four files by
+historical accident, with `method`, `tone`, and `verbosity` also exposed as
+top-level namespaces.
+
+Restructure the catalog only:
+
+- One flat `intent` catalog. A slug is defined once and any trait may use
+  it as require, focus, avoid, or block.
+- Behavior axes gathered under `behavior`: method, tone, verbosity,
+  format, directness, scope-control, initiative, uncertainty — one file,
+  one shape, `[behavior.method]` and so on.
+- Delete the four dead legacy sections `[intent]`, `[method]`, `[tone]`,
+  `[verbosity]`. They generate statics with zero consumers, and their file
+  headers claiming they feed the SDK are false.
+
+What deliberately does NOT change: the canonical document shape
+(`[[intent.require]] id = "..."` stays), the `<intent group="...">`
+rendering, search and discovery keying on facets, and `useIntent`'s
+require-versus-avoid contradiction check. All of those are trait-side and
+correct as they are.
+
+This simplifies the renderer: builtin lookup currently searches four intent
+catalogs by slug and can collapse to one.
+"""
+validation = """
+## Watch
+
+- `modules/core/build.rs` SECTIONS is a closed, mandatory list. An unknown
+  section panics the build; a listed section missing from the TOML also
+  panics. The table and the files move in one commit or nothing builds.
+- `dogfood_intent_builtin_tests` asserts each slug resolves from its own
+  facet catalog and NOT from the others. Flat intent deletes the premise:
+  rewrite the test, do not adjust it.
+- The vocabulary build step is not feature-gated while the trait packages
+  are — wasm-core deliberately gets vocabulary without packages. Keep that
+  separation intact.
+
+## Done when
+
+The catalog is one flat intent catalog plus one axis-namespaced behavior
+catalog, the dead sections are gone, every trait builds byte-identically
+(the canonical shape did not change), and the renderer resolves a slug
+through a single intent lookup.
+"""

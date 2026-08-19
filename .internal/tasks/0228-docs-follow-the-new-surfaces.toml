@@ -1,0 +1,42 @@
+schema-version = "0.2"
+key = "0228"
+title = "Docs follow the templates, the built-ins, and the vocabulary"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Closing sweep for 0218 through 0225, on the website
+(~/ctx-company/ctx-company-website, content/traits/docs/).
+
+- Setup names a command that does not exist: `ctx traits new`. It is
+  `ctx traits create`. Its `--from implement` becomes correct once 0218
+  lands, so the two land together.
+- The template set is named in prose; it becomes review, implement,
+  research.
+- Intent and Behavior reference pages document the facet-grouped
+  vocabulary and the top-level method/tone/verbosity namespaces. Both
+  change: intent leaves hang off `intent`, axes hang off `behavior`, and
+  the pages should say plainly that the catalog defines meaning while the
+  trait chooses the facet — that is the part authors get wrong.
+- The seven new atoms appear in the tables.
+- Built-in trait names lose their suffix wherever documented.
+
+House style, unchanged: bold ids, never inline code in prose, two-column
+tables, sentence per line. CONCEPTS pages carry no TypeScript or TOML.
+"""
+validation = """
+## Watch
+
+- Every fenced example must build against the shipped CDK. The example
+  page is already verified that way; hold the same bar for anything new,
+  because a quickstart that cannot be copy-pasted is worse than no page.
+- Setup may carry uncommitted owner edits. Check before writing.
+
+## Done when
+
+No page names a retired command, template, built-in id, or vocabulary
+spelling; the site builds; and every code example on a changed page has
+been built rather than eyeballed.
+"""
+
+[relations]
+depends-on = ["0218", "0225"]

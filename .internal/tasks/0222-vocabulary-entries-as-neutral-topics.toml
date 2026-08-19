@@ -1,0 +1,54 @@
+schema-version = "0.2"
+key = "0222"
+title = "Reword every vocabulary entry as what it is, not what to do about it"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Once a slug can appear in any facet (0221), imperative wording breaks. The
+catalog reads `leanness = "Keep the implementation lean."` and
+`scope-creep = "Ask before pursuing adjacent work."` — both are
+instructions bound to one facet. A trait writing `require: [scopeCreep]`
+would render an instruction that contradicts itself.
+
+Owner ruling 2026-08-19: an entry is a detailed, pragmatic explanation of
+the behavior the author is choosing, not an action to take with it.
+
+Reword all ~45 entries so each names the thing and explains it well enough
+to be worth selecting:
+
+    scope-creep = expanding past what was asked — the adjacent fix, the
+    nearby cleanup, the improvement nobody requested
+
+Read as `avoid`, that says don't; as `focus`, it says watch for it. The
+polarity already rides in the rendered `group=` attribute, so the text does
+not need to carry it and must not.
+
+The `directive` field is what the renderer prefers when present, and it is
+the imperative form. Decide per entry whether a facet-neutral directive is
+possible or whether the field should be dropped for that entry and the
+description carry the weight.
+
+Applies to both catalogs: intent entries and every behavior axis.
+"""
+validation = """
+## Watch
+
+- Rendered output changes even though the canonical document does not:
+  every affected trait's model-visible digest moves, and the lockfiles and
+  any exported artifacts move with it. Regenerate them in the same commit
+  or `ctx traits check` reports drift.
+- Guidance text is validated: non-empty summary and description, and a
+  second-person ban rejecting "you"/"your". Neutral topic wording must
+  still pass that.
+- Do not silently change what an entry MEANS while rewording it. A trait
+  selecting `leanness` today must get the same idea tomorrow.
+
+## Done when
+
+Every entry reads as a topic that works in any facet, no entry instructs;
+the second-person and non-empty validations pass; and a spot-read of three
+traits' rendered model view shows guidance that still says what it said.
+"""
+
+[relations]
+depends-on = ["0221"]

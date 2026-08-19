@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0224"
+title = "CDK vocabulary surface: flat intent, behavior-owned axes"
+status = "ready"
+raised = "2026-08-19"
+content = """
+The catalog restructure (0221) has to reach the authoring surface, or
+authors keep writing the old spellings against a catalog that no longer
+has that shape.
+
+    intent.require.Leanness   ->  intent.Leanness
+    method.EvidenceFirst      ->  behavior.method.EvidenceFirst
+    tone.Direct               ->  behavior.tone.Direct
+    verbosity.Brief           ->  behavior.verbosity.Brief
+
+Intent leaves hang directly off `intent`, because the facet is chosen at
+the call site, not baked into the name:
+
+    useIntent({ require: [intent.Leanness], avoid: [intent.ScopeCreep] })
+
+The top-level `method`, `tone`, and `verbosity` namespaces are deleted;
+they were the last three vocabulary namespaces living outside the axis
+that owns them. `directness`, `format`, `initiative`, `scopeControl`, and
+`uncertainty` move under `behavior` with them, so one rule covers all
+eight axes instead of a special case for three.
+
+`useIntent` keeps its facet keys and its require-versus-avoid
+contradiction check — those are per-trait and unaffected.
+"""
+validation = """
+## Watch
+
+- `sdk_generate.rs` validates that `trait.ts` binds the literal namespaces
+  `tone`, `method`, and `verbosity` to their generated constants. Deleting
+  those exports fails codegen validation before it fails typecheck; the
+  validator must be updated in the same commit.
+- The chain is generated end to end — vocabulary TOML, build script,
+  builtins.rs, schema.rs, sdk-generate, generated.ts — and `just sdk-check`
+  runs inside `just test`. Hand-editing generated.ts will pass locally and
+  fail the gate.
+- `cdk.test.ts` asserts `intent.avoid.ScopeCreep` resolves AND that
+  `intent.ScopeCreep` is undefined. This task inverts both; rewrite the
+  test to the new contract rather than deleting it.
+- `.docs/PRODUCT.md` documents three casing aliases (PascalCase, camel,
+  SCREAMING_SNAKE) and root-hoisted intent leaves. The code implements one
+  alias form and no hoisting. Doc and code already disagree — settle it
+  here rather than inheriting the ambiguity that parked task 0046.
+
+## Done when
+
+Authors write `intent.X` and `behavior.<axis>.X`; the three top-level
+namespaces are gone along with the validator clause pinning them;
+`just sdk-check` passes with a regenerated `generated.ts`; and the
+vocabulary casing tests assert the new contract.
+"""
+
+[relations]
+depends-on = ["0221"]

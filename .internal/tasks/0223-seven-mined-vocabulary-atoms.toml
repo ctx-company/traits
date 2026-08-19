@@ -1,0 +1,65 @@
+schema-version = "0.2"
+key = "0223"
+title = "Seven vocabulary atoms mined from published agent skills"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Surveyed two public skill sources and kept what is genuinely vocabulary —
+a reusable atom a dozen traits could select — rather than a procedure,
+which belongs in a trait. Deduped against the existing ~45 entries; these
+seven have no current equivalent.
+
+From the `bro` skill set (backnotprop/bro):
+
+- plain (behavior.tone) — everyday language over domain jargon, explained
+  as one person to another, without sloganeering or rhetorical flourish.
+  `technical` is its opposite; `terse` and `brief` govern length, not
+  register. Nothing covers this today.
+- restate-to-confirm (behavior.method) — playing the request back in one's
+  own words before acting, so a misreading surfaces before the work does.
+  `socratic` asks questions, `curious` clarifies, `ask-when-blocked` stops;
+  none of them play back.
+- steelman (behavior.method) — the strongest case against the conclusion,
+  stated fairly, and what makes it fail.
+- implications-first (behavior.method) — what each fact constrains,
+  breaks, or enables downstream, rather than the fact alone.
+
+From the Karpathy guidelines (multica-ai/andrej-karpathy-skills):
+
+- push-back (behavior.method) — disagreement with a stated premise or
+  approach when the evidence warrants it, carrying that evidence.
+- match-surrounding-style (intent) — code that reads like its neighbours,
+  honoring existing convention over personal preference.
+- verifiable-goal (intent) — the task restated as a condition that can be
+  checked, before work starts rather than after.
+
+Wording is ours, written to the 0222 neutral-topic standard; the ideas are
+credited in a comment on the catalog file. Nothing is copied.
+
+Held for a later pass, in rough order of appeal: falsifiable-verdict,
+neutral-framing, critical-only, clean-own-orphans, reproduce-before-fix.
+
+Placement is constrained: verbosity, directness, scope-control,
+initiative, and uncertainty are scalar — a trait selects exactly one
+value — so an atom that must coexist with others belongs in tone, method,
+or format. That is why falsifiable-verdict cannot simply join uncertainty
+beside state-assumptions.
+"""
+validation = """
+## Watch
+
+- An atom nothing would ever select is dead weight. Before landing each
+  one, name a trait in this repository that would plausibly choose it.
+- Do not let an atom drift into procedure. "Restate the request before
+  acting" is vocabulary; "run /readback then wait for confirmation" is a
+  trait.
+
+## Done when
+
+The seven are in the catalog in neutral-topic wording, reachable from the
+CDK under their axes, credited by source in a file comment, and at least
+one authored trait or template selects each of them.
+"""
+
+[relations]
+depends-on = ["0222"]

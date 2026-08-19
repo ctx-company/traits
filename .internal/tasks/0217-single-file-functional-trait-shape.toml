@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0217"
+title = "Spike: the single-file, variant-free shape a scaffold template can use"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Every functional-style trait in this repository declares a family: an entry
+module calling `defineTrait` plus `useVariant`, and at least one variant
+module beside it. A build of a bare `defineTrait` with steps registered in
+the trait function was not attempted; a docs-example build in this shape
+failed until a `variant/default/` module existed.
+
+The three scaffold templates 0218 introduces must be single-file and
+variant-free (owner ruling 2026-08-19). Object-layer authoring
+(`trait(...)` + `procedure({...})`) already satisfies that shape — it is
+what today's five templates use — but it is not the surface the docs teach
+or the authored families use.
+
+`procedure.from(fields, body)` (task 0106, "functional procedures inside
+object shells") is the candidate: a functional body inside an object shell
+is exactly a single-file variant-free trait, if it composes with
+`defineTrait` and the step registrars.
+
+Determine which of these is true, with a built artifact as the evidence:
+
+1. A functional trait function can register steps directly, no variant.
+2. `procedure.from` gives a single-file shape that builds and checks.
+3. Neither — a functional trait requires a variant module, and the
+   templates must either accept two files or the CDK must gain support.
+
+Report the answer as the canonical template skeleton: the smallest source
+that builds, checks, and runs, written out in full.
+"""
+validation = """
+## Watch
+
+- Prove it by building, not by reading types. A shape that typechecks but
+  emits no procedure is a failure, not a pass.
+- Use a scratch package under a throwaway id and delete it afterwards; do
+  not leave a fixture package on the board or in the authored tree.
+
+## Done when
+
+The chosen skeleton is written into this task's outcome, a scratch package
+in that exact shape passes `ctx traits build` and `ctx traits check`, and
+the scratch package is removed. If the answer is (3), the task records what
+CDK support would cost so the owner can rule on two files versus new API.
+"""
