@@ -82,10 +82,9 @@ export function commitTail(options: CommitTailOptions): readonly SequenceHandle[
   });
   return [
     statusStep,
-    sequence.when(`${id}-maybe-commit`, {
-      if: condition.not(condition.equals(status, "")),
-      // oxlint-disable-next-line unicorn/no-thenable -- `BranchSequenceFields.then` is the CDK's own branch-arm field, not a promise.
-      then: [scribeStep, stageStep, commitStep],
+    sequence.branch(`${id}-maybe-commit`, {
+      check: condition.not(condition.equals(status, "")),
+      success: [scribeStep, stageStep, commitStep],
     }),
   ];
 }

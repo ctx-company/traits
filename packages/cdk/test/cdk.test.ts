@@ -869,7 +869,7 @@ describe("sequence.loop on-exhausted (P399)", () => {
             sequence.loop("abort-loop", {
               sequence: bodyOf("abort-body"),
               iterations: 3,
-              onExhausted: sequence.flow.Abort,
+              onExhausted: "abort",
             }),
             sequence.loop("signal-loop", {
               sequence: bodyOf("signal-body"),
@@ -1996,11 +1996,10 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         }),
       );
     const viaWhen = draftFor([
-      sequence.when("route", {
-        if: condition.output.is("approved"),
-        // oxlint-disable-next-line unicorn/no-thenable -- BranchSequenceFields.then is a step ref, not a promise.
-        then: [mergeStep],
-        otherwise: [reviseStep],
+      sequence.branch("route", {
+        check: condition.output.is("approved"),
+        success: [mergeStep],
+        failure: [reviseStep],
       }),
     ]);
     const viaBranch = draftFor([
@@ -2476,33 +2475,18 @@ it("passes metadata family/variant and facets through the draft unchanged", () =
   expect(draft.metadata).toEqual({ family: "plan", variant: "quick", tag: ["first-party"] });
 });
 
-describe("agent.* templates vs deprecated bare exports (P459)", () => {
+describe("agent.* role templates", () => {
   it.each([
-    ["worker", agent.worker, worker] as const,
-    ["reviewer", agent.reviewer, reviewer] as const,
-    ["planner", agent.planner, planner] as const,
-    ["oracle", agent.oracle, oracle] as const,
-    ["searcher", agent.searcher, searcher] as const,
-  ])("%s: namespaced and bare exports emit an identical declaration", (_name, namespaced, bare) => {
-    const namespacedHandle = namespaced("role", { description: "Custom description." });
-    const bareHandle = bare("role", { description: "Custom description." });
+    ["worker", agent.worker] as const,
+    ["reviewer", agent.reviewer] as const,
+    ["planner", agent.planner] as const,
+    ["oracle", agent.oracle] as const,
+    ["searcher", agent.searcher] as const,
+  ])("%s: emits a declaration carrying the caller's description", (_name, namespaced) => {
+    const handle = namespaced("role", { description: "Custom description." });
 
-    expect(toDraftJson(bareHandle)).toEqual(toDraftJson(namespacedHandle));
-  });
-
-  it("reports a deprecation diagnostic only for the bare export", () => {
-    const namespacedHandle = agent.worker("role", { description: "Custom description." });
-    const bareHandle = worker("role", { description: "Custom description." });
-
-    expect(diagnostics(namespacedHandle)).toEqual([]);
-    expect(diagnostics(bareHandle)).toEqual([
-      {
-        severity: "warning",
-        code: "cdk.agent-template.bare-export-deprecated",
-        fieldPath: "agent.role",
-        message: "Bare `worker(...)` is deprecated; use `agent.worker(...)` instead.",
-      },
-    ]);
+    expect(toDraftJson(handle)).toMatchObject({ id: "role", description: "Custom description." });
+    expect(diagnostics(handle)).toEqual([]);
   });
 });
 
@@ -2618,27 +2602,18 @@ describe("session", () => {
     expect(() => session("Not A Slug")).toThrow(/slug/);
   });
 
-  it("all five role templates and their deprecated bare aliases accept a session binding", () => {
+  it("all five role templates accept a session binding", () => {
     const shared = session("shared-role-scan");
-    const namespacedHandles = [
+    const handles = [
       agent.worker("w", { session: shared }),
       agent.reviewer("r", { session: shared }),
       agent.planner("p", { session: shared }),
       agent.oracle("o", { session: shared }),
       agent.searcher("s", { session: shared }),
     ];
-    const bareHandles = [
-      worker("w", { session: shared }),
-      reviewer("r", { session: shared }),
-      planner("p", { session: shared }),
-      oracle("o", { session: shared }),
-      searcher("s", { session: shared }),
-    ];
 
-    for (// oxlint-disable-next-line typescript/no-non-null-assertion -- namespacedHandles and bareHandles are built as parallel arrays of equal length above
-    const [namespaced, bare] of namespacedHandles.map((handle, index) => [handle, bareHandles[index]!] as const)) {
-      expect(toDraftJson(namespaced).session).toBe("session:shared-role-scan");
-      expect(toDraftJson(namespaced)).toEqual(toDraftJson(bare));
+    for (const handle of handles) {
+      expect(toDraftJson(handle).session).toBe("session:shared-role-scan");
     }
   });
 
@@ -2793,7 +2768,7 @@ describe("guards are handles, not JsonObjects (P483)", () => {
 
     // @ts-expect-error a plain object literal is not a GuardValue; author via condition.*.
     // oxlint-disable-next-line unicorn/no-thenable -- BranchSequenceFields.then is a step ref, not a promise.
-    sequence.when("bad-branch-if", { if: { slot: "x", equals: 1 }, then: "sequence:noop" });
+    sequence.branch("bad-branch-if", { check: { slot: "x", equals: 1 }, success: "sequence:noop" });
   });
 
   it("rejects a misspelled predicate key passed to condition.not", () => {
@@ -2810,11 +2785,11 @@ describe("guards are handles, not JsonObjects (P483)", () => {
       until: "condition:guard-fixture-named",
     });
     // oxlint-disable unicorn/no-thenable -- BranchSequenceFields.then is a step ref, not a promise.
-    sequence.when("guard-fixture-branch-signal", { if: "signal:review-complete", then: "sequence:noop" });
-    sequence.when("guard-fixture-branch-named", { if: named, then: "sequence:noop" });
-    sequence.when("guard-fixture-branch-nested", {
-      if: [condition.signal("signal:review-complete"), [condition.unsafe({ empty: "slot:findings" })]],
-      then: "sequence:noop",
+    sequence.branch("guard-fixture-branch-signal", { check: "signal:review-complete", success: "sequence:noop" });
+    sequence.branch("guard-fixture-branch-named", { check: named, success: "sequence:noop" });
+    sequence.branch("guard-fixture-branch-nested", {
+      check: [condition.signal("signal:review-complete"), [condition.unsafe({ empty: "slot:findings" })]],
+      success: "sequence:noop",
     });
     // oxlint-enable unicorn/no-thenable
   });

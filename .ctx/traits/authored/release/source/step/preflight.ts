@@ -8,7 +8,7 @@ export const gitStatus = cdk.slot.text({
   hint: "Non-empty means the tree is dirty; the run parks before any bump when this is non-empty.",
 });
 
-export const gatePassed = cdk.slot.of({
+export const gatePassed = cdk.slot({
   id: "gate-passed",
   schema: cdk.schema.object("release-gate-result", {
     ok: cdk.schema.field(cdk.schema.boolean(), { description: "True when the gate command exited successfully." }),

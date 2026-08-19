@@ -69,7 +69,7 @@ import { isLiteralProjectionSource, slot } from "./slot.js";
 import { operation } from "./slot.js";
 import type { LiteralProjectionSource } from "./slot.js";
 
-/** Loop exhaustion policy spellings (P448): `sequence.flow.Continue`/`sequence.flow.Abort` evaluate to these. */
+/** Loop exhaustion policy values a canonical loop lowers to; author them as `signal.Continue`/`signal.Abort`. */
 export type ExhaustionPolicy = "continue" | "abort";
 /** A single loop-exhaustion signal ref, authored the same way as `onComplete`. */
 export type ExhaustionSignalValue = string | RefHandle<"signal">;
@@ -614,12 +614,12 @@ export type SequenceFields =
  *   text: input.prompt`Review ${diff} with a focus on ${focus}.`,
  *   output: review,
  * });
- * const applyFixesStep = sequence.command({ id: "apply-fixes", cmd: "apply-fixes" });
+ * const applyFixesStep = sequence.command("apply-fixes", { cmd: "apply-fixes" });
  * const reviewOne = sequence.linear("review-one", [reviewStep]);
  * const files = slot.texts("files");
  * const currentFile = slot.text("current-file");
- * const mergeStep = sequence.command({ id: "merge", cmd: "git merge --no-ff" });
- * const reviseStep = sequence.command({ id: "revise", cmd: "revise" });
+ * const mergeStep = sequence.command("merge", { cmd: "git merge --no-ff" });
+ * const reviseStep = sequence.command("revise", { cmd: "revise" });
  * ```
  * @see {@link SequenceFields}
  */
@@ -835,13 +835,6 @@ export interface SequenceFunction {
    */
   branch(id: string, fields: Omit<GateBranchFields, "id" | "kind">): SequenceHandle;
   /**
-   * Declares a conditional branch: runs `then` when `if` is satisfied,
-   * `otherwise` when it is not.
-   * @deprecated Use {@link SequenceFunction.branch} — `sequence.branch(id, { check, success, failure })`.
-   * @example `sequence.when("route", { if: condition.output.is("approved"), then: [mergeStep], otherwise: [reviseStep] })`
-   */
-  when(id: string, fields: Omit<BranchSequenceFields, "id" | "kind">): SequenceHandle;
-  /**
    * Declares a parallel panel of independent named-sequence branches.
    * `max-branches` is derived from the branch count.
    * @example
@@ -866,11 +859,6 @@ export interface SequenceFunction {
    * ```
    */
   parallel(id: string, branches: readonly SequenceRefValue[], options: ParallelOptions): SequenceHandle;
-  /** `sequence.loop(..., { onExhausted })` spellings for the two exhaustion policies, evaluating to `"continue"` and `"abort"` respectively. */
-  readonly flow: {
-    readonly Continue: "continue";
-    readonly Abort: "abort";
-  };
 }
 
 function sequencePrompt<Input, Output = unknown>(
@@ -1069,7 +1057,7 @@ function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceH
 /**
  * Declares prompt, command, and control-flow sequence steps.
  * @param fields Step fields discriminated by `kind`.
- * @example `sequence.prompt({ id: "draft", text: input.prompt`Write about ${focus}.` })`
+ * @example `sequence.prompt("draft", { input: input.prompt`Write about ${focus}.` })`
  * @see {@link procedure}
  */
 export const sequence: SequenceFunction = {
@@ -1118,14 +1106,6 @@ export const sequence: SequenceFunction = {
   },
   forEach: sequenceForEach,
   branch: sequenceBranch,
-  when: (id: string, fields: Omit<BranchSequenceFields, "id" | "kind">): SequenceHandle => {
-    recordDiagnostic(
-      "cdk-legacy-sequence-when",
-      `sequence.${id}`,
-      "sequence.when is deprecated; use sequence.branch({ check, success, failure })",
-    );
-    return sequenceOf({ ...fields, id, kind: "branch" });
-  },
   parallel: (id: string, branches: readonly SequenceRefValue[], options?: ParallelOptions): SequenceHandle =>
     sequenceOf({
       id,
@@ -1136,7 +1116,6 @@ export const sequence: SequenceFunction = {
       ...(options?.onFailure === undefined ? {} : { onFailure: options.onFailure }),
       ...(options?.include === undefined ? {} : { include: options.include }),
     }),
-  flow: { Continue: "continue", Abort: "abort" } as const,
 };
 
 /**
@@ -1183,7 +1162,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     recordDiagnostic(
       "cdk-legacy-sequence-prompt",
       `sequence.${fields.id}.prompt`,
-      "sequence prompt: is deprecated; use the text: field",
+      "sequence prompt: is deprecated; use input: with an input.prompt template",
     );
   }
   if (rawFields.text !== undefined && rawFields.prompt !== undefined) {

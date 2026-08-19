@@ -56,7 +56,7 @@ export interface InputFunction {
    * same argv validation as an explicit `argv:` array. Non-interpolated
    * dependencies — including `input.optional(...)` markers — are declared
    * separately through `include:`, not by interpolating them here.
-   * @example `sequence.command({ id: "commit", input: input.command`git commit -m ${message}`, include: input.optional(scope) })`
+   * @example `sequence.command("commit", { input: input.command`git commit -m ${message}`, include: input.optional(scope) })`
    */
   command(strings: TemplateStringsArray, ...values: readonly CommandInterpolation[]): CommandTemplateValue;
 
