@@ -678,8 +678,6 @@ export const behavior = {
  */
 export const intent = callableNamespace(GeneratedIntent);
 
-
-
 function pascalKey(key: string): string {
   return key.charAt(0).toUpperCase() + key.slice(1);
 }

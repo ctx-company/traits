@@ -287,9 +287,9 @@ describe("draft synthesis", () => {
   // The message has to say where ports DO go, or the author has been told
   // only that their guess was wrong.
   it("points an unknown contract field at the trait's own port field", () => {
-    expect(() =>
-      procedure({ description: "d", sequence: [], input: ["port:task"] } as never),
-    ).toThrow(/declare ports with the trait's own `port` field/);
+    expect(() => procedure({ description: "d", sequence: [], input: ["port:task"] } as never)).toThrow(
+      /declare ports with the trait's own `port` field/,
+    );
   });
 
   it("names every unknown field at once, not just the first", () => {
