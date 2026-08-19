@@ -1,0 +1,70 @@
+schema-version = "0.2"
+key = "0231"
+title = "An intent group has to say what belonging to it means"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Owner ruling 2026-08-19, and the missing half of 0222.
+
+Flattening the catalog moved every bit of polarity out of the item and into
+the group. An entry now reads "expanding past what was asked" — true, and
+deliberately silent on what to do about it. The only thing left saying what
+to do is the group, and the render states that as a bare attribute:
+
+    <intent group="avoid" id="scope-creep">expanding past what was asked…</intent>
+
+Before 0222 that attribute was reinforcement; the item's own text already
+said "do not expand". Now it is load-bearing, and it is doing the work by
+implication alone. An agent is left to infer that `avoid` forbids while
+`focus` merely directs attention — a distinction the trait author chose
+deliberately and the render never explains.
+
+That distinction is the point of having four groups. `require` and `focus`
+are not two strengths of the same thing: one enforces, the other asks. A
+trait that puts `correctness` in `focus` is saying watch here; a trait that
+puts it in `require` is saying this must hold. Same item, different
+instruction, and today the difference reaches the agent as one word in an
+attribute.
+
+For each group PRESENT in a trait, render what membership in that group
+means, once, before its items. Absent groups say nothing — a trait with no
+blocks should not carry a paragraph about blocking.
+
+The four meanings to write (wording is the task's real work, not the
+plumbing):
+
+- require — must hold in the finished work; not achieving it is a failure
+- focus — where attention goes; the lens the work is examined through
+- avoid — must not happen; doing it is a defect even if nothing else breaks
+- block — a hard stop; encountering it means refusing rather than proceeding
+
+`modules/core/src/model_view/compile.rs` is where this lands:
+`intent_groups` returns the four groups with their items, and
+`format_guidance_group` writes the elements. The group header belongs
+between them, emitted only when the group has items.
+"""
+validation = """
+## Watch
+
+- Behavior axes have the same shape and NOT the same problem: an axis names
+  a manner rather than a polarity, and its items still carry their own
+  meaning. Do not add axis headers for symmetry — this is about the four
+  intent groups specifically.
+- The model-visible digest moves for every trait declaring intent, so
+  lockfiles and any exported artifacts regenerate with it. Canonical output
+  does not change; this is render-side only.
+- The second-person ban applies to whatever text is written here, as it
+  does to every other rendered guidance string.
+- Both render paths need it, or the two disagree: the full model view and
+  the compact `summary_sections` projection.
+
+## Done when
+
+A trait declaring require and avoid renders a stated meaning for each of
+those two groups and nothing for focus or block; the meanings say plainly
+that require enforces and focus directs; and a scratch-fixture proof pins
+that a group with no items emits no header.
+"""
+
+[relations]
+depends-on = ["0222"]
