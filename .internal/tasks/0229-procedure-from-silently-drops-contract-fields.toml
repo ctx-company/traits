@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0229"
 title = "The procedure authoring surface: reject what it ignores, drop what it does not need"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Three defects in one small surface, found while proving the single-file
@@ -78,4 +78,30 @@ the trait `port` field as where ports are declared; `sequenceOrder` and
 `worktreeRequired` are gone from the CDK, the canonical model, the
 planner, and the renderers; and a scratch behavioral proof pins the
 rejection rather than a file inventory.
+
+## Outcome (2db6ca10)
+
+All three done. The rejection immediately found the defect live in three
+places, which the task suspected but could not confirm:
+
+- `critique` declared its `review` output port only on the procedure, so it
+  shipped with four input ports and NO output — producing nothing a caller
+  could read. Fixed; its canonical gains the port.
+- `explain` declared the same fields redundantly. Its canonical is
+  byte-identical after removal, which is the proof they did nothing.
+- `ctx traits init`'s starter scaffold carried it too, so every trait
+  scaffolded that way had no output port until its author noticed.
+
+Six test fixtures across five proof files carried the same shape and were
+corrected the same way.
+
+The "Watch" note about `output.of(...)` ports resolving by a different
+route was a red herring: `explain` and `critique` differ only in whether
+the port is ALSO declared at trait level. Trait-level `port` is the one
+collection route; the procedure field was never a second one.
+
+Proven by four CDK unit tests on the rejection and its message, by
+extending the existing typecheck-only test to assert the runtime throw,
+and end to end by building a package that declares its output port in the
+wrong place and watching it fail.
 """
