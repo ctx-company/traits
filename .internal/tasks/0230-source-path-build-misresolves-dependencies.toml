@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0230"
 title = "Building by source path resolves dependencies from the wrong root"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 `ctx traits build <path/to/source/index.ts>` — the documented escape hatch
@@ -59,4 +59,27 @@ validation = """
 succeeds and resolves `../spec`; the builtins gate drops its scratch root
 and compares `index.map` alongside the canonical; and a scratch-fixture
 proof covers a path-built package with a sibling path dependency.
+
+## Outcome (bd88f8e4)
+
+The root defect is fixed and proven. The diagnosis above was close but
+wrong about the location: `package_root_for_manifest` HAS a source-entry
+case and was returning the right root all along. The build handed it
+`source/index.toml` — a path no case can step up from — because
+`package_build_paths` routed only canonical packages and built-in
+TEMPLATES to `generated/`, leaving the trait and shared buckets on the
+beside-the-source fallback.
+
+Every recognized package now writes under `generated/`. `spec` and the
+three templates build by path. Twelve committed debris files (six
+`source/index.toml`, six `source/index.map`) written by mis-rooted builds
+are deleted. `proof_source_path_build_root.rs` covers two sibling packages
+where one declares the other by relative path, and was verified to fail
+without the fix.
+
+Two of the three "done when" clauses are NOT met, blocked by something
+0227 introduced after this task was written — see 0232. The five
+dependents still cannot be path-built, so the gate keeps its scratch root
+and its maps stay uncomparable. Both comments in `builtins.sh` now state
+the real reason rather than promising this task would remove it.
 """

@@ -1,0 +1,68 @@
+schema-version = "0.2"
+key = "0232"
+title = "The built-in repo layout and the runtime store layout disagree"
+status = "ready"
+raised = "2026-08-19"
+content = """
+The five built-in meta-traits declare their shared dependency as:
+
+    spec = { version = "0.1.0", path = "../spec" }
+
+That is true in exactly one of the two places the package exists, and false
+in the other.
+
+- The runtime store is FLAT. `write_staged_packages` materializes every
+  package at `<store>/<id>`, so a dependent's `../spec` resolves to its
+  sibling. This is the layout that ships and the one the declared path is
+  correct for.
+- The repository is BUCKETED, since 0227. `spec` lives at
+  `modules/builtin/shared/spec` and its dependents at
+  `modules/builtin/traits/<id>`, so `../spec` resolves to
+  `modules/builtin/traits/spec`, which does not exist.
+
+Nothing was broken by this — it was invisible because the only thing that
+resolves these paths in-repo is the builtins gate, and that gate copies
+every package into one flat scratch authored root, where `../spec` is true
+again. 0230 removed the other reason for that copy, which is what left this
+one standing alone and visible.
+
+Two ways out, and they are not equivalent:
+
+- Make the store bucketed, mirroring the repo. `BuiltinTraitPackage` carries
+  its bucket (build.rs already iterates per-bucket), `write_staged_packages`
+  joins it, `resolve_builtin_package_root` searches buckets,
+  `is_builtin_store_package_root` gains a path level, and the five
+  dependents declare `../../shared/spec`. Repo and store then agree, and a
+  reader of either sees the same relationship. Cost: it changes an on-disk
+  layout under `.ctx/cache/builtin-traits/<version>/`, which several
+  resolution paths pattern-match on.
+- Make the repo flat, dropping the `shared/` bucket and keeping only the
+  `runnable` flag to distinguish spec. Smaller, but it undoes the
+  three-bucket structure 0227 asked for, and `runnable` alone does not tell
+  a reader why spec is different when they are looking at the tree.
+
+The first is the better shape and the more invasive one. This is an owner
+call, not a mechanical fix, which is why it is filed rather than done.
+"""
+validation = """
+## Watch
+
+- The store is versioned per CLI version and republished when stale, so a
+  layout change self-heals for users rather than needing a migration. Verify
+  that: the staleness check must notice a layout change, not just digest
+  drift.
+- `is_builtin_store_package_root` gates trust and write/import decisions, not
+  only resolution. A path-shape change there reaches further than the store.
+- `trust approve spec` resolves through the built-in store
+  (`resolve_builtin_manifest_path`) since edd77db3; it has to keep working
+  whichever layout wins.
+
+## Done when
+
+Repo and store agree on one layout; the five dependents build by source
+path; `builtins.sh` drops its scratch root and compares `generated/index.map`
+alongside the canonical and the lock.
+"""
+
+[relations]
+depends-on = ["0227", "0230"]
