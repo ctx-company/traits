@@ -4,6 +4,17 @@ generated-by = "ctx traits sync"
 generated-at = "not-recorded"
 
 [[trait]]
+id = "spec"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:174ee5b3791207a09a286352423e6ccd4bc30eb1b7c992a2e6fab717acd070b4"
+canonical = "sha256:7f4103abe0932c220aad45daab6f16a588587656cb05d4f3ef153bd11c7c2730"
+model-visible = "sha256:fa29959334535f27eea37bf642482dd9457c79f07c7498fa4c69188088113bdf"
+resource-manifest = "sha256:21a1bea7ad900b112b52cd04ea10e3b98fa6c50fd40b73798218fee995bc91c9"
+
+[[trait]]
 id = "trait-spec"
 requested-version = "0.1.0"
 resolved-version = "0.1.0"

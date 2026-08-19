@@ -26,8 +26,7 @@ const traitId = port.input.text({
   description:
     'Slugified trait ID the candidate must declare (`trait("<trait-id>", ...)`); also keys the round evaluator\'s scratch package.',
 });
-const agentTraitsSchema = ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" });
-const designRubric = ref.resource({ id: "design-rubric", dependency: "trait-spec" });
+const designRubric = ref.resource({ id: "design-rubric", dependency: "spec" });
 
 // --- Loop-carried state: the candidate authoring source under construction,
 // its latest round evaluation, and how many rounds have run. ---
@@ -68,7 +67,7 @@ const produceFirstStep = sequence.prompt("produce-first", {
   agent: generator,
   input: input.prompt`
         Create exactly one complete trait authoring source in TypeScript, using the @ctx-traits/cdk builder, for ${name} from ${brief}. It must declare trait("${traitId}", ...) with a non-empty procedure sequence — a candidate that compiles but declares no procedure never converges.
-        Ground it in ${agentTraitsSchema} and ${designRubric}. Return the complete TypeScript source text only, nothing else.`,
+        Follow ${designRubric}: classify the material by what it says before choosing a shape, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return the complete TypeScript source text only, nothing else.`,
   output: candidateSource,
 });
 
@@ -203,10 +202,10 @@ export default trait("generate-trait", {
     "Drives a bounded produce/evaluate loop that generates a trait candidate against the deterministic rung ladder, revising on its own typed diagnostics.",
   metadata: { tag: ["first-party", "meta-trait", "generation"] },
   dependency: dependency({
-    alias: "trait-spec",
-    id: "trait-spec",
+    alias: "spec",
+    id: "spec",
     version: "0.1.0",
-    source: { path: "../trait-spec" },
+    source: { path: "../spec" },
   }),
   // `procedure(...)` has no `input`/`output` fields of its own — the
   // procedure's contract is inferred from declared ports: input ports the

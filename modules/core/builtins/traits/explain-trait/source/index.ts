@@ -14,7 +14,7 @@ const scaffold = port.input.text({
   id: "scaffold",
   description: "Deterministic explain-scaffold JSON text — the sole grounding evidence.",
 });
-const agentTraitsSchema = ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" });
+const designRubric = ref.resource({ id: "design-rubric", dependency: "spec" });
 
 const anchor = schema.object(
   "source-anchor",
@@ -47,7 +47,7 @@ const narrationOutput = output.of(
     }),
     explanation: schema.text(),
   }),
-)`Return exactly one explain-scaffold object. Copy trait-id, receipt-digest, sections, and warnings from ${scaffold} verbatim and unmodified — never alter, drop, or add a fact, anchor, or section. Add a non-empty explanation that narrates in plain language only what ${scaffold}'s sections establish, grounded in ${agentTraitsSchema}. This is generated advisory text, not authority, a check receipt, or a substitute for the canonical trait. Do not claim runtime behavior or validation that the scaffold does not establish.`;
+)`Return exactly one explain-scaffold object. Copy trait-id, receipt-digest, sections, and warnings from ${scaffold} verbatim and unmodified — never alter, drop, or add a fact, anchor, or section. Add a non-empty explanation that narrates in plain language only what ${scaffold}'s sections establish, using the vocabulary of ${designRubric} — derived kind, speech act, dataflow — so the narration names what the trait is. This is generated advisory text, not authority, a check receipt, or a substitute for the canonical trait. Do not claim runtime behavior or validation that the scaffold does not establish.`;
 
 const explainStep = sequence.prompt("explain-trait", {
   title: "Explain trait",
@@ -70,10 +70,10 @@ export default trait("explain-trait", {
     "Narrates a plain-language advisory explanation strictly grounded in a deterministic receipt-anchored scaffold.",
   metadata: { tag: ["first-party", "meta-trait", "explain"] },
   dependency: dependency({
-    alias: "trait-spec",
-    id: "trait-spec",
+    alias: "spec",
+    id: "spec",
     version: "0.1.0",
-    source: { path: "../trait-spec" },
+    source: { path: "../spec" },
   }),
   schema: [anchor, section],
   port: narrationPort,

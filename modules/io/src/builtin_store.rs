@@ -1,12 +1,12 @@
 //! Runtime materialization of the six embedded first-party built-in
 //! meta-trait packages (`generate-trait`, `refine-trait`, `critique-trait`,
-//! `explain-trait`, `import-trait`, `trait-spec`) as real files on disk.
+//! `explain-trait`, `import-trait`, `spec`) as real files on disk.
 //!
 //! `ctx_traits_core::builtin_trait_packages` only exposes the packages as
 //! bytes compiled into the binary; nothing on disk backs them at runtime
 //! outside this crate's own repo checkout. The rest of the IO layer
 //! (`run::resolve_trait_path`, declared-resource digesting, the
-//! `../trait-spec` sibling dependency join) only ever knows how to read real
+//! `../spec` sibling dependency join) only ever knows how to read real
 //! files under a real package root, so this module's only job is to make one
 //! exist — every containment/lifecycle/resource gate downstream stays
 //! exactly as it is for a repo-local package, no bypass logic anywhere else.
@@ -107,7 +107,7 @@ pub fn resolve_builtin_package_root(
 /// Materialize every embedded built-in package under the current CLI
 /// version's store directory if it is not already valid. All six packages
 /// are always published together (never one at a time) so a sibling
-/// `../trait-spec` dependency join always finds a real materialized
+/// `../spec` dependency join always finds a real materialized
 /// package, regardless of which built-in id a caller originally resolved.
 fn ensure_store_published(repo_root: &Utf8Path) -> crate::Result<()> {
     let store_root = crate::layout::builtin_store_root_path(repo_root)?;

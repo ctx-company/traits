@@ -103,7 +103,7 @@ fn generate_loop_exhaustion_writes_no_package_and_preserves_scratch() {
     // driven at all — a deterministic, offline, local-only operation (no
     // provider call), distinct from the assertion below that a
     // non-converging run never adds a trust record for the CANDIDATE trait.
-    for dependency in ["generate-trait", "trait-spec"] {
+    for dependency in ["generate-trait", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),

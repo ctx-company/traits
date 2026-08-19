@@ -81,7 +81,7 @@ fn refine_apply_loop_exhaustion_writes_nothing_and_names_the_failing_rung() {
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
-    for dependency in ["refine-trait", "trait-spec"] {
+    for dependency in ["refine-trait", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),
@@ -174,7 +174,7 @@ fn refine_preview_without_apply_spends_exactly_one_round() {
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
-    for dependency in ["refine-trait", "trait-spec"] {
+    for dependency in ["refine-trait", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),

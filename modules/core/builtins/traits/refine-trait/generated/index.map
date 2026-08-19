@@ -1,0 +1,142 @@
+{
+  "agent:refiner": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 16,
+    "end": 16
+  },
+  "port:change-request": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 28,
+    "end": 28
+  },
+  "port:result": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 201,
+    "end": 201
+  },
+  "port:single-shot": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "port:source": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 22,
+    "end": 22
+  },
+  "port:source-digest": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 23,
+    "end": 23
+  },
+  "port:source-path": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "prompt:produce-first": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 81,
+    "end": 81
+  },
+  "prompt:revise": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 120,
+    "end": 120
+  },
+  "schema:refine-envelope": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 143,
+    "end": 143
+  },
+  "schema:round-report": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 48,
+    "end": 48
+  },
+  "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 209,
+    "end": 209
+  },
+  "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then/revise": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 117,
+    "end": 117
+  },
+  "sequence:procedure/capture-single-shot": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 92,
+    "end": 92
+  },
+  "sequence:procedure/derive-envelope": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 186,
+    "end": 186
+  },
+  "sequence:procedure/guarded-loop": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 135,
+    "end": 135
+  },
+  "sequence:procedure/init-rounds-spent": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 87,
+    "end": 87
+  },
+  "sequence:procedure/produce-first": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 78,
+    "end": 78
+  },
+  "sequence:round": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 137,
+    "end": 137
+  },
+  "sequence:round/count-round": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 108,
+    "end": 108
+  },
+  "sequence:round/evaluate-round": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 101,
+    "end": 101
+  },
+  "sequence:round/revise-if-not-converged": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 128,
+    "end": 128
+  },
+  "slot:candidate": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 43,
+    "end": 43
+  },
+  "slot:envelope": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 167,
+    "end": 167
+  },
+  "slot:round-report": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 62,
+    "end": 62
+  },
+  "slot:rounds-spent": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 67,
+    "end": 67
+  },
+  "slot:single-shot-flag": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 73,
+    "end": 73
+  },
+  "trait:refine-trait": {
+    "file": ".ctx/traits/authored/refine-trait/source/index.ts",
+    "start": 209,
+    "end": 209
+  }
+}

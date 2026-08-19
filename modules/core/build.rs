@@ -114,7 +114,7 @@ const BUILTIN_TRAIT_PACKAGE_IDS: &[&str] = &[
     "critique-trait",
     "explain-trait",
     "import-trait",
-    "trait-spec",
+    "spec",
 ];
 
 const BUILTIN_TRAIT_PACKAGES_DIR: &str = "builtins/traits";

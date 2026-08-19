@@ -40,8 +40,7 @@ const targetSchema = port.input.text({
   id: "target-schema",
   description: "Target canonical schema (agent-traits/canonical-trait) the draft must conform to.",
 });
-const agentTraitsSchema = ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" });
-const designRubric = ref.resource({ id: "design-rubric", dependency: "trait-spec" });
+const designRubric = ref.resource({ id: "design-rubric", dependency: "spec" });
 
 // --- Loop-carried state: the candidate trait draft under construction, its
 // latest round evaluation, and how many rounds have run. ---
@@ -79,7 +78,7 @@ const produceFirstStep = sequence.prompt("produce-first", {
   agent: generator,
   input: input.prompt`
         Treat ${scaffold} as the authoritative baseline for trait ${traitId}, imported from a ${sourceProfile} source. Preserve trait identity and import provenance exactly as given in ${scaffold}. Enrich only intent, behavior, metadata, and descriptions that ${source} actually supports; never invent claims the source does not make.
-        Conform to ${targetSchema}, grounding the result in ${agentTraitsSchema} and ${designRubric}. Return exactly one complete trait draft JSON text — a single trait field holding the canonical trait draft — nothing else.`,
+        Conform to ${targetSchema}, following ${designRubric} — classify the imported material by what it says rather than inventing runtime behavior for it, and name every identifier so it reads alone. Return exactly one complete trait draft JSON text — a single trait field holding the canonical trait draft — nothing else.`,
   output: candidate,
 });
 
@@ -203,10 +202,10 @@ export default trait("import-trait", {
     "Drives a bounded produce/evaluate loop that enriches a deterministic import scaffold with source-grounded trait content, converging toward the imported contract: builds and checks clean while remaining recognizably the scaffold baseline.",
   metadata: { tag: ["first-party", "meta-trait", "import"] },
   dependency: dependency({
-    alias: "trait-spec",
-    id: "trait-spec",
+    alias: "spec",
+    id: "spec",
     version: "0.1.0",
-    source: { path: "../trait-spec" },
+    source: { path: "../spec" },
   }),
   port: envelopePort,
   procedure: procedure({

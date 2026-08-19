@@ -9,9 +9,9 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:8a5f576ea5e6ee1d1a2af221e6a9d742d699881f25f52f91e3c68e2a01b270ee"
-canonical = "sha256:d89ecfed92262488fe9772b91e70dd2c2d52098465ca4382549cf29564baf59a"
-model-visible = "sha256:385594f77b1facb0fe8d42aec0c9dc0eae3e0dfe7306c821d658da8b56ba1763"
+source = "sha256:422e85094b5e25fb9374b2398f1733f0ac893f2a6b8d626bfcb35974a6ae4eed"
+canonical = "sha256:2f59ac4188392eb3846361b08419d3b95211f94b8d04b02d03bd53a14c1c5daf"
+model-visible = "sha256:ad194911e387dff5790ecc43242e2cf5d48c325a1059dc6b7eddc48947686c19"
 resource-manifest = "sha256:8f49b8c174a855d6b9ec0e3f6d16f5ce3511618ee3afe79438c86499ffed4a8e"
 
 [[trait.export]]
@@ -20,17 +20,17 @@ path = ".agents/skills/critique-trait/SKILL.md"
 digest = "sha256:8197dcad35c69dc3610263b3a54eedd99053776c5121acbdffb69897930ff58a"
 
 [[dependency]]
-alias = "trait-spec"
-id = "trait-spec"
+alias = "spec"
+id = "spec"
 requested-version = "0.1.0"
 resolved-version = "0.1.0"
-vendored-path = ".ctx/traits/vendor/trait-spec"
+vendored-path = ".ctx/traits/vendored/spec"
 
 [dependency.source]
-path = "../trait-spec"
+path = "../spec"
 
 [dependency.digests]
-source = "sha256:2e679fed106ad0d7ba791d5a88b74a03d48c1cf84fe0d8786fbc971689db7f59"
-canonical = "sha256:6b6dabf47b2ff4f583405fca4e6a4cf87fea7aa8efa6b7298e28a15e126b3ff7"
-model-visible = "sha256:16efa105137138e4466db43f274ea2509cbe208008d1b370df730d83459bd30d"
-resource-manifest = "sha256:0df7adcc175a94c51c60e501d1fbde585ae1e70507f1753631eb97dcc37bfa0e"
+source = "sha256:174ee5b3791207a09a286352423e6ccd4bc30eb1b7c992a2e6fab717acd070b4"
+canonical = "sha256:7f4103abe0932c220aad45daab6f16a588587656cb05d4f3ef153bd11c7c2730"
+model-visible = "sha256:fa29959334535f27eea37bf642482dd9457c79f07c7498fa4c69188088113bdf"
+resource-manifest = "sha256:21a1bea7ad900b112b52cd04ea10e3b98fa6c50fd40b73798218fee995bc91c9"

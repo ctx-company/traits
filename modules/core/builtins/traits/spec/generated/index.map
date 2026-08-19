@@ -1,0 +1,12 @@
+{
+  "resource:design-rubric": {
+    "file": ".ctx/traits/authored/spec/source/index.ts",
+    "start": 3,
+    "end": 3
+  },
+  "trait:spec": {
+    "file": ".ctx/traits/authored/spec/source/index.ts",
+    "start": 10,
+    "end": 10
+  }
+}

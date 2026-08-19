@@ -5,4 +5,4 @@ name = "Generate Trait"
 status = "ready"
 
 [dependencies]
-trait-spec = { version = "0.1.0", path = "../trait-spec" }
+spec = { version = "0.1.0", path = "../spec" }

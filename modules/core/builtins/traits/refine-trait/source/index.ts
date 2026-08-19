@@ -36,8 +36,7 @@ const singleShot = port.input.of(schema.boolean(), {
   id: "single-shot",
   description: "Stop after exactly one produce/evaluate round regardless of convergence.",
 });
-const agentTraitsSchema = ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" });
-const designRubric = ref.resource({ id: "design-rubric", dependency: "trait-spec" });
+const designRubric = ref.resource({ id: "design-rubric", dependency: "spec" });
 
 // --- Loop-carried state: the candidate refine scaffold under construction,
 // its latest round evaluation, and how many rounds have run. ---
@@ -81,7 +80,7 @@ const produceFirstStep = sequence.prompt("produce-first", {
   agent: refiner,
   input: input.prompt`
         Refine ${source} at ${sourcePath} for ${changeRequest}. Preserve source identity, use ${sourceDigest} as source evidence, and anchor every patch to real one-based inclusive lines in ${sourcePath}.
-        Ground it in ${agentTraitsSchema} and ${designRubric}. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else.`,
+        Follow ${designRubric}: keep the derived kind honest, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else.`,
   output: candidate,
 });
 
@@ -214,10 +213,10 @@ export default trait("refine-trait", {
     "Drives a bounded produce/evaluate loop that refines a trait candidate against the deterministic rung ladder (with an identity rung refinement must never cross), revising on its own typed diagnostics.",
   metadata: { tag: ["first-party", "meta-trait", "refinement"] },
   dependency: dependency({
-    alias: "trait-spec",
-    id: "trait-spec",
+    alias: "spec",
+    id: "spec",
     version: "0.1.0",
-    source: { path: "../trait-spec" },
+    source: { path: "../spec" },
   }),
   port: envelopePort,
   procedure: procedure({

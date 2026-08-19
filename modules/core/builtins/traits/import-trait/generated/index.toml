@@ -1,19 +1,23 @@
 id = "import-trait"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Import Trait"
 description = "Drives a bounded produce/evaluate loop that enriches a deterministic import scaffold with source-grounded trait content, converging toward the imported contract: builds and checks clean while remaining recognizably the scaffold baseline."
 
 [[dependency]]
-alias = "trait-spec"
-id = "trait-spec"
+alias = "spec"
+id = "spec"
 version = "0.1.0"
 
 [dependency.source]
-path = "../trait-spec"
+path = "../spec"
 
 [metadata]
-tag = ["first-party", "meta-trait", "import"]
+tag = [
+    "first-party",
+    "meta-trait",
+    "import",
+]
 
 [[port]]
 id = "result"
@@ -131,15 +135,14 @@ summary = "Trait import enrichment agent."
 text = """
 
         Treat {port:scaffold} as the authoritative baseline for trait {port:trait-id}, imported from a {port:source-profile} source. Preserve trait identity and import provenance exactly as given in {port:scaffold}. Enrich only intent, behavior, metadata, and descriptions that {port:source} actually supports; never invent claims the source does not make.
-        Conform to {port:target-schema}, grounding the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one complete trait draft JSON text — a single trait field holding the canonical trait draft — nothing else."""
+        Conform to {port:target-schema}, following {resource:spec/design-rubric} — classify the imported material by what it says rather than inventing runtime behavior for it, and name every identifier so it reads alone. Return exactly one complete trait draft JSON text — a single trait field holding the canonical trait draft — nothing else."""
 input = [
-  "port:scaffold",
-  "port:trait-id",
-  "port:source-profile",
-  "port:source",
-  "port:target-schema",
-  "resource:trait-spec/agent-traits-schema",
-  "resource:trait-spec/design-rubric",
+    "port:scaffold",
+    "port:trait-id",
+    "port:source-profile",
+    "port:source",
+    "port:target-schema",
+    "resource:spec/design-rubric",
 ]
 output = ["slot:candidate"]
 
@@ -148,7 +151,13 @@ text = """
 
         Round evaluation of the import for trait {port:trait-id} failed at rung {slot:round-report}. Current candidate draft: {slot:candidate}.
         Fix exactly what the diagnostics in {slot:round-report} name; never invent claims {port:source} does not make, and never drop a declaration the {port:scaffold} baseline established — enrichment adds, it never deletes. Keep everything else. Return the complete corrected trait draft JSON text only, nothing else."""
-input = ["port:trait-id", "slot:round-report", "slot:candidate", "port:source", "port:scaffold"]
+input = [
+    "port:trait-id",
+    "slot:round-report",
+    "slot:candidate",
+    "port:source",
+    "port:scaffold",
+]
 output = ["slot:candidate"]
 
 [[sequence.ctx-branch-arm-s-5-round-23-revise-if-not-converged-then.sequence]]
@@ -156,17 +165,32 @@ id = "revise"
 title = "Revise the candidate against its round diagnostics (generator)"
 agent = "agent:generator"
 prompt = "prompt:revise"
-input = ["port:trait-id", "slot:round-report", "slot:candidate", "port:source", "port:scaffold"]
+input = [
+    "port:trait-id",
+    "slot:round-report",
+    "slot:candidate",
+    "port:source",
+    "port:scaffold",
+]
 output = ["slot:candidate"]
 
 [[sequence.round.sequence]]
 id = "evaluate-round"
 title = "Evaluate the candidate through the rung ladder"
-input = ["port:trait-id", "slot:candidate"]
+input = [
+    "port:trait-id",
+    "slot:candidate",
+]
 output = ["slot:round-report"]
 
 [sequence.round.sequence.command]
-argv = ["ctx", "traits", "import-round", "{port:trait-id}", "{slot:candidate}"]
+argv = [
+    "ctx",
+    "traits",
+    "import-round",
+    "{port:trait-id}",
+    "{slot:candidate}",
+]
 timeout-ms = 180000
 
 [[sequence.round.sequence]]
@@ -198,7 +222,13 @@ equals = true
 
 [procedure]
 description = "Produce a trait draft grounded in the deterministic scaffold and raw source, evaluate it through the deterministic rung ladder (with a baseline-retention rung the draft must never cross), and revise within a declared round bound; the handler writes only a converged result."
-input = ["port:scaffold", "port:source", "port:source-profile", "port:target-schema", "port:trait-id"]
+input = [
+    "port:scaffold",
+    "port:source",
+    "port:source-profile",
+    "port:target-schema",
+    "port:trait-id",
+]
 output = ["port:result"]
 
 [[procedure.sequence]]
@@ -207,13 +237,12 @@ title = "Draft the trait candidate (generator)"
 agent = "agent:generator"
 prompt = "prompt:produce-first"
 input = [
-  "port:scaffold",
-  "port:trait-id",
-  "port:source-profile",
-  "port:source",
-  "port:target-schema",
-  "resource:trait-spec/agent-traits-schema",
-  "resource:trait-spec/design-rubric",
+    "port:scaffold",
+    "port:trait-id",
+    "port:source-profile",
+    "port:source",
+    "port:target-schema",
+    "resource:spec/design-rubric",
 ]
 output = ["slot:candidate"]
 
@@ -245,11 +274,19 @@ equals = true
 [[procedure.sequence]]
 id = "derive-envelope"
 title = "Assemble the terminal round-evidence envelope"
-input = ["slot:round-report", "slot:candidate", "slot:rounds-spent"]
+input = [
+    "slot:round-report",
+    "slot:candidate",
+    "slot:rounds-spent",
+]
 output = ["slot:envelope"]
 
 [procedure.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 const [roundReportText, candidateText, roundsSpentText, roundsBoundText] = process.argv.slice(1);
 const report = JSON.parse(roundReportText);
 process.stdout.write(JSON.stringify({
@@ -259,4 +296,9 @@ process.stdout.write(JSON.stringify({
     "failing-rung": report.converged ? undefined : report.rung,
     diagnostics: report.diagnostics ?? [],
     candidate: candidateText,
-}));""", "{slot:round-report}", "{slot:candidate}", "{slot:rounds-spent}", "3"]
+}));""",
+    "{slot:round-report}",
+    "{slot:candidate}",
+    "{slot:rounds-spent}",
+    "3",
+]

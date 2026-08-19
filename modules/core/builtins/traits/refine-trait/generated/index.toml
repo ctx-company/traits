@@ -1,19 +1,23 @@
 id = "refine-trait"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Refine Trait"
 description = "Drives a bounded produce/evaluate loop that refines a trait candidate against the deterministic rung ladder (with an identity rung refinement must never cross), revising on its own typed diagnostics."
 
 [[dependency]]
-alias = "trait-spec"
-id = "trait-spec"
+alias = "spec"
+id = "spec"
 version = "0.1.0"
 
 [dependency.source]
-path = "../trait-spec"
+path = "../spec"
 
 [metadata]
-tag = ["first-party", "meta-trait", "refinement"]
+tag = [
+    "first-party",
+    "meta-trait",
+    "refinement",
+]
 
 [[port]]
 id = "change-request"
@@ -136,14 +140,13 @@ summary = "Trait refinement agent."
 text = """
 
         Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}.
-        Ground it in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else."""
+        Follow {resource:spec/design-rubric}: keep the derived kind honest, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else."""
 input = [
-  "port:source",
-  "port:source-path",
-  "port:change-request",
-  "port:source-digest",
-  "resource:trait-spec/agent-traits-schema",
-  "resource:trait-spec/design-rubric",
+    "port:source",
+    "port:source-path",
+    "port:change-request",
+    "port:source-digest",
+    "resource:spec/design-rubric",
 ]
 output = ["slot:candidate"]
 
@@ -152,7 +155,11 @@ text = """
 
         Round evaluation of the refinement for {port:change-request} failed at rung {slot:round-report}. Current candidate scaffold: {slot:candidate}.
         Fix exactly what the diagnostics in {slot:round-report} name; never change the trait's identity or drop its procedure — refinement edits a trait, it does not swap or gut it. Keep everything else. Return the complete corrected refine scaffold JSON text only, nothing else."""
-input = ["port:change-request", "slot:round-report", "slot:candidate"]
+input = [
+    "port:change-request",
+    "slot:round-report",
+    "slot:candidate",
+]
 output = ["slot:candidate"]
 
 [[sequence.ctx-branch-arm-s-5-round-23-revise-if-not-converged-then.sequence]]
@@ -160,17 +167,30 @@ id = "revise"
 title = "Revise the candidate against its round diagnostics (refiner)"
 agent = "agent:refiner"
 prompt = "prompt:revise"
-input = ["port:change-request", "slot:round-report", "slot:candidate"]
+input = [
+    "port:change-request",
+    "slot:round-report",
+    "slot:candidate",
+]
 output = ["slot:candidate"]
 
 [[sequence.round.sequence]]
 id = "evaluate-round"
 title = "Evaluate the candidate through the rung ladder"
-input = ["port:source-path", "slot:candidate"]
+input = [
+    "port:source-path",
+    "slot:candidate",
+]
 output = ["slot:round-report"]
 
 [sequence.round.sequence.command]
-argv = ["ctx", "traits", "refine-round", "{port:source-path}", "{slot:candidate}"]
+argv = [
+    "ctx",
+    "traits",
+    "refine-round",
+    "{port:source-path}",
+    "{slot:candidate}",
+]
 timeout-ms = 180000
 
 [[sequence.round.sequence]]
@@ -206,7 +226,13 @@ equals = true
 
 [procedure]
 description = "Produce a refinement scaffold, evaluate it through the deterministic rung ladder, and revise within a declared round bound; the handler writes only a converged result. `single-shot` stops after exactly one round for the non-`--apply` preview path."
-input = ["port:change-request", "port:single-shot", "port:source", "port:source-digest", "port:source-path"]
+input = [
+    "port:change-request",
+    "port:single-shot",
+    "port:source",
+    "port:source-digest",
+    "port:source-path",
+]
 output = ["port:result"]
 
 [[procedure.sequence]]
@@ -215,12 +241,11 @@ title = "Draft the refinement scaffold (refiner)"
 agent = "agent:refiner"
 prompt = "prompt:produce-first"
 input = [
-  "port:source",
-  "port:source-path",
-  "port:change-request",
-  "port:source-digest",
-  "resource:trait-spec/agent-traits-schema",
-  "resource:trait-spec/design-rubric",
+    "port:source",
+    "port:source-path",
+    "port:change-request",
+    "port:source-digest",
+    "resource:spec/design-rubric",
 ]
 output = ["slot:candidate"]
 
@@ -243,7 +268,12 @@ input = ["port:single-shot"]
 output = ["slot:single-shot-flag"]
 
 [procedure.sequence.command]
-argv = ["node", "--eval", "process.stdout.write(String(process.argv[1]))", "{port:single-shot}"]
+argv = [
+    "node",
+    "--eval",
+    "process.stdout.write(String(process.argv[1]))",
+    "{port:single-shot}",
+]
 
 [[procedure.sequence]]
 id = "guarded-loop"
@@ -265,11 +295,19 @@ equals = true
 [[procedure.sequence]]
 id = "derive-envelope"
 title = "Assemble the terminal round-evidence envelope"
-input = ["slot:round-report", "slot:candidate", "slot:rounds-spent"]
+input = [
+    "slot:round-report",
+    "slot:candidate",
+    "slot:rounds-spent",
+]
 output = ["slot:envelope"]
 
 [procedure.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 const [roundReportText, candidateText, roundsSpentText, roundsBoundText] = process.argv.slice(1);
 const report = JSON.parse(roundReportText);
 process.stdout.write(JSON.stringify({
@@ -279,4 +317,9 @@ process.stdout.write(JSON.stringify({
     "failing-rung": report.converged ? undefined : report.rung,
     diagnostics: report.diagnostics ?? [],
     candidate: candidateText,
-}));""", "{slot:round-report}", "{slot:candidate}", "{slot:rounds-spent}", "3"]
+}));""",
+    "{slot:round-report}",
+    "{slot:candidate}",
+    "{slot:rounds-spent}",
+    "3",
+]
