@@ -11,6 +11,12 @@ Cargo feature gates two of them.
 
 Move the tree to `modules/builtin`.
 
+Three buckets now, not two: `traits/` (five runnable meta-traits),
+`templates/` (three scaffolds), and `shared/` (spec — embedded and
+published like a trait so a dependent's `../spec` resolves, but carrying
+no procedure and kept out of the runnable catalog). The move must
+preserve that distinction rather than flattening it back.
+
 The split that must survive the move is the feature separation, and it is
 not symmetric:
 
@@ -42,6 +48,14 @@ validation = """
   without rebuilding its `generated/index.toml` ships silently. The move is
   a natural moment to add one, and it should be a scratch-fixture
   behavioral check, not a file inventory.
+
+## Already landed
+
+The drift gate this task called for exists (a4dec39f): `just
+builtins-build` and `just builtins-check`, the latter wired into `test`
+and `test-full`. It still uses a scratch authored root, so it compares
+only the canonical and the lock — 0230 removes that and lets it cover
+source maps too. What remains here is the crate move itself.
 
 ## Done when
 
