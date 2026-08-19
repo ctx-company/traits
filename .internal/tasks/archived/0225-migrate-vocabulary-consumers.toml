@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0225"
 title = "Migrate every vocabulary consumer, and harvest what was inlined"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Ten authored trait source files select vocabulary through the old
@@ -50,3 +50,30 @@ recorded.
 
 [relations]
 depends-on = ["0224"]
+
+outcome = """
+The migration half landed inside 0221+0224 (921c074e) — it could not be
+separated, because a consumer cannot keep compiling against a surface that
+no longer exists. Ten authored source files, the CDK tests, and two
+builtin sources moved in that commit; all seven families rebuild.
+
+The harvest half is a no-op, and deliberately so:
+
+- No vendored packages remain in this repository, so the
+  `refactor-default` inlined values this task was written around are gone
+  with them.
+- No canonical carries an inlined guidance override — zero items with a
+  local summary or description across every authored and builtin package.
+- No source declares one either.
+- Every slug in use is catalogued; nothing is referenced that the
+  vocabulary does not define.
+
+The reverse direction was checked too: 25 of 47 intent entries and 36 of
+45 behavior entries are selected by no trait here. They stay. A catalog is
+the menu offered to every user, not a record of what this repository
+happens to order — `security`, `data-loss`, `unsafe-command`, `warm`,
+`terse` are all obviously worth offering, and a scalar axis like
+directness can only ever have one of its three values selected per trait.
+Deleting an entry for being unused locally would confuse the two.
+"""
+
