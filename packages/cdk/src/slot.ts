@@ -78,10 +78,7 @@ export interface SlotFunction {
     schemaValue: SchemaValue<Value>,
   ): (value: string | Omit<SlotFields, "schema">) => DeclaredSlotHandle<Value[]>;
   /** List-slot shorthand with the element schema and id/fields both given. @example `slot.list(schema.text(), "findings")` */
-  list<Value>(
-    schemaValue: SchemaValue<Value>,
-    value: string | Omit<SlotFields, "schema">,
-  ): DeclaredSlotHandle<Value[]>;
+  list<Value>(schemaValue: SchemaValue<Value>, value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<Value[]>;
   /** List-of-text-slot shorthand, the common case of `slot.list(schema.text(), ...)`. @example `slot.texts("notes")` */
   texts(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string[]>;
   /** List-of-number-slot shorthand, the numeric sibling of {@link SlotFunction.texts}. @example `slot.numbers("durations")` */

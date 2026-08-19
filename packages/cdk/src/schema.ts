@@ -714,10 +714,9 @@ function boxSchemaRef(schemaRef: string): SchemaRefBox {
 }
 
 export function schemaList<Value>(value: SchemaValue<Value>): SchemaRef<Value[]> {
-  const schemaRef = `${schemaForms.list.prefix}${refText(
-    value,
-    "schema.list",
-  )}${schemaForms.list.suffix}` as SchemaRef<Value[]>;
+  const schemaRef = `${schemaForms.list.prefix}${refText(value, "schema.list")}${schemaForms.list.suffix}` as SchemaRef<
+    Value[]
+  >;
   // Box the ref and carry the element's declarations, exactly as schema.union
   // does. A bare template string would render correctly and collect nothing:
   // an object schema reachable only through a list field would never be

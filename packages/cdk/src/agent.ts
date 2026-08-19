@@ -210,4 +210,3 @@ export function seats(
   }
   return Array.from({ length: count }, (_, i) => mint(`${role}-${i + 1}`, ...args));
 }
-

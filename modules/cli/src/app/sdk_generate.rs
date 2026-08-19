@@ -767,11 +767,11 @@ fn validate_schema_builder_wiring(source: &str) -> crate::Result<()> {
         "};",
         "schema.ts schema builder",
     )?;
-    for expected in [
-        "list: schemaArray",
-        "array: schemaArray",
-        "union: schemaUnion",
-    ] {
+    // `list` is the one list spelling: the `array:` alias and the
+    // `schemaArray` constructor name both retired when the CDK unified list
+    // naming, so expecting them here only proved this check had not been
+    // updated with the rename.
+    for expected in ["list: schemaList", "union: schemaUnion"] {
         if builder.matches(expected).count() != 1 {
             return Err(crate::Error::Command {
                 message: format!("schema.ts schema builder: missing or duplicate {expected:?}"),
@@ -786,7 +786,7 @@ fn validate_schema_builder_wiring(source: &str) -> crate::Result<()> {
         "schemaForms.union.suffix",
     ] {
         // Wrapper tokens are legitimately used in more than one place
-        // (wrapping in schemaArray, unwrapping in schemaUnion's list-member
+        // (wrapping in schemaList, unwrapping in schemaUnion's list-member
         // check); the guard proves the generated vocabulary is wired, so
         // missing is the only failure.
         if source.matches(expected).count() == 0 {
