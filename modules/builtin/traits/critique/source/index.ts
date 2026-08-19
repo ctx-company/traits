@@ -61,10 +61,14 @@ export default trait("critique", {
     source: { path: "../spec" },
   }),
   schema: [anchor, finding],
+  // The output port is declared HERE, at trait level. It was declared on the
+  // procedure instead, which accepted and discarded it (0229) -- so critique
+  // shipped with four input ports and no output at all, producing nothing a
+  // caller could read. The input ports need no declaration: the prompt
+  // interpolates them, and a consumed port is collected transitively.
+  port: reviewPort,
   procedure: procedure({
     description: "Report advisory design findings without modifying the reviewed trait.",
-    input: [source, sourceDigest, sourcePath, sourceMap],
-    output: reviewPort,
     sequence: critiqueStep,
   }),
 });

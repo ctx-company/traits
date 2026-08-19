@@ -80,8 +80,6 @@ export default trait("explain", {
   procedure: procedure({
     description:
       "Generate one untrusted plain-language narration strictly grounded in the supplied deterministic explain scaffold.",
-    input: [sourceTraitId, receiptDigest, scaffold],
-    output: narrationPort,
     sequence: explainStep,
   }),
 });

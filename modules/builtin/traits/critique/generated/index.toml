@@ -20,6 +20,13 @@ tag = [
 ]
 
 [[port]]
+id = "review"
+direction = "output"
+schema = "schema:review-scaffold"
+description = "Advisory critique scaffold."
+value = "slot:critique"
+
+[[port]]
 id = "source"
 direction = "input"
 schema = "schema:text"
@@ -129,6 +136,7 @@ input = [
     "port:source-map",
     "port:source-path",
 ]
+output = ["port:review"]
 
 [[procedure.sequence]]
 id = "critique"

@@ -23,54 +23,16 @@ pub(crate) struct EffectiveSequenceItem<'a> {
 pub(crate) fn effective_sequence_items(
     proc: &crate::r#trait::procedure::Model,
 ) -> crate::Result<Vec<EffectiveSequenceItem<'_>>> {
-    let Some(sequence_order) = &proc.sequence_order else {
-        return Ok(proc
-            .sequence
-            .iter()
-            .enumerate()
-            .map(|(index, item)| EffectiveSequenceItem {
-                run_index: index,
-                declaration_index: index,
-                item,
-            })
-            .collect());
-    };
-
-    let mut ordered = Vec::new();
-    let mut seen_ids = BTreeSet::new();
-    for (run_index, requested_id) in sequence_order.iter().enumerate() {
-        if !seen_ids.insert(requested_id.as_str()) {
-            return Err(crate::procedure::invalid_field(
-                format!("procedure.sequence-order[{run_index}]"),
-                format!("duplicate sequence item id {requested_id:?}"),
-            ));
-        }
-        let Some((declaration_index, item)) = proc
-            .sequence
-            .iter()
-            .enumerate()
-            .find(|(_, item)| item.id.as_deref() == Some(requested_id.as_str()))
-        else {
-            return Err(crate::procedure::invalid_field(
-                format!("procedure.sequence-order[{run_index}]"),
-                format!("unknown sequence item id {requested_id:?}"),
-            ));
-        };
-        ordered.push(EffectiveSequenceItem {
-            run_index,
-            declaration_index,
+    Ok(proc
+        .sequence
+        .iter()
+        .enumerate()
+        .map(|(index, item)| EffectiveSequenceItem {
+            run_index: index,
+            declaration_index: index,
             item,
-        });
-    }
-
-    if ordered.len() != proc.sequence.len() {
-        return Err(crate::procedure::invalid_field(
-            "procedure.sequence-order",
-            "sequence-order must include every procedure.sequence item exactly once",
-        ));
-    }
-
-    Ok(ordered)
+        })
+        .collect())
 }
 
 fn require_ref(
@@ -486,7 +448,6 @@ pub fn plan_procedure_run(trait_ref: &Trait, run_id: Id) -> crate::Result<Plan> 
     Ok(Plan {
         run_id,
         trait_id: trait_ref.id.as_str().to_string(),
-        worktree_required: proc.worktree_required,
         sequence_items,
         slots,
         producer_edges: nested_state.producer_edges,

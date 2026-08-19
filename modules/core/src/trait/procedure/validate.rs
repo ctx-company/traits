@@ -208,7 +208,6 @@ pub fn validate(t: &Trait) -> crate::Result<()> {
         }
     }
 
-    // Validate sequence-order if present.
     let ordered = ordered_procedure_items(proc)?;
     validate_failure_routes(t, &ordered, &signal_ids)?;
 
@@ -3186,55 +3185,7 @@ fn validate_produced_before_read(trait_ref: &Trait) -> crate::Result<()> {
 }
 
 fn ordered_procedure_items(procedure: &Model) -> crate::Result<Vec<(usize, &SequenceItem)>> {
-    let Some(sequence_order) = procedure.sequence_order.as_ref() else {
-        return Ok(procedure.sequence.iter().enumerate().collect());
-    };
-    let mut by_id = BTreeMap::new();
-    for (declaration_index, item) in procedure.sequence.iter().enumerate() {
-        let Some(id) = item.id.as_deref() else {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("procedure.sequence[{declaration_index}].id"),
-                message: "sequence-order requires every procedure.sequence item to declare an id"
-                    .to_string(),
-            }
-            .into());
-        };
-        if by_id.insert(id, (declaration_index, item)).is_some() {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("procedure.sequence[{declaration_index}].id"),
-                message: format!("duplicate sequence item id {id:?}"),
-            }
-            .into());
-        }
-    }
-    if sequence_order.len() != procedure.sequence.len() {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: "procedure.sequence-order".to_string(),
-            message: "sequence-order must include every procedure.sequence item exactly once"
-                .to_string(),
-        }
-        .into());
-    }
-    let mut seen = BTreeSet::new();
-    let mut ordered = Vec::new();
-    for (run_index, requested_id) in sequence_order.iter().enumerate() {
-        if !seen.insert(requested_id.as_str()) {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("procedure.sequence-order[{run_index}]"),
-                message: format!("duplicate sequence-order id {requested_id:?}"),
-            }
-            .into());
-        }
-        let Some((declaration_index, item)) = by_id.get(requested_id.as_str()) else {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("procedure.sequence-order[{run_index}]"),
-                message: format!("unknown sequence item id {requested_id:?}"),
-            }
-            .into());
-        };
-        ordered.push((*declaration_index, *item));
-    }
-    Ok(ordered)
+    Ok(procedure.sequence.iter().enumerate().collect())
 }
 
 fn validate_failure_routes(

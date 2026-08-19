@@ -1607,7 +1607,6 @@ mod tests {
         ctx_traits_core::procedure::run::Plan {
             run_id: ctx_traits_core::procedure::run::Id::new("test-run").unwrap(),
             trait_id: "test".to_string(),
-            worktree_required: false,
             sequence_items: items,
             slots: Vec::new(),
             producer_edges: Vec::new(),

@@ -739,9 +739,9 @@ const worker = agent(\"worker\", {{ description: \"Completes the starter task.\"
 const variantFixture = (name) => variant({{\n\
   name,\n\
   summary: `The ${{name}} variant.`,\n\
+  port: output,\n\
   procedure: procedure({{\n\
     description: \"Describe what this trait should accomplish.\",\n\
-    output,\n\
     sequence: sequence.prompt({{\n\
       id: \"run\",\n\
       agent: worker,\n\

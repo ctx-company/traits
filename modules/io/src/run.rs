@@ -651,39 +651,6 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         "approved".to_string(),
     );
 
-    // A `worktreeRequired` procedure can never actually be run outside a Git
-    // repository (worktree preparation itself requires one): refuse it here,
-    // before any session/run id is minted or worktree prepared, with a
-    // direct repository-requirement error rather than reaching the generic
-    // worktree/session failure path partway through setup (P439).
-    if loaded
-        .trait_ref
-        .procedure
-        .as_ref()
-        .is_some_and(|procedure| procedure.worktree_required)
-        && matches!(
-            crate::state::discover_invocation_root().inspect_err(|error| {
-                update(
-                    StartupStage::Worktree,
-                    StartupStageState::Failed,
-                    error.to_string(),
-                );
-            })?,
-            crate::state::InvocationRoot::Adhoc(_)
-        )
-    {
-        let message = format!(
-            "trait {:?} requires a prepared worktree, which requires a Git repository; run inside a Git checkout",
-            loaded.trait_ref.id
-        );
-        update(
-            StartupStage::Worktree,
-            StartupStageState::Failed,
-            message.clone(),
-        );
-        return invalid_request("run.worktree", message);
-    }
-
     // Trait-argument parsing happens before assignment preparation so
     // `port:task` is available downstream.
     update(

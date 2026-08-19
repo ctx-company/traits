@@ -1319,23 +1319,7 @@ fn sequence_receipt_summary(
 fn ordered_procedure_items(
     procedure: &ctx_traits_core::r#trait::procedure::Model,
 ) -> Vec<&ctx_traits_core::r#trait::procedure::SequenceItem> {
-    let Some(order) = procedure.sequence_order.as_ref() else {
-        return procedure.sequence.iter().collect();
-    };
-    // Core validation guarantees sequence-order is a complete permutation of
-    // procedure.sequence, so this lookup cannot omit a validated step.
-    let by_id: std::collections::BTreeMap<
-        &str,
-        &ctx_traits_core::r#trait::procedure::SequenceItem,
-    > = procedure
-        .sequence
-        .iter()
-        .filter_map(|item| item.id.as_deref().map(|id| (id, item)))
-        .collect();
-    order
-        .iter()
-        .filter_map(|id| by_id.get(id.as_str()).copied())
-        .collect()
+    procedure.sequence.iter().collect()
 }
 
 fn collect_sequence_receipt_items(

@@ -1082,7 +1082,7 @@ export type CanonicalPredicateList = readonly string[];
  * Optional top-level section. When present, `description` must be non-empty
  * and `sequence` must be non-empty. The `input` and `output` contract fields
  * declare procedure-level boundary ports. `sequence` holds inline
- * `[[procedure.sequence]]` items; `sequence-order` optionally reorders them.
+ * `[[procedure.sequence]]` items, in the order they run.
  */
 export type CanonicalProcedure = {
   /**
@@ -1098,21 +1098,10 @@ export type CanonicalProcedure = {
    */
   readonly "output"?: string | readonly string[] | undefined;
   /**
-   * Ordered `[[procedure.sequence]]` items. Definition order is the default
-   * execution order unless `sequence-order` is present.
+   * Ordered `[[procedure.sequence]]` items. Definition order is execution
+   * order.
    */
   readonly "sequence"?: readonly CanonicalSequenceItem[] | undefined;
-  /**
-   * Optional explicit ordering of sequence item IDs. If present, every
-   * sequence item must have a unique ID, every listed ID must exist,
-   * duplicate IDs are invalid, and unlisted items are invalid.
-   */
-  readonly "sequence-order"?: readonly string[] | undefined;
-  /**
-   * Require prepared worktree provenance before the procedure can expose
-   * its first prompt or command frame.
-   */
-  readonly "worktree-required"?: boolean | undefined;
 };
 
 /**
@@ -1496,7 +1485,7 @@ export type CanonicalSequenceInputList = readonly CanonicalSequenceInput[];
  * procedure rather than by a separate top-level table.
  * 
  * `[[procedure.sequence]]` definition order is the default execution order.
- * An optional `id` allows `procedure.sequence-order` to customize ordering.
+ * An optional `id` names the item for references and evidence.
  */
 export type CanonicalSequenceItem = {
   /**
@@ -1540,7 +1529,7 @@ export type CanonicalSequenceItem = {
    */
   readonly "format"?: CanonicalSlug | readonly CanonicalSlug[] | undefined;
   /**
-   * Optional stable identifier for sequence-order references.
+   * Optional stable identifier for references and run evidence.
    */
   readonly "id"?: string | undefined;
   /**

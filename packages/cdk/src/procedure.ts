@@ -101,9 +101,43 @@ export interface DependencyFields {
 
 export interface ProcedureFields {
   readonly description: string;
-  readonly worktreeRequired?: boolean;
-  readonly sequenceOrder?: readonly string[];
   readonly sequence?: SequenceHandle | readonly SequenceHandle[] | readonly JsonObject[];
+}
+
+/**
+ * The complete set of keys `procedure(...)` accepts. Trait sources are
+ * EVALUATED, not typechecked, so TypeScript's excess-property check never
+ * runs where an author would need it — `procedure({ output: [report] })`
+ * type-errors in an editor and is silently discarded by a build. Keeping the
+ * accepted set here, beside the interface, is what makes the runtime check
+ * below fail on the same keys `tsc` would.
+ */
+const PROCEDURE_KEYS: readonly string[] = ["description", "sequence"];
+
+/**
+ * A procedure's contract is INFERRED — from the input ports its steps
+ * consume and the output ports bound to the slots they produce. So
+ * `input`/`output` here are not fields that were dropped; they never
+ * existed. The trap is that guessing them is quiet: a trait declaring its
+ * output port only in `procedure(...)` builds clean, checks clean, reports
+ * `valid: true` with no audit finding, and returns nothing. The input side
+ * hides it further, because a prompt interpolating a port collects that port
+ * transitively — so an author watches one arrive and reasonably assumes the
+ * other did too.
+ */
+function rejectUnknownProcedureKeys(fields: ProcedureFields): void {
+  const unknown = Object.keys(fields).filter((key) => !PROCEDURE_KEYS.includes(key));
+  if (unknown.length === 0) return;
+  const listed = unknown.map((key) => JSON.stringify(key)).join(", ");
+  const contractHint =
+    unknown.includes("input") || unknown.includes("output")
+      ? " A procedure's input and output are inferred from its steps: declare ports with the trait's own" +
+        " `port` field (`port.input.text(...)` / `port.output.text(...)`) and bind an output port to the slot" +
+        " a step writes."
+      : "";
+  throw new Error(
+    `procedure(...): unknown field(s) ${listed}; accepted fields are ${PROCEDURE_KEYS.join(", ")}.${contractHint}`,
+  );
 }
 
 /**
@@ -142,6 +176,7 @@ export function dependency(fields: DependencyFields): CanonicalDependency {
  * @see {@link sequence}
  */
 export function procedure(fields: ProcedureFields): ProcedureHandle {
+  rejectUnknownProcedureKeys(fields);
   const sequenceValues = arrayOf<SequenceHandle | JsonObject>(fields.sequence).flatMap((item) =>
     materializeSequenceItem(item as SequenceHandle, { kind: "procedure" }),
   );
@@ -151,8 +186,6 @@ export function procedure(fields: ProcedureFields): ProcedureHandle {
   return withMeta(
     compact({
       description: fields.description,
-      "worktree-required": fields.worktreeRequired,
-      "sequence-order": fields.sequenceOrder === undefined ? undefined : Array.from(fields.sequenceOrder),
       sequence: items,
     }),
     {

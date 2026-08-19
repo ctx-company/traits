@@ -469,13 +469,7 @@ fn push_procedure_steps(out: &mut String, trait_ref: &Trait) {
     };
     out.push_str(&procedure.description);
     out.push_str("\n\n");
-    if procedure.worktree_required {
-        out.push_str(
-            "Runtime requirement: start this procedure with prepared worktree provenance.\n\n",
-        );
-    }
-    let ordered = ordered_skill_sequence_items(procedure);
-    for (index, item) in ordered.iter().enumerate() {
+    for (index, item) in procedure.sequence.iter().enumerate() {
         let title = if item.title.is_empty() {
             item.id.as_deref().unwrap_or("unnamed step")
         } else {
@@ -533,24 +527,6 @@ fn push_procedure_steps(out: &mut String, trait_ref: &Trait) {
         }
         out.push('\n');
     }
-}
-
-fn ordered_skill_sequence_items(
-    procedure: &crate::r#trait::procedure::Model,
-) -> Vec<&crate::r#trait::procedure::SequenceItem> {
-    let Some(order) = procedure.sequence_order.as_ref() else {
-        return procedure.sequence.iter().collect();
-    };
-    let by_id: std::collections::BTreeMap<&str, &crate::r#trait::procedure::SequenceItem> =
-        procedure
-            .sequence
-            .iter()
-            .filter_map(|item| item.id.as_deref().map(|id| (id, item)))
-            .collect();
-    order
-        .iter()
-        .filter_map(|id| by_id.get(id.as_str()).copied())
-        .collect()
 }
 
 fn push_declared_signals(out: &mut String, trait_ref: &Trait) {

@@ -907,12 +907,12 @@ pub struct FailureRoute {
 /// procedure rather than by a separate top-level table.
 ///
 /// `[[procedure.sequence]]` definition order is the default execution order.
-/// An optional `id` allows `procedure.sequence-order` to customize ordering.
+/// An optional `id` names the item for references and evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 #[schemars(rename_all = "kebab-case")]
 pub struct SequenceItem {
-    /// Optional stable identifier for sequence-order references.
+    /// Optional stable identifier for references and run evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 
@@ -1170,18 +1170,13 @@ impl SequenceItem {
 /// Optional top-level section. When present, `description` must be non-empty
 /// and `sequence` must be non-empty. The `input` and `output` contract fields
 /// declare procedure-level boundary ports. `sequence` holds inline
-/// `[[procedure.sequence]]` items; `sequence-order` optionally reorders them.
+/// `[[procedure.sequence]]` items, in the order they run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 #[schemars(rename_all = "kebab-case", rename = "Procedure")]
 pub struct Model {
     /// Human-readable description of what the procedure accomplishes.
     pub description: String,
-
-    /// Require prepared worktree provenance before the procedure can expose
-    /// its first prompt or command frame.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub worktree_required: bool,
 
     /// Model-level input refs (e.g. `port:user-prompt`, `slot:scope`).
     #[serde(default, skip_serializing_if = "RefList::is_empty")]
@@ -1191,18 +1186,8 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "RefList::is_empty")]
     pub output: RefList,
 
-    /// Ordered `[[procedure.sequence]]` items. Definition order is the default
-    /// execution order unless `sequence-order` is present.
+    /// Ordered `[[procedure.sequence]]` items. Definition order is execution
+    /// order.
     #[serde(default, rename = "sequence", skip_serializing_if = "Vec::is_empty")]
     pub sequence: Vec<SequenceItem>,
-
-    /// Optional explicit ordering of sequence item IDs. If present, every
-    /// sequence item must have a unique ID, every listed ID must exist,
-    /// duplicate IDs are invalid, and unlisted items are invalid.
-    #[serde(
-        default,
-        rename = "sequence-order",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub sequence_order: Option<Vec<String>>,
 }

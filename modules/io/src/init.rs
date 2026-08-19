@@ -345,9 +345,9 @@ export const draft = trait({{
   id: {trait_id},
   name: {name},
   description: "Starter trait scaffolded by `ctx traits init`.",
+  port: output,
   procedure: procedure({{
     description: "Describe what this trait should accomplish.",
-    output,
     sequence: sequence.prompt({{
       id: "run",
       agent: worker,

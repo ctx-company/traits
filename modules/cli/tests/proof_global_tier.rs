@@ -9,7 +9,7 @@
 //! isolated config home and appends to the audit journal; the same trait
 //! installed at both tiers resolves project-first with the shadow surfaced;
 //! an ad-hoc (non-repository) invocation resolves the global tier and gets
-//! an `adhoc-<slug>` checkout key; a `worktreeRequired` trait refuses
+//! an `adhoc-<slug>` checkout key
 //! outside a Git repository; `trust approve <alias>` admits every current
 //! variant digest of a family package in one review.
 
@@ -132,12 +132,7 @@ fn sha512_integrity(bytes: &[u8]) -> String {
     )
 }
 
-fn trait_doc(id: &str, summary: &str, worktree_required: bool) -> String {
-    let worktree_line = if worktree_required {
-        "worktree-required = true\n"
-    } else {
-        ""
-    };
+fn trait_doc(id: &str, summary: &str) -> String {
     format!(
         "id = \"{id}\"\n\
          schema-version = \"0.2\"\n\
@@ -147,7 +142,6 @@ fn trait_doc(id: &str, summary: &str, worktree_required: bool) -> String {
          \n\
          [procedure]\n\
          description = \"Run command\"\n\
-         {worktree_line}\
          \n\
          [[slot]]\n\
          id = \"notified\"\n\
@@ -206,16 +200,12 @@ fn npm_registry_serving(package: &str, version: &str, tarball: Vec<u8>) -> Fixtu
     })
 }
 
-fn single_trait_npm_package(
-    package: &str,
-    trait_id: &str,
-    worktree_required: bool,
-) -> SingleTraitPackage {
+fn single_trait_npm_package(package: &str, trait_id: &str) -> SingleTraitPackage {
     let version = "0.1.0";
     let manifest = format!(
         "[package]\nid = \"{trait_id}\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"ready\"\n"
     );
-    let doc = trait_doc(trait_id, "Demo", worktree_required);
+    let doc = trait_doc(trait_id, "Demo");
     let tarball = build_tarball(&[
         ("trait.toml", manifest.as_bytes()),
         ("generated/index.toml", doc.as_bytes()),
@@ -279,7 +269,7 @@ fn write_fixture_file(path: &Path, contents: &str) {
 fn global_install_records_manifest_lock_vendor_and_audit_journal() {
     let scratch = ScratchRoot::new("global-tier-install");
     let home = scratch.home();
-    let fixture = single_trait_npm_package("global-demo", "global-demo", false);
+    let fixture = single_trait_npm_package("global-demo", "global-demo");
     let cwd = home.join("nonrepo");
     fs::create_dir_all(&cwd).unwrap();
 
@@ -349,7 +339,7 @@ fn global_install_records_manifest_lock_vendor_and_audit_journal() {
 fn project_tier_shadows_global_tier() {
     let scratch = ScratchRoot::new("global-tier-shadow");
     let home = scratch.home();
-    let fixture = single_trait_npm_package("shadow-demo", "shadow-demo", false);
+    let fixture = single_trait_npm_package("shadow-demo", "shadow-demo");
 
     // Global install.
     require_success_with_env(
@@ -368,7 +358,7 @@ fn project_tier_shadows_global_tier() {
     );
     write_fixture_file(
         &producer.join("generated/index.toml"),
-        &trait_doc("shadow-demo", "project copy", false),
+        &trait_doc("shadow-demo", "project copy"),
     );
     let consumer = home.join("consumer");
     fs::create_dir_all(&consumer).unwrap();
@@ -405,17 +395,15 @@ fn project_tier_shadows_global_tier() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Ad-hoc (non-repository) run resolves the global tier, records an
-//    `adhoc-<slug>` checkout key, and a `worktreeRequired` global trait
-//    refuses outside a Git repository.
+// 3. Ad-hoc (non-repository) run resolves the global tier and records an
+//    `adhoc-<slug>` checkout key.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn adhoc_run_resolves_global_tier_and_worktree_required_trait_refuses() {
+fn adhoc_run_resolves_global_tier_and_records_an_adhoc_checkout_key() {
     let scratch = ScratchRoot::new("global-tier-adhoc-run");
     let home = scratch.home();
-    let plain = single_trait_npm_package("adhoc-plain", "adhoc-plain", false);
-    let worktree = single_trait_npm_package("adhoc-worktree", "adhoc-worktree", true);
+    let plain = single_trait_npm_package("adhoc-plain", "adhoc-plain");
 
     require_success_with_env(
         "`ctx traits dependency add -g adhoc-plain`",
@@ -424,25 +412,12 @@ fn adhoc_run_resolves_global_tier_and_worktree_required_trait_refuses() {
         &home,
         &[("CTX_TRAITS_REGISTRY_BASE", &plain.registry.base_url)],
     );
-    require_success_with_env(
-        "`ctx traits dependency add -g adhoc-worktree`",
-        &["traits", "dependency", "add", "-g", "adhoc-worktree"],
-        &home,
-        &home,
-        &[("CTX_TRAITS_REGISTRY_BASE", &worktree.registry.base_url)],
-    );
 
     let cwd = home.join("nonrepo");
     fs::create_dir_all(&cwd).unwrap();
     require_success(
         "`ctx traits trust approve adhoc-plain`",
         &["traits", "trust", "approve", "adhoc-plain"],
-        &cwd,
-        &home,
-    );
-    require_success(
-        "`ctx traits trust approve adhoc-worktree`",
-        &["traits", "trust", "approve", "adhoc-worktree"],
         &cwd,
         &home,
     );
@@ -464,18 +439,6 @@ fn adhoc_run_resolves_global_tier_and_worktree_required_trait_refuses() {
         checkouts_text.contains("adhoc-"),
         "ad-hoc run must record an `adhoc-<slug>` checkout key: {checkouts_text}"
     );
-
-    let worktree_output = run_ctx(&["traits", "run", "adhoc-worktree"], &cwd, &home);
-    assert!(
-        !worktree_output.status.success(),
-        "a worktreeRequired trait must refuse outside a Git repository"
-    );
-    let (_, worktree_stderr) = utf8(&worktree_output);
-    assert!(
-        worktree_stderr.contains("requires a prepared worktree, which requires a Git repository")
-            && worktree_stderr.contains("run inside a Git checkout"),
-        "worktreeRequired refusal must name the exact repository-requirement message: {worktree_stderr}"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -490,7 +453,7 @@ fn adhoc_run_resolves_global_tier_and_worktree_required_trait_refuses() {
 fn gitless_project_install_approves_and_resolves_project_tier() {
     let scratch = ScratchRoot::new("global-tier-gitless-project");
     let home = scratch.home();
-    let fixture = single_trait_npm_package("gitless-demo", "gitless-demo", false);
+    let fixture = single_trait_npm_package("gitless-demo", "gitless-demo");
 
     // Project-scoped install (no `-g`) into a directory that is not a Git
     // repository — deliberately no `git_init`.

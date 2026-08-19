@@ -899,9 +899,6 @@ fn format_procedure(
     findings: &mut Vec<Finding>,
 ) -> String {
     let mut lines: Vec<String> = Vec::new();
-    if proc.worktree_required {
-        lines.push("Worktree required: yes".to_string());
-    }
     lines.push(format_sanitized_refs(
         "Input",
         proc.input.as_slice(),

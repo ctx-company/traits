@@ -95,7 +95,7 @@ pub struct PlannedParallelBranch {
 pub struct PlannedSequenceItem {
     /// Zero-based source position in `procedure.sequence`.
     pub sequence_index: usize,
-    /// Zero-based effective run position after applying `sequence-order`.
+    /// Zero-based run position.
     pub run_index: usize,
     /// Optional ID from the sequence item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -352,9 +352,6 @@ pub struct Plan {
     pub run_id: Id,
     /// The trait ID this plan belongs to.
     pub trait_id: String,
-    /// Whether execution requires prepared worktree provenance.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub worktree_required: bool,
     /// Planned sequence items in sequence order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sequence_items: Vec<PlannedSequenceItem>,

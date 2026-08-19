@@ -1875,7 +1875,6 @@ pub fn resolve_run_set_submission(
     value: JsonValue,
     caller: CallerProvenance,
 ) -> crate::Result<SetResolution> {
-    require_worktree_provenance(trait_ref, session)?;
     let caller_agent =
         caller_agent_role(trait_ref, caller.agent.as_deref())?.map(|role| format!("agent:{role}"));
     let caller_harness = caller.harness.clone();
@@ -2231,7 +2230,6 @@ fn submit_run_submission(
     submission: CallSubmission,
     current_frame_set: bool,
 ) -> crate::Result<CallResponse> {
-    require_worktree_provenance(trait_ref, &session)?;
     let preflight = preflight_call_rejection(trait_ref, &session, &submission, current_frame_set)?;
     if let Some(report) = preflight.rejection {
         if preflight.non_persisting_rejection {
@@ -2433,7 +2431,6 @@ pub fn submit_terminal_frame_failure(
     session: Session,
     reason: &str,
 ) -> crate::Result<CallResponse> {
-    require_worktree_provenance(trait_ref, &session)?;
     let Some((candidate_state, report)) =
         apply_terminal_frame_failure(trait_ref, session.ledger.clone(), reason)?
     else {
@@ -2476,18 +2473,7 @@ fn build_session(
             ),
         ));
     }
-    let worktree_provenance_missing = worktree_provenance_missing(trait_ref, &provenance);
-    let frame_result = if worktree_provenance_missing {
-        NextSequenceFrameResult::Blocked {
-            missing_inputs: Vec::new(),
-            capabilities: vec![CapabilityReport::unsupported(
-                "runtime.worktree-provenance",
-                "procedure requires prepared worktree provenance; start it with --worktree",
-            )],
-        }
-    } else {
-        next_sequence_frame(trait_ref, &state)?
-    };
+    let frame_result = next_sequence_frame(trait_ref, &state)?;
     let mut unresolved_inputs = Vec::new();
     let mut capabilities = state.provider_capability_reports.clone();
     let mut next_frame = None;
@@ -2533,8 +2519,7 @@ fn build_session(
             missing_inputs,
             capabilities: blocked_capabilities,
         } => {
-            let awaiting_input = !worktree_provenance_missing
-                && missing_inputs.iter().all(|item| item.starts_with("port:"));
+            let awaiting_input = missing_inputs.iter().all(|item| item.starts_with("port:"));
             unresolved_inputs = missing_inputs;
             capabilities.extend(blocked_capabilities);
             if awaiting_input {
@@ -2644,24 +2629,6 @@ fn normalize_caller_agent_role(
         ));
     }
     Ok(Some(role))
-}
-
-fn require_worktree_provenance(trait_ref: &Trait, session: &Session) -> crate::Result<()> {
-    if worktree_provenance_missing(trait_ref, &session.provenance) {
-        return Err(crate::procedure::invalid_field(
-            "run-session.provenance.worktree",
-            "procedure requires prepared worktree provenance; start it with --worktree",
-        ));
-    }
-    Ok(())
-}
-
-fn worktree_provenance_missing(trait_ref: &Trait, provenance: &Provenance) -> bool {
-    trait_ref
-        .procedure
-        .as_ref()
-        .is_some_and(|procedure| procedure.worktree_required)
-        && provenance.worktree.is_none()
 }
 
 fn preflight_call_rejection(

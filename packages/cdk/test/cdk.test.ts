@@ -264,6 +264,43 @@ describe("draft synthesis", () => {
       },
     });
   });
+
+  // 0229. `procedure(...)` used to accept and silently discard any field it
+  // did not know, and `input`/`output` are the ones an author reaches for:
+  // they read like the procedure's contract. They are not. The contract is
+  // INFERRED from the steps, so a trait declaring its output port here built
+  // clean, checked clean, reported `valid: true` with no audit finding, and
+  // returned nothing.
+  //
+  // Trait sources are evaluated rather than typechecked, so the excess-property
+  // check that would have caught this in an editor never runs on a build.
+  it("rejects an unknown procedure field instead of discarding it", () => {
+    expect(() =>
+      procedure({
+        description: "Declares its output where it does not belong.",
+        sequence: [],
+        output: ["port:report"],
+      } as never),
+    ).toThrow(/unknown field\(s\) "output"/);
+  });
+
+  // The message has to say where ports DO go, or the author has been told
+  // only that their guess was wrong.
+  it("points an unknown contract field at the trait's own port field", () => {
+    expect(() =>
+      procedure({ description: "d", sequence: [], input: ["port:task"] } as never),
+    ).toThrow(/declare ports with the trait's own `port` field/);
+  });
+
+  it("names every unknown field at once, not just the first", () => {
+    expect(() =>
+      procedure({ description: "d", sequence: [], input: [], output: [], sequenceOrder: [] } as never),
+    ).toThrow(/"input", "output", "sequenceOrder"/);
+  });
+
+  it("still accepts the fields it documents", () => {
+    expect(() => procedure({ description: "Fine.", sequence: [] })).not.toThrow();
+  });
 });
 
 // `zod-to-json-schema` emits a top-level `$schema` key by default, outside
@@ -812,25 +849,34 @@ describe("retired canonical fields", () => {
     variant({ schemas: [reachable] });
   });
 
-  it("rejects removed procedure contract fields at typecheck time", () => {
+  // Both halves matter and only one of them used to hold. `tsc` rejected
+  // these fields all along; a trait source is EVALUATED rather than
+  // typechecked, so on the path that counts they were accepted and discarded
+  // in silence (0229). The `@ts-expect-error` markers keep the compile-time
+  // half honest, and the throw keeps the runtime half honest.
+  it("rejects removed procedure contract fields at typecheck AND at build time", () => {
     const request = port.input.text({ id: "retired-contract-request" });
     const result = slot.text("retired-contract-result");
     const response = port.output.text({ id: "retired-contract-response", value: result });
-    procedure({
-      description: "Contracts are inferred from reachable steps.",
-      sequence: sequence.prompt("retired-contract-step", { text: input.prompt`Use ${request}.`, output: result }),
-      // @ts-expect-error procedure input ports are inferred from consumed refs.
-      input: request,
-    });
-    procedure({
-      description: "Contracts are inferred from reachable steps.",
-      sequence: sequence.prompt("retired-contract-output-step", {
-        text: input.prompt`Use ${request}.`,
-        output: result,
+    expect(() =>
+      procedure({
+        description: "Contracts are inferred from reachable steps.",
+        sequence: sequence.prompt("retired-contract-step", { text: input.prompt`Use ${request}.`, output: result }),
+        // @ts-expect-error procedure input ports are inferred from consumed refs.
+        input: request,
       }),
-      // @ts-expect-error procedure output ports are inferred from produced bound slots.
-      output: response,
-    });
+    ).toThrow(/unknown field\(s\) "input"/);
+    expect(() =>
+      procedure({
+        description: "Contracts are inferred from reachable steps.",
+        sequence: sequence.prompt("retired-contract-output-step", {
+          text: input.prompt`Use ${request}.`,
+          output: result,
+        }),
+        // @ts-expect-error procedure output ports are inferred from produced bound slots.
+        output: response,
+      }),
+    ).toThrow(/unknown field\(s\) "output"/);
   });
 
   it("rejects authoring status/trust on a trait draft", () => {
