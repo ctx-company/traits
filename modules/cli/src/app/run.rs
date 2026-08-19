@@ -653,12 +653,24 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
 /// per-task outcome table renders once the queue finishes or halts.
 #[derive(Debug, Clone)]
 pub(crate) enum TaskQueueOutcome {
-    Landed { closed: bool },
+    Landed {
+        closed: bool,
+    },
     Completed,
     NotMerged,
     Parked,
     MergeFailed,
-    Failed { message: String },
+    /// The run reached a terminal state that is not `Completed` — rejected on
+    /// a step, blocked, still waiting on an agent or a human, cancelled. The
+    /// session status and the recorded drive outcome are carried verbatim so
+    /// the row names what actually happened.
+    NotCompleted {
+        status: String,
+        outcome: Option<String>,
+    },
+    Failed {
+        message: String,
+    },
 }
 
 impl TaskQueueOutcome {
@@ -670,6 +682,7 @@ impl TaskQueueOutcome {
             self,
             TaskQueueOutcome::Parked
                 | TaskQueueOutcome::MergeFailed
+                | TaskQueueOutcome::NotCompleted { .. }
                 | TaskQueueOutcome::Failed { .. }
         )
     }
@@ -682,9 +695,42 @@ impl TaskQueueOutcome {
             TaskQueueOutcome::NotMerged => "committed, not merged".to_string(),
             TaskQueueOutcome::Parked => "parked".to_string(),
             TaskQueueOutcome::MergeFailed => "merge failed".to_string(),
+            TaskQueueOutcome::NotCompleted { status, outcome } => match outcome {
+                Some(outcome) => format!("not completed: {status} ({outcome})"),
+                None => format!("not completed: {status}"),
+            },
             TaskQueueOutcome::Failed { message } => format!("failed: {message}"),
         }
     }
+}
+
+/// `Some(NotCompleted)` unless the run actually reached `Status::Completed`.
+///
+/// The queue used to test only `Status::Failed` and route everything else
+/// through [`landing_state`](ctx_traits_core::procedure::session::landing_state),
+/// which returns `None` whenever there are no terminal merge frames — exactly
+/// what a run that never got far enough to merge looks like. So `rejected`,
+/// `blocked`, `awaiting-agent-output`, and every other non-terminal status
+/// reported as `completed (no merge intent)`, did not halt the queue, and left
+/// the whole command exiting 0. Observed 2026-08-19: five failed 0006.9 runs
+/// in ctx-notify and two failed 0006.5 runs in ctx-codecheck, every one of
+/// them carrying `merge-intent: deep` while the row claimed there was none.
+///
+/// `Status::Failed` keeps its own richer row upstream of this check; this is
+/// for the other seven variants.
+fn queue_not_completed(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<TaskQueueOutcome> {
+    if session.status == ctx_traits_core::procedure::session::Status::Completed {
+        return None;
+    }
+    Some(TaskQueueOutcome::NotCompleted {
+        status: super::run_view::session_text::session_status(&session.status).to_string(),
+        outcome: session
+            .last_drive_outcome
+            .as_ref()
+            .map(|recorded| recorded.outcome.as_str().to_string()),
+    })
 }
 
 pub(crate) struct TaskQueueInputs<'a> {
@@ -764,12 +810,13 @@ pub(crate) fn handle_task_queue_run(
         };
         match drive_session(session_inputs) {
             Ok(completion) => {
-                let session_failed = completion.session.status
-                    == ctx_traits_core::procedure::session::Status::Failed;
-                if session_failed {
+                if completion.session.status == ctx_traits_core::procedure::session::Status::Failed
+                {
                     TaskQueueOutcome::Failed {
                         message: "run completed with status failed".to_string(),
                     }
+                } else if let Some(not_completed) = queue_not_completed(&completion.session) {
+                    not_completed
                 } else {
                     use ctx_traits_core::procedure::session::LandingState;
                     match ctx_traits_core::procedure::session::landing_state(&completion.session) {
@@ -912,6 +959,37 @@ mod task_queue_drive_tests {
             drive_task_queue(&queue, false, |_key| TaskQueueOutcome::NotMerged);
         assert!(!halted);
         assert_eq!(outcomes.len(), 2);
+    }
+
+    /// The whole point of the row: a run that never completed must halt the
+    /// queue and say so, instead of spending the next task's model budget
+    /// behind a `completed (no merge intent)` label.
+    #[test]
+    fn a_run_that_never_completed_halts_the_queue_and_names_its_state() {
+        let queue = vec!["0006.9".to_string(), "0007.1".to_string()];
+        let (outcomes, halted) =
+            drive_task_queue(&queue, false, |_key| TaskQueueOutcome::NotCompleted {
+                status: "rejected".to_string(),
+                outcome: Some("command-step-failed".to_string()),
+            });
+        assert!(halted, "a not-completed run halts by default");
+        assert_eq!(outcomes.len(), 1, "the second task must not have been run");
+        assert_eq!(
+            outcomes[0].1.label(),
+            "not completed: rejected (command-step-failed)"
+        );
+    }
+
+    #[test]
+    fn a_not_completed_row_without_a_recorded_outcome_still_names_the_status() {
+        assert_eq!(
+            TaskQueueOutcome::NotCompleted {
+                status: "blocked".to_string(),
+                outcome: None,
+            }
+            .label(),
+            "not completed: blocked"
+        );
     }
 }
 
