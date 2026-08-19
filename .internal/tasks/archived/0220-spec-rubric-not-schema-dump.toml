@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0220"
 title = "spec: a design rubric that is used, not a 75 KB schema nobody reads"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 `trait-spec` is a procedure-less package carrying two resources: a 75 KB
@@ -54,3 +54,30 @@ and runs against it; no prompt mentions the schema resource; and the four
 generating built-ins demonstrably consult the rubric rather than merely
 citing it.
 """
+
+outcome = """
+Landed as 7b76ea8b. The package is `spec`, carries only the rubric, and
+shrank from 100 KB to 28 KB. All five dependents build, check, and resolve
+it: `dependencies: ... pending-aliases=spec` with prompts reading
+`resource:spec/design-rubric`, fifteen references across the six
+canonicals and no trace of the schema resource.
+
+The rubric now decides something rather than being cited. Each prompt
+names what it is being held to — classify by what the material says
+before choosing a shape, model dataflow only with declared ports and
+slots, keep the derived kind honest, name identifiers so they read alone.
+explain-trait had cited only the schema; it now narrates in the rubric's
+vocabulary instead of losing its grounding.
+
+Two things found on the way:
+
+- critique-trait's source called `input.text`, which is not a function on
+  the CDK input surface. That package could not be rebuilt from source
+  and nobody knew, because nothing gates builtins for drift. Fixed here;
+  the gate belongs to 0227 and matters more than this one instance.
+- Building any builtin requires a scratch repository. `ctx traits build
+  <id>` resolves through the authored root, so a package living under
+  modules/core/builtins is unreachable by id from inside this repo.
+  Worth a proper path-based build mode eventually.
+"""
+
