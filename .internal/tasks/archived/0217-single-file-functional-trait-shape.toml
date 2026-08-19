@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0217"
 title = "Spike: the single-file, variant-free shape a scaffold template can use"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Every functional-style trait in this repository declares a family: an entry
@@ -45,4 +45,53 @@ The chosen skeleton is written into this task's outcome, a scratch package
 in that exact shape passes `ctx traits build` and `ctx traits check`, and
 the scratch package is removed. If the answer is (3), the task records what
 CDK support would cost so the owner can rule on two files versus new API.
+"""
+
+outcome = """
+Answer: (2). `procedure.from` gives a single-file, variant-free trait that
+builds and checks, with functional registrars inside an object shell —
+`cdk.step.*`/`agent.prompt`/`flow.*` in the body, no variant module.
+
+The skeleton, verified end to end on a scratch package:
+
+    import * as cdk from "@ctx-traits/cdk";
+
+    const reviewer = cdk.agent.reviewer("reviewer", { description: "..." });
+    const focus = cdk.port.input.text({ id: "focus", description: "..." });
+    const verdict = cdk.slot.text({ id: "verdict", description: "..." });
+    const verdictReport = cdk.port.output.text({
+      id: "verdict-report",
+      description: "...",
+      value: verdict,
+      optional: true,
+    });
+
+    export default cdk.trait("spike-single-file", {
+      version: "0.1.0",
+      name: "Spike Single File",
+      description: "...",
+      port: [focus, verdictReport],
+      procedure: cdk.procedure.from({ description: "..." }, () => {
+        reviewer.prompt("Review the change", {
+          input: cdk.input.prompt`Review the working tree with a focus on ${focus}.`,
+          output: verdict,
+        });
+      }),
+    });
+
+Emits the full contract: both ports, `value = "slot:verdict"` on the
+output, and `[procedure] input/output` inferred from the steps.
+
+THE ONE RULE THAT IS NOT OBVIOUS: ports must be listed in the trait's own
+`port` field. The functional family shape derives output ports from the
+variant function's `return`; an object shell has no return, so nothing
+collects them. An input port still lands transitively when a prompt
+interpolates it — which is exactly what makes the failure quiet.
+
+Footgun worth its own task: `procedure.from` accepts `input:`/`output:` in
+its fields object and silently ignores both. `ProcedureFields` declares
+neither (the contract is inferred from the steps), trait sources are
+evaluated rather than typechecked, so the excess properties vanish without
+a word. A trait declaring its output port only there builds clean, checks
+clean, and returns nothing.
 """
