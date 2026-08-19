@@ -539,7 +539,42 @@ fn resolve_trust_approve_target(operand: &str) -> crate::Result<Option<String>> 
     if candidate.extension().is_some() && candidate.exists() {
         return Ok(Some(operand.to_string()));
     }
-    Ok(ctx_traits_io::run::try_resolve_trait_id(operand)?.map(|(path, _source)| path.to_string()))
+    if let Some((path, _source)) = ctx_traits_io::run::try_resolve_trait_id(operand)? {
+        return Ok(Some(path.to_string()));
+    }
+    resolve_shared_builtin_target(operand)
+}
+
+/// A built-in package that is embedded and published but NOT runnable
+/// (`spec`), resolved for trust purposes only.
+///
+/// Every resolver `try_resolve_trait_id` consults filters built-in
+/// candidates through `runnable_package`, deliberately: a package with no
+/// procedure must never be offered by `list`, selected by a query, or
+/// reached by `run`. But trust is not selection. A dependent materializes a
+/// shared package's resources only once that package's own canonical digest
+/// is verified, and the runtime says so in as many words — "run `ctx traits
+/// trust approve spec`" — which the runnable filter turned into a dead end:
+/// the instruction resolved to no trait, fell through to installed-package
+/// approval, and failed with "no installed package matches alias or npm
+/// package".
+///
+/// So this looks past `runnable` where the runnable filter is the wrong
+/// question, and only there: an id that names an embedded package resolves
+/// to its published manifest in the built-in store. Selection surfaces are
+/// untouched.
+fn resolve_shared_builtin_target(operand: &str) -> crate::Result<Option<String>> {
+    if ctx_traits_core::builtin_trait_packages::package(operand)
+        .is_none_or(|package| package.runnable)
+    {
+        return Ok(None);
+    }
+    let context = ctx_traits_io::inventory::InventoryContext::discover()?;
+    Ok(ctx_traits_io::builtin_store::resolve_builtin_manifest_path(
+        context.repo_root_for_paths(),
+        operand,
+    )?
+    .map(|path| path.to_string()))
 }
 
 /// `ctx traits trust block`: named-trait resolution only (no package
