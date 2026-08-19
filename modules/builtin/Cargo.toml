@@ -32,4 +32,10 @@ toml.workspace = true
 [build-dependencies]
 sha2.workspace = true
 hex.workspace = true
-toml.workspace = true
+# `preserve_order` keeps catalog entries in the order they were authored.
+# Without it `toml::Value` sorts, and an axis whose order carries meaning
+# reads as noise -- verbosity would run brief, detailed, normal, terse
+# instead of along the scale it actually describes. Build-dependency
+# features resolve separately under resolver 3, so this does not reach the
+# runtime crates that also use `toml`.
+toml = { workspace = true, features = ["preserve_order"] }

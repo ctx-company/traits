@@ -1,16 +1,7 @@
-// Template: implement
+// Plan the work, do it, then judge the result.
 //
-// Scaffolded by `ctx traits create <name> --from implement`. One file, no
-// variants — the whole trait is below. Edit it freely; nothing here is
-// special because it came from a template.
-//
-// The shape: a stated piece of work in, a summary of what was done and a
-// review of it out. Three agent steps, plan then build then judge, with one
-// command step between the work and the review so the reviewer sees what
-// actually changed rather than only what the worker says changed.
-//
-// There is no refinement loop here on purpose. Add one when a single review
-// pass stops being enough — see the `flow.loop` reference for the shape.
+// The command step between the work and the review is deliberate: the
+// reviewer sees what actually changed, not only what the worker reports.
 import * as cdk from "@ctx-traits/cdk";
 
 const planner = cdk.agent.planner("planner", {
@@ -67,8 +58,7 @@ export default function () {
     metadata: { tag: ["template", "implementation"] },
   });
 
-  // Vocabulary the runtime renders into every step of this trait. Selecting
-  // an item is the instruction; the catalog says what each one means.
+  // Rendered into every step. Selecting an item is the instruction.
   cdk.useBehavior({
     tone: [cdk.behavior.tone.Plain],
     method: [cdk.behavior.method.RestateToConfirm],

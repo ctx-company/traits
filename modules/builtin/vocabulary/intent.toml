@@ -1,64 +1,205 @@
 # The intent catalog: what each item IS.
 #
-# A trait decides whether an item is a require, a focus, an avoid, or a
-# block at its own call site — that is the trait's editorial judgement,
-# not a property of the item. So an entry names and explains the thing and
-# never instructs; the rendered `group=` attribute carries the polarity.
+# A trait decides whether an item is a require, a focus, an avoid, or a block
+# at its own call site — that is the trait's editorial judgement, not a
+# property of the item. So an entry names and explains the thing and never
+# instructs; the rendered `group=` attribute carries the polarity.
 #
-# Read `scope-creep` as an avoid and it says don't; read it as a focus and
-# it says watch for it. Both are meaningful, and an entry that said "do not
-# expand beyond the requested task" could only ever mean the first.
+# Read `scope-creep` as an avoid and it says don't; read it as a focus and it
+# says watch for it. Both are meaningful, and an entry that said "do not expand
+# beyond the requested task" could only ever mean the first.
 #
-# Some entries (match-surrounding-style and verifiable-goal) were drawn from ideas
-# in published agent skills — backnotprop/bro and the Karpathy guidelines
+# One table per entry: an entry is read, diffed and reviewed on its own lines.
+#
+# Some entries (match-surrounding-style and verifiable-goal) were drawn from
+# ideas in published agent skills — backnotprop/bro and the Karpathy guidelines
 # (multica-ai/andrej-karpathy-skills). The wording here is our own; what was
 # taken is the observation that these are reusable, not any text.
 
-[intent]
-accretion = { summary = "A parallel solution added beside an existing one instead of consolidating.", description = "Related behavior that grows a second helper, branch, or path next to the one already handling it, rather than being unified with it." }
-annotation-fidelity = { summary = "Each annotation surviving as exactly one checklist item.", description = "Every human annotation maps to one actionable item — none dropped, none merged into another, none silently reworded into something else." }
-behavior-preserving-default = { summary = "Observable behavior staying as it is unless the task changes it.", description = "The existing contract holds by default: a change that alters what callers observe is a deliberate act, not a side effect of the work." }
-big-rewrite = { summary = "Rewriting a subsystem where a narrow fix would do.", description = "Replacing working structure wholesale when the requested outcome needed a contained change." }
-bounded-refinement = { summary = "A review-and-repair loop with a condition that ends it.", description = "Repair cycles that recheck what was fixed and stop at a stated acceptance condition rather than running until something else intervenes." }
-correctness = { summary = "Whether the code does the right thing, ahead of how it reads.", description = "Real behavior gaps and defects, weighed above naming, formatting, and style preference." }
-data-loss = { summary = "Behavior that can delete, corrupt, overwrite, leak, or strand data.", description = "Operations whose failure mode costs data rather than time — a migration dropping a column before the copy, a write that cannot be undone." }
-destructive-change = { summary = "Deleting data or rewriting history.", description = "Actions that remove or rewrite what already exists, where recovery is difficult or impossible without a backup." }
-duplication = { summary = "Logic copied where it should be shared and evolve together.", description = "Two or more sites carrying the same behavior, so a future change has to find and update every copy to stay correct." }
-elegance = { summary = "Clear, cohesive design over clever or incidental complexity.", description = "Structure that reads as one idea, rather than an assembly whose parts only make sense in the order they were added." }
-gates-green-before-commit = { summary = "The repository's validation gates passing before a commit.", description = "The checks the project itself defines — build, tests, lint — run and resolved rather than deferred past the commit that broke them." }
-gold-plating = { summary = "Polish or features nobody asked for.", description = "Optional enhancement delivered alongside the requested outcome, expanding what has to be reviewed and maintained." }
-inspect-changed-behavior = { summary = "Reading the diff, nearby code, and tests before drawing conclusions.", description = "Findings grounded in what the change actually does, established by looking at it rather than inferring from its description." }
-interface-widening = { summary = "Public surface growing without a concrete caller.", description = "An export, parameter, or option added for a use that has not appeared yet, which then has to be supported once it exists." }
-leanness = { summary = "Only what the requested outcome needs.", description = "The change sized to its purpose, with anything beyond that recognized as a separate decision rather than a free addition." }
-maintainability = { summary = "Complexity, coupling, and brittleness that make future change harder.", description = "Structure whose cost lands on the next person: unclear naming, tangled dependencies, branching that must be held in the head all at once." }
-match-surrounding-style = { summary = "Code that reads like its neighbours.", description = "Existing convention in the file honored over personal preference, so a change does not announce itself by looking different from the code around it." }
-over-engineering = { summary = "Generality built ahead of demonstrated need.", description = "Abstraction, configurability, or defensive handling for cases that have not been shown to occur." }
-performance = { summary = "Avoidable expensive work.", description = "Cost that the task did not require — an accidental quadratic over a large collection, repeated work that could be done once." }
-policy-bypass = { summary = "Working around user, repository, host, or organization policy.", description = "Routing past a permission prompt, a repository rule, or an organizational constraint rather than satisfying it or surfacing it." }
-pragmatism = { summary = "The smallest practical change that satisfies the contract.", description = "What the stated requirement actually needs, chosen over the more thorough or more general thing nearby." }
-preserve-scope = { summary = "Staying inside the requested task.", description = "Adjacent work named as an option rather than performed, so the boundary of the change stays where it was agreed." }
-report-actionable-finding = { summary = "A finding carrying what is wrong, why it matters, and where.", description = "Enough for someone else to act: the defect, its consequence, and the location, rather than an observation that has to be re-derived." }
-reuse-over-reimplement = { summary = "Extracting shared logic instead of copying it.", description = "Existing behavior found and reused, so one definition serves both callers rather than two definitions drifting apart." }
-review-before-final = { summary = "Inspecting completed work against its requirements before calling it done.", description = "A pass over the finished change measured against what was asked, before it is presented as complete." }
-robustness = { summary = "Correctness under ordinary failure and boundary conditions.", description = "Behavior that holds at the edges the code will really meet: empty input, a failed call, a value at its limit." }
-role-attributed-output = { summary = "Output labelled with the role that produced or reviewed it.", description = "Reviewer evidence distinguishable from implementation output, so a reader knows which agent is speaking." }
-rubber-stamp-review = { summary = "Approval without substantive review.", description = "A verdict issued without checking the requirements or the evidence — the shape of a review with none of its value." }
-scope-creep = { summary = "Expanding past what was asked.", description = "The adjacent fix, the nearby cleanup, the improvement nobody requested — work that grows the change beyond its agreed boundary." }
-secret-exfiltration = { summary = "Revealing, copying, uploading, or moving secrets.", description = "Credentials, tokens, or key material leaving where they were held — pasted into output, written to a new file, sent to a service." }
-security = { summary = "Permission handling, injection risk, and unsafe data exposure.", description = "Behavior where the failure mode is a boundary crossed: unvalidated input reaching an interpreter, data readable by whoever should not read it." }
-silent-deviation = { summary = "Adapting around a contradicted plan without recording it.", description = "A plan that could not be followed as written, quietly reinterpreted, so the record no longer describes what happened." }
-specific = { summary = "Observations naming the affected behavior, artifact, or location.", description = "A statement someone can go and check, rather than general advice that fits any codebase equally." }
-speculative-claim = { summary = "A guess presented as fact.", description = "An assertion whose evidence was never established, stated in the same register as one that was." }
-state-assumptions = { summary = "Assumptions made visible beside the claims they support.", description = "What was taken as given when context was missing, said plainly and near the conclusion resting on it." }
-style-only = { summary = "Cosmetic feedback where no style review was asked for.", description = "Naming, formatting, and arrangement preferences raised in place of substantive findings." }
-taste-only-blocking = { summary = "Subjective preference treated as a blocking defect.", description = "A judgement about how something reads, given the weight of a correctness, safety, or trust problem." }
-tests = { summary = "Coverage, assertions, uncovered branches, and stale tests.", description = "Whether the tests actually establish what they appear to: missing assertions, branches nothing exercises, tests that no longer match the code." }
-unapproved-network = { summary = "Network access without explicit allowance.", description = "Reaching outside the machine when the user or host policy has not permitted it — fetching, publishing, or calling a remote service." }
-unbounded-loop = { summary = "Refinement with no stop condition.", description = "A repair cycle whose end depends on something outside itself, rather than on stated acceptance criteria or a declared bound." }
-unrequested-refactor = { summary = "Changing code outside the requested change.", description = "Restructuring that was not asked for, mixed into a diff whose reviewer expected only the requested work." }
-unsafe-command = { summary = "Commands that can destroy data or alter system state.", description = "Invocations whose effects reach past the working tree, or past what can be undone, without the user having agreed to them." }
-user-impact = { summary = "The user-visible consequence of a finding.", description = "What the defect costs the person using the software, stated alongside what it is technically." }
-verbatim-execution = { summary = "An agreed draft executed exactly, with departures recorded.", description = "The approved plan followed as written, and any point where reality forced a change written down rather than absorbed silently." }
-verifiable-goal = { summary = "The task restated as a condition that can be checked.", description = "A target established before the work starts — a test that fails now, a command that must exit clean — rather than a judgement made about it afterwards." }
-verify-coverage = { summary = "Whether changed behavior is covered by anything.", description = "Tests, examples, or acceptance criteria that actually exercise what changed — and a stated gap when nothing does." }
-weaken-tests-to-pass = { summary = "Loosening a test instead of repairing the implementation.", description = "An assertion relaxed, skipped, or deleted so a change goes green, where the change was what broke it." }
+[intent.accretion]
+summary = "A parallel solution added beside an existing one instead of consolidating."
+description = "Related behavior that grows a second helper, branch, or path next to the one already handling it, rather than being unified with it."
+
+[intent.annotation-fidelity]
+summary = "Each annotation surviving as exactly one checklist item."
+description = "Every human annotation maps to one actionable item — none dropped, none merged into another, none silently reworded into something else."
+
+[intent.behavior-preserving-default]
+summary = "Observable behavior staying as it is unless the task changes it."
+description = "The existing contract holds by default: a change that alters what callers observe is a deliberate act, not a side effect of the work."
+
+[intent.big-rewrite]
+summary = "Rewriting a subsystem where a narrow fix would do."
+description = "Replacing working structure wholesale when the requested outcome needed a contained change."
+
+[intent.bounded-refinement]
+summary = "A review-and-repair loop with a condition that ends it."
+description = "Repair cycles that recheck what was fixed and stop at a stated acceptance condition rather than running until something else intervenes."
+
+[intent.correctness]
+summary = "Whether the code does the right thing, ahead of how it reads."
+description = "Real behavior gaps and defects, weighed above naming, formatting, and style preference."
+
+[intent.data-loss]
+summary = "Behavior that can delete, corrupt, overwrite, leak, or strand data."
+description = "Operations whose failure mode costs data rather than time — a migration dropping a column before the copy, a write that cannot be undone."
+
+[intent.destructive-change]
+summary = "Deleting data or rewriting history."
+description = "Actions that remove or rewrite what already exists, where recovery is difficult or impossible without a backup."
+
+[intent.duplication]
+summary = "Logic copied where it should be shared and evolve together."
+description = "Two or more sites carrying the same behavior, so a future change has to find and update every copy to stay correct."
+
+[intent.elegance]
+summary = "Clear, cohesive design over clever or incidental complexity."
+description = "Structure that reads as one idea, rather than an assembly whose parts only make sense in the order they were added."
+
+[intent.gates-green-before-commit]
+summary = "The repository's validation gates passing before a commit."
+description = "The checks the project itself defines — build, tests, lint — run and resolved rather than deferred past the commit that broke them."
+
+[intent.gold-plating]
+summary = "Polish or features nobody asked for."
+description = "Optional enhancement delivered alongside the requested outcome, expanding what has to be reviewed and maintained."
+
+[intent.inspect-changed-behavior]
+summary = "Reading the diff, nearby code, and tests before drawing conclusions."
+description = "Findings grounded in what the change actually does, established by looking at it rather than inferring from its description."
+
+[intent.interface-widening]
+summary = "Public surface growing without a concrete caller."
+description = "An export, parameter, or option added for a use that has not appeared yet, which then has to be supported once it exists."
+
+[intent.leanness]
+summary = "Only what the requested outcome needs."
+description = "The change sized to its purpose, with anything beyond that recognized as a separate decision rather than a free addition."
+
+[intent.maintainability]
+summary = "Complexity, coupling, and brittleness that make future change harder."
+description = "Structure whose cost lands on the next person: unclear naming, tangled dependencies, branching that must be held in the head all at once."
+
+[intent.match-surrounding-style]
+summary = "Code that reads like its neighbours."
+description = "Existing convention in the file honored over personal preference, so a change does not announce itself by looking different from the code around it."
+
+[intent.over-engineering]
+summary = "Generality built ahead of demonstrated need."
+description = "Abstraction, configurability, or defensive handling for cases that have not been shown to occur."
+
+[intent.performance]
+summary = "Avoidable expensive work."
+description = "Cost that the task did not require — an accidental quadratic over a large collection, repeated work that could be done once."
+
+[intent.policy-bypass]
+summary = "Working around user, repository, host, or organization policy."
+description = "Routing past a permission prompt, a repository rule, or an organizational constraint rather than satisfying it or surfacing it."
+
+[intent.pragmatism]
+summary = "The smallest practical change that satisfies the contract."
+description = "What the stated requirement actually needs, chosen over the more thorough or more general thing nearby."
+
+[intent.preserve-scope]
+summary = "Staying inside the requested task."
+description = "Adjacent work named as an option rather than performed, so the boundary of the change stays where it was agreed."
+
+[intent.report-actionable-finding]
+summary = "A finding carrying what is wrong, why it matters, and where."
+description = "Enough for someone else to act: the defect, its consequence, and the location, rather than an observation that has to be re-derived."
+
+[intent.reuse-over-reimplement]
+summary = "Extracting shared logic instead of copying it."
+description = "Existing behavior found and reused, so one definition serves both callers rather than two definitions drifting apart."
+
+[intent.review-before-final]
+summary = "Inspecting completed work against its requirements before calling it done."
+description = "A pass over the finished change measured against what was asked, before it is presented as complete."
+
+[intent.robustness]
+summary = "Correctness under ordinary failure and boundary conditions."
+description = "Behavior that holds at the edges the code will really meet: empty input, a failed call, a value at its limit."
+
+[intent.role-attributed-output]
+summary = "Output labelled with the role that produced or reviewed it."
+description = "Reviewer evidence distinguishable from implementation output, so a reader knows which agent is speaking."
+
+[intent.rubber-stamp-review]
+summary = "Approval without substantive review."
+description = "A verdict issued without checking the requirements or the evidence — the shape of a review with none of its value."
+
+[intent.scope-creep]
+summary = "Expanding past what was asked."
+description = "The adjacent fix, the nearby cleanup, the improvement nobody requested — work that grows the change beyond its agreed boundary."
+
+[intent.secret-exfiltration]
+summary = "Revealing, copying, uploading, or moving secrets."
+description = "Credentials, tokens, or key material leaving where they were held — pasted into output, written to a new file, sent to a service."
+
+[intent.security]
+summary = "Permission handling, injection risk, and unsafe data exposure."
+description = "Behavior where the failure mode is a boundary crossed: unvalidated input reaching an interpreter, data readable by whoever should not read it."
+
+[intent.silent-deviation]
+summary = "Adapting around a contradicted plan without recording it."
+description = "A plan that could not be followed as written, quietly reinterpreted, so the record no longer describes what happened."
+
+[intent.specific]
+summary = "Observations naming the affected behavior, artifact, or location."
+description = "A statement someone can go and check, rather than general advice that fits any codebase equally."
+
+[intent.speculative-claim]
+summary = "A guess presented as fact."
+description = "An assertion whose evidence was never established, stated in the same register as one that was."
+
+[intent.state-assumptions]
+summary = "Assumptions made visible beside the claims they support."
+description = "What was taken as given when context was missing, said plainly and near the conclusion resting on it."
+
+[intent.style-only]
+summary = "Cosmetic feedback where no style review was asked for."
+description = "Naming, formatting, and arrangement preferences raised in place of substantive findings."
+
+[intent.taste-only-blocking]
+summary = "Subjective preference treated as a blocking defect."
+description = "A judgement about how something reads, given the weight of a correctness, safety, or trust problem."
+
+[intent.tests]
+summary = "Coverage, assertions, uncovered branches, and stale tests."
+description = "Whether the tests actually establish what they appear to: missing assertions, branches nothing exercises, tests that no longer match the code."
+
+[intent.unapproved-network]
+summary = "Network access without explicit allowance."
+description = "Reaching outside the machine when the user or host policy has not permitted it — fetching, publishing, or calling a remote service."
+
+[intent.unbounded-loop]
+summary = "Refinement with no stop condition."
+description = "A repair cycle whose end depends on something outside itself, rather than on stated acceptance criteria or a declared bound."
+
+[intent.unrequested-refactor]
+summary = "Changing code outside the requested change."
+description = "Restructuring that was not asked for, mixed into a diff whose reviewer expected only the requested work."
+
+[intent.unsafe-command]
+summary = "Commands that can destroy data or alter system state."
+description = "Invocations whose effects reach past the working tree, or past what can be undone, without the user having agreed to them."
+
+[intent.user-impact]
+summary = "The user-visible consequence of a finding."
+description = "What the defect costs the person using the software, stated alongside what it is technically."
+
+[intent.verbatim-execution]
+summary = "An agreed draft executed exactly, with departures recorded."
+description = "The approved plan followed as written, and any point where reality forced a change written down rather than absorbed silently."
+
+[intent.verifiable-goal]
+summary = "The task restated as a condition that can be checked."
+description = "A target established before the work starts — a test that fails now, a command that must exit clean — rather than a judgement made about it afterwards."
+
+[intent.verify-coverage]
+summary = "Whether changed behavior is covered by anything."
+description = "Tests, examples, or acceptance criteria that actually exercise what changed — and a stated gap when nothing does."
+
+[intent.weaken-tests-to-pass]
+summary = "Loosening a test instead of repairing the implementation."
+description = "An assertion relaxed, skipped, or deleted so a change goes green, where the change was what broke it."
