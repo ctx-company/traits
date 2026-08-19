@@ -406,7 +406,7 @@ pub fn package_runtime_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
 /// This governs canonical-vs-legacy *write* and *import* semantics
 /// (`package_manifest_write_path`, import staging) and stays `.ctx/traits`-
 /// scoped: the first-party built-in packages under
-/// `modules/core/builtins/traits` are product-owned, not mutable import/write
+/// `modules/builtin/traits` are product-owned, not mutable import/write
 /// targets, so they must not become "canonical" for those purposes. Use
 /// [`is_builtin_trait_package_root`] where only root-resolution (read paths)
 /// needs to recognize the built-in tree.
@@ -473,12 +473,12 @@ pub fn is_canonical_package_root(package_root: &Utf8Path) -> bool {
 }
 
 /// The `modules` directory of the first-party built-in
-/// `modules/core/builtins/traits/<id>` tree, if `package_root` is exactly a
+/// `modules/builtin/traits/<id>` tree, if `package_root` is exactly a
 /// package root under it. Shared by [`is_builtin_trait_package_root`] and
 /// [`builtin_trait_package_repo_root`] so the exact-path-shape traversal is
 /// encoded in exactly one place.
 ///
-/// Also recognizes the sibling `modules/core/builtins/templates/<id>` tree
+/// Also recognizes the sibling `modules/builtin/templates/<id>` tree
 /// (P271 teaching templates): templates are authoring inputs, never
 /// resolvable runtime traits (see [`is_canonical_package_root`]'s doc for
 /// why that distinction matters for write/import targets), but they share
@@ -490,15 +490,11 @@ fn builtin_trait_tree_modules_dir(package_root: &Utf8Path) -> Option<&Utf8Path> 
     if !matches!(traits_dir.file_name(), Some("traits" | "templates")) {
         return None;
     }
-    let builtins_dir = traits_dir.parent()?;
-    if builtins_dir.file_name() != Some("builtins") {
+    let builtin_dir = traits_dir.parent()?;
+    if builtin_dir.file_name() != Some("builtin") {
         return None;
     }
-    let core_dir = builtins_dir.parent()?;
-    if core_dir.file_name() != Some("core") {
-        return None;
-    }
-    let modules_dir = core_dir.parent()?;
+    let modules_dir = builtin_dir.parent()?;
     if modules_dir.file_name() == Some("modules") {
         Some(modules_dir)
     } else {
@@ -507,7 +503,7 @@ fn builtin_trait_tree_modules_dir(package_root: &Utf8Path) -> Option<&Utf8Path> 
 }
 
 /// Whether a path is exactly a package root under the first-party built-in
-/// `modules/core/builtins/traits` tree (the six meta-trait packages moved
+/// `modules/builtin/traits` tree (the six meta-trait packages moved
 /// there in P336).
 ///
 /// Narrowly scoped to root-resolution (`package_root_for_manifest`), so that
@@ -519,8 +515,8 @@ pub fn is_builtin_trait_package_root(package_root: &Utf8Path) -> bool {
 }
 
 /// Whether a path is exactly a package root under the first-party
-/// `modules/core/builtins/templates` tree (the P271 teaching templates),
-/// as distinct from the `modules/core/builtins/traits` meta-trait tree.
+/// `modules/builtin/templates` tree (the P271 teaching templates),
+/// as distinct from the `modules/builtin/traits` meta-trait tree.
 ///
 /// The two trees share an on-disk shape and both resolve through
 /// [`builtin_trait_tree_modules_dir`], but only templates use the
@@ -538,7 +534,7 @@ pub fn is_builtin_template_package_root(package_root: &Utf8Path) -> bool {
 
 /// The repository root for a built-in trait package root (the parent of
 /// `modules`), if `package_root` is exactly a package root under
-/// `modules/core/builtins/traits`. Used by
+/// `modules/builtin/traits`. Used by
 /// `export::infer_repo_root_from_trait_file` to resolve `node_modules`/
 /// `@ctx-traits/cdk` from the real repo root when rebuilding a built-in
 /// package via `ctx traits build`.
@@ -667,7 +663,7 @@ impl TraitPackageRoot {
 ///
 /// Resolves purely from `package_root` — callers that already have a
 /// package root (built-in/template packages under
-/// `modules/core/builtins/{traits,templates}`, external flat packages, or a
+/// `modules/builtin/{traits,templates}`, external flat packages, or a
 /// `.ctx/traits/<id>` root) never need to reconstruct one from a repo root
 /// and trait id.
 pub fn package_cdk_source_path(package_root: &Utf8Path) -> Result<Option<Utf8PathBuf>, Error> {

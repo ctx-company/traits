@@ -1,0 +1,35 @@
+[package]
+name = "ctx-traits-builtin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "First-party ctx.traits assets embedded at compile time: the guidance vocabulary catalog, the built-in trait packages, and the scaffold templates. Data only — no logic, no IO."
+
+[features]
+default = []
+# Embed the built-in trait packages (generate, refine, critique, explain,
+# import, spec) and the scaffold templates (implement, research, review) as
+# static byte tables. Enabled through ctx-traits-core by the IO and CLI
+# crates, never by the WASM crates: embedding them would grow every wasm
+# artifact by the size of the packages.
+#
+# The vocabulary catalog is NOT behind this gate. Core's renderer resolves
+# guidance through it and wasm-core needs it, so it is always built.
+trait-packages = []
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+hex.workspace = true
+toml.workspace = true
+
+[build-dependencies]
+sha2.workspace = true
+hex.workspace = true
+toml.workspace = true

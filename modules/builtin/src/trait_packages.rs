@@ -3,8 +3,8 @@
 //! `explain`, `import`, `spec`), embedded into the binary
 //! at compile time.
 //!
-//! Core performs no IO here: `build.rs` reads the package files, computes
-//! their SHA-256 digests, and emits static byte tables that this module only
+//! No IO happens here: `build.rs` reads the package files, computes their
+//! SHA-256 digests, and emits static byte tables that this module only
 //! exposes through immutable views.
 
 /// A single embedded file belonging to a built-in trait package.
@@ -73,7 +73,17 @@ pub fn runnable_package(id: &str) -> Option<&'static BuiltinTraitPackage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::digest::Digest;
+
+    /// The crate's own `sha256:<hex>`, so the self-consistency test below
+    /// does not need a dependency on core's digest type — this crate is data
+    /// and must stay free of anything that would make core's dependency on
+    /// it circular.
+    fn sha256_digest(bytes: &[u8]) -> String {
+        use sha2::Digest as _;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(bytes);
+        format!("sha256:{}", hex::encode(hasher.finalize()))
+    }
 
     const EXPECTED_IDS: &[&str] = &[
         "generate", "refine", "critique", "explain", "import", "spec",
@@ -133,13 +143,11 @@ mod tests {
     fn every_file_digest_matches_its_embedded_bytes() {
         for package in packages() {
             for file in package.files {
-                let expected = Digest::from_bytes(file.bytes);
+                let expected = sha256_digest(file.bytes);
                 assert_eq!(
-                    expected.as_str(),
-                    file.digest,
+                    expected, file.digest,
                     "digest mismatch for {:?} in package {:?}",
-                    file.relative_path,
-                    package.id
+                    file.relative_path, package.id
                 );
             }
         }

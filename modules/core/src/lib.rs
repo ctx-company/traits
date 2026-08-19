@@ -27,9 +27,14 @@ pub mod assist;
 pub mod audit;
 #[cfg(feature = "builtin-trait-packages")]
 pub mod builtin_templates;
+/// The embedded built-in trait packages, re-exported from
+/// `ctx-traits-builtin` at the path core has always published them under.
 #[cfg(feature = "builtin-trait-packages")]
-pub mod builtin_trait_packages;
-pub mod builtins;
+pub use ctx_traits_builtin::trait_packages as builtin_trait_packages;
+/// The guidance vocabulary catalog, re-exported from `ctx-traits-builtin`.
+/// Unlike the packages, it carries no feature gate: the renderer resolves
+/// every guidance reference through it.
+pub use ctx_traits_builtin::vocabulary as builtins;
 pub mod cache;
 pub mod capability;
 pub mod check;

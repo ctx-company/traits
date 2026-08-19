@@ -15,9 +15,10 @@ default = []
 # refine, critique, explain, import, spec)
 # as static byte tables. Enabled by the IO and CLI crates, never by the WASM
 # crates.
-builtin-trait-packages = []
+builtin-trait-packages = ["ctx-traits-builtin/trait-packages"]
 
 [dependencies]
+ctx-traits-builtin.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 globset.workspace = true

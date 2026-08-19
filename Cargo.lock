@@ -303,6 +303,16 @@ name = "ctx-fixture-agent"
 version = "0.2.4"
 
 [[package]]
+name = "ctx-traits-builtin"
+version = "0.2.4"
+dependencies = [
+ "hex",
+ "serde",
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "ctx-traits-cli"
 version = "0.2.4"
 dependencies = [
@@ -333,6 +343,7 @@ name = "ctx-traits-core"
 version = "0.2.4"
 dependencies = [
  "camino",
+ "ctx-traits-builtin",
  "derive_more",
  "globset",
  "hex",

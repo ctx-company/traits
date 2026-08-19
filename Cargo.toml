@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "modules/builtin",
   "modules/core",
   "modules/io",
   "modules/cli",
@@ -47,6 +48,7 @@ toml_edit = "0.25"
 ureq = "3"
 zip = { version = "7.2.0", default-features = false }
 
+ctx-traits-builtin = { path = "modules/builtin" }
 ctx-traits-core = { path = "modules/core" }
 ctx-traits-io = { path = "modules/io" }
 ctx-traits-cli = { path = "modules/cli" }

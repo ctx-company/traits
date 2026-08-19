@@ -8,7 +8,7 @@
 //! (comparison-arm run) are not landed in this checkout, so this test
 //! consumes the deterministic fixtures already committed to the repository
 //! for the equivalent purpose today: the `ctx.traits` builtin trait
-//! documents (`modules/core/builtins/**/generated/index.toml`) for
+//! documents (`modules/builtin/**/generated/index.toml`) for
 //! validate/normalize/render, and the existing marketplace-audit self-test
 //! fixtures (`scripts/goldens/fixtures/audit*`, `.fixtures/mattpocock`) for
 //! audit. When P235/P236/P237 land their own committed fixtures at their
@@ -58,7 +58,7 @@ fn repo_root() -> PathBuf {
 /// Canonical trait documents already committed as `ctx.traits` builtins.
 /// Stable sorted order so failures are reproducible across runs.
 fn canonical_trait_fixtures() -> Vec<PathBuf> {
-    let root = repo_root().join("modules/core/builtins");
+    let root = repo_root().join("modules/builtin");
     let mut paths = Vec::new();
     collect_generated_index_toml(&root, &mut paths);
     paths.sort();

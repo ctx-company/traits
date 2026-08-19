@@ -9,7 +9,7 @@
 # reaches its committed canonical. critique-trait sat unbuildable for an
 # unknown stretch because of exactly that.
 #
-# Why the scratch root: a package under modules/core/builtins is unreachable
+# Why the scratch root: a package under modules/builtin is unreachable
 # by id (`ctx traits build <id>` resolves through .ctx/traits/authored), and
 # building it by source path mis-resolves its `../spec` dependency relative to
 # source/ instead of the package root (task 0230). Copying the tree into a
@@ -26,7 +26,7 @@ case "$MODE" in
 esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILTINS="$REPO_ROOT/modules/core/builtins"
+BUILTINS="$REPO_ROOT/modules/builtin"
 CTX="${CTX_BIN:-$REPO_ROOT/target/debug/ctx}"
 
 if [[ ! -x "$CTX" ]]; then

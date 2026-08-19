@@ -292,7 +292,7 @@ pub fn infer_repo_root_from_trait_file(trait_file: &Utf8Path) -> &Utf8Path {
     let Some(trait_root) = crate::layout::package_root_for_manifest(trait_file) else {
         return trait_file;
     };
-    // `modules/core/builtins/traits/<id>`: the first-party meta-trait
+    // `modules/builtin/traits/<id>`: the first-party meta-trait
     // packages moved here still need `@ctx-traits/cdk` resolved from the
     // real repo-root `node_modules` when rebuilt via `ctx traits build`.
     if let Some(repo_root) = crate::layout::builtin_trait_package_repo_root(trait_root) {

@@ -1043,10 +1043,10 @@ pub(crate) fn default_target_path(
 /// source.
 ///
 /// Canonical (`.ctx/traits/<id>`) and P271 template
-/// (`modules/core/builtins/templates/<id>`) packages route to the
+/// (`modules/builtin/templates/<id>`) packages route to the
 /// `generated/index.{ext,map}` pair. Every other package sharing the v2
 /// `<root>/source/index.{ts,mjs}` shape — including the seven first-party
-/// built-in meta-traits under `modules/core/builtins/traits`, which still
+/// built-in meta-traits under `modules/builtin/traits`, which still
 /// commit an adjacent `source/index.map` — keeps the adjacent-sidecar
 /// fallback. Widening this to the built-in meta-trait tree too is a
 /// separate, larger migration (it touches seven committed sidecars) and is
@@ -1196,13 +1196,13 @@ pub(crate) fn package_cdk_source(trait_path: &Utf8Path) -> crate::Result<Option<
             .map_err(crate::Error::from);
     }
     // Any other package root — a first-party built-in or template package
-    // under `modules/core/builtins/{traits,templates}`, or an external flat
+    // under `modules/builtin/{traits,templates}`, or an external flat
     // package — resolves the CDK source relative to the package root that
     // was actually resolved for `trait_path`. Reconstructing a path from
     // the trait id under `.ctx/traits` here (as this used to) can silently
     // resolve an unrelated, same-named live `.ctx/traits/<id>` package
     // instead of the package actually being checked (e.g. the
-    // `modules/core/builtins/templates/review/` template colliding with
+    // `modules/builtin/templates/review/` template colliding with
     // this repository's own live `.ctx/traits/authored/review/`), or find
     // nothing at all for ids with no live counterpart.
     ctx_traits_io::layout::package_cdk_source_path(package_root)
@@ -1242,10 +1242,10 @@ pub(crate) fn package_source_map(trait_path: &Utf8Path) -> crate::Result<Utf8Pat
             .map_err(crate::Error::from);
     }
     // A first-party P271 template package under
-    // `modules/core/builtins/templates` authoring at the v2
+    // `modules/builtin/templates` authoring at the v2
     // `source/index.{ts,mjs}` shape: same canonical `generated/index.map`
     // sidecar `ctx traits build` writes for it (see `package_build_paths`).
-    // The built-in meta-trait tree under `modules/core/builtins/traits`
+    // The built-in meta-trait tree under `modules/builtin/traits`
     // shares the same v2 shape but still commits an adjacent
     // `source/index.map`, so it is deliberately excluded here — see
     // `package_build_paths`'s doc comment.

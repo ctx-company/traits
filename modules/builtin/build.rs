@@ -49,13 +49,13 @@ const SECTIONS: &[SectionDef] = &[
 
 type Entry = (String, String, String, Option<String>);
 
-const VOCABULARY_DIR: &str = "builtins/vocabulary";
+const VOCABULARY_DIR: &str = "vocabulary";
 
 fn main() {
     println!("cargo:rerun-if-changed={VOCABULARY_DIR}");
     let mut paths: Vec<_> = fs::read_dir(VOCABULARY_DIR)
-        .expect("read builtins/vocabulary")
-        .map(|entry| entry.expect("read builtins/vocabulary entry").path())
+        .expect("read vocabulary")
+        .map(|entry| entry.expect("read vocabulary entry").path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
         .collect();
     paths.sort();
@@ -82,7 +82,7 @@ fn main() {
 /// parsing `generated/index.toml`.
 const BUILTIN_TRAIT_PACKAGE_IDS: &[&str] = &["generate", "refine", "critique", "explain", "import"];
 
-const BUILTIN_TRAIT_PACKAGES_DIR: &str = "builtins/traits";
+const BUILTIN_TRAIT_PACKAGES_DIR: &str = "traits";
 
 /// Shared packages the meta-traits depend on but which are not themselves
 /// runnable: no procedure, nothing to select or dispatch. They are embedded
@@ -92,13 +92,13 @@ const BUILTIN_TRAIT_PACKAGES_DIR: &str = "builtins/traits";
 /// `run-info` never offer a package that cannot run.
 const BUILTIN_SHARED_PACKAGE_IDS: &[&str] = &["spec"];
 
-const BUILTIN_SHARED_PACKAGES_DIR: &str = "builtins/shared";
+const BUILTIN_SHARED_PACKAGES_DIR: &str = "shared";
 
 fn generate_builtin_trait_packages(out_dir: &str) {
     // Feature-gate both the filesystem reads and the generated table so a
     // build without `builtin-trait-packages` neither hashes nor embeds any
     // package bytes.
-    if env::var("CARGO_FEATURE_BUILTIN_TRAIT_PACKAGES").is_err() {
+    if env::var("CARGO_FEATURE_TRAIT_PACKAGES").is_err() {
         fs::write(
             Path::new(out_dir).join("builtin_trait_packages.rs"),
             "pub static BUILTIN_TRAIT_PACKAGES: &[BuiltinTraitPackage] = &[];\n",
@@ -174,7 +174,7 @@ fn generate_builtin_trait_packages(out_dir: &str) {
 /// new` reports them in.
 const BUILTIN_TEMPLATE_IDS: &[&str] = &["implement", "research", "review"];
 
-const BUILTIN_TEMPLATES_DIR: &str = "builtins/templates";
+const BUILTIN_TEMPLATES_DIR: &str = "templates";
 
 /// Embed each template's authoring inputs (`trait.toml`, every
 /// `source/**/*.ts` file) as UTF-8 static strings. Only authoring files are
@@ -190,7 +190,7 @@ const BUILTIN_TEMPLATES_DIR: &str = "builtins/templates";
 /// `data.ts`, `schema.ts`, `agent.ts`, `sequence/<concept>.ts`) is embedded
 /// verbatim as an extra file, passed through byte-identical by `instantiate`.
 fn generate_builtin_templates(out_dir: &str) {
-    if env::var("CARGO_FEATURE_BUILTIN_TRAIT_PACKAGES").is_err() {
+    if env::var("CARGO_FEATURE_TRAIT_PACKAGES").is_err() {
         fs::write(
             Path::new(out_dir).join("builtin_templates.rs"),
             "pub static BUILTIN_TEMPLATES: &[BuiltinTemplate] = &[];\n",
