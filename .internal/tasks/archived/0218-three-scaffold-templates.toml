@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0218"
 title = "Three scaffold templates: review, implement, research"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 `ctx traits create` carries five templates — code-review, implement-phase,
@@ -69,3 +69,27 @@ template directories are gone along with every reference to them.
 
 [relations]
 depends-on = ["0217"]
+
+outcome = """
+Landed as bb780593. `ctx traits create` lists exactly implement, research,
+review; each scaffolds into a clean repository and passes `ctx traits
+check`, verified with the rebuilt binary rather than by inspection.
+
+Each template is one file using `cdk.trait` + `cdk.procedure.from` with
+functional registrars inside — the 0217 shape — so a scaffolded package
+reads like the surface the reference pages teach.
+
+Two things worth knowing for the next task in this area:
+
+- The three ids collide with this repository's own authored `review`,
+  `implement`, and `research` packages, so `ctx traits build <id>` from
+  anywhere inside the repo resolves the authored package, not the
+  template. Templates were built in a scratch repository and their
+  generated artifacts copied in. The runtime path itself is unaffected:
+  CDK source resolves relative to the resolved package root, and the
+  comment in `cdk_build.rs` explaining that now cites this live case.
+- There is still no drift gate over `modules/core/builtins/`. A template
+  source edited without rebuilding its `generated/index.toml` ships
+  silently. 0227 carries that.
+"""
+
