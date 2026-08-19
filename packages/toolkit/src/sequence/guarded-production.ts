@@ -158,7 +158,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
   const verdicts = seats.map(
     (seat, index) =>
       seat.verdictSlot ??
-      slot.of({
+      slot({
         id: `${id}-verdict${suffix(index)}`,
         schema: seat.verdictSchema ?? reviewerVerdict,
         description: `Reviewer verdict for the "${id}" produce-review round.`,

@@ -144,21 +144,6 @@ function agentTemplate(template: AgentTemplateDefinition): AgentTemplateFunction
   return (id, fields = {}) => agentTemplateOf(template, id, fields);
 }
 
-/** Thin wrapper around the namespaced template that attaches a deprecation diagnostic; emits an identical declaration. */
-function deprecatedBareAgentTemplate(name: string, template: AgentTemplateDefinition): AgentTemplateFunction {
-  return (id, fields = {}) =>
-    agentTemplateOf(template, id, fields, {
-      diagnostics: [
-        {
-          severity: "warning",
-          code: "cdk.agent-template.bare-export-deprecated",
-          fieldPath: `agent.${id}`,
-          message: `Bare \`${name}(...)\` is deprecated; use \`agent.${name}(...)\` instead.`,
-        },
-      ],
-    });
-}
-
 // `Object.assign` inline in the initializer (rather than a separate
 // statement after a bare `agentFn` export) is what lets the `AgentFunction`
 // annotation below be checked instead of asserted: TypeScript resolves
@@ -226,13 +211,3 @@ export function seats(
   return Array.from({ length: count }, (_, i) => mint(`${role}-${i + 1}`, ...args));
 }
 
-/** @deprecated Use {@link agent}.worker — same declaration, kept for source compatibility during the migration window. */
-export const worker = deprecatedBareAgentTemplate("worker", agentTemplates.worker);
-/** @deprecated Use {@link agent}.reviewer — same declaration, kept for source compatibility during the migration window. */
-export const reviewer = deprecatedBareAgentTemplate("reviewer", agentTemplates.reviewer);
-/** @deprecated Use {@link agent}.planner — same declaration, kept for source compatibility during the migration window. */
-export const planner = deprecatedBareAgentTemplate("planner", agentTemplates.planner);
-/** @deprecated Use {@link agent}.oracle — same declaration, kept for source compatibility during the migration window. */
-export const oracle = deprecatedBareAgentTemplate("oracle", agentTemplates.oracle);
-/** @deprecated Use {@link agent}.searcher — same declaration, kept for source compatibility during the migration window. */
-export const searcher = deprecatedBareAgentTemplate("searcher", agentTemplates.searcher);

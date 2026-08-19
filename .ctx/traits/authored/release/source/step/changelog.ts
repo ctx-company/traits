@@ -10,7 +10,7 @@ export const entry = cdk.slot.text({
   description: "The drafted changelog entry, grounded solely in the commit log — every line traceable to a listed commit hash.",
 });
 
-export const verdict = cdk.slot.of({
+export const verdict = cdk.slot({
   id: "changelog-verdict",
   schema: agents.reviewerVerdict,
   description: "Reviewer's refute-mode spot-check verdict on the changelog entry.",

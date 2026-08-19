@@ -170,7 +170,7 @@ export interface TraitFields {
   readonly dependency?: CanonicalDependency | readonly CanonicalDependency[];
   /** The trait's procedure. @see {@link procedure} */
   readonly procedure?: ProcedureHandle;
-  /** Declared agents. @example `agent: [worker("impl", {...})]` @see {@link agent} */
+  /** Declared agents. @example `agent: [agent.worker("impl", {...})]` @see {@link agent} */
   readonly agent?: AgentHandle | readonly AgentHandle[];
   /** Alias of {@link TraitFields.agent}. */
   readonly agents?: AgentHandle | readonly AgentHandle[];

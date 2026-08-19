@@ -84,8 +84,6 @@ export interface SlotFunction {
   ): DeclaredSlotHandle<Value[]>;
   /** List-of-text-slot shorthand, the common case of `slot.array(schema.text(), ...)`. @example `slot.texts("notes")` */
   texts(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string[]>;
-  /** Full-form slot declaration, alias of the bare `slot(...)` call for when a named property reads better than a call expression. @example `slot.of({ id: "review", schema: schema.text() })` */
-  of<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value> }): DeclaredSlotWithFields<Value>;
 }
 
 /**
@@ -113,30 +111,30 @@ export function isLiteralProjectionSource(value: unknown): value is LiteralProje
 }
 
 export interface OperationFunction {
-  /** The `operation.over` write mode that appends to a list slot. */
+  /** The `.with` write mode that appends to a list slot. */
   readonly Append: "append";
-  /** The `operation.over` write mode that merges an object into an object slot. */
+  /** The `.with` write mode that merges an object into an object slot. */
   readonly Merge: "merge";
-  /** The `operation.over` write mode that replaces the slot's whole value (the default). */
+  /** The `.with` write mode that replaces the slot's whole value (the default). */
   readonly Replace: "replace";
-  /** The `operation.over` write mode that increments a numeric slot. */
+  /** The `.with` write mode that increments a numeric slot. */
   readonly Increment: "increment";
   /**
-   * Builds the `set-field` write-mode value for `operation.over`: writes one
+   * Builds the `set-field` write-mode value for `.with`: writes one
    * field of an object slot without touching the rest of it.
-   * @example `operation.over(review, operation.SetField("status"))`
+   * @example `review.with(operation.SetField("status"))`
    */
   SetField(field: string): Extract<WriteOperation, { readonly "set-field": string }>;
-  /** Appends a step's output to a list slot instead of replacing it. @example `operation.over(findings, operation.Append)` */
+  /** Appends a step's output to a list slot instead of replacing it. @example `findings.with(operation.Append)` */
   over<Value>(slotHandle: SlotHandle<Value[]>, operation: "append"): OutputSinkHandle<Value>;
-  /** Increments a numeric slot by a step's numeric output. @example `operation.over(retryCount, operation.Increment)` */
+  /** Increments a numeric slot by a step's numeric output. @example `retryCount.with(operation.Increment)` */
   over(slotHandle: SlotHandle<number>, operation: "increment"): OutputSinkHandle<number>;
-  /** Merges a step's object output into an object slot, or writes one field via `operation.SetField`. @example `operation.over(review, operation.Merge)` */
+  /** Merges a step's object output into an object slot, or writes one field via `operation.SetField`. @example `review.with(operation.Merge)` */
   over<Value>(
     slotHandle: SlotHandle<Value>,
     operation: "merge" | Extract<WriteOperation, { readonly "set-field": string }>,
   ): OutputSinkHandle<JsonValue>;
-  /** Replaces the slot's whole value (the default write mode — same as passing the slot directly as `output`). @example `operation.over(review, operation.Replace)` */
+  /** Replaces the slot's whole value (the default write mode — same as passing the slot directly as `output`). @example `review.with(operation.Replace)` */
   over<Value>(slotHandle: SlotHandle<Value>, operation?: "replace"): OutputSinkHandle<Value>;
   /**
    * Declares a canonical typed literal as a `project` step's projection
@@ -156,7 +154,7 @@ export interface OperationFunction {
  * see {@link port} for that.
  * @param fields Slot identity and schema.
  * @example `slot.text("result")`
- * @see {@link operation.over}
+ * @see {@link DeclaredSlotHandle.with}
  * @see {@link port}
  */
 function slotFn<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value> }): DeclaredSlotWithFields<Value> {
@@ -181,7 +179,6 @@ export const slot: SlotFunction = Object.assign(slotFn, {
       ? (slotValue: string | Omit<SlotFields, "schema">) => slotWithSchema(slotValue, schemaArray(schemaValue))
       : slotWithSchema(value, schemaArray(schemaValue)),
   texts: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaArray("schema:text")),
-  of: slotFn,
 }) as SlotFunction;
 
 /**

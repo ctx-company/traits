@@ -20,7 +20,7 @@ export const diff = cdk.slot.text({
   description: "Scoped diff of the version-file edits, for the reviewer to open with its own tools.",
 });
 
-export const verdict = cdk.slot.of({
+export const verdict = cdk.slot({
   id: "version-verdict",
   schema: agents.reviewerVerdict,
   description: "Reviewer's verdict on the version bump.",
