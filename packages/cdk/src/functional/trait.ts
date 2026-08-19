@@ -125,10 +125,14 @@ export function defineTrait(name: string, fields: DefineTraitFields = {}): void 
   assertJsonLiteral(fields, "defineTrait fields");
   frame.defineTraitCalled = true;
   frame.slug = slug;
-  // A display name (anything beyond the bare slug) becomes the `name` field
-  // unless one was given explicitly; a bare slug injects nothing, keeping
-  // existing canonicals untouched.
-  frame.fields = fields.name === undefined && name !== slug ? { ...fields, name } : { ...fields };
+  // The first argument becomes the `name` field unless one was given
+  // explicitly. It is injected even when it is already a bare slug: `name`
+  // is REQUIRED on the canonical, so skipping the injection produced a draft
+  // that could not decode -- `ctx traits create work` (a lowercase name
+  // kebab-cases to itself) failed with "invalid manifest at root: missing
+  // field `name`" while `create Work` succeeded. A family shell is unharmed
+  // either way, because each variant declares its own name.
+  frame.fields = fields.name === undefined ? { ...fields, name } : { ...fields };
 }
 
 /** `defineVariant`'s own fields: metadata and descriptions only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */

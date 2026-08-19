@@ -531,12 +531,16 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     expect(envelope.draft).toMatchObject({ id: "display-name", name: "Display Name" });
   });
 
-  it("defineTrait with a bare slug injects no name", () => {
+  // `name` is REQUIRED on the canonical, so a draft without one cannot
+  // decode. This used to inject nothing when the given name already kebab-
+  // cased to itself, which meant every lowercase name produced an
+  // unbuildable trait: `ctx traits create work` failed with "invalid
+  // manifest at root: missing field `name`" while `create Work` succeeded.
+  it("defineTrait with a bare slug still carries it as the name", () => {
     const envelope = evaluateTraitFunction(() => {
       defineTrait("bare-slug", { description: "s" });
     });
-    expect(envelope.draft).toMatchObject({ id: "bare-slug" });
-    expect((envelope.draft as { name?: unknown }).name).toBeUndefined();
+    expect(envelope.draft).toMatchObject({ id: "bare-slug", name: "bare-slug" });
   });
 
   it("defineTrait with a computed (non-literal) field is a build error", () => {
