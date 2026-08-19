@@ -55,7 +55,7 @@ const findingsReport = cdk.port.output.text({
 export default function () {
   cdk.defineTrait("Research", {
     version: "0.1.0",
-    description: "Researches a topic into a written report at a predictable path, then reviews it for coverage.",
+    description: "Researches a topic into a written report at a known path, then reviews it for coverage.",
     metadata: { tag: ["template", "research"] },
   });
 

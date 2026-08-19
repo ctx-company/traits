@@ -2,5 +2,5 @@
 id = "research"
 version = "0.1.0"
 name = "Research"
-description = "Researches a topic into a written report at a predictable path, then reviews it for coverage."
+description = "Researches a topic into a written report at a known path, then reviews it for coverage."
 status = "draft"

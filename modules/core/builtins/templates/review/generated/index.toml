@@ -2,7 +2,7 @@ id = "review"
 schema-version = "0.5"
 version = "0.1.0"
 name = "Review"
-description = "Reviews a git range and returns a written review, without touching the tree."
+description = "Reviews whatever it is pointed at and returns a written review, without touching the tree."
 
 [metadata]
 tag = [
@@ -32,10 +32,10 @@ id = "steelman"
 id = "push-back"
 
 [[port]]
-id = "range"
+id = "target"
 direction = "input"
 schema = "schema:text"
-description = 'The change to review, as a git range — e.g. "main...HEAD" or "HEAD~3..HEAD".'
+description = 'What to review, in your own words — e.g. "the auth module", "src/parser.rs", "main...HEAD".'
 
 [[port]]
 id = "verdict-report"
@@ -46,83 +46,35 @@ title = "Review"
 value = "slot:verdict"
 
 [[slot]]
-id = "changed-files"
-schema = "schema:text"
-description = "Names and change kinds of every file in the range — an index of the change, never its content."
-
-[[slot]]
-id = "commit-log"
-schema = "schema:text"
-description = "One line per commit in the range."
-
-[[slot]]
 id = "verdict"
 schema = "schema:text"
 description = "The reviewer's assessment: what blocks a merge, what is advisory, and what was checked."
 
 [[agent]]
 id = "reviewer"
-description = "Reviews the change in a git range and reports what would block a merge."
+description = "Reviews what it is pointed at and reports what would block a merge."
 summary = "Review role."
 
-[prompt.review-the-change]
+[prompt.review-the-target]
 text = """
 
-      Review the change in {port:range}.
-      The files it touches: {slot:changed-files}
-      The commits it contains: {slot:commit-log}
-      Open the files themselves for anything you need to judge — the lists above are an index, not the change.
+      Review {port:target}.
+      Find it and read it with your own tools first — never review something from its name alone.
       Report what would block a merge, then what is advisory, then what you checked and found sound.
-      Say plainly when the change is fine; do not invent findings to fill the report.
+      Say plainly when it is fine; do not invent findings to fill the report.
     """
-input = [
-    "port:range",
-    "slot:changed-files",
-    "slot:commit-log",
-]
+input = ["port:target"]
 output = ["slot:verdict"]
 
 [procedure]
-description = "Reviews a git range and returns a written review, without touching the tree."
-input = ["port:range"]
+description = "Reviews whatever it is pointed at and returns a written review, without touching the tree."
+input = ["port:target"]
 output = ["port:verdict-report"]
 
 [[procedure.sequence]]
-id = "capture-the-changed-files"
-title = "Capture the changed files"
-input = ["port:range"]
-output = ["slot:changed-files"]
-
-[procedure.sequence.command]
-argv = [
-    "git",
-    "diff",
-    "--name-status",
-    "{port:range}",
-]
-
-[[procedure.sequence]]
-id = "capture-the-commit-log"
-title = "Capture the commit log"
-input = ["port:range"]
-output = ["slot:commit-log"]
-
-[procedure.sequence.command]
-argv = [
-    "git",
-    "log",
-    "--oneline",
-    "{port:range}",
-]
-
-[[procedure.sequence]]
-id = "review-the-change"
-title = "Review the change"
+id = "review-the-target"
+title = "Review the target"
 agent = "agent:reviewer"
-prompt = "prompt:review-the-change"
-input = [
-    "port:range",
-    "slot:changed-files",
-    "slot:commit-log",
-]
+prompt = "prompt:review-the-target"
+input = ["port:target"]
 output = ["slot:verdict"]
