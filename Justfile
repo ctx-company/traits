@@ -105,7 +105,13 @@ test:
 	just ts-typecheck
 	cargo fmt --check
 	cargo clippy --workspace --all-features -- -D warnings
-	cargo test --workspace --lib
+	# `builtin-trait-packages` is named rather than inherited. Core's whole
+	# builtin_trait_packages module is gated on it, so without the feature its
+	# tests do not exist — `cargo test -p ctx-traits-core` reports a confident
+	# pass having asserted nothing about the embedded set. Feature unification
+	# through io and cli happens to enable it here today; saying so keeps the
+	# coverage from depending on a dependency-graph side effect.
+	cargo test --workspace --lib --features ctx-traits-core/builtin-trait-packages
 
 # The LANDING gate (0056): everything `test` proves, plus the full proof
 # suites, run ONCE before a branch touches main. Declared as `[merge] gate` in
