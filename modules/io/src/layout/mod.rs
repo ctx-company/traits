@@ -478,16 +478,19 @@ pub fn is_canonical_package_root(package_root: &Utf8Path) -> bool {
 /// [`builtin_trait_package_repo_root`] so the exact-path-shape traversal is
 /// encoded in exactly one place.
 ///
-/// Also recognizes the sibling `modules/builtin/templates/<id>` tree
-/// (P271 teaching templates): templates are authoring inputs, never
-/// resolvable runtime traits (see [`is_canonical_package_root`]'s doc for
-/// why that distinction matters for write/import targets), but they share
-/// the same on-disk package shape as the built-in meta-traits, so `ctx
-/// traits build`/`sync`/`check` run against a committed template the same
-/// way they run against a committed built-in.
+/// Also recognizes the two sibling trees, which share the same on-disk
+/// package shape so `ctx traits build`/`sync`/`check` run against any of
+/// them the same way: `modules/builtin/templates/<id>` (teaching templates
+/// -- authoring inputs, never resolvable runtime traits; see
+/// [`is_canonical_package_root`]'s doc for why that matters for
+/// write/import targets) and `modules/builtin/shared/<id>` (packages a
+/// built-in depends on but which declare no procedure of their own).
 fn builtin_trait_tree_modules_dir(package_root: &Utf8Path) -> Option<&Utf8Path> {
     let traits_dir = package_root.parent()?;
-    if !matches!(traits_dir.file_name(), Some("traits" | "templates")) {
+    if !matches!(
+        traits_dir.file_name(),
+        Some("traits" | "templates" | "shared")
+    ) {
         return None;
     }
     let builtin_dir = traits_dir.parent()?;
@@ -518,13 +521,13 @@ pub fn is_builtin_trait_package_root(package_root: &Utf8Path) -> bool {
 /// `modules/builtin/templates` tree (the P271 teaching templates),
 /// as distinct from the `modules/builtin/traits` meta-trait tree.
 ///
-/// The two trees share an on-disk shape and both resolve through
-/// [`builtin_trait_tree_modules_dir`], but only templates use the
-/// `generated/index.map` canonical source-map sidecar; the built-in
-/// meta-traits still commit an adjacent `source/index.map`. Callers that
-/// need to route build/source-map paths differently for the two trees
-/// (e.g. `cdk_build::package_build_paths`) use this to narrow to templates
-/// only.
+/// All three buckets share an on-disk shape and resolve through
+/// [`builtin_trait_tree_modules_dir`]; this narrows to templates for the
+/// callers that genuinely treat a scaffold differently from a runnable
+/// package. It is NOT the build/source-map router any more: every bucket
+/// writes its canonical and its map under `generated/` (task 0230). It used
+/// to be, and the adjacent `source/index.map` files that produced were
+/// build debris, deleted with the fix.
 pub fn is_builtin_template_package_root(package_root: &Utf8Path) -> bool {
     package_root
         .parent()

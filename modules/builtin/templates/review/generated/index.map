@@ -1,73 +1,33 @@
 {
   "agent:reviewer": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 14,
-    "end": 14
+    "file": "modules/builtin/templates/review/source/index.ts",
+    "start": 21,
+    "end": 21
   },
-  "port:range": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 18,
-    "end": 18
-  },
-  "port:verdict-report": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 42,
-    "end": 42
-  },
-  "prompt:review-the-range": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 76,
-    "end": 76
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then": {
-    "file": "[eval1]",
-    "start": 116,
-    "end": 116
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-changed-files": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 65,
-    "end": 65
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 70,
-    "end": 70
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/review-the-range": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 75,
-    "end": 75
-  },
-  "sequence:procedure/range-resolved": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 64,
-    "end": 64
-  },
-  "sequence:procedure/resolve-the-range": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 57,
-    "end": 57
-  },
-  "slot:changed-files": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 29,
-    "end": 29
-  },
-  "slot:commit-log": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 33,
-    "end": 33
-  },
-  "slot:resolved-range": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
+  "port:target": {
+    "file": "modules/builtin/templates/review/source/index.ts",
     "start": 25,
     "end": 25
   },
+  "port:verdict-report": {
+    "file": "modules/builtin/templates/review/source/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "prompt:review-the-target": {
+    "file": "modules/builtin/templates/review/source/index.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:procedure/review-the-target": {
+    "file": "modules/builtin/templates/review/source/index.ts",
+    "start": 60,
+    "end": 60
+  },
   "slot:verdict": {
-    "file": "modules/core/builtins/templates/review/source/index.ts",
-    "start": 37,
-    "end": 37
+    "file": "modules/builtin/templates/review/source/index.ts",
+    "start": 30,
+    "end": 30
   },
   "trait:review": {
     "file": "[eval1]",

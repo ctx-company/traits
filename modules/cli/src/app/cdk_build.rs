@@ -1087,9 +1087,18 @@ pub(crate) fn package_build_paths(
     if package_root == source_dir {
         return Ok(fallback(source_path));
     }
+    // Every recognized package writes its canonical and source map under
+    // `generated/`, whichever built-in bucket it lives in. Templates were
+    // listed here and the trait and shared buckets were not, so building a
+    // built-in by source path fell through to writing beside the source:
+    // `source/index.toml` instead of `generated/index.toml`. That is the
+    // whole of task 0230 -- the mis-placed canonical also became the root
+    // every relative dependency resolved from, so a built-in declaring
+    // `path = "../spec"` looked for it at `<package>/source/../spec` and
+    // could not be built by path at all.
     let is_canonical = ctx_traits_io::layout::is_canonical_package_root(package_root);
-    let is_template = ctx_traits_io::layout::is_builtin_template_package_root(package_root);
-    if !is_canonical && !is_template {
+    let is_builtin = ctx_traits_io::layout::is_builtin_trait_package_root(package_root);
+    if !is_canonical && !is_builtin {
         return Ok(fallback(source_path));
     }
     let generated = package_root.join(ctx_traits_io::layout::GENERATED);

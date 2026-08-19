@@ -1,86 +1,86 @@
 {
   "agent:planner": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 16,
     "end": 16
   },
   "agent:reviewer": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 22,
     "end": 22
   },
   "agent:worker": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 19,
     "end": 19
   },
   "port:goal": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 26,
     "end": 26
   },
   "port:review-report": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 55,
     "end": 55
   },
   "port:work-report": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 48,
     "end": 48
   },
   "prompt:do-the-work": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 80,
-    "end": 80
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 91,
+    "end": 91
   },
   "prompt:draft-the-plan": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 71,
-    "end": 71
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 82,
+    "end": 82
   },
   "prompt:review-the-work": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 94,
-    "end": 94
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 105,
+    "end": 105
   },
   "sequence:procedure/capture-the-changed-files": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 88,
-    "end": 88
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 99,
+    "end": 99
   },
   "sequence:procedure/do-the-work": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 79,
-    "end": 79
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 90,
+    "end": 90
   },
   "sequence:procedure/draft-the-plan": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 70,
-    "end": 70
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 81,
+    "end": 81
   },
   "sequence:procedure/review-the-work": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
-    "start": 93,
-    "end": 93
+    "file": "modules/builtin/templates/implement/source/index.ts",
+    "start": 104,
+    "end": 104
   },
   "slot:changed-files": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 39,
     "end": 39
   },
   "slot:plan": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 31,
     "end": 31
   },
   "slot:verdict": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 43,
     "end": 43
   },
   "slot:work-summary": {
-    "file": "modules/core/builtins/templates/implement/source/index.ts",
+    "file": "modules/builtin/templates/implement/source/index.ts",
     "start": 35,
     "end": 35
   },

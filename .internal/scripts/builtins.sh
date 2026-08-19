@@ -9,11 +9,13 @@
 # reaches its committed canonical. critique-trait sat unbuildable for an
 # unknown stretch because of exactly that.
 #
-# Why the scratch root: a package under modules/builtin is unreachable
-# by id (`ctx traits build <id>` resolves through .ctx/traits/authored), and
-# building it by source path mis-resolves its `../spec` dependency relative to
-# source/ instead of the package root (task 0230). Copying the tree into a
-# throwaway authored root sidesteps both until that is fixed.
+# Why the scratch root: a package under modules/builtin is unreachable by id
+# (`ctx traits build <id>` resolves through .ctx/traits/authored), and the
+# five dependents declare `path = "../spec"` — true of the flat runtime store
+# they ship into, false of this bucketed tree, where spec sits at
+# ../../shared/spec. Copying every package into one flat authored root makes
+# both true at once. (0230 removed the third reason: a path build used to
+# resolve dependencies from source/ rather than the package root.)
 set -euo pipefail
 
 MODE="${1:-build}"
@@ -74,8 +76,15 @@ for id in "${ORDER[@]}"; do
   # repo-relative path it was built from, so it differs between this scratch
   # root and the real tree — a difference about where the build ran, not about
   # whether the artifact is stale. The canonical is what ships and what a
-  # source edit must reach. (Task 0230 removes the scratch root, and then the
-  # map becomes comparable too.)
+  # source edit must reach.
+  #
+  # 0230 fixed the package-root half of why this root exists: a path build now
+  # writes under generated/ and resolves relative dependencies from the
+  # package root, so spec and the three templates build by path directly.
+  # What still needs the flat root is the five dependents' `path = "../spec"`,
+  # which is correct in the flat runtime store and wrong in this bucketed
+  # tree, where spec is at ../../shared/spec. Until repo and store agree on
+  # one layout, the copy stands and the map stays uncomparable.
   for artifact in generated/index.toml trait.lock; do
     src="$AUTHORED/$id/$artifact"
     [[ -e "$src" ]] || continue
