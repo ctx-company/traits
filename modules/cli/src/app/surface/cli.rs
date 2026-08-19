@@ -1595,9 +1595,9 @@ pub enum TraitsCommand {
     /// --approve marks it verified; --deny marks it blocked. Approval is of
     /// a digest, never a name — a later canonical edit is unreviewed again.
     ///
-    /// Hidden as of P419: superseded by `ctx traits trust --approved`/`trust
-    /// block`, which this command now routes through unchanged. Kept
-    /// invocable, undocumented, for one release.
+    /// Hidden as of P419: superseded by `ctx traits trust --approved` and
+    /// `ctx traits trust --blocked`, which this command routes through
+    /// unchanged. Kept invocable, undocumented, for one release.
     #[command(hide = true)]
     Review {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
