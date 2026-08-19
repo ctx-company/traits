@@ -12,10 +12,10 @@ export function seedBestStage(title: string) {
     id: "seed-best",
     projections: [
       { source: baselineResult, field: "metric", destination: bestMetric },
-      { source: baselineResult, destination: cdk.operation.over(history, cdk.operation.Append) },
+      { source: baselineResult, destination: history.with(cdk.operation.Append) },
       { source: cdk.operation.literal(0), destination: roundCount },
       { source: cdk.operation.literal(0), destination: keptCount },
-      { source: cdk.operation.literal("baseline"), destination: cdk.operation.over(decisions, cdk.operation.Append) },
+      { source: cdk.operation.literal("baseline"), destination: decisions.with(cdk.operation.Append) },
     ],
   });
 }

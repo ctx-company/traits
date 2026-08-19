@@ -1,5 +1,5 @@
 id = "release"
-schema-version = "0.4"
+schema-version = "0.5"
 version = "0.1.0"
 name = "Release"
 description = "Release Procedure: preflight gates, version bump, changelog, commit & tag, with owner-approved tag push and publish."

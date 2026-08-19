@@ -31,18 +31,18 @@
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 104,
-    "end": 104
+    "start": 125,
+    "end": 125
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 84,
-    "end": 84
+    "start": 91,
+    "end": 91
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 217,
-    "end": 217
+    "start": 238,
+    "end": 238
   },
   "schema:review-tree-status": {
     "file": ".ctx/traits/authored/review/source/shared/stage/assert-clean.ts",
@@ -51,8 +51,8 @@
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 283,
-    "end": 283
+    "start": 322,
+    "end": 322
   },
   "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
     "file": ".ctx/traits/authored/review/source/shared/stage/evidence.ts",

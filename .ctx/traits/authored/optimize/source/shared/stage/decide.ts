@@ -47,10 +47,10 @@ export function decideCandidate(
       cdk.step.project("Record the kept candidate", {
         id: "record-kept-candidate",
         projections: [
-          { source: cdk.operation.literal(1), destination: cdk.operation.over(roundCount, cdk.operation.Increment) },
-          { source: cdk.operation.literal(1), destination: cdk.operation.over(keptCount, cdk.operation.Increment) },
-          { source: candidateResult, destination: cdk.operation.over(history, cdk.operation.Append) },
-          { source: cdk.operation.literal("kept"), destination: cdk.operation.over(decisions, cdk.operation.Append) },
+          { source: cdk.operation.literal(1), destination: roundCount.with(cdk.operation.Increment) },
+          { source: cdk.operation.literal(1), destination: keptCount.with(cdk.operation.Increment) },
+          { source: candidateResult, destination: history.with(cdk.operation.Append) },
+          { source: cdk.operation.literal("kept"), destination: decisions.with(cdk.operation.Append) },
           ...recordExtraProjections,
         ],
       });
@@ -61,11 +61,11 @@ export function decideCandidate(
       cdk.step.project("Record the discarded candidate", {
         id: "record-discarded-candidate",
         projections: [
-          { source: cdk.operation.literal(1), destination: cdk.operation.over(roundCount, cdk.operation.Increment) },
-          { source: candidateResult, destination: cdk.operation.over(history, cdk.operation.Append) },
+          { source: cdk.operation.literal(1), destination: roundCount.with(cdk.operation.Increment) },
+          { source: candidateResult, destination: history.with(cdk.operation.Append) },
           {
             source: cdk.operation.literal("discarded"),
-            destination: cdk.operation.over(decisions, cdk.operation.Append),
+            destination: decisions.with(cdk.operation.Append),
           },
           ...recordExtraProjections,
         ],
