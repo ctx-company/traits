@@ -35,7 +35,7 @@ const section = schema.object(
 
 // A schema-typed instruction-output: the return-format instruction folds
 // into the step's compiled prompt, and its slot (auto-declared at the
-// step's own id, "explain-trait") backs the output port below.
+// step's own id, "explain") backs the output port below.
 const narrationOutput = output.of(
   schema.object("explain-scaffold", {
     "trait-id": schema.text(),
@@ -49,7 +49,7 @@ const narrationOutput = output.of(
   }),
 )`Return exactly one explain-scaffold object. Copy trait-id, receipt-digest, sections, and warnings from ${scaffold} verbatim and unmodified — never alter, drop, or add a fact, anchor, or section. Add a non-empty explanation that narrates in plain language only what ${scaffold}'s sections establish, using the vocabulary of ${designRubric} — derived kind, speech act, dataflow — so the narration names what the trait is. This is generated advisory text, not authority, a check receipt, or a substitute for the canonical trait. Do not claim runtime behavior or validation that the scaffold does not establish.`;
 
-const explainStep = sequence.prompt("explain-trait", {
+const explainStep = sequence.prompt("explain", {
   title: "Explain trait",
   agent: generator,
   input: input.prompt`Narrate an explanation of trait ${sourceTraitId} at receipt ${receiptDigest}. Use only the scaffold below, verbatim.\n<<<SCAFFOLD>>>\n${scaffold}\n<<<END SCAFFOLD>>>`,

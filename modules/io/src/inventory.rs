@@ -145,7 +145,7 @@ impl InventoryContext {
             });
         }
 
-        if ctx_traits_core::builtin_trait_packages::package(id).is_some()
+        if ctx_traits_core::builtin_trait_packages::runnable_package(id).is_some()
             && let Some(path) =
                 crate::builtin_store::resolve_builtin_manifest_path(self.invocation.path(), id)?
         {
@@ -198,7 +198,7 @@ impl InventoryContext {
             ids.insert(trait_ref.id);
         }
 
-        for package in ctx_traits_core::builtin_trait_packages::packages() {
+        for package in ctx_traits_core::builtin_trait_packages::runnable_packages() {
             ids.insert(package.id.to_string());
         }
 

@@ -108,11 +108,19 @@ fn main() {
 /// embedding: the package manifest, the compiled trait manifest, and any
 /// resources the compiled manifest declares are discovered dynamically by
 /// parsing `generated/index.toml`.
-const BUILTIN_TRAIT_PACKAGE_IDS: &[&str] = &[
-    "generate", "refine", "critique", "explain", "import", "spec",
-];
+const BUILTIN_TRAIT_PACKAGE_IDS: &[&str] = &["generate", "refine", "critique", "explain", "import"];
 
 const BUILTIN_TRAIT_PACKAGES_DIR: &str = "builtins/traits";
+
+/// Shared packages the meta-traits depend on but which are not themselves
+/// runnable: no procedure, nothing to select or dispatch. They are embedded
+/// and published to the runtime store exactly like a trait package — the
+/// store is what makes a sibling `../spec` dependency resolve — but they are
+/// kept out of the runnable catalog, so `list`, query selection, and
+/// `run-info` never offer a package that cannot run.
+const BUILTIN_SHARED_PACKAGE_IDS: &[&str] = &["spec"];
+
+const BUILTIN_SHARED_PACKAGES_DIR: &str = "builtins/shared";
 
 fn generate_builtin_trait_packages(out_dir: &str) {
     // Feature-gate both the filesystem reads and the generated table so a
@@ -128,11 +136,20 @@ fn generate_builtin_trait_packages(out_dir: &str) {
     }
 
     println!("cargo:rerun-if-changed={BUILTIN_TRAIT_PACKAGES_DIR}");
+    println!("cargo:rerun-if-changed={BUILTIN_SHARED_PACKAGES_DIR}");
 
     let mut generated =
         String::from("pub static BUILTIN_TRAIT_PACKAGES: &[BuiltinTraitPackage] = &[\n");
-    for id in BUILTIN_TRAIT_PACKAGE_IDS {
-        let package_dir = Path::new(BUILTIN_TRAIT_PACKAGES_DIR).join(id);
+    let embedded = BUILTIN_TRAIT_PACKAGE_IDS
+        .iter()
+        .map(|id| (*id, BUILTIN_TRAIT_PACKAGES_DIR, true))
+        .chain(
+            BUILTIN_SHARED_PACKAGE_IDS
+                .iter()
+                .map(|id| (*id, BUILTIN_SHARED_PACKAGES_DIR, false)),
+        );
+    for (id, packages_dir, runnable) in embedded {
+        let package_dir = Path::new(packages_dir).join(id);
         let manifest_rel = "trait.toml";
         let index_rel = "generated/index.toml";
 
@@ -153,7 +170,7 @@ fn generate_builtin_trait_packages(out_dir: &str) {
         relative_paths.extend(declared_resource_paths(&index_text, id));
 
         generated.push_str(&format!(
-            "    BuiltinTraitPackage {{ id: {id:?}, files: &[\n"
+            "    BuiltinTraitPackage {{ id: {id:?}, runnable: {runnable}, files: &[\n"
         ));
         for relative_path in &relative_paths {
             let file_abs = package_dir.join(relative_path);
@@ -163,7 +180,7 @@ fn generate_builtin_trait_packages(out_dir: &str) {
             panic_on_embedded_absolute_home_path(&bytes, &file_abs);
             let digest = sha256_hex_digest(&bytes);
             generated.push_str(&format!(
-                "        BuiltinTraitFile {{ relative_path: {relative_path:?}, bytes: include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{BUILTIN_TRAIT_PACKAGES_DIR}/{id}/{relative_path}\")), digest: \"sha256:{digest}\" }},\n"
+                "        BuiltinTraitFile {{ relative_path: {relative_path:?}, bytes: include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{packages_dir}/{id}/{relative_path}\")), digest: \"sha256:{digest}\" }},\n"
             ));
         }
         generated.push_str("    ] },\n");

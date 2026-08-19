@@ -23,6 +23,12 @@ pub struct BuiltinTraitFile {
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinTraitPackage {
     pub id: &'static str,
+    /// Whether this package is a trait a caller can select and run. A shared
+    /// package (`spec`) is embedded and published exactly like a runnable one
+    /// — the store is what makes a sibling `../spec` dependency resolve — but
+    /// it declares no procedure, so offering it for selection would surface a
+    /// trait that cannot run.
+    pub runnable: bool,
     pub files: &'static [BuiltinTraitFile],
 }
 
@@ -44,9 +50,24 @@ pub fn package(id: &str) -> Option<&'static BuiltinTraitPackage> {
         .find(|package| package.id == id)
 }
 
-/// List all built-in trait packages.
+/// List every embedded built-in package, runnable or not. This is the set
+/// the runtime store publishes: a shared dependency has to be on disk beside
+/// its dependents for their relative `path` to resolve.
 pub fn packages() -> &'static [BuiltinTraitPackage] {
     BUILTIN_TRAIT_PACKAGES
+}
+
+/// The built-in packages a caller can actually select and run — what `list`,
+/// query selection, and tier resolution should offer.
+pub fn runnable_packages() -> impl Iterator<Item = &'static BuiltinTraitPackage> {
+    BUILTIN_TRAIT_PACKAGES
+        .iter()
+        .filter(|package| package.runnable)
+}
+
+/// Look up a runnable built-in trait package by id.
+pub fn runnable_package(id: &str) -> Option<&'static BuiltinTraitPackage> {
+    package(id).filter(|package| package.runnable)
 }
 
 #[cfg(test)]
@@ -57,6 +78,22 @@ mod tests {
     const EXPECTED_IDS: &[&str] = &[
         "generate", "refine", "critique", "explain", "import", "spec",
     ];
+
+    const EXPECTED_RUNNABLE_IDS: &[&str] = &["generate", "refine", "critique", "explain", "import"];
+
+    /// `spec` is embedded and published like any other package, because a
+    /// dependent's `../spec` has to resolve on disk — but it declares no
+    /// procedure and must never be offered as something to run.
+    #[test]
+    fn spec_is_embedded_but_not_runnable() {
+        let mut runnable: Vec<&str> = runnable_packages().map(|package| package.id).collect();
+        runnable.sort_unstable();
+        let mut expected = EXPECTED_RUNNABLE_IDS.to_vec();
+        expected.sort_unstable();
+        assert_eq!(runnable, expected);
+        assert!(package("spec").is_some(), "spec stays embedded");
+        assert!(runnable_package("spec").is_none(), "spec is never runnable");
+    }
 
     #[test]
     fn exposes_exactly_the_six_builtin_ids() {

@@ -3572,7 +3572,7 @@ fn merged_lower_tier_candidates(
     }
     if alias_valid {
         for candidate_id in builtin_alias_package_candidates(alias, |id| {
-            ctx_traits_core::builtin_trait_packages::package(id).is_some()
+            ctx_traits_core::builtin_trait_packages::runnable_package(id).is_some()
         }) {
             if let Some(package_root) =
                 crate::builtin_store::resolve_builtin_package_root(repo_root, &candidate_id)?

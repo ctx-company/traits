@@ -1647,9 +1647,11 @@ pub(crate) fn handle_list(json: bool, verbose: bool) -> crate::Result<CommandOut
         .collect();
     let authoring_packages = ctx_traits_io::discovery::trait_authoring_packages(&cwd)?;
 
-    let mut builtin_packages: Vec<_> = ctx_traits_core::builtin_trait_packages::packages()
-        .iter()
-        .collect();
+    // Runnable only: a shared package like `spec` ships in the binary so a
+    // dependent's `../spec` resolves, but listing it would offer a trait that
+    // declares no procedure and cannot run.
+    let mut builtin_packages: Vec<_> =
+        ctx_traits_core::builtin_trait_packages::runnable_packages().collect();
     builtin_packages.sort_by_key(|package| package.id);
     let builtins = builtin_packages
         .into_iter()

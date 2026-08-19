@@ -24,7 +24,7 @@ id = "explanation"
 direction = "output"
 schema = "schema:explain-scaffold"
 description = "Generated advisory explanation, echoing its grounding scaffold verbatim."
-value = "slot:explain-trait"
+value = "slot:explain"
 
 [[port]]
 id = "receipt-digest"
@@ -45,9 +45,9 @@ schema = "schema:text"
 description = "Explained trait identity."
 
 [[slot]]
-id = "explain-trait"
+id = "explain"
 schema = "schema:explain-scaffold"
-description = "Runtime slot explain-trait."
+description = "Runtime slot explain."
 
 [[schema]]
 id = "explain-scaffold"
@@ -117,7 +117,7 @@ id = "generator"
 description = "Narrates a plain-language advisory explanation strictly grounded in a deterministic receipt-anchored scaffold."
 summary = "Trait explanation narrator."
 
-[prompt.explain-trait]
+[prompt.explain]
 text = """
 Narrate an explanation of trait {port:source-trait-id} at receipt {port:receipt-digest}. Use only the scaffold below, verbatim.
 <<<SCAFFOLD>>>
@@ -133,7 +133,7 @@ input = [
     "port:scaffold",
     "resource:spec/design-rubric",
 ]
-output = ["slot:explain-trait"]
+output = ["slot:explain"]
 
 [procedure]
 description = "Generate one untrusted plain-language narration strictly grounded in the supplied deterministic explain scaffold."
@@ -145,14 +145,14 @@ input = [
 output = ["port:explanation"]
 
 [[procedure.sequence]]
-id = "explain-trait"
+id = "explain"
 title = "Explain trait"
 agent = "agent:generator"
-prompt = "prompt:explain-trait"
+prompt = "prompt:explain"
 input = [
     "port:source-trait-id",
     "port:receipt-digest",
     "port:scaffold",
     "resource:spec/design-rubric",
 ]
-output = ["slot:explain-trait"]
+output = ["slot:explain"]

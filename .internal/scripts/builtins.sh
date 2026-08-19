@@ -42,7 +42,7 @@ ln -s "$REPO_ROOT/node_modules" "$SCRATCH/node_modules"
 (cd "$SCRATCH" && "$CTX" traits init >/dev/null)
 
 AUTHORED="$SCRATCH/.ctx/traits/authored"
-for package in "$BUILTINS"/traits/*/ "$BUILTINS"/templates/*/; do
+for package in "$BUILTINS"/traits/*/ "$BUILTINS"/templates/*/ "$BUILTINS"/shared/*/; do
   cp -R "${package%/}" "$AUTHORED/"
 done
 
@@ -63,11 +63,12 @@ for id in "${ORDER[@]}"; do
     continue
   fi
 
-  if [[ -d "$BUILTINS/traits/$id" ]]; then
-    dest="$BUILTINS/traits/$id"
-  else
-    dest="$BUILTINS/templates/$id"
-  fi
+  for bucket in traits templates shared; do
+    if [[ -d "$BUILTINS/$bucket/$id" ]]; then
+      dest="$BUILTINS/$bucket/$id"
+      break
+    fi
+  done
 
   # Only the canonical and the lock are compared. A source map records the
   # repo-relative path it was built from, so it differs between this scratch
