@@ -155,7 +155,7 @@ function forbidPositionalUntil(title: string, containerLabel: string, frame: Aut
   );
 }
 
-/** Common optional override on every `step.*`/`agent.*.prompt` registrar (0109 F2): the emitted canonical id, when it must differ from `idFromTitle(title)`. */
+/** Common optional override on every `step.*`/`agent.*.prompt` registrar and on a `step(...)` declaration (0109 F2): the emitted canonical id, when it must differ from `idFromTitle(title)`. */
 export interface IdOverride {
   readonly id?: string;
 }
@@ -164,7 +164,12 @@ export interface IdOverride {
 // step.*
 // ---------------------------------------------------------------------------
 
-export const step = {
+/**
+ * The inline `step.*` registrars. Composed into the public callable `step`
+ * by `./step.ts` — which owns the declaration form — so this module never has
+ * to import back from it.
+ */
+export const stepRegistrars = {
   command(
     title: string,
     opts: Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride = {} as never,

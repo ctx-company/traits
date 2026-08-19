@@ -30,7 +30,7 @@
     "end": 19
   },
   "prompt:draft-the-implementation-plan": {
-    "file": ".ctx/traits/authored/implement/source/shared/stage/draft.ts",
+    "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
     "start": 8,
     "end": 8
   },

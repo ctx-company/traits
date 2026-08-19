@@ -40,17 +40,17 @@
     "end": 77
   },
   "prompt:apply-the-proposed-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/variant/experiment/stage/apply.ts",
+    "file": ".ctx/traits/authored/optimize/source/variant/experiment/step/apply.ts",
     "start": 9,
     "end": 9
   },
   "prompt:prepare-and-verify-the-isolated-workbench": {
-    "file": ".ctx/traits/authored/optimize/source/variant/experiment/stage/setup.ts",
+    "file": ".ctx/traits/authored/optimize/source/variant/experiment/step/setup.ts",
     "start": 9,
     "end": 9
   },
   "prompt:propose-one-fresh-bounded-experiment": {
-    "file": ".ctx/traits/authored/optimize/source/variant/experiment/stage/propose.ts",
+    "file": ".ctx/traits/authored/optimize/source/variant/experiment/step/propose.ts",
     "start": 9,
     "end": 9
   },
@@ -110,22 +110,22 @@
     "end": 87
   },
   "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise/abort-summary": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/summary.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/summary.ts",
     "start": 21,
     "end": 21
   },
   "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/capture-best-ref": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 59,
     "end": 59
   },
   "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/capture-initial-ref": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 52,
     "end": 52
   },
   "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/measure-the-baseline": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/measure.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/measure.ts",
     "start": 70,
     "end": 70
   },
@@ -135,57 +135,57 @@
     "end": 26
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise/clean-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 113,
     "end": 113
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise/record-discarded-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/decide.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/decide.ts",
     "start": 61,
     "end": 61
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise/reset-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 106,
     "end": 106
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then/advance-best": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 72,
     "end": 72
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then/capture-committed-ref": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 65,
     "end": 65
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then/commit-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 99,
     "end": 99
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then/derive-commit-message": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 81,
     "end": 81
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then/record-kept-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/decide.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/decide.ts",
     "start": 47,
     "end": 47
   },
   "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then/stage-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/git.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/git.ts",
     "start": 96,
     "end": 96
   },
   "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise/baseline-failure-summary": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/summary.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/summary.ts",
     "start": 45,
     "end": 45
   },
   "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then/derive-summary-iteration-limit-reached": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/summary.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/summary.ts",
     "start": 132,
     "end": 132
   },
@@ -195,7 +195,7 @@
     "end": 30
   },
   "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then/seed-best": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/baseline.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/baseline.ts",
     "start": 11,
     "end": 11
   },
@@ -210,7 +210,7 @@
     "end": 18
   },
   "sequence:run-the-iteration-capped-experiment-budget-body/apply-the-declared-keep-discard-decision": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/decide.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/decide.ts",
     "start": 40,
     "end": 40
   },
@@ -220,7 +220,7 @@
     "end": 33
   },
   "sequence:run-the-iteration-capped-experiment-budget-body/measure-the-candidate": {
-    "file": ".ctx/traits/authored/optimize/source/shared/stage/measure.ts",
+    "file": ".ctx/traits/authored/optimize/source/shared/step/measure.ts",
     "start": 70,
     "end": 70
   },

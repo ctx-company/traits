@@ -16,7 +16,7 @@ export const smart1 = reviewerRole(
 // experiment-only seat: a proposer that drafts one fresh bounded experiment
 // per round from typed measurement history (never a conversational memory).
 // Preflight/baseline aborts are typed deterministic command steps, never an
-// agent-authored summary (see shared/stage/summary.ts) — no summarizer seat.
+// agent-authored summary (see shared/step/summary.ts) — no summarizer seat.
 export const proposer = reviewerRole(
   "proposer",
   "Proposes one small, falsifiable experiment from the objective, current best metric, and typed measurement history in a fresh per-frame session. Never claims a metric result, a keep decision, or access to prior conversational context.",

@@ -15,7 +15,7 @@
     "end": 146
   },
   "prompt:distill": {
-    "file": ".ctx/traits/authored/plan/source/shared/stage/distill.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/step/distill.ts",
     "start": 15,
     "end": 15
   },
@@ -25,17 +25,17 @@
     "end": 71
   },
   "sequence:procedure/distill": {
-    "file": ".ctx/traits/authored/plan/source/shared/stage/distill.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/step/distill.ts",
     "start": 13,
     "end": 13
   },
   "sequence:procedure/next-key": {
-    "file": ".ctx/traits/authored/plan/source/shared/stage/derive.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/step/derive.ts",
     "start": 17,
     "end": 17
   },
   "sequence:procedure/raised-date": {
-    "file": ".ctx/traits/authored/plan/source/shared/stage/derive.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/step/derive.ts",
     "start": 40,
     "end": 40
   },

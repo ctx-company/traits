@@ -185,7 +185,7 @@
     "end": 75
   },
   "sequence:procedure/report-path": {
-    "file": ".ctx/traits/authored/research/source/shared/stage/derive.ts",
+    "file": ".ctx/traits/authored/research/source/shared/step/derive.ts",
     "start": 34,
     "end": 34
   },
@@ -210,7 +210,7 @@
     "end": 57
   },
   "sequence:procedure/topic-slug": {
-    "file": ".ctx/traits/authored/research/source/shared/stage/derive.ts",
+    "file": ".ctx/traits/authored/research/source/shared/step/derive.ts",
     "start": 13,
     "end": 13
   },

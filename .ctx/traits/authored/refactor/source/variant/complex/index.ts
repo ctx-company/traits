@@ -8,16 +8,16 @@ export default function () {
     metadata: { tag: shared.metadata.tag },
   });
 
-  shared.stage.survey.gather("Survey the target");
-  shared.stage.frame.select("Frame the problem");
-  shared.stage.design.draft("Design the boundary");
+  shared.step.survey.gather("Survey the target");
+  shared.step.frame.select("Frame the problem");
+  shared.step.design.draft("Design the boundary");
 
   cdk.flow.loop("Doubly-reviewed verbatim refinement", (loop) => {
     loop.maxIterations(6, { onExhausted: cdk.signal.Continue });
 
-    shared.stage.implement.apply("Implement the design specification");
-    shared.stage.review.primary("Review refactor");
-    shared.stage.review.secondary("Cross-review refactor");
+    shared.step.implement.apply("Implement the design specification");
+    shared.step.review.primary("Review refactor");
+    shared.step.review.secondary("Cross-review refactor");
 
     loop.untilAll([
       cdk.condition.equals(shared.data.verdict1.status, "approved"),
@@ -25,11 +25,11 @@ export default function () {
     ]);
   });
 
-  shared.stage.git.status("Check working tree status");
-  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.stage.git.status.output), () => {
-    shared.stage.git.commitMessage("Write the commit message");
-    shared.stage.git.commitStage("Stage all changes");
-    shared.stage.git.commitSubmit("Commit the refactor");
+  shared.step.git.status("Check working tree status");
+  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.step.git.status.output), () => {
+    shared.step.git.commitMessage("Write the commit message");
+    shared.step.git.commitStage("Stage all changes");
+    shared.step.git.commitSubmit("Commit the refactor");
   });
 
   return { commitReport: shared.data.commitReport };

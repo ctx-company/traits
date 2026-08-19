@@ -10,10 +10,10 @@ the barrel and declares the family-wide BEHAVIOR and INTENT consts; data.ts ends
 `export const port = {...}` / `export const slot = {...}` aggregates; useIntent/useBehavior/
 useResource once at trait level, never in variants; `include:` eliminated — optional prior-round
 attachments interpolate inline as ${slot.x.optional()} in the prompt text; output ports written
-directly by steps (no echo slots); one stage file per concern via cdk.stage; prompts are tagged
+directly by steps (no echo slots); one step file per concern via cdk.step; prompts are tagged
 templates, one clause per line, 4-space indent, no line past ~120 chars, outputs via
 cdk.output.prompt naming the destination; variants are a uniform skeleton — defineVariant
-(one-line description, tag), stages by title, loop bounds inside the loop body, git tail under
+(one-line description, tag), steps by title, loop bounds inside the loop body, git tail under
 flow.when("Maybe Commit"), one return of ports.
 
 Function-form prompts with placeholder maps become tagged templates (TASK_FORMAT_DOCTRINE
