@@ -25,9 +25,9 @@ export default function () {
     "Distill-and-write role.",
   );
 
-  shared.stage.derive.nextKeyStep();
-  shared.stage.derive.raisedDateStep();
-  shared.stage.distill.tasks(smart1);
+  shared.step.derive.nextKeyStep();
+  shared.step.derive.raisedDateStep();
+  shared.step.distill.tasks(smart1);
 
   return { writtenFiles: shared.data.writtenFiles };
 }

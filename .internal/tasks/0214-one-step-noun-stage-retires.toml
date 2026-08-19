@@ -1,0 +1,68 @@
+schema-version = "0.2"
+key = "0214"
+title = "Contract: one step noun — `cdk.stage` retires into `cdk.step`"
+status = "done"
+raised = "2026-08-19"
+content = """
+Decision record from the 2026-08-19 owner brainstorm on `Step` vs `Stage`.
+Cite it, don't re-litigate.
+
+## Rulings
+
+1. **One noun, and it is `step`.** `stage` and `step` never named two runtime
+   things — a stage was a DECLARATION of a leaf's parts, a `step.*` registrar
+   its inline PLACEMENT, and calling a stage just called `agent.prompt` or
+   `step.command`. The two spellings collapse into one identifier.
+
+2. **`step` wins, not `stage`**, because "step" is already the word everywhere
+   downstream of authoring: the canonical wire (`CanonicalFailureRoute.step`),
+   source-map anchors (`sequence:procedure/<step-id>`), the `sequence-step`
+   DeclKind, the runtime and TUI, and the build errors an author reads
+   (`step titled "X" — ...`). Winning `stage` in authoring would have meant
+   writing one word and reading another in every diagnostic. "Stage" is also
+   already spoken for three times in this codebase — `MergeStage`,
+   `StartupStage`, `StagedTrait`/staging dirs — plus git staging inside the
+   step files themselves (`commitStage`, `slot.stageOutput`, "Stage all
+   changes"). Those keep their names: there, "stage" means git-staging, not a
+   procedure leaf.
+
+3. **`step` is one identifier with two call shapes**: `step(fields)` declares a
+   reusable step (callable with a title, fields stay addressable as
+   properties, `overrides` merge); `step.command`/`step.check`/`step.project`
+   place one inline. `./functional/step.ts` owns the declaration form and
+   composes the registrars that `./functional/registrars.ts` exports as
+   `stepRegistrars`, so the registrar module never imports back.
+
+4. **Hard move, no deprecated re-export** (0207 rule 6 precedent). Authored
+   directories are `source/**/step/`, the barrel is `export * as step`, and
+   the `*Stage` factory/const names in the optimize family became `*Step`.
+
+5. **House style follows**: "one step file per concern via `cdk.step`". Tasks
+   0200-0205 were reworded in the same change; done tasks keep their historical
+   wording.
+
+## Not in this change
+
+Shape dispatch still covers prompt-vs-command only, so `check` and `project`
+have no reusable declaration form — they stay inline `step.check`/
+`step.project`. Both already carry an explicit `kind:` discriminant, so
+`step({ kind: "check", ... })` is the obvious extension if the escape hatch
+should shrink to zero. Deliberately deferred: it adds surface, where this
+change only removes a noun.
+"""
+validation = """
+## Done when
+
+No `stage` spelling remains in the CDK surface or in authored trait sources
+(git-staging names excepted), and every family rebuilds to BYTE-IDENTICAL
+canonical — the rename must be provably behavior-neutral.
+
+## Evidence (2026-08-19)
+
+- `ctx traits build` for all seven families: only `generated/*/index.map`
+  changed (recorded source paths); every `generated/*/index.toml` byte-identical.
+- `just ts-typecheck`, `just ts-lint`, `just ts-format-check`, `just ts-test`
+  green. `ctx traits check`: refactor/research/plan/optimize/release pass;
+  implement and review stay blocked on the pre-existing `shell-substitution`
+  audit class over unchanged canonical bytes.
+"""

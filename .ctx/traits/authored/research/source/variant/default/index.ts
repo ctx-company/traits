@@ -49,8 +49,8 @@ export default function () {
     condition.count(shared.data.streamPlan).equals(5),
   ]);
 
-  shared.stage.derive.deriveTopicSlugStep();
-  shared.stage.derive.deriveReportPathStep("report.md");
+  shared.step.derive.deriveTopicSlugStep();
+  shared.step.derive.deriveReportPathStep("report.md");
 
   flow.loop("Ingest", (loop) => {
     loop.maxIterations(3, { onExhausted: signal.Abort });
@@ -141,7 +141,7 @@ export default function () {
     loop.until(condition.equals(shared.data.verdict1.status, "approved"));
   });
 
-  shared.stage.commit.shippingCommitTail({
+  shared.step.commit.shippingCommitTail({
     agent: scribe,
     text: input.prompt`
                 The review for the research on ${shared.data.topic} has ended approved and the work is being committed.

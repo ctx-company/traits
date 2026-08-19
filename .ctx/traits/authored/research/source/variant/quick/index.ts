@@ -31,8 +31,8 @@ export default function () {
     "Writes the commit message for the completed research from the scope note and verdict",
   );
 
-  shared.stage.derive.deriveTopicSlugStep();
-  shared.stage.derive.deriveReportPathStep("brief.md");
+  shared.step.derive.deriveTopicSlugStep();
+  shared.step.derive.deriveReportPathStep("brief.md");
 
   smart.prompt("Scope the topic", {
     input: input.prompt`
@@ -67,7 +67,7 @@ export default function () {
     loop.until(condition.equals(shared.data.verdict1.status, "approved"));
   });
 
-  shared.stage.commit.shippingCommitTail({
+  shared.step.commit.shippingCommitTail({
     agent: scribe,
     text: input.prompt`
                 The review for the research on ${shared.data.topic} has ended approved and the work is being committed.

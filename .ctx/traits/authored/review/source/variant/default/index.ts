@@ -23,25 +23,25 @@ export default function () {
     avoid: [intent.avoid.RubberStampReview, intent.avoid.ScopeCreep],
   });
 
-  shared.stage.resolveRange.resolve("Resolve the range");
+  shared.step.resolveRange.resolve("Resolve the range");
 
   flow.when(
     "Range Resolved",
-    condition.not(condition.equals(shared.stage.resolveRange.rangeResolved, "")),
+    condition.not(condition.equals(shared.step.resolveRange.rangeResolved, "")),
     () => {
-      shared.stage.evidence.captureDiffStat("Capture the diff inventory");
-      shared.stage.evidence.captureCommitLog("Capture the commit log");
+      shared.step.evidence.captureDiffStat("Capture the diff inventory");
+      shared.step.evidence.captureCommitLog("Capture the commit log");
 
-      flow.when("Diff Non-Empty", condition.not(condition.equals(shared.stage.evidence.diffStat, "")), () => {
-        shared.stage.review.review("Review the range");
-        shared.stage.assertClean.assert("Assert the reviewed tree stayed clean");
+      flow.when("Diff Non-Empty", condition.not(condition.equals(shared.step.evidence.diffStat, "")), () => {
+        shared.step.review.review("Review the range");
+        shared.step.assertClean.assert("Assert the reviewed tree stayed clean");
       });
     },
   );
 
   return {
-    reviewVerdictReport: shared.stage.review.reviewVerdictReport,
-    reviewDocumentReport: shared.stage.review.reviewDocumentReport,
-    treeStatusReport: shared.stage.assertClean.treeStatusReport,
+    reviewVerdictReport: shared.step.review.reviewVerdictReport,
+    reviewDocumentReport: shared.step.review.reviewDocumentReport,
+    treeStatusReport: shared.step.assertClean.treeStatusReport,
   };
 }

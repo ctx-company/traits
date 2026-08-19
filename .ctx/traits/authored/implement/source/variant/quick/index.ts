@@ -7,14 +7,14 @@ export default function () {
     metadata: { tag: shared.metadata.tag },
   });
 
-  shared.stage.draft.compose("Draft the implementation plan");
-  shared.stage.work.implement("Implement the task");
+  shared.step.draft.compose("Draft the implementation plan");
+  shared.step.work.implement("Implement the task");
 
-  shared.stage.git.status("Check working tree status");
-  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.stage.git.status.output), () => {
-    shared.stage.git.commitMessage("Write the commit message");
-    shared.stage.git.commitStage("Stage all changes");
-    shared.stage.git.commitSubmit("Commit the work");
+  shared.step.git.status("Check working tree status");
+  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.step.git.status.output), () => {
+    shared.step.git.commitMessage("Write the commit message");
+    shared.step.git.commitStage("Stage all changes");
+    shared.step.git.commitSubmit("Commit the work");
   });
 
   return { commitReport: shared.data.commitReport };

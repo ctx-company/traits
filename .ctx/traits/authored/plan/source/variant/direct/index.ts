@@ -24,9 +24,9 @@ export default function () {
     "Format-and-write role.",
   );
 
-  shared.stage.derive.nextKeyStep();
-  shared.stage.derive.raisedDateStep();
-  shared.stage.distill.verbatim(smart1);
+  shared.step.derive.nextKeyStep();
+  shared.step.derive.raisedDateStep();
+  shared.step.distill.verbatim(smart1);
 
   return { writtenFiles: shared.data.writtenFiles };
 }

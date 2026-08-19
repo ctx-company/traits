@@ -19,7 +19,6 @@ import {
   seats,
   signal,
   slot,
-  stage,
   step,
   toDraftJson,
   tone,
@@ -452,24 +451,24 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     ).toThrow(/defineTrait: called more than once/);
   });
 
-  it("a stage is callable: invoking it registers its prompt or command step", () => {
-    const target = slot.text("stage-target");
-    const notes = slot.text("stage-notes");
-    const probe = slot.text("stage-probe");
-    const surveyStage = stage({
-      agent: agent.worker("stage-worker"),
+  it("a declared step is callable: invoking it registers its prompt or command step", () => {
+    const target = slot.text("declared-target");
+    const notes = slot.text("declared-notes");
+    const probe = slot.text("declared-probe");
+    const surveyStep = step({
+      agent: agent.worker("declared-worker"),
       input: input.prompt`Survey ${target}.`,
       output: notes,
     });
-    const statusStage = stage({
+    const statusStep = step({
       input: input.command`git status --porcelain`,
       output: probe,
     });
-    expect(surveyStage.output).toBe(notes);
+    expect(surveyStep.output).toBe(notes);
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("stage-step-shape", { description: "One-line stage steps." });
-      surveyStage("Survey the target");
-      statusStage("Check working tree status");
+      defineTrait("declared-step-shape", { description: "One-line declared steps." });
+      surveyStep("Survey the target");
+      statusStep("Check working tree status");
     });
     const draft = envelope.draft as {
       readonly procedure?: {
@@ -477,9 +476,26 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       };
     };
     expect(draft.procedure?.sequence?.[0]?.id).toBe("survey-the-target");
-    expect(draft.procedure?.sequence?.[0]?.output).toEqual(["slot:stage-notes"]);
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual(["slot:declared-notes"]);
     expect(draft.procedure?.sequence?.[1]?.id).toBe("check-working-tree-status");
-    expect(draft.procedure?.sequence?.[1]?.output).toEqual(["slot:stage-probe"]);
+    expect(draft.procedure?.sequence?.[1]?.output).toEqual(["slot:declared-probe"]);
+  });
+
+  it("the declaration form and the inline registrars are the same `step` identifier", () => {
+    const probe = slot.text("one-noun-probe");
+    const declared = step({ input: input.command`git status --porcelain`, output: probe });
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("one-noun", { description: "Declared and inline steps side by side." });
+      declared("Check working tree status");
+      step.command("Show the current ref", { input: input.command`git rev-parse HEAD`, output: probe });
+    });
+    const draft = envelope.draft as {
+      readonly procedure?: { readonly sequence?: readonly { readonly id?: string; readonly kind?: string }[] };
+    };
+    expect(draft.procedure?.sequence?.map((item) => item.id)).toEqual([
+      "check-working-tree-status",
+      "show-the-current-ref",
+    ]);
   });
 
   it("defineTrait derives the canonical id from a display name and keeps the name", () => {

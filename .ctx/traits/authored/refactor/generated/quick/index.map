@@ -35,7 +35,7 @@
     "end": 16
   },
   "prompt:review-the-implementation": {
-    "file": ".ctx/traits/authored/refactor/source/shared/stage/review.ts",
+    "file": ".ctx/traits/authored/refactor/source/shared/step/review.ts",
     "start": 50,
     "end": 50
   },

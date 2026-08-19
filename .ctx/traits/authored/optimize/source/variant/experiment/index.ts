@@ -2,7 +2,7 @@ import { condition, defineVariant, flow, method, signal, useBehavior, useIntent 
 
 import * as shared from "#trait/shared/index.ts";
 import { experimentCommand } from "./data.ts";
-import * as stage from "./stage/index.ts";
+import * as step from "./step/index.ts";
 
 export default function () {
   defineVariant("Experiment", {
@@ -15,35 +15,35 @@ export default function () {
   useIntent(shared.intent.experiment);
   useBehavior({ method: [method.EvidenceFirst] });
 
-  stage.setup.setupStage("Prepare and verify the isolated workbench");
+  step.setup.setupStep("Prepare and verify the isolated workbench");
 
   flow.match("Gate mutation on isolated-worktree readiness", condition.fieldEquals(shared.data.readinessSlot, "status", "ready"), {
     [condition.True]: () => {
-      shared.stage.git.captureInitialRef("Capture the immutable baseline commit");
-      shared.stage.git.captureBestRef("Capture the fixed reset ref");
-      shared.stage.baseline.measureBaselineStage("Measure the baseline", experimentCommand);
+      shared.step.git.captureInitialRef("Capture the immutable baseline commit");
+      shared.step.git.captureBestRef("Capture the fixed reset ref");
+      shared.step.baseline.measureBaselineStep("Measure the baseline", experimentCommand);
 
       flow.match("Require a usable trusted baseline", condition.fieldEquals(shared.data.baselineResult, "status", "ok"), {
         [condition.True]: () => {
-          shared.stage.baseline.seedBestStage("Seed trusted best state and history");
+          shared.step.baseline.seedBestStep("Seed trusted best state and history");
 
           flow.loop("Run the iteration-capped experiment budget", (loop) => {
             loop.maxIterations(20, { onExhausted: signal.Continue });
-            stage.propose.proposeStage("Propose one fresh bounded experiment");
-            stage.apply.applyStage("Apply the proposed candidate");
-            shared.stage.measure.measureAggregateStage("Measure the candidate", experimentCommand, shared.data.candidateResult);
-            shared.stage.decide.decideCandidate();
+            step.propose.proposeStep("Propose one fresh bounded experiment");
+            step.apply.applyStep("Apply the proposed candidate");
+            shared.step.measure.measureAggregateStep("Measure the candidate", experimentCommand, shared.data.candidateResult);
+            shared.step.decide.decideCandidate();
           });
 
-          shared.stage.summary.deriveSummaryStage("Derive the typed experiment summary", "iteration-limit-reached");
+          shared.step.summary.deriveSummaryStep("Derive the typed experiment summary", "iteration-limit-reached");
         },
         [condition.False]: () => {
-          shared.stage.summary.baselineFailureSummaryStage("Report the unusable baseline");
+          shared.step.summary.baselineFailureSummaryStep("Report the unusable baseline");
         },
       });
     },
     [condition.False]: () => {
-      shared.stage.summary.abortSummaryStage("Report the preflight abort");
+      shared.step.summary.abortSummaryStep("Report the preflight abort");
     },
   });
 

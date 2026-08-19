@@ -3,7 +3,7 @@ import { condition, defineVariant, flow, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 import { benchmarkCommand, improvementTarget, reviewVerdictSlot, roundComplete, reviews } from "./data.ts";
-import * as stage from "./stage/index.ts";
+import * as step from "./step/index.ts";
 
 const seedReviews = () =>
   cdk.step.project("Seed empty review history", {
@@ -22,9 +22,9 @@ const resetRound = () =>
 const runReasonGate = () =>
   flow.match("Deterministically branch on the actual completion cause", condition.lte(shared.data.bestMetric, improvementTarget), {
     [condition.True]: () =>
-      shared.stage.summary.deriveSummaryStage("Derive the typed benchmark summary (target reached)", "target-reached", reviews),
+      shared.step.summary.deriveSummaryStep("Derive the typed benchmark summary (target reached)", "target-reached", reviews),
     [condition.False]: () =>
-      shared.stage.summary.deriveSummaryStage(
+      shared.step.summary.deriveSummaryStep(
         "Derive the typed benchmark summary (iteration limit reached)",
         "iteration-limit-reached",
         reviews,
@@ -41,17 +41,17 @@ export default function () {
   });
   useIntent(shared.intent.benchmark);
 
-  stage.setup.setupStage("Prepare and verify the isolated workbench");
+  step.setup.setupStep("Prepare and verify the isolated workbench");
 
   flow.match("Gate mutation on isolated-worktree readiness", condition.fieldEquals(shared.data.readinessSlot, "status", "ready"), {
     [condition.True]: () => {
-      shared.stage.git.captureInitialRef("Capture the immutable baseline commit");
-      shared.stage.git.captureBestRef("Capture the fixed reset ref");
-      shared.stage.baseline.measureBaselineStage("Measure the baseline", benchmarkCommand);
+      shared.step.git.captureInitialRef("Capture the immutable baseline commit");
+      shared.step.git.captureBestRef("Capture the fixed reset ref");
+      shared.step.baseline.measureBaselineStep("Measure the baseline", benchmarkCommand);
 
       flow.match("Require a usable trusted baseline", condition.fieldEquals(shared.data.baselineResult, "status", "ok"), {
         [condition.True]: () => {
-          shared.stage.baseline.seedBestStage("Seed trusted best state and history");
+          shared.step.baseline.seedBestStep("Seed trusted best state and history");
           seedReviews();
 
           flow.match(
@@ -59,27 +59,27 @@ export default function () {
             condition.lte(shared.data.bestMetric, improvementTarget),
             {
               [condition.True]: () => {
-                shared.stage.summary.deriveSummaryStage("Derive the typed benchmark summary (already met)", "target-reached", reviews);
+                shared.step.summary.deriveSummaryStep("Derive the typed benchmark summary (already met)", "target-reached", reviews);
               },
               [condition.False]: () => {
                 flow.loop("Run the iteration-capped benchmark round budget", (loop) => {
                   loop.maxIterations(12, { onExhausted: cdk.signal.Continue });
                   resetRound();
-                  stage.scope.scopeStage("Scope one bounded benchmark-improvement attempt (smart-1)");
-                  stage.draft.draftStage("Turn the scope into a concrete worker draft (smart-1)");
-                  stage.implement.implementStage("Implement the draft (worker)");
-                  stage.review.reviewStage("Review the implemented candidate (smart-1)");
+                  step.scope.scopeStep("Scope one bounded benchmark-improvement attempt (smart-1)");
+                  step.draft.draftStep("Turn the scope into a concrete worker draft (smart-1)");
+                  step.implement.implementStep("Implement the draft (worker)");
+                  step.review.reviewStep("Review the implemented candidate (smart-1)");
                   flow.match(
                     "Route on the review verdict",
                     condition.fieldEquals(reviewVerdictSlot, "status", "approved"),
                     {
                       [condition.True]: () => {
-                        shared.stage.measure.measureAggregateStage("Measure the candidate", benchmarkCommand, shared.data.candidateResult);
-                        stage.decide.deriveMarginStage("Derive whether the candidate clears the noise threshold");
-                        stage.decide.decideCandidateWithMargin();
+                        shared.step.measure.measureAggregateStep("Measure the candidate", benchmarkCommand, shared.data.candidateResult);
+                        step.decide.deriveMarginStep("Derive whether the candidate clears the noise threshold");
+                        step.decide.decideCandidateWithMargin();
                       },
                       [condition.False]: () => {
-                        stage.decide.recordReviewRejected();
+                        step.decide.recordReviewRejected();
                       },
                     },
                   );
@@ -101,12 +101,12 @@ export default function () {
           );
         },
         [condition.False]: () => {
-          shared.stage.summary.baselineFailureSummaryStage("Report the unusable baseline");
+          shared.step.summary.baselineFailureSummaryStep("Report the unusable baseline");
         },
       });
     },
     [condition.False]: () => {
-      shared.stage.summary.abortSummaryStage("Report the preflight abort");
+      shared.step.summary.abortSummaryStep("Report the preflight abort");
     },
   });
 

@@ -10,10 +10,10 @@ the barrel and declares the family-wide BEHAVIOR and INTENT consts; data.ts ends
 `export const port = {...}` / `export const slot = {...}` aggregates; useIntent/useBehavior/
 useResource once at trait level, never in variants; `include:` eliminated — optional prior-round
 attachments interpolate inline as ${slot.x.optional()} in the prompt text; output ports written
-directly by steps (no echo slots); one stage file per concern via cdk.stage; prompts are tagged
+directly by steps (no echo slots); one step file per concern via cdk.step; prompts are tagged
 templates, one clause per line, 4-space indent, no line past ~120 chars, outputs via
 cdk.output.prompt naming the destination; variants are a uniform skeleton — defineVariant
-(one-line description, tag), stages by title, loop bounds inside the loop body, git tail under
+(one-line description, tag), steps by title, loop bounds inside the loop body, git tail under
 flow.when("Maybe Commit"), one return of ports.
 
 Biggest delta of the set. Function-form input.prompt(text, map) prompts become tagged
@@ -21,7 +21,7 @@ templates; include: lists everywhere become inline .optional() interpolations; t
 QUICK/FULL intent split folds into one trait-level declaration; data.ts (heavily grown by the
 v2 rework) gains port/slot aggregates; the long research/ingest/produce prompts split one
 clause per line; deriveTopicSlugStep/deriveReportPathStep keep their command-step shape but move
-to the diff.capture-style direct cdk.stage exports.
+to the diff.capture-style direct cdk.step exports.
 """
 validation = """
 ## Watch

@@ -7,7 +7,7 @@
  */
 export { attachProcedureFrom } from "./procedure.js";
 export type { ProcedureFromFields, ProcedureFromFunction } from "./procedure.js";
-export { effect, flow, step } from "./registrars.js";
+export { effect, flow } from "./registrars.js";
 export type {
   EachParam,
   FieldMatchArms,
@@ -17,8 +17,8 @@ export type {
   LoopParam,
   ParParam,
 } from "./registrars.js";
-export { stage } from "./stage.js";
-export type { CommandStageFields, PromptStageFields, Stage, StageFields } from "./stage.js";
+export { step } from "./step.js";
+export type { CommandStepFields, PromptStepFields, Step, StepFields } from "./step.js";
 export {
   defineTrait,
   defineVariant,

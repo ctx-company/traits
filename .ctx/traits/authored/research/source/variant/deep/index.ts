@@ -51,8 +51,8 @@ export default function () {
     condition.count(shared.data.streamPlan).where("kind", "counterevidence").atLeast(1),
   ]);
 
-  shared.stage.derive.deriveTopicSlugStep();
-  shared.stage.derive.deriveReportPathStep("report.md");
+  shared.step.derive.deriveTopicSlugStep();
+  shared.step.derive.deriveReportPathStep("report.md");
 
   flow.loop("Ingest", (loop) => {
     loop.maxIterations(3, { onExhausted: signal.Abort });
@@ -164,7 +164,7 @@ export default function () {
     );
   });
 
-  shared.stage.commit.shippingCommitTail({
+  shared.step.commit.shippingCommitTail({
     agent: scribe,
     text: input.prompt`
                 The dual review for the research on ${shared.data.topic} has ended in agreement and the work is being committed. The final verdicts are ${shared.data.verdict1} and ${shared.data.verdict2} (unreachable while either status is still revise — an exhausted loop aborts with its stop reason and never reaches here).
