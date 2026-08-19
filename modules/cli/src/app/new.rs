@@ -306,7 +306,7 @@ pub(crate) fn trust_status_line(
         ),
         ctx_traits_core::r#trait::TrustVerdict::Unreviewed => format!(
             "status: {verb} (no trust verdict on this machine for this canonical digest; run \
-             `ctx traits check {trait_id}` then `ctx traits trust approve {trait_id}` before \
+             `ctx traits check {trait_id}` then `ctx traits trust --approved {trait_id}` before \
              activating)",
         ),
     }

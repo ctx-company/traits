@@ -114,7 +114,7 @@ pub(crate) enum Surface {
     /// The interactive dashboard's TRUST screen: names keypresses (`a`/`b`/`A`).
     Tui,
     /// `ctx traits trust <id>` and friends: names commands
-    /// (`ctx traits trust approve/block <id>`), never a keypress.
+    /// (`ctx traits trust --approved/block <id>`), never a keypress.
     Cli { trait_id: String },
 }
 
@@ -145,7 +145,7 @@ fn next_action_tui(class: TrustClass, family: Option<&str>) -> String {
             "the new bytes already read as unreviewed — `a`/`b` to decide them fresh".to_string()
         }
         TrustClass::Orphaned => {
-            "nothing to approve — `ctx traits trust list` reports it as orphaned".to_string()
+            "nothing to approve — `ctx traits trust --list` reports it as orphaned".to_string()
         }
     }
 }
@@ -153,16 +153,20 @@ fn next_action_tui(class: TrustClass, family: Option<&str>) -> String {
 fn next_action_cli(class: TrustClass, trait_id: &str) -> String {
     match class {
         TrustClass::Verified => {
-            format!("already approved — `ctx traits trust block {trait_id}` to block it instead")
+            format!(
+                "already approved — `ctx traits trust --blocked {trait_id}` to block it instead"
+            )
         }
         TrustClass::Blocked => {
-            format!("already blocked — `ctx traits trust approve {trait_id}` to approve it instead")
+            format!(
+                "already blocked — `ctx traits trust --approved {trait_id}` to approve it instead"
+            )
         }
         TrustClass::Unreviewed | TrustClass::MovedApproval | TrustClass::MovedBlock => format!(
-            "re-run `ctx traits trust approve {trait_id}` to approve, or `ctx traits trust block {trait_id}` to block"
+            "re-run `ctx traits trust --approved {trait_id}` to approve, or `ctx traits trust --blocked {trait_id}` to block"
         ),
         TrustClass::Orphaned => {
-            "nothing to approve — `ctx traits trust list` reports it as orphaned".to_string()
+            "nothing to approve — `ctx traits trust --list` reports it as orphaned".to_string()
         }
     }
 }
@@ -283,7 +287,7 @@ mod tests {
             );
 
             // Orphaned is the one class with nothing surface-specific to say
-            // on either surface — both point at the read-only `trust list`
+            // on either surface — both point at the read-only `trust --list`
             // report, not at an approve/block command or keypress.
             if *class == TrustClass::Orphaned {
                 continue;

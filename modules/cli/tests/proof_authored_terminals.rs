@@ -36,8 +36,8 @@ fn review_and_activate(repo: &Path, home: &Path) {
         home,
     );
     require_success(
-        "`ctx traits activate`",
-        &["traits", "activate", "--file", fixture],
+        "`ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

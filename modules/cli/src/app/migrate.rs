@@ -158,7 +158,7 @@ pub(crate) fn handle_migrate(
                 panel = panel.row(PanelRow::toned(
                     "trust",
                     format!(
-                        "canonical digest moved; re-approval required — run `ctx traits trust approve {}`",
+                        "canonical digest moved; re-approval required — run `ctx traits trust --approved {}`",
                         report.path
                     ),
                     RowTone::Warn,

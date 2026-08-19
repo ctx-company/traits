@@ -40,7 +40,7 @@ pub struct TrustRecord {
     pub digest: String,
     pub state: TrustState,
     /// Trait ID this record was recorded against, when the update came from
-    /// a named `trust approve <trait>`/`trust block <trait>` (or a package
+    /// a named `trust --approved <trait>`/`trust --blocked <trait>` (or a package
     /// approval, which stamps every member trait's ID). `None` for raw
     /// `--digest` records and for records written before P419, which decode
     /// unchanged and remain authoritative exact-digest evidence — legacy
@@ -173,7 +173,7 @@ pub enum TrustFreshness {
 }
 
 /// A [`TrustRecord`] joined against current trait resolution: the shared
-/// classification `trust <trait>`, `trust list`, and `doctor` all read from,
+/// classification `trust <trait>`, `trust --list`, and `doctor` all read from,
 /// so none of them re-derive current/stale/orphan independently.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -207,7 +207,7 @@ pub struct TrustReportRow {
 
 impl TrustReportRow {
     /// Whether this row is a *stale approval* — P419's specific meaning of
-    /// `trust list --stale` and doctor's stale finding: a VERIFIED record
+    /// `trust --list --stale` and doctor's stale finding: a VERIFIED record
     /// whose identity-bound trait rebuilt to a different digest, so a human
     /// who thinks they already approved the current bytes has not. A moved
     /// BLOCKED record is never a stale approval: the trait's new digest
@@ -355,7 +355,7 @@ pub struct SupersededEvidence {
 }
 
 /// One digest trust write, as applied by [`update_digests_locked`]. `trait_id`
-/// is `Some` for a named `trust approve <trait>`/`trust block <trait>` or a
+/// is `Some` for a named `trust --approved <trait>`/`trust --blocked <trait>` or a
 /// package-member approval, `None` for a raw `--digest` write.
 #[derive(Debug, Clone)]
 pub struct DigestTrustUpdate {
@@ -552,7 +552,7 @@ pub fn update_digest(
     Ok(updates.remove(0))
 }
 
-/// Single named-trait trust update (`trust approve <trait>` / `trust block
+/// Single named-trait trust update (`trust --approved <trait>` / `trust --blocked
 /// <trait>`): a convenience wrapper over [`update_digests_locked`] so the
 /// caller does not have to build a one-element slice by hand.
 pub fn update_named_digest(

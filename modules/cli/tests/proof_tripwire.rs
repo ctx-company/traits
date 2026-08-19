@@ -80,7 +80,11 @@ argv = ["sh", "-c", "{cmd}"]
         home,
     );
     assert_exit_code(&output, 0);
-    let output = run_ctx(&["traits", "activate", "--file", fixture], repo, home);
+    let output = run_ctx(
+        &["traits", "state", "--active", "--file", fixture],
+        repo,
+        home,
+    );
     assert_exit_code(&output, 0);
     // `activate` mutates `trait.toml` in the invocation checkout; commit it
     // so the merge preflight's own "invocation checkout is clean" precondition

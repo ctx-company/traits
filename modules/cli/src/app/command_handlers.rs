@@ -24,7 +24,7 @@ use crate::app::{
     },
     lifecycle_reporting::{
         current_utf8_dir, format_manifest_discovery, handle_init, handle_list, handle_sync,
-        handle_sync_all, handle_trust,
+        handle_sync_all,
     },
     schema_synth_build::{handle_build, handle_schema, handle_synth},
 };
@@ -189,43 +189,6 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     }
 }
 
-/// Fold `ctx traits trust --json`'s namespace-level flag into whichever
-/// subcommand was given, so `--json` before or after the subcommand name
-/// reaches the same one output path in `handle_trust` rather than needing
-/// duplicated JSON-selection logic per subcommand.
-fn merge_trust_json(subcommand: cli::TrustCommand, namespace_json: bool) -> cli::TrustCommand {
-    match subcommand {
-        cli::TrustCommand::Approve {
-            operand,
-            digest,
-            all_current,
-            reason,
-            json,
-        } => cli::TrustCommand::Approve {
-            operand,
-            digest,
-            all_current,
-            reason,
-            json: json || namespace_json,
-        },
-        cli::TrustCommand::Block {
-            operand,
-            digest,
-            reason,
-            json,
-        } => cli::TrustCommand::Block {
-            operand,
-            digest,
-            reason,
-            json: json || namespace_json,
-        },
-        cli::TrustCommand::List { stale, json } => cli::TrustCommand::List {
-            stale,
-            json: json || namespace_json,
-        },
-    }
-}
-
 /// Fold `ctx traits config --json`'s namespace-level flag into whichever
 /// subcommand was given; see [`merge_trust_json`].
 fn merge_config_json(subcommand: cli::ConfigCommand, namespace_json: bool) -> cli::ConfigCommand {
@@ -351,9 +314,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     }),
                 }
             }
-            Some(cli::TraitsCommand::Fork { id, json }) => {
-                crate::app::fork::handle_fork(&id, json)
-            }
+            Some(cli::TraitsCommand::Fork { id, json }) => crate::app::fork::handle_fork(&id, json),
             Some(cli::TraitsCommand::List { json, verbose }) => handle_list(json, verbose),
             Some(cli::TraitsCommand::Stats {
                 since,
@@ -375,7 +336,13 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                             .map_err(|message| crate::Error::Command { message })
                     })
                     .transpose()?;
-                crate::app::story::handle_story(&run, session_store.as_deref(), json, markdown, level)
+                crate::app::story::handle_story(
+                    &run,
+                    session_store.as_deref(),
+                    json,
+                    markdown,
+                    level,
+                )
             }
             Some(cli::TraitsCommand::Doctor {
                 path,
@@ -426,27 +393,40 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             Some(cli::TraitsCommand::Trust {
                 trait_arg,
                 file,
+                approved,
+                blocked,
+                list,
+                stale,
+                digest,
+                all_current,
+                reason,
                 json,
-                subcommand,
-            }) => match subcommand {
-                // The outer `TRAIT`/`--file` target is valid only for bare
-                // `ctx traits trust <trait>` status: `approve`/`block`/`list`
-                // each take their own operand (`approve`/`block`) or none
-                // (`list`). Enforced here, once, before any subcommand
-                // dispatches — never silently ignoring an outer target the
-                // caller may have believed was the command's subject.
-                Some(_) if trait_arg.is_some() || file.is_some() => {
-                    Err(crate::Error::Command {
-                        message: "a trait name or --file <path> before the subcommand is only valid for bare `ctx traits trust <trait>` status; `approve`/`block` take their own operand and `list` takes none — remove the outer target".to_string(),
-                    })
+            }) => {
+                if list {
+                    crate::app::lifecycle_reporting::handle_trust_list(stale, json)
+                } else if approved {
+                    crate::app::lifecycle_reporting::handle_trust_approve(
+                        trust_operand(trait_arg, file.as_deref())?,
+                        digest,
+                        all_current,
+                        reason,
+                        json,
+                    )
+                } else if blocked {
+                    crate::app::lifecycle_reporting::handle_trust_block(
+                        trust_operand(trait_arg, file.as_deref())?,
+                        digest,
+                        reason,
+                        json,
+                    )
+                } else {
+                    crate::app::lifecycle_reporting::handle_trust_status(
+                        trait_arg.as_deref(),
+                        file.as_deref(),
+                        json,
+                    )
                 }
-                Some(subcommand) => handle_trust(merge_trust_json(subcommand, json)),
-                None => crate::app::lifecycle_reporting::handle_trust_status(
-                    trait_arg.as_deref(),
-                    file.as_deref(),
-                    json,
-                ),
-            },
+            }
             Some(cli::TraitsCommand::Hygiene { trait_files, json }) => {
                 handle_hygiene(&trait_files, json)
             }
@@ -719,36 +699,35 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     &file, state, reason, json, "review",
                 )
             }
-            Some(cli::TraitsCommand::Activate {
+            Some(cli::TraitsCommand::State {
                 trait_arg,
                 file,
-                json,
-            }) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
-                &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "activate")?,
-                crate::app::lifecycle_handlers::LifecycleAction::Activate,
-                json,
-            ),
-            Some(cli::TraitsCommand::Deactivate {
-                trait_arg,
-                file,
-                json,
-            }) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
-                &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "deactivate")?,
-                crate::app::lifecycle_handlers::LifecycleAction::Deactivate,
-                json,
-            ),
-            Some(cli::TraitsCommand::Deprecate {
-                trait_arg,
-                file,
+                active,
+                draft,
+                deprecated,
                 reason,
                 json,
-            }) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
-                &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "deprecate")?,
-                crate::app::lifecycle_handlers::LifecycleAction::Deprecate {
-                    reason: reason.as_deref(),
-                },
-                json,
-            ),
+            }) => {
+                let action = if active {
+                    Some(crate::app::lifecycle_handlers::LifecycleAction::Activate)
+                } else if draft {
+                    Some(crate::app::lifecycle_handlers::LifecycleAction::Deactivate)
+                } else if deprecated {
+                    Some(crate::app::lifecycle_handlers::LifecycleAction::Deprecate {
+                        reason: reason.as_deref(),
+                    })
+                } else {
+                    None
+                };
+                let target = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "state")?;
+                match action {
+                    Some(action) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
+                        &target, action, json,
+                    ),
+                    // No flag: report, do not transition.
+                    None => crate::app::lifecycle_handlers::handle_lifecycle_status(&target, json),
+                }
+            }
             Some(cli::TraitsCommand::RunInfo {
                 trait_id,
                 file,
@@ -765,11 +744,8 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 no_drive,
                 ephemeral,
             }) => {
-                let mut progress = crate::app::drive::resolve_progress(
-                    args.progress,
-                    args.json,
-                    args.no_tui,
-                );
+                let mut progress =
+                    crate::app::drive::resolve_progress(args.progress, args.json, args.no_tui);
                 // BEFORE anything can touch crossterm. Its event reader is a
                 // process-global built ONCE, lazily, on first use — and if
                 // stdin is not a terminal at that moment its source is `None`
@@ -794,13 +770,13 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     // TERM=dumb are status-only even when attached to a PTY.
                     && crate::app::tui::stderr_supports_live(false);
                 let startup = interactive_tui
-                .then(crate::app::run_startup_view::StartupView::new)
-                .transpose()
-                .unwrap_or_else(|error| {
-                    progress = cli::DriveProgress::Status;
-                    eprintln!("run tui unavailable; falling back to status progress: {error}");
-                    None
-                });
+                    .then(crate::app::run_startup_view::StartupView::new)
+                    .transpose()
+                    .unwrap_or_else(|error| {
+                        progress = cli::DriveProgress::Status;
+                        eprintln!("run tui unavailable; falling back to status progress: {error}");
+                        None
+                    });
                 if startup.is_none() && !args.json {
                     eprintln!("ctx run · initialization");
                 }
@@ -842,7 +818,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 );
                 if ephemeral && !no_drive {
                     if let Some(view) = startup.as_ref() {
-                        view.fail("--ephemeral requires --no-drive; driven runs persist their ledger");
+                        view.fail(
+                            "--ephemeral requires --no-drive; driven runs persist their ledger",
+                        );
                     }
                     return Err(crate::Error::Command {
                         message:
@@ -868,28 +846,25 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                             "--task requires a driven run; omit --no-drive".to_string(),
                         ));
                     }
-                    let board_dir = crate::app::tasks::board_dir(None)
-                        .inspect_err(|error| {
-                            if let Some(view) = startup.as_ref() {
-                                view.fail(error.to_string());
-                            }
-                        })?;
+                    let board_dir = crate::app::tasks::board_dir(None).inspect_err(|error| {
+                        if let Some(view) = startup.as_ref() {
+                            view.fail(error.to_string());
+                        }
+                    })?;
                     let repo_root = resolve_repo_root(None).inspect_err(|error| {
                         if let Some(view) = startup.as_ref() {
                             view.fail(error.to_string());
                         }
                     })?;
-                    let provider = ctx_traits_io::task_files::FilesTaskBoard::open_read(board_dir.clone());
+                    let provider =
+                        ctx_traits_io::task_files::FilesTaskBoard::open_read(board_dir.clone());
                     let queue = crate::app::task_queue::expand_task_queue(&provider, &args.task)
                         .map_err(refuse)?;
-                    let dispatch_trait = runtime
-                        .effective_dispatch_trait()
-                        .ok_or_else(|| {
-                            refuse(
-                                "--task requires [tasks] dispatch-trait to be configured"
-                                    .to_string(),
-                            )
-                        })?;
+                    let dispatch_trait = runtime.effective_dispatch_trait().ok_or_else(|| {
+                        refuse(
+                            "--task requires [tasks] dispatch-trait to be configured".to_string(),
+                        )
+                    })?;
                     let merge_policy = runtime.effective_merge_policy();
                     let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
                     let Some(merge_rung) = merge_rung else {
@@ -1509,11 +1484,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     global,
                     force,
                     json,
-                } => crate::app::host_install::handle_update(
-                    global,
-                    force,
-                    json || namespace_json,
-                ),
+                } => crate::app::host_install::handle_update(global, force, json || namespace_json),
                 cli::HostCommand::Status { global, json } => {
                     crate::app::host_install::handle_status(global, json || namespace_json)
                 }
@@ -1682,9 +1653,11 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             Some(cli::TasksCommand::Reconcile { board, json }) => {
                 crate::app::tasks::handle_tasks_reconcile(board.as_deref(), json)
             }
-            Some(cli::TasksCommand::List { board, archived, json }) => {
-                crate::app::tasks::handle_tasks_list(board.as_deref(), archived, json)
-            }
+            Some(cli::TasksCommand::List {
+                board,
+                archived,
+                json,
+            }) => crate::app::tasks::handle_tasks_list(board.as_deref(), archived, json),
             Some(cli::TasksCommand::Show { task, board, json }) => {
                 crate::app::tasks::handle_tasks_show(&task, board.as_deref(), json)
             }
@@ -2079,6 +2052,21 @@ fn sorted_join_or_none(values: &[String]) -> String {
     sorted.sort();
     sorted.dedup();
     sorted.join(",")
+}
+
+/// The operand a trust decision records against: the bare trait name, or the
+/// `--file <path>` spelling of the same thing. `--digest` bypasses both and is
+/// handled by the caller, so `None` here is only an error when no digest and
+/// no `--all-current` were given — which clap already enforces.
+fn trust_operand(trait_arg: Option<String>, file: Option<&str>) -> crate::Result<Option<String>> {
+    match (trait_arg, file) {
+        (Some(_), Some(_)) => Err(crate::Error::Command {
+            message: "pass either a trait name or --file <path>, not both".to_string(),
+        }),
+        (Some(name), None) => Ok(Some(name)),
+        (None, Some(path)) => Ok(Some(path.to_string())),
+        (None, None) => Ok(None),
+    }
 }
 
 /// Resolve a positional trait name or explicit `--file` into a trait file

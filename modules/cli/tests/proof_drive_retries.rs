@@ -320,8 +320,8 @@ session-mode = "per-frame"
         home,
     );
     require_success(
-        "p464-proof `ctx traits activate`",
-        &["traits", "activate", "--file", fixture],
+        "p464-proof `ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

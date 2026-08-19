@@ -2,7 +2,7 @@
 //!
 //! Status and trust are owned by separate stores (Group 95, 2026-07-19):
 //! `activate`/`deactivate` edit the package manifest's `[package].status`
-//! (`draft | ready`); `ctx traits trust approve/block` (and the hidden
+//! (`draft | ready`); `ctx traits trust --approved/block` (and the hidden
 //! `review --approve/--deny` compatibility alias, see
 //! [`crate::app::lifecycle_reporting::handle_trust_named_update`]) records a
 //! verdict in the machine trust store (`~/.config/ctx/trust.toml`) keyed by
@@ -20,6 +20,15 @@ struct LifecycleTransitionOutput<'a> {
     action: &'a str,
     trait_id: &'a str,
     previous_status: &'a str,
+    status: &'a str,
+    trust: &'a str,
+    next_action: &'a str,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct LifecycleStatusOutput<'a> {
+    trait_id: &'a str,
     status: &'a str,
     trust: &'a str,
     next_action: &'a str,
@@ -108,7 +117,83 @@ fn package_id_from_normals<'a>(normals: &[&'a str]) -> Option<&'a str> {
     (!id.is_empty()).then_some(*id)
 }
 
-/// `ctx traits activate`/`deactivate`/`deprecate`: edits the package
+/// Bare `ctx traits state <trait>`: report the lifecycle state and the
+/// machine trust standing beside it, and change nothing.
+///
+/// Trust is reported here because status alone never makes a trait runnable
+/// — the two gates are independent, and a report that showed only one of
+/// them would answer "can I run this?" wrongly half the time.
+pub(crate) fn handle_lifecycle_status(file: &str, json: bool) -> crate::Result<CommandOutput<()>> {
+    let (trait_ref, trait_root, _source_digest, canonical_digest) =
+        ctx_traits_io::run::load_trait(file)?;
+    let status = ctx_traits_io::lifecycle::resolve_package_status(&trait_root)?;
+    let status_display = status.display_name().to_string();
+    let trust = ctx_traits_io::lifecycle::resolve_trust_verdict_for_trait(
+        trait_ref.id.as_str(),
+        canonical_digest.as_str(),
+    )?;
+
+    let next_action = match (status, trust) {
+        (ctx_traits_core::manifest::PackageStatus::Draft, _) => {
+            "draft: run `ctx traits state --active <trait>` to make it resolver-eligible"
+                .to_string()
+        }
+        (
+            ctx_traits_core::manifest::PackageStatus::Ready,
+            ctx_traits_core::r#trait::TrustVerdict::Verified,
+        ) => "active and machine-trusted".to_string(),
+        (ctx_traits_core::manifest::PackageStatus::Ready, _) => {
+            let trust_gates = ctx_traits_core::r#trait::activation::trust_gates_for_check(
+                trait_ref.id.as_str(),
+                &trust,
+            );
+            format!(
+                "status is ready, but this machine has not approved the current canonical \
+                 digest; {}",
+                ctx_traits_core::r#trait::activation::format_gate_refusal(&trust_gates)
+            )
+        }
+    };
+
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            let output = LifecycleStatusOutput {
+                trait_id: trait_ref.id.as_str(),
+                status: &status_display,
+                trust: trust.display_name(),
+                next_action: next_action.as_str(),
+            };
+            print_json_report(&output, "lifecycle status")?;
+        }
+        OutputMode::Human(mode) => {
+            let panel = Panel::new("ctx", "state", PanelStatus::Passed(status_display.clone()))
+                .row(PanelRow::toned(
+                    "trait",
+                    trait_ref.id.as_str(),
+                    RowTone::Default,
+                ))
+                .row(PanelRow::toned(
+                    "status",
+                    status_display.as_str(),
+                    RowTone::Default,
+                ))
+                .row(PanelRow::toned(
+                    "trust",
+                    trust.display_name(),
+                    RowTone::Default,
+                ))
+                .row(PanelRow::toned(
+                    "next",
+                    next_action.as_str(),
+                    RowTone::Default,
+                ));
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+    Ok(CommandOutput::new(()))
+}
+
+/// `ctx traits state --active`/`--draft`/`--deprecated`: edits the package
 /// manifest's `[package].status`. Never touches the canonical trait
 /// document.
 pub(crate) fn handle_lifecycle_transition(

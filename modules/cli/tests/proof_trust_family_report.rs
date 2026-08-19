@@ -95,7 +95,12 @@ fn family_report_shows_every_variant_and_a_conservative_aggregate() {
     build_family_fixture(&proj, &home);
 
     let approve = run_ctx(
-        &["traits", "trust", "approve", &format!("{TRAIT_ID}:quick")],
+        &[
+            "traits",
+            "trust",
+            "--approved",
+            &format!("{TRAIT_ID}:quick"),
+        ],
         &proj,
         &home,
     );
@@ -175,7 +180,12 @@ fn list_json_carries_per_variant_trust_and_a_partial_family_aggregate() {
     build_family_fixture(&proj, &home);
 
     let approve = run_ctx(
-        &["traits", "trust", "approve", &format!("{TRAIT_ID}:quick")],
+        &[
+            "traits",
+            "trust",
+            "--approved",
+            &format!("{TRAIT_ID}:quick"),
+        ],
         &proj,
         &home,
     );
@@ -232,7 +242,7 @@ fn run_on_unreviewed_variant_names_trust_and_the_approve_command() {
         "refusal must name the unreviewed trust condition: {stderr}"
     );
     assert!(
-        stderr.contains(&format!("ctx traits trust approve {TRAIT_ID}:default")),
+        stderr.contains(&format!("ctx traits trust --approved {TRAIT_ID}:default")),
         "refusal must name the exact approve command for this variant: {stderr}"
     );
     assert!(
@@ -251,7 +261,7 @@ fn bare_family_approve_clears_every_variant_and_the_refusal() {
     let proj = home.join("repo");
     build_family_fixture(&proj, &home);
 
-    let approve = run_ctx(&["traits", "trust", "approve", TRAIT_ID], &proj, &home);
+    let approve = run_ctx(&["traits", "trust", "--approved", TRAIT_ID], &proj, &home);
     let (stdout, stderr) = utf8(&approve);
     assert!(
         approve.status.success(),

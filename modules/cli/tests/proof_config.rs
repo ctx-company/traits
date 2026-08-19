@@ -1576,7 +1576,13 @@ output = ["slot:notified"]
     );
     assert_exit_code(
         &run_ctx(
-            &["traits", "activate", "--file", fixture.to_str().unwrap()],
+            &[
+                "traits",
+                "state",
+                "--active",
+                "--file",
+                fixture.to_str().unwrap(),
+            ],
             &repo,
             &scratch.home(),
         ),
@@ -1761,7 +1767,13 @@ output = ["slot:notified"]
     );
     assert_exit_code(
         &run_ctx(
-            &["traits", "activate", "--file", fixture.to_str().unwrap()],
+            &[
+                "traits",
+                "state",
+                "--active",
+                "--file",
+                fixture.to_str().unwrap(),
+            ],
             repo,
             home,
         ),

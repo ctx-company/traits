@@ -141,7 +141,7 @@ session-mode = "persistent"
     );
     require_success(
         "persistent fixture activate",
-        &["traits", "activate", "--file", fixture],
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

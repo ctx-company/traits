@@ -684,7 +684,7 @@ fn install_npm_internal(
         traits,
         inherited,
         claim: claim_label.to_string(),
-        review_hint: "run `ctx traits trust approve <trait>` for each canonical digest above before running it".to_string(),
+        review_hint: "run `ctx traits trust --approved <trait>` for each canonical digest above before running it".to_string(),
     })
 }
 
@@ -719,7 +719,7 @@ fn install_report_from_locked_path(
         traits,
         inherited: entry.inherited,
         claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
-        review_hint: "already locked to this source; run `ctx traits trust approve <trait>` for each canonical digest above before running it, or `ctx traits dependency update <alias>` to accept changed source bytes".to_string(),
+        review_hint: "already locked to this source; run `ctx traits trust --approved <trait>` for each canonical digest above before running it, or `ctx traits dependency update <alias>` to accept changed source bytes".to_string(),
     }
 }
 
@@ -824,7 +824,7 @@ fn install_path_internal(
         traits,
         inherited: false,
         claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
-        review_hint: "run `ctx traits trust approve <trait>` for each canonical digest above before running it".to_string(),
+        review_hint: "run `ctx traits trust --approved <trait>` for each canonical digest above before running it".to_string(),
     })
 }
 
@@ -886,7 +886,7 @@ fn install_git_internal(
         traits,
         inherited: false,
         claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
-        review_hint: "run `ctx traits trust approve <trait>` for each canonical digest above before running it".to_string(),
+        review_hint: "run `ctx traits trust --approved <trait>` for each canonical digest above before running it".to_string(),
     })
 }
 
@@ -3634,10 +3634,10 @@ fn replay_locked_git_package(
 }
 
 // ---------------------------------------------------------------------------
-// Package-granular trust resolution (`ctx traits trust approve <package>`, P439)
+// Package-granular trust resolution (`ctx traits trust --approved <package>`, P439)
 // ---------------------------------------------------------------------------
 
-/// An installed package located during `trust approve` resolution, together
+/// An installed package located during `trust --approved` resolution, together
 /// with the tier it was found at.
 pub struct ResolvedInstalledPackage {
     pub scope: DistributionScope,
@@ -3716,7 +3716,7 @@ fn find_installed_package(
     }
 }
 
-/// Result of a successful `trust approve <package>`: every canonical digest
+/// Result of a successful `trust --approved <package>`: every canonical digest
 /// across the package's current trait entries, now recorded verified in one
 /// atomic, cross-process-locked write.
 #[derive(Debug, Clone, Serialize)]
@@ -3755,7 +3755,7 @@ pub fn approve_package(
 /// metadata (only ever populated for a family variant; see `TraitLockEntry`).
 /// Trait *count* is deliberately not evidence: an ordinary multi-trait npm
 /// package has no family structure and must keep resolving/approving its one
-/// named trait exactly as before P535. Used by `trust approve` (P535) to
+/// named trait exactly as before P535. Used by `trust --approved` (P535) to
 /// route a default-aliased vendored family package (e.g. a folded
 /// `implement` package installed via `path:`) through whole-package approval
 /// instead of ordinary named-trait resolution, which would only ever resolve

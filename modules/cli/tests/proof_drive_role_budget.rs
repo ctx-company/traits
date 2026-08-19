@@ -128,8 +128,8 @@ session-mode = "per-frame"
         home,
     );
     require_success(
-        "p475-budget-proof `ctx traits activate`",
-        &["traits", "activate", "--file", fixture],
+        "p475-budget-proof `ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

@@ -53,14 +53,14 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
         &manifest("P498 context-ledger fixture."),
     );
     require_success(
-        "`ctx traits activate` clears the draft gate",
-        &["traits", "activate", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
     require_success(
-        "`ctx traits trust approve` clears the unreviewed gate",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` clears the unreviewed gate",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -207,8 +207,8 @@ fn editing_the_trait_between_commits_reinjects_with_digest_changed() {
     // in `trait.toml`, not the edited generated document); re-approve so
     // only the ledger's own digest-changed staleness is under test here.
     require_success(
-        "`ctx traits trust approve` re-clears the unreviewed gate after edit",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` re-clears the unreviewed gate after edit",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );

@@ -85,7 +85,7 @@ fn explain_llm_assisted_narrates_the_deterministic_scaffold() {
     let map_path = write_source_map(&proj, &source_path);
 
     for dependency in ["explain", "spec"] {
-        let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
+        let approve = run_ctx(&["traits", "trust", "--approved", dependency], &proj, &home);
         assert!(
             approve.status.success(),
             "trust approve {dependency} failed: {}",

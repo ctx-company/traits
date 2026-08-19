@@ -6,7 +6,6 @@ use crate::app::command_handlers::print_json_report;
 use crate::app::presentation::{
     OutputMode, Panel, PanelRow, PanelSection, PanelStatus, RowTone, emit_human, emit_one_row,
 };
-use crate::app::surface::cli;
 
 pub(crate) fn format_manifest_discovery(
     repo_root: &camino::Utf8Path,
@@ -266,30 +265,11 @@ pub(crate) fn handle_sync(
     Ok(CommandOutput::new(()))
 }
 
-pub(crate) fn handle_trust(subcommand: cli::TrustCommand) -> crate::Result<CommandOutput<()>> {
-    match subcommand {
-        cli::TrustCommand::Approve {
-            operand,
-            digest,
-            all_current,
-            reason,
-            json,
-        } => handle_trust_approve(operand, digest, all_current, reason, json),
-        cli::TrustCommand::Block {
-            operand,
-            digest,
-            reason,
-            json,
-        } => handle_trust_block(operand, digest, reason, json),
-        cli::TrustCommand::List { stale, json } => handle_trust_list(stale, json),
-    }
-}
-
-/// `ctx traits trust approve`: named-trait resolution wins; when `operand`
+/// `ctx traits trust --approved`: named-trait resolution wins; when `operand`
 /// does not resolve as a trait, falls back to installed-package bulk
-/// approval (P419's preserved `trust approve <package>` behavior). `--digest`
+/// approval (P419's preserved `trust --approved <package>` behavior). `--digest`
 /// bypasses both resolvers for scripts.
-fn handle_trust_approve(
+pub(crate) fn handle_trust_approve(
     operand: Option<String>,
     digest: Option<String>,
     all_current: bool,
@@ -327,7 +307,7 @@ fn handle_trust_approve(
                 .collect::<Vec<_>>()
                 .join("; ");
             return Err(crate::Error::Command {
-                message: format!("trust approve --all-current refused: {detail}"),
+                message: format!("trust --approved --all-current refused: {detail}"),
             });
         }
         let updates: Vec<_> = targets
@@ -343,11 +323,11 @@ fn handle_trust_approve(
             .collect();
         let written = ctx_traits_io::trust::update_digests_locked(&updates)?;
         match OutputMode::select(json, false) {
-            OutputMode::Json => print_json_report(&written, "trust approve all-current")?,
+            OutputMode::Json => print_json_report(&written, "trust --approved --all-current")?,
             OutputMode::Human(mode) => {
                 let mut panel = Panel::new(
                     "ctx",
-                    "trust approve --all-current",
+                    "trust --approved --all-current",
                     PanelStatus::Passed("passed".to_string()),
                 )
                 .row(PanelRow::toned(
@@ -408,7 +388,7 @@ fn handle_trust_approve(
             if guard.refused() {
                 return Err(crate::Error::Command {
                     message: format!(
-                        "trust approve {operand} refused: {}",
+                        "trust --approved {operand} refused: {}",
                         guard.refusal.as_deref().unwrap_or("")
                     ),
                 });
@@ -424,7 +404,7 @@ fn handle_trust_approve(
         if let OutputMode::Human(mode) = OutputMode::select(json, false) {
             let panel = Panel::new(
                 "ctx",
-                "trust approve",
+                "trust --approved",
                 PanelStatus::Passed("passed".to_string()),
             )
             .row(PanelRow::toned("family", operand.clone(), RowTone::Default))
@@ -454,11 +434,11 @@ fn handle_trust_approve(
             let leaves = resolved.entry.traits.len();
             let report = ctx_traits_io::distribution::approve_resolved_package(resolved, reason)?;
             match OutputMode::select(json, false) {
-                OutputMode::Json => print_json_report(&report, "trust approve report")?,
+                OutputMode::Json => print_json_report(&report, "trust report")?,
                 OutputMode::Human(mode) => {
                     let panel = Panel::new(
                         "ctx",
-                        format!("trust approve {}", report.package),
+                        format!("trust --approved {}", report.package),
                         PanelStatus::Passed("passed".to_string()),
                     )
                     .row(PanelRow::toned(
@@ -488,7 +468,7 @@ fn handle_trust_approve(
             ctx_traits_io::trust::TrustState::Verified,
             reason,
             json,
-            "trust approve",
+            "trust --approved",
         ),
         None => crate::app::distribution::handle_approve(&operand, reason, json),
     }
@@ -515,7 +495,7 @@ fn family_variant_files(operand: &str) -> crate::Result<Option<Vec<String>>> {
     Ok((!files.is_empty()).then_some(files))
 }
 
-/// `trust approve <trait|package>`'s operand resolution seam: trait
+/// `trust --approved <trait|package>`'s operand resolution seam: trait
 /// resolution wins whenever `operand` actually resolves — as an existing
 /// literal file path, or as a trait id in any tier via
 /// [`ctx_traits_io::run::try_resolve_trait_id`] — and falls through to
@@ -554,7 +534,7 @@ fn resolve_trust_approve_target(operand: &str) -> crate::Result<Option<String>> 
 /// reached by `run`. But trust is not selection. A dependent materializes a
 /// shared package's resources only once that package's own canonical digest
 /// is verified, and the runtime says so in as many words — "run `ctx traits
-/// trust approve spec`" — which the runnable filter turned into a dead end:
+/// trust --approved spec`" — which the runnable filter turned into a dead end:
 /// the instruction resolved to no trait, fell through to installed-package
 /// approval, and failed with "no installed package matches alias or npm
 /// package".
@@ -577,10 +557,10 @@ fn resolve_shared_builtin_target(operand: &str) -> crate::Result<Option<String>>
     .map(|path| path.to_string()))
 }
 
-/// `ctx traits trust block`: named-trait resolution only (no package
+/// `ctx traits trust --blocked`: named-trait resolution only (no package
 /// fallback — blocking a whole installed package is not part of P419's
 /// preserved surface). `--digest` bypasses resolution for scripts.
-fn handle_trust_block(
+pub(crate) fn handle_trust_block(
     operand: Option<String>,
     digest: Option<String>,
     reason: Option<String>,
@@ -595,14 +575,17 @@ fn handle_trust_block(
         );
     }
     let operand = operand.expect("clap enforces operand or --digest");
-    let file =
-        crate::app::command_handlers::resolve_trait_target(Some(&operand), None, "trust block")?;
+    let file = crate::app::command_handlers::resolve_trait_target(
+        Some(&operand),
+        None,
+        "trust --blocked",
+    )?;
     handle_trust_named_update(
         &file,
         ctx_traits_io::trust::TrustState::Blocked,
         reason,
         json,
-        "trust block",
+        "trust --blocked",
     )
 }
 
@@ -619,7 +602,7 @@ fn handle_trust_digest_update(
     print_trust_update(&update, json)
 }
 
-/// Shared named-trait trust write for `trust approve`/`trust block` and the
+/// Shared named-trait trust write for `trust --approved`/`trust --blocked` and the
 /// hidden `review --approve/--deny` compatibility alias (P419): the trait's
 /// current canonical digest is resolved fresh, the write is appended as a
 /// new event under one lock (history is append-only — never a replacement of
@@ -772,7 +755,7 @@ pub(crate) fn handle_trust_named_update(
                     "next",
                     format!(
                         "this machine trusts the current digest, but package status is still \
-                         draft; run `ctx traits activate {}` before it can run",
+                         draft; run `ctx traits state --active {}` before it can run",
                         trait_ref.id.as_str()
                     ),
                     RowTone::Default,
@@ -849,8 +832,8 @@ pub(crate) fn current_trait_digests() -> crate::Result<Vec<(String, String)>> {
 type CurrentTraitDigestWithRoot = (String, Option<String>, String, String);
 
 /// [`current_trait_digests`], additionally carrying each trait's package
-/// root — `trust approve --all-current` needs it to evaluate guards (a)/(c)
-/// per target before writing, the same as a single named `trust approve`.
+/// root — `trust --approved --all-current` needs it to evaluate guards (a)/(c)
+/// per target before writing, the same as a single named `trust --approved`.
 pub(crate) fn current_trait_digests_with_roots() -> crate::Result<Vec<CurrentTraitDigestWithRoot>> {
     let context = ctx_traits_io::inventory::InventoryContext::discover()?;
     let mut targets = std::collections::BTreeMap::new();
@@ -895,7 +878,7 @@ struct TrustStatusJson<'a> {
 /// operand spelling, before any single-file resolution collapses a bare
 /// family id to its default variant — mirroring `handle_trust_approve`'s
 /// operand resolution order exactly, so what this reports for a family
-/// covers exactly what `trust approve <family>` would approve in one act
+/// covers exactly what `trust --approved <family>` would approve in one act
 /// (0150). A bare family operand reports every declared variant; anything
 /// else (a single trait id, `family:variant`, or `--file`) resolves and
 /// reports that one trait, echoing its variant when it has one.
@@ -978,11 +961,11 @@ fn handle_trust_status_family(
             );
         }
         // Pin the store semantics the aggregate above reports against: a
-        // family-wide `trust approve` covers every variant in one journaled
+        // family-wide `trust --approved` covers every variant in one journaled
         // act (`handle_trust_approve`), so this footer's remedy is never
         // narrower than what actually clears the family's gates.
         println!(
-            "  next: `ctx traits trust approve {family}` re-approves all {} variants in one act",
+            "  next: `ctx traits trust --approved {family}` re-approves all {} variants in one act",
             statuses.len()
         );
     }
@@ -1069,7 +1052,7 @@ fn handle_trust_status_single(file: &str, json: bool) -> crate::Result<CommandOu
         println!("  current-digest: {}", canonical_digest.as_str());
         println!("  verdict: {}", verdict.display_name());
         // Shares P419's state-aware stale-approval rule
-        // (`TrustReportRow::is_stale_approval`) with `trust list --stale`
+        // (`TrustReportRow::is_stale_approval`) with `trust --list --stale`
         // and doctor via `trust_story::classify_trust`, which delegates the
         // same split rather than re-deriving it: a moved VERIFIED record
         // recommends re-approval, but a moved BLOCKED record must never
@@ -1109,10 +1092,10 @@ struct TrustListRowJson<'a> {
     superseded: bool,
 }
 
-/// `ctx traits trust list [--stale]`: every named trust decision, joined
+/// `ctx traits trust --list [--stale]`: every named trust decision, joined
 /// against current trait resolution via
 /// [`ctx_traits_io::trust::classify_records`].
-fn handle_trust_list(stale: bool, json: bool) -> crate::Result<CommandOutput<()>> {
+pub(crate) fn handle_trust_list(stale: bool, json: bool) -> crate::Result<CommandOutput<()>> {
     let document = ctx_traits_io::trust::read_store()?;
     let current = current_trait_digests()?;
     let mut rows = ctx_traits_io::trust::classify_records(&document, &current);
@@ -1143,13 +1126,13 @@ fn handle_trust_list(stale: bool, json: bool) -> crate::Result<CommandOutput<()>
                     superseded: row.superseded,
                 })
                 .collect();
-            print_json_report(&json_rows, "trust list")?;
+            print_json_report(&json_rows, "trust --list")?;
         }
         OutputMode::Human(mode) => {
             let headline = if stale {
-                "trust list --stale"
+                "trust --list --stale"
             } else {
-                "trust list"
+                "trust --list"
             };
             let mut panel = Panel::new("ctx", headline, PanelStatus::Passed("passed".to_string()));
             let mut entry_rows = Vec::new();

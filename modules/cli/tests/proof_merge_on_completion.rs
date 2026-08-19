@@ -120,8 +120,8 @@ output = ["slot:notified"]
         home,
     );
     require_success(
-        "`ctx traits activate`",
-        &["traits", "activate", "--file", fixture],
+        "`ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

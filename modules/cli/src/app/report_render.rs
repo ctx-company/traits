@@ -120,8 +120,8 @@ fn render_trust_refusal(
 }
 
 /// Classify `trait_id`'s lifecycle/trust gates against `posture`: hard
-/// refuses on `blocked.trust.blocked` (naming `ctx traits trust list`, never
-/// core's `trust approve` remedy — blocked is a decision, not a pending
+/// refuses on `blocked.trust.blocked` (naming `ctx traits trust --list`, never
+/// core's `trust --approved` remedy — blocked is a decision, not a pending
 /// review) and on any escapable gate that `posture` did not escape; returns
 /// the gates that passed only because they were escaped or are
 /// advisory-only, so the caller can surface a `lifecycle-advisory`.
@@ -148,7 +148,7 @@ fn classify_render_trust(
         .collect();
     if !blocked.is_empty() {
         let message = format!(
-            "{} refused: {} — trust decisions are not reviewable via activation; run `ctx traits trust list`",
+            "{} refused: {} — trust decisions are not reviewable via activation; run `ctx traits trust --list`",
             posture.verb,
             blocked
                 .iter()
@@ -161,7 +161,7 @@ fn classify_render_trust(
             trait_id,
             &blocked,
             message,
-            "ctx traits trust list",
+            "ctx traits trust --list",
         ));
     }
 
