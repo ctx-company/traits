@@ -48,50 +48,49 @@ CDK support would cost so the owner can rule on two files versus new API.
 """
 
 outcome = """
-Answer: (2). `procedure.from` gives a single-file, variant-free trait that
-builds and checks, with functional registrars inside an object shell —
-`cdk.step.*`/`agent.prompt`/`flow.*` in the body, no variant module.
-
-The skeleton, verified end to end on a scratch package:
+Answer: (1). A trait function with NO variant registers steps directly and
+declares its ports through its return statement — the same mechanism an
+authored variant function uses. No `procedure`, no `port` field, no
+object shell.
 
     import * as cdk from "@ctx-traits/cdk";
 
-    const reviewer = cdk.agent.reviewer("reviewer", { description: "..." });
-    const focus = cdk.port.input.text({ id: "focus", description: "..." });
-    const verdict = cdk.slot.text({ id: "verdict", description: "..." });
-    const verdictReport = cdk.port.output.text({
-      id: "verdict-report",
+    const w = cdk.agent.worker("w", { description: "..." });
+    const goal = cdk.port.input.text({ id: "goal", description: "..." });
+    const out = cdk.slot.text({ id: "out", description: "..." });
+    const resultPort = cdk.port.output.text({
+      id: "result",
+      title: "Result",
       description: "...",
-      value: verdict,
+      value: out,
       optional: true,
     });
 
-    export default cdk.trait("spike-single-file", {
-      version: "0.1.0",
-      name: "Spike Single File",
-      description: "...",
-      port: [focus, verdictReport],
-      procedure: cdk.procedure.from({ description: "..." }, () => {
-        reviewer.prompt("Review the change", {
-          input: cdk.input.prompt`Review the working tree with a focus on ${focus}.`,
-          output: verdict,
-        });
-      }),
-    });
+    export default function () {
+      cdk.defineTrait("Plain Fn", { version: "0.1.0", description: "..." });
 
-Emits the full contract: both ports, `value = "slot:verdict"` on the
-output, and `[procedure] input/output` inferred from the steps.
+      w.prompt("Do the thing", {
+        input: cdk.input.prompt`Do ${goal}.`,
+        output: out,
+      });
 
-THE ONE RULE THAT IS NOT OBVIOUS: ports must be listed in the trait's own
-`port` field. The functional family shape derives output ports from the
-variant function's `return`; an object shell has no return, so nothing
-collects them. An input port still lands transitively when a prompt
-interpolates it — which is exactly what makes the failure quiet.
+      return { result: resultPort };
+    }
 
-Footgun worth its own task: `procedure.from` accepts `input:`/`output:` in
-its fields object and silently ignores both. `ProcedureFields` declares
-neither (the contract is inferred from the steps), trait sources are
-evaluated rather than typechecked, so the excess properties vanish without
-a word. A trait declaring its output port only there builds clean, checks
-clean, and returns nothing.
+Emits the full contract: both ports, `value = "slot:out"`, and
+`[procedure] input`/`output` inferred from the step wiring. A returned
+declared port passes through with its own title and description intact; a
+returned bare slot derives a port whose description is generated.
+
+CORRECTION: this task first recorded answer (2), `procedure.from` inside
+an object shell, and the templates landed that way before being rewritten
+(04015732). That answer was wrong because the question was never asked
+properly — the earlier failure that ruled out (1) was a trait function
+calling `useVariant` on a variant module that did not exist, not a trait
+function registering steps. Owner asked why the templates needed
+`procedure` at all, which is what surfaced it.
+
+Consequence worth carrying: the object shell is now unused by anything in
+this repository, and the `procedure` authoring surface it needs carries
+the 0229 defects.
 """

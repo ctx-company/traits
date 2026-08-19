@@ -1,51 +1,81 @@
 schema-version = "0.2"
 key = "0229"
-title = "procedure.from accepts input and output, then throws them away"
+title = "The procedure authoring surface: reject what it ignores, drop what it does not need"
 status = "ready"
 raised = "2026-08-19"
 content = """
-Found while proving the single-file trait shape (0217).
+Three defects in one small surface, found while proving the single-file
+trait shape (0217).
 
-`cdk.procedure.from({ description, input: [...], output: [...] }, body)`
+## 1. Unknown fields are accepted and discarded
+
+`cdk.procedure({ description, input: [...], output: [...], sequence })`
 accepts `input` and `output` and ignores both. `ProcedureFields` declares
 neither — a procedure's contract is inferred from its steps — and trait
-sources are evaluated rather than typechecked, so the excess properties
-disappear without a diagnostic.
+sources are evaluated rather than typechecked, so TypeScript's
+excess-property check never runs where it would matter.
 
-The failure is quiet in the worst way. A trait that declares its output
-port only there:
+The failure is quiet in the worst way. A trait declaring its output port
+only there builds clean, checks clean, reports `valid: true` with no audit
+finding, and returns nothing. The input side hides it further: a prompt
+interpolating a port collects that port transitively, so the author
+watches one arrive and reasonably assumes the other did.
 
-- builds clean
-- checks clean, `valid: true`, no audit findings
-- emits no output port at all, and returns nothing to its caller
+Tested both layers with one variable changed: the object-layer
+`procedure(...)` and the functional `procedure.from(...)` behave
+identically, because the latter spreads its fields into the former. This
+is one defect, not two.
 
-The input side hides it further: an input port still lands, because a
-prompt interpolating it collects it transitively. So the author sees one
-port arrive and reasonably assumes the other did too.
+The fix is not to honor the fields — inference is correct and should
+stay. It is to REJECT unknown keys, so a wrong guess is an error instead
+of a silence. Worth checking whether other CDK builders spread caller
+fields the same way; any of them will behave identically.
 
-Make it loud. Either accept the fields and honor them, or reject them at
-build time naming the trait's own `port` field as the place ports are
-declared in an object shell. Silently accepting an argument that changes
-nothing is the one option that should not survive.
+## 2. `sequenceOrder` should go
 
-Worth checking whether the same class exists elsewhere: any fields object
-in the CDK that is spread into a builder which does not declare those keys
-will behave identically, and trait sources are never typechecked.
+It reorders the sequence at run planning and validates that the list names
+every item exactly once. But order is already expressed by registration
+order, or by the array passed to `sequence`. It is a second way to say one
+thing whose only contribution is a new way to be wrong.
+
+No authored trait, built-in, or template uses it, and it is unreachable
+from the hook API, so nothing ever will. Remove the field, the planner
+branch, and the render clause.
+
+## 3. `worktreeRequired` should go for now
+
+Owner ruling 2026-08-19: remove it until the ergonomics are thought
+through.
+
+It is not redundant with `--worktree` — the flag is the operator's choice
+for one run, the declaration is the trait's statement that it cannot run
+safely without isolation, and the runtime enforces it early with a direct
+message instead of a half-prepared failure. But it hangs off `procedure`
+rather than the trait, it is unreachable from `defineTrait`, and
+consequently no shipped trait uses it. Remove it rather than leave an
+enforced-but-unusable field; it comes back on the trait, reachable from
+the hook API, when its shape is decided.
 """
 validation = """
 ## Watch
 
-- The object layer's contract inference is correct and should not change:
-  a procedure's input and output ARE derived from its steps. This task is
-  about the argument that pretends otherwise.
-- `packages/cdk/src/functional/procedure.ts` spreads its fields into
-  `procedure(...)`, so any fix belongs where the shape is known, not in
-  the object-layer builder that legitimately accepts unknown keys.
+- Inference is the correct behavior and must not change: a procedure's
+  input and output ARE derived from its steps. This task is about the
+  arguments that pretend otherwise.
+- Removing `worktreeRequired` deletes a real enforcement path in
+  `modules/io/src/run.rs` and its rendering in the model view and the
+  Agent Skills export. Two proof tests construct traits carrying it.
+- A port bound to an `output.of(...)` instruction-output appears to be
+  collected by a different route than one bound to a plain slot — the
+  deleted code-review template had no trait `port` field and still emitted
+  its output port. Pin that route down before changing collection, because
+  "sometimes it works" is why nobody noticed this.
 
 ## Done when
 
-Passing `input`/`output` to `procedure.from` either works or fails with a
-message naming the trait `port` field; a scratch trait declaring an output
-port only through `procedure.from` no longer builds green while returning
-nothing; and a scratch behavioral proof pins whichever behavior is chosen.
+Passing an unknown field to `procedure(...)` fails with a message naming
+the trait `port` field as where ports are declared; `sequenceOrder` and
+`worktreeRequired` are gone from the CDK, the canonical model, the
+planner, and the renderers; and a scratch behavioral proof pins the
+rejection rather than a file inventory.
 """
