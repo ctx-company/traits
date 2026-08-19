@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0224"
 title = "CDK vocabulary surface: flat intent, behavior-owned axes"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 The catalog restructure (0221) has to reach the authoring surface, or
