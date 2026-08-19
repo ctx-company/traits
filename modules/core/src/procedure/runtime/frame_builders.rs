@@ -879,7 +879,19 @@ pub(crate) fn resolved_setting_value<'a>(state: &'a State, id: &str) -> Option<&
 /// Canonical single-token rendering: text as-is, number/boolean canonical, and
 /// every non-scalar as compact JSON.
 fn render_argv_value(value: &JsonValue) -> Option<String> {
-    crate::r#trait::prompt::render_interpolation_value(value)
+    let rendered = crate::r#trait::prompt::render_interpolation_value(value)?;
+    // A command's captured stdout conventionally ends in a newline, and a slot
+    // stores what it captured verbatim. One argv element is one token, and no
+    // token meaningfully ends in a newline — `git diff --name-status <sha>\n`
+    // is not a revision, it is an error. Trimming here, at the single point a
+    // value becomes an argument, fixes that for every trait at once; the
+    // alternative is each trait wrapping its own capture in a shell to strip
+    // the newline back off (ctx-notify 0004, 2026-08-19).
+    //
+    // Only trailing newlines are trimmed. Trailing spaces are left alone: a
+    // shell strips them by accident, and a value that ends in one may have
+    // meant to.
+    Some(rendered.trim_end_matches(['\n', '\r']).to_string())
 }
 
 fn prompt_evidence(
@@ -1284,4 +1296,42 @@ fn sort_state(state: &mut State) {
     state
         .output_ports
         .sort_by(|a, b| a.port_ref.cmp(&b.port_ref));
+}
+
+#[cfg(test)]
+mod argv_interpolation_tests {
+    use super::*;
+
+    /// A command step captures stdout verbatim, and stdout conventionally ends
+    /// in a newline. Interpolated into an argv token that newline is never
+    /// meaningful and usually fatal: `git diff --name-status <sha>\n` is not a
+    /// revision. Before this trim, every trait capturing a command's output had
+    /// to wrap the capture in a shell to strip the newline back off.
+    #[test]
+    fn an_interpolated_value_loses_its_trailing_newline() {
+        let sha = serde_json::json!("b04479621afac7335f0f187f490be9eb4dca5bd1\n");
+        assert_eq!(
+            render_argv_value(&sha).as_deref(),
+            Some("b04479621afac7335f0f187f490be9eb4dca5bd1"),
+        );
+    }
+
+    /// Trailing spaces are left alone. A shell would strip them by accident;
+    /// a value that ends in one may have meant to.
+    #[test]
+    fn an_interpolated_value_keeps_its_trailing_space() {
+        let padded = serde_json::json!("value ");
+        assert_eq!(render_argv_value(&padded).as_deref(), Some("value "));
+    }
+
+    /// Interior newlines are untouched — only the trailing ones come off, so a
+    /// multi-line capture still arrives whole.
+    #[test]
+    fn an_interpolated_value_keeps_interior_newlines() {
+        let listing = serde_json::json!("M src/a.rs\nM src/b.rs\n");
+        assert_eq!(
+            render_argv_value(&listing).as_deref(),
+            Some("M src/a.rs\nM src/b.rs"),
+        );
+    }
 }
