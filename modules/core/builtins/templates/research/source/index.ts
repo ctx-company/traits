@@ -4,10 +4,10 @@
 // variants — the whole trait is below. Edit it freely; nothing here is
 // special because it came from a template.
 //
-// The shape: a topic in, a written report at a predictable path out. The
-// path is derived by command steps rather than chosen by the model, so the
-// caller knows where the deliverable landed before the run starts and can
-// assert on it afterwards.
+// The shape: a topic in, a written report at a known path out. The path is a
+// port with a default rather than something the model picks, so the caller
+// knows where the deliverable will land before the run starts and can assert
+// on it afterwards.
 import * as cdk from "@ctx-traits/cdk";
 
 const scout = cdk.agent.planner("scout", {
@@ -24,23 +24,13 @@ const topic = cdk.port.input.text({
   id: "topic",
   description: "The topic or question to research.",
 });
-const outputDir = cdk.port.input.text({
-  id: "output-dir",
-  description: "Repo-relative directory the report is written under.",
+const reportPath = cdk.port.input.text({
+  id: "report-path",
+  description: "Repo-relative path to write the report to.",
   optional: true,
-  default: { value: "research" },
+  default: { value: "research/report.md" },
 });
 
-// Derived by command steps, never by the model: a predictable path is what
-// makes the deliverable assertable.
-const slug = cdk.slot.text({
-  id: "topic-slug",
-  description: "Kebab-case slug derived from the topic, used as the report's directory name.",
-});
-const reportPath = cdk.slot.text({
-  id: "report-path",
-  description: "Repo-relative path the report is written to.",
-});
 const questions = cdk.slot.text({
   id: "questions",
   description: "The core question, the sub-questions worth answering, and what is deliberately out of scope.",
@@ -54,13 +44,6 @@ const verdict = cdk.slot.text({
   description: "Whether the report answers its questions, and what is missing if it does not.",
 });
 
-const reportPathReport = cdk.port.output.text({
-  id: "report-path-report",
-  title: "Report Path",
-  description: "Where the report was written.",
-  value: reportPath,
-  optional: true,
-});
 const findingsReport = cdk.port.output.text({
   id: "findings-report",
   title: "Findings",
@@ -83,16 +66,6 @@ export default function () {
     method: [cdk.behavior.method.EvidenceFirst, cdk.behavior.method.ImplicationsFirst],
   });
   cdk.useIntent({ avoid: [cdk.intent.SpeculativeClaim] });
-
-  cdk.step.command("Derive the topic slug", {
-    input: cdk.input.command`sh -c "printf %s \\"\\$1\\" | tr \\"A-Z\\" \\"a-z\\" | tr -cs \\"a-z0-9\\" \\"-\\" | sed \\"s/^-*//;s/-*\\$//\\"" _ ${topic}`,
-    output: slug,
-  });
-
-  cdk.step.command("Derive the report path", {
-    input: cdk.input.command`sh -c "printf %s/%s/report.md \\"\\$1\\" \\"\\$2\\"" _ ${outputDir} ${slug}`,
-    output: reportPath,
-  });
 
   scout.prompt("Scope the topic", {
     input: cdk.input.prompt`
@@ -121,5 +94,5 @@ export default function () {
     output: verdict,
   });
 
-  return { reportPathReport, findingsReport };
+  return { findingsReport };
 }

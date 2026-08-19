@@ -32,23 +32,14 @@ title = "Findings"
 value = "slot:work-summary"
 
 [[port]]
-id = "output-dir"
+id = "report-path"
 direction = "input"
 schema = "schema:text"
 optional = true
-description = "Repo-relative directory the report is written under."
+description = "Repo-relative path to write the report to."
 
 [port.default]
-value = "research"
-
-[[port]]
-id = "report-path-report"
-direction = "output"
-schema = "schema:text"
-optional = true
-description = "Where the report was written."
-title = "Report Path"
-value = "slot:report-path"
+value = "research/report.md"
 
 [[port]]
 id = "topic"
@@ -60,16 +51,6 @@ description = "The topic or question to research."
 id = "questions"
 schema = "schema:text"
 description = "The core question, the sub-questions worth answering, and what is deliberately out of scope."
-
-[[slot]]
-id = "report-path"
-schema = "schema:text"
-description = "Repo-relative path the report is written to."
-
-[[slot]]
-id = "topic-slug"
-schema = "schema:text"
-description = "Kebab-case slug derived from the topic, used as the report's directory name."
 
 [[slot]]
 id = "verdict"
@@ -100,26 +81,26 @@ summary = "Planning role."
 text = """
 
       Research {port:topic}, answering the questions in {slot:questions}.
-      Write the report to {slot:report-path}, creating the directory if it does not exist.
+      Write the report to {port:report-path}, creating the directory if it does not exist.
       Cite what each finding rests on, and say when the evidence is thin rather than filling the gap.
       Return what you found, what you wrote, and which questions remain open.
     """
 input = [
     "port:topic",
     "slot:questions",
-    "slot:report-path",
+    "port:report-path",
 ]
 output = ["slot:work-summary"]
 
 [prompt.review-the-report]
 text = """
 
-      Read the report at {slot:report-path} and judge it against the questions in {slot:questions}.
+      Read the report at {port:report-path} and judge it against the questions in {slot:questions}.
       The researcher's account: {slot:work-summary}
       Report which questions are answered, which are not, and any claim the report does not support.
     """
 input = [
-    "slot:report-path",
+    "port:report-path",
     "slot:questions",
     "slot:work-summary",
 ]
@@ -137,47 +118,10 @@ output = ["slot:questions"]
 [procedure]
 description = "Researches a topic into a written report at a predictable path, then reviews it for coverage."
 input = [
-    "port:output-dir",
+    "port:report-path",
     "port:topic",
 ]
-output = [
-    "port:findings-report",
-    "port:report-path-report",
-]
-
-[[procedure.sequence]]
-id = "derive-the-topic-slug"
-title = "Derive the topic slug"
-input = ["port:topic"]
-output = ["slot:topic-slug"]
-
-[procedure.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'printf %s "$1" | tr "A-Z" "a-z" | tr -cs "a-z0-9" "-" | sed "s/^-*//;s/-*$//"',
-    "_",
-    "{port:topic}",
-]
-
-[[procedure.sequence]]
-id = "derive-the-report-path"
-title = "Derive the report path"
-input = [
-    "port:output-dir",
-    "slot:topic-slug",
-]
-output = ["slot:report-path"]
-
-[procedure.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'printf %s/%s/report.md "$1" "$2"',
-    "_",
-    "{port:output-dir}",
-    "{slot:topic-slug}",
-]
+output = ["port:findings-report"]
 
 [[procedure.sequence]]
 id = "scope-the-topic"
@@ -195,7 +139,7 @@ prompt = "prompt:research-the-topic"
 input = [
     "port:topic",
     "slot:questions",
-    "slot:report-path",
+    "port:report-path",
 ]
 output = ["slot:work-summary"]
 
@@ -205,7 +149,7 @@ title = "Review the report"
 agent = "agent:reviewer"
 prompt = "prompt:review-the-report"
 input = [
-    "slot:report-path",
+    "port:report-path",
     "slot:questions",
     "slot:work-summary",
 ]
