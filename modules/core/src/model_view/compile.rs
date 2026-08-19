@@ -954,9 +954,24 @@ mod render_v2_shape_tests {
         let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
         let text = &report.behavior_text;
 
+        // Look the expected text up from the catalog rather than hardcoding
+        // it: the point is that a bare reference falls back to the built-in
+        // wording, not that the wording says any particular thing. Pinning the
+        // prose here made a catalog rewording look like a renderer failure.
+        let builtin_summary = |catalog: &[crate::builtins::BuiltinDefinition], slug: &str| {
+            catalog
+                .iter()
+                .find(|entry| entry.slug == slug)
+                .map(|entry| entry.directive.unwrap_or(entry.summary))
+                .unwrap_or_else(|| panic!("{slug} is catalogued"))
+        };
+
+        // `formal` is referenced bare, so it must fall back to the catalog.
+        assert!(text.contains(builtin_summary(crate::builtins::BEHAVIOR_TONE, "formal")));
+        // `leanness` and `warm` carry local text, which always wins over the
+        // catalog — these strings belong to the fixture, not the vocabulary.
         assert!(text.contains("Keep the implementation lean."));
         assert!(text.contains("Keep feedback constructive."));
-        assert!(text.contains("Use a formal professional tone."));
         assert!(!text.contains("custom guidance with no summary supplied"));
     }
 

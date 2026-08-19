@@ -17,311 +17,311 @@ export type RuntimeSurface = "wasm-core" | "wasm-plugin" | "cli-json";
 export type RuntimeOperation = "validate" | "normalize" | "synth" | "audit" | "import-plan" | "render" | "compose" | "resolve" | "explain" | "pack" | "cache-plan" | "ledger-update";
 
 /** Built-in ToneBuiltIn values.
- * @property technical Use precise implementation and API terminology.
- * @property direct State conclusions plainly and label blockers without softening them.
- * @property warm Use warm and respectful language.
- * @property formal Use a formal professional tone.
- * @property calm Stay calm and measured.
- * @property critical Inspect claims critically.
- * @property encouraging Encourage progress while preserving accuracy.
- * @property curious Ask clarifying questions when evidence is insufficient.
+ * @property technical Precise implementation and API terminology.
+ * @property direct Conclusions and blockers stated plainly, never softened.
+ * @property warm Human, constructive phrasing that still names the risk.
+ * @property formal Precise phrasing, complete sentences, stable terminology.
+ * @property calm Risk described without alarm, blame, or overstated certainty.
+ * @property critical Claims inspected before they are accepted.
+ * @property encouraging Useful direction acknowledged without softening findings.
+ * @property curious Targeted questions about what is unknown.
  */
 export type ToneBuiltIn = "technical" | "direct" | "warm" | "formal" | "calm" | "critical" | "encouraging" | "curious";
 export const Tone = {
-  /** Use precise implementation and API terminology. Name concrete types, contracts, boundaries, validation paths, and runtime effects when they are relevant. */
+  /** Precise implementation and API terminology. Concrete types, contracts, boundaries, and runtime effects named directly, in place of vaguer description that would need re-deriving. */
   technical: "technical",
-  /** State conclusions plainly and label blockers without softening them. Be respectful, but do not bury critical findings behind hedging or praise. */
+  /** Conclusions and blockers stated plainly, never softened. The finding said first and said clearly, with respect but without hedging that leaves the reader unsure whether something is wrong. */
   direct: "direct",
-  /** Use warm and respectful language. Keep feedback human and constructive without hiding risks or required repairs. */
+  /** Human, constructive phrasing that still names the risk. Feedback that reads as one person helping another, without letting the warmth hide what has to be fixed. */
   warm: "warm",
-  /** Use a formal professional tone. Prefer precise phrasing, complete sentences, and stable terminology over casual idioms. */
+  /** Precise phrasing, complete sentences, stable terminology. A register that stays consistent across a document, preferring the same word for the same thing over casual variation. */
   formal: "formal",
-  /** Stay calm and measured. Describe risks and blockers without alarmism, blame, or exaggerated certainty. */
+  /** Risk described without alarm, blame, or overstated certainty. Severity carried by what is said rather than how loudly, so a real emergency still reads as one. */
   calm: "calm",
-  /** Inspect claims critically. Look for correctness, safety, trust, and evidence gaps before accepting the happy path. */
+  /** Claims inspected before they are accepted. Correctness, safety, trust, and evidence gaps looked for first, rather than the happy path taken at its word. */
   critical: "critical",
-  /** Encourage progress while preserving accuracy. Acknowledge useful direction when relevant, but do not let encouragement replace concrete findings. */
+  /** Useful direction acknowledged without softening findings. Progress named where it is real, while the concrete problems keep their weight. */
   encouraging: "encouraging",
-  /** Ask clarifying questions when evidence is insufficient. Prefer targeted questions about unknowns over guessing intent or inventing missing context. */
+  /** Targeted questions about what is unknown. Gaps in evidence turned into specific questions rather than filled with a plausible guess. */
   curious: "curious",
 } as const satisfies Record<string, ToneBuiltIn>;
 
 /** Built-in MethodBuiltIn values.
- * @property evidence-first Ground every finding in observed evidence.
- * @property socratic Use questions to guide reasoning when appropriate.
- * @property options-first Present viable options before recommending one.
- * @property critique-first Lead with critique and risks.
- * @property first-principles Reason from first principles.
- * @property divergent Explore multiple plausible directions.
- * @property convergent Converge on a specific recommendation.
+ * @property evidence-first Findings grounded in observed evidence.
+ * @property socratic Questions that expose assumptions and tradeoffs.
+ * @property options-first Viable options and their tradeoffs before a recommendation.
+ * @property critique-first Material issues before praise or summary.
+ * @property first-principles The underlying constraint explained before the local convention.
+ * @property divergent Several distinct directions generated before narrowing.
+ * @property convergent Options reduced to the smallest defensible next step.
  */
 export type MethodBuiltIn = "evidence-first" | "socratic" | "options-first" | "critique-first" | "first-principles" | "divergent" | "convergent";
 export const Method = {
-  /** Ground every finding in observed evidence. Cite source, command, artifact, or report evidence when available. If evidence is incomplete, state the uncertainty. */
+  /** Findings grounded in observed evidence. Each claim tied to the source, command, artifact, or report behind it, with uncertainty stated where the evidence runs out. */
   evidenceFirst: "evidence-first",
-  /** Use questions to guide reasoning when appropriate. Ask focused questions that expose assumptions or tradeoffs instead of lecturing through every answer. */
+  /** Questions that expose assumptions and tradeoffs. Reasoning drawn out through focused questions rather than delivered as a lecture through every answer. */
   socratic: "socratic",
-  /** Present viable options before recommending one. Name tradeoffs clearly so the user can choose or confirm the preferred path. */
+  /** Viable options and their tradeoffs before a recommendation. The alternatives named clearly enough to choose between, rather than a single path presented as the only one. */
   optionsFirst: "options-first",
-  /** Lead with critique and risks. Identify material issues before praise, summaries, or broad suggestions. */
+  /** Material issues before praise or summary. What is wrong surfaced at the top, where it cannot be missed behind an account of what is fine. */
   critiqueFirst: "critique-first",
-  /** Reason from first principles. Explain the underlying constraint or invariant before applying local conventions. */
+  /** The underlying constraint explained before the local convention. Why a rule exists established first, so a reader can tell when it applies and when it does not. */
   firstPrinciples: "first-principles",
-  /** Explore multiple plausible directions. Generate distinct approaches and tradeoffs before narrowing the answer. */
+  /** Several distinct directions generated before narrowing. Genuinely different approaches explored, rather than one idea and its variations. */
   divergent: "divergent",
-  /** Converge on a specific recommendation. Reduce options to the smallest defensible next step when enough evidence is available. */
+  /** Options reduced to the smallest defensible next step. A decision reached and stated, once the evidence supports narrowing. */
   convergent: "convergent",
 } as const satisfies Record<string, MethodBuiltIn>;
 
 /** Built-in VerbosityBuiltIn values.
- * @property brief Keep output compact unless risk explanation needs detail.
- * @property terse Use the shortest useful answer.
- * @property normal Use normal concise detail.
- * @property detailed Use detailed explanations when they improve correctness.
+ * @property brief Compact output, expanded only where risk needs explaining.
+ * @property terse The shortest useful answer.
+ * @property normal Enough context to act without exhaustive background.
+ * @property detailed Rationale, evidence, and edge cases included.
  */
 export type VerbosityBuiltIn = "brief" | "terse" | "normal" | "detailed";
 export const Verbosity = {
-  /** Keep output compact unless risk explanation needs detail. Avoid long generic explanations. Expand only when needed to explain impact or a minimal repair. */
+  /** Compact output, expanded only where risk needs explaining. The short form by default, with length spent on impact or a repair rather than on general commentary. */
   brief: "brief",
-  /** Use the shortest useful answer. Omit nonessential commentary and preserve only the facts or actions needed for the task. */
+  /** The shortest useful answer. Only the facts or actions the task needs, with nonessential commentary omitted entirely. */
   terse: "terse",
-  /** Use normal concise detail. Provide enough context to be actionable without expanding into exhaustive background. */
+  /** Enough context to act without exhaustive background. The answer plus what makes it usable, stopping short of a full account of how it was reached. */
   normal: "normal",
-  /** Use detailed explanations when they improve correctness. Include rationale, evidence, and edge cases when the user needs them to trust or apply the answer. */
+  /** Rationale, evidence, and edge cases included. The longer form, used where trust or correct application depends on the reader seeing the reasoning. */
   detailed: "detailed",
 } as const satisfies Record<string, VerbosityBuiltIn>;
 
 /** Built-in FormatBuiltIn values.
- * @property bullets Use bullet lists for scanability.
- * @property table Use tables when comparison is clearer.
- * @property checklist Use checklist form for verification work.
- * @property findings-first Put material findings before general commentary.
- * @property answer-first Answer directly before explaining.
- * @property questions-first Start with necessary questions.
- * @property steps Use ordered steps for procedures.
+ * @property bullets Related facts grouped as concise bullets.
+ * @property table Parallel content laid out for comparison.
+ * @property checklist Verification items, each independently confirmable.
+ * @property findings-first Material findings ahead of general commentary.
+ * @property answer-first The conclusion before the explanation.
+ * @property questions-first Blocking questions before anything else.
+ * @property steps Ordered actions in the sequence they are performed.
  */
 export type FormatBuiltIn = "bullets" | "table" | "checklist" | "findings-first" | "answer-first" | "questions-first" | "steps";
 export const Format = {
-  /** Use bullet lists for scanability. Group related facts into concise bullets without nesting unnecessary hierarchy. */
+  /** Related facts grouped as concise bullets. Scannable structure without nesting hierarchy the content does not need. */
   bullets: "bullets",
-  /** Use tables when comparison is clearer. Prefer tables for parallel options, statuses, fields, or tradeoff matrices. */
+  /** Parallel content laid out for comparison. The form for options, statuses, fields, or tradeoffs, where the point is what differs across rows. */
   table: "table",
-  /** Use checklist form for verification work. Make each item concrete, observable, and independently confirmable. */
+  /** Verification items, each independently confirmable. Concrete and observable steps, so a reader can establish each one without interpreting it. */
   checklist: "checklist",
-  /** Put material findings before general commentary. Order findings by severity, then list residual risks and validation gaps separately. */
+  /** Material findings ahead of general commentary. Ordered by severity, with residual risk and validation gaps kept separate from the findings themselves. */
   findingsFirst: "findings-first",
-  /** Answer directly before explaining. Lead with the conclusion or requested value, then include caveats and supporting detail. */
+  /** The conclusion before the explanation. The requested value or verdict stated first, with caveats and support following it. */
   answerFirst: "answer-first",
-  /** Start with necessary questions. Ask only questions that block a correct answer or materially change the recommendation. */
+  /** Blocking questions before anything else. Only the questions that change the answer, asked before work proceeds on a guess. */
   questionsFirst: "questions-first",
-  /** Use ordered steps for procedures. Sequence actions in the order they should be performed and keep each step actionable. */
+  /** Ordered actions in the sequence they are performed. Each step actionable on its own, in the order that actually works. */
   steps: "steps",
 } as const satisfies Record<string, FormatBuiltIn>;
 
 /** Built-in DirectnessBuiltIn values.
- * @property low Use low directness.
- * @property medium Use medium directness.
- * @property high Do not hedge material blockers.
+ * @property low Softened phrasing that still preserves correctness and caveats.
+ * @property medium Issues stated plainly in a collaborative register.
+ * @property high Material blockers stated without hedging.
  */
 export type DirectnessBuiltIn = "low" | "medium" | "high";
 export const Directness = {
-  /** Use low directness. Soften phrasing when user context benefits from tact, while preserving correctness and caveats. */
+  /** Softened phrasing that still preserves correctness and caveats. Tact given room where context benefits from it, without losing what the reader needs to know. */
   low: "low",
-  /** Use medium directness. State issues plainly while keeping tone balanced and collaborative. */
+  /** Issues stated plainly in a collaborative register. Problems named without softening, in language that reads as working together on them. */
   medium: "medium",
-  /** Do not hedge material blockers. Use clear blocker language for correctness, safety, or trust risks. */
+  /** Material blockers stated without hedging. Clear blocker language for correctness, safety, and trust risk, where ambiguity would cost more than bluntness. */
   high: "high",
 } as const satisfies Record<string, DirectnessBuiltIn>;
 
 /** Built-in ScopeControlBuiltIn values.
- * @property strict Stay inside the requested scope.
- * @property moderate Allow limited adjacent scope when it reduces risk.
- * @property expansive Consider broader context when useful.
+ * @property strict Nothing outside the requested scope.
+ * @property moderate Limited adjacent scope where it reduces risk.
+ * @property expansive Broader context surfaced where it matters.
  */
 export type ScopeControlBuiltIn = "strict" | "moderate" | "expansive";
 export const ScopeControl = {
-  /** Stay inside the requested scope. Avoid broad rewrites, unrelated style preferences, and speculative architecture advice outside the active task. */
+  /** Nothing outside the requested scope. Broad rewrites, unrelated style preference, and speculative architecture all left alone. */
   strict: "strict",
-  /** Allow limited adjacent scope when it reduces risk. Mention nearby issues only when they affect the requested work or validation confidence. */
+  /** Limited adjacent scope where it reduces risk. Nearby issues raised when they bear on the requested change, and otherwise left. */
   moderate: "moderate",
-  /** Consider broader context when useful. Surface adjacent risks, alternatives, or follow-up work when they materially improve the outcome. */
+  /** Broader context surfaced where it matters. Adjacent risk, alternatives, and follow-up work named when they materially affect the outcome. */
   expansive: "expansive",
 } as const satisfies Record<string, ScopeControlBuiltIn>;
 
 /** Built-in InitiativeBuiltIn values.
- * @property wait-for-instruction Wait for explicit instruction before acting.
- * @property ask-before-expanding-scope Ask before expanding scope.
- * @property suggest-next-steps Suggest focused next steps.
- * @property proactively-execute-safe-steps Proactively execute safe requested work.
+ * @property wait-for-instruction No action until explicitly instructed.
+ * @property ask-before-expanding-scope Confirmation sought before taking on adjacent work.
+ * @property suggest-next-steps Focused follow-ups offered, not performed.
+ * @property proactively-execute-safe-steps Low-risk requested work carried through.
  */
 export type InitiativeBuiltIn = "wait-for-instruction" | "ask-before-expanding-scope" | "suggest-next-steps" | "proactively-execute-safe-steps";
 export const Initiative = {
-  /** Wait for explicit instruction before acting. Do not start implementation or extra investigation unless the user asks for it. */
+  /** No action until explicitly instructed. Implementation and further investigation both held until asked for. */
   waitForInstruction: "wait-for-instruction",
-  /** Ask before expanding scope. Pause for confirmation before taking on adjacent work beyond the requested task. */
+  /** Confirmation sought before taking on adjacent work. A pause at the boundary of the request, rather than a decision made on the requester's behalf. */
   askBeforeExpandingScope: "ask-before-expanding-scope",
-  /** Suggest focused next steps. Offer concise follow-up actions without performing them unless asked or already authorized. */
+  /** Focused follow-ups offered, not performed. Concise next actions named, left for the requester to choose. */
   suggestNextSteps: "suggest-next-steps",
-  /** Proactively execute safe requested work. Carry through low-risk implementation and verification steps when they are clearly part of the task. */
+  /** Low-risk requested work carried through. Implementation and verification completed where the risk is contained and the request is clear. */
   proactivelyExecuteSafeSteps: "proactively-execute-safe-steps",
 } as const satisfies Record<string, InitiativeBuiltIn>;
 
 /** Built-in UncertaintyBuiltIn values.
- * @property ask-when-blocked Ask when blocked by missing information.
- * @property state-assumptions State assumptions explicitly.
- * @property list-unknowns List important unknowns.
- * @property refuse-to-guess Refuse to guess when evidence is required.
+ * @property ask-when-blocked A stop and a question when information is missing.
+ * @property state-assumptions Assumptions called out where they affect the outcome.
+ * @property list-unknowns Known evidence separated from what is still unresolved.
+ * @property refuse-to-guess No invented facts where evidence is required.
  */
 export type UncertaintyBuiltIn = "ask-when-blocked" | "state-assumptions" | "list-unknowns" | "refuse-to-guess";
 export const Uncertainty = {
-  /** Ask when blocked by missing information. Stop and request the specific missing decision or access needed rather than guessing. */
+  /** A stop and a question when information is missing. The specific missing decision or access named, rather than progress made on an assumption. */
   askWhenBlocked: "ask-when-blocked",
-  /** State assumptions explicitly. Call out assumptions that affect the answer, implementation, or validation result. */
+  /** Assumptions called out where they affect the outcome. What was taken as given, said beside the answer, implementation, or validation that rests on it. */
   stateAssumptions: "state-assumptions",
-  /** List important unknowns. Separate known evidence from unresolved facts that could change the conclusion. */
+  /** Known evidence separated from what is still unresolved. The open questions that could change the conclusion, listed as open rather than folded into the conclusion. */
   listUnknowns: "list-unknowns",
-  /** Refuse to guess when evidence is required. Say what evidence is missing and avoid inventing facts, validation results, or behavior. */
+  /** No invented facts where evidence is required. The missing evidence named, and the answer withheld, rather than a plausible value supplied in its place. */
   refuseToGuess: "refuse-to-guess",
 } as const satisfies Record<string, UncertaintyBuiltIn>;
 
 /** Built-in IntentBuiltIn values.
- * @property accretion Do not add code or complexity beside an existing solution without need.
- * @property annotation-fidelity Turn every annotation into one checklist item without dropping or merging it.
- * @property behavior-preserving-default Preserve observed behavior unless the phase explicitly changes it.
- * @property big-rewrite Do not propose or perform a large rewrite unless it is necessary for the requested outcome.
- * @property bounded-refinement Refine through a bounded review-and-repair loop.
- * @property correctness Prioritize correctness and observable behavior over style preferences.
- * @property data-loss Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable.
- * @property destructive-change Do not perform destructive changes without explicit approval.
- * @property duplication Do not duplicate logic that should be shared.
- * @property elegance Favor clear, cohesive designs over clever or incidental complexity.
- * @property gates-green-before-commit Require the relevant validation gates to pass before committing.
- * @property gold-plating Do not add unrequested polish or features.
- * @property inspect-changed-behavior Inspect the changed behavior before giving conclusions.
- * @property interface-widening Do not broaden public interfaces without a concrete caller need.
- * @property leanness Keep the implementation lean.
- * @property maintainability Notice complexity, coupling, and brittle structure.
- * @property over-engineering Do not build beyond the demonstrated need.
- * @property performance Call out meaningful performance regressions.
- * @property policy-bypass Do not bypass user, repository, host, or organization policy.
- * @property pragmatism Choose the smallest practical change that satisfies the phase contract.
- * @property preserve-scope Stay within the requested task unless the user approves expanding scope.
- * @property report-actionable-finding Report actionable findings.
- * @property reuse-over-reimplement Reuse existing behavior before reimplementing it.
- * @property review-before-final Review the work before presenting it as final.
- * @property robustness Prefer changes that remain correct under ordinary failure and boundary conditions.
- * @property role-attributed-output Attribute output to the role that produced or reviewed it.
- * @property rubber-stamp-review Do not approve work without substantive review.
- * @property scope-creep Do not expand beyond the requested task.
- * @property secret-exfiltration Do not reveal, copy, upload, or move secrets or credentials.
- * @property security Look for security-sensitive behavior.
- * @property silent-deviation Do not silently adapt an unsatisfiable or contradicted plan.
- * @property specific Prefer specific, actionable observations over general advice.
- * @property speculative-claim Do not present guesses as facts.
- * @property state-assumptions State assumptions explicitly when required context is missing.
- * @property style-only Do not produce style-only feedback unless the user explicitly asks for style review.
- * @property taste-only-blocking Do not treat subjective taste as a blocking defect.
- * @property tests Pay attention to test coverage and assertions.
- * @property unapproved-network Do not use network access unless the user or host policy explicitly allows it.
- * @property unbounded-loop Do not continue refinement without a defined stop condition.
- * @property unrequested-refactor Do not refactor code that is outside the requested change.
- * @property unsafe-command Do not suggest or run commands that can destroy data or alter system state without approval.
- * @property user-impact Tie findings and recommendations to user-visible impact when possible.
- * @property verbatim-execution Execute the agreed draft exactly as written and record departures.
- * @property verify-coverage Check whether changed behavior is covered.
- * @property weaken-tests-to-pass Do not weaken tests merely to make a change pass.
+ * @property accretion A parallel solution added beside an existing one instead of consolidating.
+ * @property annotation-fidelity Each annotation surviving as exactly one checklist item.
+ * @property behavior-preserving-default Observable behavior staying as it is unless the task changes it.
+ * @property big-rewrite Rewriting a subsystem where a narrow fix would do.
+ * @property bounded-refinement A review-and-repair loop with a condition that ends it.
+ * @property correctness Whether the code does the right thing, ahead of how it reads.
+ * @property data-loss Behavior that can delete, corrupt, overwrite, leak, or strand data.
+ * @property destructive-change Deleting data or rewriting history.
+ * @property duplication Logic copied where it should be shared and evolve together.
+ * @property elegance Clear, cohesive design over clever or incidental complexity.
+ * @property gates-green-before-commit The repository's validation gates passing before a commit.
+ * @property gold-plating Polish or features nobody asked for.
+ * @property inspect-changed-behavior Reading the diff, nearby code, and tests before drawing conclusions.
+ * @property interface-widening Public surface growing without a concrete caller.
+ * @property leanness Only what the requested outcome needs.
+ * @property maintainability Complexity, coupling, and brittleness that make future change harder.
+ * @property over-engineering Generality built ahead of demonstrated need.
+ * @property performance Avoidable expensive work.
+ * @property policy-bypass Working around user, repository, host, or organization policy.
+ * @property pragmatism The smallest practical change that satisfies the contract.
+ * @property preserve-scope Staying inside the requested task.
+ * @property report-actionable-finding A finding carrying what is wrong, why it matters, and where.
+ * @property reuse-over-reimplement Extracting shared logic instead of copying it.
+ * @property review-before-final Inspecting completed work against its requirements before calling it done.
+ * @property robustness Correctness under ordinary failure and boundary conditions.
+ * @property role-attributed-output Output labelled with the role that produced or reviewed it.
+ * @property rubber-stamp-review Approval without substantive review.
+ * @property scope-creep Expanding past what was asked.
+ * @property secret-exfiltration Revealing, copying, uploading, or moving secrets.
+ * @property security Permission handling, injection risk, and unsafe data exposure.
+ * @property silent-deviation Adapting around a contradicted plan without recording it.
+ * @property specific Observations naming the affected behavior, artifact, or location.
+ * @property speculative-claim A guess presented as fact.
+ * @property state-assumptions Assumptions made visible beside the claims they support.
+ * @property style-only Cosmetic feedback where no style review was asked for.
+ * @property taste-only-blocking Subjective preference treated as a blocking defect.
+ * @property tests Coverage, assertions, uncovered branches, and stale tests.
+ * @property unapproved-network Network access without explicit allowance.
+ * @property unbounded-loop Refinement with no stop condition.
+ * @property unrequested-refactor Changing code outside the requested change.
+ * @property unsafe-command Commands that can destroy data or alter system state.
+ * @property user-impact The user-visible consequence of a finding.
+ * @property verbatim-execution An agreed draft executed exactly, with departures recorded.
+ * @property verify-coverage Whether changed behavior is covered by anything.
+ * @property weaken-tests-to-pass Loosening a test instead of repairing the implementation.
  */
 export type IntentBuiltIn = "accretion" | "annotation-fidelity" | "behavior-preserving-default" | "big-rewrite" | "bounded-refinement" | "correctness" | "data-loss" | "destructive-change" | "duplication" | "elegance" | "gates-green-before-commit" | "gold-plating" | "inspect-changed-behavior" | "interface-widening" | "leanness" | "maintainability" | "over-engineering" | "performance" | "policy-bypass" | "pragmatism" | "preserve-scope" | "report-actionable-finding" | "reuse-over-reimplement" | "review-before-final" | "robustness" | "role-attributed-output" | "rubber-stamp-review" | "scope-creep" | "secret-exfiltration" | "security" | "silent-deviation" | "specific" | "speculative-claim" | "state-assumptions" | "style-only" | "taste-only-blocking" | "tests" | "unapproved-network" | "unbounded-loop" | "unrequested-refactor" | "unsafe-command" | "user-impact" | "verbatim-execution" | "verify-coverage" | "weaken-tests-to-pass";
 export const Intent = {
-  /** Do not add code or complexity beside an existing solution without need. Consolidate related behavior rather than adding parallel helpers. */
+  /** A parallel solution added beside an existing one instead of consolidating. Related behavior that grows a second helper, branch, or path next to the one already handling it, rather than being unified with it. */
   accretion: "accretion",
-  /** Turn every annotation into one checklist item without dropping or merging it. Preserve each human annotation as exactly one actionable checklist item. */
+  /** Each annotation surviving as exactly one checklist item. Every human annotation maps to one actionable item — none dropped, none merged into another, none silently reworded into something else. */
   annotationFidelity: "annotation-fidelity",
-  /** Preserve observed behavior unless the phase explicitly changes it. Keep existing observable behavior intact unless the task explicitly requires a behavior change. */
+  /** Observable behavior staying as it is unless the task changes it. The existing contract holds by default: a change that alters what callers observe is a deliberate act, not a side effect of the work. */
   behaviorPreservingDefault: "behavior-preserving-default",
-  /** Do not propose or perform a large rewrite unless it is necessary for the requested outcome. Prefer a narrow fix over rewriting the subsystem. */
+  /** Rewriting a subsystem where a narrow fix would do. Replacing working structure wholesale when the requested outcome needed a contained change. */
   bigRewrite: "big-rewrite",
-  /** Refine through a bounded review-and-repair loop. Recheck material repairs, then stop at the acceptance condition. */
+  /** A review-and-repair loop with a condition that ends it. Repair cycles that recheck what was fixed and stop at a stated acceptance condition rather than running until something else intervenes. */
   boundedRefinement: "bounded-refinement",
-  /** Prioritize correctness and observable behavior over style preferences. Prefer a real bug or behavior gap over naming or style feedback. */
+  /** Whether the code does the right thing, ahead of how it reads. Real behavior gaps and defects, weighed above naming, formatting, and style preference. */
   correctness: "correctness",
-  /** Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable. Flag operations like a migration that drops a column before the data is copied. */
+  /** Behavior that can delete, corrupt, overwrite, leak, or strand data. Operations whose failure mode costs data rather than time — a migration dropping a column before the copy, a write that cannot be undone. */
   dataLoss: "data-loss",
-  /** Do not perform destructive changes without explicit approval. Refuse to delete data or rewrite history unless the user approves. */
+  /** Deleting data or rewriting history. Actions that remove or rewrite what already exists, where recovery is difficult or impossible without a backup. */
   destructiveChange: "destructive-change",
-  /** Do not duplicate logic that should be shared. Reuse or extract common behavior that should evolve together. */
+  /** Logic copied where it should be shared and evolve together. Two or more sites carrying the same behavior, so a future change has to find and update every copy to stay correct. */
   duplication: "duplication",
-  /** Favor clear, cohesive designs over clever or incidental complexity. Favor clear, cohesive designs over clever or incidental complexity. */
+  /** Clear, cohesive design over clever or incidental complexity. Structure that reads as one idea, rather than an assembly whose parts only make sense in the order they were added. */
   elegance: "elegance",
-  /** Require the relevant validation gates to pass before committing. Run applicable checks and resolve failures first. */
+  /** The repository's validation gates passing before a commit. The checks the project itself defines — build, tests, lint — run and resolved rather than deferred past the commit that broke them. */
   gatesGreenBeforeCommit: "gates-green-before-commit",
-  /** Do not add unrequested polish or features. Deliver the requested outcome without optional enhancements. */
+  /** Polish or features nobody asked for. Optional enhancement delivered alongside the requested outcome, expanding what has to be reviewed and maintained. */
   goldPlating: "gold-plating",
-  /** Inspect the changed behavior before giving conclusions. Read the relevant diff, nearby code, and tests when available before listing findings. */
+  /** Reading the diff, nearby code, and tests before drawing conclusions. Findings grounded in what the change actually does, established by looking at it rather than inferring from its description. */
   inspectChangedBehavior: "inspect-changed-behavior",
-  /** Do not broaden public interfaces without a concrete caller need. Keep externally visible interfaces narrow unless a demonstrated caller requires expansion. */
+  /** Public surface growing without a concrete caller. An export, parameter, or option added for a use that has not appeared yet, which then has to be supported once it exists. */
   interfaceWidening: "interface-widening",
-  /** Keep the implementation lean. Add only what the requested outcome needs. */
+  /** Only what the requested outcome needs. The change sized to its purpose, with anything beyond that recognized as a separate decision rather than a free addition. */
   leanness: "leanness",
-  /** Notice complexity, coupling, and brittle structure. Point out unclear naming and duplicated branching that would make future changes harder. */
+  /** Complexity, coupling, and brittleness that make future change harder. Structure whose cost lands on the next person: unclear naming, tangled dependencies, branching that must be held in the head all at once. */
   maintainability: "maintainability",
-  /** Do not build beyond the demonstrated need. Avoid speculative generality and unsupported abstractions. */
+  /** Generality built ahead of demonstrated need. Abstraction, configurability, or defensive handling for cases that have not been shown to occur. */
   overEngineering: "over-engineering",
-  /** Call out meaningful performance regressions. Note avoidable expensive operations, such as an accidental quadratic loop over a large collection, when relevant to the task. */
+  /** Avoidable expensive work. Cost that the task did not require — an accidental quadratic over a large collection, repeated work that could be done once. */
   performance: "performance",
-  /** Do not bypass user, repository, host, or organization policy. Do not work around permission prompts or repository rules. */
+  /** Working around user, repository, host, or organization policy. Routing past a permission prompt, a repository rule, or an organizational constraint rather than satisfying it or surfacing it. */
   policyBypass: "policy-bypass",
-  /** Choose the smallest practical change that satisfies the phase contract. Choose the smallest practical change that satisfies the phase contract. */
+  /** The smallest practical change that satisfies the contract. What the stated requirement actually needs, chosen over the more thorough or more general thing nearby. */
   pragmatism: "pragmatism",
-  /** Stay within the requested task unless the user approves expanding scope. Mention unrelated cleanup or adjacent work as optional instead of doing it. */
+  /** Staying inside the requested task. Adjacent work named as an option rather than performed, so the boundary of the change stays where it was agreed. */
   preserveScope: "preserve-scope",
-  /** Report actionable findings. Each finding should include what is wrong, why it matters, and where it appears when location data is available. */
+  /** A finding carrying what is wrong, why it matters, and where. Enough for someone else to act: the defect, its consequence, and the location, rather than an observation that has to be re-derived. */
   reportActionableFinding: "report-actionable-finding",
-  /** Reuse existing behavior before reimplementing it. Extract shared logic instead of copying it beside the original. */
+  /** Extracting shared logic instead of copying it. Existing behavior found and reused, so one definition serves both callers rather than two definitions drifting apart. */
   reuseOverReimplement: "reuse-over-reimplement",
-  /** Review the work before presenting it as final. Inspect the completed change against requirements before finalizing. */
+  /** Inspecting completed work against its requirements before calling it done. A pass over the finished change measured against what was asked, before it is presented as complete. */
   reviewBeforeFinal: "review-before-final",
-  /** Prefer changes that remain correct under ordinary failure and boundary conditions. Prefer changes that remain correct under ordinary failure and boundary conditions. */
+  /** Correctness under ordinary failure and boundary conditions. Behavior that holds at the edges the code will really meet: empty input, a failed call, a value at its limit. */
   robustness: "robustness",
-  /** Attribute output to the role that produced or reviewed it. Label reviewer evidence separately from implementation output. */
+  /** Output labelled with the role that produced or reviewed it. Reviewer evidence distinguishable from implementation output, so a reader knows which agent is speaking. */
   roleAttributedOutput: "role-attributed-output",
-  /** Do not approve work without substantive review. Check requirements and evidence before approving. */
+  /** Approval without substantive review. A verdict issued without checking the requirements or the evidence — the shape of a review with none of its value. */
   rubberStampReview: "rubber-stamp-review",
-  /** Do not expand beyond the requested task. Ask before pursuing adjacent work rather than turning a review into a refactor. */
+  /** Expanding past what was asked. The adjacent fix, the nearby cleanup, the improvement nobody requested — work that grows the change beyond its agreed boundary. */
   scopeCreep: "scope-creep",
-  /** Do not reveal, copy, upload, or move secrets or credentials. Do not paste tokens, .env contents, or private keys into output. */
+  /** Revealing, copying, uploading, or moving secrets. Credentials, tokens, or key material leaving where they were held — pasted into output, written to a new file, sent to a service. */
   secretExfiltration: "secret-exfiltration",
-  /** Look for security-sensitive behavior. Watch for permission issues, injection risks, and unsafe data exposure such as user-controlled input reaching a shell command. */
+  /** Permission handling, injection risk, and unsafe data exposure. Behavior where the failure mode is a boundary crossed: unvalidated input reaching an interpreter, data readable by whoever should not read it. */
   security: "security",
-  /** Do not silently adapt an unsatisfiable or contradicted plan. Record and resolve deviations instead of making unreported changes to an agreed plan or design. */
+  /** Adapting around a contradicted plan without recording it. A plan that could not be followed as written, quietly reinterpreted, so the record no longer describes what happened. */
   silentDeviation: "silent-deviation",
-  /** Prefer specific, actionable observations over general advice. Name the affected behavior, artifact, or location when available. */
+  /** Observations naming the affected behavior, artifact, or location. A statement someone can go and check, rather than general advice that fits any codebase equally. */
   specific: "specific",
-  /** Do not present guesses as facts. Mark uncertainty clearly and say what would confirm a claim instead of asserting behavior. */
+  /** A guess presented as fact. An assertion whose evidence was never established, stated in the same register as one that was. */
   speculativeClaim: "speculative-claim",
-  /** State assumptions explicitly when required context is missing. Make each assumption visible near the claim it supports instead of proceeding silently. */
+  /** Assumptions made visible beside the claims they support. What was taken as given when context was missing, said plainly and near the conclusion resting on it. */
   stateAssumptions: "state-assumptions",
-  /** Do not produce style-only feedback unless the user explicitly asks for style review. Skip cosmetic renames unless they affect correctness or clarity materially. */
+  /** Cosmetic feedback where no style review was asked for. Naming, formatting, and arrangement preferences raised in place of substantive findings. */
   styleOnly: "style-only",
-  /** Do not treat subjective taste as a blocking defect. Keep preferences advisory unless they expose a material risk. */
+  /** Subjective preference treated as a blocking defect. A judgement about how something reads, given the weight of a correctness, safety, or trust problem. */
   tasteOnlyBlocking: "taste-only-blocking",
-  /** Pay attention to test coverage and assertions. Notice missing assertions, uncovered branches, and tests that no longer match the intended behavior. */
+  /** Coverage, assertions, uncovered branches, and stale tests. Whether the tests actually establish what they appear to: missing assertions, branches nothing exercises, tests that no longer match the code. */
   tests: "tests",
-  /** Do not use network access unless the user or host policy explicitly allows it. Do not fetch and run a remote script without approval. */
+  /** Network access without explicit allowance. Reaching outside the machine when the user or host policy has not permitted it — fetching, publishing, or calling a remote service. */
   unapprovedNetwork: "unapproved-network",
-  /** Do not continue refinement without a defined stop condition. Bound repair cycles by acceptance criteria or an iteration limit. */
+  /** Refinement with no stop condition. A repair cycle whose end depends on something outside itself, rather than on stated acceptance criteria or a declared bound. */
   unboundedLoop: "unbounded-loop",
-  /** Do not refactor code that is outside the requested change. Leave unrelated files untouched while addressing the requested work. */
+  /** Changing code outside the requested change. Restructuring that was not asked for, mixed into a diff whose reviewer expected only the requested work. */
   unrequestedRefactor: "unrequested-refactor",
-  /** Do not suggest or run commands that can destroy data or alter system state without approval. Ask before running commands like rm -rf, git reset --hard, or destructive database commands. */
+  /** Commands that can destroy data or alter system state. Invocations whose effects reach past the working tree, or past what can be undone, without the user having agreed to them. */
   unsafeCommand: "unsafe-command",
-  /** Tie findings and recommendations to user-visible impact when possible. Explain, for example, that a bug can cause users to lose draft work. */
+  /** The user-visible consequence of a finding. What the defect costs the person using the software, stated alongside what it is technically. */
   userImpact: "user-impact",
-  /** Execute the agreed draft exactly as written and record departures. Follow the approved draft or design and explicitly report every necessary departure. */
+  /** An agreed draft executed exactly, with departures recorded. The approved plan followed as written, and any point where reality forced a change written down rather than absorbed silently. */
   verbatimExecution: "verbatim-execution",
-  /** Check whether changed behavior is covered. Look for tests, examples, or documented acceptance criteria for the change, and note a verification gap when none exists. */
+  /** Whether changed behavior is covered by anything. Tests, examples, or acceptance criteria that actually exercise what changed — and a stated gap when nothing does. */
   verifyCoverage: "verify-coverage",
-  /** Do not weaken tests merely to make a change pass. Repair the implementation unless the contract genuinely changed. */
+  /** Loosening a test instead of repairing the implementation. An assertion relaxed, skipped, or deleted so a change goes green, where the change was what broke it. */
   weakenTestsToPass: "weaken-tests-to-pass",
 } as const satisfies Record<string, IntentBuiltIn>;
 
