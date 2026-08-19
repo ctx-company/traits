@@ -81,11 +81,11 @@ fn classify(name: &str) -> Result<&'static str, String> {
         | "host" | "migrate" | "activate" | "review" | "config" | "task" | "explain"
         | "claim-gate" | "hygiene" | "cost" | "prepare-public" | "context-contracts" | "policy"
         | "evidence" | "compatibility" | "subagent" | "inspect" | "manifest" | "schema"
-        | "sdk-generate" | "synth" | "generate-evals" | "generate-round" | "refine-round"
-        | "import-round" | "import-refresh" | "run-info" | "session" | "mcp" | "drive" | "call"
-        | "run-status" | "run-frame" | "next" | "set" | "deactivate" | "deprecate" | "eval"
-        | "prompt" | "preview" | "search" | "resolve" | "pack" | "context" | "hook" | "help"
-        | "stats" | "story" | "tui-demo" | "edit" | "running" => "hidden",
+        | "sdk-generate" | "synth" | "generate-round" | "refine-round" | "import-round"
+        | "import-refresh" | "run-info" | "session" | "mcp" | "drive" | "call" | "run-status"
+        | "run-frame" | "next" | "set" | "deactivate" | "deprecate" | "eval" | "prompt"
+        | "preview" | "search" | "resolve" | "pack" | "context" | "hook" | "help" | "stats"
+        | "story" | "tui-demo" | "edit" | "running" => "hidden",
         other => {
             return Err(format!(
                 "ctx traits help --json: unclassified command {other:?}; add it to the release-group classification in help_surface.rs"

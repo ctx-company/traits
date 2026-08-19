@@ -1087,32 +1087,6 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// LLM-assisted synthesis of deferred behavioral/runtime eval declarations.
-    #[command(hide = true)]
-    GenerateEvals {
-        /// Canonical trait file to extend in memory.
-        #[arg(long)]
-        file: String,
-
-        /// Provider/model ID for the eval synthesis author.
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Override the generate-evals agent assignment.
-        #[arg(
-            long = "assign",
-            value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
-        )]
-        assignments: Vec<String>,
-
-        /// Path to raw JSON EvalSynthesisScaffold output for deterministic validation.
-        #[arg(long)]
-        candidate: Option<String>,
-
-        /// Emit structured JSON using the assist candidate envelope.
-        #[arg(long)]
-        json: bool,
-    },
     /// Import an Agent Skills SKILL.md into a draft-status, unreviewed canonical trait package.
     ///
     /// Persists the complete package by default (root status draft, canonical

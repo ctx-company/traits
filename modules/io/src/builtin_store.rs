@@ -1,6 +1,6 @@
-//! Runtime materialization of the seven embedded first-party built-in
+//! Runtime materialization of the six embedded first-party built-in
 //! meta-trait packages (`generate-trait`, `refine-trait`, `critique-trait`,
-//! `generate-evals`, `explain-trait`, `import-trait`, `trait-spec`) as real files on disk.
+//! `explain-trait`, `import-trait`, `trait-spec`) as real files on disk.
 //!
 //! `ctx_traits_core::builtin_trait_packages` only exposes the packages as
 //! bytes compiled into the binary; nothing on disk backs them at runtime
@@ -105,7 +105,7 @@ pub fn resolve_builtin_package_root(
 }
 
 /// Materialize every embedded built-in package under the current CLI
-/// version's store directory if it is not already valid. All seven packages
+/// version's store directory if it is not already valid. All six packages
 /// are always published together (never one at a time) so a sibling
 /// `../trait-spec` dependency join always finds a real materialized
 /// package, regardless of which built-in id a caller originally resolved.
@@ -239,7 +239,7 @@ fn expected_entries(package: &BuiltinTraitPackage) -> BTreeSet<Utf8PathBuf> {
 /// directory plus every entry [`expected_entries`] declares inside it. This
 /// is the single exhaustive inventory the version directory's actual
 /// contents are compared against in [`store_is_valid`] — the one place a
-/// sibling entry alongside the seven known package directories can be seen.
+/// sibling entry alongside the six known package directories can be seen.
 fn expected_version_entries() -> BTreeSet<Utf8PathBuf> {
     let mut entries = BTreeSet::new();
     for package in builtin_trait_packages::packages() {
@@ -306,7 +306,7 @@ fn walk_dir_no_follow(
     Ok(())
 }
 
-/// Whether the store's version directory contains all seven built-in packages
+/// Whether the store's version directory contains all six built-in packages
 /// with byte-for-byte matching content and, across the *entire* version
 /// directory tree (not just each package's own subtree), no undeclared
 /// entry. `Ok(false)` means "missing or stale, rebuild it"; an unsafe path
@@ -325,7 +325,7 @@ fn store_is_valid(version_dir: &Utf8Path) -> crate::Result<bool> {
     // package in isolation: this is the only check that can see an
     // undeclared sibling entry (extra package-like directory, stray file, or
     // symlink) sitting directly under the version directory alongside the
-    // seven known package directories. A symlink or special file anywhere in
+    // six known package directories. A symlink or special file anywhere in
     // the tree is caught here as a hard `Err` via `collect_actual_entries`;
     // an extra ordinary file or directory is ordinary staleness and repaired
     // by the full rebuild `Ok(false)` triggers.

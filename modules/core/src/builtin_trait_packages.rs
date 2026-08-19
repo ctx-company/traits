@@ -1,5 +1,5 @@
 //! Typed accessor over the first-party built-in meta-trait packages
-//! (`generate-trait`, `refine-trait`, `critique-trait`, `generate-evals`,
+//! (`generate-trait`, `refine-trait`, `critique-trait`,
 //! `explain-trait`, `import-trait`, `trait-spec`), embedded into the binary
 //! at compile time.
 //!
@@ -58,14 +58,13 @@ mod tests {
         "generate-trait",
         "refine-trait",
         "critique-trait",
-        "generate-evals",
         "explain-trait",
         "import-trait",
         "trait-spec",
     ];
 
     #[test]
-    fn exposes_exactly_the_seven_builtin_ids() {
+    fn exposes_exactly_the_six_builtin_ids() {
         let mut ids: Vec<&str> = packages().iter().map(|package| package.id).collect();
         ids.sort_unstable();
         let mut expected = EXPECTED_IDS.to_vec();

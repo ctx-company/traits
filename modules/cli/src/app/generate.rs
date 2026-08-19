@@ -390,127 +390,6 @@ pub(crate) fn handle_critique(input: CritiqueInputs<'_>) -> crate::Result<Comman
     Ok(CommandOutput::new(()))
 }
 
-pub(crate) struct GenerateEvalsInputs<'a> {
-    pub(crate) file: &'a str,
-    pub(crate) model: Option<&'a str>,
-    pub(crate) assignments: &'a [String],
-    pub(crate) candidate_path: Option<&'a str>,
-    pub(crate) json: bool,
-}
-
-pub(crate) fn handle_generate_evals(
-    input: GenerateEvalsInputs<'_>,
-) -> crate::Result<CommandOutput<()>> {
-    let trait_path = camino::Utf8Path::new(input.file);
-    let (source_trait, _, source_digest, _) = ctx_traits_io::run::load_trait(input.file)?;
-    let source_text = ctx_traits_io::read::read_text(trait_path)?;
-    let source_trait_id = source_trait.id.as_str().to_string();
-    let candidate =
-        ctx_traits_core::assist::plan_assist_boundary(ctx_traits_core::assist::BoundaryRequest {
-            operation: ctx_traits_core::assist::Operation::GenerateEvals,
-            source_trait_ids: vec![source_trait_id.clone()],
-            source_paths: vec![input.file.to_string()],
-            source_digests: vec![source_digest.clone()],
-            user_request: "generate deferred behavioral/runtime eval declarations".to_string(),
-            model: input.model.map(str::to_string),
-            target_path: "in-memory-complete-trait".to_string(),
-            provider_available: input.candidate_path.is_none(),
-            context: serde_json::json!({
-                "source": &source_text,
-                "source-trait-id": &source_trait_id,
-                "source-digest": source_digest,
-                "io-contract": &source_trait.ports,
-                "target-schema": "agent-traits/eval-synthesis-scaffold"
-            }),
-        })?;
-    let raw = match input.candidate_path {
-        Some(path) => ctx_traits_io::read::read_text(camino::Utf8Path::new(path))?,
-        None => match run_builtin_trait(
-            "generate-evals",
-            vec![
-                runtime_input("source", source_text),
-                runtime_input("source-trait-id", source_trait_id.as_str()),
-                runtime_input("source-digest", source_digest.as_str()),
-                runtime_input(
-                    "io-contract",
-                    serde_json::to_string(&source_trait.ports).map_err(|error| {
-                        crate::Error::json("serialize source I/O contract", error)
-                    })?,
-                ),
-            ],
-            input.assignments,
-            input.model,
-            None,
-        ) {
-            Ok(outcome) => outcome.output,
-            Err(error) => {
-                return blocked_assist_candidate(candidate, input.json, error.to_string());
-            }
-        },
-    };
-    let mut scaffold: ctx_traits_core::scaffold::EvalSynthesisScaffold =
-        match serde_json::from_str(&raw) {
-            Ok(scaffold) => scaffold,
-            Err(error) => {
-                return blocked_assist_candidate(candidate, input.json, error.to_string());
-            }
-        };
-    scaffold
-        .scenarios
-        .sort_by(|left, right| left.id.cmp(&right.id));
-    scaffold.evals.sort_by(|left, right| left.id.cmp(&right.id));
-    if let Err(error) = scaffold.validate(&source_trait, &source_digest) {
-        return blocked_wrapper_candidate(
-            candidate,
-            &raw,
-            ctx_traits_core::encoding::Encoding::Json,
-            &source_trait_id,
-            input.json,
-            error.to_string(),
-        );
-    }
-    let merged = scaffold.merge_into(&source_trait);
-    let complete = serde_json::to_string(&merged)
-        .map_err(|error| crate::Error::json("serialize merged eval candidate", error))?;
-    let mut evaluation = ctx_traits_core::assist::evaluate_supplied_candidate(
-        candidate,
-        &complete,
-        ctx_traits_core::encoding::Encoding::Json,
-    );
-    evaluation.candidate.raw_output_digest = Some(ctx_traits_core::digest::Digest::source(&raw));
-    evaluation.candidate.parsed_candidate_digest = Some(
-        ctx_traits_core::digest::Digest::canonical(&canonical_json_value(&raw)?),
-    );
-    evaluation.candidate =
-        ctx_traits_core::assist::audit_wrapper_output(evaluation.candidate, &raw, &source_trait_id);
-    let trait_root = ctx_traits_io::layout::package_root_for_manifest(trait_path)
-        .unwrap_or_else(|| camino::Utf8Path::new("."));
-    let mut candidate = attach_assist_check_report(
-        evaluation.candidate,
-        evaluation.normalized_trait.as_ref(),
-        evaluation.normalized_output_text.as_deref(),
-        trait_root,
-    )?;
-    if candidate.gate_summary.all_passed() {
-        candidate = ctx_traits_core::assist::with_context_evidence(
-            candidate,
-            serde_json::json!({ "eval-synthesis-scaffold": scaffold }),
-        );
-    }
-    print_assist_candidate(&candidate, input.json)?;
-    if candidate.status == ctx_traits_core::assist::CandidateStatus::Blocked {
-        return Err(crate::Error::Command {
-            message: "generate-evals failed: candidate was blocked by validation gates".to_string(),
-        });
-    }
-    Ok(CommandOutput::new(()))
-}
-
-/// The in-loop evaluate rung `generate-trait`'s meta-trait invokes for one
-/// round: exactly one call into `evaluate_round`, no provider, no looping.
-/// Always exits 0 and prints the round report as JSON whether or not it
-/// converged — the meta-trait's own `sequence.loop` decides continuation
-/// from the report's `converged` field, not from this process's exit code.
 pub(crate) fn handle_generate_round(
     trait_id: &str,
     candidate: &str,
@@ -610,7 +489,7 @@ pub(crate) fn run_builtin_trait(
         None,
     )? {
         BuiltinTraitRun::Completed(outcome) => Ok(outcome),
-        // Non-loop builtins (critique, explain, generate-evals) have no
+        // Non-loop builtins (critique, explain) have no
         // round-evidence join point to fold a kill into; preserve the prior
         // flat-failure behavior for them.
         BuiltinTraitRun::Killed(killed) => Err(crate::Error::Command {
@@ -631,7 +510,6 @@ pub(crate) fn run_builtin_trait_observed(
         "generate-trait" => "generator",
         "refine-trait" => "refiner",
         "critique-trait" => "critic",
-        "generate-evals" => "generator",
         "explain-trait" => "generator",
         "import-trait" => "generator",
         _ => {
@@ -1857,4 +1735,3 @@ pub(crate) fn apply_assist_check_drift(
 
 pub(crate) use handle_critique as critique;
 pub(crate) use handle_generate as handle;
-pub(crate) use handle_generate_evals as generate_evals;

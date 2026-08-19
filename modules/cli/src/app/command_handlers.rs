@@ -147,7 +147,7 @@ fn resolve_run_budget(
 
 use crate::app::{
     eval::EvalInputs,
-    generate::{CritiqueInputs, GenerateEvalsInputs, GenerateInputs},
+    generate::{CritiqueInputs, GenerateInputs},
     refine::RefineInputs,
     resolve::ResolveInputs,
     run::{CallInputs, RunInfoInputs, RunInputs, SessionStartInputs, SetInputs},
@@ -646,19 +646,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             }) => crate::app::generate::critique(CritiqueInputs {
                 file: &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "critique")?,
                 source_map: source_map.as_deref(),
-                model: model.as_deref(),
-                assignments: &assignments,
-                candidate_path: candidate.as_deref(),
-                json,
-            }),
-            Some(cli::TraitsCommand::GenerateEvals {
-                file,
-                model,
-                assignments,
-                candidate,
-                json,
-            }) => crate::app::generate::generate_evals(GenerateEvalsInputs {
-                file: &file,
                 model: model.as_deref(),
                 assignments: &assignments,
                 candidate_path: candidate.as_deref(),

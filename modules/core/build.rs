@@ -112,7 +112,6 @@ const BUILTIN_TRAIT_PACKAGE_IDS: &[&str] = &[
     "generate-trait",
     "refine-trait",
     "critique-trait",
-    "generate-evals",
     "explain-trait",
     "import-trait",
     "trait-spec",
