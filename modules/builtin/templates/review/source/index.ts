@@ -1,5 +1,3 @@
-// Template: review
-//
 // Scaffolded by `ctx traits create <name> --from review`. One file, no
 // variants — the whole trait is below. Edit it freely; nothing here is
 // special because it came from a template.
@@ -10,12 +8,6 @@
 //
 // To make the evidence deterministic instead, put a command step ahead of the
 // prompt and hand its slot to the reviewer:
-//
-//   const changed = cdk.slot.text({ id: "changed-files", description: "..." });
-//   cdk.step.command("Capture the changed files", {
-//     input: cdk.input.command`git diff --name-status HEAD`,
-//     output: changed,
-//   });
 import * as cdk from "@ctx-traits/cdk";
 
 const reviewer = cdk.agent.reviewer("reviewer", {
