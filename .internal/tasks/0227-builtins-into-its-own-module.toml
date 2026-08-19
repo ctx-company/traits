@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0227"
 title = "builtins moves out of core into its own module"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 `modules/core/builtins/` holds three unrelated things that core happens to
@@ -62,6 +62,29 @@ source maps too. What remains here is the crate move itself.
 `modules/builtin` owns the tree, core depends on it, wasm-core still builds
 without the packages, every built-in and template resolves as before, and
 the embedded-bytes self-consistency test still passes from the new home.
+
+## Outcome (9b30d5ad, edd77db3)
+
+`ctx-traits-builtin` owns the three buckets, its own `build.rs`, and the
+generated tables. Core depends on it and re-exports `crate::builtins` and
+`crate::builtin_trait_packages` at their old paths, so no call site moved.
+
+The seam fell where the cycle would be: the new crate depends on nothing in
+the workspace, so `builtin_templates`'s `instantiate` — which decodes and
+re-encodes a `PackageManifest` — stayed in core while its data moved. The
+embedded-bytes digest test moved with the data and hashes with sha2 rather
+than core's `Digest`.
+
+Feature separation verified, not assumed: `cargo tree -e features` reports
+zero `trait-packages` occurrences for both wasm crates and non-zero for io
+and cli. Vocabulary stays unconditional.
+
+Also repointed: io's layout path-shape predicate, the drift gate script,
+wasm-core's parity test, and comments in `cdk_build.rs`/`export.rs`.
+
+Surfaced while running the full suite (which `just test` does not cover):
+`ctx traits trust approve spec` had been impossible since 724461a5, because
+trust resolution went through the `runnable` filter. Fixed in edd77db3.
 """
 
 [relations]
