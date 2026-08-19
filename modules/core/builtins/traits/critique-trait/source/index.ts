@@ -31,7 +31,7 @@ const designRubric = ref.resource({ id: "design-rubric", dependency: "trait-spec
 const reviewOutput = output.of(
   schema.object(
     "review-scaffold",
-    { "source-trait-id": schema.text(), "source-digest": schema.text(), findings: schema.array(finding) },
+    { "source-trait-id": schema.text(), "source-digest": schema.text(), findings: schema.list(finding) },
     { description: "An advisory critique with exact source-map anchors." },
   ),
 )`Return exactly one structured review scaffold using ${sourceDigest}. Findings are advisory, not proof or enforcement. Use only these rules: unbounded-loop, unattributed-output, missing-review-before-final, over-abstraction, stringly-reference, weak-schema, over-broad-trust. Every finding must name a canonical construct reference and copy its anchor exactly from ${sourceMap}; do not guess, repair, or infer anchors. Ground the critique in ${agentTraitsSchema} and ${designRubric}.`;

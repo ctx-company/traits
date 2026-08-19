@@ -38,8 +38,8 @@ const planOutput = output.of(
   schema.object(
     "test-plan",
     {
-      cases: schema.array(testCase),
-      "coverage-gaps": schema.array(schema.text()),
+      cases: schema.list(testCase),
+      "coverage-gaps": schema.list(schema.text()),
     },
     { description: "A structured test plan: proposed cases plus any requirements the plan can't cover." },
   ),

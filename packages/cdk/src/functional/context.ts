@@ -22,7 +22,7 @@ import type {
   SignalOutputValue,
 } from "../sequence.js";
 import { isThenable } from "./internal.js";
-import type { EachParam } from "./registrars.js";
+import type { ForEachParam } from "./registrars.js";
 
 /** Best-effort authoring location captured at a registrar call site. */
 export interface AuthorFrame {
@@ -87,7 +87,6 @@ export interface ParallelScopeState {
 
 export interface ForEachScopeState {
   limitValue?: number;
-  maxItemsValue?: number;
   concurrent?: boolean;
   /** Set once `each.itemSchema(...)` has materialized the item slot — guards the at-most-once rule and tells the lowering not to mint the default (inherited/`slot.any`) item slot at scope close. */
   itemSchemaCalled: boolean;
@@ -247,7 +246,7 @@ type AgentPromptLowering = (
 type SlotForEachLowering = (
   slotHandle: SlotHandle,
   title: string,
-  body: (item: SlotHandle, each: EachParam) => void,
+  body: (item: SlotHandle, loop: ForEachParam) => void,
 ) => SequenceHandle;
 
 let agentPromptLowering: AgentPromptLowering | undefined;
@@ -277,7 +276,7 @@ export function dispatchAgentPrompt(
 export function dispatchSlotForEach(
   slotHandle: SlotHandle,
   title: string,
-  body: (item: SlotHandle, each: EachParam) => void,
+  body: (item: SlotHandle, loop: ForEachParam) => void,
 ): SequenceHandle {
   if (slotForEachLowering === undefined) {
     throw new Error(
@@ -338,9 +337,9 @@ export interface TraitFrame {
   readonly boundVariants: BoundVariant[];
   /** `defineTrait`'s own fields payload, validated but otherwise untyped here — see `functional/trait.ts`'s `DefineTraitFields`. */
   fields: Record<string, unknown> | undefined;
-  /** Accumulated across every `useBehavior` call, keyed by `BehaviorFields` field name. */
+  /** Accumulated across every `useBehavior` call, keyed by `Behavior` field name. */
   readonly behavior: Record<string, unknown>;
-  /** Accumulated across every `useIntent` call, keyed by `IntentSpec` facet name. */
+  /** Accumulated across every `useIntent` call, keyed by `Intent` facet name. */
   readonly intent: Record<string, unknown>;
   /** Resource handles passed to `useResource`, in call order. */
   readonly resources: ResourceHandle[];

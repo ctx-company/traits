@@ -453,7 +453,6 @@ export type ForEachSequenceFields = SequenceCommonFields & {
   readonly over: string | SlotHandle | RefHandle;
   readonly item: string | SlotHandle | RefHandle;
   readonly limit?: number;
-  readonly maxItems?: number;
   readonly concurrent?: boolean;
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
@@ -1239,12 +1238,6 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
       throw new Error(`procedure.sequence ${fields.id}: dynamic iterations and maxIterations are mutually exclusive`);
     }
   }
-  if (isSequenceKind(fields, kind, "for-each")) {
-    const each = fields;
-    if (each.limit !== undefined && each.maxItems !== undefined && each.limit !== each.maxItems) {
-      throw new Error(`procedure.sequence ${fields.id}: limit and maxItems differ`);
-    }
-  }
   if (isSequenceKind(fields, kind, "loop") || isSequenceKind(fields, kind, "for-each")) {
     const control = fields as LoopSequenceFields | ForEachSequenceFields;
     if ((control.sequence !== undefined) === (control.body !== undefined)) {
@@ -1454,7 +1447,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     const each = fields;
     canonical.over = refText(each.over, `sequence.${fields.id}.over`);
     canonical.item = refText(each.item, `sequence.${fields.id}.item`);
-    canonical["max-items"] = each.limit ?? each.maxItems;
+    canonical["max-items"] = each.limit;
     canonical["on-failure"] =
       each.onFailure === undefined
         ? undefined

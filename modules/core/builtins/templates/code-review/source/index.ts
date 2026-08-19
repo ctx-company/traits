@@ -60,7 +60,7 @@ const reviewOutput = output.of(
     "code-review-scaffold",
     {
       verdict: schema.verdict(),
-      findings: schema.array(finding),
+      findings: schema.list(finding),
     },
     { description: "A structured code review: a pass/fail/needs-changes verdict plus per-file findings." },
   ),

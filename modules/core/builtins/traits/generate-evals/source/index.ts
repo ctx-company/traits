@@ -31,8 +31,8 @@ const synthesisOutput = output.of(
   schema.object("eval-synthesis-scaffold", {
     "source-trait-id": schema.text(),
     "source-digest": schema.text(),
-    scenarios: schema.array(scenario),
-    evals: schema.array(evalProposal),
+    scenarios: schema.list(scenario),
+    evals: schema.list(evalProposal),
   }),
 )`Return exactly one eval-synthesis scaffold for ${sourceTraitId} using ${sourceDigest}. Propose positive, negative, and edge scenarios where justified. Scenarios are specifications, not evidence. Every eval must use only behavioral or runtime, link scenarios through canonical singular scenario (a scalar or array), and use only render:, fixture:, trait:, or report: input/output refs. Behavioral and runtime executors are deferred; do not claim they ran. Ground proposals in ${agentTraitsSchema} and ${designRubric}.`;
 

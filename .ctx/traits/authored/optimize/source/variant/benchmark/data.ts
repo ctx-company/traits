@@ -39,7 +39,7 @@ export const roundComplete = slot({
   description:
     '"open" at round start, "complete" only in the final atomic record step of the round\'s arm — gates the loop\'s `until` so the runtime\'s after-each-step guard evaluation can never terminate mid-commit/reset.',
 });
-export const reviews = slot.array(reviewStatusSchema, {
+export const reviews = slot.list(reviewStatusSchema, {
   id: "reviews",
   description: "Review verdict status for every round that reached review, in execution order.",
 });

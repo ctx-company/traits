@@ -218,21 +218,19 @@ installAgentPromptLowering((agentHandle, title, promptOpts) => {
 });
 
 /**
- * The `each` scope param an `items.forEach` body receives (0211) — every
- * knob the pre-0211 `ForEachRegistrarOptions` opts object carried, now
- * called on the param instead: `each.limit(n)`, `each.maxItems(n)`,
- * `each.concurrent()`. `onComplete` moved to `effect.onComplete` (routes
- * into the same for-each's `onComplete` field, generalized from
- * `flow.loop`-only). Each method is callable at most once, and only from
- * directly inside its OWN `items.forEach` body — calling an outer `each`
- * from within a nested `items.forEach` is a build error, closing the
- * aliasing hole `LoopParam` otherwise tolerates.
+ * The scope param an `items.forEach` body receives as its second argument
+ * (0211) — every knob the pre-0211 opts object carried, called on the param
+ * instead: `loop.limit(n)`, `loop.concurrent()`. It configures the LOOP, not
+ * the item, which is why the body reads `(item, loop)`. `onComplete` moved
+ * to `effect.onComplete` (routes into the same for-each's `onComplete`
+ * field, generalized from `flow.loop`-only). Each method is callable at most
+ * once, and only from directly inside its OWN `items.forEach` body — calling
+ * an outer body's param from within a nested `items.forEach` is a build
+ * error, closing the aliasing hole `LoopParam` otherwise tolerates.
  */
-export interface EachParam {
-  /** At most once. */
+export interface ForEachParam {
+  /** Bounds the iterated list's length; a longer list is refused, never truncated. At most once. */
   limit(n: number): void;
-  /** At most once. */
-  maxItems(n: number): void;
   /** At most once. */
   concurrent(): void;
   /**
@@ -271,12 +269,12 @@ function inheritedElementSchema(over: SlotHandle): SchemaValue | undefined {
 }
 
 /** Builds the `each` scope param for one `items.forEach` body — every method guards that it's called from directly inside `ownScope`, never an outer/aliased for-each scope. */
-function buildEachParam(
+function buildForEachParam(
   ownScope: Scope,
   title: string,
   frame: AuthorFrame | undefined,
   materializeItemSchema: (schemaValue: SchemaValue) => void,
-): EachParam {
+): ForEachParam {
   const guardOwnScope = (methodLabel: string): NonNullable<Scope["forEach"]> => {
     if (nearestScope("for-each") !== ownScope) {
       throw buildError(title, `${methodLabel} called outside its own items.forEach body`, frame);
@@ -286,25 +284,18 @@ function buildEachParam(
   };
   return {
     limit(n) {
-      const state = guardOwnScope("each.limit(...)");
-      if (state.limitValue !== undefined) throw buildError(title, "each.limit(...) called more than once", frame);
+      const state = guardOwnScope("loop.limit(...)");
+      if (state.limitValue !== undefined) throw buildError(title, "loop.limit(...) called more than once", frame);
       state.limitValue = n;
     },
-    maxItems(n) {
-      const state = guardOwnScope("each.maxItems(...)");
-      if (state.maxItemsValue !== undefined) {
-        throw buildError(title, "each.maxItems(...) called more than once", frame);
-      }
-      state.maxItemsValue = n;
-    },
     concurrent() {
-      const state = guardOwnScope("each.concurrent(...)");
-      if (state.concurrent !== undefined) throw buildError(title, "each.concurrent(...) called more than once", frame);
+      const state = guardOwnScope("loop.concurrent(...)");
+      if (state.concurrent !== undefined) throw buildError(title, "loop.concurrent(...) called more than once", frame);
       state.concurrent = true;
     },
     itemSchema(schemaValue) {
-      const state = guardOwnScope("each.itemSchema(...)");
-      if (state.itemSchemaCalled) throw buildError(title, "each.itemSchema(...) called more than once", frame);
+      const state = guardOwnScope("loop.itemSchema(...)");
+      if (state.itemSchemaCalled) throw buildError(title, "loop.itemSchema(...) called more than once", frame);
       state.itemSchemaCalled = true;
       materializeItemSchema(schemaValue);
     },
@@ -320,17 +311,17 @@ installSlotForEachLowering((slotHandle, titleText, body) => {
   const lazyItem = lazyForEachItem(id, (prop) => {
     throw buildError(
       titleText,
-      `item field ${JSON.stringify(prop)} accessed before each.itemSchema(...) declared the item schema — declare the schema first (an inherited element schema mints no field refs)`,
+      `item field ${JSON.stringify(prop)} accessed before loop.itemSchema(...) declared the item schema — declare the schema first (an inherited element schema mints no field refs)`,
       frame,
     );
   });
   const { scope } = runInScope("for-each", label, () => {
     const ownScope = currentScope(label);
-    const eachParam = buildEachParam(ownScope, titleText, frame, (schemaValue) => {
+    const forEachParam = buildForEachParam(ownScope, titleText, frame, (schemaValue) => {
       materializedItemSlot = forEachItemSlot(slotHandle, id, schemaValue);
       lazyItem.materialize(materializedItemSlot);
     });
-    body(lazyItem.proxy, eachParam);
+    body(lazyItem.proxy, forEachParam);
   });
   checkDuplicateTitles(scope.items, label);
   if (scope.items.length === 0) throw buildError(titleText, "items.forEach registered no steps", frame);
@@ -345,7 +336,6 @@ installSlotForEachLowering((slotHandle, titleText, body) => {
       item: itemSlot,
       body: itemsOf(scope),
       limit: forEachState.limitValue,
-      maxItems: forEachState.maxItemsValue,
       concurrent: forEachState.concurrent,
       ...(forEachState.onComplete.length === 0 ? {} : { onComplete: forEachState.onComplete }),
     } as Omit<ForEachSequenceFields, "id" | "kind">),
@@ -603,7 +593,7 @@ function flowMatch(
 
 export interface ParParam {
   /** Reserved surface (0102 ledger): accepts the call, emits nothing, and always throws. */
-  maxAtOnce(n: number): void;
+  concurrencyLimit(n: number): void;
 }
 
 function branchRefFor(loopId: string, registered: RegisteredItem): SequenceLinearHandle {
@@ -619,8 +609,8 @@ function flowParallel(title: string, body: (par: ParParam) => void): SequenceHan
   forbidPositionalUntil(title, "flow.parallel", frame);
   const label = `flow.parallel(${JSON.stringify(title)})`;
   const parParam: ParParam = {
-    maxAtOnce() {
-      throw new Error("par.maxAtOnce is parked — see the 0102 ledger");
+    concurrencyLimit() {
+      throw new Error("par.concurrencyLimit is parked — see the 0102 ledger");
     },
   };
   const { scope } = runInScope("parallel", label, () => body(parParam));

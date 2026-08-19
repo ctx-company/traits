@@ -145,15 +145,15 @@ describe("functional layer build rules (0106)", () => {
     ).toThrow(/arm "foo" must be a callback/);
   });
 
-  it("par.maxAtOnce is parked: it throws and emits nothing", () => {
+  it("par.concurrencyLimit is parked: it throws and emits nothing", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.parallel("Parked", (par) => {
-          par.maxAtOnce(2);
+          par.concurrencyLimit(2);
           step.command("A", { cmd: "echo a" });
         });
       }),
-    ).toThrow(/par\.maxAtOnce is parked/);
+    ).toThrow(/par\.concurrencyLimit is parked/);
   });
 
   it("flow.when(..., signal.Abort) outside a loop throws", () => {
@@ -1082,13 +1082,13 @@ describe("effect.session.title (0110)", () => {
   });
 });
 
-describe("items.forEach typed item slots (0153) + each scope param (0211)", () => {
+describe("items.forEach typed item slots (0153) + loop scope param (0211)", () => {
   const draftSlots = (built: unknown): readonly { id: string; schema: string }[] =>
     (built as { slot?: readonly { id: string; schema: string }[] }).slot ?? [];
 
   it("the item slot inherits the iterated list's element schema", () => {
     const reviewItem = schema.object("fe-review-item", { note: schema.text() });
-    const items = slot.array(reviewItem, "fe-items");
+    const items = slot.list(reviewItem, "fe-items");
     const out = slot.text("fe-out");
     const proc = procedure.from({ description: "d" }, () => {
       items.forEach("Handle each item", (item) => {
@@ -1101,12 +1101,12 @@ describe("items.forEach typed item slots (0153) + each scope param (0211)", () =
     expect(itemSlot?.schema).toBe("schema:fe-review-item");
   });
 
-  it("an explicit each.itemSchema override wins over inheritance", () => {
+  it("an explicit loop.itemSchema override wins over inheritance", () => {
     const items = slot.texts("fe-override-items");
     const out = slot.text("fe-override-out");
     const proc = procedure.from({ description: "d" }, () => {
-      items.forEach("Handle overridden", (item, each) => {
-        each.itemSchema(schema.text());
+      items.forEach("Handle overridden", (item, loop) => {
+        loop.itemSchema(schema.text());
         step.command("Echo", { cmd: "echo hi", output: out });
         void item;
       });
@@ -1130,14 +1130,13 @@ describe("items.forEach typed item slots (0153) + each scope param (0211)", () =
     expect(itemSlot?.schema).toBe("schema:any");
   });
 
-  it("each.limit/maxItems/concurrent land in the emitted for-each fields", () => {
+  it("loop.limit/concurrent land in the emitted for-each fields", () => {
     const items = slot.texts("fe-knobs-items");
     const out = slot.text("fe-knobs-out");
     const proc = procedure.from({ description: "d" }, () => {
-      items.forEach("Handle knobs", (item, each) => {
-        each.limit(3);
-        each.maxItems(3);
-        each.concurrent();
+      items.forEach("Handle knobs", (item, loop) => {
+        loop.limit(3);
+        loop.concurrent();
         step.command("Echo", { cmd: "echo hi", output: out });
         void item;
       });
@@ -1149,32 +1148,32 @@ describe("items.forEach typed item slots (0153) + each scope param (0211)", () =
     expect(forEachItem).toMatchObject({ "max-items": 3, concurrent: true });
   });
 
-  it("each.limit called twice throws", () => {
+  it("loop.limit called twice throws", () => {
     const items = slot.texts("fe-limit-twice-items");
     expect(() =>
       procedure.from({ description: "d" }, () => {
-        items.forEach("Handle limit twice", (item, each) => {
-          each.limit(1);
-          each.limit(2);
+        items.forEach("Handle limit twice", (item, loop) => {
+          loop.limit(1);
+          loop.limit(2);
           step.command("Echo", { cmd: "echo hi" });
           void item;
         });
       }),
-    ).toThrow(/each\.limit\(\.\.\.\) called more than once/);
+    ).toThrow(/loop\.limit\(\.\.\.\) called more than once/);
   });
 
-  it("each.itemSchema called twice throws", () => {
+  it("loop.itemSchema called twice throws", () => {
     const items = slot.texts("fe-schema-twice-items");
     expect(() =>
       procedure.from({ description: "d" }, () => {
-        items.forEach("Handle schema twice", (item, each) => {
-          each.itemSchema(schema.text());
-          each.itemSchema(schema.text());
+        items.forEach("Handle schema twice", (item, loop) => {
+          loop.itemSchema(schema.text());
+          loop.itemSchema(schema.text());
           step.command("Echo", { cmd: "echo hi" });
           void item;
         });
       }),
-    ).toThrow(/each\.itemSchema\(\.\.\.\) called more than once/);
+    ).toThrow(/loop\.itemSchema\(\.\.\.\) called more than once/);
   });
 
   it("calling the outer each from inside a nested items.forEach body throws — no aliasing across scopes", () => {
@@ -1182,20 +1181,20 @@ describe("items.forEach typed item slots (0153) + each scope param (0211)", () =
     const innerItems = slot.texts("fe-nested-inner-items");
     expect(() =>
       procedure.from({ description: "d" }, () => {
-        outerItems.forEach("Outer", (outerItem, outerEach) => {
+        outerItems.forEach("Outer", (outerItem, outerLoop) => {
           void outerItem;
           innerItems.forEach("Inner", (innerItem) => {
             step.command("Echo", { cmd: "echo hi" });
             void innerItem;
-            outerEach.maxItems(1);
+            outerLoop.limit(1);
           });
         });
       }),
-    ).toThrow(/each\.maxItems\(\.\.\.\) called outside its own items\.forEach body/);
+    ).toThrow(/loop\.limit\(\.\.\.\) called outside its own items\.forEach body/);
   });
 
-  it("an item field accessed before each.itemSchema(...) declares the schema is a loud build error", () => {
-    const items = slot.array(schema.object("fe-lazy-item", { note: schema.text() }), "fe-lazy-items");
+  it("an item field accessed before loop.itemSchema(...) declares the schema is a loud build error", () => {
+    const items = slot.list(schema.object("fe-lazy-item", { note: schema.text() }), "fe-lazy-items");
     expect(() =>
       procedure.from({ description: "d" }, () => {
         items.forEach("Handle lazy", (item) => {
@@ -1203,15 +1202,15 @@ describe("items.forEach typed item slots (0153) + each scope param (0211)", () =
           step.command("Echo", { cmd: "echo hi", input: input.command`echo ${fieldItem["note"] as never}` });
         });
       }),
-    ).toThrow(/item field "note" accessed before each\.itemSchema\(\.\.\.\) declared the item schema/);
+    ).toThrow(/item field "note" accessed before loop\.itemSchema\(\.\.\.\) declared the item schema/);
   });
 
-  it("a field accessed after each.itemSchema(...) declares an object schema reaches the built draft", () => {
+  it("a field accessed after loop.itemSchema(...) declares an object schema reaches the built draft", () => {
     const items = slot.texts("fe-lazy-declared-items");
     expect(() => {
       const proc = procedure.from({ description: "d" }, () => {
-        items.forEach("Handle lazy declared", (item, each) => {
-          each.itemSchema(schema.object("fe-lazy-declared-schema", { note: schema.text() }));
+        items.forEach("Handle lazy declared", (item, loop) => {
+          loop.itemSchema(schema.object("fe-lazy-declared-schema", { note: schema.text() }));
           const fieldItem = item as unknown as { readonly note: never };
           flow.when("Note Is Set", condition.equals(fieldItem.note, "set"), () => {
             step.command("Echo", { cmd: "echo hi" });

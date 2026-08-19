@@ -1,5 +1,5 @@
 import { dispatchSlotForEach, recordTraitMint } from "./functional/context.js";
-import type { EachParam } from "./functional/registrars.js";
+import type { ForEachParam } from "./functional/registrars.js";
 import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
 import type {
   DeclaredSlotHandle,
@@ -14,7 +14,7 @@ import { optionalSlot as optionalSlotInput } from "./input.js";
 import { attachMeta, metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
 import { ref, refText } from "./ref.js";
-import { schemaArray } from "./schema.js";
+import { schemaList } from "./schema.js";
 import type { SchemaValue } from "./schema.js";
 
 export interface SlotFields {
@@ -73,17 +73,19 @@ export interface SlotFunction {
   number(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<number>;
   /** Any-JSON-schema slot shorthand, for output shapes not worth declaring precisely. @example `slot.any("raw")` */
   any(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<JsonValue>;
-  /** Curried list-slot factory: bind the element schema once, declare several slots of that list shape. @example `const findingsList = slot.array(schema.text()); const findings = findingsList("findings");` */
-  array<Value>(
+  /** Curried list-slot factory: bind the element schema once, declare several slots of that list shape. @example `const findingsList = slot.list(schema.text()); const findings = findingsList("findings");` */
+  list<Value>(
     schemaValue: SchemaValue<Value>,
   ): (value: string | Omit<SlotFields, "schema">) => DeclaredSlotHandle<Value[]>;
-  /** List-slot shorthand with the element schema and id/fields both given. @example `slot.array(schema.text(), "findings")` */
-  array<Value>(
+  /** List-slot shorthand with the element schema and id/fields both given. @example `slot.list(schema.text(), "findings")` */
+  list<Value>(
     schemaValue: SchemaValue<Value>,
     value: string | Omit<SlotFields, "schema">,
   ): DeclaredSlotHandle<Value[]>;
-  /** List-of-text-slot shorthand, the common case of `slot.array(schema.text(), ...)`. @example `slot.texts("notes")` */
+  /** List-of-text-slot shorthand, the common case of `slot.list(schema.text(), ...)`. @example `slot.texts("notes")` */
   texts(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string[]>;
+  /** List-of-number-slot shorthand, the numeric sibling of {@link SlotFunction.texts}. @example `slot.numbers("durations")` */
+  numbers(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<number[]>;
 }
 
 /**
@@ -174,11 +176,12 @@ export const slot: SlotFunction = Object.assign(slotFn, {
   boolean: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:boolean"),
   number: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:number"),
   any: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:any"),
-  array: (schemaValue: SchemaValue, value?: string | Omit<SlotFields, "schema">) =>
+  list: (schemaValue: SchemaValue, value?: string | Omit<SlotFields, "schema">) =>
     value === undefined
-      ? (slotValue: string | Omit<SlotFields, "schema">) => slotWithSchema(slotValue, schemaArray(schemaValue))
-      : slotWithSchema(value, schemaArray(schemaValue)),
-  texts: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaArray("schema:text")),
+      ? (slotValue: string | Omit<SlotFields, "schema">) => slotWithSchema(slotValue, schemaList(schemaValue))
+      : slotWithSchema(value, schemaList(schemaValue)),
+  texts: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaList("schema:text")),
+  numbers: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaList("schema:number")),
 }) as SlotFunction;
 
 /**
@@ -197,7 +200,7 @@ export const slot: SlotFunction = Object.assign(slotFn, {
  * @param slotHandle The destination slot.
  * @example
  * ```ts
- * const findings = slot.array(schema.text(), "findings");
+ * const findings = slot.list(schema.text(), "findings");
  * const retryCount = slot.number("retry-count");
  * const review = slot.text("review");
  * operation.over(findings, operation.Append);
@@ -284,7 +287,7 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   const withForEach = withHiddenField(
     withOptional,
     "forEach",
-    (title: string, body: (item: SlotHandle, each: EachParam) => void) =>
+    (title: string, body: (item: SlotHandle, loop: ForEachParam) => void) =>
       dispatchSlotForEach(withOptional, title, body) as SequenceHandle,
   );
   // `.with` is the authoring-form spelling of `operation.over(slot, op)`
