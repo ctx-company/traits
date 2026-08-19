@@ -2945,7 +2945,7 @@ fn command_evidence_matches_current_frame(
                     .is_some_and(|value| *value == expected)
             });
     }
-    if command_execution_succeeded(evidence, command) {
+    if command_output_landed(evidence, command) {
         submission.produced_slots.len() == 1
             && submission.produced_slots.contains_key(&command.output_slot)
     } else {
@@ -2953,6 +2953,33 @@ fn command_evidence_matches_current_frame(
         // rejected-output transition, which can activate its on-failure route.
         submission.produced_slots.is_empty()
     }
+}
+
+/// Whether a command frame's execution produced a value the frame may carry
+/// forward — exit-code success AND an untruncated capture.
+///
+/// The truncation half is what keeps this distinct from
+/// [`command_execution_succeeded`]. A capture cut off at
+/// `COMMAND_CAPTURE_LIMIT` would forward a silently cropped value, so the
+/// executing runtime parks it through the same path as a genuine command
+/// failure and submits NO output. Before this predicate existed, core judged
+/// that submission by exit code alone: a command that exited 0 with truncated
+/// stdout was "succeeded" here, so core demanded exactly one produced slot,
+/// found none, and rejected the whole submission as `command execution
+/// evidence does not match current command frame` — an evidence-shape
+/// complaint that names neither the truncation nor the limit. Observed
+/// 2026-08-19 (ctx-notify 0006.9): `git add -A` swept 44,866 leaked build
+/// artifacts into the tree and `git commit` printed ~5.7 MB of `create mode`
+/// lines against a 320 KiB ceiling.
+///
+/// Checks deliberately do NOT route through here: a check's verdict derives
+/// from the exit code alone, which truncation cannot corrupt, so a truncated
+/// check capture stays warning-only (see [`check_verdict`]).
+fn command_output_landed(
+    evidence: &CommandExecutionEvidence,
+    command: &crate::procedure::runtime::CommandFrame,
+) -> bool {
+    command_execution_succeeded(evidence, command) && !evidence.stdout_truncated
 }
 
 /// Recompute a check's pass/fail verdict from trusted exit evidence: a
@@ -3461,6 +3488,127 @@ fn ledger_digest(state: &State) -> crate::Result<Digest> {
         crate::procedure::serialization("run-session.state-digest", "run ledger", e)
     })?;
     Ok(Digest::source(&text))
+}
+
+/// The IO layer parks a truncated capture through the same path as a failed
+/// command and submits no output; core has to expect that same shape, or the
+/// two disagree and the submission dies as an evidence mismatch that names
+/// nothing (ctx-notify 0006.9, 2026-08-19).
+#[cfg(test)]
+mod command_capture_truncation_tests {
+    use super::*;
+
+    fn command_frame() -> crate::procedure::runtime::CommandFrame {
+        crate::procedure::runtime::CommandFrame {
+            cmd: None,
+            argv: vec!["git".to_string(), "commit".to_string()],
+            executable_digest: None,
+            resource_argv: Vec::new(),
+            cwd: None,
+            timeout_ms: None,
+            idle_timeout_ms: None,
+            capture_bytes: None,
+            success_exit_code: vec![0],
+            output_slot: "port:commit-report".to_string(),
+            additional_output_refs: Vec::new(),
+            permission_code: String::new(),
+            reason: String::new(),
+        }
+    }
+
+    fn evidence(stdout_truncated: bool) -> CommandExecutionEvidence {
+        CommandExecutionEvidence {
+            argv: command_frame().argv,
+            output_slot: command_frame().output_slot,
+            executable_digest: None,
+            exit_code: Some(0),
+            timed_out: false,
+            stdout: None,
+            stderr: None,
+            stdout_truncated,
+            stderr_truncated: false,
+        }
+    }
+
+    fn submission(produced: Option<(&str, JsonValue)>) -> CallSubmission {
+        let mut produced_slots = BTreeMap::new();
+        if let Some((output_ref, value)) = produced {
+            produced_slots.insert(output_ref.to_string(), value);
+        }
+        CallSubmission {
+            session_id: SessionId::new("session-truncation-shape".to_string())
+                .expect("valid session id"),
+            run_id: None,
+            state_digest: None,
+            expected_sequence_item_id: None,
+            expected_run_index: None,
+            expected_source_index: None,
+            expected_position_path: Vec::new(),
+            produced_slots,
+            signals: BTreeMap::new(),
+            warnings: Vec::new(),
+            command_execution: None,
+            caller: None,
+        }
+    }
+
+    #[test]
+    fn exit_zero_with_truncated_stdout_expects_no_output() {
+        let command = command_frame();
+        assert!(
+            command_evidence_matches_current_frame(
+                &evidence(true),
+                &command,
+                &submission(None),
+                false
+            ),
+            "a truncated capture submits no output — the shape core must accept"
+        );
+        assert!(
+            !command_evidence_matches_current_frame(
+                &evidence(true),
+                &command,
+                &submission(Some((
+                    "port:commit-report",
+                    JsonValue::String(String::new())
+                ))),
+                false
+            ),
+            "a truncated capture must never land a cropped value"
+        );
+    }
+
+    #[test]
+    fn exit_zero_with_whole_stdout_still_expects_its_output() {
+        let command = command_frame();
+        assert!(
+            command_evidence_matches_current_frame(
+                &evidence(false),
+                &command,
+                &submission(Some((
+                    "port:commit-report",
+                    JsonValue::String(String::new())
+                ))),
+                false
+            ),
+            "an untruncated success still carries exactly one produced output"
+        );
+        assert!(!command_evidence_matches_current_frame(
+            &evidence(false),
+            &command,
+            &submission(None),
+            false
+        ));
+    }
+
+    /// A check's verdict comes from the exit code, which truncation cannot
+    /// corrupt — so truncation must not flip a passing gate to failing.
+    #[test]
+    fn truncation_does_not_change_a_check_verdict() {
+        let command = command_frame();
+        assert!(check_verdict(&evidence(true), &command));
+        assert!(check_verdict(&evidence(false), &command));
+    }
 }
 
 #[cfg(test)]
