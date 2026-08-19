@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0212"
 title = "Sweep authored traits to the unified control surface"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
+closed = "2026-08-19"
+origin = "run run-6afe4d991e02262c7c94a5b2afb1c845c0e457c0eecef2b0fc8ed9b64cf18ecc merged as 733b1bd38b5916396f18b792a8e266e0f1e357b9"
 content = """
 Closing sweep for 0208-0211, per 0207 ruling 6 (hard moves, no aliases):
 
@@ -26,3 +28,7 @@ depends-on = [
     "0210",
     "0211",
 ]
+
+[closure]
+mode = "merge"
+commit = "733b1bd38b5916396f18b792a8e266e0f1e357b9"
