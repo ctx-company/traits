@@ -1,0 +1,23 @@
+id = "plain"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Plain"
+description = "Describe what this trait is for."
+
+[metadata]
+tag = ["template"]
+
+[[intent.focus]]
+id = "correctness"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[behavior.tone]]
+id = "plain"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.method]]
+id = "evidence-first"

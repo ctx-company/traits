@@ -174,3 +174,77 @@ fn a_path_built_package_resolves_its_sibling_path_dependency() {
         "the consumer's canonical must land under generated/ too"
     );
 }
+
+/// `ctx traits create` without `--from`, and with a display name that is not
+/// the id.
+///
+/// Both are easy to get subtly wrong. The default template has to be a real
+/// package that builds and locks like any other, not a special case inside
+/// the command. And a display name cannot simply be passed to
+/// `defineTrait`: its first argument is the NAME and the canonical id is
+/// that name's kebab-casing, so `create daily --name "Daily Work"` would
+/// build `daily-work` and then fail against a manifest declaring `daily`.
+#[test]
+fn create_defaults_to_the_plain_template_and_honours_a_separate_display_name() {
+    let scratch = ScratchRoot::new("create-plain-and-name");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).expect("create project dir");
+    git_init(&proj);
+    symlink_node_modules(&proj);
+    write(
+        &proj.join("package.json"),
+        "{\n  \"name\": \"scratch\",\n  \"private\": true\n}\n",
+    );
+    let init = run_ctx(&["traits", "init"], &proj, &home);
+    assert!(
+        init.status.success(),
+        "traits init must succeed: {}",
+        utf8(&init).1
+    );
+
+    // No --from at all.
+    let plain = run_ctx(&["traits", "create", "notes"], &proj, &home);
+    let (plain_out, plain_err) = utf8(&plain);
+    assert!(
+        plain.status.success(),
+        "create without --from must scaffold the plain template: {plain_out}{plain_err}"
+    );
+    let notes = proj.join(".ctx/traits/authored/notes/generated/index.toml");
+    let notes_canonical =
+        fs::read_to_string(&notes).expect("plain template must build a canonical");
+    assert!(
+        notes_canonical.contains("id = \"notes\"") && notes_canonical.contains("name = \"notes\""),
+        "the id doubles as the display name when --name is absent: {notes_canonical}"
+    );
+    assert!(
+        !notes_canonical.contains("[procedure]"),
+        "the plain template declares no procedure: {notes_canonical}"
+    );
+
+    // A display name that is not the id.
+    let named = run_ctx(
+        &[
+            "traits",
+            "create",
+            "daily",
+            "--name",
+            "Daily Work",
+            "--from",
+            "implement",
+        ],
+        &proj,
+        &home,
+    );
+    let (named_out, named_err) = utf8(&named);
+    assert!(
+        named.status.success(),
+        "create with a separate display name must succeed: {named_out}{named_err}"
+    );
+    let daily = fs::read_to_string(proj.join(".ctx/traits/authored/daily/generated/index.toml"))
+        .expect("named trait must build a canonical");
+    assert!(
+        daily.contains("id = \"daily\"") && daily.contains("name = \"Daily Work\""),
+        "the id comes from the operand and the name from --name: {daily}"
+    );
+}

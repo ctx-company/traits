@@ -89,6 +89,9 @@ for id in "${ORDER[@]}"; do
     src="$AUTHORED/$id/$artifact"
     [[ -e "$src" ]] || continue
     if [[ "$MODE" == "build" ]]; then
+      # mkdir -p, because a package added since the last build has no
+      # `generated/` yet and `cp` will not create the parent for you.
+      mkdir -p "$(dirname "${dest:?}/$artifact")"
       rm -rf "${dest:?}/$artifact"
       cp -R "$src" "$dest/$artifact"
     elif ! diff -rq "$src" "$dest/$artifact" >/dev/null 2>&1; then

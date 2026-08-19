@@ -298,12 +298,22 @@ pub enum TraitsCommand {
     },
     /// Scaffold a new trait package from a template, or list available templates.
     ///
-    /// With no name, lists the three first-party teaching templates
-    /// (implement, research, review) and writes nothing. With a name and `--from
-    /// <template>`, materializes that template into a new draft package at
-    /// `.ctx/traits/<slugified-name>/`, builds it through the same
-    /// internal path `ctx traits build` uses, and locks it through the
-    /// same internal path `ctx traits vendor` uses.
+    /// With no name, lists the first-party teaching templates (plain,
+    /// implement, research, review) and writes nothing. With a name,
+    /// materializes a template into a new draft package at
+    /// `.ctx/traits/<id>/`, builds it through the same internal path `ctx
+    /// traits build` uses, and locks it through the same internal path `ctx
+    /// traits vendor` uses.
+    ///
+    /// `--from` is optional and defaults to `plain`, the smallest trait that
+    /// builds — identity and behavior, no steps. Reaching for a template is
+    /// a choice about what you are starting from, not a step you must take
+    /// to start at all.
+    ///
+    /// The positional argument is the trait id. It is also the display name
+    /// unless `--name` gives a different one, so `create work` is a trait
+    /// named `work`, and `create work --name "Daily Work"` is a trait with
+    /// id `work` named `Daily Work`.
     ///
     /// `create` (2026-08-18 rename of `new`, no compatibility alias) is
     /// deterministic and offline except for invoking the local CDK build
@@ -318,13 +328,19 @@ pub enum TraitsCommand {
     /// has a machine trust record from a prior review). Use `ctx traits
     /// check` and `ctx traits trust --approved` next.
     Create {
-        /// Human-readable trait name to slugify into a trait ID. Required
-        /// together with `--from`; omitted entirely to list templates.
-        name: Option<String>,
+        /// Trait id, and the display name unless `--name` overrides it.
+        /// Omit entirely to list the available templates.
+        #[arg(value_name = "ID")]
+        id: Option<String>,
 
-        /// Template to scaffold from: implement, research, or review.
+        /// Template to scaffold from: plain, implement, research, or review.
+        /// Defaults to `plain`.
         #[arg(long)]
         from: Option<String>,
+
+        /// Display name, when it should differ from the id.
+        #[arg(long, requires = "id")]
+        name: Option<String>,
 
         /// Emit structured JSON.
         #[arg(long)]
