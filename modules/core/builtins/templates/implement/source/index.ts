@@ -60,52 +60,46 @@ const reviewReport = cdk.port.output.text({
   optional: true,
 });
 
-export default cdk.trait("implement", {
-  version: "0.1.0",
-  name: "Implement",
-  description: "Plans a stated piece of work, implements it, and reviews the result against the plan.",
-  metadata: { tag: ["template", "implementation"] },
-  // Ports are declared here, not on the procedure: an object-shell trait has
-  // no variant return for them to be derived from.
-  port: [goal, workReport, reviewReport],
-  procedure: cdk.procedure.from(
-    {
-      description: "Plan the work, carry it out, and review what was done.",
-    },
-    () => {
-      planner.prompt("Draft the plan", {
-        input: cdk.input.prompt`
-          Plan the work for ${goal}.
-          Name the scope, the files you expect to touch, the approach, and how the result will be checked.
-          Keep it short enough to act on; this is a plan, not the implementation.
-        `,
-        output: plan,
-      });
+export default function () {
+  cdk.defineTrait("Implement", {
+    version: "0.1.0",
+    description: "Plans a stated piece of work, implements it, and reviews the result against the plan.",
+    metadata: { tag: ["template", "implementation"] },
+  });
 
-      worker.prompt("Do the work", {
-        input: cdk.input.prompt`
-          Carry out ${goal}, following the plan in ${plan}.
-          Run the checks the plan names before reporting.
-          Return what you changed, how you validated it, and anything still open.
-        `,
-        output: workSummary,
-      });
+  planner.prompt("Draft the plan", {
+    input: cdk.input.prompt`
+      Plan the work for ${goal}.
+      Name the scope, the files you expect to touch, the approach, and how the result will be checked.
+      Keep it short enough to act on; this is a plan, not the implementation.
+    `,
+    output: plan,
+  });
 
-      cdk.step.command("Capture the changed files", {
-        input: cdk.input.command`git diff --name-status HEAD`,
-        output: changedFiles,
-      });
+  worker.prompt("Do the work", {
+    input: cdk.input.prompt`
+      Carry out ${goal}, following the plan in ${plan}.
+      Run the checks the plan names before reporting.
+      Return what you changed, how you validated it, and anything still open.
+    `,
+    output: workSummary,
+  });
 
-      reviewer.prompt("Review the work", {
-        input: cdk.input.prompt`
-          Judge the finished work for ${goal} against the plan in ${plan}.
-          The worker's account: ${workSummary}
-          The files that changed: ${changedFiles}
-          Read the changed files yourself; the summary is a claim, not evidence.
-          Report what still blocks the work, then what you verified and found sound.
-        `,
-        output: verdict,
-      });
-    },
-  ),
-});
+  cdk.step.command("Capture the changed files", {
+    input: cdk.input.command`git diff --name-status HEAD`,
+    output: changedFiles,
+  });
+
+  reviewer.prompt("Review the work", {
+    input: cdk.input.prompt`
+      Judge the finished work for ${goal} against the plan in ${plan}.
+      The worker's account: ${workSummary}
+      The files that changed: ${changedFiles}
+      Read the changed files yourself; the summary is a claim, not evidence.
+      Report what still blocks the work, then what you verified and found sound.
+    `,
+    output: verdict,
+  });
+
+  return { workReport, reviewReport };
+}

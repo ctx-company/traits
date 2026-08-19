@@ -69,55 +69,49 @@ const findingsReport = cdk.port.output.text({
   optional: true,
 });
 
-export default cdk.trait("research", {
-  version: "0.1.0",
-  name: "Research",
-  description: "Researches a topic into a written report at a predictable path, then reviews it for coverage.",
-  metadata: { tag: ["template", "research"] },
-  // Ports are declared here, not on the procedure: an object-shell trait has
-  // no variant return for them to be derived from.
-  port: [topic, outputDir, reportPathReport, findingsReport],
-  procedure: cdk.procedure.from(
-    {
-      description: "Scope the topic, research it into a report, and check the report answers it.",
-    },
-    () => {
-      cdk.step.command("Derive the topic slug", {
-        input: cdk.input.command`sh -c "printf %s \\"\\$1\\" | tr \\"A-Z\\" \\"a-z\\" | tr -cs \\"a-z0-9\\" \\"-\\" | sed \\"s/^-*//;s/-*\\$//\\"" _ ${topic}`,
-        output: slug,
-      });
+export default function () {
+  cdk.defineTrait("Research", {
+    version: "0.1.0",
+    description: "Researches a topic into a written report at a predictable path, then reviews it for coverage.",
+    metadata: { tag: ["template", "research"] },
+  });
 
-      cdk.step.command("Derive the report path", {
-        input: cdk.input.command`sh -c "printf %s/%s/report.md \\"\\$1\\" \\"\\$2\\"" _ ${outputDir} ${slug}`,
-        output: reportPath,
-      });
+  cdk.step.command("Derive the topic slug", {
+    input: cdk.input.command`sh -c "printf %s \\"\\$1\\" | tr \\"A-Z\\" \\"a-z\\" | tr -cs \\"a-z0-9\\" \\"-\\" | sed \\"s/^-*//;s/-*\\$//\\"" _ ${topic}`,
+    output: slug,
+  });
 
-      scout.prompt("Scope the topic", {
-        input: cdk.input.prompt`
-          Narrow ${topic} into the questions the research must answer.
-          Give the core question, the sub-questions worth answering separately, and what is deliberately out of scope.
-        `,
-        output: questions,
-      });
+  cdk.step.command("Derive the report path", {
+    input: cdk.input.command`sh -c "printf %s/%s/report.md \\"\\$1\\" \\"\\$2\\"" _ ${outputDir} ${slug}`,
+    output: reportPath,
+  });
 
-      researcher.prompt("Research the topic", {
-        input: cdk.input.prompt`
-          Research ${topic}, answering the questions in ${questions}.
-          Write the report to ${reportPath}, creating the directory if it does not exist.
-          Cite what each finding rests on, and say when the evidence is thin rather than filling the gap.
-          Return what you found, what you wrote, and which questions remain open.
-        `,
-        output: workSummary,
-      });
+  scout.prompt("Scope the topic", {
+    input: cdk.input.prompt`
+      Narrow ${topic} into the questions the research must answer.
+      Give the core question, the sub-questions worth answering separately, and what is deliberately out of scope.
+    `,
+    output: questions,
+  });
 
-      reviewer.prompt("Review the report", {
-        input: cdk.input.prompt`
-          Read the report at ${reportPath} and judge it against the questions in ${questions}.
-          The researcher's account: ${workSummary}
-          Report which questions are answered, which are not, and any claim the report does not support.
-        `,
-        output: verdict,
-      });
-    },
-  ),
-});
+  researcher.prompt("Research the topic", {
+    input: cdk.input.prompt`
+      Research ${topic}, answering the questions in ${questions}.
+      Write the report to ${reportPath}, creating the directory if it does not exist.
+      Cite what each finding rests on, and say when the evidence is thin rather than filling the gap.
+      Return what you found, what you wrote, and which questions remain open.
+    `,
+    output: workSummary,
+  });
+
+  reviewer.prompt("Review the report", {
+    input: cdk.input.prompt`
+      Read the report at ${reportPath} and judge it against the questions in ${questions}.
+      The researcher's account: ${workSummary}
+      Report which questions are answered, which are not, and any claim the report does not support.
+    `,
+    output: verdict,
+  });
+
+  return { reportPathReport, findingsReport };
+}

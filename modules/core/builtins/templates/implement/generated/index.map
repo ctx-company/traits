@@ -31,38 +31,38 @@
   },
   "prompt:do-the-work": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 86,
-    "end": 86
+    "start": 80,
+    "end": 80
   },
   "prompt:draft-the-plan": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 77,
-    "end": 77
+    "start": 71,
+    "end": 71
   },
   "prompt:review-the-work": {
-    "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 100,
-    "end": 100
-  },
-  "sequence:procedure/capture-the-changed-files": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
     "start": 94,
     "end": 94
   },
+  "sequence:procedure/capture-the-changed-files": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 88,
+    "end": 88
+  },
   "sequence:procedure/do-the-work": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 85,
-    "end": 85
+    "start": 79,
+    "end": 79
   },
   "sequence:procedure/draft-the-plan": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 76,
-    "end": 76
+    "start": 70,
+    "end": 70
   },
   "sequence:procedure/review-the-work": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 99,
-    "end": 99
+    "start": 93,
+    "end": 93
   },
   "slot:changed-files": {
     "file": ".ctx/traits/authored/implement/source/index.ts",
@@ -85,8 +85,8 @@
     "end": 35
   },
   "trait:implement": {
-    "file": ".ctx/traits/authored/implement/source/index.ts",
-    "start": 63,
-    "end": 63
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }

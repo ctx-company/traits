@@ -16,38 +16,38 @@
   },
   "prompt:review-the-range": {
     "file": ".ctx/traits/authored/review/source/index.ts",
-    "start": 82,
-    "end": 82
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
-    "start": 50,
-    "end": 50
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-changed-files": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
-    "start": 71,
-    "end": 71
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
     "start": 76,
     "end": 76
   },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/review-the-range": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
-    "start": 81,
-    "end": 81
+  "sequence:ctx-branch-arm-p-14-range-resolved-then": {
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   },
-  "sequence:procedure/range-resolved": {
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-changed-files": {
+    "file": ".ctx/traits/authored/review/source/index.ts",
+    "start": 65,
+    "end": 65
+  },
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
     "file": ".ctx/traits/authored/review/source/index.ts",
     "start": 70,
     "end": 70
   },
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/review-the-range": {
+    "file": ".ctx/traits/authored/review/source/index.ts",
+    "start": 75,
+    "end": 75
+  },
+  "sequence:procedure/range-resolved": {
+    "file": ".ctx/traits/authored/review/source/index.ts",
+    "start": 64,
+    "end": 64
+  },
   "sequence:procedure/resolve-the-range": {
     "file": ".ctx/traits/authored/review/source/index.ts",
-    "start": 63,
-    "end": 63
+    "start": 57,
+    "end": 57
   },
   "slot:changed-files": {
     "file": ".ctx/traits/authored/review/source/index.ts",
@@ -70,8 +70,8 @@
     "end": 37
   },
   "trait:review": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
-    "start": 50,
-    "end": 50
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }

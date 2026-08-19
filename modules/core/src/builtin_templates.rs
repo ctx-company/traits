@@ -70,20 +70,16 @@ pub enum InstantiateError {
         field: &'static str,
     },
     #[error(
-        "template {id:?} source/index.ts does not contain exactly one `trait({anchor:?}` call site"
-    )]
-    MissingIdAnchor { id: &'static str, anchor: String },
-    #[error(
-        "template {id:?} source/index.ts does not contain exactly one `name: {anchor:?}` field"
+        "template {id:?} source/index.ts does not contain exactly one `defineTrait({anchor:?}` call site"
     )]
     MissingNameAnchor { id: &'static str, anchor: String },
 }
 
 /// A template's authoring files rewritten for a freshly requested trait id
 /// and display name. `extra_source_files` passes through byte-identical —
-/// the two anchored rewrites (`trait(<id>` and `name: <name>`) live only in
-/// `source_ts`, per doctrine (`index.ts` declares; the other modules don't
-/// carry package identity).
+/// the one anchored rewrite (`defineTrait(<name>`) lives only in `source_ts`,
+/// per doctrine (`index.ts` declares; the other modules don't carry package
+/// identity).
 #[derive(Debug, Clone)]
 pub struct InstantiatedTemplate {
     pub trait_toml: String,
@@ -99,12 +95,13 @@ pub struct InstantiatedTemplate {
 /// `draft` regardless of the template's own committed status), re-encode.
 ///
 /// `source/index.ts` cannot be rewritten structurally without a TypeScript
-/// parser (out of scope per P271), so it is rewritten through two explicit,
-/// anchored source markers instead of a broad text replace: the template's
-/// own id as it appears in the `trait(<id>, {` call site, and the
-/// template's own committed display name as it appears in the `name:
-/// <name>` field. Each anchor must occur exactly once; a template whose
-/// source doesn't match this shape is an authoring defect caught here
+/// parser (out of scope per P271), so it is rewritten through one explicit,
+/// anchored source marker instead of a broad text replace: the template's own
+/// committed display name as it appears in the `defineTrait(<name>, {` call
+/// site. A trait function derives its canonical id by kebab-casing that same
+/// name, so rewriting the name rewrites the id with it — there is no separate
+/// id literal to keep in step. The anchor must occur exactly once; a template
+/// whose source doesn't match this shape is an authoring defect caught here
 /// rather than silently mis-substituted.
 pub fn instantiate(
     template: &BuiltinTemplate,
@@ -123,30 +120,20 @@ pub fn instantiate(
             }
         })?;
 
-    let original_id_literal = ts_string_literal(template.id);
-    let id_anchor = format!("trait({original_id_literal}");
-    let id_replacement = format!("trait({}", ts_string_literal(trait_id));
-    let id_occurrences = template.source_ts.matches(id_anchor.as_str()).count();
-    if id_occurrences != 1 {
-        return Err(InstantiateError::MissingIdAnchor {
-            id: template.id,
-            anchor: id_anchor,
-        });
-    }
-    let with_id = template.source_ts.replacen(&id_anchor, &id_replacement, 1);
-
     let original_name = template_display_name(template)?;
     let original_name_literal = ts_string_literal(&original_name);
-    let name_anchor = format!("name: {original_name_literal}");
-    let name_replacement = format!("name: {}", ts_string_literal(display_name));
-    let name_occurrences = with_id.matches(name_anchor.as_str()).count();
+    let name_anchor = format!("defineTrait({original_name_literal}");
+    let name_replacement = format!("defineTrait({}", ts_string_literal(display_name));
+    let name_occurrences = template.source_ts.matches(name_anchor.as_str()).count();
     if name_occurrences != 1 {
         return Err(InstantiateError::MissingNameAnchor {
             id: template.id,
             anchor: name_anchor,
         });
     }
-    let source_ts = with_id.replacen(&name_anchor, &name_replacement, 1);
+    let source_ts = template
+        .source_ts
+        .replacen(&name_anchor, &name_replacement, 1);
 
     Ok(InstantiatedTemplate {
         trait_toml,

@@ -36,43 +36,43 @@
   },
   "prompt:research-the-topic": {
     "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 104,
-    "end": 104
+    "start": 98,
+    "end": 98
   },
   "prompt:review-the-report": {
     "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 114,
-    "end": 114
+    "start": 108,
+    "end": 108
   },
   "prompt:scope-the-topic": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 96,
-    "end": 96
-  },
-  "sequence:procedure/derive-the-report-path": {
     "file": ".ctx/traits/authored/research/source/index.ts",
     "start": 90,
     "end": 90
   },
+  "sequence:procedure/derive-the-report-path": {
+    "file": ".ctx/traits/authored/research/source/index.ts",
+    "start": 84,
+    "end": 84
+  },
   "sequence:procedure/derive-the-topic-slug": {
     "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 85,
-    "end": 85
+    "start": 79,
+    "end": 79
   },
   "sequence:procedure/research-the-topic": {
     "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 103,
-    "end": 103
+    "start": 97,
+    "end": 97
   },
   "sequence:procedure/review-the-report": {
     "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 113,
-    "end": 113
+    "start": 107,
+    "end": 107
   },
   "sequence:procedure/scope-the-topic": {
     "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 95,
-    "end": 95
+    "start": 89,
+    "end": 89
   },
   "slot:questions": {
     "file": ".ctx/traits/authored/research/source/index.ts",
@@ -100,8 +100,8 @@
     "end": 48
   },
   "trait:research": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
-    "start": 72,
-    "end": 72
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }

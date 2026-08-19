@@ -72,10 +72,10 @@ summary = "Execution role."
 [prompt.do-the-work]
 text = """
 
-          Carry out {port:goal}, following the plan in {slot:plan}.
-          Run the checks the plan names before reporting.
-          Return what you changed, how you validated it, and anything still open.
-        """
+      Carry out {port:goal}, following the plan in {slot:plan}.
+      Run the checks the plan names before reporting.
+      Return what you changed, how you validated it, and anything still open.
+    """
 input = [
     "port:goal",
     "slot:plan",
@@ -85,22 +85,22 @@ output = ["slot:work-summary"]
 [prompt.draft-the-plan]
 text = """
 
-          Plan the work for {port:goal}.
-          Name the scope, the files you expect to touch, the approach, and how the result will be checked.
-          Keep it short enough to act on; this is a plan, not the implementation.
-        """
+      Plan the work for {port:goal}.
+      Name the scope, the files you expect to touch, the approach, and how the result will be checked.
+      Keep it short enough to act on; this is a plan, not the implementation.
+    """
 input = ["port:goal"]
 output = ["slot:plan"]
 
 [prompt.review-the-work]
 text = """
 
-          Judge the finished work for {port:goal} against the plan in {slot:plan}.
-          The worker's account: {slot:work-summary}
-          The files that changed: {slot:changed-files}
-          Read the changed files yourself; the summary is a claim, not evidence.
-          Report what still blocks the work, then what you verified and found sound.
-        """
+      Judge the finished work for {port:goal} against the plan in {slot:plan}.
+      The worker's account: {slot:work-summary}
+      The files that changed: {slot:changed-files}
+      Read the changed files yourself; the summary is a claim, not evidence.
+      Report what still blocks the work, then what you verified and found sound.
+    """
 input = [
     "port:goal",
     "slot:plan",
@@ -110,7 +110,7 @@ input = [
 output = ["slot:verdict"]
 
 [procedure]
-description = "Plan the work, carry it out, and review what was done."
+description = "Plans a stated piece of work, implements it, and reviews the result against the plan."
 input = ["port:goal"]
 output = [
     "port:review-report",

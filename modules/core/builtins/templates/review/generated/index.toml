@@ -2,7 +2,7 @@ id = "review"
 schema-version = "0.5"
 version = "0.1.0"
 name = "Review"
-description = "Reviews a git ref or range and returns a typed verdict plus a written review, without touching the tree."
+description = "Reviews a git ref or range and returns a written review, without touching the tree."
 
 [metadata]
 tag = [
@@ -53,13 +53,13 @@ summary = "Review role."
 [prompt.review-the-range]
 text = """
 
-            Review the change in {port:range}.
-            The files it touches: {slot:changed-files}
-            The commits it contains: {slot:commit-log}
-            Open the files themselves for anything you need to judge — the lists above are an index, not the change.
-            Report what would block a merge, then what is advisory, then what you checked and found sound.
-            Say plainly when the change is fine; do not invent findings to fill the report.
-          """
+        Review the change in {port:range}.
+        The files it touches: {slot:changed-files}
+        The commits it contains: {slot:commit-log}
+        Open the files themselves for anything you need to judge — the lists above are an index, not the change.
+        Report what would block a merge, then what is advisory, then what you checked and found sound.
+        Say plainly when the change is fine; do not invent findings to fill the report.
+      """
 input = [
     "port:range",
     "slot:changed-files",
@@ -108,7 +108,7 @@ input = [
 output = ["slot:verdict"]
 
 [procedure]
-description = "Resolve the range, capture what changed, and review it."
+description = "Reviews a git ref or range and returns a written review, without touching the tree."
 input = ["port:range"]
 output = ["port:verdict-report"]
 

@@ -87,11 +87,11 @@ summary = "Planning role."
 [prompt.research-the-topic]
 text = """
 
-          Research {port:topic}, answering the questions in {slot:questions}.
-          Write the report to {slot:report-path}, creating the directory if it does not exist.
-          Cite what each finding rests on, and say when the evidence is thin rather than filling the gap.
-          Return what you found, what you wrote, and which questions remain open.
-        """
+      Research {port:topic}, answering the questions in {slot:questions}.
+      Write the report to {slot:report-path}, creating the directory if it does not exist.
+      Cite what each finding rests on, and say when the evidence is thin rather than filling the gap.
+      Return what you found, what you wrote, and which questions remain open.
+    """
 input = [
     "port:topic",
     "slot:questions",
@@ -102,10 +102,10 @@ output = ["slot:work-summary"]
 [prompt.review-the-report]
 text = """
 
-          Read the report at {slot:report-path} and judge it against the questions in {slot:questions}.
-          The researcher's account: {slot:work-summary}
-          Report which questions are answered, which are not, and any claim the report does not support.
-        """
+      Read the report at {slot:report-path} and judge it against the questions in {slot:questions}.
+      The researcher's account: {slot:work-summary}
+      Report which questions are answered, which are not, and any claim the report does not support.
+    """
 input = [
     "slot:report-path",
     "slot:questions",
@@ -116,14 +116,14 @@ output = ["slot:verdict"]
 [prompt.scope-the-topic]
 text = """
 
-          Narrow {port:topic} into the questions the research must answer.
-          Give the core question, the sub-questions worth answering separately, and what is deliberately out of scope.
-        """
+      Narrow {port:topic} into the questions the research must answer.
+      Give the core question, the sub-questions worth answering separately, and what is deliberately out of scope.
+    """
 input = ["port:topic"]
 output = ["slot:questions"]
 
 [procedure]
-description = "Scope the topic, research it into a report, and check the report answers it."
+description = "Researches a topic into a written report at a predictable path, then reviews it for coverage."
 input = [
     "port:output-dir",
     "port:topic",
