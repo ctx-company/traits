@@ -774,7 +774,7 @@ fn push_scaffold_declaration(
     } else {
         (
             70,
-            "provisional declaration reconstructed from generated skill sections; per-declaration semantic anchors are deferred to Group 46 import-trait",
+            "provisional declaration reconstructed from generated skill sections; per-declaration semantic anchors are deferred to Group 46 import",
             anchors.whole_file.clone(),
         )
     };

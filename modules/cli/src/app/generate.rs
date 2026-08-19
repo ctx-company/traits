@@ -5,7 +5,7 @@ use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone
 use crate::app::surface::cli;
 use ctx_traits_core::response::CommandOutput;
 
-/// The `generate-trait` meta-trait's terminal output: the round-evidence
+/// The `generate` meta-trait's terminal output: the round-evidence
 /// envelope its `derive-envelope` step assembles (task 0066.1/0066.2).
 /// Deserializes `run_builtin_trait`'s single JSON output string.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -199,7 +199,7 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
     }
 
     // The default path (and `--check`) drive the declared bounded loop in
-    // `generate-trait`: the meta-trait iterates on its own typed rung
+    // `generate`: the meta-trait iterates on its own typed rung
     // diagnostics, and this handler writes only a converged result. No
     // retry logic lives here — that is the meta-trait's job (task 0066.1).
     // A live observer reports each round as it happens instead of blocking
@@ -209,7 +209,7 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
     let round_progress = RoundProgressObserver::new();
     let observer: crate::app::drive::FrameObserver<'_> = &|event| round_progress.observe(event);
     let outcome = match run_builtin_trait_observed(
-        "generate-trait",
+        "generate",
         vec![
             runtime_input("name", name),
             runtime_input("brief", brief),
@@ -314,7 +314,7 @@ pub(crate) fn handle_critique(input: CritiqueInputs<'_>) -> crate::Result<Comman
     let raw = match input.candidate_path {
         Some(path) => ctx_traits_io::read::read_text(camino::Utf8Path::new(path))?,
         None => match run_builtin_trait(
-            "critique-trait",
+            "critique",
             vec![
                 runtime_input("source", source_text),
                 runtime_input("source-digest", source_digest.as_str()),
@@ -507,11 +507,11 @@ pub(crate) fn run_builtin_trait_observed(
     frame_observer: Option<crate::app::drive::FrameObserver<'_>>,
 ) -> crate::Result<BuiltinTraitRun> {
     let agent_role = match trait_id {
-        "generate-trait" => "generator",
-        "refine-trait" => "refiner",
-        "critique-trait" => "critic",
-        "explain-trait" => "generator",
-        "import-trait" => "generator",
+        "generate" => "generator",
+        "refine" => "refiner",
+        "critique" => "critic",
+        "explain" => "generator",
+        "import" => "generator",
         _ => {
             return Err(crate::Error::Command {
                 message: format!("unsupported built-in trait runner {trait_id:?}"),
@@ -850,8 +850,8 @@ fn parse_failing_rung(rung: &str) -> Option<ctx_traits_core::assist::Rung> {
 
 /// The terminal shape every guarded-loop meta-trait's `derive-envelope` step
 /// emits (task 0066.1/0066.2/0066.3): convergence, rounds spent against the
-/// declared bound, and the failing rung — shared by `generate-trait`,
-/// `refine-trait`, and `import-trait`'s otherwise command-specific envelope
+/// declared bound, and the failing rung — shared by `generate`,
+/// `refine`, and `import`'s otherwise command-specific envelope
 /// structs so `round_evidence_from_envelope` has exactly one implementation.
 pub(crate) trait LoopEnvelope {
     fn converged(&self) -> bool;

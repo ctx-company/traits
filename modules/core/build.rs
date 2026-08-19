@@ -109,12 +109,7 @@ fn main() {
 /// resources the compiled manifest declares are discovered dynamically by
 /// parsing `generated/index.toml`.
 const BUILTIN_TRAIT_PACKAGE_IDS: &[&str] = &[
-    "generate-trait",
-    "refine-trait",
-    "critique-trait",
-    "explain-trait",
-    "import-trait",
-    "spec",
+    "generate", "refine", "critique", "explain", "import", "spec",
 ];
 
 const BUILTIN_TRAIT_PACKAGES_DIR: &str = "builtins/traits";

@@ -122,7 +122,7 @@ pub(crate) fn handle_explain(input: ExplainInputs<'_>) -> crate::Result<CommandO
 /// Deterministic evidence shared by every `explain --scaffold` path: the
 /// rebased source map, the check receipt, and the receipt-anchored scaffold
 /// built from them. The deterministic path, the `--llm-assisted` path, and
-/// the dashboard's `explain-trait` runner all build this the same way and
+/// the dashboard's `explain` runner all build this the same way and
 /// must never drift from one another (task 0124).
 pub(crate) struct ExplainEvidence {
     pub(crate) scaffold: ctx_traits_core::scaffold::ExplainScaffold,
@@ -310,7 +310,7 @@ fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOut
     Ok(CommandOutput::new(()))
 }
 
-/// `--llm-assisted` path: run `explain-trait` (or read `--candidate`) to
+/// `--llm-assisted` path: run `explain` (or read `--candidate`) to
 /// narrate the same deterministic scaffold every other path builds, then
 /// gate it through `explain`'s own receipt-grounding gate
 /// (`evaluate_supplied_explain_scaffold`) plus an evidence-equality check —
@@ -358,7 +358,7 @@ fn handle_explain_llm_assisted(
             let scaffold_text = serde_json::to_string(scaffold)
                 .map_err(|error| crate::Error::json("serialize explain scaffold input", error))?;
             match crate::app::generate::run_builtin_trait(
-                "explain-trait",
+                "explain",
                 vec![
                     crate::app::generate::runtime_input("source-trait-id", trait_id),
                     crate::app::generate::runtime_input(

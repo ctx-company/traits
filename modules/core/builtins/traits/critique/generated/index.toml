@@ -1,0 +1,145 @@
+id = "critique"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Critique Trait"
+description = "Produces source-backed advisory trait design critiques."
+
+[[dependency]]
+alias = "spec"
+id = "spec"
+version = "0.1.0"
+
+[dependency.source]
+path = "../spec"
+
+[metadata]
+tag = [
+    "first-party",
+    "meta-trait",
+    "critique",
+]
+
+[[port]]
+id = "source"
+direction = "input"
+schema = "schema:text"
+description = "Canonical source trait text."
+
+[[port]]
+id = "source-digest"
+direction = "input"
+schema = "schema:text"
+description = "sha256 digest of the source trait."
+
+[[port]]
+id = "source-map"
+direction = "input"
+schema = "schema:text"
+description = "Serialized source map whose anchors are authoritative."
+
+[[port]]
+id = "source-path"
+direction = "input"
+schema = "schema:text"
+description = "Reviewed trait path."
+
+[[slot]]
+id = "critique"
+schema = "schema:review-scaffold"
+description = "Runtime slot critique."
+
+[[schema]]
+id = "review-finding"
+description = "One advisory source-backed design finding."
+
+[schema.fields.anchor]
+schema = "schema:source-anchor"
+required = true
+
+[schema.fields.construct-ref]
+schema = "schema:text"
+required = true
+
+[schema.fields.message]
+schema = "schema:text"
+required = true
+
+[schema.fields.rule]
+schema = "schema:text"
+required = true
+
+[[schema]]
+id = "review-scaffold"
+description = "An advisory critique with exact source-map anchors."
+
+[schema.fields.findings]
+schema = "[schema:review-finding]"
+required = true
+
+[schema.fields.source-digest]
+schema = "schema:text"
+required = true
+
+[schema.fields.source-trait-id]
+schema = "schema:text"
+required = true
+
+[[schema]]
+id = "source-anchor"
+description = "An exact one-based inclusive source-map location."
+
+[schema.fields.end]
+schema = "schema:number"
+required = true
+
+[schema.fields.file]
+schema = "schema:text"
+required = true
+
+[schema.fields.start]
+schema = "schema:number"
+required = true
+
+[[agent]]
+id = "critic"
+description = "Reports source-backed advisory trait design findings."
+summary = "Trait design reviewer."
+
+[prompt.critique]
+text = """
+Critique {port:source} at {port:source-path}.
+
+Return exactly one structured review scaffold using {port:source-digest}. Findings are advisory, not proof or enforcement. Use only these rules: unbounded-loop, unattributed-output, missing-review-before-final, over-abstraction, stringly-reference, weak-schema, over-broad-trust. Every finding must name a canonical construct reference and copy its anchor exactly from {port:source-map}; do not guess, repair, or infer anchors. Judge the trait against {resource:spec/design-rubric}: whether its derived kind matches what it actually declares, whether its dataflow uses declared ports and slots rather than implied ones, and whether every identifier carries its meaning alone.
+
+Return JSON matching schema:review-scaffold, with no surrounding commentary."""
+input = [
+    "port:source",
+    "port:source-path",
+    "port:source-digest",
+    "port:source-map",
+    "resource:spec/design-rubric",
+]
+output = ["slot:critique"]
+
+[procedure]
+description = "Report advisory design findings without modifying the reviewed trait."
+input = [
+    "port:source",
+    "port:source-digest",
+    "port:source-map",
+    "port:source-path",
+]
+
+[[procedure.sequence]]
+id = "critique"
+title = "Critique trait"
+agent = "agent:critic"
+prompt = "prompt:critique"
+input = [
+    "port:source",
+    "port:source-path",
+    "port:source-digest",
+    "port:source-map",
+    "resource:spec/design-rubric",
+]
+output = ["slot:critique"]

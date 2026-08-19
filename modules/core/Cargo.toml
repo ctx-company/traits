@@ -11,8 +11,8 @@ description = "Pure deterministic ctx.traits core: parse, normalize, validate, a
 
 [features]
 default = []
-# Embed the first-party built-in meta-trait packages (generate-trait,
-# refine-trait, critique-trait, explain-trait, import-trait, spec)
+# Embed the first-party built-in meta-trait packages (generate,
+# refine, critique, explain, import, spec)
 # as static byte tables. Enabled by the IO and CLI crates, never by the WASM
 # crates.
 builtin-trait-packages = []

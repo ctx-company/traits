@@ -1,5 +1,5 @@
 //! Task 0124: `ctx traits explain --scaffold --llm-assisted` (no `--candidate`)
-//! now drives the `explain-trait` runner through the harness — proving the
+//! now drives the `explain` runner through the harness — proving the
 //! Done-when end to end against a real (fixture) narrator: the deterministic
 //! evidence reaches the runner, the runner's echoed scaffold survives the
 //! grounding gate unaltered, and the printed candidate carries a non-empty
@@ -84,7 +84,7 @@ fn explain_llm_assisted_narrates_the_deterministic_scaffold() {
     write_file(&source_path, SOURCE_TRAIT);
     let map_path = write_source_map(&proj, &source_path);
 
-    for dependency in ["explain-trait", "spec"] {
+    for dependency in ["explain", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),

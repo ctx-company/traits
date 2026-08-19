@@ -193,7 +193,7 @@ fn role_scribe() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `generate-trait`'s and `import-trait`'s produce/revise steps (both
+/// `generate`'s and `import`'s produce/revise steps (both
 /// declare an agent literally named `generator`; task 0066.1/0066.3's
 /// guarded loops): always returns the same deliberately invalid text, so
 /// every round fails at the ladder's earliest rung (`build` for generate's
@@ -227,7 +227,7 @@ fn role_generator(prompt: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `refine-trait`'s produce/revise steps (task 0066.3's guarded loop):
+/// `refine`'s produce/revise steps (task 0066.3's guarded loop):
 /// always returns the same deliberately invalid text in slot `candidate`, so
 /// every round fails at the ladder's `synth-normalize` rung and the loop's
 /// declared bound genuinely exhausts.
@@ -238,14 +238,14 @@ fn role_refiner(prompt: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `explain-trait`'s single narration step (task 0124): echoes the
+/// `explain`'s single narration step (task 0124): echoes the
 /// deterministic scaffold embedded in the compiled prompt verbatim, adding
 /// only a fixed advisory `explanation` string, so the CLI's grounding gate
 /// (`evidence_matches`) sees an unaltered echo and the run converges to a
 /// gated narrated explanation without a live provider.
 fn role_explainer(prompt: Option<String>) -> ExitCode {
     let prompt = prompt.unwrap_or_default();
-    let field = requested_output_field(&prompt).unwrap_or_else(|| "explain-trait".to_string());
+    let field = requested_output_field(&prompt).unwrap_or_else(|| "explain".to_string());
     // The compiled prompt reindents every line of interpolated multi-line
     // template text (task 0046: prompt wrap never dedents), so the markers'
     // surrounding newlines carry extra leading whitespace — search for the

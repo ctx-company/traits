@@ -1,5 +1,5 @@
 //! Task 0066.1: `ctx traits generate`'s default path now drives the guarded
-//! produce/evaluate loop declared in `generate-trait` instead of the old
+//! produce/evaluate loop declared in `generate` instead of the old
 //! one-shot canonical pipeline. This proves the non-convergence contract end
 //! to end against a real (never-converging) generator: the declared
 //! iteration bound genuinely exhausts, no target package is written, the
@@ -25,7 +25,7 @@ fn write_file(path: &Path, contents: &str) {
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", path.display()));
 }
 
-/// Every role `generate-trait` drives (`generator`) bound to the fixture
+/// Every role `generate` drives (`generator`) bound to the fixture
 /// agent's `--role generator` stub, which always returns the same
 /// deliberately invalid TypeScript candidate — so every round fails at the
 /// ladder's `build` rung and the loop's declared bound (3 rounds,
@@ -99,11 +99,11 @@ fn generate_loop_exhaustion_writes_no_package_and_preserves_scratch() {
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
-    // `generate-trait` itself must be locally trusted before it can be
+    // `generate` itself must be locally trusted before it can be
     // driven at all — a deterministic, offline, local-only operation (no
     // provider call), distinct from the assertion below that a
     // non-converging run never adds a trust record for the CANDIDATE trait.
-    for dependency in ["generate-trait", "spec"] {
+    for dependency in ["generate", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),

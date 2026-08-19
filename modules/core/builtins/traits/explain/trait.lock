@@ -1,0 +1,75 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "explain"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:2e0976799e1110aecbfa6d1ce6cc75eab7859330c7a996a614c08137f44d1efe"
+canonical = "sha256:692eff4d5f279064855c9508191fc283517de136c6ae41e621e18fe129dcab92"
+model-visible = "sha256:336d176c1e07801868229e186fad4745bed36948af574e5a1c02c5c10760a0fa"
+resource-manifest = "sha256:97f245a1a51156cf1dcadc40571a541348acc4aa507475585d02b24f8bb9816f"
+
+[[trait]]
+id = "explain-trait"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:42b6a7b3f60205e6851759892152e95ea10311ec3ab3c257c0c7c0f6939430d0"
+canonical = "sha256:22ea8d41d2a84c7d74fbeb174b8e6a512e861c1dbd38e43bb84602f2390eeaab"
+model-visible = "sha256:336d176c1e07801868229e186fad4745bed36948af574e5a1c02c5c10760a0fa"
+resource-manifest = "sha256:65452b617e500530e11701d263c81a8ed8229ee96a1a33668096eae668aed756"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/explain-trait/SKILL.md"
+digest = "sha256:6ec630789217a5efa7cdfd6ef6a7070e0b2692b81ab582743e7940a106def054"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0-alpha.1"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:ce19095beca35d0e8a71ba7412613f45ad5176c615e7ea5f721f35ebe060f38e"
+canonical = "sha256:0ae294534221f3bad85264057b0aac815c158e53fb225ca938359b24ed0426dc"
+model-visible = "sha256:0964c670b4c2082f9b554cf26ad8231460d0420472b8dc19c09502103d439f1e"
+render = "sha256:f7dd5124cda6cbcb0fe8836110fab6b5f4c09e385082a25af2e3cc6087110844"
+generated-markdown = "sha256:6ec630789217a5efa7cdfd6ef6a7070e0b2692b81ab582743e7940a106def054"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.explanation output contract has no title",
+    "port.explanation output contract has no format guidance",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = ".agents/skills/explain-trait/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]
+
+[[dependency]]
+alias = "spec"
+id = "spec"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+vendored-path = ".ctx/traits/vendored/spec"
+
+[dependency.source]
+path = "../spec"
+
+[dependency.digests]
+source = "sha256:174ee5b3791207a09a286352423e6ccd4bc30eb1b7c992a2e6fab717acd070b4"
+canonical = "sha256:7f4103abe0932c220aad45daab6f16a588587656cb05d4f3ef153bd11c7c2730"
+model-visible = "sha256:fa29959334535f27eea37bf642482dd9457c79f07c7498fa4c69188088113bdf"
+resource-manifest = "sha256:21a1bea7ad900b112b52cd04ea10e3b98fa6c50fd40b73798218fee995bc91c9"

@@ -1,6 +1,6 @@
 //! Runtime materialization of the six embedded first-party built-in
-//! meta-trait packages (`generate-trait`, `refine-trait`, `critique-trait`,
-//! `explain-trait`, `import-trait`, `spec`) as real files on disk.
+//! meta-trait packages (`generate`, `refine`, `critique`,
+//! `explain`, `import`, `spec`) as real files on disk.
 //!
 //! `ctx_traits_core::builtin_trait_packages` only exposes the packages as
 //! bytes compiled into the binary; nothing on disk backs them at runtime

@@ -1,0 +1,8 @@
+[package]
+id = "generate"
+version = "0.1.0"
+name = "Generate Trait"
+status = "ready"
+
+[dependencies]
+spec = { version = "0.1.0", path = "../spec" }

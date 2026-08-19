@@ -735,7 +735,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         verbose: bool,
 
-        /// Narrate the --scaffold evidence through the explain-trait runner
+        /// Narrate the --scaffold evidence through the explain runner
         /// instead of stopping at the deterministic scaffold. No effect
         /// without --scaffold; deterministic explain is unchanged.
         #[arg(long = "llm-assisted")]
@@ -746,18 +746,18 @@ pub enum TraitsCommand {
         #[arg(long)]
         candidate: Option<String>,
 
-        /// Provider/model ID for the explain-trait narrator. No effect
+        /// Provider/model ID for the explain narrator. No effect
         /// without --llm-assisted.
         #[arg(long)]
         model: Option<String>,
 
         /// Path to a `[budget]` document (0176) capping the --llm-assisted
-        /// explain-trait runner. Routing goes through --assign. No effect
+        /// explain runner. Routing goes through --assign. No effect
         /// without --llm-assisted or with --candidate.
         #[arg(long, value_name = "PATH")]
         budget: Option<String>,
 
-        /// Override the explain-trait generator agent assignment. No effect
+        /// Override the explain generator agent assignment. No effect
         /// without --llm-assisted.
         #[arg(
             long = "assign",
@@ -934,7 +934,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         model: Option<String>,
 
-        /// Override the generate-trait agent assignment.
+        /// Override the generate agent assignment.
         #[arg(
             long = "assign",
             value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
@@ -962,7 +962,7 @@ pub enum TraitsCommand {
     },
     /// Evaluate one authoring-source candidate through the rung ladder.
     ///
-    /// Internal: the only intended caller is `generate-trait`'s in-loop
+    /// Internal: the only intended caller is `generate`'s in-loop
     /// evaluate step (task 0066.1). Never calls a provider, never loops —
     /// exactly one round, always exits 0 and prints the round report as
     /// JSON regardless of convergence; the meta-trait's own loop primitive
@@ -977,7 +977,7 @@ pub enum TraitsCommand {
     },
     /// Evaluate one refine scaffold candidate through the rung ladder.
     ///
-    /// Internal: the only intended caller is `refine-trait`'s in-loop
+    /// Internal: the only intended caller is `refine`'s in-loop
     /// evaluate step (task 0066.3). Never calls a provider, never loops —
     /// exactly one round, always exits 0 and prints the round report as
     /// JSON regardless of convergence; the meta-trait's own loop primitive
@@ -993,7 +993,7 @@ pub enum TraitsCommand {
     },
     /// Evaluate one import trait-draft candidate through the rung ladder.
     ///
-    /// Internal: the only intended caller is `import-trait`'s in-loop
+    /// Internal: the only intended caller is `import`'s in-loop
     /// evaluate step (task 0066.3). Never calls a provider, never loops —
     /// exactly one round, always exits 0 and prints the round report as
     /// JSON regardless of convergence; the meta-trait's own loop primitive
@@ -1026,7 +1026,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         model: Option<String>,
 
-        /// Override the refine-trait agent assignment.
+        /// Override the refine agent assignment.
         #[arg(
             long = "assign",
             value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
@@ -1072,7 +1072,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         model: Option<String>,
 
-        /// Override the critique-trait reviewer assignment.
+        /// Override the critique reviewer assignment.
         #[arg(
             long = "assign",
             value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
@@ -1105,7 +1105,7 @@ pub enum TraitsCommand {
         profile: Option<String>,
 
         /// Path to a `[budget]` document (0176) capping the `--llm-assisted`
-        /// import-trait runner. Routing goes through `--assign`. Has no
+        /// import runner. Routing goes through `--assign`. Has no
         /// effect on deterministic import or an offline `--candidate`
         /// import, since neither dispatches a harness.
         #[arg(long, value_name = "PATH")]
@@ -1129,7 +1129,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         model: Option<String>,
 
-        /// Override the import-trait agent assignment.
+        /// Override the import agent assignment.
         #[arg(
             long = "assign",
             value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"

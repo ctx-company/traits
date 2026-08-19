@@ -187,7 +187,7 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
                 let scaffold_text = serde_json::to_string(&evidence.scaffold)
                     .map_err(|error| format!("serialize explain scaffold: {error}"))?;
                 let raw = crate::app::generate::run_builtin_trait(
-                    "explain-trait",
+                    "explain",
                     vec![
                         crate::app::generate::runtime_input(
                             "source-trait-id",

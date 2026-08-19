@@ -1,5 +1,5 @@
 //! Task 0066.3: `ctx traits refine --apply` now drives the guarded
-//! produce/evaluate loop declared in `refine-trait` instead of a single
+//! produce/evaluate loop declared in `refine` instead of a single
 //! unguarded provider call. This proves the non-convergence contract end to
 //! end against a real (never-converging) refiner: the declared iteration
 //! bound genuinely exhausts, the source file is never rewritten, and the
@@ -81,7 +81,7 @@ fn refine_apply_loop_exhaustion_writes_nothing_and_names_the_failing_rung() {
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
-    for dependency in ["refine-trait", "spec"] {
+    for dependency in ["refine", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),
@@ -150,7 +150,7 @@ fn refine_apply_loop_exhaustion_writes_nothing_and_names_the_failing_rung() {
     );
 }
 
-/// `refine` without `--apply` still runs `refine-trait` for its one produce
+/// `refine` without `--apply` still runs `refine` for its one produce
 /// call (task 0066.3 §4's `single-shot` guard), but must never loop — one
 /// round spent regardless of convergence, proving the non-`--apply` form's
 /// one-provider-call contract survives the meta-trait now always declaring
@@ -174,7 +174,7 @@ fn refine_preview_without_apply_spends_exactly_one_round() {
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
-    for dependency in ["refine-trait", "spec"] {
+    for dependency in ["refine", "spec"] {
         let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
         assert!(
             approve.status.success(),

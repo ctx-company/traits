@@ -1,6 +1,6 @@
 //! Typed accessor over the first-party built-in meta-trait packages
-//! (`generate-trait`, `refine-trait`, `critique-trait`,
-//! `explain-trait`, `import-trait`, `spec`), embedded into the binary
+//! (`generate`, `refine`, `critique`,
+//! `explain`, `import`, `spec`), embedded into the binary
 //! at compile time.
 //!
 //! Core performs no IO here: `build.rs` reads the package files, computes
@@ -55,12 +55,7 @@ mod tests {
     use crate::digest::Digest;
 
     const EXPECTED_IDS: &[&str] = &[
-        "generate-trait",
-        "refine-trait",
-        "critique-trait",
-        "explain-trait",
-        "import-trait",
-        "spec",
+        "generate", "refine", "critique", "explain", "import", "spec",
     ];
 
     #[test]

@@ -10,7 +10,7 @@ use crate::app::generate::{
 };
 use ctx_traits_core::response::CommandOutput;
 
-/// `refine-trait`'s terminal output: the round-evidence envelope its
+/// `refine`'s terminal output: the round-evidence envelope its
 /// `derive-envelope` step assembles (task 0066.3, mirroring 0066.1/0066.2's
 /// `GenerateEnvelope`). `candidate` is the last refine scaffold JSON text
 /// produced — decoded downstream by the existing `decode_refine_candidate`
@@ -133,7 +133,7 @@ pub(crate) fn handle_refine(input: RefineInputs<'_>) -> crate::Result<CommandOut
                 let observer: crate::app::drive::FrameObserver<'_> =
                     &|event| round_progress.observe(event);
                 let outcome = match run_builtin_trait_observed(
-                    "refine-trait",
+                    "refine",
                     vec![
                         runtime_input("source", source_text.as_str()),
                         runtime_input("source-digest", source_digest.as_str()),
@@ -419,7 +419,7 @@ pub(crate) fn decode_refine_candidate(
     Ok((candidate, Some(scaffold)))
 }
 
-/// The in-loop evaluate rung `refine-trait`'s meta-trait invokes for one
+/// The in-loop evaluate rung `refine`'s meta-trait invokes for one
 /// round: exactly one call into `assist_round::evaluate_refine_round`, no
 /// provider, no looping. Always exits 0 and prints the round report as JSON
 /// whether or not it converged — the meta-trait's own `sequence.loop`

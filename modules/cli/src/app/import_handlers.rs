@@ -17,7 +17,7 @@ use crate::app::import_analysis::{
 };
 use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 
-/// `import-trait`'s terminal output: the round-evidence envelope its
+/// `import`'s terminal output: the round-evidence envelope its
 /// `derive-envelope` step assembles (task 0066.3, mirroring 0066.1/0066.2's
 /// `GenerateEnvelope`). `candidate` is the last trait draft JSON text
 /// produced — decoded downstream by the existing `decode_generate_candidate`
@@ -592,7 +592,7 @@ pub(crate) struct ImportInputs<'a> {
     pub(crate) assignments: &'a [String],
     pub(crate) candidate_path: Option<&'a str>,
     /// `--run-profile <PATH>`: caller-selected LLM runtime routing/budget
-    /// for the harness-backed `import-trait` runner (P403). Distinct from
+    /// for the harness-backed `import` runner (P403). Distinct from
     /// `source_profile`, which selects the source-format parser. Has no
     /// effect when `llm_assisted` is false or `candidate_path` is set, since
     /// neither path dispatches a harness.
@@ -783,7 +783,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                     let observer: crate::app::drive::FrameObserver<'_> =
                         &|event| round_progress.observe(event);
                     let outcome = match run_builtin_trait_observed(
-                        "import-trait",
+                        "import",
                         vec![
                             runtime_input("scaffold", synth_output_text.as_str()),
                             runtime_input("source", loaded_source.skill_markdown.as_str()),
@@ -1185,7 +1185,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
     Ok(CommandOutput::new(()))
 }
 
-/// The in-loop evaluate rung `import-trait`'s meta-trait invokes for one
+/// The in-loop evaluate rung `import`'s meta-trait invokes for one
 /// round: exactly one call into `assist_round::evaluate_import_round`, no
 /// provider, no looping. Always exits 0 and prints the round report as JSON
 /// whether or not it converged — the meta-trait's own `sequence.loop`
