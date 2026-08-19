@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0213"
 title = "ctx traits fork: fork a vendored package into the authored tree"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
+closed = "2026-08-18"
+origin = "run run-f059a62f4732c9dd38c8b1b6e66d6e47a5b9ccec455b1e113b6f6de1e98d2f21 merged as acb4d844959701805a98004bfd2aa165cab0b498"
 content = """
 Owner-requested command: "Fork a vendored package into the authored tree —
 yours to edit from there."
@@ -47,3 +49,7 @@ forked-from provenance; the vendored entry no longer shadows it; re-running
 errors loudly; the command appears in the Author help group and
 `help --json`; output-style proof matches the panel registry shape.
 """
+
+[closure]
+mode = "merge"
+commit = "acb4d844959701805a98004bfd2aa165cab0b498"

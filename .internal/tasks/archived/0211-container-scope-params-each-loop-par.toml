@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0211"
 title = "Containers configure through scope params: each for forEach, flow.until family retires"
-status = "ready"
+status = "done"
 raised = "2026-08-18"
+closed = "2026-08-18"
+origin = "run run-5f29f3415c9d3be573830dbf59e67a14a16a131ddf1542b2a268519b166f061a merged as b00958ac3f7c9b162f24179d944590cddb14092d"
 content = """
 Per 0207 ruling 5. One idiom across containers: the body receives its scope
 handle and all scoped configuration is calls on it.
@@ -49,3 +51,7 @@ depends-on = [
     "0207",
     "0209",
 ]
+
+[closure]
+mode = "merge"
+commit = "b00958ac3f7c9b162f24179d944590cddb14092d"
