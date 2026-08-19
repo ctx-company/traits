@@ -1,17 +1,12 @@
 {
-  "resource:agent-traits-schema": {
-    "file": "modules/core/builtins/traits/trait-spec/source/index.ts",
+  "resource:design-rubric": {
+    "file": "modules/core/builtins/traits/spec/source/index.ts",
     "start": 3,
     "end": 3
   },
-  "resource:design-rubric": {
-    "file": "modules/core/builtins/traits/trait-spec/source/index.ts",
+  "trait:spec": {
+    "file": "modules/core/builtins/traits/spec/source/index.ts",
     "start": 10,
     "end": 10
-  },
-  "trait:trait-spec": {
-    "file": "modules/core/builtins/traits/trait-spec/source/index.ts",
-    "start": 17,
-    "end": 17
   }
 }

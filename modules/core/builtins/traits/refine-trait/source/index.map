@@ -1,142 +1,142 @@
 {
   "agent:refiner": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 3,
-    "end": 3
+    "start": 16,
+    "end": 16
   },
   "port:change-request": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 11,
-    "end": 11
+    "start": 28,
+    "end": 28
   },
   "port:result": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 168,
-    "end": 168
+    "start": 201,
+    "end": 201
   },
   "port:single-shot": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 35,
+    "end": 35
   },
   "port:source": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 8,
-    "end": 8
+    "start": 22,
+    "end": 22
   },
   "port:source-digest": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 9,
-    "end": 9
+    "start": 23,
+    "end": 23
   },
   "port:source-path": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 10,
-    "end": 10
+    "start": 24,
+    "end": 24
   },
   "prompt:produce-first": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 60,
-    "end": 60
+    "start": 81,
+    "end": 81
   },
   "prompt:revise": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 99,
-    "end": 99
+    "start": 120,
+    "end": 120
   },
   "schema:refine-envelope": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 122,
-    "end": 122
+    "start": 143,
+    "end": 143
   },
   "schema:round-report": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 48,
+    "end": 48
   },
   "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 175,
-    "end": 175
+    "start": 209,
+    "end": 209
   },
   "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then/revise": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 96,
-    "end": 96
+    "start": 117,
+    "end": 117
   },
   "sequence:procedure/capture-single-shot": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 71,
-    "end": 71
+    "start": 92,
+    "end": 92
   },
   "sequence:procedure/derive-envelope": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 153,
-    "end": 153
+    "start": 186,
+    "end": 186
   },
   "sequence:procedure/guarded-loop": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 114,
-    "end": 114
+    "start": 135,
+    "end": 135
   },
   "sequence:procedure/init-rounds-spent": {
-    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 66,
-    "end": 66
-  },
-  "sequence:procedure/produce-first": {
-    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 57,
-    "end": 57
-  },
-  "sequence:round": {
-    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 116,
-    "end": 116
-  },
-  "sequence:round/count-round": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
     "start": 87,
     "end": 87
   },
+  "sequence:procedure/produce-first": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 78,
+    "end": 78
+  },
+  "sequence:round": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 137,
+    "end": 137
+  },
+  "sequence:round/count-round": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 108,
+    "end": 108
+  },
   "sequence:round/evaluate-round": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 80,
-    "end": 80
+    "start": 101,
+    "end": 101
   },
   "sequence:round/revise-if-not-converged": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 107,
-    "end": 107
+    "start": 128,
+    "end": 128
   },
   "slot:candidate": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 43,
+    "end": 43
   },
   "slot:envelope": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 134,
-    "end": 134
+    "start": 167,
+    "end": 167
   },
   "slot:round-report": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 41,
-    "end": 41
+    "start": 62,
+    "end": 62
   },
   "slot:rounds-spent": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 46,
-    "end": 46
+    "start": 67,
+    "end": 67
   },
   "slot:single-shot-flag": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 52,
-    "end": 52
+    "start": 73,
+    "end": 73
   },
   "trait:refine-trait": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 175,
-    "end": 175
+    "start": 209,
+    "end": 209
   }
 }

@@ -6,52 +6,52 @@
   },
   "port:explanation": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 42,
-    "end": 42
+    "start": 59,
+    "end": 59
   },
   "port:receipt-digest": {
-    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 8,
-    "end": 8
-  },
-  "port:scaffold": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
     "start": 9,
     "end": 9
   },
-  "port:source-trait-id": {
-    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 7,
-    "end": 7
-  },
-  "prompt:explain-trait": {
-    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 35,
-    "end": 35
-  },
-  "schema:explain-scaffold": {
-    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 23,
-    "end": 23
-  },
-  "schema:explain-section": {
+  "port:scaffold": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
     "start": 13,
     "end": 13
   },
+  "port:source-trait-id": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 8,
+    "end": 8
+  },
+  "prompt:explain-trait": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 52,
+    "end": 52
+  },
+  "schema:explain-scaffold": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 40,
+    "end": 40
+  },
+  "schema:explain-section": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 24,
+    "end": 24
+  },
   "schema:source-anchor": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 12,
-    "end": 12
+    "start": 19,
+    "end": 19
   },
   "sequence:procedure/explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 35,
-    "end": 35
+    "start": 52,
+    "end": 52
   },
   "trait:explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 44,
-    "end": 44
+    "start": 66,
+    "end": 66
   }
 }

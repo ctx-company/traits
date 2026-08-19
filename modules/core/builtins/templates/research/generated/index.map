@@ -1,101 +1,101 @@
 {
   "agent:researcher": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 16,
     "end": 16
   },
   "agent:reviewer": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 19,
     "end": 19
   },
   "agent:scout": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 13,
     "end": 13
   },
   "port:findings-report": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 64,
     "end": 64
   },
   "port:output-dir": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 27,
     "end": 27
   },
   "port:report-path-report": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 57,
     "end": 57
   },
   "port:topic": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 23,
     "end": 23
   },
   "prompt:research-the-topic": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 98,
     "end": 98
   },
   "prompt:review-the-report": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 108,
     "end": 108
   },
   "prompt:scope-the-topic": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 90,
     "end": 90
   },
   "sequence:procedure/derive-the-report-path": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 84,
     "end": 84
   },
   "sequence:procedure/derive-the-topic-slug": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 79,
     "end": 79
   },
   "sequence:procedure/research-the-topic": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 97,
     "end": 97
   },
   "sequence:procedure/review-the-report": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 107,
     "end": 107
   },
   "sequence:procedure/scope-the-topic": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 89,
     "end": 89
   },
   "slot:questions": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 44,
     "end": 44
   },
   "slot:report-path": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 40,
     "end": 40
   },
   "slot:topic-slug": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 36,
     "end": 36
   },
   "slot:verdict": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 52,
     "end": 52
   },
   "slot:work-summary": {
-    "file": ".ctx/traits/authored/research/source/index.ts",
+    "file": "modules/core/builtins/templates/research/source/index.ts",
     "start": 48,
     "end": 48
   },

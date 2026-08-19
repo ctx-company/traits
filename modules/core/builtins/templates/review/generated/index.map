@@ -1,21 +1,21 @@
 {
   "agent:reviewer": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 14,
     "end": 14
   },
   "port:range": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 18,
     "end": 18
   },
   "port:verdict-report": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 42,
     "end": 42
   },
   "prompt:review-the-range": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 76,
     "end": 76
   },
@@ -25,47 +25,47 @@
     "end": 116
   },
   "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-changed-files": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 65,
     "end": 65
   },
   "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 70,
     "end": 70
   },
   "sequence:ctx-branch-arm-p-14-range-resolved-then/review-the-range": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 75,
     "end": 75
   },
   "sequence:procedure/range-resolved": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 64,
     "end": 64
   },
   "sequence:procedure/resolve-the-range": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 57,
     "end": 57
   },
   "slot:changed-files": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 29,
     "end": 29
   },
   "slot:commit-log": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 33,
     "end": 33
   },
   "slot:resolved-range": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 25,
     "end": 25
   },
   "slot:verdict": {
-    "file": ".ctx/traits/authored/review/source/index.ts",
+    "file": "modules/core/builtins/templates/review/source/index.ts",
     "start": 37,
     "end": 37
   },
