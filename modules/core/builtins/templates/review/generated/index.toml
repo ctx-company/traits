@@ -2,7 +2,7 @@ id = "review"
 schema-version = "0.5"
 version = "0.1.0"
 name = "Review"
-description = "Reviews a git ref or range and returns a written review, without touching the tree."
+description = "Reviews a git range and returns a written review, without touching the tree."
 
 [metadata]
 tag = [
@@ -35,14 +35,13 @@ id = "push-back"
 id = "range"
 direction = "input"
 schema = "schema:text"
-description = 'A git ref or range to review, e.g. "main...feature-x" or a branch name.'
+description = 'The change to review, as a git range — e.g. "main...HEAD" or "HEAD~3..HEAD".'
 
 [[port]]
 id = "verdict-report"
 direction = "output"
 schema = "schema:text"
-optional = true
-description = "The review. Absent when the range did not resolve or held no changes."
+description = "The review."
 title = "Review"
 value = "slot:verdict"
 
@@ -57,11 +56,6 @@ schema = "schema:text"
 description = "One line per commit in the range."
 
 [[slot]]
-id = "resolved-range"
-schema = "schema:text"
-description = "The range after git resolved it; empty when the ref does not exist."
-
-[[slot]]
 id = "verdict"
 schema = "schema:text"
 description = "The reviewer's assessment: what blocks a merge, what is advisory, and what was checked."
@@ -71,56 +65,16 @@ id = "reviewer"
 description = "Reviews the change in a git range and reports what would block a merge."
 summary = "Review role."
 
-[prompt.review-the-range]
+[prompt.review-the-change]
 text = """
 
-        Review the change in {port:range}.
-        The files it touches: {slot:changed-files}
-        The commits it contains: {slot:commit-log}
-        Open the files themselves for anything you need to judge — the lists above are an index, not the change.
-        Report what would block a merge, then what is advisory, then what you checked and found sound.
-        Say plainly when the change is fine; do not invent findings to fill the report.
-      """
-input = [
-    "port:range",
-    "slot:changed-files",
-    "slot:commit-log",
-]
-output = ["slot:verdict"]
-
-[[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "capture-the-changed-files"
-title = "Capture the changed files"
-input = ["port:range"]
-output = ["slot:changed-files"]
-
-[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.command]
-argv = [
-    "git",
-    "diff",
-    "--name-status",
-    "{port:range}",
-]
-
-[[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "capture-the-commit-log"
-title = "Capture the commit log"
-input = ["port:range"]
-output = ["slot:commit-log"]
-
-[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.command]
-argv = [
-    "git",
-    "log",
-    "--oneline",
-    "{port:range}",
-]
-
-[[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "review-the-range"
-title = "Review the range"
-agent = "agent:reviewer"
-prompt = "prompt:review-the-range"
+      Review the change in {port:range}.
+      The files it touches: {slot:changed-files}
+      The commits it contains: {slot:commit-log}
+      Open the files themselves for anything you need to judge — the lists above are an index, not the change.
+      Report what would block a merge, then what is advisory, then what you checked and found sound.
+      Say plainly when the change is fine; do not invent findings to fill the report.
+    """
 input = [
     "port:range",
     "slot:changed-files",
@@ -129,29 +83,46 @@ input = [
 output = ["slot:verdict"]
 
 [procedure]
-description = "Reviews a git ref or range and returns a written review, without touching the tree."
+description = "Reviews a git range and returns a written review, without touching the tree."
 input = ["port:range"]
 output = ["port:verdict-report"]
 
 [[procedure.sequence]]
-id = "resolve-the-range"
-title = "Resolve the range"
+id = "capture-the-changed-files"
+title = "Capture the changed files"
 input = ["port:range"]
-output = ["slot:resolved-range"]
+output = ["slot:changed-files"]
 
 [procedure.sequence.command]
 argv = [
     "git",
-    "rev-parse",
-    "--abbrev-ref",
+    "diff",
+    "--name-status",
     "{port:range}",
 ]
 
 [[procedure.sequence]]
-id = "range-resolved"
-title = "Range Resolved"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-p-14-range-resolved-then"
+id = "capture-the-commit-log"
+title = "Capture the commit log"
+input = ["port:range"]
+output = ["slot:commit-log"]
 
-[procedure.sequence.when.not]
-empty = "slot:resolved-range"
+[procedure.sequence.command]
+argv = [
+    "git",
+    "log",
+    "--oneline",
+    "{port:range}",
+]
+
+[[procedure.sequence]]
+id = "review-the-change"
+title = "Review the change"
+agent = "agent:reviewer"
+prompt = "prompt:review-the-change"
+input = [
+    "port:range",
+    "slot:changed-files",
+    "slot:commit-log",
+]
+output = ["slot:verdict"]

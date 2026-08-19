@@ -5,7 +5,6 @@ import { input, port, slot } from "@ctx-traits/cdk";
 import { reviewer } from "../agent.ts";
 import { range } from "../data.ts";
 import { commitLog, diffStat } from "./evidence.ts";
-import { rangeResolved } from "./resolve-range.ts";
 
 export const reviewVerdict = slot({
   id: "review-verdict",
@@ -23,13 +22,13 @@ export const reviewDocument = slot.text({
 // implement's own DOCTRINE-splicing prompts), not a typed slot/port ref — the
 // tagged template only accepts typed refs in its `${}` positions.
 const reviewText = input.prompt(
-  `Review the range {rangeResolved} (from the range/ref you were given: {range}). Commit log: {commitLog}. File-level diff inventory (never the full patch): {diffStat}.
-    Open the actual content yourself with your own tools — "git show", "git diff {rangeResolved} -- <file>" — the inventory above is only an index of where the changes landed.
+  `Review the range {range}. Commit log: {commitLog}. File-level diff inventory (never the full patch): {diffStat}.
+    Open the actual content yourself with your own tools — "git show", "git diff {range} -- <file>" — the inventory above is only an index of where the changes landed.
     No task board governs this run: leave "wall-id" the empty string, omit "remaining" and "owner-items", and set "escalation" to "needs-owner" only for authority questions the diff itself raises, never for ordinary code-review blockers.
     Edit nothing — you are read-only. Open files, do not write them.
     ${CODE_INTEGRITY_DOCTRINE}
     Write both the typed verdict and a rendered human review document: what the range does, the blockers you found (if any) and why each is one, and anything advisory.`,
-  { range, rangeResolved, commitLog, diffStat },
+  { range, commitLog, diffStat },
 );
 
 export const review = cdk.step({
@@ -40,14 +39,14 @@ export const review = cdk.step({
 
 export const reviewVerdictReport = port.output.of(reviewVerdictSchema, {
   id: "review-verdict-report",
-  description: "The reviewer's typed verdict. Absent when preflight parked on an unresolvable range or an empty diff.",
+  description: "The reviewer's typed verdict. Absent when the range held no changes.",
   optional: true,
   value: reviewVerdict,
 });
 export const reviewDocumentReport = port.output.text({
   id: "review-document-report",
   description:
-    "The rendered human review document. Absent when preflight parked on an unresolvable range or an empty diff.",
+    "The rendered human review document. Absent when the range held no changes.",
   optional: true,
   value: reviewDocument,
 });

@@ -2,8 +2,8 @@ id = "review"
 schema-version = "0.5"
 version = "0.1.0"
 name = "Review (Default)"
-description = "Preflight range resolution -> deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
-summary = "Points a single reviewer at an arbitrary locally-resolvable git ref/range and returns a typed verdict plus a rendered review document, with zero mutation of the reviewed tree."
+description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
+summary = "Points a single reviewer at a git range and returns a typed verdict plus a rendered review document, with zero mutation of the reviewed tree."
 variant = "default"
 
 [metadata]
@@ -29,14 +29,14 @@ id = "scope-creep"
 id = "range"
 direction = "input"
 schema = "schema:text"
-description = 'A locally-resolvable git ref or range (e.g. "main...feature-x", a branch name, or a single ref meaning <merge-base of default>..ref). Preflight resolves and validates it with git rev-parse/git merge-base before anything else runs.'
+description = 'The change to review, as a git range — e.g. "main...HEAD" or "HEAD~3..HEAD". Handed to git as written; git rejects a range it cannot resolve.'
 
 [[port]]
 id = "review-document-report"
 direction = "output"
 schema = "schema:text"
 optional = true
-description = "The rendered human review document. Absent when preflight parked on an unresolvable range or an empty diff."
+description = "The rendered human review document. Absent when the range held no changes."
 value = "slot:review-document"
 
 [[port]]
@@ -44,32 +44,27 @@ id = "review-verdict-report"
 direction = "output"
 schema = "schema:review-verdict"
 optional = true
-description = "The reviewer's typed verdict. Absent when preflight parked on an unresolvable range or an empty diff."
+description = "The reviewer's typed verdict. Absent when the range held no changes."
 value = "slot:review-verdict"
 
 [[port]]
 id = "tree-status-report"
 direction = "output"
-schema = "schema:review-tree-status"
+schema = "schema:text"
 optional = true
-description = "Whether the reviewed tree came out clean. Absent when preflight parked on an unresolvable range or an empty diff."
+description = "Uncommitted changes left in the reviewed tree, empty when none."
 value = "slot:tree-status"
 
 [[slot]]
 id = "commit-log"
 schema = "schema:text"
-description = "git log --oneline output for the resolved range."
+description = "git log --oneline output for the range."
 
 [[slot]]
 id = "diff-stat"
 schema = "schema:text"
-description = "git diff --stat output for the resolved range: file inventory only, never patch bodies."
+description = "git diff --stat output for the range: file inventory only, never patch bodies."
 hint = "Index pattern — the reviewer opens actual content with its own tools (git show, git diff <range> -- <file>)."
-
-[[slot]]
-id = "range-resolved"
-schema = "schema:text"
-description = "The normalized two-endpoint range actually diffed and logged, after preflight resolution."
 
 [[slot]]
 id = "review-document"
@@ -83,8 +78,8 @@ description = "Reviewer's typed verdict on the range. No task board governs this
 
 [[slot]]
 id = "tree-status"
-schema = "schema:review-tree-status"
-description = "Detects (does not prevent) whether the review step mutated the reviewed tree."
+schema = "schema:text"
+description = "The porcelain listing of uncommitted changes; empty when the reviewed tree stayed clean."
 
 [[schema]]
 id = "blocker"
@@ -191,19 +186,6 @@ required = true
 description = 'The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); "none possible" only when truly nothing applies.'
 
 [[schema]]
-id = "review-tree-status"
-
-[schema.fields.argv]
-schema = "[schema:text]"
-required = true
-description = "The exact argv that decided it."
-
-[schema.fields.ok]
-schema = "schema:boolean"
-required = true
-description = "True when the reviewed tree has no uncommitted changes after the review step ran."
-
-[[schema]]
 id = "review-verdict"
 description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if a blocking defect remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly."
 
@@ -259,8 +241,8 @@ summary = "Standalone review role."
 
 [prompt.review-the-range]
 text = """
-Review the range {slot:range-resolved} (from the range/ref you were given: {port:range}). Commit log: {slot:commit-log}. File-level diff inventory (never the full patch): {slot:diff-stat}.
-    Open the actual content yourself with your own tools — "git show", "git diff {slot:range-resolved} -- <file>" — the inventory above is only an index of where the changes landed.
+Review the range {port:range}. Commit log: {slot:commit-log}. File-level diff inventory (never the full patch): {slot:diff-stat}.
+    Open the actual content yourself with your own tools — "git show", "git diff {port:range} -- <file>" — the inventory above is only an index of where the changes landed.
     No task board governs this run: leave "wall-id" the empty string, omit "remaining" and "owner-items", and set "escalation" to "needs-owner" only for authority questions the diff itself raises, never for ordinary code-review blockers.
     Edit nothing — you are read-only. Open files, do not write them.
     Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
@@ -271,7 +253,6 @@ Review the range {slot:range-resolved} (from the range/ref you were given: {port
     Write both the typed verdict and a rendered human review document: what the range does, the blockers you found (if any) and why each is one, and anything advisory."""
 input = [
     "port:range",
-    "slot:range-resolved",
     "slot:commit-log",
     "slot:diff-stat",
 ]
@@ -280,54 +261,13 @@ output = [
     "slot:review-document",
 ]
 
-[[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "capture-the-diff-inventory"
-title = "Capture the diff inventory"
-input = ["slot:range-resolved"]
-output = ["slot:diff-stat"]
-
-[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'git diff --stat "$1"',
-    "_",
-    "{slot:range-resolved}",
-]
-
-[[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "capture-the-commit-log"
-title = "Capture the commit log"
-input = ["slot:range-resolved"]
-output = ["slot:commit-log"]
-
-[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'git log --oneline "$1"',
-    "_",
-    "{slot:range-resolved}",
-]
-
-[[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "diff-non-empty"
-title = "Diff Non-Empty"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then"
-
-[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.when.not]
-slot = "slot:diff-stat"
-equals = ""
-
-[[sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence]]
+[[sequence.ctx-branch-arm-p-14-diff-non-empty-then.sequence]]
 id = "review-the-range"
 title = "Review the range"
 agent = "agent:reviewer"
 prompt = "prompt:review-the-range"
 input = [
     "port:range",
-    "slot:range-resolved",
     "slot:commit-log",
     "slot:diff-stat",
 ]
@@ -336,21 +276,20 @@ output = [
     "slot:review-document",
 ]
 
-[[sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence]]
+[[sequence.ctx-branch-arm-p-14-diff-non-empty-then.sequence]]
 id = "assert-the-reviewed-tree-stayed-clean"
 title = "Assert the reviewed tree stayed clean"
-kind = "check"
 output = ["slot:tree-status"]
 
-[sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence.command]
+[sequence.ctx-branch-arm-p-14-diff-non-empty-then.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    'test -z "$(git status --porcelain)"',
+    "git",
+    "status",
+    "--porcelain",
 ]
 
 [procedure]
-description = "Preflight range resolution -> deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
+description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
 input = ["port:range"]
 output = [
     "port:review-document-report",
@@ -359,26 +298,39 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "resolve-the-range"
-title = "Resolve the range"
+id = "capture-the-diff-inventory"
+title = "Capture the diff inventory"
 input = ["port:range"]
-output = ["slot:range-resolved"]
+output = ["slot:diff-stat"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    'r="$1"; case "$r" in *...*|*..*) resolved="$r" ;; *) git rev-parse --verify "$r" >/dev/null 2>&1 || exit 0; base=$(git merge-base HEAD "$r" 2>/dev/null) || exit 0; resolved="$base..$r" ;; esac; git rev-list "$resolved" >/dev/null 2>&1 && echo "$resolved"; exit 0',
-    "_",
+    "git",
+    "diff",
+    "--stat",
     "{port:range}",
 ]
 
 [[procedure.sequence]]
-id = "range-resolved"
-title = "Range Resolved"
+id = "capture-the-commit-log"
+title = "Capture the commit log"
+input = ["port:range"]
+output = ["slot:commit-log"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "log",
+    "--oneline",
+    "{port:range}",
+]
+
+[[procedure.sequence]]
+id = "diff-non-empty"
+title = "Diff Non-Empty"
 kind = "branch"
-sequence = "sequence:ctx-branch-arm-p-14-range-resolved-then"
+sequence = "sequence:ctx-branch-arm-p-14-diff-non-empty-then"
 
 [procedure.sequence.when.not]
-slot = "slot:range-resolved"
+slot = "slot:diff-stat"
 equals = ""

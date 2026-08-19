@@ -3,5 +3,5 @@ import { port } from "@ctx-traits/cdk";
 export const range = port.input.text({
   id: "range",
   description:
-    'A locally-resolvable git ref or range (e.g. "main...feature-x", a branch name, or a single ref meaning <merge-base of default>..ref). Preflight resolves and validates it with git rev-parse/git merge-base before anything else runs.',
+    'The change to review, as a git range — e.g. "main...HEAD" or "HEAD~3..HEAD". Handed to git as written; git rejects a range it cannot resolve.',
 });

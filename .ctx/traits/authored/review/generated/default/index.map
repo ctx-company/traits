@@ -11,23 +11,23 @@
   },
   "port:review-document-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 47,
-    "end": 47
+    "start": 46,
+    "end": 46
   },
   "port:review-verdict-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 41,
-    "end": 41
+    "start": 40,
+    "end": 40
   },
   "port:tree-status-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
-    "start": 18,
-    "end": 18
+    "start": 10,
+    "end": 10
   },
   "prompt:review-the-range": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 25,
-    "end": 25
+    "start": 24,
+    "end": 24
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -44,50 +44,35 @@
     "start": 238,
     "end": 238
   },
-  "schema:review-tree-status": {
-    "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
-    "start": 6,
-    "end": 6
-  },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
     "start": 322,
     "end": 322
   },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
+  "sequence:ctx-branch-arm-p-14-diff-non-empty-then/assert-the-reviewed-tree-stayed-clean": {
+    "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
+    "start": 18,
+    "end": 18
+  },
+  "sequence:ctx-branch-arm-p-14-diff-non-empty-then/review-the-range": {
+    "file": ".ctx/traits/authored/review/source/variant/default/index.ts",
+    "start": 29,
+    "end": 29
+  },
+  "sequence:procedure/capture-the-commit-log": {
     "file": ".ctx/traits/authored/review/source/shared/step/evidence.ts",
     "start": 23,
     "end": 23
   },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-diff-inventory": {
+  "sequence:procedure/capture-the-diff-inventory": {
     "file": ".ctx/traits/authored/review/source/shared/step/evidence.ts",
     "start": 17,
     "end": 17
   },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/diff-non-empty": {
-    "file": ".ctx/traits/authored/review/source/variant/default/index.ts",
-    "start": 35,
-    "end": 35
-  },
-  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/assert-the-reviewed-tree-stayed-clean": {
-    "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
-    "start": 31,
-    "end": 31
-  },
-  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/review-the-range": {
-    "file": ".ctx/traits/authored/review/source/variant/default/index.ts",
-    "start": 36,
-    "end": 36
-  },
-  "sequence:procedure/range-resolved": {
+  "sequence:procedure/diff-non-empty": {
     "file": ".ctx/traits/authored/review/source/variant/default/index.ts",
     "start": 28,
     "end": 28
-  },
-  "sequence:procedure/resolve-the-range": {
-    "file": ".ctx/traits/authored/review/source/shared/step/resolve-range.ts",
-    "start": 12,
-    "end": 12
   },
   "slot:commit-log": {
     "file": ".ctx/traits/authored/review/source/shared/step/evidence.ts",
@@ -99,25 +84,20 @@
     "start": 6,
     "end": 6
   },
-  "slot:range-resolved": {
-    "file": ".ctx/traits/authored/review/source/shared/step/resolve-range.ts",
-    "start": 6,
-    "end": 6
-  },
   "slot:review-document": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 16,
-    "end": 16
+    "start": 15,
+    "end": 15
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 10,
-    "end": 10
+    "start": 9,
+    "end": 9
   },
   "slot:tree-status": {
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
-    "start": 12,
-    "end": 12
+    "start": 4,
+    "end": 4
   },
   "trait:review": {
     "file": "[eval1]",

@@ -92,4 +92,4 @@ done
 if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
-echo "builtins: ${#ORDER[@]} packages ${MODE}ed clean"
+echo "builtins: ${#ORDER[@]} packages clean (${MODE})"
