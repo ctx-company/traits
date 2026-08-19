@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0219"
 title = "Built-in traits: five that earn their place, named without the suffix"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Seven packages ship embedded in the binary. `generate-evals` backs a
@@ -57,3 +57,31 @@ build, check, and run under their new ids; the built-in count is correct
 everywhere it is asserted or documented; and the alias prefix-match hazard
 is confirmed absent by resolving `generate` with no spurious candidate.
 """
+
+outcome = """
+Landed in two commits: generate-evals removed early (52702bfd), the five
+renames (192d2d46).
+
+The deletion went first on purpose and it mattered. Alias resolution
+treats every hyphen-prefix of an id as a candidate built-in package, so
+`generate` would have prefix-matched `generate-evals` and minted a
+spurious built-in-tier candidate. Confirmed absent afterwards:
+`run-info generate` reports exactly one selection.
+
+Six packages now: critique, explain, generate, import, refine, spec. All
+canonical digests moved with their ids, so prior machine trust for them is
+void — accepted, since built-in resolution is exact-id with no
+compatibility alias.
+
+Two things deliberately not renamed: the `import-trait-drift` marker,
+which is a reported string rather than a package id, and the step ids
+inside explain and critique, which are internal to their own canonicals.
+
+Rebuilt through the 0227 gate rather than by hand — the first real use of
+it, and it is what made the rename verifiable in one pass.
+
+Left standing per the ruling's "for now": core::assist::Operation::
+GenerateEvals and scaffold::EvalSynthesisScaffold, since Operation is
+reported through the wasm ABI capability surface.
+"""
+
