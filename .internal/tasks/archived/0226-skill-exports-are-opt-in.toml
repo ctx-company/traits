@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0226"
 title = "Skill exports are something the user asks for, not repository furniture"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Five rendered `SKILL.md` files sit committed under `.agents/skills/`, one
