@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0228"
 title = "Docs follow the templates, the built-ins, and the vocabulary"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Closing sweep for 0218 through 0225, on the website
@@ -36,6 +36,33 @@ validation = """
 No page names a retired command, template, built-in id, or vocabulary
 spelling; the site builds; and every code example on a changed page has
 been built rather than eyeballed.
+
+## Outcome (website 0a9299b)
+
+Less to do than the task assumed, and more where it mattered.
+
+Already correct, checked rather than assumed: setup.md names `ctx traits
+create work --from implement`; no page carried a `-trait` suffix, a
+retired template, `trait-spec`, `worktreeRequired`, or `sequenceOrder`.
+The earlier docs pass in this session had covered them.
+
+The vocabulary pages were badly stale. Behavior documented three axes of
+eight under namespaces that no longer exist (`cdk.tone.X` rather than
+`cdk.behavior.tone.X`), with six entries of forty-five; intent listed two
+of forty-seven. Both are now GENERATED from
+`modules/builtin/vocabulary/*.toml`, so they carry every entry — the
+seven mined atoms included — and cannot drift again by hand.
+
+Both pages now state the thing authors get wrong and neither said: the
+catalog defines meaning, the trait chooses the facet, and the same entry
+read as a focus or as a require says different things.
+
+Both fenced examples were built as a real trait against the shipped CDK —
+compiled, every leaf resolved, check clean — not eyeballed.
+
+One thing the task did not anticipate: command-line.md documented two
+commands that no longer exist, `generate-evals` and `compose`. Found by
+invoking every name on that line against the binary.
 """
 
 [relations]
