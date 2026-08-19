@@ -24,6 +24,18 @@ sdk-generate:
 sdk-check:
 	cargo run -p ctx-traits-cli -- traits sdk-generate --check
 
+# Rebuild the embedded built-in traits and scaffold templates from source.
+# Internal only: these ship inside the binary, so no user command rebuilds
+# them and nothing else notices when a source edit never reaches its
+# committed canonical.
+builtins-build:
+	cargo build -p ctx-traits-cli
+	./.internal/scripts/builtins.sh build
+
+builtins-check:
+	cargo build -p ctx-traits-cli
+	./.internal/scripts/builtins.sh check
+
 ts-build:
 	pnpm --dir packages/config run build
 	pnpm --dir packages/cdk run build
@@ -81,6 +93,7 @@ test:
 	export CARGO_TARGET_DIR="{{gate_target_dir}}"
 	target_dir="$CARGO_TARGET_DIR"
 	just sdk-check
+	just builtins-check
 	just ts-format-check
 	# ts-typecheck in the PER-ROUND gate (owner ruling 2026-08-11): twice now
 	# a run iterated green for its whole build loop while carrying a
@@ -116,6 +129,7 @@ test-full:
 	# reinstalls for real instead of prompting.
 	CI=true pnpm install --frozen-lockfile
 	just sdk-check
+	just builtins-check
 	just ts-format-check
 	# CI runs ts-typecheck/ts-test as separate steps after test-full; the
 	# landing gate must prove the same surface, or a TS-breaking change lands

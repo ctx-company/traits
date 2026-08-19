@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0230"
+title = "Building by source path resolves dependencies from the wrong root"
+status = "ready"
+raised = "2026-08-19"
+content = """
+`ctx traits build <path/to/source/index.ts>` — the documented escape hatch
+for building a package that is not resolvable by id — resolves relative
+dependency paths against the SOURCE directory instead of the package root.
+
+A package declaring `path = "../spec"` therefore looks for its dependency
+at `<package>/source/../spec`, which folds to `<package>/spec`, and fails:
+
+    filesystem error at modules/core/builtins/traits/critique-trait/spec/
+    generated/index.toml: dependency package does not contain trait.toml
+
+The same package builds correctly when resolved by id, because then the
+root is the package directory and `../spec` folds to its sibling.
+
+The cause is `layout::package_root_for_manifest`, which knows how to walk
+up from a canonical manifest (`generated/index.toml`, and a family
+variant's `generated/<selector>/index.toml`) to the package root, but has
+no case for a CDK source at `<package>/source/index.ts`. It returns
+`<package>/source`, and `run::load_trait` hands that on as the trait root
+that `dependency::resolve_relative` joins against.
+
+Two consequences, both live:
+
+- The five built-in traits that depend on `spec` cannot be built by path
+  at all.
+- Building them through a scratch authored root instead — the workaround
+  0227's gate uses — writes THAT root's path into every `index.map`, so a
+  shipped artifact records `.ctx/traits/authored/<id>/source/index.ts`
+  rather than its real location under `modules/core/builtins`. The map is
+  a debug aid, so this is cosmetic, but it is wrong and it makes maps
+  incomparable between build routes.
+
+Fixing this removes the scratch root entirely: the builtins gate becomes
+a plain loop over source paths, and `index.map` and `package.json` become
+comparable artifacts the gate can also cover.
+"""
+validation = """
+## Watch
+
+- `package_root_for_manifest` is consulted by every resolution path, not
+  just builds. Adding a source-path case must not change what it returns
+  for a canonical manifest, a family variant manifest, or an external flat
+  package.
+- An external flat package with an adjacent source and no `source/`
+  directory is a real shape (`package_source_map` preserves sidecars for
+  it) — do not assume every source lives at `<package>/source/`.
+- The fix is only proven by building a package that HAS a relative
+  dependency. `spec` has none, so it builds by path today and proves
+  nothing.
+
+## Done when
+
+`ctx traits build modules/core/builtins/traits/critique-trait/source/index.ts`
+succeeds and resolves `../spec`; the builtins gate drops its scratch root
+and compares `index.map` alongside the canonical; and a scratch-fixture
+proof covers a path-built package with a sibling path dependency.
+"""

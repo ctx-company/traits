@@ -1,0 +1,16 @@
+{
+  "dependencies": {},
+  "files": [
+    "trait.toml",
+    "trait.lock",
+    "generated",
+    "resources",
+    "source"
+  ],
+  "imports": {
+    "#trait/*": "./source/*"
+  },
+  "name": "@ctx-traits/spec",
+  "type": "module",
+  "version": "0.1.0"
+}
