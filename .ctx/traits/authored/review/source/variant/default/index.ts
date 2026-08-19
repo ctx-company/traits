@@ -19,8 +19,8 @@ export default function () {
       "Preflight range resolution -> deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion.",
   });
   useIntent({
-    require: [intent.require.ReviewBeforeFinal, intent.require.Leanness],
-    avoid: [intent.avoid.RubberStampReview, intent.avoid.ScopeCreep],
+    require: [intent.ReviewBeforeFinal, intent.Leanness],
+    avoid: [intent.RubberStampReview, intent.ScopeCreep],
   });
 
   shared.step.resolveRange.resolve("Resolve the range");

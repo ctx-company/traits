@@ -13,8 +13,8 @@ export default function () {
   });
 
   cdk.useIntent({
-    require: [cdk.intent.require.ReviewBeforeFinal, cdk.intent.require.Leanness],
-    avoid: [cdk.intent.avoid.RubberStampReview, cdk.intent.avoid.ScopeCreep],
+    require: [cdk.intent.ReviewBeforeFinal, cdk.intent.Leanness],
+    avoid: [cdk.intent.RubberStampReview, cdk.intent.ScopeCreep],
   });
   cdk.useResource([resource.releaseManifest]);
 

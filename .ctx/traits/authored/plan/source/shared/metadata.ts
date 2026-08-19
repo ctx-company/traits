@@ -1,5 +1,8 @@
-import type { Behavior } from "@ctx-traits/cdk";
-import { method, tone, verbosity } from "@ctx-traits/cdk";
+import * as cdk from "@ctx-traits/cdk";
 
 export const tag = ["task", "plan", "bootstrap", "planning"];
-export const behavior: Behavior = { tone: [tone.Direct, tone.Technical], method: method.EvidenceFirst, verbosity: verbosity.Brief };
+export const behavior: cdk.Behavior = {
+  tone: [cdk.behavior.tone.Direct, cdk.behavior.tone.Technical],
+  method: cdk.behavior.method.EvidenceFirst,
+  verbosity: cdk.behavior.verbosity.Brief,
+};

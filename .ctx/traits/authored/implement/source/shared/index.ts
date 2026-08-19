@@ -7,25 +7,25 @@ export * as resource from "./resource.ts";
 export * as step from "./step/index.ts";
 
 export const BEHAVIOR: cdk.Behavior = {
-  tone: [cdk.tone.Direct, cdk.tone.Technical],
-  method: cdk.method.EvidenceFirst,
-  verbosity: cdk.verbosity.Brief,
+  tone: [cdk.behavior.tone.Direct, cdk.behavior.tone.Technical],
+  method: cdk.behavior.method.EvidenceFirst,
+  verbosity: cdk.behavior.verbosity.Brief,
 };
 
 export const INTENT: cdk.Intent = {
   require: [
-    cdk.intent.focus.Correctness,
-    cdk.intent.require.Robustness,
-    cdk.intent.require.Leanness,
-    cdk.intent.require.ReuseOverReimplement,
-    cdk.intent.require.ReviewBeforeFinal,
-    cdk.intent.require.BoundedRefinement,
+    cdk.intent.Correctness,
+    cdk.intent.Robustness,
+    cdk.intent.Leanness,
+    cdk.intent.ReuseOverReimplement,
+    cdk.intent.ReviewBeforeFinal,
+    cdk.intent.BoundedRefinement,
   ],
   avoid: [
-    cdk.intent.avoid.OverEngineering,
-    cdk.intent.avoid.Duplication,
-    cdk.intent.avoid.ScopeCreep,
-    cdk.intent.avoid.UnboundedLoop,
-    cdk.intent.avoid.RubberStampReview,
+    cdk.intent.OverEngineering,
+    cdk.intent.Duplication,
+    cdk.intent.ScopeCreep,
+    cdk.intent.UnboundedLoop,
+    cdk.intent.RubberStampReview,
   ],
 };

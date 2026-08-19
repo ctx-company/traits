@@ -168,20 +168,20 @@ pub fn sdk_types_schema() -> crate::Result<Value> {
         "type": "object",
         "x-ctx-sdk": {
             "builtins": {
-                "intent": {
-                    "require": builtins::INTENT_REQUIRE,
-                    "focus": builtins::INTENT_FOCUS,
-                    "avoid": builtins::INTENT_AVOID,
-                    "block": builtins::INTENT_BLOCK,
+                // One flat intent catalog: the catalog says what an item is,
+                // and a trait decides at its call site whether it is a
+                // require, focus, avoid, or block.
+                "intent": builtins::INTENT,
+                "behavior": {
+                    "tone": builtins::BEHAVIOR_TONE,
+                    "method": builtins::BEHAVIOR_METHOD,
+                    "verbosity": builtins::BEHAVIOR_VERBOSITY,
+                    "format": builtins::BEHAVIOR_FORMAT,
+                    "directness": builtins::BEHAVIOR_DIRECTNESS,
+                    "scope-control": builtins::BEHAVIOR_SCOPE_CONTROL,
+                    "initiative": builtins::BEHAVIOR_INITIATIVE,
+                    "uncertainty": builtins::BEHAVIOR_UNCERTAINTY,
                 },
-                "tone": builtins::BEHAVIOR_TONE,
-                "method": builtins::BEHAVIOR_METHOD,
-                "verbosity": builtins::BEHAVIOR_VERBOSITY,
-                "format": builtins::BEHAVIOR_FORMAT,
-                "directness": builtins::BEHAVIOR_DIRECTNESS,
-                "scope-control": builtins::BEHAVIOR_SCOPE_CONTROL,
-                "initiative": builtins::BEHAVIOR_INITIATIVE,
-                "uncertainty": builtins::BEHAVIOR_UNCERTAINTY,
             },
             "agent-templates": AGENT_TEMPLATES,
             "ref-kinds": ref_kinds,

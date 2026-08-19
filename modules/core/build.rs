@@ -14,64 +14,36 @@ const SECTIONS: &[SectionDef] = &[
         constant: "INTENT",
     },
     SectionDef {
-        name: "tone",
-        constant: "TONE",
-    },
-    SectionDef {
-        name: "method",
-        constant: "METHOD",
-    },
-    SectionDef {
-        name: "verbosity",
-        constant: "VERBOSITY",
-    },
-    SectionDef {
-        name: "behavior_tone",
+        name: "behavior.tone",
         constant: "BEHAVIOR_TONE",
     },
     SectionDef {
-        name: "behavior_method",
+        name: "behavior.method",
         constant: "BEHAVIOR_METHOD",
     },
     SectionDef {
-        name: "behavior_format",
+        name: "behavior.format",
         constant: "BEHAVIOR_FORMAT",
     },
     SectionDef {
-        name: "behavior_verbosity",
+        name: "behavior.verbosity",
         constant: "BEHAVIOR_VERBOSITY",
     },
     SectionDef {
-        name: "behavior_directness",
+        name: "behavior.directness",
         constant: "BEHAVIOR_DIRECTNESS",
     },
     SectionDef {
-        name: "behavior_scope_control",
+        name: "behavior.scope-control",
         constant: "BEHAVIOR_SCOPE_CONTROL",
     },
     SectionDef {
-        name: "behavior_initiative",
+        name: "behavior.initiative",
         constant: "BEHAVIOR_INITIATIVE",
     },
     SectionDef {
-        name: "behavior_uncertainty",
+        name: "behavior.uncertainty",
         constant: "BEHAVIOR_UNCERTAINTY",
-    },
-    SectionDef {
-        name: "intent_require",
-        constant: "INTENT_REQUIRE",
-    },
-    SectionDef {
-        name: "intent_focus",
-        constant: "INTENT_FOCUS",
-    },
-    SectionDef {
-        name: "intent_avoid",
-        constant: "INTENT_AVOID",
-    },
-    SectionDef {
-        name: "intent_block",
-        constant: "INTENT_BLOCK",
     },
 ];
 

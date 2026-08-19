@@ -54,10 +54,6 @@ export type {
   DirectnessBuiltIn,
   FormatBuiltIn,
   InitiativeBuiltIn,
-  IntentAvoidBuiltIn,
-  IntentBlockBuiltIn,
-  IntentFocusBuiltIn,
-  IntentRequireBuiltIn,
   JsonObject,
   JsonValue,
   RefKind,
@@ -271,18 +267,7 @@ export type { SessionBinding, SessionFunction, SessionLifecycle, SessionOptions 
 export type { SessionTitleSinkInput, SinkFields } from "./sink.js";
 export { operation, slot } from "./slot.js";
 export type { LiteralProjectionSource, OperationFunction, SlotFields, SlotFunction } from "./slot.js";
-export {
-  directness,
-  format,
-  initiative,
-  intent,
-  method,
-  scopeControl,
-  tone,
-  trait,
-  uncertainty,
-  verbosity,
-} from "./trait.js";
+export { behavior, intent, trait } from "./trait.js";
 export type {
   Behavior,
   CustomSlug,

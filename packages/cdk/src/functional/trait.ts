@@ -59,7 +59,7 @@ function assertKnownKeys(fields: Record<string, unknown>, allowed: readonly stri
   }
 }
 
-/** Catches the enum-typo case (e.g. `intent.avoid.RubberStampReviw`, which evaluates to `undefined`) as an array entry instead of a silently dropped guidance item. */
+/** Catches the enum-typo case (e.g. `intent.RubberStampReviw`, which evaluates to `undefined`) as an array entry instead of a silently dropped guidance item. */
 function assertNoUndefinedArrayEntries(fields: Record<string, unknown>, caller: string): void {
   for (const [key, value] of Object.entries(fields)) {
     if (Array.isArray(value)) {
@@ -233,7 +233,7 @@ export function useVariant(value: unknown, key?: string): UseVariantHandle {
   };
 }
 
-/** A built-in guidance reference (e.g. `intent.require.CiteEvidence`) — either a bare kebab-case slug or `{ id }`. */
+/** A built-in guidance reference (e.g. `intent.CiteEvidence`) — either a bare kebab-case slug or `{ id }`. */
 interface GuidanceRef {
   readonly id?: string;
 }
@@ -277,7 +277,7 @@ export function useBehavior(fields: Behavior): void {
  * validation as `useBehavior`, plus a require/avoid contradiction check: the
  * same guidance slug declared in both `require` and `avoid` (across any
  * combination of calls) is a build error.
- * @example `useIntent({ require: [intent.require.CiteEvidence] })`
+ * @example `useIntent({ require: [intent.CiteEvidence] })`
  */
 export function useIntent(fields: Intent): void {
   const frame = currentTraitFrame("useIntent");

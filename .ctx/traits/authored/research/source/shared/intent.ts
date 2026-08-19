@@ -9,22 +9,22 @@ import { intent } from "@ctx-traits/cdk";
 
 /** quick's lean intent set (variant/quick/index.ts). */
 export const quick: Intent = {
-  require: [intent.focus.Correctness, intent.require.Leanness, intent.require.ReviewBeforeFinal],
-  avoid: [intent.avoid.OverEngineering, intent.avoid.ScopeCreep, intent.avoid.RubberStampReview],
+  require: [intent.Correctness, intent.Leanness, intent.ReviewBeforeFinal],
+  avoid: [intent.OverEngineering, intent.ScopeCreep, intent.RubberStampReview],
 };
 
 /** default/deep's superset intent (variant/default/index.ts, variant/deep/index.ts). */
 export const full: Intent = {
   require: [
-    intent.focus.Correctness,
-    intent.require.Robustness,
-    intent.require.Leanness,
-    intent.require.ReviewBeforeFinal,
+    intent.Correctness,
+    intent.Robustness,
+    intent.Leanness,
+    intent.ReviewBeforeFinal,
   ],
   avoid: [
-    intent.avoid.OverEngineering,
-    intent.avoid.ScopeCreep,
-    intent.avoid.UnboundedLoop,
-    intent.avoid.RubberStampReview,
+    intent.OverEngineering,
+    intent.ScopeCreep,
+    intent.UnboundedLoop,
+    intent.RubberStampReview,
   ],
 };

@@ -572,19 +572,13 @@ fn behavior_builtin(id: &str) -> Option<BuiltinGuidance> {
 }
 
 /// Built-in render snippets for known `intent.*` slugs, sourced from the
-/// generated `builtins` catalog. Keyed by slug (unique across
-/// require/focus/avoid/block); unknown custom slugs return `None` and fall back
-/// to the author's local summary/description or the thin-guidance warning.
+/// generated `builtins` catalog. One flat catalog: the catalog says what an
+/// item is, and the trait decides at its own call site whether that item is a
+/// require, a focus, an avoid, or a block. Unknown custom slugs return `None`
+/// and fall back to the author's local summary/description or the
+/// thin-guidance warning.
 fn intent_builtin(id: &str) -> Option<BuiltinGuidance> {
-    lookup_builtin(
-        &[
-            crate::builtins::INTENT_REQUIRE,
-            crate::builtins::INTENT_FOCUS,
-            crate::builtins::INTENT_AVOID,
-            crate::builtins::INTENT_BLOCK,
-        ],
-        id,
-    )
+    lookup_builtin(&[crate::builtins::INTENT], id)
 }
 
 // ---------------------------------------------------------------------------
@@ -710,32 +704,21 @@ mod dogfood_intent_builtin_tests {
             .find(|section| section.heading == "Intent")
             .expect("Intent section is present");
 
-        for (slug, expected_facet, other_facets) in DOGFOOD_REQUIRE
+        // One catalog, and the facet comes from the TRAIT's usage rather than
+        // from where a slug was catalogued. So the assertion is no longer
+        // "this slug lives in the require catalog" — it is "this slug resolves
+        // from the one catalog, and renders under the group the fixture put it
+        // in". A slug is free to appear under a different group in a different
+        // trait, which is the point of the flat catalog.
+        for (slug, expected_facet) in DOGFOOD_REQUIRE
             .iter()
-            .map(|slug| (slug, "require", crate::builtins::INTENT_AVOID))
-            .chain(
-                DOGFOOD_AVOID
-                    .iter()
-                    .map(|slug| (slug, "avoid", crate::builtins::INTENT_REQUIRE)),
-            )
+            .map(|slug| (slug, "require"))
+            .chain(DOGFOOD_AVOID.iter().map(|slug| (slug, "avoid")))
         {
-            let expected_catalog = if expected_facet == "require" {
-                crate::builtins::INTENT_REQUIRE
-            } else {
-                crate::builtins::INTENT_AVOID
-            };
-
-            let entry = expected_catalog
+            let entry = crate::builtins::INTENT
                 .iter()
                 .find(|entry| entry.slug == *slug)
-                .unwrap_or_else(|| {
-                    panic!("{slug} must be catalogued under intent.{expected_facet}, but was not found there")
-                });
-
-            assert!(
-                !other_facets.iter().any(|other| other.slug == *slug),
-                "{slug} is catalogued under intent.{expected_facet} but also appears in the opposite facet catalog"
-            );
+                .unwrap_or_else(|| panic!("{slug} must be catalogued in intent, but was not found"));
 
             let directive = entry.directive.unwrap_or(entry.summary);
             assert!(

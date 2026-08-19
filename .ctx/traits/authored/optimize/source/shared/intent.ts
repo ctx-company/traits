@@ -2,11 +2,11 @@ import type { Intent } from "@ctx-traits/cdk";
 import * as cdk from "@ctx-traits/cdk";
 
 export const benchmark = {
-  require: [cdk.intent.require.ReviewBeforeFinal, cdk.intent.focus.Correctness],
-  avoid: [cdk.intent.avoid.RubberStampReview],
+  require: [cdk.intent.ReviewBeforeFinal, cdk.intent.Correctness],
+  avoid: [cdk.intent.RubberStampReview],
 } as Intent;
 
 export const experiment = {
-  require: [cdk.intent.focus.Correctness, cdk.intent.require.GatesGreenBeforeCommit],
-  avoid: [cdk.intent.avoid.RubberStampReview],
+  require: [cdk.intent.Correctness, cdk.intent.GatesGreenBeforeCommit],
+  avoid: [cdk.intent.RubberStampReview],
 } as Intent;

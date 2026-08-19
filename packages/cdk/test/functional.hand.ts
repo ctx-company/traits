@@ -12,6 +12,7 @@
 
 import {
   agent,
+  behavior,
   condition,
   defineTrait,
   effect,
@@ -27,7 +28,6 @@ import {
   slot,
   step,
   toDraftJson,
-  tone,
   trait,
   useBehavior,
   useIntent,
@@ -540,7 +540,7 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
           description: "Review a diff for the stated focus.",
         });
         port.input.text({ id: "diff" });
-        useBehavior({ tone: tone.Direct });
+        useBehavior({ tone: behavior.tone.Direct });
         const review = slot.text("review");
         step.command("Review", { output: review, input: input.command`echo ${ctx.input.diff as never}` });
         return { review };
@@ -562,7 +562,7 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
         trait("diff-review", {
           name: "Diff Review",
           description: "Review a diff for the stated focus.",
-          behavior: { tone: tone.Direct },
+          behavior: { tone: behavior.tone.Direct },
           port: output,
           procedure: proc,
         }),
@@ -576,7 +576,7 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
     function viaFunctional() {
       const envelope = evaluateTraitFunction(() => {
         defineTrait("guidance-only", { name: "Guidance Only", summary: "Behavioral guidance." });
-        useBehavior({ tone: tone.Direct });
+        useBehavior({ tone: behavior.tone.Direct });
         useIntent({ require: [intent("cite-evidence")] });
       });
       return envelope.draft;
@@ -587,7 +587,7 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
         trait("guidance-only", {
           name: "Guidance Only",
           summary: "Behavioral guidance.",
-          behavior: { tone: tone.Direct },
+          behavior: { tone: behavior.tone.Direct },
           intent: { require: [intent("cite-evidence")] },
         }),
       );

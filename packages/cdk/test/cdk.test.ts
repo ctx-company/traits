@@ -1,5 +1,6 @@
 import {
   agent,
+  behavior,
   callout,
   condition,
   dependency,
@@ -26,7 +27,6 @@ import {
   table,
   toDraftJson,
   toDraftJsonWithSourceMap,
-  tone,
   trait,
   variant,
 } from "@ctx-traits/cdk";
@@ -772,14 +772,16 @@ describe("schema authoring sugar", () => {
 
 describe("retired canonical fields", () => {
   it("exposes built-in vocabulary only through lowercase PascalCase namespaces", () => {
-    expect(tone.Direct).toBe("direct");
+    expect(behavior.tone.Direct).toBe("direct");
     // @ts-expect-error builtin leaves are PascalCase.
-    expectTypeOf(tone.direct);
+    expectTypeOf(behavior.tone.direct);
     // @ts-expect-error legacy uppercase namespace is not exported publicly.
     expectTypeOf(publicCdk.Tone);
-    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
-    expect((tone as unknown as Record<string, unknown>).Tone).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect((behavior.tone as unknown as Record<string, unknown>).direct).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect((behavior.tone as unknown as Record<string, unknown>).Tone).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
     expect((publicCdk as Record<string, unknown>).Tone).toBeUndefined();
+    // An axis lives under `behavior`, never at the top level.
+    expect((publicCdk as Record<string, unknown>).tone).toBeUndefined();
   });
 
   it("collects a reachable schema once and omits unrelated authored schemas", () => {
@@ -2963,10 +2965,19 @@ describe("markdown doc-resource helpers (P459)", () => {
 
 describe("vocabulary casing", () => {
   it("exposes only qualified PascalCase built-in leaves", () => {
-    expect(tone.Direct).toBe("direct");
-    expect(intent.avoid.ScopeCreep).toBe("scope-creep");
-    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
-    expect((tone as unknown as Record<string, unknown>).DIRECT).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
-    expect((intent as unknown as Record<string, unknown>).ScopeCreep).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect(behavior.tone.Direct).toBe("direct");
+    expect((behavior.tone as unknown as Record<string, unknown>).direct).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect((behavior.tone as unknown as Record<string, unknown>).DIRECT).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+  });
+
+  /// The catalog says what an item is; the trait decides the facet at its call
+  /// site. So a slug hangs directly off `intent`, and the old facet nesting is
+  /// gone rather than merely discouraged.
+  it("exposes intent slugs flat, with no facet nesting", () => {
+    expect(intent.ScopeCreep).toBe("scope-creep");
+    expect(intent.Leanness).toBe("leanness");
+    for (const facet of ["require", "focus", "avoid", "block"]) {
+      expect((intent as unknown as Record<string, unknown>)[facet]).toBeUndefined(); // audited-unknown-cast: negative-test probe of a shape the flat catalog deliberately drops
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { condition, defineVariant, flow, method, signal, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { behavior, condition, defineVariant, flow, signal, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 import { experimentCommand } from "./data.ts";
@@ -13,7 +13,7 @@ export default function () {
       "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements.",
   });
   useIntent(shared.intent.experiment);
-  useBehavior({ method: [method.EvidenceFirst] });
+  useBehavior({ method: [behavior.method.EvidenceFirst] });
 
   step.setup.setupStep("Prepare and verify the isolated workbench");
 

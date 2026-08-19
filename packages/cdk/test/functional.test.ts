@@ -5,6 +5,7 @@
 // ruling — no behavior-freezing tests in the gated suite).
 import {
   agent,
+  behavior,
   condition,
   defineTrait,
   effect,
@@ -21,7 +22,6 @@ import {
   slot,
   step,
   toDraftJson,
-  tone,
   trait,
   useBehavior,
   useIntent,
@@ -561,8 +561,8 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     expect(() =>
       evaluateTraitFunction(() => {
         defineTrait("behavior-overlap");
-        useBehavior({ tone: tone.Direct });
-        useBehavior({ tone: tone.Warm });
+        useBehavior({ tone: behavior.tone.Direct });
+        useBehavior({ tone: behavior.tone.Warm });
       }),
     ).toThrow(/"tone" was already set/);
   });
@@ -582,7 +582,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         defineTrait("behavior-undefined-entry");
         // oxlint-disable-next-line -- intentionally undefined, exercising the enum-typo catch.
-        useBehavior({ format: [tone.Direct, undefined] as never });
+        useBehavior({ format: [behavior.tone.Direct, undefined] as never });
       }),
     ).toThrow(/format\[1\] is undefined/);
   });
@@ -648,7 +648,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   it("a behavioral trait (no steps) builds a valid draft with no procedure", () => {
     const envelope = evaluateTraitFunction(() => {
       defineTrait("engineering-standards-shape", { summary: "Behavioral guidance only." });
-      useBehavior({ tone: tone.Direct });
+      useBehavior({ tone: behavior.tone.Direct });
       useIntent({ require: [intent("cite-evidence")] });
     });
     expect(envelope.draft).toMatchObject({ id: "engineering-standards-shape" });
@@ -710,7 +710,7 @@ describe("defineVariant/useVariant hook-style families", () => {
       name: "Family (Quick)",
       description: "One step.",
     });
-    useBehavior({ tone: tone.Direct });
+    useBehavior({ tone: behavior.tone.Direct });
     const out = slot.text("result");
     agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
       input: input.prompt`Do it.`,

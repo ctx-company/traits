@@ -1,63 +1,53 @@
-# SDK-facing sections (consumed by schema.rs -> generated.ts).
-# Legacy single-string format: summary defaults to description.
+# The intent catalog: what each item IS.
+#
+# A trait decides whether an item is a require, a focus, an avoid, or a
+# block at its own call site — that is the trait's editorial judgement,
+# not a property of the item. So an entry describes the thing and never
+# instructs; the rendered `group=` attribute carries the polarity.
+
 [intent]
-require = "Required outcomes or actions."
-focus = "Areas that deserve focused attention."
-avoid = "Actions or outcomes to avoid."
-
-# ---------------------------------------------------------------------------
-# Full catalog: intent facets (verbatim from compile.rs intent_builtin).
-# ---------------------------------------------------------------------------
-
-[intent_require]
+accretion = { summary = "Do not add code or complexity beside an existing solution without need.", description = "Consolidate related behavior rather than adding parallel helpers.", directive = "Consolidate related behavior rather than adding a parallel helper beside an existing one." }
+annotation-fidelity = { summary = "Turn every annotation into one checklist item without dropping or merging it.", description = "Preserve each human annotation as exactly one actionable checklist item.", directive = "Turn every annotation into exactly one checklist item; do not drop or merge annotations." }
+behavior-preserving-default = { summary = "Preserve observed behavior unless the phase explicitly changes it.", description = "Keep existing observable behavior intact unless the task explicitly requires a behavior change.", directive = "Preserve observed behavior unless the phase explicitly changes it." }
+big-rewrite = { summary = "Do not propose or perform a large rewrite unless it is necessary for the requested outcome.", description = "Prefer a narrow fix over rewriting the subsystem." }
+bounded-refinement = { summary = "Refine through a bounded review-and-repair loop.", description = "Recheck material repairs, then stop at the acceptance condition.", directive = "Bound the review-and-repair loop; recheck material repairs, then stop at the acceptance condition." }
+correctness = { summary = "Prioritize correctness and observable behavior over style preferences.", description = "Prefer a real bug or behavior gap over naming or style feedback.", directive = "Prioritize a real correctness or behavior gap over naming or style feedback." }
+data-loss = { summary = "Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable.", description = "Flag operations like a migration that drops a column before the data is copied." }
+destructive-change = { summary = "Do not perform destructive changes without explicit approval.", description = "Refuse to delete data or rewrite history unless the user approves." }
+duplication = { summary = "Do not duplicate logic that should be shared.", description = "Reuse or extract common behavior that should evolve together.", directive = "Extract and share logic that should evolve together instead of duplicating it." }
+elegance = { summary = "Favor clear, cohesive designs over clever or incidental complexity.", description = "Favor clear, cohesive designs over clever or incidental complexity.", directive = "Favor the clear, cohesive design over the clever or incidentally complex one." }
+gates-green-before-commit = { summary = "Require the relevant validation gates to pass before committing.", description = "Run applicable checks and resolve failures first.", directive = "Run applicable checks and resolve failures before committing." }
+gold-plating = { summary = "Do not add unrequested polish or features.", description = "Deliver the requested outcome without optional enhancements.", directive = "Deliver the requested outcome without adding optional, unrequested enhancements." }
 inspect-changed-behavior = { summary = "Inspect the changed behavior before giving conclusions.", description = "Read the relevant diff, nearby code, and tests when available before listing findings." }
-report-actionable-finding = { summary = "Report actionable findings.", description = "Each finding should include what is wrong, why it matters, and where it appears when location data is available." }
-verify-coverage = { summary = "Check whether changed behavior is covered.", description = "Look for tests, examples, or documented acceptance criteria for the change, and note a verification gap when none exists." }
-state-assumptions = { summary = "State assumptions explicitly when required context is missing.", description = "Make each assumption visible near the claim it supports instead of proceeding silently." }
-preserve-scope = { summary = "Stay within the requested task unless the user approves expanding scope.", description = "Mention unrelated cleanup or adjacent work as optional instead of doing it.", directive = "Keep unrelated cleanup or adjacent work optional rather than performing it unasked." }
+interface-widening = { summary = "Do not broaden public interfaces without a concrete caller need.", description = "Keep externally visible interfaces narrow unless a demonstrated caller requires expansion.", directive = "Do not broaden public interfaces without a concrete caller need." }
 leanness = { summary = "Keep the implementation lean.", description = "Add only what the requested outcome needs.", directive = "Add only what the requested outcome needs; treat anything beyond that as scope creep." }
+maintainability = { summary = "Notice complexity, coupling, and brittle structure.", description = "Point out unclear naming and duplicated branching that would make future changes harder." }
+over-engineering = { summary = "Do not build beyond the demonstrated need.", description = "Avoid speculative generality and unsupported abstractions.", directive = "Avoid speculative generality; build only what the demonstrated need requires." }
+performance = { summary = "Call out meaningful performance regressions.", description = "Note avoidable expensive operations, such as an accidental quadratic loop over a large collection, when relevant to the task." }
+policy-bypass = { summary = "Do not bypass user, repository, host, or organization policy.", description = "Do not work around permission prompts or repository rules." }
+pragmatism = { summary = "Choose the smallest practical change that satisfies the phase contract.", description = "Choose the smallest practical change that satisfies the phase contract.", directive = "Pick the smallest practical change that satisfies the stated contract." }
+preserve-scope = { summary = "Stay within the requested task unless the user approves expanding scope.", description = "Mention unrelated cleanup or adjacent work as optional instead of doing it.", directive = "Keep unrelated cleanup or adjacent work optional rather than performing it unasked." }
+report-actionable-finding = { summary = "Report actionable findings.", description = "Each finding should include what is wrong, why it matters, and where it appears when location data is available." }
 reuse-over-reimplement = { summary = "Reuse existing behavior before reimplementing it.", description = "Extract shared logic instead of copying it beside the original.", directive = "Extract and reuse shared logic instead of copying or reimplementing it." }
 review-before-final = { summary = "Review the work before presenting it as final.", description = "Inspect the completed change against requirements before finalizing.", directive = "Inspect the completed change against requirements before presenting it as done." }
-gates-green-before-commit = { summary = "Require the relevant validation gates to pass before committing.", description = "Run applicable checks and resolve failures first.", directive = "Run applicable checks and resolve failures before committing." }
-bounded-refinement = { summary = "Refine through a bounded review-and-repair loop.", description = "Recheck material repairs, then stop at the acceptance condition.", directive = "Bound the review-and-repair loop; recheck material repairs, then stop at the acceptance condition." }
-role-attributed-output = { summary = "Attribute output to the role that produced or reviewed it.", description = "Label reviewer evidence separately from implementation output.", directive = "Label reviewer evidence separately from implementation output." }
 robustness = { summary = "Prefer changes that remain correct under ordinary failure and boundary conditions.", description = "Prefer changes that remain correct under ordinary failure and boundary conditions.", directive = "Favor the change that stays correct under ordinary failure and boundary conditions." }
-pragmatism = { summary = "Choose the smallest practical change that satisfies the phase contract.", description = "Choose the smallest practical change that satisfies the phase contract.", directive = "Pick the smallest practical change that satisfies the stated contract." }
-elegance = { summary = "Favor clear, cohesive designs over clever or incidental complexity.", description = "Favor clear, cohesive designs over clever or incidental complexity.", directive = "Favor the clear, cohesive design over the clever or incidentally complex one." }
-behavior-preserving-default = { summary = "Preserve observed behavior unless the phase explicitly changes it.", description = "Keep existing observable behavior intact unless the task explicitly requires a behavior change.", directive = "Preserve observed behavior unless the phase explicitly changes it." }
-verbatim-execution = { summary = "Execute the agreed draft exactly as written and record departures.", description = "Follow the approved draft or design and explicitly report every necessary departure.", directive = "Execute the agreed draft exactly as written; record every departure instead of silently adapting." }
-annotation-fidelity = { summary = "Turn every annotation into one checklist item without dropping or merging it.", description = "Preserve each human annotation as exactly one actionable checklist item.", directive = "Turn every annotation into exactly one checklist item; do not drop or merge annotations." }
-
-[intent_focus]
-correctness = { summary = "Prioritize correctness and observable behavior over style preferences.", description = "Prefer a real bug or behavior gap over naming or style feedback.", directive = "Prioritize a real correctness or behavior gap over naming or style feedback." }
-tests = { summary = "Pay attention to test coverage and assertions.", description = "Notice missing assertions, uncovered branches, and tests that no longer match the intended behavior." }
-specific = { summary = "Prefer specific, actionable observations over general advice.", description = "Name the affected behavior, artifact, or location when available.", directive = "Name the affected behavior, artifact, or location when it is available." }
-security = { summary = "Look for security-sensitive behavior.", description = "Watch for permission issues, injection risks, and unsafe data exposure such as user-controlled input reaching a shell command." }
-performance = { summary = "Call out meaningful performance regressions.", description = "Note avoidable expensive operations, such as an accidental quadratic loop over a large collection, when relevant to the task." }
-maintainability = { summary = "Notice complexity, coupling, and brittle structure.", description = "Point out unclear naming and duplicated branching that would make future changes harder." }
-data-loss = { summary = "Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable.", description = "Flag operations like a migration that drops a column before the data is copied." }
-user-impact = { summary = "Tie findings and recommendations to user-visible impact when possible.", description = "Explain, for example, that a bug can cause users to lose draft work." }
-
-[intent_avoid]
-style-only = { summary = "Do not produce style-only feedback unless the user explicitly asks for style review.", description = "Skip cosmetic renames unless they affect correctness or clarity materially." }
-scope-creep = { summary = "Do not expand beyond the requested task.", description = "Ask before pursuing adjacent work rather than turning a review into a refactor.", directive = "Ask before pursuing adjacent work instead of expanding the task unasked." }
-big-rewrite = { summary = "Do not propose or perform a large rewrite unless it is necessary for the requested outcome.", description = "Prefer a narrow fix over rewriting the subsystem." }
-unrequested-refactor = { summary = "Do not refactor code that is outside the requested change.", description = "Leave unrelated files untouched while addressing the requested work." }
-speculative-claim = { summary = "Do not present guesses as facts.", description = "Mark uncertainty clearly and say what would confirm a claim instead of asserting behavior.", directive = "Mark uncertainty explicitly instead of presenting a guess as a fact." }
-unbounded-loop = { summary = "Do not continue refinement without a defined stop condition.", description = "Bound repair cycles by acceptance criteria or an iteration limit.", directive = "Bound repair cycles by an acceptance condition or iteration limit; do not refine indefinitely." }
+role-attributed-output = { summary = "Attribute output to the role that produced or reviewed it.", description = "Label reviewer evidence separately from implementation output.", directive = "Label reviewer evidence separately from implementation output." }
 rubber-stamp-review = { summary = "Do not approve work without substantive review.", description = "Check requirements and evidence before approving.", directive = "Check requirements and evidence before approving; do not rubber-stamp." }
-weaken-tests-to-pass = { summary = "Do not weaken tests merely to make a change pass.", description = "Repair the implementation unless the contract genuinely changed.", directive = "Repair the implementation rather than weakening a test to force it to pass." }
-taste-only-blocking = { summary = "Do not treat subjective taste as a blocking defect.", description = "Keep preferences advisory unless they expose a material risk.", directive = "Keep subjective taste advisory; block only on a material, demonstrable risk." }
-accretion = { summary = "Do not add code or complexity beside an existing solution without need.", description = "Consolidate related behavior rather than adding parallel helpers.", directive = "Consolidate related behavior rather than adding a parallel helper beside an existing one." }
-over-engineering = { summary = "Do not build beyond the demonstrated need.", description = "Avoid speculative generality and unsupported abstractions.", directive = "Avoid speculative generality; build only what the demonstrated need requires." }
-gold-plating = { summary = "Do not add unrequested polish or features.", description = "Deliver the requested outcome without optional enhancements.", directive = "Deliver the requested outcome without adding optional, unrequested enhancements." }
-duplication = { summary = "Do not duplicate logic that should be shared.", description = "Reuse or extract common behavior that should evolve together.", directive = "Extract and share logic that should evolve together instead of duplicating it." }
-interface-widening = { summary = "Do not broaden public interfaces without a concrete caller need.", description = "Keep externally visible interfaces narrow unless a demonstrated caller requires expansion.", directive = "Do not broaden public interfaces without a concrete caller need." }
-silent-deviation = { summary = "Do not silently adapt an unsatisfiable or contradicted plan.", description = "Record and resolve deviations instead of making unreported changes to an agreed plan or design.", directive = "Never adapt around an unsatisfiable or contradicted plan without recording and resolving the deviation." }
-
-[intent_block]
-destructive-change = { summary = "Do not perform destructive changes without explicit approval.", description = "Refuse to delete data or rewrite history unless the user approves." }
+scope-creep = { summary = "Do not expand beyond the requested task.", description = "Ask before pursuing adjacent work rather than turning a review into a refactor.", directive = "Ask before pursuing adjacent work instead of expanding the task unasked." }
 secret-exfiltration = { summary = "Do not reveal, copy, upload, or move secrets or credentials.", description = "Do not paste tokens, .env contents, or private keys into output." }
+security = { summary = "Look for security-sensitive behavior.", description = "Watch for permission issues, injection risks, and unsafe data exposure such as user-controlled input reaching a shell command." }
+silent-deviation = { summary = "Do not silently adapt an unsatisfiable or contradicted plan.", description = "Record and resolve deviations instead of making unreported changes to an agreed plan or design.", directive = "Never adapt around an unsatisfiable or contradicted plan without recording and resolving the deviation." }
+specific = { summary = "Prefer specific, actionable observations over general advice.", description = "Name the affected behavior, artifact, or location when available.", directive = "Name the affected behavior, artifact, or location when it is available." }
+speculative-claim = { summary = "Do not present guesses as facts.", description = "Mark uncertainty clearly and say what would confirm a claim instead of asserting behavior.", directive = "Mark uncertainty explicitly instead of presenting a guess as a fact." }
+state-assumptions = { summary = "State assumptions explicitly when required context is missing.", description = "Make each assumption visible near the claim it supports instead of proceeding silently." }
+style-only = { summary = "Do not produce style-only feedback unless the user explicitly asks for style review.", description = "Skip cosmetic renames unless they affect correctness or clarity materially." }
+taste-only-blocking = { summary = "Do not treat subjective taste as a blocking defect.", description = "Keep preferences advisory unless they expose a material risk.", directive = "Keep subjective taste advisory; block only on a material, demonstrable risk." }
+tests = { summary = "Pay attention to test coverage and assertions.", description = "Notice missing assertions, uncovered branches, and tests that no longer match the intended behavior." }
 unapproved-network = { summary = "Do not use network access unless the user or host policy explicitly allows it.", description = "Do not fetch and run a remote script without approval." }
+unbounded-loop = { summary = "Do not continue refinement without a defined stop condition.", description = "Bound repair cycles by acceptance criteria or an iteration limit.", directive = "Bound repair cycles by an acceptance condition or iteration limit; do not refine indefinitely." }
+unrequested-refactor = { summary = "Do not refactor code that is outside the requested change.", description = "Leave unrelated files untouched while addressing the requested work." }
 unsafe-command = { summary = "Do not suggest or run commands that can destroy data or alter system state without approval.", description = "Ask before running commands like rm -rf, git reset --hard, or destructive database commands." }
-policy-bypass = { summary = "Do not bypass user, repository, host, or organization policy.", description = "Do not work around permission prompts or repository rules." }
+user-impact = { summary = "Tie findings and recommendations to user-visible impact when possible.", description = "Explain, for example, that a bug can cause users to lose draft work." }
+verbatim-execution = { summary = "Execute the agreed draft exactly as written and record departures.", description = "Follow the approved draft or design and explicitly report every necessary departure.", directive = "Execute the agreed draft exactly as written; record every departure instead of silently adapting." }
+verify-coverage = { summary = "Check whether changed behavior is covered.", description = "Look for tests, examples, or documented acceptance criteria for the change, and note a verification gap when none exists." }
+weaken-tests-to-pass = { summary = "Do not weaken tests merely to make a change pass.", description = "Repair the implementation unless the contract genuinely changed.", directive = "Repair the implementation rather than weakening a test to force it to pass." }

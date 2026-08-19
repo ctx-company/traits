@@ -63,10 +63,7 @@ struct Model {
     synth_formats: Vec<String>,
     runtime_surfaces: Vec<String>,
     runtime_operations: Vec<String>,
-    intent_require: Vec<Builtin>,
-    intent_focus: Vec<Builtin>,
-    intent_avoid: Vec<Builtin>,
-    intent_block: Vec<Builtin>,
+    intent: Vec<Builtin>,
     tone: Vec<Builtin>,
     method: Vec<Builtin>,
     verbosity: Vec<Builtin>,
@@ -167,10 +164,10 @@ impl Model {
             .get("schema-forms")
             .and_then(Value::as_object)
             .ok_or_else(|| invalid_model("missing schema-forms object"))?;
-        let intent = builtins
-            .get("intent")
+        let behavior = builtins
+            .get("behavior")
             .and_then(Value::as_object)
-            .ok_or_else(|| invalid_model("missing builtins.intent object"))?;
+            .ok_or_else(|| invalid_model("missing builtins.behavior object"))?;
         Ok(Self {
             agent_templates: agent_templates(exports.get("agent-templates"))?,
             ref_kinds,
@@ -185,18 +182,15 @@ impl Model {
             synth_formats: strings(exports.get("synth-formats"), "synth-formats")?,
             runtime_surfaces: strings(exports.get("runtime-surfaces"), "runtime-surfaces")?,
             runtime_operations: strings(exports.get("runtime-operations"), "runtime-operations")?,
-            intent_require: builtins_for(intent.get("require"), "intent.require")?,
-            intent_focus: builtins_for(intent.get("focus"), "intent.focus")?,
-            intent_avoid: builtins_for(intent.get("avoid"), "intent.avoid")?,
-            intent_block: builtins_for(intent.get("block"), "intent.block")?,
-            tone: builtins_for(builtins.get("tone"), "tone")?,
-            method: builtins_for(builtins.get("method"), "method")?,
-            verbosity: builtins_for(builtins.get("verbosity"), "verbosity")?,
-            format: builtins_for(builtins.get("format"), "format")?,
-            directness: builtins_for(builtins.get("directness"), "directness")?,
-            scope_control: builtins_for(builtins.get("scope-control"), "scope-control")?,
-            initiative: builtins_for(builtins.get("initiative"), "initiative")?,
-            uncertainty: builtins_for(builtins.get("uncertainty"), "uncertainty")?,
+            intent: builtins_for(builtins.get("intent"), "intent")?,
+            tone: builtins_for(behavior.get("tone"), "behavior.tone")?,
+            method: builtins_for(behavior.get("method"), "behavior.method")?,
+            verbosity: builtins_for(behavior.get("verbosity"), "behavior.verbosity")?,
+            format: builtins_for(behavior.get("format"), "behavior.format")?,
+            directness: builtins_for(behavior.get("directness"), "behavior.directness")?,
+            scope_control: builtins_for(behavior.get("scope-control"), "behavior.scope-control")?,
+            initiative: builtins_for(behavior.get("initiative"), "behavior.initiative")?,
+            uncertainty: builtins_for(behavior.get("uncertainty"), "behavior.uncertainty")?,
         })
     }
 }
@@ -599,35 +593,17 @@ fn builtin_const(const_name: &str, type_name: &str, values: &[Builtin]) -> crate
 }
 
 fn render_intent(model: &Model) -> crate::Result<String> {
-    let facets: [(&str, &str, &[Builtin]); 4] = [
-        ("IntentRequireBuiltIn", "require", &model.intent_require),
-        ("IntentFocusBuiltIn", "focus", &model.intent_focus),
-        ("IntentAvoidBuiltIn", "avoid", &model.intent_avoid),
-        ("IntentBlockBuiltIn", "block", &model.intent_block),
-    ];
-    let mut output = String::new();
-    for (type_name, _, values) in facets {
-        output.push_str(&builtin_union(type_name, values)?);
+    if model.intent.is_empty() {
+        return Err(invalid_model("intent catalog has no values"));
     }
+    // One flat catalog. Which facet an item belongs to — require, focus,
+    // avoid, block — is the trait's decision at its own call site, so the
+    // authoring surface is `intent.X`, not `intent.<facet>.X`.
+    let mut output = builtin_union("IntentBuiltIn", &model.intent)?;
     output.push_str(&format!(
-        "export type IntentBuiltIn = {};\n\n",
-        facets
-            .iter()
-            .map(|(type_name, _, _)| *type_name)
-            .collect::<Vec<_>>()
-            .join(" | ")
+        "export const Intent = {{\n{}}} as const satisfies Record<string, IntentBuiltIn>;\n\n",
+        builtin_properties(&model.intent, "  ")
     ));
-    output.push_str("export const Intent = {\n");
-    for (type_name, key, values) in facets {
-        if values.is_empty() {
-            return Err(invalid_model(format!("Intent.{key} has no values")));
-        }
-        output.push_str(&format!(
-            "  {key}: {{\n{}  }} as const satisfies Record<string, {type_name}>,\n",
-            builtin_properties(values, "    ")
-        ));
-    }
-    output.push_str("} as const;\n\n");
     Ok(output)
 }
 
@@ -683,18 +659,23 @@ fn validate_sources(source_root: &Path, model: &Model) -> crate::Result<()> {
     // `method`, `verbosity`); 0046 deleted the deprecated PascalCase shims
     // (`Tone`/`Method`/`Verbosity`) from trait.ts entirely, so only the
     // namespace binding itself remains to trace to the generated value.
-    validate_callable_namespace_binding(&trait_source, "tone", "GeneratedTone", "trait.ts tone")?;
+    for (axis, binding) in [
+        ("tone", "GeneratedTone"),
+        ("method", "GeneratedMethod"),
+        ("verbosity", "GeneratedVerbosity"),
+        ("directness", "GeneratedDirectness"),
+        ("scopeControl", "GeneratedScopeControl"),
+        ("initiative", "GeneratedInitiative"),
+        ("uncertainty", "GeneratedUncertainty"),
+        ("format", "GeneratedFormat"),
+    ] {
+        validate_behavior_axis_binding(&trait_source, axis, binding)?;
+    }
     validate_callable_namespace_binding(
         &trait_source,
-        "method",
-        "GeneratedMethod",
-        "trait.ts method",
-    )?;
-    validate_callable_namespace_binding(
-        &trait_source,
-        "verbosity",
-        "GeneratedVerbosity",
-        "trait.ts verbosity",
+        "intent",
+        "GeneratedIntent",
+        "trait.ts intent",
     )?;
     validate_exact_const_object_literals(
         &schema_source,
@@ -802,6 +783,19 @@ fn read_source(path: PathBuf) -> crate::Result<String> {
     fs::read_to_string(&path).map_err(|error| crate::Error::Command {
         message: format!("read {}: {error}", path.display()),
     })
+}
+
+/// Confirms one axis of the `behavior` namespace is built from its generated
+/// const, so the whole vocabulary still traces to codegen rather than drifting
+/// into a hand-written map.
+fn validate_behavior_axis_binding(source: &str, axis: &str, binding: &str) -> crate::Result<()> {
+    let expected = format!("{axis}: callableNamespace({binding}),");
+    if source.matches(&expected).count() != 1 {
+        return Err(crate::Error::Command {
+            message: format!("trait.ts behavior.{axis}: expected exactly one `{expected}`"),
+        });
+    }
+    Ok(())
 }
 
 /// Confirms `const_name` is itself built from the generated const via

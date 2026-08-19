@@ -184,165 +184,146 @@ export const Uncertainty = {
   refuseToGuess: "refuse-to-guess",
 } as const satisfies Record<string, UncertaintyBuiltIn>;
 
-/** Built-in IntentRequireBuiltIn values.
+/** Built-in IntentBuiltIn values.
+ * @property accretion Do not add code or complexity beside an existing solution without need.
+ * @property annotation-fidelity Turn every annotation into one checklist item without dropping or merging it.
+ * @property behavior-preserving-default Preserve observed behavior unless the phase explicitly changes it.
+ * @property big-rewrite Do not propose or perform a large rewrite unless it is necessary for the requested outcome.
+ * @property bounded-refinement Refine through a bounded review-and-repair loop.
+ * @property correctness Prioritize correctness and observable behavior over style preferences.
+ * @property data-loss Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable.
+ * @property destructive-change Do not perform destructive changes without explicit approval.
+ * @property duplication Do not duplicate logic that should be shared.
+ * @property elegance Favor clear, cohesive designs over clever or incidental complexity.
+ * @property gates-green-before-commit Require the relevant validation gates to pass before committing.
+ * @property gold-plating Do not add unrequested polish or features.
  * @property inspect-changed-behavior Inspect the changed behavior before giving conclusions.
- * @property report-actionable-finding Report actionable findings.
- * @property verify-coverage Check whether changed behavior is covered.
- * @property state-assumptions State assumptions explicitly when required context is missing.
- * @property preserve-scope Stay within the requested task unless the user approves expanding scope.
+ * @property interface-widening Do not broaden public interfaces without a concrete caller need.
  * @property leanness Keep the implementation lean.
+ * @property maintainability Notice complexity, coupling, and brittle structure.
+ * @property over-engineering Do not build beyond the demonstrated need.
+ * @property performance Call out meaningful performance regressions.
+ * @property policy-bypass Do not bypass user, repository, host, or organization policy.
+ * @property pragmatism Choose the smallest practical change that satisfies the phase contract.
+ * @property preserve-scope Stay within the requested task unless the user approves expanding scope.
+ * @property report-actionable-finding Report actionable findings.
  * @property reuse-over-reimplement Reuse existing behavior before reimplementing it.
  * @property review-before-final Review the work before presenting it as final.
- * @property gates-green-before-commit Require the relevant validation gates to pass before committing.
- * @property bounded-refinement Refine through a bounded review-and-repair loop.
- * @property role-attributed-output Attribute output to the role that produced or reviewed it.
  * @property robustness Prefer changes that remain correct under ordinary failure and boundary conditions.
- * @property pragmatism Choose the smallest practical change that satisfies the phase contract.
- * @property elegance Favor clear, cohesive designs over clever or incidental complexity.
- * @property behavior-preserving-default Preserve observed behavior unless the phase explicitly changes it.
- * @property verbatim-execution Execute the agreed draft exactly as written and record departures.
- * @property annotation-fidelity Turn every annotation into one checklist item without dropping or merging it.
- */
-export type IntentRequireBuiltIn = "inspect-changed-behavior" | "report-actionable-finding" | "verify-coverage" | "state-assumptions" | "preserve-scope" | "leanness" | "reuse-over-reimplement" | "review-before-final" | "gates-green-before-commit" | "bounded-refinement" | "role-attributed-output" | "robustness" | "pragmatism" | "elegance" | "behavior-preserving-default" | "verbatim-execution" | "annotation-fidelity";
-/** Built-in IntentFocusBuiltIn values.
- * @property correctness Prioritize correctness and observable behavior over style preferences.
- * @property tests Pay attention to test coverage and assertions.
- * @property specific Prefer specific, actionable observations over general advice.
- * @property security Look for security-sensitive behavior.
- * @property performance Call out meaningful performance regressions.
- * @property maintainability Notice complexity, coupling, and brittle structure.
- * @property data-loss Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable.
- * @property user-impact Tie findings and recommendations to user-visible impact when possible.
- */
-export type IntentFocusBuiltIn = "correctness" | "tests" | "specific" | "security" | "performance" | "maintainability" | "data-loss" | "user-impact";
-/** Built-in IntentAvoidBuiltIn values.
- * @property style-only Do not produce style-only feedback unless the user explicitly asks for style review.
- * @property scope-creep Do not expand beyond the requested task.
- * @property big-rewrite Do not propose or perform a large rewrite unless it is necessary for the requested outcome.
- * @property unrequested-refactor Do not refactor code that is outside the requested change.
- * @property speculative-claim Do not present guesses as facts.
- * @property unbounded-loop Do not continue refinement without a defined stop condition.
+ * @property role-attributed-output Attribute output to the role that produced or reviewed it.
  * @property rubber-stamp-review Do not approve work without substantive review.
- * @property weaken-tests-to-pass Do not weaken tests merely to make a change pass.
- * @property taste-only-blocking Do not treat subjective taste as a blocking defect.
- * @property accretion Do not add code or complexity beside an existing solution without need.
- * @property over-engineering Do not build beyond the demonstrated need.
- * @property gold-plating Do not add unrequested polish or features.
- * @property duplication Do not duplicate logic that should be shared.
- * @property interface-widening Do not broaden public interfaces without a concrete caller need.
- * @property silent-deviation Do not silently adapt an unsatisfiable or contradicted plan.
- */
-export type IntentAvoidBuiltIn = "style-only" | "scope-creep" | "big-rewrite" | "unrequested-refactor" | "speculative-claim" | "unbounded-loop" | "rubber-stamp-review" | "weaken-tests-to-pass" | "taste-only-blocking" | "accretion" | "over-engineering" | "gold-plating" | "duplication" | "interface-widening" | "silent-deviation";
-/** Built-in IntentBlockBuiltIn values.
- * @property destructive-change Do not perform destructive changes without explicit approval.
+ * @property scope-creep Do not expand beyond the requested task.
  * @property secret-exfiltration Do not reveal, copy, upload, or move secrets or credentials.
+ * @property security Look for security-sensitive behavior.
+ * @property silent-deviation Do not silently adapt an unsatisfiable or contradicted plan.
+ * @property specific Prefer specific, actionable observations over general advice.
+ * @property speculative-claim Do not present guesses as facts.
+ * @property state-assumptions State assumptions explicitly when required context is missing.
+ * @property style-only Do not produce style-only feedback unless the user explicitly asks for style review.
+ * @property taste-only-blocking Do not treat subjective taste as a blocking defect.
+ * @property tests Pay attention to test coverage and assertions.
  * @property unapproved-network Do not use network access unless the user or host policy explicitly allows it.
+ * @property unbounded-loop Do not continue refinement without a defined stop condition.
+ * @property unrequested-refactor Do not refactor code that is outside the requested change.
  * @property unsafe-command Do not suggest or run commands that can destroy data or alter system state without approval.
- * @property policy-bypass Do not bypass user, repository, host, or organization policy.
+ * @property user-impact Tie findings and recommendations to user-visible impact when possible.
+ * @property verbatim-execution Execute the agreed draft exactly as written and record departures.
+ * @property verify-coverage Check whether changed behavior is covered.
+ * @property weaken-tests-to-pass Do not weaken tests merely to make a change pass.
  */
-export type IntentBlockBuiltIn = "destructive-change" | "secret-exfiltration" | "unapproved-network" | "unsafe-command" | "policy-bypass";
-export type IntentBuiltIn = IntentRequireBuiltIn | IntentFocusBuiltIn | IntentAvoidBuiltIn | IntentBlockBuiltIn;
-
+export type IntentBuiltIn = "accretion" | "annotation-fidelity" | "behavior-preserving-default" | "big-rewrite" | "bounded-refinement" | "correctness" | "data-loss" | "destructive-change" | "duplication" | "elegance" | "gates-green-before-commit" | "gold-plating" | "inspect-changed-behavior" | "interface-widening" | "leanness" | "maintainability" | "over-engineering" | "performance" | "policy-bypass" | "pragmatism" | "preserve-scope" | "report-actionable-finding" | "reuse-over-reimplement" | "review-before-final" | "robustness" | "role-attributed-output" | "rubber-stamp-review" | "scope-creep" | "secret-exfiltration" | "security" | "silent-deviation" | "specific" | "speculative-claim" | "state-assumptions" | "style-only" | "taste-only-blocking" | "tests" | "unapproved-network" | "unbounded-loop" | "unrequested-refactor" | "unsafe-command" | "user-impact" | "verbatim-execution" | "verify-coverage" | "weaken-tests-to-pass";
 export const Intent = {
-  require: {
-    /** Inspect the changed behavior before giving conclusions. Read the relevant diff, nearby code, and tests when available before listing findings. */
-    inspectChangedBehavior: "inspect-changed-behavior",
-    /** Report actionable findings. Each finding should include what is wrong, why it matters, and where it appears when location data is available. */
-    reportActionableFinding: "report-actionable-finding",
-    /** Check whether changed behavior is covered. Look for tests, examples, or documented acceptance criteria for the change, and note a verification gap when none exists. */
-    verifyCoverage: "verify-coverage",
-    /** State assumptions explicitly when required context is missing. Make each assumption visible near the claim it supports instead of proceeding silently. */
-    stateAssumptions: "state-assumptions",
-    /** Stay within the requested task unless the user approves expanding scope. Mention unrelated cleanup or adjacent work as optional instead of doing it. */
-    preserveScope: "preserve-scope",
-    /** Keep the implementation lean. Add only what the requested outcome needs. */
-    leanness: "leanness",
-    /** Reuse existing behavior before reimplementing it. Extract shared logic instead of copying it beside the original. */
-    reuseOverReimplement: "reuse-over-reimplement",
-    /** Review the work before presenting it as final. Inspect the completed change against requirements before finalizing. */
-    reviewBeforeFinal: "review-before-final",
-    /** Require the relevant validation gates to pass before committing. Run applicable checks and resolve failures first. */
-    gatesGreenBeforeCommit: "gates-green-before-commit",
-    /** Refine through a bounded review-and-repair loop. Recheck material repairs, then stop at the acceptance condition. */
-    boundedRefinement: "bounded-refinement",
-    /** Attribute output to the role that produced or reviewed it. Label reviewer evidence separately from implementation output. */
-    roleAttributedOutput: "role-attributed-output",
-    /** Prefer changes that remain correct under ordinary failure and boundary conditions. Prefer changes that remain correct under ordinary failure and boundary conditions. */
-    robustness: "robustness",
-    /** Choose the smallest practical change that satisfies the phase contract. Choose the smallest practical change that satisfies the phase contract. */
-    pragmatism: "pragmatism",
-    /** Favor clear, cohesive designs over clever or incidental complexity. Favor clear, cohesive designs over clever or incidental complexity. */
-    elegance: "elegance",
-    /** Preserve observed behavior unless the phase explicitly changes it. Keep existing observable behavior intact unless the task explicitly requires a behavior change. */
-    behaviorPreservingDefault: "behavior-preserving-default",
-    /** Execute the agreed draft exactly as written and record departures. Follow the approved draft or design and explicitly report every necessary departure. */
-    verbatimExecution: "verbatim-execution",
-    /** Turn every annotation into one checklist item without dropping or merging it. Preserve each human annotation as exactly one actionable checklist item. */
-    annotationFidelity: "annotation-fidelity",
-  } as const satisfies Record<string, IntentRequireBuiltIn>,
-  focus: {
-    /** Prioritize correctness and observable behavior over style preferences. Prefer a real bug or behavior gap over naming or style feedback. */
-    correctness: "correctness",
-    /** Pay attention to test coverage and assertions. Notice missing assertions, uncovered branches, and tests that no longer match the intended behavior. */
-    tests: "tests",
-    /** Prefer specific, actionable observations over general advice. Name the affected behavior, artifact, or location when available. */
-    specific: "specific",
-    /** Look for security-sensitive behavior. Watch for permission issues, injection risks, and unsafe data exposure such as user-controlled input reaching a shell command. */
-    security: "security",
-    /** Call out meaningful performance regressions. Note avoidable expensive operations, such as an accidental quadratic loop over a large collection, when relevant to the task. */
-    performance: "performance",
-    /** Notice complexity, coupling, and brittle structure. Point out unclear naming and duplicated branching that would make future changes harder. */
-    maintainability: "maintainability",
-    /** Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable. Flag operations like a migration that drops a column before the data is copied. */
-    dataLoss: "data-loss",
-    /** Tie findings and recommendations to user-visible impact when possible. Explain, for example, that a bug can cause users to lose draft work. */
-    userImpact: "user-impact",
-  } as const satisfies Record<string, IntentFocusBuiltIn>,
-  avoid: {
-    /** Do not produce style-only feedback unless the user explicitly asks for style review. Skip cosmetic renames unless they affect correctness or clarity materially. */
-    styleOnly: "style-only",
-    /** Do not expand beyond the requested task. Ask before pursuing adjacent work rather than turning a review into a refactor. */
-    scopeCreep: "scope-creep",
-    /** Do not propose or perform a large rewrite unless it is necessary for the requested outcome. Prefer a narrow fix over rewriting the subsystem. */
-    bigRewrite: "big-rewrite",
-    /** Do not refactor code that is outside the requested change. Leave unrelated files untouched while addressing the requested work. */
-    unrequestedRefactor: "unrequested-refactor",
-    /** Do not present guesses as facts. Mark uncertainty clearly and say what would confirm a claim instead of asserting behavior. */
-    speculativeClaim: "speculative-claim",
-    /** Do not continue refinement without a defined stop condition. Bound repair cycles by acceptance criteria or an iteration limit. */
-    unboundedLoop: "unbounded-loop",
-    /** Do not approve work without substantive review. Check requirements and evidence before approving. */
-    rubberStampReview: "rubber-stamp-review",
-    /** Do not weaken tests merely to make a change pass. Repair the implementation unless the contract genuinely changed. */
-    weakenTestsToPass: "weaken-tests-to-pass",
-    /** Do not treat subjective taste as a blocking defect. Keep preferences advisory unless they expose a material risk. */
-    tasteOnlyBlocking: "taste-only-blocking",
-    /** Do not add code or complexity beside an existing solution without need. Consolidate related behavior rather than adding parallel helpers. */
-    accretion: "accretion",
-    /** Do not build beyond the demonstrated need. Avoid speculative generality and unsupported abstractions. */
-    overEngineering: "over-engineering",
-    /** Do not add unrequested polish or features. Deliver the requested outcome without optional enhancements. */
-    goldPlating: "gold-plating",
-    /** Do not duplicate logic that should be shared. Reuse or extract common behavior that should evolve together. */
-    duplication: "duplication",
-    /** Do not broaden public interfaces without a concrete caller need. Keep externally visible interfaces narrow unless a demonstrated caller requires expansion. */
-    interfaceWidening: "interface-widening",
-    /** Do not silently adapt an unsatisfiable or contradicted plan. Record and resolve deviations instead of making unreported changes to an agreed plan or design. */
-    silentDeviation: "silent-deviation",
-  } as const satisfies Record<string, IntentAvoidBuiltIn>,
-  block: {
-    /** Do not perform destructive changes without explicit approval. Refuse to delete data or rewrite history unless the user approves. */
-    destructiveChange: "destructive-change",
-    /** Do not reveal, copy, upload, or move secrets or credentials. Do not paste tokens, .env contents, or private keys into output. */
-    secretExfiltration: "secret-exfiltration",
-    /** Do not use network access unless the user or host policy explicitly allows it. Do not fetch and run a remote script without approval. */
-    unapprovedNetwork: "unapproved-network",
-    /** Do not suggest or run commands that can destroy data or alter system state without approval. Ask before running commands like rm -rf, git reset --hard, or destructive database commands. */
-    unsafeCommand: "unsafe-command",
-    /** Do not bypass user, repository, host, or organization policy. Do not work around permission prompts or repository rules. */
-    policyBypass: "policy-bypass",
-  } as const satisfies Record<string, IntentBlockBuiltIn>,
-} as const;
+  /** Do not add code or complexity beside an existing solution without need. Consolidate related behavior rather than adding parallel helpers. */
+  accretion: "accretion",
+  /** Turn every annotation into one checklist item without dropping or merging it. Preserve each human annotation as exactly one actionable checklist item. */
+  annotationFidelity: "annotation-fidelity",
+  /** Preserve observed behavior unless the phase explicitly changes it. Keep existing observable behavior intact unless the task explicitly requires a behavior change. */
+  behaviorPreservingDefault: "behavior-preserving-default",
+  /** Do not propose or perform a large rewrite unless it is necessary for the requested outcome. Prefer a narrow fix over rewriting the subsystem. */
+  bigRewrite: "big-rewrite",
+  /** Refine through a bounded review-and-repair loop. Recheck material repairs, then stop at the acceptance condition. */
+  boundedRefinement: "bounded-refinement",
+  /** Prioritize correctness and observable behavior over style preferences. Prefer a real bug or behavior gap over naming or style feedback. */
+  correctness: "correctness",
+  /** Watch for behavior that can delete, corrupt, overwrite, leak, or make user data unreachable. Flag operations like a migration that drops a column before the data is copied. */
+  dataLoss: "data-loss",
+  /** Do not perform destructive changes without explicit approval. Refuse to delete data or rewrite history unless the user approves. */
+  destructiveChange: "destructive-change",
+  /** Do not duplicate logic that should be shared. Reuse or extract common behavior that should evolve together. */
+  duplication: "duplication",
+  /** Favor clear, cohesive designs over clever or incidental complexity. Favor clear, cohesive designs over clever or incidental complexity. */
+  elegance: "elegance",
+  /** Require the relevant validation gates to pass before committing. Run applicable checks and resolve failures first. */
+  gatesGreenBeforeCommit: "gates-green-before-commit",
+  /** Do not add unrequested polish or features. Deliver the requested outcome without optional enhancements. */
+  goldPlating: "gold-plating",
+  /** Inspect the changed behavior before giving conclusions. Read the relevant diff, nearby code, and tests when available before listing findings. */
+  inspectChangedBehavior: "inspect-changed-behavior",
+  /** Do not broaden public interfaces without a concrete caller need. Keep externally visible interfaces narrow unless a demonstrated caller requires expansion. */
+  interfaceWidening: "interface-widening",
+  /** Keep the implementation lean. Add only what the requested outcome needs. */
+  leanness: "leanness",
+  /** Notice complexity, coupling, and brittle structure. Point out unclear naming and duplicated branching that would make future changes harder. */
+  maintainability: "maintainability",
+  /** Do not build beyond the demonstrated need. Avoid speculative generality and unsupported abstractions. */
+  overEngineering: "over-engineering",
+  /** Call out meaningful performance regressions. Note avoidable expensive operations, such as an accidental quadratic loop over a large collection, when relevant to the task. */
+  performance: "performance",
+  /** Do not bypass user, repository, host, or organization policy. Do not work around permission prompts or repository rules. */
+  policyBypass: "policy-bypass",
+  /** Choose the smallest practical change that satisfies the phase contract. Choose the smallest practical change that satisfies the phase contract. */
+  pragmatism: "pragmatism",
+  /** Stay within the requested task unless the user approves expanding scope. Mention unrelated cleanup or adjacent work as optional instead of doing it. */
+  preserveScope: "preserve-scope",
+  /** Report actionable findings. Each finding should include what is wrong, why it matters, and where it appears when location data is available. */
+  reportActionableFinding: "report-actionable-finding",
+  /** Reuse existing behavior before reimplementing it. Extract shared logic instead of copying it beside the original. */
+  reuseOverReimplement: "reuse-over-reimplement",
+  /** Review the work before presenting it as final. Inspect the completed change against requirements before finalizing. */
+  reviewBeforeFinal: "review-before-final",
+  /** Prefer changes that remain correct under ordinary failure and boundary conditions. Prefer changes that remain correct under ordinary failure and boundary conditions. */
+  robustness: "robustness",
+  /** Attribute output to the role that produced or reviewed it. Label reviewer evidence separately from implementation output. */
+  roleAttributedOutput: "role-attributed-output",
+  /** Do not approve work without substantive review. Check requirements and evidence before approving. */
+  rubberStampReview: "rubber-stamp-review",
+  /** Do not expand beyond the requested task. Ask before pursuing adjacent work rather than turning a review into a refactor. */
+  scopeCreep: "scope-creep",
+  /** Do not reveal, copy, upload, or move secrets or credentials. Do not paste tokens, .env contents, or private keys into output. */
+  secretExfiltration: "secret-exfiltration",
+  /** Look for security-sensitive behavior. Watch for permission issues, injection risks, and unsafe data exposure such as user-controlled input reaching a shell command. */
+  security: "security",
+  /** Do not silently adapt an unsatisfiable or contradicted plan. Record and resolve deviations instead of making unreported changes to an agreed plan or design. */
+  silentDeviation: "silent-deviation",
+  /** Prefer specific, actionable observations over general advice. Name the affected behavior, artifact, or location when available. */
+  specific: "specific",
+  /** Do not present guesses as facts. Mark uncertainty clearly and say what would confirm a claim instead of asserting behavior. */
+  speculativeClaim: "speculative-claim",
+  /** State assumptions explicitly when required context is missing. Make each assumption visible near the claim it supports instead of proceeding silently. */
+  stateAssumptions: "state-assumptions",
+  /** Do not produce style-only feedback unless the user explicitly asks for style review. Skip cosmetic renames unless they affect correctness or clarity materially. */
+  styleOnly: "style-only",
+  /** Do not treat subjective taste as a blocking defect. Keep preferences advisory unless they expose a material risk. */
+  tasteOnlyBlocking: "taste-only-blocking",
+  /** Pay attention to test coverage and assertions. Notice missing assertions, uncovered branches, and tests that no longer match the intended behavior. */
+  tests: "tests",
+  /** Do not use network access unless the user or host policy explicitly allows it. Do not fetch and run a remote script without approval. */
+  unapprovedNetwork: "unapproved-network",
+  /** Do not continue refinement without a defined stop condition. Bound repair cycles by acceptance criteria or an iteration limit. */
+  unboundedLoop: "unbounded-loop",
+  /** Do not refactor code that is outside the requested change. Leave unrelated files untouched while addressing the requested work. */
+  unrequestedRefactor: "unrequested-refactor",
+  /** Do not suggest or run commands that can destroy data or alter system state without approval. Ask before running commands like rm -rf, git reset --hard, or destructive database commands. */
+  unsafeCommand: "unsafe-command",
+  /** Tie findings and recommendations to user-visible impact when possible. Explain, for example, that a bug can cause users to lose draft work. */
+  userImpact: "user-impact",
+  /** Execute the agreed draft exactly as written and record departures. Follow the approved draft or design and explicitly report every necessary departure. */
+  verbatimExecution: "verbatim-execution",
+  /** Check whether changed behavior is covered. Look for tests, examples, or documented acceptance criteria for the change, and note a verification gap when none exists. */
+  verifyCoverage: "verify-coverage",
+  /** Do not weaken tests merely to make a change pass. Repair the implementation unless the contract genuinely changed. */
+  weakenTestsToPass: "weaken-tests-to-pass",
+} as const satisfies Record<string, IntentBuiltIn>;
 
 export type AgentTemplateName = "worker" | "reviewer" | "planner" | "oracle" | "searcher";
 export type AgentModelTier = "top" | "fast";

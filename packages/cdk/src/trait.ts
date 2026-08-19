@@ -21,10 +21,7 @@ import type {
   DirectnessBuiltIn,
   FormatBuiltIn,
   InitiativeBuiltIn,
-  IntentAvoidBuiltIn,
-  IntentBlockBuiltIn,
-  IntentFocusBuiltIn,
-  IntentRequireBuiltIn,
+  IntentBuiltIn,
   JsonObject,
   JsonValue,
   MethodBuiltIn,
@@ -37,11 +34,7 @@ export type {
   DirectnessBuiltIn,
   FormatBuiltIn,
   InitiativeBuiltIn,
-  IntentAvoidBuiltIn,
-  IntentBlockBuiltIn,
   IntentBuiltIn,
-  IntentFocusBuiltIn,
-  IntentRequireBuiltIn,
   MethodBuiltIn,
   ScopeControlBuiltIn,
   ToneBuiltIn,
@@ -119,11 +112,17 @@ export interface Behavior {
 }
 
 /** `[intent]` authoring shape: `require`/`focus`/`avoid`/`block` guidance facets. */
+/**
+ * The four facets a trait sorts its intent into. Every facet accepts every
+ * catalog item, because the facet is the trait's judgement about an item, not
+ * a property the item carries — `avoid: [intent.ScopeCreep]` and
+ * `focus: [intent.ScopeCreep]` are both meaningful and mean different things.
+ */
 export interface Intent {
-  readonly require?: GuidanceInput<IntentRequireBuiltIn> | readonly GuidanceInput<IntentRequireBuiltIn>[];
-  readonly focus?: GuidanceInput<IntentFocusBuiltIn> | readonly GuidanceInput<IntentFocusBuiltIn>[];
-  readonly avoid?: GuidanceInput<IntentAvoidBuiltIn> | readonly GuidanceInput<IntentAvoidBuiltIn>[];
-  readonly block?: GuidanceInput<IntentBlockBuiltIn> | readonly GuidanceInput<IntentBlockBuiltIn>[];
+  readonly require?: GuidanceInput<IntentBuiltIn> | readonly GuidanceInput<IntentBuiltIn>[];
+  readonly focus?: GuidanceInput<IntentBuiltIn> | readonly GuidanceInput<IntentBuiltIn>[];
+  readonly avoid?: GuidanceInput<IntentBuiltIn> | readonly GuidanceInput<IntentBuiltIn>[];
+  readonly block?: GuidanceInput<IntentBuiltIn> | readonly GuidanceInput<IntentBuiltIn>[];
 }
 
 /**
@@ -635,76 +634,51 @@ function callableNamespace<Values extends Record<string, string>>(values: Values
   return Object.assign((value: string): CustomSlug => customSlug(value), pascalCaseLeaves(values));
 }
 
-type IntentAxisAliases<Axes extends Record<string, Record<string, string>>> = {
-  readonly [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]>;
-};
-
-type IntentNamespace<Axes extends Record<string, Record<string, string>>> = ((value: string) => CustomSlug) &
-  IntentAxisAliases<Axes>;
-
-/**
- * Builds the `intent` callable namespace. Built-ins remain facet-qualified;
- * a caller may use the function only for a validated custom slug.
- */
-export function callableIntentNamespace<Axes extends Record<string, Record<string, string>>>(
-  axes: Axes,
-): IntentNamespace<Axes> {
-  const aliasedAxes = {} as { [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]> };
-  for (const axis of Object.keys(axes) as (keyof Axes)[]) {
-    const axisMap = axes[axis] as Record<string, string>;
-    aliasedAxes[axis] = pascalCaseLeaves(axisMap) as PascalCaseLeaves<Axes[typeof axis]>;
-  }
-  return Object.assign((value: string): CustomSlug => customSlug(value), aliasedAxes) as IntentNamespace<Axes>;
-}
-
-/**
- * Builds a validated custom tone slug for `behavior.tone` alongside the
- * generated `Tone` built-ins (for example, `tone.Direct`).
- * @example `trait("review", { behavior: { tone: tone("blunt") } })`
- */
-export const tone = callableNamespace(GeneratedTone);
-/**
- * Builds a validated custom method slug for `behavior.method` alongside the
- * generated `Method` built-ins.
- * @example `trait("review", { behavior: { method: method("socratic") } })`
- */
-export const method = callableNamespace(GeneratedMethod);
-/**
- * Builds a validated custom verbosity slug for `behavior.verbosity`
- * alongside the generated `Verbosity` built-ins.
- * @example `trait("review", { behavior: { verbosity: verbosity("terse") } })`
- */
-export const verbosity = callableNamespace(GeneratedVerbosity);
-/** Builds a validated custom directness slug for `behavior.directness` alongside the generated built-ins. */
-export const directness = callableNamespace(GeneratedDirectness);
-/** Builds a validated custom scope-control slug for `behavior.scopeControl` alongside the generated built-ins. */
-export const scopeControl = callableNamespace(GeneratedScopeControl);
-/** Builds a validated custom initiative slug for `behavior.initiative` alongside the generated built-ins. */
-export const initiative = callableNamespace(GeneratedInitiative);
-/** Builds a validated custom uncertainty slug for `behavior.uncertainty` alongside the generated built-ins. */
-export const uncertainty = callableNamespace(GeneratedUncertainty);
-/** Builds a validated custom format slug for `behavior.format` alongside the generated built-ins. */
-export const format = callableNamespace(GeneratedFormat);
-
-/**
- * Builds a validated custom intent slug for use alongside the generated
- * `Intent` facets (`require`/`focus`/`avoid`/`block`), each reachable as
- * e.g. `intent.avoid.ScopeCreep`.
- *
- * Behavior/intent facets accept any lowercase slug, not just the generated
- * built-ins — `intent(...)` (and the other behavior namespaces above)
- * validate that a custom facet is actually slug-shaped at build time instead
- * of letting an arbitrary string through to fail synth with a less specific
- * error.
- *
- * @example `trait("review", { intent: { require: [intent("cite-evidence")] } })`
- */
-export const intent = callableIntentNamespace(GeneratedIntent);
-
 type PascalCase<Key extends string> = Key extends `${infer Head}${infer Rest}` ? `${Uppercase<Head>}${Rest}` : Key;
 type PascalCaseLeaves<Values extends Record<string, string>> = {
   [Key in keyof Values as PascalCase<Key & string>]: Values[Key];
 };
+
+/**
+ * The behavior vocabulary, grouped by the axis each value belongs to:
+ * `behavior.tone.Direct`, `behavior.method.EvidenceFirst`,
+ * `behavior.verbosity.Brief`, and so on for every axis.
+ *
+ * Each axis is also callable, to build a validated custom slug alongside the
+ * generated built-ins. An axis accepts any lowercase slug, not just the
+ * catalog's — calling it validates the slug shape at build time instead of
+ * letting an arbitrary string through to fail synth with a vaguer error.
+ *
+ * @example `useBehavior({ tone: [behavior.tone.Direct], method: behavior.method.EvidenceFirst })`
+ * @example `useBehavior({ tone: [behavior.tone("blunt")] })`
+ */
+export const behavior = {
+  tone: callableNamespace(GeneratedTone),
+  method: callableNamespace(GeneratedMethod),
+  verbosity: callableNamespace(GeneratedVerbosity),
+  directness: callableNamespace(GeneratedDirectness),
+  scopeControl: callableNamespace(GeneratedScopeControl),
+  initiative: callableNamespace(GeneratedInitiative),
+  uncertainty: callableNamespace(GeneratedUncertainty),
+  format: callableNamespace(GeneratedFormat),
+} as const;
+
+/**
+ * The intent vocabulary, flat: `intent.Leanness`, `intent.ScopeCreep`.
+ *
+ * The catalog says what an item IS. Whether it is a require, a focus, an
+ * avoid, or a block is the trait's decision at its own call site, so the same
+ * item reads correctly in any facet — `avoid: [intent.ScopeCreep]` and
+ * `focus: [intent.ScopeCreep]` both mean something, and mean different things.
+ *
+ * Callable to build a validated custom slug, same as the behavior axes.
+ *
+ * @example `useIntent({ require: [intent.Leanness], avoid: [intent.ScopeCreep] })`
+ * @example `useIntent({ require: [intent("cite-evidence")] })`
+ */
+export const intent = callableNamespace(GeneratedIntent);
+
+
 
 function pascalKey(key: string): string {
   return key.charAt(0).toUpperCase() + key.slice(1);
