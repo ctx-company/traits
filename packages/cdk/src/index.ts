@@ -32,7 +32,7 @@ export {
 export type {
   DefineTraitFields,
   DefineVariantFields,
-  EachParam,
+  ForEachParam,
   FieldMatchArms,
   FlowErrorOptions,
   FlowSuccessOptions,
@@ -285,13 +285,11 @@ export {
 } from "./trait.js";
 export type {
   Behavior,
-  BehaviorFields,
   CustomSlug,
   GuidanceInput,
   GuidanceItem,
   Intent,
   IntentBuiltIn,
-  IntentSpec,
   MethodBuiltIn,
   SchemaVersion,
   SemVer,

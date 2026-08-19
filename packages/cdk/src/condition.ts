@@ -59,7 +59,7 @@ export type NumericComparisonValue = number | SlotHandle<number> | PortHandle<nu
  * const finding = schema.object("finding", {
  *   severity: schema.field(schema.oneOf("severity", ["blocker", "advisory"])),
  * });
- * const findings = slot.array(finding, "findings");
+ * const findings = slot.list(finding, "findings");
  * condition.count(findings).where("severity", "blocker").equals(0);
  * ```
  */
@@ -88,7 +88,7 @@ export type CountComparisonValue = number | ConditionCountFunction;
  * const finding = schema.object("finding", {
  *   severity: schema.field(schema.oneOf("severity", ["blocker", "advisory"])),
  * });
- * const findings = slot.array(finding, "findings");
+ * const findings = slot.list(finding, "findings");
  * const retryCount = slot.number("retry-count");
  * ```
  */

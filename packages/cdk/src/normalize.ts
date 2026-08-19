@@ -26,7 +26,7 @@ import {
   withMeta,
 } from "./meta.js";
 import type { DeclKind, SourceAnchor, SourceMap } from "./meta.js";
-import type { BehaviorFields, IntentSpec, TraitFields } from "./trait.js";
+import type { Behavior, Intent, TraitFields } from "./trait.js";
 
 /**
  * `toDraftJson`'s accepted input: any branded CDK handle (not just
@@ -474,7 +474,7 @@ export function refText(value: unknown, fieldPath: string): string {
   throw new Error(`${fieldPath}: expected typed ref handle or ref string`);
 }
 
-export function normalizeBehavior(value: BehaviorFields | undefined): JsonObject | undefined {
+export function normalizeBehavior(value: Behavior | undefined): JsonObject | undefined {
   return value === undefined
     ? undefined
     : compact({
@@ -488,7 +488,7 @@ export function normalizeBehavior(value: BehaviorFields | undefined): JsonObject
         format: normalizeGuidanceList(value.format),
       });
 }
-export function normalizeIntent(value: IntentSpec | undefined): JsonObject | undefined {
+export function normalizeIntent(value: Intent | undefined): JsonObject | undefined {
   return value === undefined
     ? undefined
     : compact({

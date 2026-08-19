@@ -46,7 +46,7 @@ export const bestMetric = slot.number({
   id: "best-metric",
   description: "Loop-carried lower-is-better metric projected only from trusted command output.",
 });
-export const history = slot.array(aggregateResult, {
+export const history = slot.list(aggregateResult, {
   id: "history",
   description: "Baseline and candidate aggregate measurements in deterministic ledger order.",
 });
@@ -60,7 +60,7 @@ export const keptCount = slot({
   schema: schema.integer(),
   description: "Rounds selected by the declared keep guard.",
 });
-export const decisions = slot.array(decisionStatus, {
+export const decisions = slot.list(decisionStatus, {
   id: "decisions",
   description: "Baseline marker and runtime-owned keep/discard/review-rejected dispositions in execution order.",
 });

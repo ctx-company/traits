@@ -34,9 +34,9 @@ const summaryOutput = output.of(
   schema.object(
     "research-summary",
     {
-      "key-findings": schema.array(schema.text()),
-      "open-questions": schema.array(schema.text()),
-      citations: schema.array(schema.text()),
+      "key-findings": schema.list(schema.text()),
+      "open-questions": schema.list(schema.text()),
+      citations: schema.list(schema.text()),
     },
     { description: "A structured research summary: what was found, what remains open, and what it's sourced from." },
   ),

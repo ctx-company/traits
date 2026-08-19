@@ -22,8 +22,7 @@ export type ForEachJoinedOptions<Item = JsonValue> = {
   readonly body: readonly SequenceHandle[] | SequenceRef;
   /** The slot each round's body appends its result onto — the joined output every item's work accumulates into. */
   readonly output: SequenceOutputValue | readonly SequenceOutputValue[];
-  /** Caps the number of elements processed; extras are skipped deterministically. */
-  readonly maxItems?: number;
+  /** Bounds the iterated list's length; a longer list is refused, never truncated. */
   readonly limit?: number;
   readonly concurrent?: boolean;
 };
@@ -45,12 +44,12 @@ export type ForEachJoinedOptions<Item = JsonValue> = {
  *   item: currentStream,
  *   body: [researchOneStream],
  *   output: findings,
- *   maxItems: 6,
+ *   limit: 6,
  * });
  * ```
  */
 export function forEachJoined<Item = JsonValue>(options: ForEachJoinedOptions<Item>): SequenceHandle {
-  const { id, title, over, item, body, output, maxItems, limit, concurrent } = options;
+  const { id, title, over, item, body, output, limit, concurrent } = options;
   // `Array.isArray` does not negatively narrow `body` here (its non-array
   // arm, `SequenceRef`, is itself a plain-object handle type TS cannot
   // statically prove disjoint from `readonly SequenceHandle[]`) — the cast
@@ -62,7 +61,6 @@ export function forEachJoined<Item = JsonValue>(options: ForEachJoinedOptions<It
     item,
     sequence: bodyRef,
     output,
-    ...(maxItems === undefined ? {} : { maxItems }),
     ...(limit === undefined ? {} : { limit }),
     ...(concurrent === undefined ? {} : { concurrent }),
   });

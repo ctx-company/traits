@@ -107,12 +107,7 @@ export interface GuidanceItem<Id extends string = string> {
  */
 export type GuidanceInput<Id extends string> = Id | (string & {}) | GuidanceItem<Id | (string & {})>;
 
-/** Alias of {@link BehaviorFields} — the functional layer's (0107) name for a `[behavior]` fragment. */
-export type Behavior = BehaviorFields;
-/** Alias of {@link IntentSpec} — the functional layer's (0107) name for an `[intent]` fragment. */
-export type Intent = IntentSpec;
-
-export interface BehaviorFields {
+export interface Behavior {
   readonly tone?: Tone | readonly Tone[];
   readonly method?: Method | readonly Method[];
   readonly verbosity?: Verbosity;
@@ -124,7 +119,7 @@ export interface BehaviorFields {
 }
 
 /** `[intent]` authoring shape: `require`/`focus`/`avoid`/`block` guidance facets. */
-export interface IntentSpec {
+export interface Intent {
   readonly require?: GuidanceInput<IntentRequireBuiltIn> | readonly GuidanceInput<IntentRequireBuiltIn>[];
   readonly focus?: GuidanceInput<IntentFocusBuiltIn> | readonly GuidanceInput<IntentFocusBuiltIn>[];
   readonly avoid?: GuidanceInput<IntentAvoidBuiltIn> | readonly GuidanceInput<IntentAvoidBuiltIn>[];
@@ -155,9 +150,9 @@ export interface TraitFields {
   readonly version?: SemVer;
   readonly summary?: string;
   readonly description?: string;
-  readonly behavior?: BehaviorFields;
+  readonly behavior?: Behavior;
   readonly metadata?: TraitMetadata;
-  readonly intent?: IntentSpec;
+  readonly intent?: Intent;
   /** `[activation]` section. @see {@link rule} */
   readonly activation?: CanonicalDeclaration;
   /** `[composition]` section: conflict/merge policy against other traits. */

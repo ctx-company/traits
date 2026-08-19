@@ -16,7 +16,7 @@ import { procedure as procedureOf } from "../procedure.js";
 import { ref } from "../ref.js";
 import { idFromTitle } from "../sequence.js";
 import type { SessionTitleSinkInput } from "../sink.js";
-import type { BehaviorFields, IntentSpec, SemVer, TraitFields, TraitMetadata } from "../trait.js";
+import type { Behavior, Intent, SemVer, TraitFields, TraitMetadata } from "../trait.js";
 import { trait } from "../trait.js";
 import { variant as variantOf } from "../variant.js";
 import type { FrameMint, RegisteredItem, TraitFrame } from "./context.js";
@@ -259,7 +259,7 @@ function guidanceSlugs(value: unknown): string[] {
  * `useBehavior` call in this trait function.
  * @example `useBehavior({ tone: tone.Direct })`
  */
-export function useBehavior(fields: BehaviorFields): void {
+export function useBehavior(fields: Behavior): void {
   const frame = currentTraitFrame("useBehavior");
   const record = fields as Record<string, unknown>;
   assertKnownKeys(record, BEHAVIOR_KEYS, "useBehavior");
@@ -279,7 +279,7 @@ export function useBehavior(fields: BehaviorFields): void {
  * combination of calls) is a build error.
  * @example `useIntent({ require: [intent.require.CiteEvidence] })`
  */
-export function useIntent(fields: IntentSpec): void {
+export function useIntent(fields: Intent): void {
   const frame = currentTraitFrame("useIntent");
   const record = fields as Record<string, unknown>;
   assertKnownKeys(record, INTENT_KEYS, "useIntent");
@@ -528,8 +528,8 @@ function assembleSingleTrait(
     });
   }
 
-  const behavior = Object.keys(traitFrame.behavior).length > 0 ? (traitFrame.behavior as BehaviorFields) : undefined;
-  const intent = Object.keys(traitFrame.intent).length > 0 ? (traitFrame.intent as IntentSpec) : undefined;
+  const behavior = Object.keys(traitFrame.behavior).length > 0 ? (traitFrame.behavior as Behavior) : undefined;
+  const intent = Object.keys(traitFrame.intent).length > 0 ? (traitFrame.intent as Intent) : undefined;
   const resource = traitFrame.resources.length > 0 ? (traitFrame.resources as ResourceHandle[]) : undefined;
   const ports = [...inputPorts, ...outputPorts] as PortHandle[];
 
@@ -612,8 +612,8 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
     });
   }
 
-  const behavior = Object.keys(traitFrame.behavior).length > 0 ? (traitFrame.behavior as BehaviorFields) : undefined;
-  const intent = Object.keys(traitFrame.intent).length > 0 ? (traitFrame.intent as IntentSpec) : undefined;
+  const behavior = Object.keys(traitFrame.behavior).length > 0 ? (traitFrame.behavior as Behavior) : undefined;
+  const intent = Object.keys(traitFrame.intent).length > 0 ? (traitFrame.intent as Intent) : undefined;
   const resource = traitFrame.resources.length > 0 ? (traitFrame.resources as ResourceHandle[]) : undefined;
   const ports = [...inputPorts, ...outputPorts] as PortHandle[];
   const name = traitFrame.fields?.name as string | undefined;

@@ -230,7 +230,7 @@ export interface SchemaTemplateFunction<Spots extends Record<string, SchemaValue
  * existing Zod/TypeBox schema instead of re-declaring it in CDK form.
  *
  * @param inner The nested schema for list and array forms.
- * @example `schema.array(schema.text())`
+ * @example `schema.list(schema.text())`
  * @see {@link SchemaValue}
  */
 export interface SchemaFunction {
@@ -252,18 +252,13 @@ export interface SchemaFunction {
    */
   checklist(): SchemaRef<ChecklistItem[]>;
   /**
-   * Wraps `inner` as a list/array schema ref, alias of `schema.array`.
+   * Wraps `inner` as a list schema ref. Declaring it by hand as
+   * `{ type: "array", items: x }` risks the items ref not being collected as
+   * a declaration; `schema.list` collects it automatically.
    * @example `schema.list(schema.text())`
    */
   list<Value>(inner: SchemaValue<Value>): SchemaRef<Value[]>;
-  /**
-   * Wraps `inner` as a list/array schema ref. Declaring `schema.array(x)` by
-   * hand as `{ type: "array", items: x }` risks the items ref not being
-   * collected as a declaration; `schema.array` collects it automatically.
-   * @example `schema.array(schema.text())`
-   */
-  array<Value>(inner: SchemaValue<Value>): SchemaRef<Value[]>;
-  /** Composes several schema refs into one union ref. @example `schema.union([schema.text(), schema.array(schema.text())])` */
+  /** Composes several schema refs into one union ref. @example `schema.union([schema.text(), schema.list(schema.text())])` */
   union<const Members extends readonly SchemaValue[]>(
     members: Members,
   ): SchemaUnionHandle<InferredSchemaValue<Members[number]>>;
@@ -475,9 +470,8 @@ export const schema: SchemaFunction = {
   number: () => schemaBuiltins.number,
   integer: () => schemaBuiltins.integer,
   any: () => schemaBuiltins.any,
-  checklist: () => schemaArray(schemaBuiltins.checklistItem as unknown as SchemaValue<ChecklistItem>),
-  list: schemaArray,
-  array: schemaArray,
+  checklist: () => schemaList(schemaBuiltins.checklistItem as unknown as SchemaValue<ChecklistItem>),
+  list: schemaList,
   union: schemaUnion,
   enum: schemaEnum,
   // These are generic *function expressions* (not plain arrow wrappers) so
@@ -708,7 +702,7 @@ function schemaTemplate<Spots extends Record<string, SchemaValue>, Fields extend
  * hold a non-enumerable property, only its boxed `String` wrapper can.
  * `Pick<string, keyof string>` documents that every `String.prototype`
  * member (`length`, `charAt`, ...) stays available on the box, same as on
- * the primitive it wraps; `schema.array`/`schema.union` are the only two
+ * the primitive it wraps; `schema.list`/`schema.union` are the only two
  * builders that need this (both mint a schema ref with declarations to
  * collect, rather than an already-declared handle).
  */
@@ -719,10 +713,10 @@ function boxSchemaRef(schemaRef: string): SchemaRefBox {
   return Object(schemaRef) as SchemaRefBox;
 }
 
-export function schemaArray<Value>(value: SchemaValue<Value>): SchemaRef<Value[]> {
+export function schemaList<Value>(value: SchemaValue<Value>): SchemaRef<Value[]> {
   const schemaRef = `${schemaForms.list.prefix}${refText(
     value,
-    "schema.array",
+    "schema.list",
   )}${schemaForms.list.suffix}` as SchemaRef<Value[]>;
   // Box the ref and carry the element's declarations, exactly as schema.union
   // does. A bare template string would render correctly and collect nothing:
@@ -790,7 +784,7 @@ function schemaUnion<const Members extends readonly SchemaValue[]>(
     schemaForms.union.separator,
   )}${schemaForms.union.suffix}` as SchemaRef;
   const handle = boxSchemaRef(schemaRef);
-  // Same distinct-phantom-family note as `schemaArray` above: `SchemaRef`'s
+  // Same distinct-phantom-family note as `schemaList` above: `SchemaRef`'s
   // brand isn't `withMeta`'s `Value` mechanism.
   return withMeta(handle, {
     kind: "ref",
@@ -1024,7 +1018,7 @@ function jsonSchemaValue(jsonSchema: JsonSchemaObject, fieldPath: string): Schem
     const items = requiredJsonObject(jsonSchema.items, `${fieldPath}.items`);
     rejectUnsupportedKeywords(items, `${fieldPath}.items`);
     if (items.enum !== undefined) throw new Error(`${fieldPath}.items.enum: array item enums are not supported`);
-    return schemaArray(jsonSchemaValue(items, `${fieldPath}.items`));
+    return schemaList(jsonSchemaValue(items, `${fieldPath}.items`));
   }
   if (jsonSchema.type === "object") throw new Error(`${fieldPath}: nested objects are not supported`);
   throw new Error(`${fieldPath}.type: expected string, number, integer, boolean, array, or object`);

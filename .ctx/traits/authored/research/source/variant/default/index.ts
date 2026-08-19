@@ -95,8 +95,8 @@ export default function () {
     projections: [{ source: operation.literal([]), destination: shared.data.dossiers }],
   });
 
-  shared.data.streamPlan.forEach("Research each stream", (stream, each) => {
-    each.maxItems(5);
+  shared.data.streamPlan.forEach("Research each stream", (stream, loop) => {
+    loop.limit(5);
     worker.prompt("Research the stream", {
       input: input.prompt`
                 Research exactly one stream — ${stream} — for the topic ${shared.data.topic}. Do not research any other stream's focus; other streams run in their own frames.

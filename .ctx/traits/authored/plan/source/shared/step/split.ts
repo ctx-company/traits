@@ -5,7 +5,7 @@ import { doneCriteria, grounding, nextKey, slicePlan, taskInput, workItems } fro
 
 /**
  * How many slices the plan may hold — the deterministic gate below AND the
- * write step's for-each `maxItems` bound both read this one constant, so
+ * write step's for-each `limit` bound both read this one constant, so
  * the two can never drift: an over-long plan is caught here as a cheap
  * replanning round, never downstream as a hard `max-items-exceeded` run
  * failure (which is exactly how the first two MVP-planning runs died: split

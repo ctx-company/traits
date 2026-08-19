@@ -11,9 +11,9 @@ const noteA = schema.object("binding-nesting-note-a", { kind: schema.text(), tex
 const noteB = schema.object("binding-nesting-note-b", { kind: schema.text(), count: schema.number() });
 const noteUnion = schema.union([noteA, noteB]);
 
-const groupedLines = port.input.of({ id: "grouped-lines", schema: schema.array(schema.array(schema.text())) });
-const notes = slot({ id: "notes", schema: schema.array(noteUnion) });
-const notesPort = port.output.of({ id: "notes", schema: schema.array(noteUnion), value: notes });
+const groupedLines = port.input.of({ id: "grouped-lines", schema: schema.list(schema.list(schema.text())) });
+const notes = slot({ id: "notes", schema: schema.list(noteUnion) });
+const notesPort = port.output.of({ id: "notes", schema: schema.list(noteUnion), value: notes });
 const worker = agent("worker", { description: "Groups raw lines and classifies each into a structured note." });
 
 export const bindingNesting = trait({

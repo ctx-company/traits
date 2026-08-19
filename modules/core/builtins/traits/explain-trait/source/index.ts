@@ -40,8 +40,8 @@ const narrationOutput = output.of(
   schema.object("explain-scaffold", {
     "trait-id": schema.text(),
     "receipt-digest": schema.text(),
-    sections: schema.array(section),
-    warnings: schema.field(schema.array(schema.text()), {
+    sections: schema.list(section),
+    warnings: schema.field(schema.list(schema.text()), {
       required: false,
       description: "Absent when the input scaffold carried none — never invented.",
     }),

@@ -40,8 +40,8 @@ export function tasks(agent: AgentHandle, maxSlices: number) {
     projections: [{ source: operation.literal([]), destination: receipts }],
   });
 
-  slicePlan.forEach("Write each slice", (slice, each) => {
-    each.maxItems(maxSlices);
+  slicePlan.forEach("Write each slice", (slice, loop) => {
+    loop.limit(maxSlices);
     agent.prompt("Write the slice", {
       input: input.prompt(
         `Write exactly one slice of the plan to the board — {slice} — as TaskDocument TOML files in .internal/tasks/ (create the directory if missing). Do not write any other slice's files; other slices run in their own frames.

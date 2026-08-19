@@ -12,7 +12,7 @@ export const BEHAVIOR: cdk.Behavior = {
   verbosity: cdk.verbosity.Brief,
 };
 
-export const INTENT: cdk.IntentSpec = {
+export const INTENT: cdk.Intent = {
   require: [
     cdk.intent.focus.Correctness,
     cdk.intent.require.Robustness,

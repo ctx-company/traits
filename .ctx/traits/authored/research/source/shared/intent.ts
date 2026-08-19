@@ -4,17 +4,17 @@
 // preserves require/avoid declaration order and quick's set is not a
 // prefix/suffix-stable subset of default/deep's merged order. Single-trait-
 // package rule: these stay here until a second consuming package exists.
-import type { IntentSpec } from "@ctx-traits/cdk";
+import type { Intent } from "@ctx-traits/cdk";
 import { intent } from "@ctx-traits/cdk";
 
 /** quick's lean intent set (variant/quick/index.ts). */
-export const quick: IntentSpec = {
+export const quick: Intent = {
   require: [intent.focus.Correctness, intent.require.Leanness, intent.require.ReviewBeforeFinal],
   avoid: [intent.avoid.OverEngineering, intent.avoid.ScopeCreep, intent.avoid.RubberStampReview],
 };
 
 /** default/deep's superset intent (variant/default/index.ts, variant/deep/index.ts). */
-export const full: IntentSpec = {
+export const full: Intent = {
   require: [
     intent.focus.Correctness,
     intent.require.Robustness,

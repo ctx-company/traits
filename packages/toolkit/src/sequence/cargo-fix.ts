@@ -201,7 +201,7 @@ export function cargoFixLoop(options: CargoFixLoopOptions): readonly SequenceHan
   } = options;
 
   const config = JSON.stringify({ checkArgs: [...check], clippyArgs: clippy === false ? null : [...clippy] });
-  const diagnostics = slot.array(cargoDiagnosticSchema, `${id}-diagnostics`);
+  const diagnostics = slot.list(cargoDiagnosticSchema, `${id}-diagnostics`);
 
   // Fused into ONE argv item (not a standalone `{port:scope}` element): the runtime rejects a slot/port-
   // substituted argv item that resolves to an empty string, and an empty scope ("" = whole workspace) is the
