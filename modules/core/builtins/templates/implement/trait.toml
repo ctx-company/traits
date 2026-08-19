@@ -1,0 +1,6 @@
+[package]
+id = "implement"
+version = "0.1.0"
+name = "Implement"
+description = "Plans a stated piece of work, implements it, and reviews the result against the plan."
+status = "draft"

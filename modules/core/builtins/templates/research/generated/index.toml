@@ -1,0 +1,200 @@
+id = "research"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Research"
+description = "Researches a topic into a written report at a predictable path, then reviews it for coverage."
+
+[metadata]
+tag = [
+    "template",
+    "research",
+]
+
+[[port]]
+id = "findings-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "What the research found."
+title = "Findings"
+value = "slot:work-summary"
+
+[[port]]
+id = "output-dir"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Repo-relative directory the report is written under."
+
+[port.default]
+value = "research"
+
+[[port]]
+id = "report-path-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "Where the report was written."
+title = "Report Path"
+value = "slot:report-path"
+
+[[port]]
+id = "topic"
+direction = "input"
+schema = "schema:text"
+description = "The topic or question to research."
+
+[[slot]]
+id = "questions"
+schema = "schema:text"
+description = "The core question, the sub-questions worth answering, and what is deliberately out of scope."
+
+[[slot]]
+id = "report-path"
+schema = "schema:text"
+description = "Repo-relative path the report is written to."
+
+[[slot]]
+id = "topic-slug"
+schema = "schema:text"
+description = "Kebab-case slug derived from the topic, used as the report's directory name."
+
+[[slot]]
+id = "verdict"
+schema = "schema:text"
+description = "Whether the report answers its questions, and what is missing if it does not."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "What was found, what was written, and which questions remain open."
+
+[[agent]]
+id = "researcher"
+description = "Investigates the questions and writes the report."
+summary = "Execution role."
+
+[[agent]]
+id = "reviewer"
+description = "Checks the report against the questions it was meant to answer."
+summary = "Review role."
+
+[[agent]]
+id = "scout"
+description = "Narrows the topic into the questions the research has to answer."
+summary = "Planning role."
+
+[prompt.research-the-topic]
+text = """
+
+          Research {port:topic}, answering the questions in {slot:questions}.
+          Write the report to {slot:report-path}, creating the directory if it does not exist.
+          Cite what each finding rests on, and say when the evidence is thin rather than filling the gap.
+          Return what you found, what you wrote, and which questions remain open.
+        """
+input = [
+    "port:topic",
+    "slot:questions",
+    "slot:report-path",
+]
+output = ["slot:work-summary"]
+
+[prompt.review-the-report]
+text = """
+
+          Read the report at {slot:report-path} and judge it against the questions in {slot:questions}.
+          The researcher's account: {slot:work-summary}
+          Report which questions are answered, which are not, and any claim the report does not support.
+        """
+input = [
+    "slot:report-path",
+    "slot:questions",
+    "slot:work-summary",
+]
+output = ["slot:verdict"]
+
+[prompt.scope-the-topic]
+text = """
+
+          Narrow {port:topic} into the questions the research must answer.
+          Give the core question, the sub-questions worth answering separately, and what is deliberately out of scope.
+        """
+input = ["port:topic"]
+output = ["slot:questions"]
+
+[procedure]
+description = "Scope the topic, research it into a report, and check the report answers it."
+input = [
+    "port:output-dir",
+    "port:topic",
+]
+output = [
+    "port:findings-report",
+    "port:report-path-report",
+]
+
+[[procedure.sequence]]
+id = "derive-the-topic-slug"
+title = "Derive the topic slug"
+input = ["port:topic"]
+output = ["slot:topic-slug"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'printf %s "$1" | tr "A-Z" "a-z" | tr -cs "a-z0-9" "-" | sed "s/^-*//;s/-*$//"',
+    "_",
+    "{port:topic}",
+]
+
+[[procedure.sequence]]
+id = "derive-the-report-path"
+title = "Derive the report path"
+input = [
+    "port:output-dir",
+    "slot:topic-slug",
+]
+output = ["slot:report-path"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'printf %s/%s/report.md "$1" "$2"',
+    "_",
+    "{port:output-dir}",
+    "{slot:topic-slug}",
+]
+
+[[procedure.sequence]]
+id = "scope-the-topic"
+title = "Scope the topic"
+agent = "agent:scout"
+prompt = "prompt:scope-the-topic"
+input = ["port:topic"]
+output = ["slot:questions"]
+
+[[procedure.sequence]]
+id = "research-the-topic"
+title = "Research the topic"
+agent = "agent:researcher"
+prompt = "prompt:research-the-topic"
+input = [
+    "port:topic",
+    "slot:questions",
+    "slot:report-path",
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
+id = "review-the-report"
+title = "Review the report"
+agent = "agent:reviewer"
+prompt = "prompt:review-the-report"
+input = [
+    "slot:report-path",
+    "slot:questions",
+    "slot:work-summary",
+]
+output = ["slot:verdict"]

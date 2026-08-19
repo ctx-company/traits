@@ -1,6 +1,0 @@
-[package]
-id = "research-summarize"
-version = "0.1.0"
-name = "Research Summarize"
-description = "Summarizes a research question against supplied source material into key findings, open questions, and citations."
-status = "draft"

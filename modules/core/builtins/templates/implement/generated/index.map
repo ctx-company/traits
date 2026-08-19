@@ -1,0 +1,92 @@
+{
+  "agent:planner": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 16,
+    "end": 16
+  },
+  "agent:reviewer": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 22,
+    "end": 22
+  },
+  "agent:worker": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 19,
+    "end": 19
+  },
+  "port:goal": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 26,
+    "end": 26
+  },
+  "port:review-report": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 55,
+    "end": 55
+  },
+  "port:work-report": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 48,
+    "end": 48
+  },
+  "prompt:do-the-work": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 86,
+    "end": 86
+  },
+  "prompt:draft-the-plan": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 77,
+    "end": 77
+  },
+  "prompt:review-the-work": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 100,
+    "end": 100
+  },
+  "sequence:procedure/capture-the-changed-files": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 94,
+    "end": 94
+  },
+  "sequence:procedure/do-the-work": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 85,
+    "end": 85
+  },
+  "sequence:procedure/draft-the-plan": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 76,
+    "end": 76
+  },
+  "sequence:procedure/review-the-work": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 99,
+    "end": 99
+  },
+  "slot:changed-files": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 39,
+    "end": 39
+  },
+  "slot:plan": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 31,
+    "end": 31
+  },
+  "slot:verdict": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 43,
+    "end": 43
+  },
+  "slot:work-summary": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "trait:implement": {
+    "file": ".ctx/traits/authored/implement/source/index.ts",
+    "start": 63,
+    "end": 63
+  }
+}

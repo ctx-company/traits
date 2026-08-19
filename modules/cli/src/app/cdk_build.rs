@@ -1201,10 +1201,10 @@ pub(crate) fn package_cdk_source(trait_path: &Utf8Path) -> crate::Result<Option<
     // was actually resolved for `trait_path`. Reconstructing a path from
     // the trait id under `.ctx/traits` here (as this used to) can silently
     // resolve an unrelated, same-named live `.ctx/traits/<id>` package
-    // instead of the package actually being checked (e.g. a
-    // `modules/core/builtins/templates/implement-phase/` package colliding
-    // with a live `.ctx/traits/implement-phase/`), or find nothing at all
-    // for ids with no live counterpart.
+    // instead of the package actually being checked (e.g. the
+    // `modules/core/builtins/templates/review/` template colliding with
+    // this repository's own live `.ctx/traits/authored/review/`), or find
+    // nothing at all for ids with no live counterpart.
     ctx_traits_io::layout::package_cdk_source_path(package_root)
         .map_err(ctx_traits_io::Error::from)
         .map_err(crate::Error::from)

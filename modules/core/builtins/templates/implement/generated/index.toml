@@ -1,0 +1,163 @@
+id = "implement"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Implement"
+description = "Plans a stated piece of work, implements it, and reviews the result against the plan."
+
+[metadata]
+tag = [
+    "template",
+    "implementation",
+]
+
+[[port]]
+id = "goal"
+direction = "input"
+schema = "schema:text"
+description = "The work to carry out, in your own words."
+
+[[port]]
+id = "review-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "The reviewer's assessment of the finished work."
+title = "Review"
+value = "slot:verdict"
+
+[[port]]
+id = "work-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "What was changed and how it was validated."
+title = "Work Summary"
+value = "slot:work-summary"
+
+[[slot]]
+id = "changed-files"
+schema = "schema:text"
+description = "Names and change kinds of every file touched — an index of the work, never its content."
+
+[[slot]]
+id = "plan"
+schema = "schema:text"
+description = "Scope, the files to touch, the approach, and how the work will be checked."
+
+[[slot]]
+id = "verdict"
+schema = "schema:text"
+description = "The reviewer's assessment: what still blocks the work, and what was verified."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "What the worker changed, how it was validated, and anything left open."
+
+[[agent]]
+id = "planner"
+description = "Turns the requested work into a short plan the worker can follow."
+summary = "Planning role."
+
+[[agent]]
+id = "reviewer"
+description = "Judges the finished work against the plan and the request."
+summary = "Review role."
+
+[[agent]]
+id = "worker"
+description = "Carries out the plan and reports what changed."
+summary = "Execution role."
+
+[prompt.do-the-work]
+text = """
+
+          Carry out {port:goal}, following the plan in {slot:plan}.
+          Run the checks the plan names before reporting.
+          Return what you changed, how you validated it, and anything still open.
+        """
+input = [
+    "port:goal",
+    "slot:plan",
+]
+output = ["slot:work-summary"]
+
+[prompt.draft-the-plan]
+text = """
+
+          Plan the work for {port:goal}.
+          Name the scope, the files you expect to touch, the approach, and how the result will be checked.
+          Keep it short enough to act on; this is a plan, not the implementation.
+        """
+input = ["port:goal"]
+output = ["slot:plan"]
+
+[prompt.review-the-work]
+text = """
+
+          Judge the finished work for {port:goal} against the plan in {slot:plan}.
+          The worker's account: {slot:work-summary}
+          The files that changed: {slot:changed-files}
+          Read the changed files yourself; the summary is a claim, not evidence.
+          Report what still blocks the work, then what you verified and found sound.
+        """
+input = [
+    "port:goal",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:verdict"]
+
+[procedure]
+description = "Plan the work, carry it out, and review what was done."
+input = ["port:goal"]
+output = [
+    "port:review-report",
+    "port:work-report",
+]
+
+[[procedure.sequence]]
+id = "draft-the-plan"
+title = "Draft the plan"
+agent = "agent:planner"
+prompt = "prompt:draft-the-plan"
+input = ["port:goal"]
+output = ["slot:plan"]
+
+[[procedure.sequence]]
+id = "do-the-work"
+title = "Do the work"
+agent = "agent:worker"
+prompt = "prompt:do-the-work"
+input = [
+    "port:goal",
+    "slot:plan",
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
+id = "capture-the-changed-files"
+title = "Capture the changed files"
+output = ["slot:changed-files"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "diff",
+    "--name-status",
+    "HEAD",
+]
+
+[[procedure.sequence]]
+id = "review-the-work"
+title = "Review the work"
+agent = "agent:reviewer"
+prompt = "prompt:review-the-work"
+input = [
+    "port:goal",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:verdict"]

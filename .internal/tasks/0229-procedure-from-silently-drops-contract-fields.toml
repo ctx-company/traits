@@ -1,0 +1,51 @@
+schema-version = "0.2"
+key = "0229"
+title = "procedure.from accepts input and output, then throws them away"
+status = "ready"
+raised = "2026-08-19"
+content = """
+Found while proving the single-file trait shape (0217).
+
+`cdk.procedure.from({ description, input: [...], output: [...] }, body)`
+accepts `input` and `output` and ignores both. `ProcedureFields` declares
+neither — a procedure's contract is inferred from its steps — and trait
+sources are evaluated rather than typechecked, so the excess properties
+disappear without a diagnostic.
+
+The failure is quiet in the worst way. A trait that declares its output
+port only there:
+
+- builds clean
+- checks clean, `valid: true`, no audit findings
+- emits no output port at all, and returns nothing to its caller
+
+The input side hides it further: an input port still lands, because a
+prompt interpolating it collects it transitively. So the author sees one
+port arrive and reasonably assumes the other did too.
+
+Make it loud. Either accept the fields and honor them, or reject them at
+build time naming the trait's own `port` field as the place ports are
+declared in an object shell. Silently accepting an argument that changes
+nothing is the one option that should not survive.
+
+Worth checking whether the same class exists elsewhere: any fields object
+in the CDK that is spread into a builder which does not declare those keys
+will behave identically, and trait sources are never typechecked.
+"""
+validation = """
+## Watch
+
+- The object layer's contract inference is correct and should not change:
+  a procedure's input and output ARE derived from its steps. This task is
+  about the argument that pretends otherwise.
+- `packages/cdk/src/functional/procedure.ts` spreads its fields into
+  `procedure(...)`, so any fix belongs where the shape is known, not in
+  the object-layer builder that legitimately accepts unknown keys.
+
+## Done when
+
+Passing `input`/`output` to `procedure.from` either works or fails with a
+message naming the trait `port` field; a scratch trait declaring an output
+port only through `procedure.from` no longer builds green while returning
+nothing; and a scratch behavioral proof pins whichever behavior is chosen.
+"""

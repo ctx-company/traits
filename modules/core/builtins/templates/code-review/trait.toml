@@ -1,6 +1,0 @@
-[package]
-id = "code-review"
-version = "0.1.0"
-name = "Code Review"
-description = "Reviews a diff against a stated focus and returns structured, source-anchored findings with a pass/needs-changes verdict."
-status = "draft"

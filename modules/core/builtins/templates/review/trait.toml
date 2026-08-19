@@ -1,0 +1,6 @@
+[package]
+id = "review"
+version = "0.1.0"
+name = "Review"
+description = "Reviews a git ref or range and returns a typed verdict plus a written review, without touching the tree."
+status = "draft"

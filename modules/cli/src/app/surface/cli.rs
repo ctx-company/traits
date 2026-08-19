@@ -298,9 +298,8 @@ pub enum TraitsCommand {
     },
     /// Scaffold a new trait package from a template, or list available templates.
     ///
-    /// With no name, lists the five first-party teaching templates
-    /// (code-review, implement-phase, research-summarize, test-writer,
-    /// pr-description) and writes nothing. With a name and `--from
+    /// With no name, lists the three first-party teaching templates
+    /// (implement, research, review) and writes nothing. With a name and `--from
     /// <template>`, materializes that template into a new draft package at
     /// `.ctx/traits/<slugified-name>/`, builds it through the same
     /// internal path `ctx traits build` uses, and locks it through the
@@ -323,8 +322,7 @@ pub enum TraitsCommand {
         /// together with `--from`; omitted entirely to list templates.
         name: Option<String>,
 
-        /// Template to scaffold from: code-review, implement-phase,
-        /// research-summarize, test-writer, or pr-description.
+        /// Template to scaffold from: implement, research, or review.
         #[arg(long)]
         from: Option<String>,
 
