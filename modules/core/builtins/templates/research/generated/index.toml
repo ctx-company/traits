@@ -10,6 +10,18 @@ tag = [
     "research",
 ]
 
+[[intent.avoid]]
+id = "speculative-claim"
+
+[[behavior.tone]]
+id = "plain"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[[behavior.method]]
+id = "implications-first"
+
 [[port]]
 id = "findings-report"
 direction = "output"

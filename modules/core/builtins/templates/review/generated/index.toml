@@ -10,6 +10,27 @@ tag = [
     "review",
 ]
 
+[[intent.focus]]
+id = "correctness"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[behavior.tone]]
+id = "plain"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[[behavior.method]]
+id = "steelman"
+
+[[behavior.method]]
+id = "push-back"
+
 [[port]]
 id = "range"
 direction = "input"

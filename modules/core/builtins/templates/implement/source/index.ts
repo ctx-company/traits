@@ -67,6 +67,17 @@ export default function () {
     metadata: { tag: ["template", "implementation"] },
   });
 
+  // Vocabulary the runtime renders into every step of this trait. Selecting
+  // an item is the instruction; the catalog says what each one means.
+  cdk.useBehavior({
+    tone: [cdk.behavior.tone.Plain],
+    method: [cdk.behavior.method.RestateToConfirm],
+  });
+  cdk.useIntent({
+    require: [cdk.intent.VerifiableGoal, cdk.intent.MatchSurroundingStyle],
+    avoid: [cdk.intent.ScopeCreep],
+  });
+
   planner.prompt("Draft the plan", {
     input: cdk.input.prompt`
       Plan the work for ${goal}.

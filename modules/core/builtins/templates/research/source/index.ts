@@ -76,6 +76,14 @@ export default function () {
     metadata: { tag: ["template", "research"] },
   });
 
+  // Vocabulary the runtime renders into every step of this trait. Selecting
+  // an item is the instruction; the catalog says what each one means.
+  cdk.useBehavior({
+    tone: [cdk.behavior.tone.Plain],
+    method: [cdk.behavior.method.EvidenceFirst, cdk.behavior.method.ImplicationsFirst],
+  });
+  cdk.useIntent({ avoid: [cdk.intent.SpeculativeClaim] });
+
   cdk.step.command("Derive the topic slug", {
     input: cdk.input.command`sh -c "printf %s \\"\\$1\\" | tr \\"A-Z\\" \\"a-z\\" | tr -cs \\"a-z0-9\\" \\"-\\" | sed \\"s/^-*//;s/-*\\$//\\"" _ ${topic}`,
     output: slug,

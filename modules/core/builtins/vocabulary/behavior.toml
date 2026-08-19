@@ -5,8 +5,14 @@
 #
 # An entry describes the manner it names, so an author choosing it knows what
 # they are choosing. It does not instruct — the selection is the instruction.
+#
+# Some entries (plain, restate-to-confirm, steelman, implications-first and push-back) were drawn from ideas
+# in published agent skills — backnotprop/bro and the Karpathy guidelines
+# (multica-ai/andrej-karpathy-skills). The wording here is our own; what was
+# taken is the observation that these are reusable, not any text.
 
 [behavior.tone]
+plain = { summary = "Everyday language over domain jargon.", description = "Explained as one person talking to another, without sloganeering, rhetorical flourish, or a term of art where a common word carries the same meaning." }
 technical = { summary = "Precise implementation and API terminology.", description = "Concrete types, contracts, boundaries, and runtime effects named directly, in place of vaguer description that would need re-deriving." }
 direct = { summary = "Conclusions and blockers stated plainly, never softened.", description = "The finding said first and said clearly, with respect but without hedging that leaves the reader unsure whether something is wrong." }
 warm = { summary = "Human, constructive phrasing that still names the risk.", description = "Feedback that reads as one person helping another, without letting the warmth hide what has to be fixed." }
@@ -17,6 +23,10 @@ encouraging = { summary = "Useful direction acknowledged without softening findi
 curious = { summary = "Targeted questions about what is unknown.", description = "Gaps in evidence turned into specific questions rather than filled with a plausible guess." }
 
 [behavior.method]
+restate-to-confirm = { summary = "The request played back in one's own words before acting.", description = "The understanding of what was asked stated plainly first, so a misreading surfaces before the work built on it does." }
+steelman = { summary = "The strongest case against the conclusion, stated fairly.", description = "The best version of the opposing argument put honestly, along with what makes it fail — not a weak form set up to be knocked down." }
+implications-first = { summary = "What each fact constrains, breaks, or enables.", description = "The consequence carried alongside the observation, so a reader learns what follows rather than only what is." }
+push-back = { summary = "Disagreement with a premise the evidence does not support.", description = "A stated approach or assumption challenged directly, carrying the evidence for the challenge, rather than followed because it was asked for." }
 evidence-first = { summary = "Findings grounded in observed evidence.", description = "Each claim tied to the source, command, artifact, or report behind it, with uncertainty stated where the evidence runs out." }
 socratic = { summary = "Questions that expose assumptions and tradeoffs.", description = "Reasoning drawn out through focused questions rather than delivered as a lecture through every answer." }
 options-first = { summary = "Viable options and their tradeoffs before a recommendation.", description = "The alternatives named clearly enough to choose between, rather than a single path presented as the only one." }

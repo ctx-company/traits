@@ -8,6 +8,11 @@
 # Read `scope-creep` as an avoid and it says don't; read it as a focus and
 # it says watch for it. Both are meaningful, and an entry that said "do not
 # expand beyond the requested task" could only ever mean the first.
+#
+# Some entries (match-surrounding-style and verifiable-goal) were drawn from ideas
+# in published agent skills — backnotprop/bro and the Karpathy guidelines
+# (multica-ai/andrej-karpathy-skills). The wording here is our own; what was
+# taken is the observation that these are reusable, not any text.
 
 [intent]
 accretion = { summary = "A parallel solution added beside an existing one instead of consolidating.", description = "Related behavior that grows a second helper, branch, or path next to the one already handling it, rather than being unified with it." }
@@ -26,6 +31,7 @@ inspect-changed-behavior = { summary = "Reading the diff, nearby code, and tests
 interface-widening = { summary = "Public surface growing without a concrete caller.", description = "An export, parameter, or option added for a use that has not appeared yet, which then has to be supported once it exists." }
 leanness = { summary = "Only what the requested outcome needs.", description = "The change sized to its purpose, with anything beyond that recognized as a separate decision rather than a free addition." }
 maintainability = { summary = "Complexity, coupling, and brittleness that make future change harder.", description = "Structure whose cost lands on the next person: unclear naming, tangled dependencies, branching that must be held in the head all at once." }
+match-surrounding-style = { summary = "Code that reads like its neighbours.", description = "Existing convention in the file honored over personal preference, so a change does not announce itself by looking different from the code around it." }
 over-engineering = { summary = "Generality built ahead of demonstrated need.", description = "Abstraction, configurability, or defensive handling for cases that have not been shown to occur." }
 performance = { summary = "Avoidable expensive work.", description = "Cost that the task did not require — an accidental quadratic over a large collection, repeated work that could be done once." }
 policy-bypass = { summary = "Working around user, repository, host, or organization policy.", description = "Routing past a permission prompt, a repository rule, or an organizational constraint rather than satisfying it or surfacing it." }
@@ -53,5 +59,6 @@ unrequested-refactor = { summary = "Changing code outside the requested change."
 unsafe-command = { summary = "Commands that can destroy data or alter system state.", description = "Invocations whose effects reach past the working tree, or past what can be undone, without the user having agreed to them." }
 user-impact = { summary = "The user-visible consequence of a finding.", description = "What the defect costs the person using the software, stated alongside what it is technically." }
 verbatim-execution = { summary = "An agreed draft executed exactly, with departures recorded.", description = "The approved plan followed as written, and any point where reality forced a change written down rather than absorbed silently." }
+verifiable-goal = { summary = "The task restated as a condition that can be checked.", description = "A target established before the work starts — a test that fails now, a command that must exit clean — rather than a judgement made about it afterwards." }
 verify-coverage = { summary = "Whether changed behavior is covered by anything.", description = "Tests, examples, or acceptance criteria that actually exercise what changed — and a stated gap when nothing does." }
 weaken-tests-to-pass = { summary = "Loosening a test instead of repairing the implementation.", description = "An assertion relaxed, skipped, or deleted so a change goes green, where the change was what broke it." }

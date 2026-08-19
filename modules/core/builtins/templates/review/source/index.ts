@@ -54,6 +54,17 @@ export default function () {
     metadata: { tag: ["template", "review"] },
   });
 
+  // Vocabulary the runtime renders into every step of this trait. Selecting
+  // an item is the instruction; the catalog says what each one means.
+  cdk.useBehavior({
+    tone: [cdk.behavior.tone.Plain, cdk.behavior.tone.Direct],
+    method: [cdk.behavior.method.EvidenceFirst, cdk.behavior.method.Steelman, cdk.behavior.method.PushBack],
+  });
+  cdk.useIntent({
+    focus: [cdk.intent.Correctness],
+    avoid: [cdk.intent.RubberStampReview],
+  });
+
   cdk.step.command("Resolve the range", {
     input: cdk.input.command`git rev-parse --abbrev-ref ${range}`,
     output: resolved,

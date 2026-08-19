@@ -17,6 +17,7 @@ export type RuntimeSurface = "wasm-core" | "wasm-plugin" | "cli-json";
 export type RuntimeOperation = "validate" | "normalize" | "synth" | "audit" | "import-plan" | "render" | "compose" | "resolve" | "explain" | "pack" | "cache-plan" | "ledger-update";
 
 /** Built-in ToneBuiltIn values.
+ * @property plain Everyday language over domain jargon.
  * @property technical Precise implementation and API terminology.
  * @property direct Conclusions and blockers stated plainly, never softened.
  * @property warm Human, constructive phrasing that still names the risk.
@@ -26,8 +27,10 @@ export type RuntimeOperation = "validate" | "normalize" | "synth" | "audit" | "i
  * @property encouraging Useful direction acknowledged without softening findings.
  * @property curious Targeted questions about what is unknown.
  */
-export type ToneBuiltIn = "technical" | "direct" | "warm" | "formal" | "calm" | "critical" | "encouraging" | "curious";
+export type ToneBuiltIn = "plain" | "technical" | "direct" | "warm" | "formal" | "calm" | "critical" | "encouraging" | "curious";
 export const Tone = {
+  /** Everyday language over domain jargon. Explained as one person talking to another, without sloganeering, rhetorical flourish, or a term of art where a common word carries the same meaning. */
+  plain: "plain",
   /** Precise implementation and API terminology. Concrete types, contracts, boundaries, and runtime effects named directly, in place of vaguer description that would need re-deriving. */
   technical: "technical",
   /** Conclusions and blockers stated plainly, never softened. The finding said first and said clearly, with respect but without hedging that leaves the reader unsure whether something is wrong. */
@@ -47,6 +50,10 @@ export const Tone = {
 } as const satisfies Record<string, ToneBuiltIn>;
 
 /** Built-in MethodBuiltIn values.
+ * @property restate-to-confirm The request played back in one's own words before acting.
+ * @property steelman The strongest case against the conclusion, stated fairly.
+ * @property implications-first What each fact constrains, breaks, or enables.
+ * @property push-back Disagreement with a premise the evidence does not support.
  * @property evidence-first Findings grounded in observed evidence.
  * @property socratic Questions that expose assumptions and tradeoffs.
  * @property options-first Viable options and their tradeoffs before a recommendation.
@@ -55,8 +62,16 @@ export const Tone = {
  * @property divergent Several distinct directions generated before narrowing.
  * @property convergent Options reduced to the smallest defensible next step.
  */
-export type MethodBuiltIn = "evidence-first" | "socratic" | "options-first" | "critique-first" | "first-principles" | "divergent" | "convergent";
+export type MethodBuiltIn = "restate-to-confirm" | "steelman" | "implications-first" | "push-back" | "evidence-first" | "socratic" | "options-first" | "critique-first" | "first-principles" | "divergent" | "convergent";
 export const Method = {
+  /** The request played back in one's own words before acting. The understanding of what was asked stated plainly first, so a misreading surfaces before the work built on it does. */
+  restateToConfirm: "restate-to-confirm",
+  /** The strongest case against the conclusion, stated fairly. The best version of the opposing argument put honestly, along with what makes it fail — not a weak form set up to be knocked down. */
+  steelman: "steelman",
+  /** What each fact constrains, breaks, or enables. The consequence carried alongside the observation, so a reader learns what follows rather than only what is. */
+  implicationsFirst: "implications-first",
+  /** Disagreement with a premise the evidence does not support. A stated approach or assumption challenged directly, carrying the evidence for the challenge, rather than followed because it was asked for. */
+  pushBack: "push-back",
   /** Findings grounded in observed evidence. Each claim tied to the source, command, artifact, or report behind it, with uncertainty stated where the evidence runs out. */
   evidenceFirst: "evidence-first",
   /** Questions that expose assumptions and tradeoffs. Reasoning drawn out through focused questions rather than delivered as a lecture through every answer. */
@@ -201,6 +216,7 @@ export const Uncertainty = {
  * @property interface-widening Public surface growing without a concrete caller.
  * @property leanness Only what the requested outcome needs.
  * @property maintainability Complexity, coupling, and brittleness that make future change harder.
+ * @property match-surrounding-style Code that reads like its neighbours.
  * @property over-engineering Generality built ahead of demonstrated need.
  * @property performance Avoidable expensive work.
  * @property policy-bypass Working around user, repository, host, or organization policy.
@@ -228,10 +244,11 @@ export const Uncertainty = {
  * @property unsafe-command Commands that can destroy data or alter system state.
  * @property user-impact The user-visible consequence of a finding.
  * @property verbatim-execution An agreed draft executed exactly, with departures recorded.
+ * @property verifiable-goal The task restated as a condition that can be checked.
  * @property verify-coverage Whether changed behavior is covered by anything.
  * @property weaken-tests-to-pass Loosening a test instead of repairing the implementation.
  */
-export type IntentBuiltIn = "accretion" | "annotation-fidelity" | "behavior-preserving-default" | "big-rewrite" | "bounded-refinement" | "correctness" | "data-loss" | "destructive-change" | "duplication" | "elegance" | "gates-green-before-commit" | "gold-plating" | "inspect-changed-behavior" | "interface-widening" | "leanness" | "maintainability" | "over-engineering" | "performance" | "policy-bypass" | "pragmatism" | "preserve-scope" | "report-actionable-finding" | "reuse-over-reimplement" | "review-before-final" | "robustness" | "role-attributed-output" | "rubber-stamp-review" | "scope-creep" | "secret-exfiltration" | "security" | "silent-deviation" | "specific" | "speculative-claim" | "state-assumptions" | "style-only" | "taste-only-blocking" | "tests" | "unapproved-network" | "unbounded-loop" | "unrequested-refactor" | "unsafe-command" | "user-impact" | "verbatim-execution" | "verify-coverage" | "weaken-tests-to-pass";
+export type IntentBuiltIn = "accretion" | "annotation-fidelity" | "behavior-preserving-default" | "big-rewrite" | "bounded-refinement" | "correctness" | "data-loss" | "destructive-change" | "duplication" | "elegance" | "gates-green-before-commit" | "gold-plating" | "inspect-changed-behavior" | "interface-widening" | "leanness" | "maintainability" | "match-surrounding-style" | "over-engineering" | "performance" | "policy-bypass" | "pragmatism" | "preserve-scope" | "report-actionable-finding" | "reuse-over-reimplement" | "review-before-final" | "robustness" | "role-attributed-output" | "rubber-stamp-review" | "scope-creep" | "secret-exfiltration" | "security" | "silent-deviation" | "specific" | "speculative-claim" | "state-assumptions" | "style-only" | "taste-only-blocking" | "tests" | "unapproved-network" | "unbounded-loop" | "unrequested-refactor" | "unsafe-command" | "user-impact" | "verbatim-execution" | "verifiable-goal" | "verify-coverage" | "weaken-tests-to-pass";
 export const Intent = {
   /** A parallel solution added beside an existing one instead of consolidating. Related behavior that grows a second helper, branch, or path next to the one already handling it, rather than being unified with it. */
   accretion: "accretion",
@@ -265,6 +282,8 @@ export const Intent = {
   leanness: "leanness",
   /** Complexity, coupling, and brittleness that make future change harder. Structure whose cost lands on the next person: unclear naming, tangled dependencies, branching that must be held in the head all at once. */
   maintainability: "maintainability",
+  /** Code that reads like its neighbours. Existing convention in the file honored over personal preference, so a change does not announce itself by looking different from the code around it. */
+  matchSurroundingStyle: "match-surrounding-style",
   /** Generality built ahead of demonstrated need. Abstraction, configurability, or defensive handling for cases that have not been shown to occur. */
   overEngineering: "over-engineering",
   /** Avoidable expensive work. Cost that the task did not require — an accidental quadratic over a large collection, repeated work that could be done once. */
@@ -319,6 +338,8 @@ export const Intent = {
   userImpact: "user-impact",
   /** An agreed draft executed exactly, with departures recorded. The approved plan followed as written, and any point where reality forced a change written down rather than absorbed silently. */
   verbatimExecution: "verbatim-execution",
+  /** The task restated as a condition that can be checked. A target established before the work starts — a test that fails now, a command that must exit clean — rather than a judgement made about it afterwards. */
+  verifiableGoal: "verifiable-goal",
   /** Whether changed behavior is covered by anything. Tests, examples, or acceptance criteria that actually exercise what changed — and a stated gap when nothing does. */
   verifyCoverage: "verify-coverage",
   /** Loosening a test instead of repairing the implementation. An assertion relaxed, skipped, or deleted so a change goes green, where the change was what broke it. */

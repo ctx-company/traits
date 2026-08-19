@@ -10,6 +10,21 @@ tag = [
     "implementation",
 ]
 
+[[intent.require]]
+id = "verifiable-goal"
+
+[[intent.require]]
+id = "match-surrounding-style"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[behavior.tone]]
+id = "plain"
+
+[[behavior.method]]
+id = "restate-to-confirm"
+
 [[port]]
 id = "goal"
 direction = "input"
