@@ -1,0 +1,98 @@
+schema-version = "0.2"
+key = "0215"
+title = "A failed run must report as failed: truncated captures and the --task queue row"
+status = "done"
+raised = "2026-08-19"
+content = """
+Two independent honesty defects found while diagnosing why ctx-notify 0006.9
+and ctx-codecheck 0006.5 "completed but were never merged". Both are fixed
+here; the diagnosis is recorded because the failure mode was expensive to
+trace and the evidence does not survive in the ledger.
+
+## 1. Core and IO disagreed about a truncated capture
+
+`modules/io/src/run.rs` parks a command whose stdout hit
+`COMMAND_CAPTURE_LIMIT` (320 KiB) through the same path as a genuine command
+failure — it submits NO produced output, deliberately, so a silently cropped
+value can never be forwarded into a slot or port.
+
+`command_execution_succeeded` in `modules/core/src/procedure/session.rs`
+judged that submission by `timed_out` and `exit_code` alone. It had no notion
+of truncation. So a command that exited 0 with truncated stdout was "succeeded"
+to core, which then demanded exactly one produced slot, found none, and
+rejected the whole submission as:
+
+    command execution evidence does not match current command frame
+
+— an evidence-SHAPE complaint that names neither the truncation, the limit,
+nor the argv. The run dies as `command-step-failed` with nothing an operator
+can act on. This was the ONLY reachable path to that message for a command
+frame: the success path copies argv and the output key straight from the same
+recomputed frame, so it cannot mismatch.
+
+Fix: a new `command_output_landed` = exit-code success AND untruncated,
+used for the command evidence-shape expectation. `command_execution_succeeded`
+is unchanged and still backs `check_verdict`, because a check's verdict comes
+from the exit code, which truncation cannot corrupt — a truncated check
+capture stays warning-only, as 0206 intended.
+
+Live case (ctx-notify 0006.9, 2026-08-19 07:51): the reviewer seat ran cargo
+with `CARGO_TARGET_DIR=$PWD/target-slot`, a path that repo's .gitignore did
+not cover. 44,866 build artifacts dirtied the tree, the Maybe Commit tail
+fired, `git add -A` staged them, and `git commit` printed ~5.7 MB of
+`create mode` lines against the 320 KiB ceiling.
+
+## 2. The --task queue called every non-`Failed` run "completed"
+
+`handle_task_queue_run` tested only `Status::Failed` and routed everything
+else through `landing_state`, which returns `None` whenever there are no
+terminal merge frames — exactly what a run that never got far enough to merge
+looks like. So `rejected`, `blocked`, `awaiting-agent-output` and the rest all
+rendered as `completed (no merge intent)`, did NOT halt the queue (so the next
+task spent model budget behind a green-looking row), and left the command
+exiting 0.
+
+The label was wrong twice over: every one of the seven observed failed runs
+carried `merge-intent: deep`.
+
+Fix: a `NotCompleted { status, outcome }` row, gated on
+`status != Status::Completed` before the landing match, carrying the session
+status and recorded drive outcome verbatim ("not completed: rejected
+(command-step-failed)"). It halts, per the 2026-08-17 owner ruling that a
+failed run halts the queue unless `--continue-on-failure`.
+
+## Not in this change
+
+- The same too-narrow `Status::Failed` test survives on the SINGLE-run path
+  (`run.rs` `CompletionOutcome::into_command_output`, `NoIntent` arm, and the
+  non-drive `run` path). A run with NO merge intent that ends `rejected` or
+  `blocked` still exits 0. Runs WITH intent are honest (`DriveNotCompleted` ->
+  exit 3), which is why the two live cases exited non-zero per-run and only
+  the queue row lied. Fixing it changes exit codes for every
+  `ctx traits run` without `--worktree`, so it wants its own decision.
+- Nothing stops a commit tail from sweeping tens of thousands of untracked
+  build artifacts into one commit. A `RUNTIME_EXCLUDE_ENTRIES`-style exclusion
+  for agent-chosen cargo scratch dirs, or a staged-file-count refusal in the
+  tail, would remove the trigger rather than just report it honestly.
+"""
+validation = """
+## Done when
+
+A command that exits 0 with a truncated capture is rejected as a command
+failure naming the truncation, not as an evidence mismatch; a `--task` queue
+row for a run that never completed names its real status and halts the queue.
+
+## Evidence (2026-08-19)
+
+- `command_capture_truncation_tests` (core): a truncated exit-0 capture accepts
+  the no-output shape and refuses a value; an untruncated one still requires
+  its single output; a check verdict is unaffected by truncation.
+- `task_queue_drive_tests` (cli): a `NotCompleted` row halts before the second
+  task and labels itself `not completed: rejected (command-step-failed)`.
+- `cargo fmt --check`, `cargo clippy --workspace --all-features -D warnings`,
+  `cargo test --workspace --lib` (1026 tests) green.
+- NOT green, and NOT from this change: `just sdk-check` and `just ts-typecheck`
+  both fail on main as of 3076330b — the drift check still expects
+  `list: schemaArray`/`array: schemaArray` after the rename to `schemaList`,
+  and `packages/cdk/test/cdk.test.ts` has 10 TS6133 unused-import errors.
+"""
