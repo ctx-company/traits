@@ -335,198 +335,136 @@ fn sha256_hex_digest(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Decode the concatenated vocabulary files into the generated static
+/// tables.
+///
+/// Each entry is its own table — `[behavior.tone.plain]`, `[intent.scope-creep]`
+/// — so an entry can be read, diffed and reviewed on its own lines instead of
+/// as one long inline value. The section it belongs to is the table path above
+/// it, which is what `SECTIONS` names.
+///
+/// Everything here panics rather than warns. This runs at build time over
+/// files that ship inside the binary: a malformed catalog must stop the build,
+/// not reach a user as a missing entry.
 fn parse(input: &str) -> String {
-    let mut current = None;
-    let mut seen = BTreeSet::new();
+    let document: toml::Value = toml::from_str(input).unwrap_or_else(|error| {
+        panic!("vocabulary: not valid TOML: {error}");
+    });
+
     let mut sections: Vec<(&'static str, Vec<Entry>)> = Vec::new();
-
-    for (line_number, raw) in input.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            let name = &line[1..line.len() - 1];
-            let section = SECTIONS.iter().find(|s| s.name == name).unwrap_or_else(|| {
-                panic!(
-                    "builtins.toml:{}: unknown section [{}]",
-                    line_number + 1,
-                    name
-                )
-            });
-            if !seen.insert(section.name) {
-                panic!(
-                    "builtins.toml:{}: duplicate section [{}]",
-                    line_number + 1,
-                    name
-                );
-            }
-            sections.push((section.name, Vec::new()));
-            current = Some(sections.len() - 1);
-            continue;
-        }
-        let Some(index) = current else {
-            panic!("builtins.toml:{}: entry outside a section", line_number + 1);
-        };
-        let Some((slug, value)) = line.split_once(" = ") else {
-            panic!(
-                "builtins.toml:{}: expected `slug = \"description\"` or `slug = {{ ... }}`",
-                line_number + 1
-            );
-        };
-        if !is_slug(slug) {
-            panic!("builtins.toml:{}: invalid slug", line_number + 1);
-        }
-        if sections[index].1.iter().any(|(s, _, _, _)| s == slug) {
-            panic!("builtins.toml:{}: duplicate slug", line_number + 1);
-        }
-        let (summary, description, directive) = parse_value(value, line_number + 1);
-        sections[index]
-            .1
-            .push((slug.to_string(), summary, description, directive));
-    }
-
     for section in SECTIONS {
-        let found = sections
-            .iter()
-            .find(|(name, _)| *name == section.name)
-            .unwrap_or_else(|| {
-                panic!("builtins.toml: missing required section [{}]", section.name)
-            });
-        if found.1.is_empty() {
+        let table = resolve_section(&document, section.name);
+        let mut entries: Vec<Entry> = Vec::new();
+        for (slug, value) in table {
+            if !is_slug(slug) {
+                panic!("vocabulary: [{}.{slug}] is not a valid slug", section.name);
+            }
+            entries.push(parse_entry(section.name, slug, value));
+        }
+        if entries.is_empty() {
             panic!(
-                "builtins.toml: section [{}] must contain entries",
+                "vocabulary: section [{}] must contain entries",
                 section.name
             );
         }
+        sections.push((section.name, entries));
     }
 
+    reject_unknown_sections(&document);
+
     let mut generated = String::new();
-    for section in SECTIONS {
-        let entries = sections
-            .iter()
-            .find(|(name, _)| *name == section.name)
-            .map(|(_, e)| e.as_slice())
-            .unwrap();
-        generated.push_str(&emit_static(section.constant, entries));
+    for (index, section) in SECTIONS.iter().enumerate() {
+        generated.push_str(&emit_static(section.constant, &sections[index].1));
     }
     generated
 }
 
-fn parse_value(value: &str, line_number: usize) -> (String, String, Option<String>) {
-    let value = value.trim();
-    if value.starts_with('{') && value.ends_with('}') {
-        parse_inline_table(&value[1..value.len() - 1], line_number)
-    } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 3 {
-        let text = &value[1..value.len() - 1];
-        validate_emittable(text, line_number);
-        (text.to_string(), text.to_string(), None)
-    } else {
-        panic!(
-            "builtins.toml:{}: expected `\"description\"` or `{{ summary = \"...\", description = \"...\" }}`",
-            line_number
-        );
+/// Walk a dotted section path (`behavior.tone`) to the table holding that
+/// section's entries.
+fn resolve_section<'a>(
+    document: &'a toml::Value,
+    name: &str,
+) -> &'a toml::map::Map<String, toml::Value> {
+    let mut current = document;
+    for segment in name.split('.') {
+        current = current
+            .get(segment)
+            .unwrap_or_else(|| panic!("vocabulary: missing required section [{name}]"));
+    }
+    current
+        .as_table()
+        .unwrap_or_else(|| panic!("vocabulary: section [{name}] is not a table"))
+}
+
+/// One entry's `summary` and `description`, plus the optional `directive`
+/// override an entry may still carry (no catalog entry does today — an entry
+/// names a topic and the selection is the instruction — but the renderer
+/// resolves it, so the field stays decodable rather than silently dropped).
+fn parse_entry(section: &str, slug: &str, value: &toml::Value) -> Entry {
+    let path = format!("{section}.{slug}");
+    let table = value
+        .as_table()
+        .unwrap_or_else(|| panic!("vocabulary: [{path}] must be a table"));
+
+    for key in table.keys() {
+        if !matches!(key.as_str(), "summary" | "description" | "directive") {
+            panic!("vocabulary: [{path}] has unknown field {key:?}");
+        }
+    }
+
+    let text = |field: &str| -> String {
+        let raw = table
+            .get(field)
+            .unwrap_or_else(|| panic!("vocabulary: [{path}] is missing {field}"))
+            .as_str()
+            .unwrap_or_else(|| panic!("vocabulary: [{path}].{field} must be a string"));
+        validate_emittable_field(raw, &path, field);
+        raw.to_string()
+    };
+
+    let directive = table.get("directive").map(|value| {
+        let raw = value
+            .as_str()
+            .unwrap_or_else(|| panic!("vocabulary: [{path}].directive must be a string"));
+        validate_emittable_field(raw, &path, "directive");
+        raw.to_string()
+    });
+
+    (
+        slug.to_string(),
+        text("summary"),
+        text("description"),
+        directive,
+    )
+}
+
+/// Every table in the document has to be a declared section or an entry inside
+/// one. A section nobody declared would otherwise be authored, committed, and
+/// silently never reach the binary.
+fn reject_unknown_sections(document: &toml::Value) {
+    let declared: BTreeSet<&str> = SECTIONS.iter().map(|section| section.name).collect();
+    let table = document
+        .as_table()
+        .expect("vocabulary: document root is a table");
+    for (root, value) in table {
+        let Some(children) = value.as_table() else {
+            panic!("vocabulary: [{root}] is not a table");
+        };
+        if declared.contains(root.as_str()) {
+            continue;
+        }
+        for child in children.keys() {
+            let path = format!("{root}.{child}");
+            if !declared.contains(path.as_str()) {
+                panic!("vocabulary: [{path}] is not a declared section");
+            }
+        }
     }
 }
 
-fn parse_inline_table(inner: &str, line_number: usize) -> (String, String, Option<String>) {
-    let mut summary = None;
-    let mut description = None;
-    let mut directive = None;
-    let bytes = inner.as_bytes();
-    let mut pos = 0;
-    loop {
-        while pos < bytes.len() && bytes[pos] == b' ' {
-            pos += 1;
-        }
-        if pos >= bytes.len() {
-            break;
-        }
-        let key_start = pos;
-        while pos < bytes.len() && bytes[pos].is_ascii_alphabetic() {
-            pos += 1;
-        }
-        let key = &inner[key_start..pos];
-        while pos < bytes.len() && bytes[pos] == b' ' {
-            pos += 1;
-        }
-        if pos >= bytes.len() || bytes[pos] != b'=' {
-            panic!(
-                "builtins.toml:{}: expected `=` in inline table",
-                line_number
-            );
-        }
-        pos += 1;
-        while pos < bytes.len() && bytes[pos] == b' ' {
-            pos += 1;
-        }
-        if pos >= bytes.len() || bytes[pos] != b'"' {
-            panic!(
-                "builtins.toml:{}: expected quoted string in inline table",
-                line_number
-            );
-        }
-        pos += 1;
-        let val_start = pos;
-        while pos < bytes.len() && bytes[pos] != b'"' {
-            pos += 1;
-        }
-        if pos >= bytes.len() {
-            panic!(
-                "builtins.toml:{}: unterminated string in inline table",
-                line_number
-            );
-        }
-        let text = &inner[val_start..pos];
-        validate_emittable(text, line_number);
-        pos += 1;
-        match key {
-            "summary" => {
-                if summary.replace(text.to_string()).is_some() {
-                    panic!("builtins.toml:{}: duplicate field `summary`", line_number);
-                }
-            }
-            "description" => {
-                if description.replace(text.to_string()).is_some() {
-                    panic!(
-                        "builtins.toml:{}: duplicate field `description`",
-                        line_number
-                    );
-                }
-            }
-            "directive" => {
-                if directive.replace(text.to_string()).is_some() {
-                    panic!("builtins.toml:{}: duplicate field `directive`", line_number);
-                }
-            }
-            _ => panic!("builtins.toml:{}: unknown field `{}`", line_number, key),
-        }
-        while pos < bytes.len() && bytes[pos] == b' ' {
-            pos += 1;
-        }
-        if pos < bytes.len() {
-            if bytes[pos] != b',' {
-                panic!(
-                    "builtins.toml:{}: expected `,` between inline-table entries",
-                    line_number
-                );
-            }
-            pos += 1;
-        }
-    }
-    let summary =
-        summary.unwrap_or_else(|| panic!("builtins.toml:{}: missing summary", line_number));
-    let description =
-        description.unwrap_or_else(|| panic!("builtins.toml:{}: missing description", line_number));
-    (summary, description, directive)
-}
-
-fn validate_emittable(text: &str, line_number: usize) {
+fn validate_emittable_field(text: &str, path: &str, field: &str) {
     if text.contains(['"', '\\', '\n', '\r']) {
-        panic!(
-            "builtins.toml:{}: value cannot be emitted safely",
-            line_number
-        );
+        panic!("vocabulary: [{path}].{field} cannot be emitted safely");
     }
 }
 

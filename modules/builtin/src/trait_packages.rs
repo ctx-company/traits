@@ -70,7 +70,12 @@ pub fn runnable_package(id: &str) -> Option<&'static BuiltinTraitPackage> {
     package(id).filter(|package| package.runnable)
 }
 
-#[cfg(test)]
+// Gated on the feature that populates the tables, not just on `test`.
+// Without `trait-packages` the generated table is deliberately EMPTY, so
+// these assertions would fail on a bare `cargo test -p ctx-traits-builtin`
+// while claiming the embedded set is wrong. Empty is the correct answer
+// there; there is simply nothing to assert about it.
+#[cfg(all(test, feature = "trait-packages"))]
 mod tests {
     use super::*;
 

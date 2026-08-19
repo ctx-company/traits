@@ -1,13 +1,8 @@
-// Scaffolded by `ctx traits create <name> --from review`. One file, no
-// variants — the whole trait is below. Edit it freely; nothing here is
-// special because it came from a template.
+// Say what to review, get a written review back.
 //
-// The shape: say what to review, get a written review back. The target is
-// your own words — a path, a branch, a range, a subsystem — and the reviewer
-// finds and reads it with its own tools.
-//
-// To make the evidence deterministic instead, put a command step ahead of the
-// prompt and hand its slot to the reviewer:
+// The target is free text — a path, a branch, a range, a subsystem — and the
+// reviewer finds and reads it with its own tools. Add a command step ahead of
+// the prompt when the evidence should be captured deterministically instead.
 import * as cdk from "@ctx-traits/cdk";
 
 const reviewer = cdk.agent.reviewer("reviewer", {
@@ -38,8 +33,7 @@ export default function () {
     metadata: { tag: ["template", "review"] },
   });
 
-  // Vocabulary the runtime renders into every step of this trait. Selecting
-  // an item is the instruction; the catalog says what each one means.
+  // Rendered into every step. Selecting an item is the instruction.
   cdk.useBehavior({
     tone: [cdk.behavior.tone.Plain, cdk.behavior.tone.Direct],
     method: [cdk.behavior.method.EvidenceFirst, cdk.behavior.method.Steelman, cdk.behavior.method.PushBack],

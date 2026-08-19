@@ -1,13 +1,9 @@
-// Template: research
+// Scope a topic into questions, research them into a report, then check the
+// report answers them.
 //
-// Scaffolded by `ctx traits create <name> --from research`. One file, no
-// variants — the whole trait is below. Edit it freely; nothing here is
-// special because it came from a template.
-//
-// The shape: a topic in, a written report at a known path out. The path is a
-// port with a default rather than something the model picks, so the caller
-// knows where the deliverable will land before the run starts and can assert
-// on it afterwards.
+// The report path is a port with a default rather than something the model
+// picks, so the caller knows where the deliverable lands before the run
+// starts.
 import * as cdk from "@ctx-traits/cdk";
 
 const scout = cdk.agent.planner("scout", {
@@ -59,8 +55,7 @@ export default function () {
     metadata: { tag: ["template", "research"] },
   });
 
-  // Vocabulary the runtime renders into every step of this trait. Selecting
-  // an item is the instruction; the catalog says what each one means.
+  // Rendered into every step. Selecting an item is the instruction.
   cdk.useBehavior({
     tone: [cdk.behavior.tone.Plain],
     method: [cdk.behavior.method.EvidenceFirst, cdk.behavior.method.ImplicationsFirst],
