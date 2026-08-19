@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0223"
 title = "Seven vocabulary atoms mined from published agent skills"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Surveyed two public skill sources and kept what is genuinely vocabulary —

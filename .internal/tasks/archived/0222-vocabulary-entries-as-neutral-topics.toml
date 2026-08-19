@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0222"
 title = "Reword every vocabulary entry as what it is, not what to do about it"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 Once a slug can appear in any facet (0221), imperative wording breaks. The
