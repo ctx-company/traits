@@ -18,3 +18,8 @@ packages/harness-client/dist/
 # Downloaded by @ctx-traits/cli during postinstall; release archives remain
 # the canonical binary artifacts.
 packages/cli/binary/
+
+# Rendered host exports. `ctx traits export` writes these on request;
+# nothing in the repository needs them, and committing them means every
+# guidance change drags a regenerated artifact along with it (0226).
+.agents/skills/

@@ -27,39 +27,6 @@ canonical = "sha256:0997bae897bcf6322c1f00fc461e85c4f6fe42202793b50d7313b18f0e06
 model-visible = "sha256:a491b2cdaf6b755b5c4a31db36b79cfee18902ef568a89690e1fa9f5f847ab19"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
-[[trait.export]]
-target = "agent-skills"
-path = ".agents/skills/refactor-default/SKILL.md"
-digest = "sha256:959741213ca8b4be096745768ce07c254a9797f1ae4c8d04ec3af3d9befe5a19"
-
-[[trait.projection]]
-target-profile = "agent-skills"
-renderer-version = "0.1.0-alpha.1"
-profile-version = "agent-skills"
-
-[trait.projection.digests]
-source = "sha256:09f6ecc800f1ffac0154330b4f98fb5bd47ec1b250f98c3e860041be30841db5"
-canonical = "sha256:0997bae897bcf6322c1f00fc461e85c4f6fe42202793b50d7313b18f0e06c82c"
-model-visible = "sha256:a491b2cdaf6b755b5c4a31db36b79cfee18902ef568a89690e1fa9f5f847ab19"
-render = "sha256:ac5830386514a01aed89e5e2df0c1fbb4f5e858292914b6c6b5794dc9166b08a"
-generated-markdown = "sha256:959741213ca8b4be096745768ce07c254a9797f1ae4c8d04ec3af3d9befe5a19"
-
-[trait.projection.warnings]
-semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
-advisory-policy = [
-    "port.commit-report output contract has no title",
-    "port.commit-report output contract has no format guidance",
-]
-
-[trait.projection.static-output]
-drift-status = "in-sync"
-path = "./.agents/skills/refactor-default/SKILL.md"
-
-[trait.projection.provenance]
-command = "ctx traits export --update-skill-lock"
-profile = "agent-skills"
-options = ["--profile=agent-skills"]
-
 [[trait]]
 id = "refactor"
 variant = "direct"
@@ -71,11 +38,6 @@ source = "sha256:1e158feda1a6e746fcad91a27ae54c87c1148f6fe3833c2e1b9719366f06445
 canonical = "sha256:10fce8d4c6c9260956b9d6e0cc2027b423283ea122904ddde56965e4bbe9aab7"
 model-visible = "sha256:60acd44385c90bfdd05eaef094512c34e744a963e41bd1f641c0c4008619e828"
 resource-manifest = "sha256:d44252c6cf774f41cb7c7b1bd6a190ee1ea26702ef46cfa328fa0d8887fa4f51"
-
-[[trait.export]]
-target = "agent-skills"
-path = ".agents/skills/refactor-direct/SKILL.md"
-digest = "sha256:f475494b19ed36ef5d4d2334071481a61833d41d51ed908fd9409b2b93c3012d"
 
 [[trait]]
 id = "refactor"
@@ -113,39 +75,6 @@ canonical = "sha256:2e81b7153f7bc38671a80852e800e8a438e96cad9fd139b390d1949be6e0
 model-visible = "sha256:b3bbb20c95e2de34239094f1d29d60f20fac259c1e5f6f2e3fb3003a078efd87"
 resource-manifest = "sha256:928a1b76f1e2ece74a4cacdd98ecc77e203de05861b65ba277719f9d031646f5"
 
-[[trait.export]]
-target = "agent-skills"
-path = ".agents/skills/refactor-quick/SKILL.md"
-digest = "sha256:2a9f67db66e7c1c8619081c3dec0811ecdbc6e13269001988ea5a3d9f7d418ae"
-
-[[trait.projection]]
-target-profile = "agent-skills"
-renderer-version = "0.2.4"
-profile-version = "agent-skills"
-
-[trait.projection.digests]
-source = "sha256:c7953332bd580fdd353baa3a8df3bd45c701207f96f40de0608e9ad0dde1859d"
-canonical = "sha256:2e81b7153f7bc38671a80852e800e8a438e96cad9fd139b390d1949be6e0da6a"
-model-visible = "sha256:8bcc13550a5ab9db40641d259dec2c0df4137f123f1165b625fd741b49f0ed00"
-render = "sha256:0166d6f02492fdb259e45e8fbac191ba7e18bd25a2e8f2134bb80fcf72a8755c"
-generated-markdown = "sha256:2a9f67db66e7c1c8619081c3dec0811ecdbc6e13269001988ea5a3d9f7d418ae"
-
-[trait.projection.warnings]
-semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
-advisory-policy = [
-    "port.commit-report output contract has no title",
-    "port.commit-report output contract has no format guidance",
-]
-
-[trait.projection.static-output]
-drift-status = "in-sync"
-path = "./.agents/skills/refactor-quick/SKILL.md"
-
-[trait.projection.provenance]
-command = "ctx traits export --update-skill-lock"
-profile = "agent-skills"
-options = ["--profile=agent-skills"]
-
 [[trait]]
 id = "refactor"
 variant = "smart"
@@ -157,11 +86,6 @@ source = "sha256:c98f6f9999d9dda411c9c53539b93a3bf1d4db049662651c9603563963cc584
 canonical = "sha256:81e6ea59cbfab7e1c1c65a78b88549247b4070f4bdade1459e9917ae8dbec887"
 model-visible = "sha256:a29c5520218e78d6863000d11159f54eee14b14f4f2b61660e414c89413c1392"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
-
-[[trait.export]]
-target = "agent-skills"
-path = ".agents/skills/refactor-smart/SKILL.md"
-digest = "sha256:ea944b857b7c2bf05815f645f7fcd5f316cbba097aa21935d205c248f6e0c7db"
 
 [[trait]]
 id = "refactor"
@@ -175,7 +99,3 @@ canonical = "sha256:f1ef310eb3f2e717442230bf939594d6c2dca419e9d214530ec9c87af306
 model-visible = "sha256:1440b174bd5197724e61340f3e48d24e5aa8b250114d3fec367de15cf7956d07"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
-[[trait.export]]
-target = "agent-skills"
-path = ".agents/skills/refactor-strict/SKILL.md"
-digest = "sha256:321378d866ad7f400d4b90df0f3a8fa6b9890398d299f8027e788935d5eba45b"

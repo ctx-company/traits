@@ -26,37 +26,3 @@ canonical = "sha256:871145ad1a37bf26198ec89c9f645d3fa9adb2682919e19bea123eae4a05
 model-visible = "sha256:b9fa48ba1574bcec0552b073daabeb5214b8b047343e8da67fdfda2118e1db05"
 resource-manifest = "sha256:fd9005a35915879b2c8c62e0e0eb5d55f365b3a54ccbd2dd3373aa6dc519b61c"
 
-[[trait.export]]
-target = "agent-skills"
-path = ".agents/skills/release-default/SKILL.md"
-digest = "sha256:629d278ddfe327999cefc68279205dd39d89faa6ac626d2e91f17d6924783af1"
-
-[[trait.projection]]
-target-profile = "agent-skills"
-renderer-version = "0.1.0-alpha.1"
-profile-version = "agent-skills"
-
-[trait.projection.digests]
-source = "sha256:5a8b0c3bcf860fdad57176d53e82e550333daf5ca84e616762b02d56582c09f5"
-canonical = "sha256:871145ad1a37bf26198ec89c9f645d3fa9adb2682919e19bea123eae4a05e348"
-model-visible = "sha256:b9fa48ba1574bcec0552b073daabeb5214b8b047343e8da67fdfda2118e1db05"
-render = "sha256:1197d2edd6cc1bde4b6a1eee260e53c615d6aea18b589a94d9b060f9f91e3b55"
-generated-markdown = "sha256:629d278ddfe327999cefc68279205dd39d89faa6ac626d2e91f17d6924783af1"
-
-[trait.projection.warnings]
-semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
-advisory-policy = [
-    "port.commit-report output contract has no title",
-    "port.commit-report output contract has no format guidance",
-    "port.publish-report output contract has no title",
-    "port.publish-report output contract has no format guidance",
-]
-
-[trait.projection.static-output]
-drift-status = "in-sync"
-path = "./.agents/skills/release-default/SKILL.md"
-
-[trait.projection.provenance]
-command = "ctx traits export --update-skill-lock"
-profile = "agent-skills"
-options = ["--profile=agent-skills"]
