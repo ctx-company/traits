@@ -275,7 +275,17 @@ fn summary_sections(trait_ref: &Trait, resource_plan: &Plan, sections: &[Section
         for (group, items) in intent_groups(intent) {
             if !items.is_empty() {
                 let ids = items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>().join(", ");
-                result.push(Section { heading: "Intent".to_string(), content: element("intent", &[("group", group)], &ids) });
+                // The compact projection carries ids only, so without the
+                // group's meaning it would say even less than the full view
+                // about why these items are grouped this way.
+                result.push(Section {
+                    heading: "Intent".to_string(),
+                    content: format!(
+                        "{}\n{}",
+                        element("intent", &[("group", group)], intent_group_meaning(group)),
+                        element("intent", &[("group", group)], &ids)
+                    ),
+                });
             }
         }
     }
@@ -340,9 +350,43 @@ fn format_intent(
 ) -> String {
     let mut elements = Vec::new();
     for (group, items) in intent_groups(intent) {
+        // Only a group the trait actually uses is explained; a trait with no
+        // blocks should not carry a paragraph about blocking.
+        if items.is_empty() {
+            continue;
+        }
+        // Same tag, no `id`: the render envelope's tag set is closed (rule
+        // 3's four sections), so the group statement is an `<intent>` element
+        // identified by carrying no item id, not a new tag name.
+        elements.push(format!(
+            "<intent group=\"{group}\">{}</intent>",
+            intent_group_meaning(group)
+        ));
         format_guidance_group("intent", "group", group, &format!("intent.{group}"), items.into_iter(), Some(intent_builtin), trait_id, warnings, normalizations, findings, &mut elements);
     }
     elements.join("\n")
+}
+
+/// What belonging to an intent group means, stated for the agent reading it.
+///
+/// Before the catalog was flattened (0222) an item carried its own polarity —
+/// "do not expand beyond the requested task" — and the `group=` attribute
+/// merely echoed it. Now an item names a thing and says nothing about what to
+/// do, so the group is the whole instruction, and an attribute alone leaves
+/// the agent to infer that `avoid` forbids while `focus` only directs
+/// attention. That inference is exactly the distinction the trait author
+/// chose deliberately (0231).
+///
+/// `require` and `focus` are not two strengths of one idea: one enforces, the
+/// other asks. The same item in either group is a different instruction.
+fn intent_group_meaning(group: &str) -> &'static str {
+    match group {
+        "require" => "Must hold in the finished work. Falling short of one of these is a failure of the work itself, not a matter of degree.",
+        "focus" => "Where attention goes. These are the lenses the work is examined through, not conditions it has to satisfy.",
+        "avoid" => "Must not happen. Doing one of these is a defect in its own right, even when nothing else breaks.",
+        "block" => "A hard stop. Encountering one of these means refusing and saying so, rather than proceeding.",
+        _ => "",
+    }
 }
 
 fn intent_groups(intent: &crate::r#trait::Intent) -> [(&str, Vec<&GuidanceItem>); 4] {
@@ -930,6 +974,51 @@ mod render_v2_shape_tests {
                 intent_section.content
             );
         }
+    }
+
+    /// 0231: a flattened item says what a thing IS and nothing about what to
+    /// do with it, so the group carries the whole instruction. It has to say
+    /// so, and only for the groups the trait actually uses.
+    #[test]
+    fn each_present_intent_group_states_what_belonging_to_it_means() {
+        let trait_ref: Trait = serde_json::from_value(serde_json::json!({
+            "id": "intent-group-meaning-fixture",
+            "schema-version": "0.2",
+            "version": "1.0.0",
+            "name": "Intent Group Meaning Fixture",
+            "description": "Declares require and avoid, and deliberately no focus or block.",
+            "intent": {
+                "require": ["leanness"],
+                "avoid": ["scope-creep"],
+            },
+        }))
+        .expect("intent-group fixture trait is valid");
+        let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
+        let text = &report.behavior_text;
+
+        for present in ["require", "avoid"] {
+            assert!(
+                text.contains(&format!("<intent group=\"{present}\">{}", intent_group_meaning(present))),
+                "the {present} group must state what belonging to it means:\n{text}"
+            );
+            assert!(
+                text.contains(intent_group_meaning(present)),
+                "the {present} group's stated meaning must reach the render:\n{text}"
+            );
+        }
+
+        // A trait that declares no focus and no block says nothing about them.
+        for absent in ["focus", "block"] {
+            assert!(
+                !text.contains(&format!("<intent group=\"{absent}\">")),
+                "an unused {absent} group must not be explained:\n{text}"
+            );
+        }
+
+        // require and focus are different instructions, not two strengths of
+        // one — the wording has to distinguish them, or the group carries no
+        // more than the attribute did.
+        assert_ne!(intent_group_meaning("require"), intent_group_meaning("focus"));
     }
 
     #[test]

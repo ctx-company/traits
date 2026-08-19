@@ -12,7 +12,7 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:76f376e94bd8855fe610543e2e19106cd12ff8b99b04ebdd35b105beb6700f27"
 canonical = "sha256:58c34f14d86e1f0e1813fec92212b3c8facff5bfb2ce3346a302e4da98dd47c8"
-model-visible = "sha256:5c39f9c0068c4fef1fc43a1754a5b2dc957f786d6d5173c788097bb579e27f13"
+model-visible = "sha256:871749fa52680bb978a89c89025bcfde95d133100133d868aa8791758bbd2f8c"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -29,7 +29,7 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:4e4df4225bbaf348d3861b3c6d1a2d68db33aad982b87ada7319730dfad0682e"
 canonical = "sha256:62e0196e6013216cf09d56694e4e41fd3a49b564690f3b27ea940f3a45adb526"
-model-visible = "sha256:040421006d719ee7087b65ab7645197b855f6a7aec8c8f9bb3a969b156eea0ed"
+model-visible = "sha256:5dbbab2f00afbbdfbd4dade6ac2d78126bc8461098ab876ee56907007e2fe8ec"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -70,7 +70,7 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:b7396a5377d4106760ab3c36823b7c3940f5daede8af9c286c54c2f9efc7c488"
 canonical = "sha256:edfb39397abfa040d2100bc706e42bb843f587573d14dd7875d4200f21caa722"
-model-visible = "sha256:8879a0bb66871fea75501e895b836408732944f1b9b2769ffdc915e824833087"
+model-visible = "sha256:db3659c95920cb92675f041cf3c985088de25e2600c8936ade77f1961594cec8"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -87,7 +87,7 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:4959da9c5f1571eefe767f44d6c771ca9c52f8c8818e836a96666a0529752191"
 canonical = "sha256:90f8581e1138db7e9c9de3395b225a86bd798658f8551a2eea85188b698b33d7"
-model-visible = "sha256:bf669afd7c15345a5908b265931e614c0b530c4a1d12f10ad31088955d438fd0"
+model-visible = "sha256:4c8967ace283810546da2b21b5367d5a32ece2103f7de8097114371bc22fdca1"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
