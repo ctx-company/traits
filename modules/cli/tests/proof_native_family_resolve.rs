@@ -308,7 +308,7 @@ fn operandless_vendor_locks_every_family_variant() {
     );
 
     let approve = run_ctx(
-        &["traits", "trust", "approve", "--all-current", "--json"],
+        &["traits", "trust", "--approved", "--all-current", "--json"],
         &proj,
         &home,
     );
@@ -344,7 +344,7 @@ fn operandless_vendor_locks_every_family_variant() {
         );
     }
     let stale = run_ctx(
-        &["traits", "trust", "list", "--stale", "--json"],
+        &["traits", "trust", "--list", "--stale", "--json"],
         &proj,
         &home,
     );

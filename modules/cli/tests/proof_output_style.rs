@@ -552,8 +552,8 @@ fn import_default_output_matches_the_panel_registry_shape() {
 fn activate_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-activate-panel-shape", "fixture-activate-panel");
     let stdout = require_success(
-        "`ctx traits activate` over a freshly-init'd trait",
-        &["traits", "activate", &fixture.trait_id],
+        "`ctx traits state --active` over a freshly-init'd trait",
+        &["traits", "state", "--active", &fixture.trait_id],
         &fixture.repo,
         &fixture.home,
     );
@@ -566,13 +566,13 @@ fn activate_default_output_matches_the_panel_registry_shape() {
 fn trust_approve_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-trust-panel-shape", "fixture-trust-panel");
     let stdout = require_success(
-        "`ctx traits trust approve` over a freshly-init'd trait",
-        &["traits", "trust", "approve", &fixture.trait_id],
+        "`ctx traits trust --approved` over a freshly-init'd trait",
+        &["traits", "trust", "--approved", &fixture.trait_id],
         &fixture.repo,
         &fixture.home,
     );
 
-    assert_matches_registry_claim("trust", "ctx", "trust approve", &stdout);
+    assert_matches_registry_claim("trust", "ctx", "trust --approved", &stdout);
 }
 
 /// A provider-free, network-free repo carrying one reviewed, activated
@@ -628,14 +628,14 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
 
     let fixture_path = ".ctx/traits/demo/generated/index.toml";
     require_success(
-        "`ctx traits trust approve`",
-        &["traits", "trust", "approve", fixture_path],
+        "`ctx traits trust --approved`",
+        &["traits", "trust", "--approved", fixture_path],
         &repo,
         &home,
     );
     require_success(
-        "`ctx traits activate --file`",
-        &["traits", "activate", "--file", fixture_path],
+        "`ctx traits state --active --file`",
+        &["traits", "state", "--active", "--file", fixture_path],
         &repo,
         &home,
     );

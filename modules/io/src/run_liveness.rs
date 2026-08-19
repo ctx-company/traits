@@ -280,7 +280,7 @@ pub fn liveness_report(root: &Utf8Path) -> Vec<(Option<LiveIndexRow>, Liveness)>
 }
 
 /// One sighting of a session that appears to be running the exact bytes
-/// under `trust block` review — read-only, best-effort evidence rendered in
+/// under `trust --blocked` review — read-only, best-effort evidence rendered in
 /// the block report (P534 review blocker 2), never authority: it never
 /// gates or stops the block write.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,7 +294,7 @@ pub struct BlockedDigestSighting {
 /// pin (`Provenance.trust_approval.canonical_digest`) matches `digest`. An
 /// unreadable ledger, an unresolvable runtime root, or a session with no
 /// pin is silently skipped — this reports sightings, never authority, and
-/// must never fail the `trust block` write it accompanies.
+/// must never fail the `trust --blocked` write it accompanies.
 pub fn live_sessions_pinned_to_digest(digest: &str) -> Vec<BlockedDigestSighting> {
     let root = crate::run_control::runtime_root();
     liveness_report(&root)

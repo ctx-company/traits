@@ -45,13 +45,13 @@ fn command_trait_fixture() -> Fixture {
     let path = ".ctx/traits/demo/generated/index.toml";
     require_success(
         "approve fixture",
-        &["traits", "trust", "approve", path],
+        &["traits", "trust", "--approved", path],
         &repo,
         &home,
     );
     require_success(
         "activate fixture",
-        &["traits", "activate", "--file", path],
+        &["traits", "state", "--active", "--file", path],
         &repo,
         &home,
     );

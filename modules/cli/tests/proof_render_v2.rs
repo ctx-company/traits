@@ -108,14 +108,14 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
         TRAIT_MANIFEST,
     );
     require_success(
-        "`ctx traits activate` clears the draft gate",
-        &["traits", "activate", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
     require_success(
-        "`ctx traits trust approve` clears the unreviewed gate",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` clears the unreviewed gate",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );

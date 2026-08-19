@@ -121,8 +121,8 @@ model = "base-model"
         home,
     );
     require_success(
-        "p451-repo-qualifier-proof `ctx traits activate`",
-        &["traits", "activate", "--file", fixture],
+        "p451-repo-qualifier-proof `ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

@@ -316,7 +316,7 @@ pub enum TraitsCommand {
     /// digest is whatever this machine already has on file for that exact
     /// digest (unreviewed, unless an identical canonical output already
     /// has a machine trust record from a prior review). Use `ctx traits
-    /// check` and `ctx traits trust approve` next.
+    /// check` and `ctx traits trust --approved` next.
     Create {
         /// Human-readable trait name to slugify into a trait ID. Required
         /// together with `--from`; omitted entirely to list templates.
@@ -543,29 +543,59 @@ pub enum TraitsCommand {
     /// Report or record this machine's local trust decisions, keyed by a
     /// trait's exact current canonical digest.
     ///
-    /// Bare `ctx traits trust <trait>` reports resolved status; `approve`
-    /// and `block` record a decision (falling through to package resolution
-    /// for `approve` when the operand is not a trait); `list` reports every
-    /// recorded decision. A trait literally named `approve`, `block`, or
-    /// `list` cannot be queried through the bare form — pass `--file`
-    /// instead.
+    /// The decision is a flag, so the operand is always the trait:
+    /// `ctx traits trust --approved <trait>`. Bare
+    /// `ctx traits trust <trait>` reports resolved status, and `--list`
+    /// reports every recorded decision.
+    ///
+    /// `--approved` falls through to the installed-package resolver when the
+    /// operand does not resolve as a trait, marking every one of that
+    /// package's current trait canonical digests verified at once.
     Trust {
         /// Trait name (resolved from .ctx/traits, falling back to a
-        /// built-in meta-trait) or explicit file path to report status for.
+        /// built-in meta-trait), explicit file path, or — for `--approved` —
+        /// an installed npm package name or manifest alias.
         #[arg(value_name = "TRAIT")]
         trait_arg: Option<String>,
 
-        /// Trait file to report status for.
+        /// Trait file to report or record against.
         #[arg(long)]
         file: Option<String>,
 
-        /// Emit structured JSON. Applies to whichever trust subcommand is
-        /// given; equivalent to that subcommand's own `--json`.
-        #[arg(long, global = true)]
-        json: bool,
+        /// Record the operand as locally verified.
+        #[arg(long, conflicts_with_all = ["blocked", "list"])]
+        approved: bool,
 
-        #[command(subcommand)]
-        subcommand: Option<TrustCommand>,
+        /// Record the operand as locally blocked.
+        #[arg(long, conflicts_with_all = ["approved", "list"])]
+        blocked: bool,
+
+        /// Report every trust decision recorded on this machine.
+        #[arg(long, conflicts_with_all = ["approved", "blocked", "trait_arg", "file"])]
+        list: bool,
+
+        /// Report only decisions whose trait no longer matches the recorded
+        /// digest. Only meaningful with `--list`.
+        #[arg(long, requires = "list")]
+        stale: bool,
+
+        /// Raw digest to record against, bypassing trait/package resolution
+        /// (for scripts).
+        #[arg(long, conflicts_with = "trait_arg", value_name = "sha256:...")]
+        digest: Option<String>,
+
+        /// Record every currently resolved trait at once. Only meaningful
+        /// with `--approved`.
+        #[arg(long, conflicts_with_all = ["trait_arg", "digest"], requires = "approved")]
+        all_current: bool,
+
+        /// Optional reviewer note recorded with the decision.
+        #[arg(long)]
+        reason: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Report trait hygiene, trigger inventory, and safe prune planning.
     #[command(hide = true)]
@@ -1091,7 +1121,7 @@ pub enum TraitsCommand {
     ///
     /// Persists the complete package by default (root status draft, canonical
     /// digest unreviewed on this machine): `check`, then team `activate` and
-    /// personal `trust approve`, then `run` — same as any local trait.
+    /// personal `trust --approved`, then `run` — same as any local trait.
     Import {
         /// Source SKILL.md file or directory containing SKILL.md.
         #[arg(long)]
@@ -1565,7 +1595,7 @@ pub enum TraitsCommand {
     /// --approve marks it verified; --deny marks it blocked. Approval is of
     /// a digest, never a name — a later canonical edit is unreviewed again.
     ///
-    /// Hidden as of P419: superseded by `ctx traits trust approve`/`trust
+    /// Hidden as of P419: superseded by `ctx traits trust --approved`/`trust
     /// block`, which this command now routes through unchanged. Kept
     /// invocable, undocumented, for one release.
     #[command(hide = true)]
@@ -1594,52 +1624,40 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Activate a trait for resolver eligibility (lifecycle transition).
+    /// Report or set a trait's lifecycle state.
     ///
-    /// Off the release help screen since the 2026-08-18 regroup; runnable
-    /// as before.
+    /// The state is a flag, so the operand is always the trait:
+    /// `ctx traits state --active <trait>`. Bare `ctx traits state <trait>`
+    /// reports the current state without changing it.
+    ///
+    /// A package is `draft` or `ready`; `--active` is what makes it
+    /// resolver-eligible. `--deprecated` is `--draft` plus a recorded
+    /// reason: there is no third status, and inventing one would mean a
+    /// state the resolver has no rule for.
     #[command(hide = true)]
-    Activate {
+    State {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
         trait_arg: Option<String>,
 
-        /// Trait file to activate.
+        /// Trait file to report or transition.
         #[arg(long)]
         file: Option<String>,
 
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Deactivate a trait, removing resolver eligibility (lifecycle transition).
-    #[command(hide = true)]
-    Deactivate {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
+        /// Make the trait resolver-eligible (status `ready`).
+        #[arg(long, conflicts_with_all = ["draft", "deprecated"])]
+        active: bool,
 
-        /// Trait file to deactivate.
-        #[arg(long)]
-        file: Option<String>,
+        /// Remove resolver eligibility (status `draft`).
+        #[arg(long, conflicts_with_all = ["active", "deprecated"])]
+        draft: bool,
 
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Deprecate a trait with a reason (lifecycle transition).
-    #[command(hide = true)]
-    Deprecate {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
+        /// Remove resolver eligibility and record why.
+        #[arg(long, conflicts_with_all = ["active", "draft"])]
+        deprecated: bool,
 
-        /// Trait file to deprecate.
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Reason for deprecation.
-        #[arg(long)]
+        /// Reason to record. Only meaningful with `--deprecated`.
+        #[arg(long, requires = "deprecated")]
         reason: Option<String>,
 
         /// Emit structured JSON.
@@ -2164,70 +2182,6 @@ pub enum HostCommand {
         /// Remove from the global placement manifest instead of the project one.
         #[arg(long)]
         global: bool,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum TrustCommand {
-    /// Resolve `operand`'s current canonical digest through the trait
-    /// resolver and mark it locally verified. When `operand` does not
-    /// resolve as a trait, falls back to the installed-package resolver
-    /// (project scope first, then global) and atomically marks every one of
-    /// that package's *current* trait canonical digests as locally
-    /// verified — trait resolution always wins when both namespaces
-    /// contain the same operand. Per-digest records remain the storage
-    /// unit underneath, so a later canonical edit to any one trait reverts
-    /// only that digest to unreviewed.
-    Approve {
-        /// Trait name/path, or installed npm package name/manifest alias.
-        #[arg(required_unless_present_any = ["digest", "all_current"])]
-        operand: Option<String>,
-
-        /// Raw digest to approve, bypassing trait/package resolution (for scripts).
-        #[arg(long, conflicts_with = "operand", value_name = "sha256:...")]
-        digest: Option<String>,
-
-        /// Approve every currently resolved trait atomically.
-        #[arg(long, conflicts_with_all = ["operand", "digest"])]
-        all_current: bool,
-
-        /// Optional reviewer note.
-        #[arg(long)]
-        reason: Option<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resolve `operand`'s current canonical digest through the trait
-    /// resolver and mark it locally blocked.
-    Block {
-        /// Trait name/path to block.
-        #[arg(required_unless_present = "digest")]
-        operand: Option<String>,
-
-        /// Raw digest to block, bypassing trait resolution (for scripts).
-        #[arg(long, conflicts_with = "operand", value_name = "sha256:...")]
-        digest: Option<String>,
-
-        /// Optional block reason.
-        #[arg(long)]
-        reason: Option<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Report every named trust decision recorded on this machine.
-    List {
-        /// Report only stale approvals: recorded digest differs from the
-        /// same trait's current canonical digest.
-        #[arg(long)]
-        stale: bool,
 
         /// Emit structured JSON.
         #[arg(long)]

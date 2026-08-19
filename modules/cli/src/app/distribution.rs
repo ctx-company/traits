@@ -1023,7 +1023,7 @@ fn valid_npm_segment(segment: &str) -> bool {
         && !segment.starts_with('_')
 }
 
-/// `ctx traits trust approve <package>`: resolve `operand` against installed
+/// `ctx traits trust --approved <package>`: resolve `operand` against installed
 /// packages (project scope, when the invocation has a project tier root —
 /// a Git repository or a plain directory something was installed into —
 /// then global) and atomically approve every current trait digest of the
@@ -1039,7 +1039,7 @@ pub(crate) fn handle_approve(
     let report = distribution::approve_package(repo_root.as_deref(), operand, reason)?;
     match OutputMode::select(json, false) {
         OutputMode::Json => {
-            print_json_report(&report, "trust approve report")?;
+            print_json_report(&report, "trust report")?;
         }
         OutputMode::Human(mode) => {
             let digests = if report.digests.is_empty() {
@@ -1049,7 +1049,7 @@ pub(crate) fn handle_approve(
             };
             let mut panel = Panel::new(
                 "ctx",
-                format!("trust approve {}", report.package),
+                format!("trust --approved {}", report.package),
                 PanelStatus::Passed("passed".to_string()),
             )
             .row(PanelRow::toned(

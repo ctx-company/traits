@@ -18,7 +18,7 @@ use crate::trust::{self, TrustState};
 /// stamps, keyed per-repo so a config-home-shared store still separates
 /// checkouts. Distinct from real trait ids (which never contain `:`
 /// followed by a `repo-key`-shaped suffix in this position), and excluded
-/// from `trust list`'s trait reporting by that same prefix.
+/// from `trust --list`'s trait reporting by that same prefix.
 const ACCEPTANCE_NAMESPACE: &str = "runtime-example";
 
 fn acceptance_trait_id(repo_key: &str) -> String {

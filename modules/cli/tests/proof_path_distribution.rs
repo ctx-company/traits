@@ -415,8 +415,8 @@ fn path_dependency_installs_every_family_variant() {
 
     for reference in ["family-demo", "family-demo:quick"] {
         require_success(
-            &format!("`ctx traits trust approve {reference}`"),
-            &["traits", "trust", "approve", reference],
+            &format!("`ctx traits trust --approved {reference}`"),
+            &["traits", "trust", "--approved", reference],
             &consumer,
             &home,
         );

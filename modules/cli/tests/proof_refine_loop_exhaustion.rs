@@ -82,7 +82,7 @@ fn refine_apply_loop_exhaustion_writes_nothing_and_names_the_failing_rung() {
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
     for dependency in ["refine", "spec"] {
-        let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
+        let approve = run_ctx(&["traits", "trust", "--approved", dependency], &proj, &home);
         assert!(
             approve.status.success(),
             "trust approve {dependency} failed: {}",
@@ -175,7 +175,7 @@ fn refine_preview_without_apply_spends_exactly_one_round() {
     let path_with_ctx = format!("{}:{existing_path}", ctx_dir.display());
 
     for dependency in ["refine", "spec"] {
-        let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
+        let approve = run_ctx(&["traits", "trust", "--approved", dependency], &proj, &home);
         assert!(
             approve.status.success(),
             "trust approve {dependency} failed: {}",

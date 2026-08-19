@@ -605,11 +605,11 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             let ref_display = request.trait_id.or(request.trait_file).unwrap_or("<trait>");
             let mut message = match &authorization.decision {
                 crate::trust::StartTrust::Unreviewed => format!(
-                    "trait trust refused: {ref_display} (digest {}) is unreviewed on this machine; review and approve with `ctx traits trust approve {ref_display}`",
+                    "trait trust refused: {ref_display} (digest {}) is unreviewed on this machine; review and approve with `ctx traits trust --approved {ref_display}`",
                     loaded.canonical_digest
                 ),
                 crate::trust::StartTrust::Blocked(record) => format!(
-                    "trait trust refused: {ref_display} (digest {}) is blocked{}; review with `ctx traits trust list`",
+                    "trait trust refused: {ref_display} (digest {}) is blocked{}; review with `ctx traits trust --list`",
                     loaded.canonical_digest,
                     record
                         .reason
@@ -1929,7 +1929,7 @@ mod startup_observer_tests {
         assert!(
             error_text.starts_with("trait trust refused: ")
                 && error_text.contains("is unreviewed on this machine")
-                && error_text.contains("ctx traits trust approve"),
+                && error_text.contains("ctx traits trust --approved"),
             "unexpected trust refusal message: {error_text}"
         );
         assert!(
@@ -3262,7 +3262,7 @@ fn resolve_local_or_builtin_trait_id(
 /// fallback, then repo-authored/vendored/global/built-in precedence via
 /// [`resolve_local_or_builtin_trait_id`]) — the one authoritative
 /// resolution seam [`resolve_trait_path`] and every fallback-aware caller
-/// (e.g. `trust approve`'s package fallback) share; neither reimplements
+/// (e.g. `trust --approved`'s package fallback) share; neither reimplements
 /// tier precedence or the local-shadow precheck independently.
 ///
 /// Returns `Ok(None)` in the two senses of "not a trait": `original_id`

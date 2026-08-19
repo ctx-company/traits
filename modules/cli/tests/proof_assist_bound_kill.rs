@@ -51,7 +51,7 @@ fn find_run_session_files(root: &Path) -> Vec<std::path::PathBuf> {
 
 fn trust_approve_generate_deps(proj: &Path, home: &Path) {
     for dependency in ["generate", "spec"] {
-        let approve = run_ctx(&["traits", "trust", "approve", dependency], proj, home);
+        let approve = run_ctx(&["traits", "trust", "--approved", dependency], proj, home);
         assert!(
             approve.status.success(),
             "trust approve {dependency} failed: {}",

@@ -1156,7 +1156,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                     format!(
                         "package status is draft and this machine has not reviewed the imported \
                          digest; run `ctx traits check {}`, then when the team is ready `ctx \
-                         traits activate {}` and `ctx traits trust approve {}`",
+                         traits state --active {}` and `ctx traits trust --approved {}`",
                         trait_id, trait_id, trait_id
                     ),
                     RowTone::Default,
@@ -1175,7 +1175,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                 println!(
                     "  next-action: package status is draft and this machine has not reviewed \
                      the imported digest; run `ctx traits check {}`, then when the team is \
-                     ready `ctx traits activate {}` and `ctx traits trust approve {}`",
+                     ready `ctx traits state --active {}` and `ctx traits trust --approved {}`",
                     trait_id, trait_id, trait_id
                 );
                 Ok(())

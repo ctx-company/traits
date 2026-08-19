@@ -397,8 +397,8 @@ fn setup_fixture(
         &home,
     );
     support::require_success(
-        "`ctx traits activate`",
-        &["traits", "activate", id],
+        "`ctx traits state --active`",
+        &["traits", "state", "--active", id],
         &repo,
         &home,
     );

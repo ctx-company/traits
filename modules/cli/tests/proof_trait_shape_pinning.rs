@@ -75,13 +75,13 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     fs::write(repo.join("session-package"), "pinned package root\n").unwrap();
     require_success(
         "activate fixture",
-        &["traits", "activate", "--file", FILE],
+        &["traits", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
     require_success(
         "approve digest A",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &repo,
         &scratch.home(),
     );
@@ -267,13 +267,13 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     fs::write(repo.join(FILE), &source_a).unwrap();
     require_success(
         "activate fixture",
-        &["traits", "activate", "--file", FILE],
+        &["traits", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
     require_success(
         "approve digest A",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &repo,
         &scratch.home(),
     );
@@ -403,13 +403,13 @@ fn malformed_pin_is_not_reported_as_a_legacy_ledger() {
     fs::write(repo.join(FILE), manifest("source A")).unwrap();
     require_success(
         "activate fixture",
-        &["traits", "activate", "--file", FILE],
+        &["traits", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
     require_success(
         "approve digest A",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &repo,
         &scratch.home(),
     );
@@ -478,13 +478,13 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     .unwrap();
     require_success(
         "activate flat fixture",
-        &["traits", "activate", "--file", FILE],
+        &["traits", "state", "--active", "--file", FILE],
         &owner,
         &scratch.home(),
     );
     require_success(
         "approve flat A",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &owner,
         &scratch.home(),
     );
@@ -636,13 +636,13 @@ fn source_owner_root_survives_an_outside_ledger_output() {
     .unwrap();
     require_success(
         "activate owner fixture",
-        &["traits", "activate", "--file", FILE],
+        &["traits", "state", "--active", "--file", FILE],
         &owner,
         &scratch.home(),
     );
     require_success(
         "approve owner source",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &owner,
         &scratch.home(),
     );
@@ -820,7 +820,8 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
         "activate symlink traversal fixture",
         &[
             "traits",
-            "activate",
+            "state",
+            "--active",
             "--file",
             activation_source.to_str().unwrap(),
         ],
@@ -913,20 +914,20 @@ fn trust_status_keeps_exact_digest_history_authoritative() {
     fs::write(repo.join(FILE), &source_a).unwrap();
     require_success(
         "activate fixture",
-        &["traits", "activate", "--file", FILE],
+        &["traits", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
     require_success(
         "approve A",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &repo,
         &scratch.home(),
     );
     fs::write(repo.join(FILE), manifest("source B")).unwrap();
     require_success(
         "approve B",
-        &["traits", "trust", "approve", "pin"],
+        &["traits", "trust", "--approved", "pin"],
         &repo,
         &scratch.home(),
     );
@@ -953,7 +954,7 @@ fn trust_status_keeps_exact_digest_history_authoritative() {
 
     require_success(
         "block exact A",
-        &["traits", "trust", "block", "pin"],
+        &["traits", "trust", "--blocked", "pin"],
         &repo,
         &scratch.home(),
     );
@@ -963,7 +964,7 @@ fn trust_status_keeps_exact_digest_history_authoritative() {
 
     require_success(
         "approve raw exact A evidence",
-        &["traits", "trust", "approve", "--digest", &digest_a],
+        &["traits", "trust", "--approved", "--digest", &digest_a],
         &repo,
         &scratch.home(),
     );

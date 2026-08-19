@@ -921,7 +921,7 @@ pub fn load_dependency_package(
     // bytes differ in every repository and are absent in a fresh one, so
     // digesting it here produced lock evidence that could never be reproduced
     // anywhere but the producer's own checkout: installing `implement` into
-    // another project vendored correctly, then failed `trust approve` with
+    // another project vendored correctly, then failed `trust --approved` with
     // "vendored content does not match locked evidence", permanently. A
     // package's integrity evidence can only cover the bytes the package ships.
     //

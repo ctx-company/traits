@@ -90,8 +90,8 @@ fn allow_unreviewed_renders_with_draft_advisory_on_stderr() {
     // Re-run without the flag but with trust approved (still draft) to
     // capture the pre-advisory stdout and prove it is byte-identical.
     require_success(
-        "`ctx traits trust approve` clears the unreviewed gate",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` clears the unreviewed gate",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -118,14 +118,14 @@ fn activated_and_verified_trait_renders_flagless_with_no_advisory() {
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits activate` clears the draft gate",
-        &["traits", "activate", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
     require_success(
-        "`ctx traits trust approve` clears the unreviewed gate",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` clears the unreviewed gate",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -178,8 +178,8 @@ fn blocked_trait_refuses_all_three_verbs_naming_trust_list() {
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits trust block` records a blocked verdict",
-        &["traits", "trust", "block", TRAIT_ID],
+        "`ctx traits trust --blocked` records a blocked verdict",
+        &["traits", "trust", "--blocked", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -205,8 +205,8 @@ fn blocked_trait_refuses_all_three_verbs_naming_trust_list() {
         );
         let (_, stderr) = support::utf8(&output);
         assert!(
-            stderr.contains("ctx traits trust list"),
-            "{args:?} refusal must name `ctx traits trust list`: {stderr}"
+            stderr.contains("ctx traits trust --list"),
+            "{args:?} refusal must name `ctx traits trust --list`: {stderr}"
         );
         assert!(
             !stderr.contains("trust approve"),
@@ -247,8 +247,8 @@ fn host_install_refuses_draft_flagless_and_succeeds_with_allow_draft() {
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits trust approve` clears the unreviewed gate",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` clears the unreviewed gate",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -298,14 +298,14 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits activate` clears the draft gate",
-        &["traits", "activate", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
     require_success(
-        "`ctx traits trust approve` clears the unreviewed gate",
-        &["traits", "trust", "approve", TRAIT_ID],
+        "`ctx traits trust --approved` clears the unreviewed gate",
+        &["traits", "trust", "--approved", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -321,8 +321,8 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
         .unwrap_or_else(|error| panic!("cannot read placed artifact {placed_path:?}: {error}"));
 
     require_success(
-        "`ctx traits trust block` blocks the placed trait's source",
-        &["traits", "trust", "block", TRAIT_ID],
+        "`ctx traits trust --blocked` blocks the placed trait's source",
+        &["traits", "trust", "--blocked", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -356,8 +356,8 @@ fn run_family_still_refuses_a_blocked_trait_naming_trust_and_never_manifest() {
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits trust block` records a blocked verdict",
-        &["traits", "trust", "block", TRAIT_ID],
+        "`ctx traits trust --blocked` records a blocked verdict",
+        &["traits", "trust", "--blocked", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -376,8 +376,8 @@ fn run_family_still_refuses_a_blocked_trait_naming_trust_and_never_manifest() {
         "run's refusal must name the blocked trust condition: {stderr}"
     );
     assert!(
-        stderr.contains("ctx traits trust list"),
-        "run's refusal must point at `ctx traits trust list`: {stderr}"
+        stderr.contains("ctx traits trust --list"),
+        "run's refusal must point at `ctx traits trust --list`: {stderr}"
     );
     assert!(
         !stderr.contains("invalid manifest"),

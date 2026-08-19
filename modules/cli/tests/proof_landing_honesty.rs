@@ -109,7 +109,11 @@ argv = ["git", "commit", "-m", "landing honesty fixture commit"]
         home,
     );
     assert_exit_code(&output, 0);
-    let output = run_ctx(&["traits", "activate", "--file", fixture], repo, home);
+    let output = run_ctx(
+        &["traits", "state", "--active", "--file", fixture],
+        repo,
+        home,
+    );
     assert_exit_code(&output, 0);
     Command::new("git")
         .args(["add", "-A"])
@@ -177,7 +181,11 @@ output = ["slot:notified"]
         home,
     );
     assert_exit_code(&output, 0);
-    let output = run_ctx(&["traits", "activate", "--file", fixture], repo, home);
+    let output = run_ctx(
+        &["traits", "state", "--active", "--file", fixture],
+        repo,
+        home,
+    );
     assert_exit_code(&output, 0);
     Command::new("git")
         .args(["add", "-A"])

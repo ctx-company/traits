@@ -71,13 +71,13 @@ fn failing_two_member_queue_fixture() -> Fixture {
     let path = ".ctx/traits/authored/demo/generated/index.toml";
     require_success(
         "approve fixture",
-        &["traits", "trust", "approve", path],
+        &["traits", "trust", "--approved", path],
         &repo,
         &home,
     );
     require_success(
         "activate fixture",
-        &["traits", "activate", "demo"],
+        &["traits", "state", "--active", "demo"],
         &repo,
         &home,
     );

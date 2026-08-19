@@ -416,8 +416,8 @@ fn adhoc_run_resolves_global_tier_and_records_an_adhoc_checkout_key() {
     let cwd = home.join("nonrepo");
     fs::create_dir_all(&cwd).unwrap();
     require_success(
-        "`ctx traits trust approve adhoc-plain`",
-        &["traits", "trust", "approve", "adhoc-plain"],
+        "`ctx traits trust --approved adhoc-plain`",
+        &["traits", "trust", "--approved", "adhoc-plain"],
         &cwd,
         &home,
     );
@@ -471,8 +471,8 @@ fn gitless_project_install_approves_and_resolves_project_tier() {
     // project it wrote, Git or no Git. This exact approve used to fail with
     // "no installed package matches alias ... at project or global scope".
     let approve_stdout = require_success(
-        "`ctx traits trust approve gitless-demo`",
-        &["traits", "trust", "approve", "gitless-demo"],
+        "`ctx traits trust --approved gitless-demo`",
+        &["traits", "trust", "--approved", "gitless-demo"],
         &cwd,
         &home,
     );
@@ -546,8 +546,8 @@ fn package_granular_trust_approves_every_family_variant_in_one_review() {
     // package-granular resolution and approves every current variant digest
     // atomically in this one call (`ctx_traits_io::distribution::approve_package`).
     let approve_stdout = require_success(
-        "`ctx traits trust approve family-install --json`",
-        &["traits", "trust", "approve", "family-install", "--json"],
+        "`ctx traits trust --approved family-install --json`",
+        &["traits", "trust", "--approved", "family-install", "--json"],
         &cwd,
         &home,
     );

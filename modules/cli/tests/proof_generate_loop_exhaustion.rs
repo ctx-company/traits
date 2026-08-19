@@ -104,7 +104,7 @@ fn generate_loop_exhaustion_writes_no_package_and_preserves_scratch() {
     // provider call), distinct from the assertion below that a
     // non-converging run never adds a trust record for the CANDIDATE trait.
     for dependency in ["generate", "spec"] {
-        let approve = run_ctx(&["traits", "trust", "approve", dependency], &proj, &home);
+        let approve = run_ctx(&["traits", "trust", "--approved", dependency], &proj, &home);
         assert!(
             approve.status.success(),
             "trust approve {dependency} failed: {}",

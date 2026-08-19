@@ -1469,7 +1469,7 @@ struct DoctorTraitShadow {
 /// record is neither: it is not a stale approval (see
 /// [`ctx_traits_io::trust::TrustReportRow::is_stale_approval`]), so it never
 /// appears here. Never reports a `Current` row — doctor surfaces trust
-/// *problems*, not the whole store; use `ctx traits trust list` for the
+/// *problems*, not the whole store; use `ctx traits trust --list` for the
 /// full inventory.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1493,7 +1493,7 @@ struct DoctorOutput {
     /// successfully.
     trait_shadow: Vec<DoctorTraitShadow>,
     /// Stale/orphaned machine trust records (P419), joined from the same
-    /// [`ctx_traits_io::trust::classify_records`] `ctx traits trust list`
+    /// [`ctx_traits_io::trust::classify_records`] `ctx traits trust --list`
     /// uses. Never writes `trust.toml`. Empty when every record is current.
     trust: Vec<DoctorTrustFinding>,
     /// P446 repository-state housekeeping: nested `.ctx/.gitignore`
@@ -1733,7 +1733,7 @@ fn repo_state_doctor_diagnostics(apply: bool) -> crate::Result<RepoStateReport> 
 }
 
 /// Resolve stale and orphaned trust-store rows, read-only, from the same
-/// shared classification `ctx traits trust list` uses (P419). Never touches
+/// shared classification `ctx traits trust --list` uses (P419). Never touches
 /// `trust.toml`.
 fn trust_doctor_diagnostics() -> crate::Result<Vec<DoctorTrustFinding>> {
     let document = ctx_traits_io::trust::read_store()?;
@@ -1755,16 +1755,16 @@ fn trust_doctor_diagnostics() -> crate::Result<Vec<DoctorTrustFinding>> {
             // stale approval). An orphaned row has no current trait to
             // re-approve and `--stale` deliberately excludes it (it is not
             // an approval at all), so its remedy must name a command that
-            // actually shows it (`trust list`, unfiltered) and the true
+            // actually shows it (`trust --list`, unfiltered) and the true
             // manual cleanup this surface has no command for.
             let remedy = if row.is_stale_approval() {
                 let id = row
                     .trait_id
                     .as_deref()
                     .expect("a stale approval is always identity-bound");
-                format!("ctx traits trust approve {id}")
+                format!("ctx traits trust --approved {id}")
             } else {
-                "orphaned: no current trait resolves to this record; run `ctx traits trust list` \
+                "orphaned: no current trait resolves to this record; run `ctx traits trust --list` \
                  to see it (orphaned rows are excluded from --stale), then remove it manually \
                  from trust.toml if it is no longer needed"
                     .to_string()
