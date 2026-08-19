@@ -1,0 +1,6 @@
+[package]
+id = "plain"
+version = "0.1.0"
+name = "Plain"
+description = "A trait with nothing in it yet: identity, behavior, and somewhere to start."
+status = "draft"

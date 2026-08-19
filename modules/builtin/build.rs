@@ -172,7 +172,7 @@ fn generate_builtin_trait_packages(out_dir: &str) {
 /// runtime traits, so they never enter the built-in trait catalog or the
 /// runtime built-in store. Listed in the fixed, sorted order `ctx traits
 /// new` reports them in.
-const BUILTIN_TEMPLATE_IDS: &[&str] = &["implement", "research", "review"];
+const BUILTIN_TEMPLATE_IDS: &[&str] = &["plain", "implement", "research", "review"];
 
 const BUILTIN_TEMPLATES_DIR: &str = "templates";
 

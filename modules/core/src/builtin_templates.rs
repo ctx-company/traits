@@ -92,10 +92,27 @@ pub fn instantiate(
             }
         })?;
 
+    // The anchor carries the opening brace so the replacement can inject a
+    // `name` field beside the id when the two differ.
+    //
+    // `defineTrait`'s first argument is the NAME, and the canonical id is its
+    // kebab-casing — so passing a display name alone cannot produce an id
+    // that differs from it. `create daily --name "Daily Work"` would build
+    // `daily-work` and then fail against a manifest declaring `daily`. The
+    // id therefore goes in the positional, where it kebab-cases to itself,
+    // and a display name that differs from it is passed explicitly.
     let original_name = template_display_name(template)?;
     let original_name_literal = ts_string_literal(&original_name);
-    let name_anchor = format!("defineTrait({original_name_literal}");
-    let name_replacement = format!("defineTrait({}", ts_string_literal(display_name));
+    let name_anchor = format!("defineTrait({original_name_literal}, {{");
+    let name_replacement = if display_name == trait_id {
+        format!("defineTrait({}, {{", ts_string_literal(trait_id))
+    } else {
+        format!(
+            "defineTrait({}, {{ name: {},",
+            ts_string_literal(trait_id),
+            ts_string_literal(display_name)
+        )
+    };
     let name_occurrences = template.source_ts.matches(name_anchor.as_str()).count();
     if name_occurrences != 1 {
         return Err(InstantiateError::MissingNameAnchor {

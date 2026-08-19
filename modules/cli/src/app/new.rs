@@ -55,7 +55,7 @@ pub(crate) fn handle_list_templates(json: bool) -> crate::Result<CommandOutput<(
             let panel = Panel::new("ctx", "create", PanelStatus::Passed("passed".to_string()))
                 .row(PanelRow::toned(
                     "usage",
-                    "ctx traits create <name> --from <template>",
+                    "ctx traits create <id> [--from <template>] [--name <display>]",
                     RowTone::Default,
                 ))
                 .section(PanelSection::new("templates", template_rows));
@@ -76,7 +76,16 @@ pub(crate) fn handle_list_templates(json: bool) -> crate::Result<CommandOutput<(
 /// local Node/CDK runtime), the claimed root and its two authored files
 /// remain on disk as a source-only draft — nothing here deletes authored
 /// content or pretends a failed build succeeded.
-pub(crate) fn handle_new(name: &str, from: &str, json: bool) -> crate::Result<CommandOutput<()>> {
+/// `id` is the package id, slugified; `name` is the display name, which
+/// defaults to `id` at the call site. They are separate because the id has
+/// to be a slug and a display name does not — `create work --name "Daily
+/// Work"` is one trait, not two ideas.
+pub(crate) fn handle_new(
+    id: &str,
+    name: &str,
+    from: &str,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
     let template = ctx_traits_core::builtin_templates::template(from).ok_or_else(|| {
         crate::Error::Command {
             message: format!(
@@ -85,7 +94,7 @@ pub(crate) fn handle_new(name: &str, from: &str, json: bool) -> crate::Result<Co
         }
     })?;
 
-    let trait_id = ctx_traits_core::synth::slugify_trait_id(name)?;
+    let trait_id = ctx_traits_core::synth::slugify_trait_id(id)?;
     let cwd = current_utf8_dir()?;
     let package = ctx_traits_io::layout::TraitPackageRoot::new(&cwd, &trait_id)
         .map_err(ctx_traits_io::Error::from)?;
