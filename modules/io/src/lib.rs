@@ -86,6 +86,7 @@ pub mod task_board_cache;
 pub mod task_files;
 pub mod tripwire;
 pub mod trust;
+pub mod trust_snapshot;
 pub mod worktree;
 pub mod write;
 

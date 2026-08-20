@@ -44,6 +44,49 @@ struct QualifiedRefUse {
     id: String,
 }
 
+/// The protected resources that differ from the last approval on this
+/// machine, by id.
+///
+/// Empty when nothing was approved before, when no snapshot was kept, or when
+/// the trait changed somewhere other than its resources — a caller must then
+/// say the trait changed without claiming where.
+fn changed_resources_since_approval(
+    trait_id: &str,
+    trait_ref: &ctx_traits_core::Trait,
+    roots: &ctx_traits_io::resource::ResourceRoots,
+) -> Vec<String> {
+    let Ok(store) = ctx_traits_io::trust::read_store() else {
+        return Vec::new();
+    };
+    let Some(record) = store.verified_record_for_trait(trait_id) else {
+        return Vec::new();
+    };
+    ctx_traits_io::trust_snapshot::resource_changes(&record.digest, trait_ref, roots)
+        .into_iter()
+        .map(|change| {
+            let where_ = if change.path.is_empty() {
+                change.resource_id.clone()
+            } else {
+                format!("{} ({})", change.resource_id, change.path)
+            };
+            // The size of the change, from the same line diff `doctor
+            // --migrate-config` renders. Enough to tell a one-word fix from a
+            // rewrite without printing the file into a status line.
+            match (change.approved.as_deref(), change.current.as_deref()) {
+                (Some(before), Some(after)) => {
+                    let lines = crate::app::migrate::diff_lines(before, after);
+                    let added = lines.iter().filter(|line| line.starts_with('+')).count();
+                    let removed = lines.iter().filter(|line| line.starts_with('-')).count();
+                    format!("{where_} +{added}/-{removed}")
+                }
+                (None, Some(_)) => format!("{where_} (no approved copy kept)"),
+                (Some(_), None) => format!("{where_} (now unreadable)"),
+                (None, None) => where_,
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn handle_check(input: CheckInputs<'_>) -> crate::Result<CommandOutput<()>> {
     let report = build_check_report(&input)?;
     emit_check_report(
@@ -335,8 +378,26 @@ pub(crate) fn build_check_report(
                         if trust_ok {
                             base
                         } else {
+                            // Name WHAT changed when we can. An unreviewed
+                            // trait whose resources moved since the last
+                            // approval is the common case, and "the digest
+                            // is different" leaves a reviewer to find the
+                            // difference themselves.
+                            let changed = changed_resources_since_approval(
+                                &trait_id,
+                                &trait_ref,
+                                &roots,
+                            );
+                            let because = if changed.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    "; changed since your approval: {}",
+                                    changed.join(", ")
+                                )
+                            };
                             format!(
-                                "{base}; reported only; run refuses until reviewed: {} (canonical-digest={}); review the trait's current behavior before approving",
+                                "{base}; reported only; run refuses until reviewed: {} (canonical-digest={}){because}; review the trait's current behavior before approving",
                                 ctx_traits_core::r#trait::activation::format_gate_refusal(
                                     &trust_gates
                                 ),
@@ -2155,8 +2216,18 @@ fn native_family_drift_check(
             None => continue,
         }
         let canonical_path = package_root.join(&expected_relative);
+        // Compared against what a build would WRITE, resource digests
+        // included — not against the bare synth output, which carries none
+        // and would make every variant with a protected resource read as
+        // stale forever.
+        let rebuilt = crate::app::schema_synth_build::inject_resource_digests(
+            package_root,
+            &variant.response.output_text,
+            ctx_traits_core::synth::OutputFormat::Toml,
+        )
+        .unwrap_or_else(|_| variant.response.output_text.clone());
         match ctx_traits_io::read::read_optional_text(&canonical_path) {
-            Ok(Some(text)) if text == variant.response.output_text => {}
+            Ok(Some(text)) if text == rebuilt => {}
             Ok(Some(_)) => failures.push(format!(
                 "variant {} canonical bytes are stale",
                 variant.name
@@ -2285,7 +2356,31 @@ fn cdk_drift_check(
         })
         .collect::<Vec<_>>();
 
-    let expected = response.provenance.canonical_digest.as_str();
+    // The rebuild has to carry resource digests too, or every trait with a
+    // protected resource reads as drifted: the committed canonical records
+    // them and a bare synth does not. Inject first, then digest what the
+    // build would actually have written.
+    let rebuilt_text = ctx_traits_io::layout::package_root_for_manifest(trait_path)
+        .map(camino::Utf8Path::to_path_buf)
+        .and_then(|package_root| {
+            crate::app::schema_synth_build::inject_resource_digests(
+                &package_root,
+                &response.output_text,
+                ctx_traits_core::synth::OutputFormat::Toml,
+            )
+            .ok()
+        })
+        .unwrap_or_else(|| response.output_text.clone());
+    // Digested the way every other canonical digest is — over the DECODED
+    // trait, not the file bytes. Hashing the text would answer a different
+    // question and disagree with the value the loader reports.
+    let rebuilt_digest = ctx_traits_core::encoding::decode_trait(
+        ctx_traits_core::encoding::Encoding::Toml,
+        &rebuilt_text,
+    )
+    .and_then(|rebuilt| ctx_traits_core::digest::canonical_digest(&rebuilt))
+    .unwrap_or_else(|_| response.provenance.canonical_digest.clone());
+    let expected = rebuilt_digest.as_str();
     let actual = current_canonical_digest.as_str();
     let committed_text = match ctx_traits_io::read::read_text(trait_path) {
         Ok(text) => text,
@@ -2316,7 +2411,7 @@ fn cdk_drift_check(
     let package_json_drift = ctx_traits_io::layout::package_root_for_manifest(trait_path)
         .and_then(package_json_drift_failure);
     let ok = expected == actual
-        && (!byte_stable || response.output_text == committed_text)
+        && (!byte_stable || rebuilt_text == committed_text)
         && !map_drifted
         && package_json_drift.is_none();
     authoring_warnings.sort_by(|left, right| {
@@ -2334,14 +2429,12 @@ fn cdk_drift_check(
             } else {
                 format!("{trait_path} matches rebuilt {source_path} canonical digest {actual}")
             }
-        } else if map_drifted && expected == actual && response.output_text == committed_text {
+        } else if map_drifted && expected == actual && rebuilt_text == committed_text {
             format!(
                 "source map for {trait_path} is stale vs rebuilt {source_path} (re-run ctx traits build)"
             )
         } else if let Some(reason) = package_json_drift.filter(|_| {
-            expected == actual
-                && (!byte_stable || response.output_text == committed_text)
-                && !map_drifted
+            expected == actual && (!byte_stable || rebuilt_text == committed_text) && !map_drifted
         }) {
             reason
         } else {

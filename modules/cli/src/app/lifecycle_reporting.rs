@@ -447,6 +447,22 @@ pub(crate) fn handle_trust_approve(
                     ),
                 });
             }
+            // Every variant is its own canonical with its own resources, so
+            // each gets its own snapshot — approving a family approves as
+            // many distinct things as it has variants.
+            if let Ok(canonical_text) = std::fs::read_to_string(variant)
+                && let Ok(roots) = ctx_traits_io::resource::resolve_resource_roots(
+                    &trait_root,
+                    &trait_ref.resources,
+                )
+            {
+                ctx_traits_io::trust_snapshot::record_approval(
+                    canonical.as_str(),
+                    &canonical_text,
+                    &roots,
+                    &trait_ref,
+                );
+            }
             updates.push(ctx_traits_io::trust::DigestTrustUpdate::named(
                 trait_ref.id.as_str().to_string(),
                 canonical.as_str().to_string(),
@@ -694,6 +710,23 @@ pub(crate) fn handle_trust_named_update(
         state,
         reason,
     )?;
+    // Snapshot what is being approved, so a later change can be SHOWN. A
+    // verdict against a digest tells a reviewer their approval no longer
+    // applies; it does not tell them what is different, and re-approving
+    // without seeing that is re-approving blind.
+    if matches!(state, ctx_traits_io::trust::TrustState::Verified)
+        && let Ok(canonical_text) = std::fs::read_to_string(file)
+        && let Ok(roots) =
+            ctx_traits_io::resource::resolve_resource_roots(&trait_root, &trait_ref.resources)
+    {
+        ctx_traits_io::trust_snapshot::record_approval(
+            canonical_digest.as_str(),
+            &canonical_text,
+            &roots,
+            &trait_ref,
+        );
+    }
+
     let live_sessions = if matches!(state, ctx_traits_io::trust::TrustState::Blocked) {
         ctx_traits_io::run_liveness::live_sessions_pinned_to_digest(&update.digest)
     } else {

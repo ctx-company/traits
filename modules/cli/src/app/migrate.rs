@@ -193,7 +193,7 @@ pub(crate) fn handle_migrate(
 /// deleted lines (not just same-index replacements) render correctly, with
 /// each line prefixed `-`/`+`. Unchanged lines are omitted — the mechanical
 /// engine's contract is that untouched spans never appear in the diff.
-fn diff_lines(before: &str, after: &str) -> Vec<String> {
+pub(crate) fn diff_lines(before: &str, after: &str) -> Vec<String> {
     let before: Vec<&str> = before.lines().collect();
     let after: Vec<&str> = after.lines().collect();
     let n = before.len();
