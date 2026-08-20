@@ -72,12 +72,15 @@ pub const CANONICAL_ENTRIES: &[&str] = &[
 /// `.ctx/.gitignore` does NOT go away: `.ctx/runs/merge.lock` and
 /// `.ctx/cache/build/` are live paths one level up, and moving rather than
 /// splitting would leave them untracked-and-showing.
-pub const GLOBAL_TRAIT_ROOT_ENTRIES: &[&str] = &["*", "!.gitignore"];
-
 /// Canonical entries for a PROJECT trait root's `.gitignore`.
 pub const TRAIT_ROOT_ENTRIES: &[&str] = &[
     // 0052: run worktrees live under `.ctx/traits/` now.
     "worktrees/",
+    // 0235: run state, traces and caches are trait-specific, so they live
+    // under the trait root — in a project and in the global root alike.
+    "runs/",
+    "debug/",
+    "cache/",
     // 0037/0178: the machine-local runtime tier and its TypeScript source.
     // The committed siblings — `config.toml` (project decisions),
     // `runtime.example.toml` (the template this is copied from) and
@@ -205,20 +208,13 @@ pub fn ensure_trait_root_gitignore(repo_root: &Utf8Path) -> crate::Result<Ensure
 
 /// The ignore file for the GLOBAL trait root, `~/.config/ctx/traits/`.
 ///
-/// A different entry set, because the directory is a different thing: a
-/// project's trait root holds authored packages plus machine-local files, so
-/// it names what to hide. The global root holds nothing BUT installed
-/// packages, every one of them reinstallable from `~/.config/ctx/traits.lock`
-/// — so it hides everything and keeps only itself.
-///
-/// It exists because that directory is one people keep under version control
-/// with the rest of their dotfiles, where a vendored tree is exactly the kind
-/// of thing that should not be committed.
+/// The same entries as a project's, because since 0235 it is the same shape:
+/// `vendored/`, `runs/`, `debug/`, `cache/` and an authoring install, all
+/// reinstallable or regenerable. It exists because that directory is one
+/// people keep under version control with the rest of their dotfiles, where
+/// a vendored tree and a 90GB cache are exactly what should not be committed.
 pub fn ensure_global_trait_root_gitignore(trait_root: &Utf8Path) -> crate::Result<EnsureReport> {
-    let plan = plan_for(
-        trait_root_gitignore_path_at(trait_root),
-        GLOBAL_TRAIT_ROOT_ENTRIES,
-    )?;
+    let plan = plan_for(trait_root_gitignore_path_at(trait_root), TRAIT_ROOT_ENTRIES)?;
     append_missing_lines(plan.path, plan.exists, plan.missing)
 }
 

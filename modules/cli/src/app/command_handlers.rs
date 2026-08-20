@@ -357,10 +357,13 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 config,
                 json,
                 migrate_config,
+                migrate_state,
                 apply,
                 verbose,
             }) => {
-                if migrate_config {
+                if migrate_state {
+                    crate::app::doctor::handle_doctor_migrate_state(apply, json)
+                } else if migrate_config {
                     crate::app::doctor::handle_doctor_migrate_config(apply, json)
                 } else if config {
                     if apply {

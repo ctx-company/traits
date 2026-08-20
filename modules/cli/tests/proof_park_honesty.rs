@@ -79,7 +79,7 @@ fn git_rev_parse_head(repo: &Path, home: &Path) -> String {
 /// compiled binary itself for its active repo-qualifier key, rather than
 /// re-deriving the repo-key hash here and risking it drifting from
 /// `modules/io/src/state.rs`'s real algorithm, then joining the same
-/// `<config-home>/ctx/runs/<repo-key>` shape `global_runs_root` builds.
+/// `<config-home>/ctx/traits/runs/<repo-key>` shape `global_runs_root` builds.
 fn global_runs_root(repo: &Path, home: &Path) -> std::path::PathBuf {
     let stdout = require_success(
         "`ctx traits doctor --config`",
@@ -99,7 +99,7 @@ fn global_runs_root(repo: &Path, home: &Path) -> std::path::PathBuf {
         .next()
         .unwrap_or_default()
         .trim();
-    home.join("ctx").join("runs").join(key)
+    home.join("ctx").join("traits").join("runs").join(key)
 }
 
 /// The fixture trait's `ctx.toml`: every role backed by `ctx-fixture-agent`

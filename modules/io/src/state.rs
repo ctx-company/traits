@@ -320,16 +320,110 @@ pub fn current_repo_key() -> crate::Result<String> {
 // Global and legacy family roots
 // ---------------------------------------------------------------------------
 
+/// The global trait root: `~/.config/ctx/traits`.
+///
+/// Everything a trait run produces lives under it — runs, debug traces,
+/// caches, and globally installed packages — because all of it is specific to
+/// traits (owner ruling 2026-08-20). They used to be siblings of `traits/` at
+/// the `ctx` root, which read as though `ctx` had state of its own and left
+/// no room for a second product to have any.
+///
+/// It mirrors a project's `.ctx/traits/` deliberately: the same four names in
+/// the same arrangement, so what a reader learns about one holds for the
+/// other.
+pub fn global_trait_root() -> crate::Result<Utf8PathBuf> {
+    Ok(global_ctx_root()?.join("traits"))
+}
+
+/// The pre-0235 location of a global state family, kept so migration can find
+/// what is already on disk.
+pub fn legacy_global_family_root(family: &str) -> crate::Result<Utf8PathBuf> {
+    Ok(global_ctx_root()?.join(family))
+}
+
+/// The state families that live under the global trait root, and that
+/// migration moves.
+pub const GLOBAL_STATE_FAMILIES: &[&str] = &["runs", "debug", "cache"];
+
 pub fn global_runs_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
-    Ok(global_ctx_root()?.join("runs").join(repo_key))
+    Ok(global_trait_root()?.join("runs").join(repo_key))
 }
 
 pub fn global_debug_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
-    Ok(global_ctx_root()?.join("debug").join(repo_key))
+    Ok(global_trait_root()?.join("debug").join(repo_key))
 }
 
 pub fn global_cache_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
-    Ok(global_ctx_root()?.join("cache").join(repo_key))
+    Ok(global_trait_root()?.join("cache").join(repo_key))
+}
+
+/// One state family that still sits at its pre-0235 location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateMigrationEntry {
+    pub family: String,
+    pub from: Utf8PathBuf,
+    pub to: Utf8PathBuf,
+    /// Whether the destination already holds something. A migration never
+    /// merges: two run stores for one repo key is not a state anyone can
+    /// reason about, so an occupied destination is reported and skipped.
+    pub destination_occupied: bool,
+}
+
+/// What still needs moving under the global trait root. Read-only.
+///
+/// Empty when there is nothing at the old locations — a fresh install, or one
+/// already migrated. Reports rather than moves because the directories are
+/// large (caches reach tens of gigabytes) and because moving someone's run
+/// history is not something a health check should do unasked.
+pub fn plan_state_migration() -> crate::Result<Vec<StateMigrationEntry>> {
+    let mut plan = Vec::new();
+    for family in GLOBAL_STATE_FAMILIES {
+        let from = legacy_global_family_root(family)?;
+        if !from.is_dir() {
+            continue;
+        }
+        let to = global_trait_root()?.join(family);
+        plan.push(StateMigrationEntry {
+            family: (*family).to_string(),
+            from,
+            destination_occupied: to.exists(),
+            to,
+        });
+    }
+    Ok(plan)
+}
+
+/// Move each planned family under the global trait root, returning what
+/// moved.
+///
+/// A rename, not a copy: the two paths share a filesystem, so this is
+/// instant regardless of size and cannot half-copy. A family whose
+/// destination already exists is skipped, never merged.
+pub fn apply_state_migration(
+    plan: &[StateMigrationEntry],
+) -> crate::Result<Vec<StateMigrationEntry>> {
+    let mut moved = Vec::new();
+    for entry in plan {
+        if entry.destination_occupied {
+            continue;
+        }
+        if let Some(parent) = entry.to.parent() {
+            std::fs::create_dir_all(parent.as_std_path()).map_err(|source| {
+                crate::environment::Error::Filesystem {
+                    path: parent.to_string(),
+                    source,
+                }
+            })?;
+        }
+        std::fs::rename(entry.from.as_std_path(), entry.to.as_std_path()).map_err(|source| {
+            crate::environment::Error::Filesystem {
+                path: entry.from.to_string(),
+                source,
+            }
+        })?;
+        moved.push(entry.clone());
+    }
+    Ok(moved)
 }
 
 /// Global runs root for the current invocation's repository.
