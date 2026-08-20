@@ -1011,3 +1011,20 @@ mod build_cache_tests {
         assert!(is_build_cache_root(path, "cargo"));
     }
 }
+
+/// The authoring-time npm manifest: `.ctx/traits/package.json`.
+///
+/// Beside the sources that import through it, not a level above. Node walks
+/// up from `.ctx/traits/authored/<id>/source/index.ts` and reaches
+/// `.ctx/traits/node_modules` first; `.ctx/traits/config.ts` resolves from
+/// the same directory. A repository with its own root `node_modules` still
+/// resolves everything else through the next step up.
+pub fn authoring_manifest_path(repo_root: &Utf8Path) -> Utf8PathBuf {
+    authoring_install_root(repo_root).join("package.json")
+}
+
+/// Where an authoring install puts `node_modules`, and the directory a
+/// package manager runs in.
+pub fn authoring_install_root(repo_root: &Utf8Path) -> Utf8PathBuf {
+    repo_root.join(PROJECT_MANIFEST_ROOT)
+}

@@ -292,6 +292,12 @@ pub enum TraitsCommand {
         /// Omitted: initialize the project roots only.
         name: Option<String>,
 
+        /// Install the authoring packages after scaffolding, through pnpm or
+        /// npm. Off by default: running a package manager is an effect on the
+        /// machine, not a scaffold, and it should be asked for.
+        #[arg(long)]
+        install: bool,
+
         /// Emit structured JSON.
         #[arg(long)]
         json: bool,

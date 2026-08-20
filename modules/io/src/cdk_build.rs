@@ -227,22 +227,31 @@ pub fn run_node_module(
         } else {
             repo_root.as_path()
         };
-        // Prefer ctx's own `.ctx/node_modules` when it exists, falling back to
-        // the repository root.
+        // Prefer ctx's own authoring `node_modules` when it exists, falling
+        // back to the repository root.
         //
-        // Node walks UP from the child's cwd, so anchoring inside `.ctx`
-        // reaches `.ctx/node_modules` first and then the repo root anyway —
-        // a project that installed the authoring packages itself keeps
-        // resolving exactly as before, and one that let `ctx traits init`
-        // install them no longer needs a package.json of its own at the root.
-        // Without this, authoring in a repository with no JavaScript project
-        // fails with `Cannot find package '@ctx-traits/cdk'`, and the remedy
-        // the product printed was "run pnpm install" — this repository's own
-        // development setup offered as user-facing advice.
-        let ctx_root = base.join(".ctx");
+        // Node walks UP from the child's cwd, so anchoring inside the
+        // authoring root reaches `.ctx/traits/node_modules` first and then
+        // `.ctx/` and the repo root anyway — a project that installed the
+        // authoring packages itself keeps resolving exactly as before, and
+        // one that let `ctx traits init --install` install them needs no
+        // package.json of its own at the root. Without this, authoring in a
+        // repository with no JavaScript project fails with `Cannot find
+        // package '@ctx-traits/cdk'`, and the remedy the product printed was
+        // "run pnpm install" — this repository's own development setup
+        // offered as user-facing advice.
+        //
+        // `.ctx/node_modules` is still honoured: it is where `init` installed
+        // before the manifest moved beside the sources that import it, and a
+        // repository initialised then must keep building now.
+        let authoring_root = crate::layout::authoring_install_root(base);
+        let legacy_root = base.join(".ctx");
         let owned_current_dir;
-        let current_dir = if ctx_root.join("node_modules").is_dir() {
-            owned_current_dir = ctx_root;
+        let current_dir = if authoring_root.join("node_modules").is_dir() {
+            owned_current_dir = authoring_root;
+            owned_current_dir.as_path()
+        } else if legacy_root.join("node_modules").is_dir() {
+            owned_current_dir = legacy_root;
             owned_current_dir.as_path()
         } else {
             base
@@ -295,7 +304,17 @@ pub fn run_node_module(
                     // this error actually describes. The previous text said
                     // "run pnpm install", which assumes a pnpm workspace the
                     // author may not have and never will.
-                    "cannot resolve {unresolved_package_hint} — run `ctx traits init` to install the authoring packages into .ctx/node_modules, or add {unresolved_package_hint} to this project yourself"
+                    "cannot resolve {unresolved_package_hint} — {}",
+                    crate::authoring_env::missing_for_authoring(
+                        request.repo_root.as_deref().unwrap_or(Utf8Path::new(".")),
+                        crate::init::authoring_package_version(),
+                    )
+                    .iter()
+                    .find(|item| item.blocks_authoring())
+                    .map_or_else(
+                        || format!("add {unresolved_package_hint} to this project yourself"),
+                        crate::authoring_env::Missing::remedy,
+                    )
                 )
             } else if stderr.is_empty() {
                 format!("{label} command exited nonzero")
