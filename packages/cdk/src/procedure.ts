@@ -268,6 +268,16 @@ export interface ResourceFunction {
    * @example `resource.file("evaluator", { path: "scripts/eval.py" })`
    */
   file(name: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle;
+  /**
+   * Binds a directory on disk, resolved the same way {@link file} is. The
+   * declaration is identical — `path` has always accepted either — but the
+   * name says which one it is, so a reader is not left inferring the kind
+   * from the path. Without it, every directory resource had to fall back to
+   * the raw form, which is the escape hatch for shapes that do not fit
+   * rather than the spelling for the second-most ordinary kind of resource.
+   * @example `resource.directory("task-board", { path: ".internal/tasks", root: "repo" })`
+   */
+  directory(name: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle;
   /** Embeds content directly in the trait source, no file on disk. @example `resource.inline("guide", "Prefer minimal diffs.")` */
   inline(
     name: string,
@@ -440,6 +450,10 @@ export const resource: ResourceFunction = Object.assign(
   {
     file: (name: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle =>
       resourceOf({ ...fields, id: name }),
+    directory: (
+      name: string,
+      fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string },
+    ): ResourceHandle => resourceOf({ ...fields, id: name }),
     inline: (
       name: string,
       content: string,
