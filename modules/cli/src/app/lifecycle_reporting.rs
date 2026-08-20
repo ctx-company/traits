@@ -637,6 +637,37 @@ fn resolve_shared_builtin_target(operand: &str) -> crate::Result<Option<String>>
     .map(|path| path.to_string()))
 }
 
+/// Trait resolution for trust's report and `--blocked` paths: the ordinary
+/// resolver, falling back to an embedded-but-not-runnable built-in.
+///
+/// `--approved` looked past `runnable` and the other two did not, so
+/// `trust --approved spec` recorded a verdict that `trust spec` then answered
+/// with "did not resolve to ./.ctx/traits/authored/spec/generated/index.toml".
+/// A decision you can make and cannot read back is not one anyone can audit,
+/// and blocking a shared package was impossible for the same reason.
+///
+/// The fallback runs only after ordinary resolution fails, and the original
+/// error survives when it does not apply — a typo'd trait id still reports as
+/// a typo'd trait id, not as an unknown built-in.
+fn resolve_trust_target(
+    trait_arg: Option<&str>,
+    file: Option<&str>,
+    context: &str,
+) -> crate::Result<String> {
+    match crate::app::command_handlers::resolve_trait_target(trait_arg, file, context) {
+        Ok(resolved) => Ok(resolved),
+        Err(error) => {
+            if let Some(operand) = trait_arg
+                && file.is_none()
+                && let Some(path) = resolve_shared_builtin_target(operand)?
+            {
+                return Ok(path);
+            }
+            Err(error)
+        }
+    }
+}
+
 /// `ctx traits trust --blocked`: named-trait resolution only (no package
 /// fallback — blocking a whole installed package is not part of P419's
 /// preserved surface). `--digest` bypasses resolution for scripts.
@@ -665,11 +696,7 @@ pub(crate) fn handle_trust_block(
                     .to_string(),
         });
     };
-    let file = crate::app::command_handlers::resolve_trait_target(
-        Some(&operand),
-        None,
-        "trust --blocked",
-    )?;
+    let file = resolve_trust_target(Some(&operand), None, "trust --blocked")?;
     handle_trust_named_update(
         &file,
         ctx_traits_io::trust::TrustState::Blocked,
@@ -1001,7 +1028,7 @@ pub(crate) fn handle_trust_status(
     {
         return handle_trust_status_family(operand, &variants, json);
     }
-    let resolved = crate::app::command_handlers::resolve_trait_target(trait_arg, file, "trust")?;
+    let resolved = resolve_trust_target(trait_arg, file, "trust")?;
     handle_trust_status_single(&resolved, json)
 }
 
