@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { smart } from "../agent.ts";
 import { plan, target } from "../data.ts";
 
-export const compose = cdk.step({
+export const compose = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
     Turn ${target} into an actionable refactoring checklist.

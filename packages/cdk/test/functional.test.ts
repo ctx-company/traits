@@ -20,6 +20,7 @@ import {
   seats,
   signal,
   slot,
+  defineStep,
   step,
   toDraftJson,
   trait,
@@ -481,12 +482,12 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     const target = slot.text("declared-target");
     const notes = slot.text("declared-notes");
     const probe = slot.text("declared-probe");
-    const surveyStep = step({
+    const surveyStep = defineStep.prompt({
       agent: agent.worker("declared-worker"),
       input: input.prompt`Survey ${target}.`,
       output: notes,
     });
-    const statusStep = step({
+    const statusStep = defineStep.command({
       input: input.command`git status --porcelain`,
       output: probe,
     });
@@ -507,9 +508,12 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     expect(draft.procedure?.sequence?.[1]?.output).toEqual(["slot:declared-probe"]);
   });
 
-  it("the declaration form and the inline registrars are the same `step` identifier", () => {
+  // Declaring and placing are two verbs now: `defineStep.*` declares,
+  // `step.*` places. They used to share the noun `step`, which read as a
+  // function at one call site and a namespace at the next.
+  it("a declared step and an inline step sit side by side in one procedure", () => {
     const probe = slot.text("one-noun-probe");
-    const declared = step({ input: input.command`git status --porcelain`, output: probe });
+    const declared = defineStep.command({ input: input.command`git status --porcelain`, output: probe });
     const envelope = evaluateTraitFunction(() => {
       defineTrait("one-noun", { description: "Declared and inline steps side by side." });
       declared("Check working tree status");
@@ -536,6 +540,49 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   // cased to itself, which meant every lowercase name produced an
   // unbuildable trait: `ctx traits create work` failed with "invalid
   // manifest at root: missing field `name`" while `create Work` succeeded.
+  // The gap the split closes. `step(fields)` chose its kind by SHAPE — agent
+  // present for a prompt, otherwise a command — so a reusable CHECK could not
+  // be declared at all, and the reusable face of `step` was strictly less
+  // capable than the inline one.
+  it("declares a reusable check", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("Reusable Check", { version: "0.1.0", description: "d" });
+      const verdict = slot({
+        id: "gate-verdict",
+        schema: schema.object("gate-result", {
+          ok: schema.field(schema.boolean(), { description: "Whether the gate passed." }),
+          argv: schema.field(schema.list(schema.text()), { description: "The argv that decided it." }),
+        }),
+      });
+      const gate = defineStep.check({ input: input.command`just test`, output: verdict });
+      gate("Run the test gate");
+      return {};
+    });
+    const draft = envelope.draft as {
+      readonly procedure: { readonly sequence: readonly { readonly kind?: string }[] };
+    };
+    expect(draft.procedure.sequence.map((item) => item.kind)).toContain("check");
+  });
+
+  // A declared step places more than once, which is the whole point of
+  // declaring it, and each placement gets its own id from its own title.
+  it("places a declared step more than once, with an id per title", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("Twice Placed", { version: "0.1.0", description: "d" });
+      const status = defineStep.command({
+        input: input.command`git status --porcelain`,
+        output: slot.text("tree"),
+      });
+      status("Check the tree before");
+      status("Check the tree after");
+      return {};
+    });
+    const draft = envelope.draft as {
+      readonly procedure: { readonly sequence: readonly { readonly id?: string }[] };
+    };
+    expect(draft.procedure.sequence.map((item) => item.id)).toEqual(["check-the-tree-before", "check-the-tree-after"]);
+  });
+
   // Every entity takes a NAME and derives its id, the way defineTrait and
   // step.command always have. Before this, `slot`, `port`, `agent` and the
   // rest ran their first argument through `validateSlug` unchanged, so an

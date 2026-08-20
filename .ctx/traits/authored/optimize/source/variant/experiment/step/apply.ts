@@ -4,7 +4,7 @@ import { worker } from "#trait/shared/agent.ts";
 import { applyReceipt, proposal } from "#trait/shared/data.ts";
 import { objective } from "../data.ts";
 
-export const applyStep = cdk.step({
+export const applyStep = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
         Apply exactly the bounded change in ${proposal} for ${objective} inside the isolated worktree.

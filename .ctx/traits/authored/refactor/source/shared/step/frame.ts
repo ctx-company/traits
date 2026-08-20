@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { smart } from "../agent.ts";
 import { refactorFrame, survey, target } from "../data.ts";
 
-export const select = cdk.step({
+export const select = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
     From the survey ${survey} of ${target}.

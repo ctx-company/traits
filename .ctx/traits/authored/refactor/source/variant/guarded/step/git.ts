@@ -9,7 +9,7 @@ import { slot } from "#trait/shared/data.ts";
 
 export * from "#trait/shared/step/git.ts";
 
-export const commitSubmit = cdk.step({
+export const commitSubmit = cdk.defineStep.command({
   input: cdk.input
     .command`env CTX_GATE_STATE_DIR=/Users/rpunkfu/ctx-company/ctx-gate/.ctx/gate/state ctx-gate run -- git commit -m ${slot.commitMessage}`,
   output: slot.commitOutput,

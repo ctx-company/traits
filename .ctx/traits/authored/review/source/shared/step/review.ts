@@ -31,7 +31,7 @@ const reviewText = input.prompt(
   { range, commitLog, diffStat },
 );
 
-export const review = cdk.step({
+export const review = cdk.defineStep.prompt({
   agent: reviewer,
   input: reviewText,
   output: [reviewVerdict, reviewDocument],

@@ -10,7 +10,7 @@ const PROMPT =
     Current work summary: {workSummary}.
     Cite the smell id or the deep-module violation for every blocker. ${agents.INTEGRITY_DOCTRINE}`;
 
-export const primary = cdk.step({
+export const primary = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt(PROMPT, {
     target,
@@ -22,7 +22,7 @@ export const primary = cdk.step({
   output: verdict1,
 });
 
-export const secondary = cdk.step({
+export const secondary = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt(PROMPT, {
     target,
@@ -45,7 +45,7 @@ const JUDGE_PROMPT =
 // the annotation-driven guided variant's procedure interface with `target`
 // (0200 round-2 review blocker). Quick and guarded already require `target`
 // through their checklist step, so omitting it here costs them nothing.
-export const judge = cdk.step({
+export const judge = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt(JUDGE_PROMPT, {
     plan,

@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { smart } from "../agent.ts";
 import { slot, port } from "../data.ts";
 
-export const primary = cdk.step({
+export const primary = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
     Review the working tree's implemented state for ${port.task} against the task file's own contract as source of truth.
@@ -17,7 +17,7 @@ export const primary = cdk.step({
   `,
 });
 
-export const secondary = cdk.step({
+export const secondary = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
     Review the working tree's implemented state for ${port.task} against the task file's own contract as source of truth.

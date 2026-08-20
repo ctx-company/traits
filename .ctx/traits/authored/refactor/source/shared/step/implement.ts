@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { worker } from "../agent.ts";
 import { plan, verdict1, verdict2, workDeviationReport, workSummary } from "../data.ts";
 
-export const apply = cdk.step({
+export const apply = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
     Implement the plan ${plan}.

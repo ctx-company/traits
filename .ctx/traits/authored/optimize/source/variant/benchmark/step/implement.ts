@@ -4,7 +4,7 @@ import { worker } from "#trait/shared/agent.ts";
 import { draftSlot, implementReceipt } from "#trait/shared/data.ts";
 import { target } from "../data.ts";
 
-export const implementStep = cdk.step({
+export const implementStep = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
         Implement the draft ${draftSlot} for ${target} inside the isolated worktree.

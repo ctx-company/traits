@@ -4,7 +4,7 @@ import { proposer } from "#trait/shared/agent.ts";
 import { bestMetric, history, proposal } from "#trait/shared/data.ts";
 import { metricField, objective } from "../data.ts";
 
-export const proposeStep = cdk.step({
+export const proposeStep = cdk.defineStep.prompt({
   agent: proposer,
   input: cdk.input.prompt`
         Propose one small, falsifiable experiment for ${objective}.

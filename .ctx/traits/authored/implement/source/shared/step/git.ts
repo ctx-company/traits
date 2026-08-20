@@ -3,22 +3,22 @@ import * as cdk from "@ctx-traits/cdk";
 import { scribe } from "../agent.ts";
 import { slot, port } from "../data.ts";
 
-export const status = cdk.step({
+export const status = cdk.defineStep.command({
   input: cdk.input.command`git status --porcelain`,
   output: slot.gitStatus,
 });
 
-export const commitStage = cdk.step({
+export const commitStage = cdk.defineStep.command({
   input: cdk.input.command`git add -A`,
   output: slot.stageOutput,
 });
 
-export const commitSubmit = cdk.step({
+export const commitSubmit = cdk.defineStep.command({
   input: cdk.input.command`git commit -m ${slot.commitMessage}`,
   output: port.commitReport,
 });
 
-export const commitMessage = cdk.step({
+export const commitMessage = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     The work for ${port.task} is being committed.

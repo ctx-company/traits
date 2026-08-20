@@ -3,17 +3,17 @@ import * as cdk from "@ctx-traits/cdk";
 import { scribe } from "../agent.ts";
 import { port, slot } from "../data.ts";
 
-export const status = cdk.step({
+export const status = cdk.defineStep.command({
   input: cdk.input.command`git status --porcelain`,
   output: slot.gitStatus,
 });
 
-export const commitStage = cdk.step({
+export const commitStage = cdk.defineStep.command({
   input: cdk.input.command`git add -A`,
   output: slot.stageOutput,
 });
 
-export const commitSubmit = cdk.step({
+export const commitSubmit = cdk.defineStep.command({
   input: cdk.input.command`git commit -m ${slot.commitMessage}`,
   output: slot.commitOutput,
 });
@@ -24,7 +24,7 @@ export const commitMessageOutput = cdk.output.prompt`
     Return exactly the finished commit message into (${slot.commitMessage}).
 `;
 
-export const commitMessage = cdk.step({
+export const commitMessage = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     The refinement for the refactor of ${port.target} has ended and the work is being committed.

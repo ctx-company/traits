@@ -4,7 +4,7 @@ import { smart1 } from "#trait/shared/agent.ts";
 import { bestMetric, history, scopeSlot } from "#trait/shared/data.ts";
 import { target } from "../data.ts";
 
-export const scopeStep = cdk.step({
+export const scopeStep = cdk.defineStep.prompt({
   agent: smart1,
   input: cdk.input.prompt`
         Scope one small, falsifiable attempt to improve the lower-is-better benchmark over ${target}.

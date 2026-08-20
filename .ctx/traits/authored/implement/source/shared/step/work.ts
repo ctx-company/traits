@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { worker } from "../agent.ts";
 import { slot, port } from "../data.ts";
 
-export const implement = cdk.step({
+export const implement = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
     Implement ${port.task} following the draft ${slot.draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).

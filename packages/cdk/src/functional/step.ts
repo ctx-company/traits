@@ -1,26 +1,30 @@
 /**
- * The step builder (owner ruling 2026-08-11, renamed from `stage` 2026-08-19):
- * a step module declares its parts once — agent, input, output — and
- * `step(fields)` returns a CALLABLE carrying those fields, so a variant body
- * that uses a step as-is reads as one line (`surveyStep("Survey the target")`,
- * `git.status("Check working tree status")`) while the parts stay addressable
- * (`surveyStep.input`, `git.status.output`) for variants that compose or
- * override. Dispatch is by shape: a step with an `agent` registers a prompt
- * step through the agent's own `.prompt` registrar; a step without one
- * registers a command step (its `input` is an `input.command` template).
+ * Declaring a step, and placing one.
  *
- * `step` is one identifier with two call shapes: `step(fields)` DECLARES a
- * reusable step, `step.command`/`step.check`/`step.project` PLACE one inline.
+ * `defineStep.*` declares a reusable step: the parts are named once — agent,
+ * input, output — and the result is a CALLABLE, so a variant that uses the
+ * step as-is reads as one line (`surveyStep("Survey the target")`) while the
+ * parts stay addressable (`surveyStep.input`) for a variant that overrides one
+ * of them. `step.*` places a step inline, where it is used once.
+ *
+ * Two verbs, because they are two acts. They used to share one: `step(fields)`
+ * declared and `step.command(title, fields)` placed, which meant the same
+ * noun read as a function at one call site and a namespace at the next. It
+ * also hid a gap — `step(fields)` chose its kind by SHAPE, agent present for a
+ * prompt and otherwise a command, so a reusable `check` could not be written
+ * at all. Naming the kind fixes both.
+ *
  * The canonical, the runtime, the TUI and every build error say "step" too —
  * the authoring word never has to be translated.
  */
 import type { AgentHandle, SequenceHandle } from "../handles.js";
 import type { CommandTemplateValue } from "../input.js";
-import type { CommandSequenceFields, PromptRegistrarOptions } from "../sequence.js";
+import type { CheckSequenceFields, CommandSequenceFields, PromptRegistrarOptions } from "../sequence.js";
 import { stepRegistrars } from "./registrars.js";
 import type { IdOverride } from "./registrars.js";
 
 type CommandRegistrarOptions = Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride;
+type CheckRegistrarOptions = Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride;
 
 export type PromptStepFields = {
   readonly agent: AgentHandle;
@@ -31,36 +35,63 @@ export type CommandStepFields = {
   readonly input: CommandTemplateValue;
 } & Omit<CommandRegistrarOptions, "id" | "input">;
 
-export type StepFields = PromptStepFields | CommandStepFields;
+export type CheckStepFields = {
+  readonly agent?: never;
+  readonly input: CommandTemplateValue;
+} & Omit<CheckRegistrarOptions, "id" | "input">;
+
+export type StepFields = PromptStepFields | CommandStepFields | CheckStepFields;
 
 /**
- * A callable step: invoking it registers the step under `title` (the id
- * derives from it); `overrides` merge over the step's own fields — the escape
- * hatch for a variant that swaps one part while keeping the one-line call site
- * for everything else. The declared fields remain readable as properties.
+ * A declared step: calling it registers the step under `title` (the id derives
+ * from it). `overrides` merge over the declared fields — the escape hatch for
+ * a variant that swaps one part while keeping the one-line call site for
+ * everything else.
  */
-export type Step<F extends StepFields> = F & {
-  (title: string, overrides?: Partial<PromptRegistrarOptions & CommandRegistrarOptions>): SequenceHandle;
+export type Step<F extends StepFields, R extends SequenceHandle = SequenceHandle> = F & {
+  (title: string, overrides?: Partial<PromptRegistrarOptions & CommandRegistrarOptions & CheckRegistrarOptions>): R;
 };
 
-function declareStep<const F extends StepFields>(fields: F): Step<F> {
-  const register = (
-    title: string,
-    overrides: Partial<PromptRegistrarOptions & CommandRegistrarOptions> = {},
-  ): SequenceHandle => {
-    const { agent, ...rest } = fields as { readonly agent?: AgentHandle };
-    if (agent !== undefined) {
-      return agent.prompt(title, { ...rest, ...overrides } as PromptRegistrarOptions);
-    }
-    return stepRegistrars.command(title, { ...rest, ...overrides } as CommandRegistrarOptions);
-  };
-  return Object.assign(register, fields) as Step<F>;
-}
+/**
+ * A declared `check` step places exactly what an inline one does, verdict slot
+ * included — the return type is taken FROM the registrar rather than restated,
+ * so `gate("…").pass.ok` stays typed and the two forms cannot drift.
+ */
+export type CheckStep<F extends CheckStepFields> = Step<F, ReturnType<typeof stepRegistrars.check>>;
 
 /**
- * The one step noun: callable with a field bundle to declare a reusable step,
- * and carrying the inline registrars (`step.command`, `step.check`,
- * `step.project`) for the leaf kinds a declaration's shape dispatch does not
- * cover.
+ * Declares a reusable step. The kind is named rather than inferred, so a
+ * `check` is as declarable as a `command` and a reader of the call site knows
+ * which of the three they are looking at.
  */
-export const step = Object.assign(declareStep, stepRegistrars);
+export const defineStep = {
+  /** A reusable agent turn. @example `const review = defineStep.prompt({ agent: reviewer, input, output });` */
+  prompt<const F extends PromptStepFields>(fields: F): Step<F> {
+    const register = (title: string, overrides: Record<string, unknown> = {}): SequenceHandle => {
+      const { agent, ...rest } = fields as unknown as { readonly agent: AgentHandle };
+      return agent.prompt(title, { ...rest, ...overrides } as PromptRegistrarOptions);
+    };
+    return Object.assign(register, fields) as unknown as Step<F>;
+  },
+  /** A reusable command step. @example `const status = defineStep.command({ input: input.command\`git status --porcelain\`, output: tree });` */
+  command<const F extends CommandStepFields>(fields: F): Step<F> {
+    const register = (title: string, overrides: Record<string, unknown> = {}): SequenceHandle =>
+      stepRegistrars.command(title, { ...fields, ...overrides } as unknown as CommandRegistrarOptions);
+    return Object.assign(register, fields) as unknown as Step<F>;
+  },
+  /** A reusable check step, verdict slot included. @example `const gate = defineStep.check({ input: input.command\`just test\` });` */
+  check<const F extends CheckStepFields>(fields: F): CheckStep<F> {
+    const register = (
+      title: string,
+      overrides: Record<string, unknown> = {},
+    ): ReturnType<typeof stepRegistrars.check> =>
+      stepRegistrars.check(title, { ...fields, ...overrides } as unknown as CheckRegistrarOptions);
+    return Object.assign(register, fields) as unknown as CheckStep<F>;
+  },
+} as const;
+
+/**
+ * Places a step inline: `step.command`, `step.check`, `step.project`. A
+ * namespace only — a step's kind is always named at the call site.
+ */
+export const step = stepRegistrars;

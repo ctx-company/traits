@@ -40,7 +40,7 @@ export function captureCommitLog(title: string) {
   });
 }
 
-export const bump = cdk.step({
+export const bump = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
     Read the release manifest ${releaseManifest} with your tools: the version-file locations to bump, the changelog path, and the release branch.
@@ -54,7 +54,7 @@ export function extractDiff(title: string) {
   return cdk.step.command(title, { argv: ["git", "diff", "--stat"], output: diff });
 }
 
-export const review = cdk.step({
+export const review = cdk.defineStep.prompt({
   agent: reviewer,
   input: cdk.input.prompt`
     Review the release's version bump.

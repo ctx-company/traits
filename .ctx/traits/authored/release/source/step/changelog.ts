@@ -21,7 +21,7 @@ export const writeOutput = cdk.slot.text({
   description: "One-line confirmation from the worker of the changelog file path it edited.",
 });
 
-export const draft = cdk.step({
+export const draft = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     Draft the changelog entry for version ${newVersion} from the commit log since the last tag: ${commitLog}. Do not consult anything else.
@@ -30,7 +30,7 @@ export const draft = cdk.step({
   output: entry,
 });
 
-export const spotCheck = cdk.step({
+export const spotCheck = cdk.defineStep.prompt({
   agent: reviewer,
   input: cdk.input.prompt`
     Spot-check the changelog entry ${entry} against the commit log ${commitLog}.
@@ -39,7 +39,7 @@ export const spotCheck = cdk.step({
   output: verdict,
 });
 
-export const write = cdk.step({
+export const write = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
     The changelog entry ${entry} for version ${newVersion} has been approved.

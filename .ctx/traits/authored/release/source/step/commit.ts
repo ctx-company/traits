@@ -25,7 +25,7 @@ export const tagOutput = cdk.slot.text({
   description: "Output evidence from the local annotated-tag command.",
 });
 
-export const writeMessage = cdk.step({
+export const writeMessage = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     The version-bump and changelog reviews have both approved.

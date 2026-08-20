@@ -5,7 +5,7 @@ import { plan } from "#trait/shared/data.ts";
 
 import * as data from "../data.ts";
 
-export const compose = cdk.step({
+export const compose = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
     Turn the captured annotations ${data.slot.annotations} into a checklist.

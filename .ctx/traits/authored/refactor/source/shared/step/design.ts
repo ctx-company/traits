@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { smart } from "../agent.ts";
 import { plan, refactorFrame, target } from "../data.ts";
 
-export const draft = cdk.step({
+export const draft = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
     Design the refactor for the framed problem ${refactorFrame} on ${target}.

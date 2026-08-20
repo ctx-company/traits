@@ -18,6 +18,7 @@ export type {
   NumericComparisonValue,
 } from "./condition.js";
 export {
+  defineStep,
   defineTrait,
   defineVariant,
   effect,
@@ -39,8 +40,12 @@ export type {
   GuardMatchArms,
   LoopParam,
   ParParam,
+  CheckStep,
+  CheckStepFields,
+  CommandStepFields,
   ProcedureFromFields,
   ProcedureFromFunction,
+  PromptStepFields,
   Step,
   StepFields,
   TraitFunctionContext,

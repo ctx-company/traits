@@ -7,7 +7,7 @@ import { commitMessageOutput } from "#trait/shared/step/git.ts";
 // Annotation-driven commit-message step: guided has no `target` input, so
 // it cannot route through the target-based shared/step/git.ts commitMessage
 // without widening the procedure's interface (0200 round-2 review blocker).
-export const commitMessage = cdk.step({
+export const commitMessage = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     The review of the implemented annotation checklist has ended and the work is being committed.

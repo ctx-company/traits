@@ -6,7 +6,7 @@ import { implementReceipt } from "#trait/shared/data.ts";
 import { draftSlot } from "#trait/shared/data.ts";
 import { reviewVerdictSlot, target } from "../data.ts";
 
-export const reviewStep = cdk.step({
+export const reviewStep = cdk.defineStep.prompt({
   agent: smart1,
   input: cdk.input.prompt(
     `Review the implemented candidate for {target} against the draft {draft}. Work summary: {implementReceipt}.

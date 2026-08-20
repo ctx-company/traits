@@ -4,7 +4,7 @@ import { worker } from "#trait/shared/agent.ts";
 import { readinessSlot } from "#trait/shared/data.ts";
 import { objective } from "../data.ts";
 
-export const setupStep = cdk.step({
+export const setupStep = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
         Prepare the workbench for ${objective}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
