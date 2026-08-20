@@ -30,6 +30,10 @@ pub enum Missing {
     /// does. Not fatal on its own — the installed CDK may still fall inside
     /// both — but it means the project was initialised by another ctx.
     StaleRange { found: String, expected: String },
+    /// The installed authoring packages do not match the digest recorded
+    /// when they were installed. Fatal: a build reads these bytes, and the
+    /// lock says they are not the bytes that were reviewed.
+    ContentDrift { package: String },
     /// A CDK is installed, and it is outside the range this binary supports.
     /// Fatal: the canonical this binary writes and the one that CDK reads
     /// are different schemas, and the failure without this check is a type
@@ -68,6 +72,10 @@ impl Missing {
             Self::StaleRange { found, expected } => format!(
                 "the authoring manifest allows {found} but this ctx supports {expected}; run \
                  `ctx traits init --install` to move to {expected}"
+            ),
+            Self::ContentDrift { package } => format!(
+                "{package} on disk does not match the digest recorded in config.lock; run \
+                 `ctx traits init --install` to reinstall and re-record it"
             ),
             Self::UnsupportedCdk { found, min, max } => format!(
                 "@ctx-traits/cdk {found} is installed, but this ctx supports >={min} <{max}; run \
@@ -112,6 +120,7 @@ pub fn missing_for_authoring(repo_root: &Utf8Path, expected_range: &str) -> Vec<
         if !version_within(&found, &min, &max) {
             missing.push(Missing::UnsupportedCdk { found, min, max });
         }
+        missing.extend(drifted_authoring_packages(repo_root));
     }
 
     if !authoring_packages_installed(repo_root) {
@@ -237,6 +246,93 @@ pub fn install_authoring_packages(repo_root: &Utf8Path) -> crate::Result<Package
         .into());
     }
     Ok(manager)
+}
+
+/// Which recorded authoring packages no longer match what is on disk.
+///
+/// Best-effort by design: no lock, no entry, or an unreadable tree yields
+/// nothing rather than an error. This runs before ordinary commands, and a
+/// project that has never installed is a state to report, not a failure.
+fn drifted_authoring_packages(repo_root: &Utf8Path) -> Vec<Missing> {
+    let Ok(Some(lock)) = crate::project_lock::read_project_lock(repo_root) else {
+        return Vec::new();
+    };
+    let Some(authoring) = lock.authoring else {
+        return Vec::new();
+    };
+    authoring
+        .packages
+        .iter()
+        .filter(|entry| !entry.tree_digest.is_empty())
+        .filter_map(|entry| {
+            let root = installed_package_root(repo_root, &entry.package)?;
+            let actual = crate::registry::compute_tree_digest(&root).ok()?;
+            (actual != entry.tree_digest).then(|| Missing::ContentDrift {
+                package: entry.package.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The packages an authoring install provides, in the order recorded.
+pub const AUTHORING_PACKAGES: &[&str] = &["@ctx-traits/cdk", "@ctx-traits/config"];
+
+/// Where an installed authoring package's real files are.
+///
+/// Canonicalized, because pnpm links `node_modules/@ctx-traits/cdk` into
+/// `node_modules/.pnpm/...` and the digest walk rejects symlinks — correctly,
+/// since a tree that can point elsewhere is not evidence of its own content.
+fn installed_package_root(repo_root: &Utf8Path, package: &str) -> Option<Utf8PathBuf> {
+    [
+        crate::layout::authoring_install_root(repo_root),
+        repo_root.join(".ctx"),
+        repo_root.to_path_buf(),
+    ]
+    .iter()
+    .find_map(|root| {
+        let mut path = root.join("node_modules");
+        for segment in package.split('/') {
+            path = path.join(segment);
+        }
+        path.join("package.json")
+            .is_file()
+            .then(|| path.canonicalize_utf8().ok())
+            .flatten()
+    })
+}
+
+/// Digest what is actually installed, and record it.
+///
+/// The package manager's lockfile is not evidence here. It records what a
+/// registry said and is rewritten on that tool's own schedule; our lock
+/// digests the bytes a build will read. Same rule, and the same digest
+/// scheme, as the vendored-tree evidence in `PackageLockEntry::tree_digest`.
+pub fn authoring_lock_entry(
+    repo_root: &Utf8Path,
+    manager: PackageManager,
+    range: &str,
+) -> crate::Result<ctx_traits_core::project_lock::AuthoringLock> {
+    let mut packages = Vec::new();
+    for name in AUTHORING_PACKAGES {
+        let Some(root) = installed_package_root(repo_root, name) else {
+            continue;
+        };
+        let version = std::fs::read_to_string(root.join("package.json").as_std_path())
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| value.get("version")?.as_str().map(str::to_string))
+            .unwrap_or_default();
+        packages.push(ctx_traits_core::project_lock::AuthoringPackageLock {
+            package: (*name).to_string(),
+            version,
+            tree_digest: crate::registry::compute_tree_digest(&root)?,
+        });
+    }
+    Ok(ctx_traits_core::project_lock::AuthoringLock {
+        range: range.to_string(),
+        manager: manager.binary().to_string(),
+        packages,
+    })
 }
 
 /// The version of `@ctx-traits/cdk` actually installed, from wherever Node

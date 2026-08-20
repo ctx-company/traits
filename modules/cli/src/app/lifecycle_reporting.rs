@@ -81,9 +81,19 @@ pub(crate) fn handle_init(
         // Move the declared range BEFORE installing, so the install resolves
         // what this binary supports rather than what a previous one did.
         moved_range = ctx_traits_io::init::refresh_authoring_range(&cwd)?;
-        Some(ctx_traits_io::authoring_env::install_authoring_packages(
-            &cwd,
-        )?)
+        let manager = ctx_traits_io::authoring_env::install_authoring_packages(&cwd)?;
+        // Record OUR digest of what landed. The package manager's lockfile
+        // says what the registry offered; this says what a build will read.
+        let range = ctx_traits_io::init::authoring_range_spec();
+        let entry = ctx_traits_io::authoring_env::authoring_lock_entry(&cwd, manager, &range)?;
+        let mut lock = ctx_traits_io::project_lock::read_project_lock(&cwd)?.unwrap_or_else(|| {
+            ctx_traits_core::project_lock::ProjectLock::new(
+                ctx_traits_core::project_lock::Metadata::default(),
+            )
+        });
+        lock.authoring = Some(entry);
+        ctx_traits_io::project_lock::write_project_lock(&cwd, &mut lock)?;
+        Some(manager)
     } else {
         None
     };
