@@ -1,5 +1,5 @@
 schema-version = "0.2"
-key = "0235"
+key = "0236"
 title = "Retire the ask and gate step kinds"
 status = "ready"
 raised = "2026-08-20"
