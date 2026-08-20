@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0234"
 title = "Record the authoring pin in config.lock, and add the command that moves it"
-status = "ready"
+status = "done"
 raised = "2026-08-20"
 content = """
 Owner ruling 2026-08-20: the resolved authoring-package version belongs in
@@ -55,6 +55,31 @@ simply what a version bump is for.
 installed them; a command moves the manifest pin, re-installs and re-records
 in one act; and `init` on a repository with a stale pin either refreshes it
 or says exactly which command will.
+
+## Outcome (b1517a02) — config.lock gets nothing, deliberately
+
+The premise was wrong and checking the repository showed it.
+`.ctx/traits/pnpm-lock.yaml` is COMMITTED; only `node_modules/` is ignored.
+So the package manager's lockfile already is the reproducible record of what
+resolved, in a format the tool that wrote it verifies. A copy in
+`config.lock` would be verified by nobody and drift the first time someone
+ran `pnpm up`. "Which manager is authoritative" needs no recording either —
+the lockfile's filename says it, which is what the probe reads.
+
+Owner agreed 2026-08-20. What shipped instead:
+
+- The dependency is a RANGE (`>=0.2.4 <0.3.0`) rather than an exact pin, and
+  the readiness check validates the INSTALLED version against it. An exact
+  pin made every version difference an error, including the ones that are
+  not.
+- `init --install` rewrites the range and installs in one act, reporting what
+  moved. `init` alone reports and changes nothing.
+- No `upgrade` verb: it would be a synonym for `init --install` today. It
+  earns the name when it also moves vendored dependencies.
+
+The env-override idea for local development was refused in favour of the
+range, which solves the same problem without a second mechanism: a workspace
+build inside the window simply works.
 """
 validation = """
 ## Watch
