@@ -17,6 +17,7 @@ import {
   compact,
   compactAs,
   headingBlock,
+  slugFromName,
   sourceMapForSequenceItems,
   validateSlug,
 } from "./normalize.js";
@@ -357,21 +358,21 @@ export function rubric(fields: RubricFields): ResourceHandle {
 }
 
 function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemFields[]>): ChecklistHandle {
-  validateSlug(fields.id, "checklist.id");
+  const id = slugFromName(fields.id, "checklist.id");
   if (fields.items.length === 0) {
     throw new Error(`checklist ${JSON.stringify(fields.id)}: must declare at least one item`);
   }
 
   const seen = new Set<string>();
   const items = fields.items.map((item, index) => {
-    const itemPath = `checklist.${fields.id}.item[${index}].id`;
+    const itemPath = `checklist.${id}.item[${index}].id`;
     validateSlug(item.id, itemPath);
     if (seen.has(item.id)) {
       throw new Error(`${itemPath}: duplicate checklist item id ${JSON.stringify(item.id)}`);
     }
     seen.add(item.id);
     if (item.text.trim() === "") {
-      throw new Error(`checklist.${fields.id}.item[${index}].text: must not be empty`);
+      throw new Error(`checklist.${id}.item[${index}].text: must not be empty`);
     }
     return compact({
       id: item.id,
@@ -388,7 +389,7 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
   const requiresEvidence = fields.items.some((item) => item.requiresEvidence === true);
 
   const verdict = schema.object(
-    `${fields.id}-verdict`,
+    `${id}-verdict`,
     {
       item: schema.field(schema.enum(itemIds), {
         description: "Which checklist item this verdict answers.",
@@ -401,11 +402,11 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
         description: "Concrete evidence supporting the status.",
       }),
     },
-    { description: `One verdict for one item of checklist resource:${fields.id}.` },
+    { description: `One verdict for one item of checklist resource:${id}.` },
   );
 
   const declaration = compact({
-    id: fields.id,
+    id,
     variant: "checklist",
     hint: fields.hint,
     item: items,

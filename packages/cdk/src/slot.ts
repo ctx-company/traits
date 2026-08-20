@@ -12,7 +12,7 @@ import type {
 } from "./handles.js";
 import { optionalSlot as optionalSlotInput } from "./input.js";
 import { attachMeta, metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
-import { collectMany, compact, validateSlug } from "./normalize.js";
+import { collectMany, compact, slugFromName, validateSlug } from "./normalize.js";
 import { ref, refText } from "./ref.js";
 import { schemaList } from "./schema.js";
 import type { SchemaValue } from "./schema.js";
@@ -242,11 +242,11 @@ function slotWithSchema(value: string | Omit<SlotFields, "schema">, schemaRef: S
 }
 
 function slotOf(fields: SlotFields): DeclaredSlotHandle {
-  validateSlug(fields.id, "slot.id");
+  const id = slugFromName(fields.id, "slot.id");
   const declaration = compact({
-    id: fields.id,
+    id,
     schema: refText(fields.schema, "slot.schema"),
-    description: fields.description ?? `Runtime slot ${fields.id}.`,
+    description: fields.description ?? `Runtime slot ${id}.`,
     hint: fields.hint,
   });
   // The handle's own enumerable surface is empty (only field access, via the
@@ -254,23 +254,16 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   // schema, description, hint }` declaration lives only in `meta.declaration`.
   // See `withDeclaration` in `meta.ts` for the shared split every other
   // declaration builder (agent/port/prompt/schema.object/...) uses too.
-  const handle = withDeclaration("slot", `slot:${fields.id}`, declaration, {} as JsonObject, {
+  const handle = withDeclaration("slot", `slot:${id}`, declaration, {} as JsonObject, {
     declarations: collectMany([fields.schema]),
   });
-  recordTraitMint("slot", fields.id, `slot:${fields.id}`, declaration);
+  recordTraitMint("slot", id, `slot:${id}`, declaration);
   const objectFields = objectSchemaFields(fields.schema);
   const declarations = collectMany([handle]);
   const resolved =
     objectFields === undefined
       ? (handle as SlotHandle)
-      : (fieldRefProxy(
-          handle as SlotHandle,
-          fields.id,
-          `slot:${fields.id}`,
-          [],
-          objectFields,
-          declarations,
-        ) as SlotHandle);
+      : (fieldRefProxy(handle as SlotHandle, id, `slot:${id}`, [], objectFields, declarations) as SlotHandle);
   // `.optional()` is the per-SITE optionality wrapper, identical in output to
   // `input.optional(slot)` — optionality has never been a property of the slot
   // itself, so the same slot stays required at one step and optional at

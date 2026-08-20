@@ -3,7 +3,7 @@ import type { JsonObject } from "./generated.js";
 import type { InstructionOutputHandle, PortHandle, SlotHandle } from "./handles.js";
 import type { CdkObject } from "./meta.js";
 import { metaOf, withDeclaration } from "./meta.js";
-import { collectMany, compact, mutableScalarArray, validateSlug } from "./normalize.js";
+import { collectMany, compact, mutableScalarArray, slugFromName } from "./normalize.js";
 import { refText } from "./ref.js";
 import type { SchemaValue } from "./schema.js";
 
@@ -156,12 +156,12 @@ function portDirectionHelpers(direction: "input" | "output"): PortDirectionHelpe
 // schema ref, and supply it explicitly, since it isn't otherwise recoverable
 // from a plain ref string like `"schema:text"`.
 function portOf<Value = unknown>(fields: PortFields): PortHandle<Value> {
-  validateSlug(fields.id, "port.id");
+  const id = slugFromName(fields.id, "port.id");
   const declaration = compact({
-    id: fields.id,
+    id,
     direction: fields.direction,
     schema: refText(fields.schema, "port.schema"),
-    description: fields.description ?? `${fields.direction} port ${fields.id}.`,
+    description: fields.description ?? `${fields.direction} port ${id}.`,
     value: fields.value === undefined ? undefined : refText(fields.value, "port.value"),
     optional: fields.optional,
     title: fields.title,
@@ -170,14 +170,14 @@ function portOf<Value = unknown>(fields: PortFields): PortHandle<Value> {
   });
   const handle = withDeclaration<CdkObject, "port", Value>(
     "port",
-    `port:${fields.id}`,
+    `port:${id}`,
     declaration,
     {},
     {
       declarations: collectMany([fields.schema, fields.value]),
     },
   );
-  recordTraitMint("port", fields.id, `port:${fields.id}`, declaration);
+  recordTraitMint("port", id, `port:${id}`, declaration);
   return handle;
 }
 

@@ -3,7 +3,7 @@ import { agentTemplates } from "./generated.js";
 import type { AgentTemplateDefinition } from "./generated.js";
 import type { AgentHandle, SequenceHandle } from "./handles.js";
 import { withDeclaration, withHiddenField } from "./meta.js";
-import { collectMany, compact, validateSlug } from "./normalize.js";
+import { collectMany, compact, slugFromName, validateSlug } from "./normalize.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
 import type { SessionBinding } from "./session.js";
 import { sessionFieldOf } from "./session.js";
@@ -51,9 +51,9 @@ export interface AgentFunction extends AgentTemplateFunctions {
 }
 
 function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclaration>[4] = {}): AgentHandle {
-  validateSlug(fields.id, "agent.id");
+  const id = slugFromName(fields.id, "agent.id");
   const declaration = compact({
-    id: fields.id,
+    id,
     description: fields.description,
     summary: fields.summary,
     system: fields.system,
@@ -67,7 +67,7 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
   // requiring the author to also list the handle at the trait root.
   const handle = withDeclaration(
     "agent",
-    `agent:${fields.id}`,
+    `agent:${id}`,
     declaration,
     {},
     {

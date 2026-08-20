@@ -536,6 +536,55 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   // cased to itself, which meant every lowercase name produced an
   // unbuildable trait: `ctx traits create work` failed with "invalid
   // manifest at root: missing field `name`" while `create Work` succeeded.
+  // Every entity takes a NAME and derives its id, the way defineTrait and
+  // step.command always have. Before this, `slot`, `port`, `agent` and the
+  // rest ran their first argument through `validateSlug` unchanged, so an
+  // author had to remember which builders kebab-case for them and which
+  // reject a capital letter.
+  it("derives an id from a name on every declaration builder", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("Name First", { version: "0.1.0", description: "d" });
+      const goal = port.input.text({ id: "Task Key", description: "x" });
+      const result = slot.text("Work Summary");
+      const hand = agent.worker("Lead Worker", { description: "w" });
+      hand.prompt("Do it", { input: input.prompt`Do ${goal}.`, output: result });
+      return { report: port.output.text({ id: "Final Report", value: result, description: "r" }) };
+    });
+    const draft = envelope.draft as {
+      readonly port: readonly { readonly id: string }[];
+      readonly slot: readonly { readonly id: string }[];
+      readonly agent: readonly { readonly id: string }[];
+    };
+    expect(draft.port.map((entry) => entry.id).sort()).toEqual(["final-report", "task-key"]);
+    expect(draft.slot.map((entry) => entry.id)).toEqual(["work-summary"]);
+    expect(draft.agent.map((entry) => entry.id)).toEqual(["lead-worker"]);
+  });
+
+  // The reason this could ship without touching a single existing canonical:
+  // a name that is already a slug derives to itself.
+  it("leaves an id-shaped name byte-identical", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("Slug Named", { version: "0.1.0", description: "d" });
+      const result = slot.text("work-summary");
+      const hand = agent.worker("worker", { description: "w" });
+      hand.prompt("Do it", { input: input.prompt`Do it.`, output: result });
+      return { report: port.output.text({ id: "report", value: result, description: "r" }) };
+    });
+    const draft = envelope.draft as { readonly slot: readonly { readonly id: string }[] };
+    expect(draft.slot.map((entry) => entry.id)).toEqual(["work-summary"]);
+  });
+
+  // The error names the string the author wrote. Being told "" is invalid
+  // when you typed "!!!" names something that appears nowhere in the source.
+  it("quotes the given name when no id can be derived from it", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("Underivable", { version: "0.1.0", description: "d" });
+        slot.text("!!!");
+      }),
+    ).toThrow(/cannot derive an id from "!!!"/);
+  });
+
   it("defineTrait with a bare slug still carries it as the name", () => {
     const envelope = evaluateTraitFunction(() => {
       defineTrait("bare-slug", { description: "s" });

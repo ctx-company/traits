@@ -59,6 +59,7 @@ import {
   sourceMapForSequenceItems,
   tokenizeShellLiteral,
   uniqueInOrder,
+  slugFromName,
   validateSlug,
 } from "./normalize.js";
 import type { Mutable } from "./normalize.js";
@@ -2318,12 +2319,7 @@ function titleFromId(id: string): string {
  * steps will call to mint their own id.
  */
 export function idFromTitle(title: string): string {
-  const id = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  validateSlug(id, `idFromTitle(${JSON.stringify(title)})`);
-  return id;
+  return slugFromName(title, `idFromTitle(${JSON.stringify(title)})`);
 }
 
 /**

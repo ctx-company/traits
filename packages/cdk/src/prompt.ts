@@ -17,6 +17,7 @@ import {
   compact,
   mergeDeclarationSets,
   normalizeRefList,
+  slugFromName,
   unique,
   uniqueInOrder,
   validateSlug,
@@ -128,26 +129,26 @@ export const prompt = Object.assign(promptFn, {
 }) as PromptFunction;
 
 function promptOf(fields: PromptFields): PromptHandle {
-  validateSlug(fields.id, "prompt.id");
+  const id = slugFromName(fields.id, "prompt.id");
   const text = promptTextValue(fields.text);
   const source =
     fields.source === undefined
-      ? promptSourceFromText(fields.text, `prompt.${fields.id}.text`)
-      : promptSourceValue(fields.source, `prompt.${fields.id}.source`);
+      ? promptSourceFromText(fields.text, `prompt.${id}.text`)
+      : promptSourceValue(fields.source, `prompt.${id}.source`);
   if (text !== undefined && source !== undefined) {
-    throw new Error(`prompt.${fields.id}: expected either text prompt body or source, not both`);
+    throw new Error(`prompt.${id}: expected either text prompt body or source, not both`);
   }
   const refs = promptRefsForFields(fields);
   const declarations = collectMany([fields.input, fields.output, fields.source, fields.text]);
   const declaration = compact({
-    id: fields.id,
+    id,
     input: normalizeRefList(fields.input ?? refs),
     output: normalizeRefList(fields.output),
     description: fields.description,
     text,
     source,
   });
-  return withDeclaration("prompt", `prompt:${fields.id}`, declaration, {}, { declarations, refs });
+  return withDeclaration("prompt", `prompt:${id}`, declaration, {}, { declarations, refs });
 }
 
 /** One template's mergeable facets — shared shape between a literal/interpolated span and a whole template. */

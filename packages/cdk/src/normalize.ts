@@ -467,6 +467,34 @@ export function validateSlug(value: string, fieldPath: string): void {
     throw new Error(`${fieldPath}: expected lowercase slug, got ${JSON.stringify(value)}`);
   }
 }
+
+/**
+ * The id a declaration gets from the name it was given: lowercased, runs of
+ * non-alphanumerics collapsed to one hyphen, then validated against the same
+ * slug grammar an explicit id is held to.
+ *
+ * Every entity takes a NAME first, the way `defineTrait` and `step.command`
+ * always have — so `slot.text("Work summary")` and `slot.text("work-summary")`
+ * declare the same slot, and an author never has to remember which builders
+ * kebab-case for them and which reject a capital letter.
+ *
+ * A name that is already a slug derives to itself, so this changes no
+ * existing declaration's bytes.
+ *
+ * The error quotes what the author actually wrote, not the derived form:
+ * being told `"work-summary"` is invalid when you typed `"Work Summary!!"`
+ * names a string that appears nowhere in the source.
+ */
+export function slugFromName(value: string, fieldPath: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new Error(`${fieldPath}: cannot derive an id from ${JSON.stringify(value)}`);
+  }
+  return slug;
+}
 export function refText(value: unknown, fieldPath: string): string {
   const ref = metaOf(value)?.ref;
   if (ref !== undefined) return ref;
