@@ -108,14 +108,18 @@ fn task_queue_brings_up_the_inline_pane_for_every_member() {
         "__QUEUE_HANDOFF_COMPLETE__",
         ".ctx/queue-handoff-termios",
     );
-    // `cmd = "false"` is a non-interactive command-permission rejection
-    // (not a session failure), so both members complete without a merge
-    // intent — this proof cares about the pane handoff, not the queue's
-    // outcome classification, which `proof_task_queue_refusal_teardown.rs`
-    // already covers.
+    // `cmd = "false"` is a command-permission rejection, so neither member
+    // completes and the queue halts — `EXIT_RUN_FAILED`, the same code
+    // `proof_task_queue_refusal_teardown.rs` pins for this shape and the
+    // behaviour 0215 introduced ("a failed run must report as failed").
+    //
+    // This proof does not own that classification; it is asserted only so a
+    // change to it is noticed here rather than read as a pane regression.
+    // What this proof owns is below: that the inline pane came up for every
+    // member and the teardown/construct handoff did not race.
     assert_eq!(
-        exit_code, 0,
-        "a rejected command step still lets the queue complete cleanly: {raw:?}"
+        exit_code, 7,
+        "expected the queue-halted exit code (app::error::EXIT_RUN_FAILED): {raw:?}"
     );
 
     assert!(
@@ -133,10 +137,15 @@ fn task_queue_brings_up_the_inline_pane_for_every_member() {
         .find("__QUEUE_HANDOFF_COMPLETE__")
         .unwrap_or_else(|| panic!("post-exit completion marker was not visible: {text:?}"));
     let committed = &text[..marker];
+    // Both members reach the table — the point of `--continue-on-failure`,
+    // and the thing a pane that failed to hand off would cut short. The
+    // outcome WORD is deliberately not asserted: it is classification, which
+    // `proof_task_queue_refusal_teardown.rs` owns, and pinning it here made
+    // this proof fail for a reason that had nothing to do with panes.
     assert!(
         committed.contains("task queue:")
-            && committed.contains("0002: completed")
-            && committed.contains("0003: completed"),
+            && committed.contains("0002: ")
+            && committed.contains("0003: "),
         "task queue outcome table did not report both members: {committed:?}"
     );
 

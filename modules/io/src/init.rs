@@ -512,11 +512,16 @@ mod tests {
             "runtime.toml never appears in the init report: {report:?}"
         );
 
-        let ignore =
-            std::fs::read_to_string(crate::gitignore::nested_gitignore_path(&repo).as_std_path())
-                .expect("nested gitignore written");
+        // The machine tier is ignored from the first commit. Since 0235 the
+        // trait root states its own ignorables, so the entry is `runtime.toml`
+        // in `.ctx/traits/.gitignore` rather than `traits/runtime.toml` a
+        // level up.
+        let ignore = std::fs::read_to_string(
+            crate::gitignore::trait_root_gitignore_path(&repo).as_std_path(),
+        )
+        .expect("trait-root gitignore written");
         assert!(
-            ignore.lines().any(|line| line == "traits/runtime.toml"),
+            ignore.lines().any(|line| line == "runtime.toml"),
             "machine tier ignored from the first commit: {ignore}"
         );
         let _ = std::fs::remove_dir_all(repo.as_std_path());
@@ -534,16 +539,24 @@ mod tests {
         let manifest =
             std::fs::read_to_string(crate::layout::authoring_manifest_path(&repo).as_std_path())
                 .expect("authoring manifest scaffolded");
+        // A RANGE, not an exact pin: the binary needs a CDK that speaks its
+        // canonical schema, not one exact build (0235).
         for package in ["cdk", "config"] {
             let expected = format!(
                 "\"@ctx-traits/{package}\": \"{}\"",
-                env!("CARGO_PKG_VERSION")
+                super::authoring_range_spec()
             );
             assert!(
                 manifest.contains(&expected),
-                "{package} must pin the crate's own version: {manifest}"
+                "{package} must declare the supported range: {manifest}"
             );
         }
+        let (min, _max) = super::authoring_cdk_range();
+        assert_eq!(
+            min,
+            env!("CARGO_PKG_VERSION"),
+            "the range floor is this crate's own version"
+        );
         let _ = std::fs::remove_dir_all(repo.as_std_path());
     }
 
