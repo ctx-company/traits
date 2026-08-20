@@ -25,6 +25,51 @@ pub struct ProjectLock {
     pub base: Option<BaseLockEntry>,
     #[serde(rename = "package", default, skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<PackageLockEntry>,
+    /// The authoring-time npm packages this project builds traits with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authoring: Option<AuthoringLock>,
+}
+
+/// What was installed to author with, digested by us.
+///
+/// A package manager's lockfile is not evidence for this purpose. It records
+/// what a registry SAID — a version and the integrity string that registry
+/// published — and it is maintained by a tool with its own rules about when to
+/// rewrite. Our locks digest the bytes actually on disk, so a change to what a
+/// build reads is detectable no matter which tool put it there. That rule is
+/// why `PackageLockEntry` carries `tree_digest` beside npm's `integrity`
+/// rather than trusting it, and the authoring packages are read by every
+/// build, so they get the same treatment.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct AuthoringLock {
+    /// The version window the project declares, recorded so a lock and a
+    /// manifest that disagree are visible without re-reading package.json.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub range: String,
+    /// The package manager that produced the install, for reporting only:
+    /// the lockfile beside the manifest remains what a reinstall reads.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manager: String,
+    #[serde(rename = "package", default, skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<AuthoringPackageLock>,
+}
+
+/// One installed authoring package and the digest of what is actually there.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct AuthoringPackageLock {
+    /// npm package name, e.g. `@ctx-traits/cdk`.
+    pub package: String,
+    /// The exact version resolved.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub version: String,
+    /// Aggregate digest over every regular file's relative path and content
+    /// in the installed package — the same scheme as
+    /// [`PackageLockEntry::tree_digest`], and the only claim here we compute
+    /// ourselves.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tree_digest: String,
 }
 
 impl ProjectLock {
@@ -33,6 +78,7 @@ impl ProjectLock {
             metadata: Some(metadata),
             base: None,
             packages: Vec::new(),
+            authoring: None,
         }
     }
 
