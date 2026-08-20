@@ -170,6 +170,55 @@ pub(crate) fn build_cdk_package(
 /// path, factored out so a caller that already holds a computed
 /// [`crate::app::cdk_build::CdkSynthOutcome`] (routed off a single Node
 /// synthesis) never has to synthesize a second time to reach it.
+/// Fill in each protected resource's `digest` by reading the file the build
+/// just declared.
+///
+/// The digest is COMPUTED, never authored — that is the whole difference from
+/// the hand-typed pin this replaced. It lands in the canonical rather than
+/// beside it because it has to travel with the resource: a package
+/// materialized into the built-in store, vendored into a consumer, or written
+/// by hand each separates a lock from the bytes it describes, and the
+/// verifier is then left with nothing to compare against.
+///
+/// A resource whose file cannot be read is left without a digest rather than
+/// failing the build. The build's own resource reporting already names a
+/// missing or unreadable resource; refusing to build here would turn every
+/// such report into a hard stop.
+pub(crate) fn inject_resource_digests(
+    package_root: &camino::Utf8Path,
+    output_text: &str,
+    output_format: ctx_traits_core::synth::OutputFormat,
+) -> crate::Result<String> {
+    let encoding = output_format.encoding();
+    let mut trait_ref = ctx_traits_core::encoding::decode_trait(encoding, output_text)?;
+    if !trait_ref
+        .resources
+        .iter()
+        .any(ctx_traits_core::r#trait::Resource::is_protected)
+    {
+        return Ok(output_text.to_string());
+    }
+
+    let roots =
+        ctx_traits_io::resource::resolve_resource_roots(package_root, &trait_ref.resources)?;
+    let mut changed = false;
+    for resource in &mut trait_ref.resources {
+        if !resource.is_protected() {
+            resource.digest = None;
+            continue;
+        }
+        let read = ctx_traits_io::resource::digest_resource(&roots, resource)?;
+        if let Some(file) = read.digest {
+            resource.digest = Some(file.digest);
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(output_text.to_string());
+    }
+    Ok(ctx_traits_core::encoding::encode(encoding, &trait_ref)?)
+}
+
 fn finish_cdk_package_build(
     source_path: &camino::Utf8Path,
     output_format: ctx_traits_core::synth::OutputFormat,
@@ -179,8 +228,12 @@ fn finish_cdk_package_build(
     let (target_path, map_path) =
         crate::app::cdk_build::package_build_paths(source_path, output_format, out)?;
     crate::app::cdk_build::ensure_distinct_build_paths(source_path, &target_path, &map_path)?;
-    validate_package_manifest_identity(&target_path, &outcome.response.output_text, output_format)?;
-    ctx_traits_io::write::write_build_output(&target_path, &outcome.response.output_text)?;
+    let package_root = ctx_traits_io::layout::package_root_for_manifest(&target_path)
+        .map_or_else(|| target_path.clone(), camino::Utf8Path::to_path_buf);
+    let output_text =
+        inject_resource_digests(&package_root, &outcome.response.output_text, output_format)?;
+    validate_package_manifest_identity(&target_path, &output_text, output_format)?;
+    ctx_traits_io::write::write_build_output(&target_path, &output_text)?;
     crate::app::cdk_build::write_generated_package_json_if_packaged(source_path)?;
     let map_json = serde_json::to_string_pretty(&outcome.source_map)
         .map(|mut text| {

@@ -69,7 +69,7 @@ impl OutputFormat {
         self.as_str()
     }
 
-    fn encoding(self) -> Encoding {
+    pub fn encoding(self) -> Encoding {
         match self {
             Self::Toml => Encoding::Toml,
             Self::Json => Encoding::Json,

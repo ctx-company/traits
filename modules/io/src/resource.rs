@@ -247,9 +247,16 @@ pub struct PresentedResource {
 /// Outcome of verifying a protected (pinned) resource's actual bytes.
 #[derive(Debug, Clone)]
 pub enum ProtectionVerification {
-    /// The resource declares no `digest` pin; not protected, nothing to
-    /// verify.
+    /// The resource is not protected; nothing to verify.
     Unprotected,
+    /// The resource IS protected but its canonical carries no digest, so
+    /// there is nothing to compare against.
+    ///
+    /// The shape of a package whose bytes a build never read — a hand-written
+    /// canonical, or one produced before digests were computed — not of a
+    /// tampered one. Reported so it is visible, and distinct from
+    /// `Unprotected` so a caller can say which of the two it is.
+    NotRecorded,
     /// Actual bytes matched the declared pin. Carries the verified absolute
     /// path, safe to open or spawn immediately by the caller that requested
     /// verification — no further containment/symlink check is required.
@@ -319,12 +326,18 @@ pub fn verify_protected_resource(
     roots: &ResourceRoots,
     resource: &Resource,
 ) -> crate::Result<ProtectionVerification> {
-    let Some(expected) = resource.digest.as_ref() else {
+    // Unprotected, or protected but never built: a resource whose canonical
+    // carries no digest has nothing to compare against. That is the shape of
+    // a package whose bytes were never read by a build, not of a tampered
+    // one, so it reports as unprotected rather than failing closed.
+    if !resource.is_protected() {
         return Ok(ProtectionVerification::Unprotected);
+    }
+    let Some(expected) = resource.digest.as_ref() else {
+        return Ok(ProtectionVerification::NotRecorded);
     };
-    // `validate_resources` in core rejects a digest pin on a pathless
-    // resource, so this is unreachable for a decoded manifest; fail closed
-    // rather than assert.
+    // `is_protected` already requires a path, so this is unreachable for a
+    // decoded manifest; fail closed rather than assert.
     let Some(path) = resource.path.as_deref() else {
         return Ok(ProtectionVerification::Failed(
             ProtectionFailure::Unavailable {

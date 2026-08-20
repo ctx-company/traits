@@ -499,24 +499,27 @@ fn absolute_resource_path(
     // immediately before this path is handed back for opening; a mismatch or
     // unavailable file fails the whole frame closed rather than degrading to
     // an unverified "not available" text line.
-    if resource.is_protected() {
-        let path = match ctx_traits_io::resource::verify_protected_resource(&roots, resource)? {
-            ctx_traits_io::resource::ProtectionVerification::Verified { path } => path,
-            ctx_traits_io::resource::ProtectionVerification::Unprotected => {
-                unreachable!("is_protected() checked above")
-            }
-            ctx_traits_io::resource::ProtectionVerification::Failed(failure) => {
-                return Err(crate::Error::Command {
-                    message: failure.to_string(),
-                });
-            }
-        };
-        let disclosure = repo_root_disclosure(&roots, resource, relative)?;
-        return Ok(ResolvedResourcePresentation {
-            path: path.to_string(),
-            hint: disclosure,
-            status: ctx_traits_io::resource::PresentationStatus::Available,
-        });
+    match ctx_traits_io::resource::verify_protected_resource(&roots, resource)? {
+        ctx_traits_io::resource::ProtectionVerification::Verified { path } => {
+            let disclosure = repo_root_disclosure(&roots, resource, relative)?;
+            return Ok(ResolvedResourcePresentation {
+                path: path.to_string(),
+                hint: disclosure,
+                status: ctx_traits_io::resource::PresentationStatus::Available,
+            });
+        }
+        ctx_traits_io::resource::ProtectionVerification::Failed(failure) => {
+            return Err(crate::Error::Command {
+                message: failure.to_string(),
+            });
+        }
+        // Not protected, or protected by a canonical that records no digest
+        // — a trait whose bytes a build never read. Both fall through to the
+        // ordinary presentation below: refusing here would make every
+        // not-yet-rebuilt trait unrunnable, and `check` already reports a
+        // missing digest.
+        ctx_traits_io::resource::ProtectionVerification::Unprotected
+        | ctx_traits_io::resource::ProtectionVerification::NotRecorded => {}
     }
 
     let presented = ctx_traits_io::resource::presentation_path(&roots, resource, relative)?;
@@ -718,9 +721,10 @@ fn inline_path_presentation(
     if resource.is_protected() {
         match ctx_traits_io::resource::verify_protected_resource(&roots, resource)? {
             ctx_traits_io::resource::ProtectionVerification::Verified { .. } => {}
-            ctx_traits_io::resource::ProtectionVerification::Unprotected => {
-                unreachable!("is_protected() checked above")
-            }
+            // Falls through to the ordinary inline read below: the trait
+            // was never built with digests, so there is nothing to compare.
+            ctx_traits_io::resource::ProtectionVerification::NotRecorded
+            | ctx_traits_io::resource::ProtectionVerification::Unprotected => {}
             ctx_traits_io::resource::ProtectionVerification::Failed(failure) => {
                 return Err(crate::Error::Command {
                     message: failure.to_string(),

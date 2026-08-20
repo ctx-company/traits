@@ -5165,6 +5165,20 @@ fn resolve_resource_argv_for_spawn(
                 };
                 *slot = path.to_string();
             }
+            // Running a file AS CODE is the one place an unverifiable
+            // resource must refuse rather than degrade: the whole reason a
+            // command may name a resource in its argv is that its bytes are
+            // known.
+            crate::resource::ProtectionVerification::NotRecorded => {
+                return invalid_request(
+                    "run.command.resource-argv",
+                    format!(
+                        "command argv resource {:?} carries no digest; rebuild the trait so its \
+                         canonical records one",
+                        entry.resource_ref
+                    ),
+                );
+            }
             crate::resource::ProtectionVerification::Unprotected => {
                 unreachable!("is_protected() checked above")
             }

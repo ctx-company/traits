@@ -80,6 +80,7 @@ pub fn derive_checklist_resource(
             id: resource_id.to_string(),
             path: None,
             digest: None,
+            protected: None,
             root: ResourceRoot::default(),
             content: None,
             hint: None,

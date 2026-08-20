@@ -156,8 +156,9 @@ pub(crate) struct ResourceProtectionIssue {
 pub(crate) fn resource_protection_issues(
     roots: &ctx_traits_io::resource::ResourceRoots,
     trait_ref: &ctx_traits_core::Trait,
-) -> crate::Result<Vec<ResourceProtectionIssue>> {
+) -> crate::Result<ResourceProtectionReport> {
     let mut issues = Vec::new();
+    let mut unrecorded = Vec::new();
 
     for resource in &trait_ref.resources {
         if !resource.is_protected() {
@@ -165,9 +166,19 @@ pub(crate) fn resource_protection_issues(
         }
         match ctx_traits_io::resource::verify_protected_resource(roots, resource)? {
             ctx_traits_io::resource::ProtectionVerification::Verified { .. } => {}
-            ctx_traits_io::resource::ProtectionVerification::Unprotected => {
-                unreachable!("is_protected() checked above")
+            // A protected resource whose canonical records no digest is
+            // reported, not asserted away: it means the trait predates its
+            // own resource digests and wants a rebuild.
+            // NOT an issue. A canonical with no resource digests is one no
+            // build has read the bytes for — every trait built before they
+            // were computed looks like this. Reported so it is visible and
+            // fixable, non-blocking so upgrading ctx does not fail `check`
+            // on every trait at once. Same shape as a missing projection
+            // baseline, which reports rather than blocks.
+            ctx_traits_io::resource::ProtectionVerification::NotRecorded => {
+                unrecorded.push(resource.id.clone());
             }
+            ctx_traits_io::resource::ProtectionVerification::Unprotected => {}
             ctx_traits_io::resource::ProtectionVerification::Failed(failure) => {
                 issues.push(ResourceProtectionIssue {
                     field: format!("resource.{}.digest", resource.id),
@@ -188,7 +199,17 @@ pub(crate) fn resource_protection_issues(
     }
 
     issues.sort_by(|a, b| a.field.cmp(&b.field).then(a.message.cmp(&b.message)));
-    Ok(issues)
+    Ok(ResourceProtectionReport { issues, unrecorded })
+}
+
+/// Protected-resource findings, split by whether they block.
+pub(crate) struct ResourceProtectionReport {
+    /// Bytes that disagree with the digest recorded for them, or that cannot
+    /// be read. These block.
+    pub(crate) issues: Vec<ResourceProtectionIssue>,
+    /// Protected resources whose canonical records no digest — the trait
+    /// wants a rebuild. Reported, never blocking.
+    pub(crate) unrecorded: Vec<String>,
 }
 
 pub(crate) fn resource_read_warning_strings(

@@ -41,7 +41,7 @@ vendored-path = ".ctx/traits/vendored/spec"
 path = "../spec"
 
 [dependency.digests]
-source = "sha256:174ee5b3791207a09a286352423e6ccd4bc30eb1b7c992a2e6fab717acd070b4"
-canonical = "sha256:7f4103abe0932c220aad45daab6f16a588587656cb05d4f3ef153bd11c7c2730"
+source = "sha256:448f90d9d4a7720b23b1c2f9cd00e568282e2338cd034b037ee73e4591d17218"
+canonical = "sha256:52d4cbba0447f2e94bac9603e1db63e6f1bdf2570297e8190484fddbcff774a7"
 model-visible = "sha256:fa29959334535f27eea37bf642482dd9457c79f07c7498fa4c69188088113bdf"
 resource-manifest = "sha256:21a1bea7ad900b112b52cd04ea10e3b98fa6c50fd40b73798218fee995bc91c9"

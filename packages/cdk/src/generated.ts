@@ -1240,17 +1240,24 @@ export type CanonicalResource = {
    */
   readonly "content"?: string | undefined;
   /**
-   * Canonical pin over the resource's expected file bytes, in
-   * `sha256:<hex>` form. Presence marks this resource protected: IO must
-   * verify actual bytes against this pin immediately before the resource
-   * reaches a model or a command spawns, and `ctx traits check` reports
-   * drift between this pin and the file on disk. Valid only on a
-   * path-backed resource — inline and checklist bodies are already
-   * canonical bytes with no filesystem path to verify. Omitted from
-   * canonical serialization when absent, so every existing unpinned
-   * declaration stays byte-identical. Adding or changing this pin changes
-   * `Resource`'s canonical digest, which is how pinning or repinning a
-   * resource moves the trait's machine-trust decision to stale.
+   * The digest of this resource's file bytes, in `sha256:<hex>` form.
+   * 
+   * COMPUTED at build time, never authored: `ctx traits build` reads the
+   * file and writes this. It sat here before as a hand-typed pin, which is
+   * why nothing ever carried one — an author had to paste a hex string
+   * that went stale on the next legitimate edit.
+   * 
+   * It lives in the canonical rather than the lock because it has to
+   * travel with the resource that declares it. Evidence kept anywhere else
+   * gets separated from the bytes it describes: a package materialized
+   * into the built-in store, vendored into a consumer, or written by hand
+   * each loses it a different way, and the verifier then has nothing to
+   * compare against.
+   * 
+   * The cost is deliberate. Editing a protected resource changes the
+   * trait's canonical digest, which moves this machine's trust decision to
+   * unreviewed — correct, because a resource is content a model reads, and
+   * changing it changes what the trait does.
    */
   readonly "digest"?: CanonicalDigest | undefined;
   /**
@@ -1276,6 +1283,20 @@ export type CanonicalResource = {
    * Path to the resource blob, relative to `root`.
    */
   readonly "path"?: string | undefined;
+  /**
+   * Whether this resource's bytes are verified against `digest`.
+   * 
+   * `None` means "derive from `root`", which is what almost every
+   * declaration wants: a package-owned resource ships with the trait, so
+   * its bytes are the trait's own and are verified; a `root = "repo"`
+   * resource is an input the consuming project supplies — a task board
+   * differs in every repository and changes between runs — so there is
+   * nothing stable to verify it against.
+   * 
+   * Set it explicitly only to disagree: `false` on a package resource that
+   * legitimately churns.
+   */
+  readonly "protected"?: boolean | undefined;
   /**
    * How this resource's body is presented to the model. Defaults to
    * `reference` for path-backed resources and `inline` for content or

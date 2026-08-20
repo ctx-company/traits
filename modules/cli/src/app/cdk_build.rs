@@ -458,7 +458,15 @@ pub(crate) fn publish_cdk_family(
         let variant_dir = generated.join(&variant.name);
         let target_path = variant_dir.join(format!("index.{}", output_format.extension()));
         let map_path = variant_dir.join(ctx_traits_io::layout::CANONICAL_SOURCE_MAP);
-        ctx_traits_io::write::write_build_output(&target_path, &variant.response.output_text)?;
+        // Every variant's canonical carries its own resource digests: a
+        // variant is a whole trait, and the resources it declares are read
+        // for it, not for the family shell.
+        let variant_text = crate::app::schema_synth_build::inject_resource_digests(
+            &package_root,
+            &variant.response.output_text,
+            output_format,
+        )?;
+        ctx_traits_io::write::write_build_output(&target_path, &variant_text)?;
         let map_json = serde_json::to_string_pretty(&variant.source_map)
             .map(|mut text| {
                 text.push('\n');

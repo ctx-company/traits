@@ -147,6 +147,7 @@ description = "Reviewer's verdict on the version bump."
 [[resource]]
 id = "release-manifest"
 path = "resources/release.toml"
+digest = "sha256:8792d69d297a989bb4d38799684344d59fb0b1f42cd1a7549550615085840cca"
 hint = "The release contract: the version-file locations to bump, the changelog file path, the release branch name, and the bump rule."
 trigger = "on-activation"
 

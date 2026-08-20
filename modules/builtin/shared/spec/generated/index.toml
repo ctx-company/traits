@@ -15,5 +15,6 @@ tag = [
 [[resource]]
 id = "design-rubric"
 path = "resources/design-rubric.md"
+digest = "sha256:801b18cf79498edcb1d920b44d93d94e5063a77087c2aae9fbec32e59bb4762e"
 hint = "How to classify a trait, model its dataflow, and name its identifiers."
 trigger = "on-activation"

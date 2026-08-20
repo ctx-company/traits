@@ -174,18 +174,21 @@ description = "Worker's cumulative account of the delivered research state: file
 [[resource]]
 id = "citation-style"
 path = "resources/citation-style.md"
+digest = "sha256:63cd20892926e758fce36c9498d41c705ee07697fa83f4751ec42f55a7cd6b74"
 hint = "Source-type citation formats and verification rules."
 trigger = "on-demand"
 
 [[resource]]
 id = "research-standards"
 path = "resources/research-standards.md"
+digest = "sha256:c4ba3326dbe94d6205874f9c29874717c3c626078b13ec5104abac8334366c37"
 hint = "Canonical flat-layout doctrine, source-rating scale, citation policy, and Chain-of-Verification method for this family."
 trigger = "on-demand"
 
 [[resource]]
 id = "source-quality-guide"
 path = "resources/source-quality-guide.md"
+digest = "sha256:3489a2f2717cf02b47ae03c1ddf9305b926f12d0611cbdcb4ce3361c2b77c3d0"
 hint = "Domain examples and a decision method for applying the canonical A-E source-quality scale."
 trigger = "on-demand"
 

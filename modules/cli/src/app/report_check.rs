@@ -376,21 +376,36 @@ pub(crate) fn build_check_report(
                 )
                 .with_section(
                     Section::ResourceProtection,
-                    &if resource_protection_issues.is_empty() {
-                        "no pinned resource drift; every command/check argv resource is pinned"
-                            .to_string()
+                    &if resource_protection_issues.issues.is_empty() {
+                        // A trait with resources nobody has digested yet is
+                        // named here rather than silently passing — but it
+                        // does not fail the check, because that is what every
+                        // trait built before resource digests looks like.
+                        if resource_protection_issues.unrecorded.is_empty() {
+                            "no protected resource drift; every command/check argv resource is \
+                             verified"
+                                .to_string()
+                        } else {
+                            format!(
+                                "no drift; {} resource(s) carry no digest yet (rebuild to record \
+                                 them): {}",
+                                resource_protection_issues.unrecorded.len(),
+                                resource_protection_issues.unrecorded.join(", ")
+                            )
+                        }
                     } else {
                         format!(
                             "{} issue(s): {}",
-                            resource_protection_issues.len(),
+                            resource_protection_issues.issues.len(),
                             resource_protection_issues
+                                .issues
                                 .iter()
                                 .map(|issue| format!("{}: {}", issue.field, issue.message))
                                 .collect::<Vec<_>>()
                                 .join("; ")
                         )
                     },
-                    resource_protection_issues.is_empty(),
+                    resource_protection_issues.issues.is_empty(),
                 )
                 .with_section(
                     Section::RenderReadiness,

@@ -113,12 +113,14 @@ hint = "What changed (files), how behavior was preserved, gate results, open con
 [[resource]]
 id = "architecture-dialect"
 path = "resources/architecture-dialect.md"
+digest = "sha256:85f4873acb2828748683a3eb755c797b9e73b4eaf887adaec93b7aab8a303bf2"
 hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
 trigger = "on-activation"
 
 [[resource]]
 id = "smell-catalog"
 path = "resources/smell-catalog.md"
+digest = "sha256:863f4b78e6c693c2da3bc7549c32bc0ae52fc2a2cc61db96606deca3094287c0"
 hint = "Eight detectable refactoring smells with detection patterns, before/after shapes, and when-not-to-apply guards."
 trigger = "on-activation"
 

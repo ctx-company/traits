@@ -213,14 +213,15 @@ export interface ResourceFields {
   /** Presentation mode: `reference` (open a path) or `inline` (embed the body). Defaults by source: `reference` for `path`, `inline` for `content`. */
   readonly render?: ResourceRender;
   /**
-   * Canonical pin over the file's expected bytes, `sha256:<hex>`. Presence
-   * marks the resource protected: Rust verifies actual bytes against this
-   * pin immediately before the resource reaches a model or a command spawns,
-   * and `ctx traits check` reports drift between this pin and the file on
-   * disk. Only meaningful alongside `path` — a resource has no filesystem
-   * bytes to pin without one.
+   * Whether this resource's bytes are verified against the digest recorded
+   * when the trait was built. Omit it and the answer comes from `root`: a
+   * package-owned resource ships with the trait and is verified, a `root:
+   * "repo"` resource is the consuming project's input and is not.
+   *
+   * Set it only to disagree — `protected: false` on a package resource that
+   * legitimately changes between builds. Only meaningful alongside `path`.
    */
-  readonly digest?: string;
+  readonly protected?: boolean;
   /** Advisory hint about the resource contents or usage. */
   readonly hint?: string;
   /** Optional resource kind. `template` resources may declare typed inputs. */
@@ -259,10 +260,12 @@ export interface ResourceFunction {
   (fields: ResourceFields): ResourceHandle;
   /**
    * Binds a file on disk, resolved relative to `root` (default `package`).
-   * Pass `digest` to pin the file's expected bytes — required before the
-   * resource can be referenced as command argv (see {@link sequence}).
+   * A package-owned file is verified against the digest recorded when the
+   * trait was built — which is also what lets it be referenced as command
+   * argv (see {@link sequence}), since running a file as code requires
+   * knowing its bytes have not changed.
    * @example `resource.file("style-guide", { path: "docs/style.md" })`
-   * @example `resource.file("evaluator", { path: "scripts/eval.py", digest: "sha256:..." })`
+   * @example `resource.file("evaluator", { path: "scripts/eval.py" })`
    */
   file(id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle;
   /** Embeds content directly in the trait source, no file on disk. @example `resource.inline("guide", "Prefer minimal diffs.")` */

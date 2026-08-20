@@ -131,19 +131,40 @@ pub struct Resource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 
-    /// Canonical pin over the resource's expected file bytes, in
-    /// `sha256:<hex>` form. Presence marks this resource protected: IO must
-    /// verify actual bytes against this pin immediately before the resource
-    /// reaches a model or a command spawns, and `ctx traits check` reports
-    /// drift between this pin and the file on disk. Valid only on a
-    /// path-backed resource — inline and checklist bodies are already
-    /// canonical bytes with no filesystem path to verify. Omitted from
-    /// canonical serialization when absent, so every existing unpinned
-    /// declaration stays byte-identical. Adding or changing this pin changes
-    /// `Resource`'s canonical digest, which is how pinning or repinning a
-    /// resource moves the trait's machine-trust decision to stale.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The digest of this resource's file bytes, in `sha256:<hex>` form.
+    ///
+    /// COMPUTED at build time, never authored: `ctx traits build` reads the
+    /// file and writes this. It sat here before as a hand-typed pin, which is
+    /// why nothing ever carried one — an author had to paste a hex string
+    /// that went stale on the next legitimate edit.
+    ///
+    /// It lives in the canonical rather than the lock because it has to
+    /// travel with the resource that declares it. Evidence kept anywhere else
+    /// gets separated from the bytes it describes: a package materialized
+    /// into the built-in store, vendored into a consumer, or written by hand
+    /// each loses it a different way, and the verifier then has nothing to
+    /// compare against.
+    ///
+    /// The cost is deliberate. Editing a protected resource changes the
+    /// trait's canonical digest, which moves this machine's trust decision to
+    /// unreviewed — correct, because a resource is content a model reads, and
+    /// changing it changes what the trait does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<Digest>,
+
+    /// Whether this resource's bytes are verified against `digest`.
+    ///
+    /// `None` means "derive from `root`", which is what almost every
+    /// declaration wants: a package-owned resource ships with the trait, so
+    /// its bytes are the trait's own and are verified; a `root = "repo"`
+    /// resource is an input the consuming project supplies — a task board
+    /// differs in every repository and changes between runs — so there is
+    /// nothing stable to verify it against.
+    ///
+    /// Set it explicitly only to disagree: `false` on a package resource that
+    /// legitimately churns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protected: Option<bool>,
 
     /// Which root the declared `path` is relative to. Defaults to `package`
     /// and is omitted from canonical serialization when default, so existing
@@ -221,10 +242,12 @@ impl Resource {
         self.variant.as_deref() == Some(CHECKLIST_VARIANT)
     }
 
-    /// Whether this resource declares a canonical pin. A protected resource's
-    /// bytes must verify against `digest` at every point of use.
+    /// Whether this resource's bytes are verified at every point of use.
+    ///
+    /// Only a path-backed resource can be: an inline or checklist body is
+    /// already canonical bytes with no file to compare against.
     pub fn is_protected(&self) -> bool {
-        self.digest.is_some()
+        self.path.is_some() && self.protected.unwrap_or(self.root.is_package())
     }
 
     /// The declared item ids, in declaration order. Empty for non-checklists.
@@ -323,23 +346,18 @@ pub fn validate_resources(resources: &[Resource]) -> crate::Result<()> {
         let id_path = format!("resource[{i}].id");
         crate::shared::validate_slug_shape(&resource.id, &id_path)?;
 
-        if let Some(digest) = &resource.digest {
-            // Transparent deserialize accepts any string into `Digest`, so
-            // the `sha256:<64 hex>` shape is not enforced until here.
-            Digest::parse(digest.as_str()).map_err(|_| crate::manifest::Error::InvalidField {
-                field_path: format!("resource[{i}].digest"),
-                message: format!(
-                    "must be a valid sha256:<64 hex> digest, got {:?}",
-                    digest.as_str()
-                ),
-            })?;
-            if resource.path.is_none() {
-                return Err(crate::manifest::Error::InvalidField {
-                    field_path: format!("resource[{i}].digest"),
-                    message: "a digest pin is only meaningful for a path-backed resource; inline and checklist resources have no filesystem bytes to verify".to_string(),
-                }
-                .into());
+        // `protected` is only meaningful for a path-backed resource: an
+        // inline or checklist body is already canonical bytes, so there is no
+        // file whose drift it could describe. Declaring it there is an
+        // authoring mistake worth naming rather than a no-op to ignore.
+        if resource.protected.is_some() && resource.path.is_none() {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("resource[{i}].protected"),
+                message: "only a path-backed resource can be protected; inline and checklist \
+                     resources have no filesystem bytes to verify"
+                    .to_string(),
             }
+            .into());
         }
 
         // A resource carries exactly one body form: a path, inline content, or
