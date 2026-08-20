@@ -1,0 +1,66 @@
+schema-version = "0.2"
+key = "0233"
+title = "A vendored package should not carry authoring source"
+status = "ready"
+raised = "2026-08-20"
+content = """
+Owner ruling 2026-08-20: `dependency add` should not pull `source/`.
+
+A consumer never builds a vendored package. The canonical under `generated/`
+is what resolves and runs, so the TypeScript that produced it is dead weight
+in every consuming repository — and worse than dead, because a file sitting
+in a package invites editing, and edits there change nothing.
+
+It ships today because the generated publish manifest lists it:
+
+    "files": ["trait.toml", "trait.lock", "generated", "resources", "source"]
+
+Confirmed live: ctx-notify's vendored `implement` carries `source/index.ts`,
+`source/shared/` and `source/variant/`.
+
+## What blocks it
+
+`ctx traits fork` rebuilds from source. Excluding `source/` from the vendor
+copy was implemented and reverted the same day because it takes fork with
+it — five proofs in `proof_fork.rs` fail, on an error the codebase already
+anticipated:
+
+    <vendored>/<id> has no source/ directory; fork requires CDK authoring
+    source (this dependency was vendored without it)
+
+So this is not a filter, it is a decision about what fork is:
+
+- Fork RE-FETCHES. The tarball keeps shipping source, the vendor tree stops
+  unpacking it, and fork pulls the package again when asked. Fork stops being
+  a local operation and needs registry access — a real semantic change, and
+  the only option that keeps both properties.
+- Fork degrades. A forked package gets the canonical and no source, which
+  contradicts the authored/generated split: an authored package you cannot
+  rebuild is not authored.
+- The tarball stops shipping source too, and fork is retired.
+
+## Done when
+
+A vendored package under `.ctx/traits/vendored/<id>` contains no `source/`,
+`ctx traits fork` still produces a rebuildable authored package, and a
+scratch-fixture proof covers both together — not one at the cost of the
+other.
+"""
+validation = """
+## Watch
+
+- `copy_dir_recursive` in `modules/io/src/distribution.rs` is the single
+  point where the staged tree becomes the vendor tree. Filter the package
+  ROOT only: a resource legitimately named `source/` nested deeper is
+  content, not authoring input.
+- The `files` list lives in `generated_package_json_value`
+  (`modules/io/src/cdk_build.rs`). Changing it changes what is published,
+  which is a different blast radius from changing what is unpacked.
+- `package_subset_files` (`modules/io/src/dependency.rs`) already excludes
+  `source/` — it lists the manifest, `reference/` and `resources/`. That is
+  the VERIFICATION subset, not the copy, and the two disagreeing is part of
+  why this went unnoticed.
+"""
+
+[relations]
+depends-on = []

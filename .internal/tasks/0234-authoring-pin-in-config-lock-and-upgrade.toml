@@ -1,0 +1,75 @@
+schema-version = "0.2"
+key = "0234"
+title = "Record the authoring pin in config.lock, and add the command that moves it"
+status = "ready"
+raised = "2026-08-20"
+content = """
+Owner ruling 2026-08-20: the resolved authoring-package version belongs in
+`.ctx/traits/config.lock` — our side of the lock, beside the package
+manager's own — so a later `ctx traits update`/`upgrade` can move the pin and
+the install together.
+
+Today the pin exists in one place only: `.ctx/traits/package.json`,
+scaffolded from the binary's `CARGO_PKG_VERSION`. Nothing records what was
+actually RESOLVED, and `init` preserves an existing manifest rather than
+refreshing it — so a repository initialised by an older binary keeps its old
+pin forever. Observed live: a test repo pinning `0.1.0-alpha.0` against a
+`0.2.4` binary.
+
+`authoring_env::missing_for_authoring` now reports that mismatch as a
+non-blocking `StalePin`, which makes it visible. It does not fix it, and
+`init --install` re-running does not change a preserved manifest.
+
+## Two halves
+
+- `config.lock` gains an authoring entry: the resolved `@ctx-traits/cdk` and
+  `@ctx-traits/config` versions, and which package manager produced the
+  install. `ProjectLock` already carries `metadata`, `base` and `packages`;
+  this is a sibling section, not a package entry, because it is one
+  project-wide fact rather than a dependency.
+- A command that moves both: rewrite the manifest pin to the binary's
+  version, re-install, and record the result. `update` and `upgrade` are both
+  free; pick one and mean it.
+
+## Why it matters beyond tidiness
+
+The pin derivation exists so a released binary always scaffolds exactly the
+authoring packages published beside it — the CLI and the CDK agree on a
+canonical schema version. A pin that cannot be moved defeats it: the
+repository stays on a CDK that predates the binary's own schema, and the
+failure surfaces as an unreadable canonical rather than a version error.
+
+A live example of the same skew, from the other direction: a locally built
+`0.2.4` binary scaffolds templates written against the workspace CDK, while
+the pin resolves the PUBLISHED `0.2.4`, which predates the vocabulary
+restructure. `create` then fails inside the CDK with
+"Cannot read properties of undefined (reading 'tone')". Nothing is wrong with
+either artifact; they are different code under one version number. Worth
+deciding whether local development needs a way to point the pin at a
+workspace build (a spec override, or `init --link`), or whether that is
+simply what a version bump is for.
+
+## Done when
+
+`config.lock` records the resolved authoring versions and the manager that
+installed them; a command moves the manifest pin, re-installs and re-records
+in one act; and `init` on a repository with a stale pin either refreshes it
+or says exactly which command will.
+"""
+validation = """
+## Watch
+
+- `.ctx/traits/config.lock` is read by `read_project_lock`, which validates
+  every package entry's paths before returning. A new non-package section
+  must not disturb that, and must round-trip through the same symlink-safe
+  writer.
+- The pin lives in `modules/io/src/init.rs` as `AUTHORING_PACKAGE_VERSION`,
+  exposed as `authoring_package_version()`. The readiness check compares
+  against it; anything that moves the pin has to move both.
+- The release guard already asserts workspace version equals every public
+  `packages/*/package.json` version. Whatever this adds must not give a
+  second, drifting source of truth for the same fact.
+"""
+
+[relations]
+depends-on = []
