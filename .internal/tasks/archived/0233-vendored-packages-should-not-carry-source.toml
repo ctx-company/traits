@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0233"
 title = "A vendored package should not carry authoring source"
-status = "ready"
+status = "wont-do"
 raised = "2026-08-20"
 content = """
 Owner ruling 2026-08-20: `dependency add` should not pull `source/`.
@@ -45,6 +45,19 @@ A vendored package under `.ctx/traits/vendored/<id>` contains no `source/`,
 `ctx traits fork` still produces a rebuildable authored package, and a
 scratch-fixture proof covers both together — not one at the cost of the
 other.
+
+## Outcome: not doing this (owner ruling 2026-08-20)
+
+Fork is vendored → authored, and that is the whole reason a vendored package
+is worth having on disk rather than resolved from a cache. It needs source.
+Every way of removing source either takes fork with it or turns it into a
+network operation for no gain the user asked for.
+
+So `source/` keeps shipping, deliberately. The cost is real — a few hundred
+KB per vendored package that nothing reads at runtime — and it buys the one
+operation that makes a dependency yours.
+
+Reopen only if fork itself changes.
 """
 validation = """
 ## Watch
