@@ -1,0 +1,35 @@
+schema-version = "0.2"
+key = "0235"
+title = "Ledger append position belongs to the append point, not to callers"
+status = "ready"
+raised = "2026-08-20"
+content = """
+`acceptance-order` must equal a revision's index in `slot-revisions` — the ledger contract checks exactly that, and refuses the whole ledger on write when it does not hold. But the number is chosen by callers, not by the code that appends.
+
+Five sites call `next_acceptance_order`, which reads the highest order recorded so far and adds one. That is only correct when every allocation is immediately followed by its append. Three sites do that inline. Two allocate once and then fan out over several outputs, and each of those has to remember to offset by index itself.
+
+One of them did not. A step declaring two outputs stamped both revisions with the same number, and the ledger was refused: `slot-revisions[4] duplicates acceptance-order 4; slot-revisions[4] acceptance-order 4 does not match append position 5`. It reached a live plan run in ctx-notify (run `9246944495c6`) and every `plan` and `review` run, plus every 0206 check writing `[slot, port]`, was exposed to the same fault. Fixed pointwise in `transitions.rs`; the shape that allowed it is untouched.
+
+`record_accepted_slot_value` is already the single place a revision is appended, and it is the only code that knows the resulting index — including whether the append lands in a parallel branch's isolation buffer or the committed ledger, which is a second way a caller-chosen number can desynchronise. Move the stamp there: `record_accepted_slot_value` assigns `acceptance-order` from the length of the list it is about to push to, and `SlotRevisionContext` drops the field.
+
+The point is not to fix another instance. It is that a caller should not be able to express a wrong append position at all.
+"""
+scope = """
+## Decisions
+Assign the order at the append point and nowhere else. `SlotRevisionContext::acceptance_order` is removed, every caller stops computing one, and `next_acceptance_order` retires with them unless a non-append reader still needs it.
+
+The historical cutoff is a separate concern and must not move: `prior_value` is captured during collection so siblings of one activation replay against the same pre-activation state. Freezing the cutoff and incrementing the position are independent, and this task must keep them so.
+
+Do not change the ledger contract itself, the `SlotRevision` shape on disk, or the parallel-branch buffering rule. Existing ledgers must deserialize and replay byte-identically.
+"""
+validation = """
+## Watch
+The parallel path is where a caller-side number goes wrong invisibly: `next_acceptance_order` reads committed state while the revision lands in a branch buffer. Whatever replaces it must derive the position from the list actually being appended to.
+
+A check step writing `[slot, port]` and a for-each item binding both route through the same append point. Neither may regress, and the 0206 accepted-port-value path must keep its own stamping behaviour.
+
+## Done when
+No caller passes an acceptance order. A focused test proves that a step declaring two outputs, a check writing `[slot, port]`, and a revision appended inside a parallel branch each receive sequential positions matching their index, and that the ledger contract accepts the result in all three cases.
+
+`cargo fmt --check`, `cargo clippy --workspace --all-features -- -D warnings`, and `cargo test --workspace` pass, with existing ledgers still replaying unchanged.
+"""

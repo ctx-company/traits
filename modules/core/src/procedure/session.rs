@@ -6296,3 +6296,117 @@ equals = "approve"
         );
     }
 }
+
+/// A step may declare more than one output — plan's `ingest` writes both
+/// `slot:work-items` and `slot:done-criteria`, and every 0206 check writes
+/// `[slot, port]`. Each accepted value becomes its own `slot-revisions`
+/// entry, and the ledger contract requires `acceptance-order` to equal that
+/// entry's index. The recording loop used to stamp one order per ACTIVATION
+/// rather than per revision, so both halves landed as order N and the ledger
+/// was refused on write: "slot-revisions[4] duplicates acceptance-order 4;
+/// slot-revisions[4] acceptance-order 4 does not match append position 5"
+/// (ctx-notify, plan run 9246944495c6, 2026-08-20).
+#[cfg(test)]
+mod multi_output_acceptance_order_tests {
+    use super::*;
+
+    const TWO_OUTPUT_FIXTURE: &str = r#"
+id = "two-output-step"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Two output step"
+description = "Unit-test fixture: one step declaring two outputs."
+
+[[agent]]
+id = "worker"
+description = "Produces both outputs in one activation."
+
+[[slot]]
+id = "first"
+schema = "schema:text"
+
+[[slot]]
+id = "second"
+schema = "schema:text"
+
+[prompt.produce]
+text = "Produce both values."
+
+[procedure]
+description = "A single two-output step."
+
+[[procedure.sequence]]
+id = "produce"
+title = "Produce"
+agent = "agent:worker"
+prompt = "prompt:produce"
+output = ["slot:first", "slot:second"]
+"#;
+
+    #[test]
+    fn each_output_of_one_activation_gets_its_own_acceptance_order() {
+        let trait_ref: crate::r#trait::Trait =
+            toml::from_str(TWO_OUTPUT_FIXTURE).expect("fixture trait parses");
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": "session-two-output-order",
+            "run-id": "run-two-output-order",
+            "provenance": {
+                "started-by": { "surface": "test", "caller": "multi-output-order" },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        let session = start_run_session(
+            &trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts");
+
+        let template = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.call_template.as_ref())
+            .expect("the first frame carries a call template")
+            .clone();
+
+        let response = submit_run_call(
+            &trait_ref,
+            session,
+            CallSubmission {
+                session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+                run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+                state_digest: Some(template.state_digest.clone()),
+                expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+                expected_run_index: Some(template.expected_run_index),
+                expected_source_index: template.expected_source_index,
+                expected_position_path: template.expected_position_path.clone(),
+                produced_slots: [
+                    ("slot:first".to_string(), serde_json::json!("one")),
+                    ("slot:second".to_string(), serde_json::json!("two")),
+                ]
+                .into_iter()
+                .collect(),
+                signals: Default::default(),
+                warnings: Vec::new(),
+                command_execution: None,
+                caller: Some(CallerProvenance::cli().with_agent(Some("worker".to_string()))),
+            },
+        )
+        .expect("both outputs are accepted");
+
+        let orders: Vec<usize> = response
+            .session
+            .ledger
+            .slot_revisions
+            .iter()
+            .map(|revision| revision.acceptance_order)
+            .collect();
+        assert_eq!(
+            orders,
+            vec![1, 2],
+            "each accepted output needs its own append position, not one shared per activation"
+        );
+    }
+}

@@ -720,11 +720,25 @@ pub fn apply_step_output(
     // All outputs accepted by this single activation (a check's `[slot,
     // port]` pair, in particular) must replay against the same pre-activation
     // historical cutoff — one sibling must never see another sibling's write
-    // as "history". Snapshot the order once, before recording either half,
+    // as "history". Snapshot the base once, before recording either half,
     // rather than re-deriving it per output (which would let the port half
     // see the slot half's just-recorded revision as prior state).
+    //
+    // The cutoff is frozen; the append POSITION is not. `acceptance-order`
+    // must equal a revision's index in `slot-revisions` (ledger_contract), so
+    // a step declaring two outputs — plan's `ingest` writes `slot:work-items`
+    // and `slot:done-criteria`, and every 0206 check writes `[slot, port]` —
+    // needs one order per revision, not one per activation. Reusing the
+    // snapshot verbatim stamped both halves with the same number and the
+    // ledger was refused on write: "slot-revisions[4] duplicates
+    // acceptance-order 4" (ctx-notify plan run 9246944495c6, 2026-08-20).
+    // Offsetting by index matches what the `project` step's own multi-output
+    // path already does. Safe against the cutoff rule because every
+    // `prior_value` is captured during collection, well before this loop.
     let activation_acceptance_order = next_acceptance_order(&state);
-    for (runtime_value, operation, submitted_payload, prior_value) in accepted_slot_values {
+    for (index, (runtime_value, operation, submitted_payload, prior_value)) in
+        accepted_slot_values.into_iter().enumerate()
+    {
         let revision = slot_revision_from_value(
             &runtime_value,
             SlotRevisionWrite {
@@ -735,7 +749,7 @@ pub fn apply_step_output(
                         projection: None,
             },
             SlotRevisionContext {
-                acceptance_order: activation_acceptance_order,
+                acceptance_order: activation_acceptance_order.saturating_add(index),
                 position_path: &producer_path,
                 loop_context: ready.loop_context.as_ref(),
                 for_each_context: ready.for_each_context.as_ref(),
