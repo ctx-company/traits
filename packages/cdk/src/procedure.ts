@@ -267,10 +267,10 @@ export interface ResourceFunction {
    * @example `resource.file("style-guide", { path: "docs/style.md" })`
    * @example `resource.file("evaluator", { path: "scripts/eval.py" })`
    */
-  file(id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle;
+  file(name: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle;
   /** Embeds content directly in the trait source, no file on disk. @example `resource.inline("guide", "Prefer minimal diffs.")` */
   inline(
-    id: string,
+    name: string,
     content: string,
     fields?: Omit<ResourceFields, "id" | "path" | "root" | "content">,
   ): ResourceHandle;
@@ -438,20 +438,21 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
 export const resource: ResourceFunction = Object.assign(
   (fields: ResourceFields): ResourceHandle => resourceOf(fields),
   {
-    file: (id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle =>
-      resourceOf({ ...fields, id }),
+    file: (name: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle =>
+      resourceOf({ ...fields, id: name }),
     inline: (
-      id: string,
+      name: string,
       content: string,
       fields: Omit<ResourceFields, "id" | "path" | "root" | "content"> = {},
-    ): ResourceHandle => resourceOf({ ...fields, id, content }),
+    ): ResourceHandle => resourceOf({ ...fields, id: name, content }),
   },
 );
 
 function resourceOf(fields: ResourceFields): ResourceHandle {
-  const declaration = compact({ ...fields });
-  const handle = withDeclaration("resource", `resource:${String(fields.id)}`, declaration, {});
-  recordTraitMint("resource", String(fields.id), `resource:${String(fields.id)}`, declaration);
+  const id = slugFromName(String(fields.id), "resource.id");
+  const declaration = compact({ ...fields, id });
+  const handle = withDeclaration("resource", `resource:${id}`, declaration, {});
+  recordTraitMint("resource", id, `resource:${id}`, declaration);
   return handle;
 }
 
@@ -495,6 +496,7 @@ export function rule(fields: RuleFields): CanonicalRule {
  * rejects one, since a verb is raised, not observed.
  */
 export interface SignalFunction {
+  (name: string, fields: Omit<SignalFields, "id">): SignalHandle;
   (fields: SignalFields): SignalHandle;
   /** Fail the enclosing structure (loop/parallel branch) and propagate — not a run-terminal `flow.error`. */
   readonly Abort: SignalVerb<"abort">;
@@ -518,13 +520,17 @@ export interface SignalFunction {
  * @param fields Signal declaration fields. `description` is required by the
  * canonical schema (states when the signal fires), unlike most other
  * declaration builders where it's optional.
- * @example `signal({ id: "approved", description: "The reviewer approved the change." })`
+ * @example `signal("Approved", { description: "The reviewer approved the change." })`
  * @see {@link sequence}
  */
-function signalFn(fields: SignalFields): SignalHandle {
-  const declaration = compact({ ...fields });
-  const handle = withDeclaration("signal", `signal:${fields.id}`, declaration, {});
-  recordTraitMint("signal", fields.id, `signal:${fields.id}`, declaration);
+function signalFn(name: string, fields: Omit<SignalFields, "id">): SignalHandle;
+function signalFn(fields: SignalFields): SignalHandle;
+function signalFn(first: string | SignalFields, second?: Omit<SignalFields, "id">): SignalHandle {
+  const fields = typeof first === "string" ? ({ ...second, id: first } as SignalFields) : first;
+  const id = slugFromName(fields.id, "signal.id");
+  const declaration = compact({ ...fields, id });
+  const handle = withDeclaration("signal", `signal:${id}`, declaration, {});
+  recordTraitMint("signal", id, `signal:${id}`, declaration);
   return handle;
 }
 
