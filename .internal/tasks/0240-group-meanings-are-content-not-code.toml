@@ -1,0 +1,67 @@
+schema-version = "0.2"
+key = "0240"
+title = "Intent groups and behavior axes are explained in the vocabulary, not in Rust"
+status = "ready"
+raised = "2026-08-20"
+content = """
+The intent and behavior catalogs are authored content:
+`modules/builtin/vocabulary/intent.toml` and `behavior.toml`, one table per
+entry, read and diffed and reviewed as prose. That is right — this is writing
+aimed at a model, and it belongs where writing is edited.
+
+The GROUP meanings are not. They are a match arm in
+`modules/core/src/model_view/compile.rs`:
+
+    fn intent_group_meaning(group: &str) -> &'static str {
+        match group {
+            "require" => "Conditions the finished work has to meet.",
+            "focus" => "Where to look. Attention, not acceptance criteria.",
+            "avoid" => "Not acceptable, unless unavoidable.",
+            "block" => "Unacceptable. If one has happened, correcting it comes before anything else.",
+            _ => "",
+        }
+    }
+
+These four strings are the most consequential prose in the system — they are
+what tells a model how hard each group binds — and changing a word means a
+Rust edit, a rebuild, and a reviewer reading a diff in a compile unit rather
+than in the catalog beside every item they govern. The wording has already
+been revised once for exactly the reason this makes hard: `block` was being
+read as "halt" when it means "go back and fix this first".
+
+The behavior axes have the same problem: an axis (`tone`, `verbosity`, ...)
+has a meaning a model should be told, and there is nowhere authored to put it.
+
+## Shape
+
+A `[group]` (or equivalently named) section in `intent.toml` carrying the four
+group meanings, and an axis section in `behavior.toml` carrying one per axis.
+Same one-table-per-entry convention as the item entries, so a group reads and
+diffs like everything around it.
+
+`intent_group_meaning` then reads from the catalog rather than from a match,
+and an unknown group is a build error rather than the current silent empty
+string — a typo'd group name currently renders a group header with no meaning
+and nothing notices.
+"""
+validation = """
+## Watch
+
+- These strings are model-visible, so moving them must not change them. Land
+  the move with byte-identical text and prove `model-visible` does not shift;
+  reword afterwards as its own reviewable change if wanted.
+- The catalog is embedded at build time (`modules/builtin/build.rs`), so the
+  meanings become part of the embedded vocabulary and travel with the binary
+  the same way the items do.
+- 0239 renders these into `<spec>`. Landing this first means 0239 has
+  somewhere to read them from.
+
+## Done when
+
+No intent group or behavior axis meaning is written in Rust, an unknown group
+fails the build rather than rendering empty, and `model-visible` digests are
+unchanged by the move itself.
+"""
+
+[relations]
+depends-on = []

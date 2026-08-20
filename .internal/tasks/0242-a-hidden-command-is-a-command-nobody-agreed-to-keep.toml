@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0242"
+title = "Delete the hidden commands instead of hiding them"
+status = "ready"
+raised = "2026-08-20"
+content = """
+Owner ruling 2026-08-20: whatever is not visible in `--help` should not exist.
+Commands only — hidden FLAGS are a separate question and are not in scope.
+
+`modules/cli/src/app/surface/cli.rs` carries 54 `#[command(hide = true)]`
+attributes. Among them:
+
+    #[command(alias = "sync", hide = true)]
+    Vendor { ... }
+
+so `ctx traits vendor` and `ctx traits sync` both work, neither appears in
+help, and `sync` is an alias to a command that is itself hidden — a second
+name for something that has no first name. `resolve_trait_target` documents
+six more of the same shape: `vendor`, `install`, `remove`, `update`,
+`outdated`, `info`, all replaced by `ctx traits dependency <verb>` and all
+kept as invisible legacy spellings.
+
+A hidden command is the worst of both: it is still surface — parsed, routed,
+maintained, and able to break — while being invisible to the person who would
+notice it broke, and to review. Nobody decided to keep these; they were
+carried because deleting them felt riskier than not.
+
+## Scope
+
+Every hidden command variant, its dispatch arm, its handler if nothing else
+reaches it, and any alias pointing at it. The visible surface does not change:
+if a hidden command is the only way to do something a visible one cannot, that
+is the finding, and it gets promoted rather than deleted.
+
+## Watch
+
+- Some hidden verbs may be reached by the traits themselves, by the dogfood
+  loop's scripts, or by `justfile` recipes rather than by a person. Grep the
+  repository, `.internal/scripts/`, and every authored trait's command steps
+  before removing any one of them — a command step's argv is exactly where an
+  invisible dependency on a legacy spelling would hide.
+- `presentation.rs` already notes that hidden commands are never looked up for
+  suggestions, so removing them cannot regress "did you mean".
+- Check whether the six dependency legacy verbs are named in published docs or
+  the website; a removed command should not be a command the docs still teach.
+
+## Done when
+
+`--help` and the parsed command set are the same set: no `hide = true` remains
+on a subcommand, nothing in the repository invokes a removed spelling, and the
+visible surface is unchanged except for anything deliberately promoted.
+"""
+validation = """
+## Done when
+
+`grep -c 'hide = true' modules/cli/src/app/surface/cli.rs` counts only
+non-subcommand uses, `cargo test --workspace` and `just builtins-check` pass,
+and every authored trait still runs.
+"""
+
+[relations]
+depends-on = []

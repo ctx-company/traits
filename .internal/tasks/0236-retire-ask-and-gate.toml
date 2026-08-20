@@ -1,9 +1,24 @@
 schema-version = "0.2"
 key = "0236"
 title = "Retire the ask and gate step kinds"
-status = "ready"
+status = "not-doing"
 raised = "2026-08-20"
 content = """
+NOT DOING — owner ruling 2026-08-20, reversing the 2026-08-20 ruling this
+task was filed on. The seven kinds are what gets DOCUMENTED, which is not the
+same as what exists. `ask` and `gate` stay implemented and stay working; they
+are simply absent from the CDK reference, because a human-in-the-loop step is
+not something to put in front of an author until it is a surface someone is
+meant to reach for.
+
+That leaves them in the state the task called worse than either end of the
+choice: supported by the runtime, unreachable from the hook API. The
+difference is that this is now a decision rather than an oversight, and the
+argument below is kept because it is the argument to answer if anyone
+proposes making them authorable — or removing them for real.
+
+---
+
 Owner ruling 2026-08-20: the step kinds worth covering are prompt, command,
 check, sequence, branch, loop and parallel. `ask` and `gate` are not among
 them, and nothing uses either.

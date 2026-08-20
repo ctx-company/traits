@@ -1,0 +1,84 @@
+schema-version = "0.2"
+key = "0238"
+title = "Every fenced ts block in the docs is built, or the docs are fiction"
+status = "ready"
+raised = "2026-08-20"
+content = """
+The CDK reference teaches the API by example. Nothing checks that the
+examples are the API.
+
+Four defects found by hand on 2026-08-20, in one sitting, all invisible to
+every gate the repository has:
+
+- `step.md` documented `step(fields)` — "one noun with two faces" — which
+  stopped existing when declaring and placing split into `defineStep.*` and
+  `step.*`. The page taught a removed API as the primary way to declare a
+  step.
+- The same page's only `check` example omitted `output`, which
+  `CheckSequenceFields` requires. The one example of the feature would not
+  compile.
+- `flow.md`'s snippets called `shared.stage.*`, from before the stage→step
+  rename.
+- `resource.md` documented `resource.directory`, which did not exist. (Fixed
+  by adding the constructor — the docs were right about where the API should
+  be. The point stands: nothing noticed the disagreement either way.)
+
+Three of the four were stale for an unknown stretch. The fourth was written
+against an API that had never existed. A reader following any of them gets a
+build error and concludes the tool is broken.
+
+## Shape
+
+A gate that extracts every fenced block marked as buildable from
+content/traits/docs/*.md, assembles each into a scratch trait package, and
+builds it. A block that does not compile fails the gate the way a stale
+canonical does.
+
+Not every block can build standalone: most are fragments referencing a
+`slot`, `agent` or `shared.step` declared elsewhere on the page or implied.
+So the gate needs a preamble convention — a per-page hidden prelude, or a
+fence annotation naming the fixture the block compiles against. The existing
+`name=source/...` annotation is the obvious place to hang it.
+
+Blocks that genuinely cannot build (shell transcripts, canonical TOML
+excerpts, deliberate counter-examples) opt out explicitly, so an opt-out is
+visible in review rather than a block silently never being checked.
+
+## Where it runs
+
+The docs live in a separate repository (ctx-company-website), and the CDK
+they document lives here. That is the actual hard part: a gate in the website
+repo has no CDK to build against, and a gate here has no docs to read.
+
+Options, unranked, needing a decision before implementation:
+
+- The website repo gains a dev dependency on the published CDK and runs the
+  gate itself. Checks against what users install, which is the honest target;
+  lags this repo by a release, so a just-renamed API reads as a docs failure
+  until publish.
+- This repo vendors or clones the docs and runs the gate in its own CI.
+  Catches a rename the moment it lands; couples two repos and needs a
+  checkout of the other.
+- The docs move into this repository and the website builds from it.
+  Largest change, and the only one where the docs and the API they describe
+  can never be out of step by construction.
+
+## Watch
+
+- A gate that is expensive to run is a gate that gets skipped. Building
+  dozens of scratch packages per docs edit is a real cost; the CDK build is
+  the slow part, so batching every block from a page into one package is
+  worth measuring before assuming per-block is fine.
+- The failure message has to name the page and the fence, not a scratch path
+  nobody can map back to a docs file.
+"""
+validation = """
+## Done when
+
+Every buildable fenced block in the CDK reference is compiled by a gate, an
+opt-out is explicit and visible, and reintroducing any of the four defects
+above fails that gate.
+"""
+
+[relations]
+depends-on = []

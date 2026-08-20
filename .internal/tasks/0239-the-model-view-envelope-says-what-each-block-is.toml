@@ -1,0 +1,132 @@
+schema-version = "0.2"
+key = "0239"
+title = "The model-view envelope: every block says what it is, and spec is separated from data"
+status = "ready"
+raised = "2026-08-20"
+content = """
+Owner design, 2026-08-20, from reading `.internal/debug/model-view-*.txt`.
+
+The frame a model receives is a pile of tags with no statement of what any of
+them are for. It shows an agent its intents without saying what an intent is,
+interleaves an explanation of a group with the members of that group, and
+renders a slot reference in the prompt under a different name than the one it
+gives that slot's value. Every one of those is legible to someone who already
+knows the system.
+
+## Target shape
+
+Sibling top-level blocks, each opening with an `<info>` that states what the
+block is, then a `<spec>` of what each field MEANS, then the volatile values.
+
+    <include>
+      <resource>[global resources]</resource>
+    </include>
+
+    <intent>
+      <info>[what this block does]</info>
+      <spec>
+        <avoid>[what belonging to avoid means]</avoid>
+        <focus>[what belonging to focus means]</focus>
+      </spec>
+
+      <avoid id="scope-creep">Expanding past what was asked.</avoid>
+      <focus id="bounded-refinement">A review-and-repair loop with a condition that ends it.</focus>
+    </intent>
+
+    <behavior>
+      <info>[what this block does]</info>
+      <spec>
+        <tone>[what tone means]</tone>
+        <verbosity>[what verbosity means]</verbosity>
+      </spec>
+      [items, as intent]
+    </behavior>
+
+    <agent>
+      <info>[this block is your identity and characteristics]</info>
+      <identity>[the agent's description field]</identity>
+    </agent>
+
+    <input>
+      <info>[what this block does]</info>
+      <spec>
+        <task>[the port/slot description]</task>
+      </spec>
+      <data>
+        <task>[the value]</task>
+      </data>
+      <prompt>[prompt text, referencing {task}]</prompt>
+    </input>
+
+    <output>
+      <info>[what this block does]</info>
+      <budget>Response must fit in 294000 bytes.</budget>
+      <spec>
+        <task>[the slot description]</task>
+      </spec>
+      <format>[JSON schema, one line]</format>
+      <prompt>[prompt text, or a generic "return in the specified format"]</prompt>
+    </output>
+
+## Defects this fixes, each observed in a real frame
+
+- BEHAVIOR IS NOT RENDERED AT ALL. The dumps show `<intent>` and no
+  `<behavior>`, for traits that declare behavior. A whole half of what a trait
+  says about itself never reaches the model. This is the most serious item
+  here and may deserve landing ahead of the rest.
+- A group's meaning is rendered as a member of that group:
+  `<intent group="require">Conditions the finished work has to meet.</intent>`
+  sits in the same list as `<intent group="require" id="correctness">`. An
+  explanation and an item are the same kind of element, distinguished only by
+  the absence of an `id`.
+- The prompt references `{port:task}` and `{slot:work-summary}` while `<data>`
+  names the same values `<task>` and `<work-summary>`. The two halves of the
+  frame disagree about what a thing is called; the model has to strip the
+  namespace to connect them. References should use the bare name the data
+  block uses.
+- Prompt text is rendered with its authoring indentation and blank lines
+  intact — a template literal indented for readability in TypeScript arrives
+  as a leading blank line, eight-space indents, and trailing blank lines.
+  Trim it: strip leading/trailing blank lines and remove the common leading
+  indentation.
+- `<identity>You are agent:smart.</identity>` names the agent by its
+  canonical ref rather than by its `description`, which is the field written
+  for exactly this purpose.
+
+## Why the spec/data split is worth the tokens
+
+It is not only legibility. `<info>` and `<spec>` are STABLE across frames and
+across runs; `<data>` is volatile by definition. Putting every stable byte
+before every volatile one is the ordering a prompt cache wants, and the
+current envelope interleaves them. See .docs/PROMPT_ASSEMBLY_AND_CACHING.md —
+this is the same argument, arriving from the audit side.
+
+The cost is real and should be measured, not assumed: `<info>`/`<spec>` repeat
+in every frame, and per-frame sessions mean every frame pays. If the ordering
+work lands with it, they should be nearly free on the second frame onward.
+"""
+validation = """
+## Watch
+
+- The group and axis meanings are hardcoded in `model_view/compile.rs`
+  (`intent_group_meaning`). Moving them into authored vocabulary is 0240 and
+  should land first or together, so this task is not writing prose into Rust
+  that 0240 then moves out.
+- Trimming prompt text changes the model-visible digest of every trait that
+  has an indented template literal — expect wide `model-visible` movement and
+  no `canonical` movement. Confirm that split holds; if canonical moves, the
+  trim is happening in the wrong layer.
+- Renaming `{slot:x}` to `{x}` must not collide: a port and a slot can share
+  a bare name. Decide what happens when they do before implementing — a
+  build-time rejection is better than a silently ambiguous reference.
+
+## Done when
+
+Every block in a composed frame opens with what it is; spec and data are
+separate; behavior renders; prompt references match their data names; prompt
+text arrives trimmed; and the debug dumps in `.internal/debug/` are
+regenerated to show it.
+"""
+
+[relations]
+depends-on = ["0240"]

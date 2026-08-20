@@ -1,0 +1,75 @@
+schema-version = "0.2"
+key = "0241"
+title = "A parent whose children all close is not archived"
+status = "ready"
+raised = "2026-08-20"
+content = """
+Owner report, 2026-08-20: closing every child of a task through task-dispatch
+leaves the parent unarchived — it stays on the board after the work it stood
+for is finished, so the board reads as having open work that does not exist.
+
+## Where it comes from
+
+Not reproduced yet; this records the mechanism found by reading, so whoever
+picks it up starts from a hypothesis rather than a blank page.
+
+Archive placement is decided in exactly one place — `apply_update` in
+`modules/io/src/task_files.rs` — and only inside `if let Some(status) =
+update.status`:
+
+    if effects_config.archive_on_close {
+        archive_target = closing;
+    }
+
+`archive_target` is otherwise initialized to `was_archived`. So a write that
+does not carry a status leaves a document exactly where it already was, by
+construction. Placement is re-evaluated only when a status is set on THAT
+document, in THAT update.
+
+Every cascade therefore has to set status itself or the cascaded document
+never moves. `release_one_dependent` is the proven instance of the shape: it
+edits `relations.depends_on`, then writes back to `path.parent()` — the
+directory the file was already in — and never consults `archive_on_close`.
+It is not the parent path, but it is the same mistake, which suggests the
+parent path has it too.
+
+Two candidates to check first:
+
+- The parent is closed by a cascade that writes it without a status, so
+  `archive_target` stays `was_archived` and it remains on the board while
+  reading as closed.
+- Nothing closes the parent at all: closing the last child is not wired to
+  close the parent, and the report is really "the parent is not closed",
+  which archival then correctly declines to act on.
+
+These want different fixes and the difference is visible in the parent's
+`status` field after the last child closes. Establish which before writing
+anything.
+
+## Note on scope
+
+If the answer is the first, the fix is probably not "also set status in the
+cascade" but "re-evaluate placement whenever a document is written", so the
+next cascade added does not reintroduce it. Placement being a property of
+status rather than a step some callers remember is the shape that holds.
+"""
+validation = """
+## Watch
+
+- `archive_on_close` is board configuration and can be false. Whatever lands
+  must keep honoring it — there is already a test asserting the false case
+  skips the move and records no effect
+  (`archive_on_close_false_skips_the_move_and_records_no_effect`).
+- Moving a document emits an `ArchivePlacement` effect record only when
+  placement actually changed. A fix that re-evaluates placement on every
+  write must not start emitting that record for writes that moved nothing.
+
+## Done when
+
+Closing the last child of a parent leaves the parent in the state the board
+config asks for, and a scratch-fixture reproduction of the reported sequence
+fails before the fix and passes after.
+"""
+
+[relations]
+depends-on = []
