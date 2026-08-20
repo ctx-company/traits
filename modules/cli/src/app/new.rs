@@ -96,6 +96,28 @@ pub(crate) fn handle_new(
 
     let trait_id = ctx_traits_core::synth::slugify_trait_id(id)?;
     let cwd = current_utf8_dir()?;
+
+    // Halt BEFORE writing anything. `create` scaffolds, then builds and locks
+    // through the same paths `build` and `vendor` use, so a repository that
+    // cannot build produces a half-materialized package and an error about
+    // whatever the build tripped over — which is how a missing `node_modules`
+    // used to surface as "invalid manifest at root: missing field `name`",
+    // from a seed file the failed build never got to replace.
+    let blocking: Vec<_> = ctx_traits_io::authoring_env::missing_for_authoring(
+        &cwd,
+        ctx_traits_io::init::authoring_package_version(),
+    )
+    .into_iter()
+    .filter(ctx_traits_io::authoring_env::Missing::blocks_authoring)
+    .collect();
+    if let Some(first) = blocking.first() {
+        return Err(crate::Error::Command {
+            message: format!(
+                "cannot scaffold {trait_id}: building a trait needs the authoring packages — {}",
+                first.remedy()
+            ),
+        });
+    }
     let package = ctx_traits_io::layout::TraitPackageRoot::new(&cwd, &trait_id)
         .map_err(ctx_traits_io::Error::from)?;
 

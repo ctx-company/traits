@@ -301,7 +301,11 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 println!("ctx traits — use --help to list trait commands");
                 Ok(CommandOutput::new(()))
             }
-            Some(cli::TraitsCommand::Init { name, json }) => handle_init(name.as_deref(), json),
+            Some(cli::TraitsCommand::Init {
+                name,
+                install,
+                json,
+            }) => handle_init(name.as_deref(), install, json),
             Some(cli::TraitsCommand::Create {
                 id,
                 from,

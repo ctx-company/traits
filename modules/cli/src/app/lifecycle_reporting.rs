@@ -64,9 +64,29 @@ struct InitReportJson<'a> {
 /// Scaffold the v2 layout: `.ctx/traits/`, `.ctx/traits/config.toml`, and,
 /// optionally, a starter package. Never overwrites an existing authored
 /// file and never touches the retired `.agents/traits/` layout.
-pub(crate) fn handle_init(name: Option<&str>, json: bool) -> crate::Result<CommandOutput<()>> {
+pub(crate) fn handle_init(
+    name: Option<&str>,
+    install: bool,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
     let cwd = current_utf8_dir()?;
     let report = ctx_traits_io::init::init(&cwd, name)?;
+
+    // Scaffolding a manifest is not the same as satisfying it. Whether or not
+    // `--install` was asked for, say plainly what is still missing — the old
+    // behaviour wrote the manifest, said "passed", and left the first build to
+    // discover that nothing had been installed.
+    let installed = if install {
+        Some(ctx_traits_io::authoring_env::install_authoring_packages(
+            &cwd,
+        )?)
+    } else {
+        None
+    };
+    let missing = ctx_traits_io::authoring_env::missing_for_authoring(
+        &cwd,
+        ctx_traits_io::init::authoring_package_version(),
+    );
 
     match OutputMode::select(json, false) {
         OutputMode::Json => {
@@ -92,6 +112,16 @@ pub(crate) fn handle_init(name: Option<&str>, json: bool) -> crate::Result<Comma
                     }
                 };
                 panel = panel.row(PanelRow::toned(label, path, tone));
+            }
+            if let Some(manager) = installed {
+                panel = panel.row(PanelRow::toned(
+                    "installed",
+                    manager.binary(),
+                    RowTone::Pass,
+                ));
+            }
+            for item in &missing {
+                panel = panel.row(PanelRow::toned("next", item.remedy(), RowTone::Warn));
             }
             emit_human(false, &panel, mode, || Ok(()))?;
         }

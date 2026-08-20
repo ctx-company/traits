@@ -80,13 +80,27 @@ pub fn init(repo_root: &Utf8Path, name: Option<&str>) -> crate::Result<InitRepor
 /// staleness this derivation removes.)
 const AUTHORING_PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Scaffold `.ctx/package.json`, the manifest for authoring-time npm packages.
+/// The version this binary scaffolds and expects to find installed. Exposed
+/// so the readiness check can report a manifest pinned to something else,
+/// rather than leaving a version mismatch to surface later as a schema error.
+pub fn authoring_package_version() -> &'static str {
+    AUTHORING_PACKAGE_VERSION
+}
+
+/// Scaffold `.ctx/traits/package.json`, the manifest for authoring-time npm
+/// packages.
 ///
 /// Trait sources import `@ctx-traits/cdk` by bare specifier, and Node resolves
 /// that by walking up from the importing file: `.ctx/traits/authored/<id>/
-/// source/` → … → `.ctx/` → the repository root. So packages installed here are
-/// found without any resolver configuration, and a project that already has its
-/// own root `node_modules` keeps resolving through the next step up, unchanged.
+/// source/` → … → `.ctx/traits/` → `.ctx/` → the repository root. So packages
+/// installed here are found without any resolver configuration, and a project
+/// that already has its own root `node_modules` keeps resolving through the
+/// next step up, unchanged.
+///
+/// It sits beside the things that import it rather than a level above: every
+/// authoring surface — every trait's `source/`, and `.ctx/traits/config.ts`
+/// — lives under `.ctx/traits/`, so this is the nearest directory that covers
+/// all of them.
 ///
 /// Private and never published: this manifest exists to hold dependencies, not
 /// to be a package. It is also the reason authoring works in a repository with
@@ -96,7 +110,7 @@ const AUTHORING_PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Running an installed trait still needs no Node at all: a generated
 /// `index.toml` is self-contained, and nothing here is on the run path.
 fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
-    let path = repo_root.join(".ctx").join("package.json");
+    let path = crate::layout::authoring_manifest_path(repo_root);
     let content = format!(
         r#"{{
   "name": "ctx-traits-authoring",
@@ -418,7 +432,7 @@ mod tests {
         let repo = scratch_repo("authoring-pin");
         super::init(&repo, None).expect("init succeeds");
         let manifest =
-            std::fs::read_to_string(repo.join(".ctx").join("package.json").as_std_path())
+            std::fs::read_to_string(crate::layout::authoring_manifest_path(&repo).as_std_path())
                 .expect("authoring manifest scaffolded");
         for package in ["cdk", "config"] {
             let expected = format!(
