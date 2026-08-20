@@ -87,6 +87,105 @@ pub fn authoring_package_version() -> &'static str {
     AUTHORING_PACKAGE_VERSION
 }
 
+/// The CDK versions this binary can work with, as `[min, max)`.
+///
+/// A RANGE rather than an exact pin, because an exact pin states something
+/// untrue: the binary does not require one build of the CDK, it requires one
+/// that speaks its canonical schema. Pinning exactly made every version
+/// difference an error, including the ones that are not — which is why a
+/// workspace build could not be used against a project at all.
+///
+/// The window is the current minor series: `>=<version> <next-minor>` while
+/// 0.x, `>=<version> <next-major>` after 1.0, matching what a caret range
+/// means at each stage. `min` is this binary's own version rather than an
+/// older floor because a canonical this binary WRITES must be readable by
+/// the CDK installed beside it, and only versions from here forward are.
+pub fn authoring_cdk_range() -> (String, String) {
+    let min = AUTHORING_PACKAGE_VERSION.to_string();
+    let mut parts = AUTHORING_PACKAGE_VERSION
+        .split(['.', '-'])
+        .filter_map(|part| part.parse::<u64>().ok());
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(0);
+    let max = if major == 0 {
+        format!("0.{}.0", minor + 1)
+    } else {
+        format!("{}.0.0", major + 1)
+    };
+    (min, max)
+}
+
+/// The range as an npm version spec — what the manifest declares.
+pub fn authoring_range_spec() -> String {
+    let (min, max) = authoring_cdk_range();
+    format!(">={min} <{max}")
+}
+
+/// Rewrite the `@ctx-traits/*` ranges in an existing authoring manifest to
+/// what this binary supports, leaving every other key alone.
+///
+/// `init` scaffolds with `create_new_file`, which preserves an existing
+/// manifest — correct for a file the user may have added their own
+/// dependencies to, and the reason a project initialised by an older ctx kept
+/// its old range forever. This is the deliberate exception, reached only
+/// through `--install`: that flag already means "change my machine", and
+/// moving the range without installing the packages it now names would leave
+/// the project describing something that is not there.
+///
+/// Returns the previous range when it changed, so the caller can say so —
+/// a moved range can mean existing traits need rebuilding, and that should
+/// come from the command that moved it rather than from the next build.
+pub fn refresh_authoring_range(repo_root: &Utf8Path) -> crate::Result<Option<String>> {
+    let path = crate::layout::authoring_manifest_path(repo_root);
+    let Ok(text) = std::fs::read_to_string(path.as_std_path()) else {
+        return Ok(None);
+    };
+    let Ok(mut document) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(None);
+    };
+    let range = authoring_range_spec();
+    let Some(dependencies) = document
+        .get_mut("dependencies")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(None);
+    };
+
+    let mut previous = None;
+    for name in ["@ctx-traits/cdk", "@ctx-traits/config"] {
+        let Some(entry) = dependencies.get_mut(name) else {
+            continue;
+        };
+        if entry.as_str() == Some(range.as_str()) {
+            continue;
+        }
+        previous.get_or_insert_with(|| {
+            entry
+                .as_str()
+                .map_or_else(|| "unset".to_string(), str::to_string)
+        });
+        *entry = serde_json::Value::String(range.clone());
+    }
+    if previous.is_none() {
+        return Ok(None);
+    }
+
+    let mut rendered = serde_json::to_string_pretty(&document).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: path.to_string(),
+            source: std::io::Error::other(source),
+        }
+    })?;
+    rendered.push('\n');
+    std::fs::write(path.as_std_path(), rendered).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: path.to_string(),
+            source,
+        }
+    })?;
+    Ok(previous)
+}
+
 /// Scaffold `.ctx/traits/package.json`, the manifest for authoring-time npm
 /// packages.
 ///
@@ -111,6 +210,7 @@ pub fn authoring_package_version() -> &'static str {
 /// `index.toml` is self-contained, and nothing here is on the run path.
 fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
     let path = crate::layout::authoring_manifest_path(repo_root);
+    let range = authoring_range_spec();
     let content = format!(
         r#"{{
   "name": "ctx-traits-authoring",
@@ -118,8 +218,8 @@ fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
   "description": "Authoring-time dependencies for this project's ctx.traits packages. Created by `ctx traits init`; not published, and not needed to RUN a trait.",
   "type": "module",
   "dependencies": {{
-    "@ctx-traits/cdk": "{AUTHORING_PACKAGE_VERSION}",
-    "@ctx-traits/config": "{AUTHORING_PACKAGE_VERSION}"
+    "@ctx-traits/cdk": "{range}",
+    "@ctx-traits/config": "{range}"
   }}
 }}
 "#

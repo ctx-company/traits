@@ -2807,9 +2807,19 @@ fn publish_staged_package(
     // have mutated a live file, so its own failure — like every commit step
     // after it — must restore the snapshot and remove the now-orphaned
     // staging tree rather than leaving either behind.
-    if let DistributionScope::Project(repo_root) = scope
-        && let Err(err) = crate::gitignore::ensure_nested_gitignore(repo_root)
-    {
+    // A global install writes into `~/.config/ctx/traits/`, which is a
+    // directory some people keep under version control with the rest of
+    // their dotfiles. It gets the same trait-root ignore file, for the same
+    // reason a project does.
+    let ensured = match scope {
+        DistributionScope::Project(repo_root) => {
+            crate::gitignore::ensure_nested_gitignore(repo_root).map(|_| ())
+        }
+        DistributionScope::Global(_) => {
+            crate::gitignore::ensure_global_trait_root_gitignore(&vendor_root).map(|_| ())
+        }
+    };
+    if let Err(err) = ensured {
         let mut notes = Vec::new();
         if let Some(snapshot) = &gitignore_snapshot {
             notes.extend(snapshot.restore());

@@ -307,7 +307,7 @@ pub fn run_node_module(
                     "cannot resolve {unresolved_package_hint} — {}",
                     crate::authoring_env::missing_for_authoring(
                         request.repo_root.as_deref().unwrap_or(Utf8Path::new(".")),
-                        crate::init::authoring_package_version(),
+                        &crate::init::authoring_range_spec(),
                     )
                     .iter()
                     .find(|item| item.blocks_authoring())

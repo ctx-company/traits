@@ -26,16 +26,26 @@ pub enum Missing {
     AuthoringManifest { path: Utf8PathBuf },
     /// The manifest exists but its packages are not installed.
     Install { root: Utf8PathBuf },
-    /// The manifest pins a different version than this binary scaffolds.
-    /// Not fatal: the install may still resolve and build. Reported so an
-    /// upgrade is visible rather than surfacing later as a schema error.
-    StalePin { found: String, expected: String },
+    /// The manifest declares a different supported range than this binary
+    /// does. Not fatal on its own — the installed CDK may still fall inside
+    /// both — but it means the project was initialised by another ctx.
+    StaleRange { found: String, expected: String },
+    /// A CDK is installed, and it is outside the range this binary supports.
+    /// Fatal: the canonical this binary writes and the one that CDK reads
+    /// are different schemas, and the failure without this check is a type
+    /// error from inside the CDK rather than a version problem.
+    UnsupportedCdk {
+        found: String,
+        min: String,
+        max: String,
+    },
 }
 
 impl Missing {
-    /// Whether this alone makes authoring impossible. A stale pin does not.
+    /// Whether this alone makes authoring impossible. A range that merely
+    /// differs does not; an installed CDK outside the window does.
     pub fn blocks_authoring(&self) -> bool {
-        !matches!(self, Self::StalePin { .. })
+        !matches!(self, Self::StaleRange { .. })
     }
 
     /// What a user should read. Each names the one command that fixes it —
@@ -55,9 +65,13 @@ impl Missing {
                 "run `ctx traits init --install` to install the authoring packages into \
                  {root}/node_modules, or install them yourself from {root}"
             ),
-            Self::StalePin { found, expected } => format!(
-                "the authoring manifest pins {found} but this ctx scaffolds {expected}; run \
+            Self::StaleRange { found, expected } => format!(
+                "the authoring manifest allows {found} but this ctx supports {expected}; run \
                  `ctx traits init --install` to move to {expected}"
+            ),
+            Self::UnsupportedCdk { found, min, max } => format!(
+                "@ctx-traits/cdk {found} is installed, but this ctx supports >={min} <{max}; run \
+                 `ctx traits init --install` to install one it can build with"
             ),
         }
     }
@@ -65,7 +79,7 @@ impl Missing {
 
 /// What this repository is missing for authoring, in fix order. Empty means
 /// a trait can be built from source here.
-pub fn missing_for_authoring(repo_root: &Utf8Path, expected_pin: &str) -> Vec<Missing> {
+pub fn missing_for_authoring(repo_root: &Utf8Path, expected_range: &str) -> Vec<Missing> {
     let mut missing = Vec::new();
 
     if which("node").is_none() {
@@ -81,13 +95,23 @@ pub fn missing_for_authoring(repo_root: &Utf8Path, expected_pin: &str) -> Vec<Mi
         missing.push(Missing::AuthoringManifest {
             path: manifest.clone(),
         });
-    } else if let Some(found) = pinned_version(&manifest)
-        && found != expected_pin
+    } else if let Some(found) = declared_range(&manifest)
+        && found != expected_range
     {
-        missing.push(Missing::StalePin {
+        missing.push(Missing::StaleRange {
             found,
-            expected: expected_pin.to_string(),
+            expected: expected_range.to_string(),
         });
+    }
+
+    // An installed CDK outside the window is reported ahead of a missing
+    // install: it IS installed, and telling someone to install what they
+    // already have explains nothing.
+    if let Some(found) = installed_cdk_version(repo_root) {
+        let (min, max) = crate::init::authoring_cdk_range();
+        if !version_within(&found, &min, &max) {
+            missing.push(Missing::UnsupportedCdk { found, min, max });
+        }
     }
 
     if !authoring_packages_installed(repo_root) {
@@ -215,8 +239,41 @@ pub fn install_authoring_packages(repo_root: &Utf8Path) -> crate::Result<Package
     Ok(manager)
 }
 
-/// The version an authoring manifest pins `@ctx-traits/cdk` to.
-fn pinned_version(manifest: &Utf8Path) -> Option<String> {
+/// The version of `@ctx-traits/cdk` actually installed, from wherever Node
+/// would resolve it.
+pub fn installed_cdk_version(repo_root: &Utf8Path) -> Option<String> {
+    [
+        crate::layout::authoring_install_root(repo_root),
+        repo_root.join(".ctx"),
+        repo_root.to_path_buf(),
+    ]
+    .iter()
+    .find_map(|root| {
+        let manifest = root
+            .join("node_modules")
+            .join("@ctx-traits")
+            .join("cdk")
+            .join("package.json");
+        let text = std::fs::read_to_string(manifest.as_std_path()).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+        value.get("version")?.as_str().map(str::to_string)
+    })
+}
+
+/// Whether `found` falls in `[min, max)`. Compares numerically rather than
+/// lexically: "0.10.0" is above "0.9.0" and a string compare says otherwise.
+fn version_within(found: &str, min: &str, max: &str) -> bool {
+    let parse = |text: &str| -> Vec<u64> {
+        text.split(['.', '-', '+'])
+            .filter_map(|part| part.parse::<u64>().ok())
+            .collect()
+    };
+    let (found, min, max) = (parse(found), parse(min), parse(max));
+    found >= min && found < max
+}
+
+/// The range an authoring manifest declares for `@ctx-traits/cdk`.
+fn declared_range(manifest: &Utf8Path) -> Option<String> {
     let text = std::fs::read_to_string(manifest.as_std_path()).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     value

@@ -76,7 +76,11 @@ pub(crate) fn handle_init(
     // `--install` was asked for, say plainly what is still missing — the old
     // behaviour wrote the manifest, said "passed", and left the first build to
     // discover that nothing had been installed.
+    let mut moved_range = None;
     let installed = if install {
+        // Move the declared range BEFORE installing, so the install resolves
+        // what this binary supports rather than what a previous one did.
+        moved_range = ctx_traits_io::init::refresh_authoring_range(&cwd)?;
         Some(ctx_traits_io::authoring_env::install_authoring_packages(
             &cwd,
         )?)
@@ -85,7 +89,7 @@ pub(crate) fn handle_init(
     };
     let missing = ctx_traits_io::authoring_env::missing_for_authoring(
         &cwd,
-        ctx_traits_io::init::authoring_package_version(),
+        &ctx_traits_io::init::authoring_range_spec(),
     );
 
     match OutputMode::select(json, false) {
@@ -112,6 +116,16 @@ pub(crate) fn handle_init(
                     }
                 };
                 panel = panel.row(PanelRow::toned(label, path, tone));
+            }
+            if let Some(previous) = &moved_range {
+                panel = panel.row(PanelRow::toned(
+                    "range",
+                    format!(
+                        "{previous} -> {}; traits built against the old range may need rebuilding",
+                        ctx_traits_io::init::authoring_range_spec()
+                    ),
+                    RowTone::Warn,
+                ));
             }
             if let Some(manager) = installed {
                 panel = panel.row(PanelRow::toned(
