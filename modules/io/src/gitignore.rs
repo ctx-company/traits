@@ -42,46 +42,74 @@ use camino::{Utf8Path, Utf8PathBuf};
 /// `.ctx/.gitignore`. Every diagnostic and writer in this module reads this
 /// same list.
 pub const CANONICAL_ENTRIES: &[&str] = &[
-    // 0052: run worktrees live under `.ctx/traits/` now. The pre-0052
-    // top-level entry stays listed on purpose — a checkout that still holds
-    // old worktrees must not suddenly show them as untracked, and they are
-    // never rewritten in place, only drained as their runs land.
-    "traits/worktrees/",
+    // Pre-0052 run worktrees, at `.ctx/worktrees/`. Listed on purpose even
+    // though nothing writes there now: a checkout that still holds old
+    // worktrees must not suddenly show them as untracked, and they are never
+    // rewritten in place, only drained as their runs land.
     "worktrees/",
     // Anchored (`/config.toml`, `/config.ts`): these name the retired P457
-    // `.ctx/config.toml`/`.ctx/config.ts` pathway, one directory up from
-    // `.ctx/traits/`. Unanchored, either pattern's basename match would also
-    // hide the COMMITTED `.ctx/traits/config.toml` document (0177) and its
+    // `.ctx/config.toml`/`.ctx/config.ts` pathway. Unanchored, either
+    // pattern's basename match would also hide the COMMITTED
+    // `.ctx/traits/config.toml` document (0177) and its
     // `.ctx/traits/config.ts` authoring source — a bug this anchoring fixes.
     "/config.toml",
     "/config.ts",
-    // 0037: the machine-local runtime tier. The committed siblings —
-    // `traits/config.toml` (project decisions) and
-    // `traits/runtime.example.toml` (the template this file is copied from) —
-    // are deliberately NOT listed here.
-    "traits/runtime.toml",
     "harness.toml",
-    "traits/vendored/",
-    // 0178: the machine-local TypeScript authoring source and its
-    // compiler-written artifact, both like `traits/runtime.toml` above. The
-    // committed sibling `traits/runtime.example.ts` is deliberately NOT
-    // listed here, nor is 0177's sibling `traits/generated/config.toml`
-    // (the COMMITTED config-document tier).
-    "traits/runtime.ts",
-    "traits/generated/runtime.toml",
     "runs/",
     "debug/",
     "cache/",
-    // Authoring-time npm packages installed by `ctx traits init`, resolved by
-    // the CDK build because Node walks up from `.ctx`. Reinstallable from the
-    // manifest beside it, and a committed `node_modules` would be a
-    // spectacular first impression.
+];
+
+/// Canonical entries for `.ctx/traits/.gitignore`, relative to that
+/// directory.
+///
+/// The trait root states its own ignorables (owner ruling 2026-08-20).
+/// Everything a project generates while running or installing traits is under
+/// `.ctx/traits/`, so the file that hides them belongs there — beside them,
+/// readable without translating `traits/…` prefixes, and identical in shape
+/// to the one the global trait root needs for globally installed traits.
+///
+/// `.ctx/.gitignore` does NOT go away: `.ctx/runs/merge.lock` and
+/// `.ctx/cache/build/` are live paths one level up, and moving rather than
+/// splitting would leave them untracked-and-showing.
+pub const GLOBAL_TRAIT_ROOT_ENTRIES: &[&str] = &["*", "!.gitignore"];
+
+/// Canonical entries for a PROJECT trait root's `.gitignore`.
+pub const TRAIT_ROOT_ENTRIES: &[&str] = &[
+    // 0052: run worktrees live under `.ctx/traits/` now.
+    "worktrees/",
+    // 0037/0178: the machine-local runtime tier and its TypeScript source.
+    // The committed siblings — `config.toml` (project decisions),
+    // `runtime.example.toml` (the template this is copied from) and
+    // `generated/config.toml` (0177's committed config-document tier) — are
+    // deliberately NOT listed.
+    "runtime.toml",
+    "runtime.ts",
+    "generated/runtime.toml",
+    "vendored/",
+    // Authoring-time npm packages installed by `ctx traits init --install`,
+    // resolved by the CDK build because Node walks up from here.
+    // Reinstallable from the manifest beside it, and a committed
+    // `node_modules` would be a spectacular first impression. The lockfile
+    // next to it IS committed: it is what makes an install reproducible.
     "node_modules/",
 ];
 
 /// Repository-relative path of the nested ignore file this module owns.
 pub fn nested_gitignore_path(repo_root: &Utf8Path) -> Utf8PathBuf {
     repo_root.join(".ctx").join(".gitignore")
+}
+
+/// The ignore file the trait root owns: `.ctx/traits/.gitignore`.
+pub fn trait_root_gitignore_path(repo_root: &Utf8Path) -> Utf8PathBuf {
+    crate::layout::authoring_install_root(repo_root).join(".gitignore")
+}
+
+/// The same file for a trait root that is not under a repository — the
+/// global root holding globally installed traits. Takes the root directly
+/// because there is no repository to derive it from.
+pub fn trait_root_gitignore_path_at(trait_root: &Utf8Path) -> Utf8PathBuf {
+    trait_root.join(".gitignore")
 }
 
 /// Runtime-tier exclude entries appended to the common Git directory's
@@ -124,13 +152,21 @@ fn read_optional_string(path: &Utf8Path) -> crate::Result<Option<String>> {
 /// Plan the missing entries for `repo_root`'s nested `.ctx/.gitignore`
 /// without writing anything.
 pub fn plan_nested_gitignore(repo_root: &Utf8Path) -> crate::Result<GitignorePlan> {
-    let path = nested_gitignore_path(repo_root);
+    plan_for(nested_gitignore_path(repo_root), CANONICAL_ENTRIES)
+}
+
+/// The same read-only plan for `.ctx/traits/.gitignore`.
+pub fn plan_trait_root_gitignore(repo_root: &Utf8Path) -> crate::Result<GitignorePlan> {
+    plan_for(trait_root_gitignore_path(repo_root), TRAIT_ROOT_ENTRIES)
+}
+
+fn plan_for(path: Utf8PathBuf, entries: &[&str]) -> crate::Result<GitignorePlan> {
     let existing = read_optional_string(&path)?;
     let existing_lines: BTreeSet<&str> = existing
         .as_deref()
         .map(|text| text.lines().collect())
         .unwrap_or_default();
-    let missing: Vec<String> = CANONICAL_ENTRIES
+    let missing: Vec<String> = entries
         .iter()
         .filter(|entry| !existing_lines.contains(*entry))
         .map(|entry| (*entry).to_string())
@@ -152,6 +188,37 @@ pub fn plan_nested_gitignore(repo_root: &Utf8Path) -> crate::Result<GitignorePla
 /// nothing missing performs no write at all.
 pub fn ensure_nested_gitignore(repo_root: &Utf8Path) -> crate::Result<EnsureReport> {
     let plan = plan_nested_gitignore(repo_root)?;
+    let report = append_missing_lines(plan.path, plan.exists, plan.missing)?;
+    // The trait root's own file is maintained in the same act: the two
+    // together are what a project needs, and a caller that had to remember
+    // both would eventually maintain one.
+    ensure_trait_root_gitignore(repo_root)?;
+    Ok(report)
+}
+
+/// Append-only ensure for `.ctx/traits/.gitignore`, with the same
+/// never-rewrite guarantees as [`ensure_nested_gitignore`].
+pub fn ensure_trait_root_gitignore(repo_root: &Utf8Path) -> crate::Result<EnsureReport> {
+    let plan = plan_trait_root_gitignore(repo_root)?;
+    append_missing_lines(plan.path, plan.exists, plan.missing)
+}
+
+/// The ignore file for the GLOBAL trait root, `~/.config/ctx/traits/`.
+///
+/// A different entry set, because the directory is a different thing: a
+/// project's trait root holds authored packages plus machine-local files, so
+/// it names what to hide. The global root holds nothing BUT installed
+/// packages, every one of them reinstallable from `~/.config/ctx/traits.lock`
+/// — so it hides everything and keeps only itself.
+///
+/// It exists because that directory is one people keep under version control
+/// with the rest of their dotfiles, where a vendored tree is exactly the kind
+/// of thing that should not be committed.
+pub fn ensure_global_trait_root_gitignore(trait_root: &Utf8Path) -> crate::Result<EnsureReport> {
+    let plan = plan_for(
+        trait_root_gitignore_path_at(trait_root),
+        GLOBAL_TRAIT_ROOT_ENTRIES,
+    )?;
     append_missing_lines(plan.path, plan.exists, plan.missing)
 }
 

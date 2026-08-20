@@ -105,7 +105,7 @@ pub(crate) fn handle_new(
     // from a seed file the failed build never got to replace.
     let blocking: Vec<_> = ctx_traits_io::authoring_env::missing_for_authoring(
         &cwd,
-        ctx_traits_io::init::authoring_package_version(),
+        &ctx_traits_io::init::authoring_range_spec(),
     )
     .into_iter()
     .filter(ctx_traits_io::authoring_env::Missing::blocks_authoring)
