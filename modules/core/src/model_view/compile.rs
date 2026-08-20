@@ -39,7 +39,7 @@ pub fn compile_model_view_with_evidence(
     if let Some(ref intent) = trait_ref.intent {
         sections.push(Section {
             heading: "Intent".to_string(),
-            content: format_intent(intent, trait_id, &mut warnings, &mut normalizations, &mut forged_tag_findings),
+            content: format_intent(intent, trait_id, true, &mut warnings, &mut normalizations, &mut forged_tag_findings),
         });
     }
 
@@ -341,9 +341,12 @@ fn format_description(
 // Intent / Behavior guidance: rule 4/5 directive resolution + tag emission.
 // ---------------------------------------------------------------------------
 
+/// `group_meanings` is false only for frame guidance, whose envelope states
+/// each group once in its own `<spec>` block.
 fn format_intent(
     intent: &crate::r#trait::Intent,
     trait_id: &str,
+    group_meanings: bool,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
@@ -355,13 +358,18 @@ fn format_intent(
         if items.is_empty() {
             continue;
         }
-        // Same tag, no `id`: the render envelope's tag set is closed (rule
-        // 3's four sections), so the group statement is an `<intent>` element
-        // identified by carrying no item id, not a new tag name.
-        elements.push(format!(
-            "<intent group=\"{group}\">{}</intent>",
-            intent_group_meaning(group)
-        ));
+        // Emitted for the STATIC model view, which has no other place to say
+        // it, and suppressed for a frame, whose envelope states every group
+        // once in `<spec>` before the items (0239). Rendering it in both put
+        // an explanation and a member in the same list, distinguishable only
+        // by an absent `id` — and rendering it in neither would leave the
+        // static view naming groups it never defines.
+        if group_meanings {
+            elements.push(format!(
+                "<intent group=\"{group}\">{}</intent>",
+                intent_group_meaning(group)
+            ));
+        }
         format_guidance_group("intent", "group", group, &format!("intent.{group}"), items.into_iter(), Some(intent_builtin), trait_id, warnings, normalizations, findings, &mut elements);
     }
     elements.join("\n")
@@ -415,6 +423,29 @@ fn group_meaning(
             panic!("{kind} {slug:?} has no vocabulary entry; add one to modules/builtin/vocabulary/")
         })
         .summary
+}
+
+/// The four intent groups paired with what belonging to one means — the
+/// `<spec>` a frame shows before the items themselves (0239).
+///
+/// Exposed rather than re-derived at the composing layer, so there is one
+/// answer to "what does `avoid` mean" and it is the vocabulary's.
+pub fn intent_group_specs() -> [(&'static str, &'static str); 4] {
+    [
+        ("require", intent_group_meaning("require")),
+        ("focus", intent_group_meaning("focus")),
+        ("avoid", intent_group_meaning("avoid")),
+        ("block", intent_group_meaning("block")),
+    ]
+}
+
+/// Every behavior axis paired with the question its values answer. The
+/// composing layer filters this to the axes a given trait actually sets.
+pub fn behavior_axis_specs() -> Vec<(&'static str, &'static str)> {
+    crate::builtins::BEHAVIOR_AXIS
+        .iter()
+        .map(|entry| (entry.slug, entry.summary))
+        .collect()
 }
 
 fn intent_groups(intent: &crate::r#trait::Intent) -> [(&str, Vec<&GuidanceItem>); 4] {
@@ -477,7 +508,7 @@ pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
     let intent = trait_ref
         .intent
         .as_ref()
-        .map(|intent| format_intent(intent, trait_id, &mut warnings, &mut normalizations, &mut findings))
+        .map(|intent| format_intent(intent, trait_id, false, &mut warnings, &mut normalizations, &mut findings))
         .unwrap_or_default();
     let behavior = trait_ref
         .behavior

@@ -13,7 +13,7 @@ import {
   withHiddenField,
   withMeta,
 } from "./meta.js";
-import { collectMany, mergeDeclarationSets, uniqueInOrder } from "./normalize.js";
+import { collectMany, dedentPromptText, mergeDeclarationSets, uniqueInOrder } from "./normalize.js";
 import type { PromptInterpolation } from "./prompt.js";
 import { promptTemplate } from "./prompt.js";
 import { refText } from "./ref.js";
@@ -85,6 +85,7 @@ function buildInstructionOutput(
 ): InstructionOutputHandle {
   const built = promptTemplate(strings, values);
   const builtMeta = metaOf(built);
+  // `promptTemplate` already dedented; this reads the dedented value back.
   const text = typeof built.text === "string" ? built.text : "";
   const refs = builtMeta?.refs;
   const optionalRefs = builtMeta?.optionalRefs;
@@ -198,7 +199,7 @@ function finishOutputTemplate(parts: OutputTemplateParts): OutputTemplateHandle 
     {
       kind: "output-template",
       outputTemplate: {
-        text: parts.text,
+        text: dedentPromptText(parts.text),
         refs: parts.refs,
         ...(parts.optionalRefs.length === 0 ? {} : { optionalRefs: parts.optionalRefs }),
         slots: parts.refs.map((ref) => parts.slotByRef.get(ref)),

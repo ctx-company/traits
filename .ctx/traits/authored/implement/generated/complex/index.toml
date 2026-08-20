@@ -302,9 +302,7 @@ Say "not yet" as many rounds as it takes; do not approve to end the loop, and do
 Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
 Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
 
-
-    Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-2)
-  """
+Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-2)"""
 input = [
     "port:task",
     "slot:work-summary",
@@ -327,9 +325,7 @@ Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {sl
 Optionally attached work summary from previous rounds: {slot:work-summary}
 Attached verdicts are the source of truth — always follow their guidance.
 
-
-    Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary
-  """
+Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary"""
 input = [
     "port:task",
     "slot:draft",
@@ -344,9 +340,7 @@ Say "not yet" as many rounds as it takes; do not approve to end the loop, and do
 Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
 Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
 
-
-    Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)
-  """
+Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)"""
 input = [
     "port:task",
     "slot:work-summary",
@@ -359,9 +353,7 @@ text = """
 The work for {port:task} is being committed.
 Write a concise commit message from the work summary into {slot:work-summary}.
 
-
-    Return exactly the finished commit message into (slot:commit-message).
-  """
+Return exactly the finished commit message into (slot:commit-message)."""
 input = [
     "port:task",
     "slot:work-summary",

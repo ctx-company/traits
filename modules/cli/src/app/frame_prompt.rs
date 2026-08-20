@@ -48,17 +48,30 @@ fn effective_max_inline_prompt_bytes() -> usize {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedFramePrompt {
     pub(crate) prompt_section: String,
+    /// The `<data>` children: one element per value the frame carries. The
+    /// only volatile part of the envelope, which is why everything else is
+    /// composed ahead of it.
     pub(crate) input_section: String,
-    /// The frame-level `<information>` element: identity, title,
-    /// description, prompt, and (when the trait declares them) intent and
-    /// behavior guidance. Built once in [`resolved_frame_prompt`] so every
-    /// CLI-transport composer reads the same text.
-    pub(crate) information_section: String,
+    /// Resource elements, hoisted out of `<data>`: a digest-pinned document
+    /// is the same in every frame of a run, so it belongs in the part a
+    /// prompt cache can keep.
+    pub(crate) include_section: String,
+    /// `<spec>` children for the values the frame is given.
+    pub(crate) input_spec: Vec<(String, String)>,
+    /// `<spec>` children for the values the frame must produce.
+    pub(crate) output_spec: Vec<(String, String)>,
+    /// The trait's own description, and the assigned role's.
+    pub(crate) trait_description: String,
+    pub(crate) agent_identity: String,
+    pub(crate) title: String,
+    /// Rendered `<intent>` / `<behavior>` items, already sanitized.
+    pub(crate) intent_items: String,
+    pub(crate) behavior_items: String,
 }
 
 /// One declared-but-unaccepted input, carrying both the human-readable reason
 /// (`resolved_input_section`'s "not inlined (pending: ...)" line) and the raw
-/// `ref_text` (`frame_contract_section`'s schema lookup) from a single source
+/// `ref_text` (the input-schema view's lookup) from a single source
 /// so the resolved-values view and the input-schema view can never disagree
 /// about which refs are pending.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,12 +139,75 @@ pub(crate) fn frame_prompt(
     // itself (identity, title, description, prompt, intent, behavior) moved
     // into the frame-level `<information>` element built in
     // `resolved_frame_prompt`.
-    format!(
-        "{}\n\n<input>\n  <data>\n{}  </data>\n{correction}</input>\n\n{}",
-        context.information_section,
+    // Ordered most-stable-first, which is both how a reader wants to meet a
+    // frame and what a prompt cache needs: `<include>`/`<intent>`/`<behavior>`
+    // are identical in every frame of a run, `<agent>` is identical for every
+    // frame that role takes, and only `<data>` changes per frame. The
+    // cacheable prefix ends exactly where the values begin.
+    //
+    // Every block opens with what it IS. A frame used to show an agent its
+    // intents without ever saying what an intent was, and separated a field's
+    // meaning from its value by nothing at all.
+    let mut envelope = String::new();
+    if !context.include_section.is_empty() {
+        envelope.push_str(&format!(
+            "<include>\n  <info>Documents you have been given. Read them; they are context for the work, not the work.</info>\n{}</include>\n\n",
+            context.include_section
+        ));
+    }
+    if !context.intent_items.is_empty() {
+        envelope.push_str(&format!(
+            "<intent>\n  <info>What the finished work is judged against. Each item below carries the group it belongs to; the group says how much it weighs.</info>\n{}{}\n</intent>\n\n",
+            intent_spec_block(),
+            indent_block(&context.intent_items, 2)
+        ));
+    }
+    if !context.behavior_items.is_empty() {
+        envelope.push_str(&format!(
+            "<behavior>\n  <info>How to work and how to write, as distinct from what to produce. Each item carries the axis it sets.</info>\n{}{}\n</behavior>\n\n",
+            behavior_spec_block(&context.behavior_items),
+            indent_block(&context.behavior_items, 2)
+        ));
+    }
+    if !context.agent_identity.is_empty() {
+        envelope.push_str(&format!(
+            "<agent>\n  <info>Who you are on this step, and what the trait as a whole is for.</info>\n  <identity>{}</identity>\n  <trait>{}</trait>\n</agent>\n\n",
+            context.agent_identity, context.trait_description
+        ));
+    }
+    envelope.push_str(&format!(
+        "<input>\n  <info>The step to do, and the values you have been given to do it with. &lt;spec&gt; says what each value means; &lt;data&gt; carries it.</info>\n  <title>{}</title>\n{}  <data>\n{}  </data>\n{correction}  <prompt>\n{}\n  </prompt>\n</input>\n\n",
+        context.title,
+        spec_block(&context.input_spec, 2),
         context.input_section,
-        requested_output_contract_section(schema)
-    )
+        indent_block(&context.prompt_section, 4)
+    ));
+    envelope.push_str(&requested_output_contract_section_with_spec(
+        schema,
+        &context.output_spec,
+    ));
+    envelope
+}
+
+/// The four intent groups and what belonging to one means. Read from the
+/// vocabulary (0240), never restated here.
+fn intent_spec_block() -> String {
+    let entries: Vec<(String, String)> = ctx_traits_core::model_view::intent_group_specs()
+        .iter()
+        .map(|(slug, meaning)| ((*slug).to_string(), (*meaning).to_string()))
+        .collect();
+    spec_block(&entries, 2)
+}
+
+/// Only the axes this frame actually sets — an axis the trait never chose a
+/// value for has nothing to explain.
+fn behavior_spec_block(items: &str) -> String {
+    let entries: Vec<(String, String)> = ctx_traits_core::model_view::behavior_axis_specs()
+        .iter()
+        .filter(|(slug, _)| items.contains(&format!("axis=\"{slug}\"")))
+        .map(|(slug, meaning)| ((*slug).to_string(), (*meaning).to_string()))
+        .collect();
+    spec_block(&entries, 2)
 }
 
 /// Indent every line of `text` by `spaces`, leaving blank lines empty so an
@@ -162,8 +238,14 @@ const RESPONSE_BUDGET_MARGIN_DEN: usize = 10;
 /// that actually enforces the response ceiling (P535 truncation) — computed
 /// here, never a hand-copied literal.
 fn response_byte_budget() -> usize {
-    ctx_traits_io::run::COMMAND_CAPTURE_LIMIT * RESPONSE_BUDGET_MARGIN_NUM
-        / RESPONSE_BUDGET_MARGIN_DEN
+    // Rounded DOWN to whole thousands: the figure already carries a
+    // deliberate margin, so stating it to the byte (294912) implies a
+    // precision it does not have and reads as a limit rather than a ceiling
+    // with room under it. Down, never up — rounding up would state a budget
+    // larger than the margin allows.
+    let raw = ctx_traits_io::run::COMMAND_CAPTURE_LIMIT * RESPONSE_BUDGET_MARGIN_NUM
+        / RESPONSE_BUDGET_MARGIN_DEN;
+    raw / 1000 * 1000
 }
 
 /// Render only the requested-output schema and response instruction. This is
@@ -188,6 +270,21 @@ pub(crate) fn requested_output_contract_section(schema: &Value) -> String {
         "<output>\n  <format>\n{}\n  </format>\n{schema_section}\n  <budget>Your entire response must fit in {budget} bytes.</budget>\n  <response>\n    {response}\n  </response>\n</output>\n",
         indent_block(&sketch, 4)
     )
+}
+
+/// The output contract with a `<spec>` naming what each requested value
+/// means, and the budget stated in whole thousands.
+///
+/// A model was being asked to fill `draft` with nothing saying what a draft
+/// is here — the slot's own description existed and simply never travelled.
+pub(crate) fn requested_output_contract_section_with_spec(
+    schema: &Value,
+    output_spec: &[(String, String)],
+) -> String {
+    let base = requested_output_contract_section(schema);
+    let info = "  <info>What to return, and in what shape. The response is validated against this before it is accepted.</info>\n";
+    let spec = spec_block(output_spec, 2);
+    base.replacen("<output>\n", &format!("<output>\n{info}{spec}"), 1)
 }
 
 /// The key skeleton a model reads first: one line per requested output naming
@@ -340,26 +437,60 @@ pub(crate) fn resolved_frame_prompt(
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     pending_inputs: &[PendingInput],
 ) -> crate::Result<ResolvedFramePrompt> {
-    let prompt_section = resolved_prompt_section(loaded, session, frame, pending_inputs)?;
+    let raw_prompt = resolved_prompt_section(loaded, session, frame, pending_inputs)?;
+    let refs = frame_reference_texts(frame, pending_inputs);
+    let prompt_section = bare_reference_names(&raw_prompt);
     let input_section = resolved_input_section(loaded, session, frame, pending_inputs)?;
-    let information_section = frame_information_section(loaded, frame, &prompt_section);
+    let include_section = resolved_include_section(loaded, session, frame)?;
+    let guidance = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref);
     Ok(ResolvedFramePrompt {
         prompt_section,
         input_section,
-        information_section,
+        include_section,
+        input_spec: input_spec_entries(loaded, &refs),
+        output_spec: output_spec_entries(loaded, frame),
+        trait_description: loaded.trait_ref.description.to_string(),
+        agent_identity: frame_agent_identity(loaded, frame),
+        title: frame.title.clone(),
+        intent_items: guidance
+            .as_ref()
+            .map(|guidance| guidance.intent.clone())
+            .unwrap_or_default(),
+        behavior_items: guidance
+            .map(|guidance| guidance.behavior)
+            .unwrap_or_default(),
     })
 }
 
-fn resolved_input_section(
+/// What the assigned role IS, in the trait's own words.
+///
+/// `<identity>You are agent:smart.</identity>` named the role by its
+/// canonical ref, which says only that a ref exists. The agent's
+/// `description` is the field written for exactly this, so it is what the
+/// model is given; the ref stays as the name it answers to.
+fn frame_agent_identity(
     loaded: &ctx_traits_io::run::LoadedTrait,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> String {
+    let Some(assigned) = frame.assigned_agent.as_ref() else {
+        return String::new();
+    };
+    loaded
+        .trait_ref
+        .agents
+        .iter()
+        .find(|agent| agent.id == assigned.role)
+        .map(|agent| sanitize_spec_text(&agent.description))
+        .unwrap_or_default()
+}
+
+fn resolved_input_section(
+    _loaded: &ctx_traits_io::run::LoadedTrait,
     session: &ctx_traits_core::procedure::session::Session,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     pending_inputs: &[PendingInput],
 ) -> crate::Result<String> {
-    if frame.available_inputs.is_empty()
-        && frame.resource_evidence.is_empty()
-        && pending_inputs.is_empty()
-    {
+    if frame.available_inputs.is_empty() && pending_inputs.is_empty() {
         return Ok(String::new());
     }
 
@@ -382,52 +513,6 @@ fn resolved_input_section(
             }
         }
     }
-    for resource in &frame.resource_evidence {
-        let id = element_id(resource.resource_ref.as_str());
-        match resolved_resource_presentation_verified(
-            loaded,
-            session,
-            frame,
-            resource.resource_ref.as_str(),
-        )? {
-            Some(ResourcePresentation::Inline { content, hint }) => {
-                let hint = hint
-                    .as_deref()
-                    .map(|hint| format!(" hint=\"{hint}\""))
-                    .unwrap_or_default();
-                section.push_str(&format!(
-                    "    <{id}{hint}>\n{}    </{id}>\n",
-                    delimited_block("RESOURCE", resource.resource_ref.as_str(), &content)
-                ));
-            }
-            Some(ResourcePresentation::InlineUnavailable { reason }) => {
-                section.push_str(&format!("    <{id} unavailable=\"{reason}\" />\n"));
-            }
-            Some(ResourcePresentation::File(resolved)) => {
-                // A path, not a body: the model opens it with its own tools.
-                let hint = resolved
-                    .hint
-                    .as_deref()
-                    .map(|hint| format!(" hint=\"{hint}\""))
-                    .unwrap_or_default();
-                match resolved.status {
-                    ctx_traits_io::resource::PresentationStatus::Available
-                    | ctx_traits_io::resource::PresentationStatus::Directory => {
-                        section
-                            .push_str(&format!("    <{id} path=\"{}\"{hint} />\n", resolved.path));
-                    }
-                    _ => {
-                        section.push_str(&format!(
-                            "    <{id} path=\"{}\" unavailable=\"declared resource file is not readable\" />\n",
-                            resolved.path
-                        ));
-                    }
-                }
-            }
-            None => {}
-        }
-    }
-
     for pending in pending_inputs {
         // Static-preview only: a declared input with no accepted value yet.
         // A live frame never renders these — an absent OPTIONAL input simply
@@ -1243,6 +1328,193 @@ fn element_id(ref_text: &str) -> String {
         .replace(['/', ':'], "-")
 }
 
+/// Rewrites `{port:task}` / `{slot:work-summary}` in prompt text to the bare
+/// `{task}` / `{work-summary}` the `<data>` block names those same values by.
+///
+/// The two halves of a frame used different names for one value: the prompt
+/// said `{slot:work-summary}` and the element carrying it was
+/// `<work-summary>`, leaving the model to strip a namespace to connect them.
+/// The typed ref stays the canonical spelling — it is what the core validates
+/// in argv, sinks and resource templates — and this is a rendering concern
+/// only, applied where the frame is composed.
+///
+/// A bare name that two different refs would both claim (a port and a slot
+/// sharing an id) keeps its qualified spelling, for both of them. Ambiguity
+/// resolved by dropping one silently would be worse than the prefix.
+fn bare_reference_names(text: &str) -> String {
+    let tokens = reference_tokens(text);
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for token in &tokens {
+        *counts.entry(element_id(token)).or_default() += 1;
+    }
+    // Longest first, so `slot:review-verdict-1` is rewritten before a
+    // shorter ref that prefixes it could claim part of the same span.
+    let mut ordered: Vec<&String> = tokens.iter().collect();
+    ordered.sort_by_key(|token| std::cmp::Reverse(token.len()));
+    let mut rendered = text.to_string();
+    for token in ordered {
+        let bare = element_id(token);
+        if counts.get(&bare).copied().unwrap_or(0) > 1 {
+            continue;
+        }
+        rendered = rendered.replace(&format!("{{{token}}}"), &format!("{{{bare}}}"));
+        // Output templates name their destinations without braces, so the
+        // bare ref is rewritten too — a `kind:id` token in prompt text is a
+        // reference, never prose.
+        rendered = rendered.replace(token.as_str(), &bare);
+    }
+    rendered
+}
+
+/// Every `kind:id` reference appearing in prompt text.
+///
+/// Read from the TEXT rather than from the frame's input list, because the
+/// two do not agree: an optional reference (`slot.optional()`) is in the
+/// prompt while having no accepted value and no pending entry, so driving
+/// from the frame left exactly those qualified while their neighbours were
+/// rewritten.
+fn reference_tokens(text: &str) -> Vec<String> {
+    const KINDS: [&str; 4] = ["slot:", "port:", "resource:", "setting:"];
+    let mut tokens: BTreeMap<String, ()> = BTreeMap::new();
+    for kind in KINDS {
+        let mut rest = text;
+        while let Some(at) = rest.find(kind) {
+            let tail = &rest[at + kind.len()..];
+            let end = tail
+                .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '/' && ch != ':')
+                .unwrap_or(tail.len());
+            if end > 0 {
+                tokens.insert(format!("{kind}{}", &tail[..end]), ());
+            }
+            rest = &rest[at + kind.len()..];
+        }
+    }
+    tokens.into_keys().collect()
+}
+
+/// Every ref a frame names, in the order the model meets them: the values it
+/// is given, then the ones declared but not yet accepted.
+fn frame_reference_texts(
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+    pending_inputs: &[PendingInput],
+) -> Vec<String> {
+    frame
+        .available_inputs
+        .iter()
+        .map(|input| input.ref_text.to_string())
+        .chain(
+            frame
+                .resource_evidence
+                .iter()
+                .map(|resource| resource.resource_ref.to_string()),
+        )
+        .chain(
+            pending_inputs
+                .iter()
+                .map(|pending| pending.ref_text.clone()),
+        )
+        .collect()
+}
+
+/// A `<spec>` block: what each named value MEANS, as distinct from what it
+/// currently holds.
+///
+/// Stable across every frame of a run, where `<data>` is volatile by
+/// definition — so this sits before it, and a prompt cache keeps it.
+fn spec_block(entries: &[(String, String)], indent: usize) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+    let pad = " ".repeat(indent);
+    let mut block = format!("{pad}<spec>\n");
+    for (id, description) in entries {
+        block.push_str(&format!("{pad}  <{id}>{description}</{id}>\n"));
+    }
+    block.push_str(&format!("{pad}</spec>\n"));
+    block
+}
+
+/// The description a trait wrote for one ref, looked up wherever that ref
+/// lives. A ref with no description contributes no `<spec>` entry rather than
+/// an empty one — silence is better than a tag that says nothing.
+fn reference_description(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    ref_text: &str,
+) -> Option<String> {
+    let (kind, id) = ref_text.split_once(':')?;
+    match kind {
+        "port" => loaded
+            .trait_ref
+            .ports
+            .iter()
+            .find(|port| port.id == id)
+            .map(|port| port.description.clone()),
+        "slot" => loaded
+            .trait_ref
+            .slots
+            .iter()
+            .find(|slot| slot.id == id)
+            .and_then(|slot| slot.description.clone()),
+        "resource" => loaded
+            .trait_ref
+            .resources
+            .iter()
+            .find(|resource| resource.id == id)
+            .and_then(|resource| resource.hint.clone()),
+        _ => None,
+    }
+    .filter(|text| !text.trim().is_empty())
+}
+
+/// Spec entries for the values a frame is given, in the frame's own order.
+fn input_spec_entries(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    refs: &[String],
+) -> Vec<(String, String)> {
+    let mut seen = BTreeMap::<String, ()>::new();
+    let mut entries = Vec::new();
+    for ref_text in refs {
+        let id = element_id(ref_text);
+        if seen.insert(id.clone(), ()).is_some() {
+            continue;
+        }
+        if let Some(description) = reference_description(loaded, ref_text) {
+            entries.push((id, sanitize_spec_text(&description)));
+        }
+    }
+    entries
+}
+
+/// Spec entries for the values a frame is asked to produce.
+fn output_spec_entries(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    for output in &frame.requested_outputs {
+        let ref_text = output.slot_ref.to_string();
+        if let Some(description) = reference_description(loaded, &ref_text) {
+            entries.push((element_id(&ref_text), sanitize_spec_text(&description)));
+        }
+    }
+    entries
+}
+
+/// A description reaches the model, so it goes through the same tag-forgery
+/// sanitation every other model-visible field does rather than being trusted
+/// because it came from a trait.
+fn sanitize_spec_text(text: &str) -> String {
+    let mut warnings = Vec::new();
+    let mut normalizations = Vec::new();
+    ctx_traits_core::model_view::sanitize_model_text(
+        text,
+        "frame.spec",
+        &mut warnings,
+        &mut normalizations,
+    )
+    .replace(['\n', '\r'], " ")
+}
+
 /// One `<data>` child. Short values sit bare inside the element; long ones keep
 /// [`delimited_block`]'s content-derived marker, whose suffix is the first 12
 /// hex chars of the value's OWN digest — forging it needs a preimage, not a
@@ -1435,66 +1707,6 @@ fn declared_json_schema(
             .or_insert_with(|| Value::String(description.clone()));
     }
     root
-}
-
-/// The `<identity>`/`<title>` pair that opens every frame's `<information>`
-/// element: who the agent is and its one-step boundary, then the step's own
-/// title — stated directly so no frame relies on the model inferring its
-/// role.
-///
-/// P560 (2026-07-28): the input JSON Schema enumeration is GONE. It listed
-/// the full nested schema — descriptions included — of every available and
-/// pending input on every frame: 4,725 chars on a measured worker frame,
-/// describing the types of values the model has already been handed and
-/// will never emit. Nothing consumed it. A description that genuinely
-/// matters to a step belongs in that step's authored prompt text, not
-/// auto-dumped for every input on every round.
-fn frame_contract_section(frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> String {
-    let role = frame
-        .assigned_agent
-        .as_ref()
-        .map_or(ctx_traits_io::harness_config::DEFAULT_SEAT, |agent| {
-            agent.role.as_str()
-        });
-    format!(
-        "  <identity>You are agent:{role}. Do only this step's work.</identity>\n  <title>{}</title>\n",
-        frame.title
-    )
-}
-
-/// The frame-level `<information>` element: identity, title, description
-/// (the trait's own description — `SequenceItem` has no per-step description
-/// field today), the resolved prompt body, and — when the trait declares
-/// them — intent/behavior guidance sourced from the same directive registry
-/// `ctx traits explain` and the static model view already use
-/// ([`ctx_traits_core::model_view::frame_guidance`]).
-fn frame_information_section(
-    loaded: &ctx_traits_io::run::LoadedTrait,
-    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
-    prompt_section: &str,
-) -> String {
-    let mut section = String::new();
-    section.push_str("<information>\n");
-    section.push_str(&frame_contract_section(frame));
-    section.push_str(&format!(
-        "  <description>{}</description>\n",
-        loaded.trait_ref.description
-    ));
-    section.push_str("  <prompt>\n");
-    section.push_str(&indent_block(prompt_section, 4));
-    section.push_str("\n  </prompt>\n");
-    if let Some(guidance) = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref) {
-        if !guidance.intent.is_empty() {
-            section.push_str(&guidance.intent);
-            section.push('\n');
-        }
-        if !guidance.behavior.is_empty() {
-            section.push_str(&guidance.behavior);
-            section.push('\n');
-        }
-    }
-    section.push_str("</information>");
-    section
 }
 
 pub(crate) fn requested_outputs(
@@ -1785,4 +1997,69 @@ mod resolve_input_value_tokens_setting_tests {
             "setting token should have been replaced, got: {rendered}"
         );
     }
+}
+
+/// Resource elements, hoisted out of `<data>` into their own `<include>`.
+///
+/// A declared resource is a digest-pinned document: identical in every frame
+/// of a run, and identical between runs until someone edits it. Sitting in
+/// `<data>` put the most stable bytes in the envelope behind the most
+/// volatile ones, which is the wrong order for a prompt cache and the wrong
+/// order for a reader — a resource is context you are given, not an operand
+/// of this step.
+fn resolved_include_section(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    session: &ctx_traits_core::procedure::session::Session,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> crate::Result<String> {
+    if frame.resource_evidence.is_empty() {
+        return Ok(String::new());
+    }
+    let mut section = String::new();
+    for resource in &frame.resource_evidence {
+        let id = element_id(resource.resource_ref.as_str());
+        match resolved_resource_presentation_verified(
+            loaded,
+            session,
+            frame,
+            resource.resource_ref.as_str(),
+        )? {
+            Some(ResourcePresentation::Inline { content, hint }) => {
+                let hint = hint
+                    .as_deref()
+                    .map(|hint| format!(" hint=\"{hint}\""))
+                    .unwrap_or_default();
+                section.push_str(&format!(
+                    "    <{id}{hint}>\n{}    </{id}>\n",
+                    delimited_block("RESOURCE", resource.resource_ref.as_str(), &content)
+                ));
+            }
+            Some(ResourcePresentation::InlineUnavailable { reason }) => {
+                section.push_str(&format!("    <{id} unavailable=\"{reason}\" />\n"));
+            }
+            Some(ResourcePresentation::File(resolved)) => {
+                // A path, not a body: the model opens it with its own tools.
+                let hint = resolved
+                    .hint
+                    .as_deref()
+                    .map(|hint| format!(" hint=\"{hint}\""))
+                    .unwrap_or_default();
+                match resolved.status {
+                    ctx_traits_io::resource::PresentationStatus::Available
+                    | ctx_traits_io::resource::PresentationStatus::Directory => {
+                        section
+                            .push_str(&format!("    <{id} path=\"{}\"{hint} />\n", resolved.path));
+                    }
+                    _ => {
+                        section.push_str(&format!(
+                            "    <{id} path=\"{}\" unavailable=\"declared resource file is not readable\" />\n",
+                            resolved.path
+                        ));
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+    Ok(section)
 }

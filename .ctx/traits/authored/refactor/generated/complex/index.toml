@@ -304,10 +304,8 @@ text = """
 Design the refactor for the framed problem {slot:refactor-frame} on {port:target}.
 Stay within the framing's constraints.
 
-
-    Return the complete agreed design ready to implement from (slot:plan).
-    Do not leave fidelity to be inferred from prose elsewhere in the design.
-"""
+Return the complete agreed design ready to implement from (slot:plan).
+Do not leave fidelity to be inferred from prose elsewhere in the design."""
 input = [
     "slot:refactor-frame",
     "port:target",
@@ -319,9 +317,7 @@ text = """
 From the survey {slot:survey} of {port:target}.
 Verify the selection against the actual code with your tools.
 
-
-    Return the problem framing (slot:refactor-frame).
-"""
+Return the problem framing (slot:refactor-frame)."""
 input = [
     "slot:survey",
     "port:target",
@@ -335,13 +331,11 @@ Execute exactly as specified, with no departure from what is written.
 Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
 When no verdicts are present, then implement the plan in full.
 
-
-    Return exactly two outputs:
-    - the work summary, replacing any prior one:
-      what changed, files, gate results, open concerns (slot:work-summary)
-    - the complete deviation report:
-      every rejected-but-considered proposal, including any new ones this round (slot:deviation-report)
-"""
+Return exactly two outputs:
+- the work summary, replacing any prior one:
+  what changed, files, gate results, open concerns (slot:work-summary)
+- the complete deviation report:
+  every rejected-but-considered proposal, including any new ones this round (slot:deviation-report)"""
 input = ["slot:plan"]
 output = [
     "slot:work-summary",
@@ -372,14 +366,12 @@ Survey {port:target} for refactoring opportunities.
 Read the target with your tools.
 Read its callers/callees with your tools — explore organically.
 
-
-    Return a numbered candidate list — for each:
-        - the cluster of code involved (paths),
-        - why it is coupled,
-        - which smell ids or dialect pillar it violates,
-        - how the boundary would change what tests can prove.
-    List every real candidate even if it cannot fit one run in slot:survey.
-"""
+Return a numbered candidate list — for each:
+    - the cluster of code involved (paths),
+    - why it is coupled,
+    - which smell ids or dialect pillar it violates,
+    - how the boundary would change what tests can prove.
+List every real candidate even if it cannot fit one run in slot:survey."""
 input = ["port:target"]
 output = ["slot:survey"]
 
@@ -389,9 +381,7 @@ The refinement for the refactor of {port:target} has ended and the work is being
 Write the commit message from the plan {slot:plan}.
 Final reviewer verdicts: {slot:review-verdict-1} & {slot:review-verdict-2}.
 
-
-    Return exactly the finished commit message into (slot:commit-message).
-"""
+Return exactly the finished commit message into (slot:commit-message)."""
 input = [
     "port:target",
     "slot:plan",
