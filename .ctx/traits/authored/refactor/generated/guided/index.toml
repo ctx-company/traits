@@ -312,9 +312,7 @@ summary = "Implementation role."
 
 [prompt.build-the-checklist]
 text = """
-
-    Turn the captured annotations {slot:annotations} into a checklist.
-
+Turn the captured annotations {slot:annotations} into a checklist.
 
 
     Return the checklist (slot:plan).
@@ -324,12 +322,10 @@ output = ["slot:plan"]
 
 [prompt.implement-the-checklist]
 text = """
-
-    Implement the plan {slot:plan}.
-    Execute exactly as specified, with no departure from what is written.
-    Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
-    When no verdicts are present, then implement the plan in full.
-
+Implement the plan {slot:plan}.
+Execute exactly as specified, with no departure from what is written.
+Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
+When no verdicts are present, then implement the plan in full.
 
 
     Return exactly two outputs:
@@ -364,11 +360,9 @@ output = ["slot:review-verdict-1"]
 
 [prompt.write-the-commit-message]
 text = """
-
-    The review of the implemented annotation checklist has ended and the work is being committed.
-    Final reviewer verdict: {slot:review-verdict-1}.
-    Write the commit message from the checklist {slot:plan}.
-
+The review of the implemented annotation checklist has ended and the work is being committed.
+Final reviewer verdict: {slot:review-verdict-1}.
+Write the commit message from the checklist {slot:plan}.
 
 
     Return exactly the finished commit message into (slot:commit-message).

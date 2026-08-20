@@ -472,12 +472,11 @@ summary = "Second-reviewer role."
 
 [prompt.building-produce]
 text = """
-
-                    Produce the research delivery for {port:topic} from the dossiers {slot:dossiers} and triangulation {slot:triangulation} — reading each dossier's notes file for full depth. The dossiers are the index; the notes files are the evidence. Never write a section from dossier summaries alone.
-                    Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory apart from notes/ — no numbered subfolders, no manifests): report.md, bibliography.md, evidence.csv (claim, source, rating, url), and verification.md. report.md's top-level sections MUST be exactly {slot:deliverable-sections}, in that order — the structure is the brief's to dictate. Satisfy every entry of {slot:done-criteria}.
-                    Apply the Chain-of-Verification method from {resource:research-standards} to every critical claim before writing verification.md: generate the claim, write a verification question for it, independently answer that question against the cited sources, and revise the claim (or drop it) based on that answer. verification.md records each critical claim, its verification question, the independent answer, and the disposition.
-                    No reviewer verdict attached means this is round 1: implement the full delivery. On every later round two independent verdicts ARE attached — fix every blocker either names.
-                    Return a work summary: what was written, how citations and critical claims were verified, open concerns."""
+Produce the research delivery for {port:topic} from the dossiers {slot:dossiers} and triangulation {slot:triangulation} — reading each dossier's notes file for full depth. The dossiers are the index; the notes files are the evidence. Never write a section from dossier summaries alone.
+Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory apart from notes/ — no numbered subfolders, no manifests): report.md, bibliography.md, evidence.csv (claim, source, rating, url), and verification.md. report.md's top-level sections MUST be exactly {slot:deliverable-sections}, in that order — the structure is the brief's to dictate. Satisfy every entry of {slot:done-criteria}.
+Apply the Chain-of-Verification method from {resource:research-standards} to every critical claim before writing verification.md: generate the claim, write a verification question for it, independently answer that question against the cited sources, and revise the claim (or drop it) based on that answer. verification.md records each critical claim, its verification question, the independent answer, and the disposition.
+No reviewer verdict attached means this is round 1: implement the full delivery. On every later round two independent verdicts ARE attached — fix every blocker either names.
+Return a work summary: what was written, how citations and critical claims were verified, open concerns."""
 input = [
     "port:topic",
     "slot:dossiers",
@@ -492,11 +491,10 @@ output = ["slot:work-summary"]
 
 [prompt.building-review-1]
 text = """
-
-                    Review the research delivered for {port:topic} against the brief's contract and the plan {slot:stream-plan}. Work summary: {slot:work-summary}.
-                    A BLOCKER is: a report.md whose top-level sections do not match {slot:deliverable-sections} one-to-one in order; a brief track in {slot:brief-tracks} the delivery leaves uncovered; an unmet entry of {slot:done-criteria}; a plan stream with no dossier or no readable notes file; a section written at dossier-summary depth when its notes file carries materially more evidence; an uncited factual claim; a critical claim without a recorded Chain-of-Verification pass in verification.md; an unaddressed cross-stream contradiction; a source below C-rating used as sole support for a critical claim; or a file written outside {port:output-dir}/{slot:topic-slug}/ (notes/ inside it is part of the layout). Everything else is advisory.
-                    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
-                    Set status to revise while any blocker remains, approved when none do."""
+Review the research delivered for {port:topic} against the brief's contract and the plan {slot:stream-plan}. Work summary: {slot:work-summary}.
+A BLOCKER is: a report.md whose top-level sections do not match {slot:deliverable-sections} one-to-one in order; a brief track in {slot:brief-tracks} the delivery leaves uncovered; an unmet entry of {slot:done-criteria}; a plan stream with no dossier or no readable notes file; a section written at dossier-summary depth when its notes file carries materially more evidence; an uncited factual claim; a critical claim without a recorded Chain-of-Verification pass in verification.md; an unaddressed cross-stream contradiction; a source below C-rating used as sole support for a critical claim; or a file written outside {port:output-dir}/{slot:topic-slug}/ (notes/ inside it is part of the layout). Everything else is advisory.
+Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+Set status to revise while any blocker remains, approved when none do."""
 input = [
     "port:topic",
     "slot:stream-plan",
@@ -511,11 +509,10 @@ output = ["slot:review-verdict-1"]
 
 [prompt.building-review-2]
 text = """
-
-                    Independently review the research delivered for {port:topic} against the brief's contract and the plan {slot:stream-plan}. Work summary: {slot:work-summary}. Do not trust the work summary or smart-1's verdict — inspect the written deliverables, the notes files, and cited sources yourself.
-                    A BLOCKER is: a report.md whose top-level sections do not match {slot:deliverable-sections} one-to-one in order; a brief track in {slot:brief-tracks} the delivery leaves uncovered; an unmet entry of {slot:done-criteria}; a plan stream with no dossier or no readable notes file; a section written at dossier-summary depth when its notes file carries materially more evidence; an uncited factual claim; a critical claim without a recorded Chain-of-Verification pass in verification.md; an unaddressed cross-stream contradiction; a source below C-rating used as sole support for a critical claim; or a file written outside {port:output-dir}/{slot:topic-slug}/ (notes/ inside it is part of the layout). Everything else is advisory.
-                    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
-                    Set status to revise while any blocker remains, approved when none do."""
+Independently review the research delivered for {port:topic} against the brief's contract and the plan {slot:stream-plan}. Work summary: {slot:work-summary}. Do not trust the work summary or smart-1's verdict — inspect the written deliverables, the notes files, and cited sources yourself.
+A BLOCKER is: a report.md whose top-level sections do not match {slot:deliverable-sections} one-to-one in order; a brief track in {slot:brief-tracks} the delivery leaves uncovered; an unmet entry of {slot:done-criteria}; a plan stream with no dossier or no readable notes file; a section written at dossier-summary depth when its notes file carries materially more evidence; an uncited factual claim; a critical claim without a recorded Chain-of-Verification pass in verification.md; an unaddressed cross-stream contradiction; a source below C-rating used as sole support for a critical claim; or a file written outside {port:output-dir}/{slot:topic-slug}/ (notes/ inside it is part of the layout). Everything else is advisory.
+Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+Set status to revise while any blocker remains, approved when none do."""
 input = [
     "port:topic",
     "slot:stream-plan",
@@ -530,13 +527,12 @@ output = ["slot:review-verdict-2"]
 
 [prompt.ingest-the-brief]
 text = """
-
-                Read the research brief for {port:topic}. When the topic names a brief file, read that file from the repository; otherwise the topic text itself is the brief.
-                Extract three things, faithful to the brief's own words — never your preferred framing:
-                1. Its research tracks: every enumerated track or area the brief wants investigated, with the brief's own question for each. When the brief does not enumerate tracks, distill them from its prose.
-                2. The deliverable structure it demands for the final report: one entry per required top-level section, in the brief's order. When the brief specifies no structure, propose one that fits its content — but when it does specify one, reproduce it exactly.
-                3. Its explicit definition-of-done items, empty when it states none.
-                Write nothing to disk in this step — later steps own every file this run produces."""
+Read the research brief for {port:topic}. When the topic names a brief file, read that file from the repository; otherwise the topic text itself is the brief.
+Extract three things, faithful to the brief's own words — never your preferred framing:
+1. Its research tracks: every enumerated track or area the brief wants investigated, with the brief's own question for each. When the brief does not enumerate tracks, distill them from its prose.
+2. The deliverable structure it demands for the final report: one entry per required top-level section, in the brief's order. When the brief specifies no structure, propose one that fits its content — but when it does specify one, reproduce it exactly.
+3. Its explicit definition-of-done items, empty when it states none.
+Write nothing to disk in this step — later steps own every file this run produces."""
 input = ["port:topic"]
 output = [
     "slot:brief-tracks",
@@ -546,10 +542,9 @@ output = [
 
 [prompt.plan-the-streams]
 text = """
-
-                Plan four to six non-overlapping research streams for {port:topic}, from the brief's tracks {slot:brief-tracks}. Each stream gets a stable id, a complete non-overlapping focus question, a kind ("primary" or "counterevidence"), and covers: the brief-track ids it is responsible for. Every track MUST appear in at least one stream's covers; a stream may own several related tracks.
-                At least one stream MUST be kind "counterevidence": its focus is deliberately searching for disconfirming evidence and competing conclusions against the other streams' emerging findings — not merely a skeptical framing of a primary question — and its covers lists the tracks whose conclusions it challenges.
-                This is the run's one and only executable stream list, consumed directly by per-stream research."""
+Plan four to six non-overlapping research streams for {port:topic}, from the brief's tracks {slot:brief-tracks}. Each stream gets a stable id, a complete non-overlapping focus question, a kind ("primary" or "counterevidence"), and covers: the brief-track ids it is responsible for. Every track MUST appear in at least one stream's covers; a stream may own several related tracks.
+At least one stream MUST be kind "counterevidence": its focus is deliberately searching for disconfirming evidence and competing conclusions against the other streams' emerging findings — not merely a skeptical framing of a primary question — and its covers lists the tracks whose conclusions it challenges.
+This is the run's one and only executable stream list, consumed directly by per-stream research."""
 input = [
     "port:topic",
     "slot:brief-tracks",
@@ -558,11 +553,10 @@ output = ["slot:stream-plan"]
 
 [prompt.research-the-stream]
 text = """
-
-                Research exactly one stream — {slot:research-each-stream-item} — for the topic {port:topic}. Do not research any other stream's focus; other streams run in their own frames. For a "counterevidence" stream, actively search for disconfirming evidence and competing conclusions against the tracks it covers rather than corroborating them.
-                Apply {resource:research-standards}: cite every factual claim, rate sources per the canonical A-E scale ({resource:source-quality-guide}), format citations per {resource:citation-style}, and note any counterevidence encountered.
-                As you read, accumulate full reading notes in {port:output-dir}/{slot:topic-slug}/notes/<stream-id>.md (create directories as needed): quotes with attribution, per-source assessments, dead ends, and everything a later writer needs to reconstruct your reasoning. Write the notes file incrementally as you research — it is the stream's evidence corpus, never an after-the-fact summary.
-                Return the stream's dossier: its stream-id, the notes file's repo-relative path, a cited summary, key claims (each with rating and citation inline), one sources entry per consulted source ("<A-E> | <citation or url> | <what it supports>"), and open questions."""
+Research exactly one stream — {slot:research-each-stream-item} — for the topic {port:topic}. Do not research any other stream's focus; other streams run in their own frames. For a "counterevidence" stream, actively search for disconfirming evidence and competing conclusions against the tracks it covers rather than corroborating them.
+Apply {resource:research-standards}: cite every factual claim, rate sources per the canonical A-E scale ({resource:source-quality-guide}), format citations per {resource:citation-style}, and note any counterevidence encountered.
+As you read, accumulate full reading notes in {port:output-dir}/{slot:topic-slug}/notes/<stream-id>.md (create directories as needed): quotes with attribution, per-source assessments, dead ends, and everything a later writer needs to reconstruct your reasoning. Write the notes file incrementally as you research — it is the stream's evidence corpus, never an after-the-fact summary.
+Return the stream's dossier: its stream-id, the notes file's repo-relative path, a cited summary, key claims (each with rating and citation inline), one sources entry per consulted source ("<A-E> | <citation or url> | <what it supports>"), and open questions."""
 input = [
     "slot:research-each-stream-item",
     "port:topic",
@@ -576,10 +570,9 @@ output = ["slot:dossiers"]
 
 [prompt.shipping-message]
 text = """
-
-                The dual review for the research on {port:topic} has ended in agreement and the work is being committed. The final verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} (unreachable while either status is still revise — an exhausted loop aborts with its stop reason and never reaches here).
-                Write a concise commit message from the work summary {slot:work-summary} and those verdicts: a short subject line naming the topic, then one paragraph on what was researched, verified, and delivered at {slot:report-path}.
-                Return exactly that message. Do not run git commands and do not write files."""
+The dual review for the research on {port:topic} has ended in agreement and the work is being committed. The final verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} (unreachable while either status is still revise — an exhausted loop aborts with its stop reason and never reaches here).
+Write a concise commit message from the work summary {slot:work-summary} and those verdicts: a short subject line naming the topic, then one paragraph on what was researched, verified, and delivered at {slot:report-path}.
+Return exactly that message. Do not run git commands and do not write files."""
 input = [
     "port:topic",
     "slot:review-verdict-1",
@@ -591,9 +584,8 @@ output = ["slot:shipping-message"]
 
 [prompt.triangulate-the-findings]
 text = """
-
-                Triangulate the researched streams for {port:topic}: read every dossier in {slot:dossiers} and every notes file they point at, then report where independent streams agree, where they conflict — including what the counterevidence stream surfaced — source-quality asymmetries (claims resting on materially weaker evidence than their neighbors), and remaining gaps.
-                Return the triangulation."""
+Triangulate the researched streams for {port:topic}: read every dossier in {slot:dossiers} and every notes file they point at, then report where independent streams agree, where they conflict — including what the counterevidence stream surfaced — source-quality asymmetries (claims resting on materially weaker evidence than their neighbors), and remaining gaps.
+Return the triangulation."""
 input = [
     "port:topic",
     "slot:dossiers",

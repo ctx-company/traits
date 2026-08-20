@@ -317,11 +317,9 @@ summary = "Implementation role."
 
 [prompt.apply-the-proposed-candidate]
 text = """
-
-        Apply exactly the bounded change in {slot:proposal} for {port:objective} inside the isolated worktree.
-        Inspect the current files first, preserve unrelated work, and do not run or report the experiment metric. The runtime executes the trusted measurement command next.
-        Return a concise receipt naming the files changed.
-    """
+Apply exactly the bounded change in {slot:proposal} for {port:objective} inside the isolated worktree.
+Inspect the current files first, preserve unrelated work, and do not run or report the experiment metric. The runtime executes the trusted measurement command next.
+Return a concise receipt naming the files changed."""
 input = [
     "slot:proposal",
     "port:objective",
@@ -330,23 +328,19 @@ output = ["slot:apply-receipt"]
 
 [prompt.prepare-and-verify-the-isolated-workbench]
 text = """
-
-        Prepare the workbench for {port:objective}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
-        Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
-        Do not modify files yet and do not invent metric evidence.
-    """
+Prepare the workbench for {port:objective}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
+Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
+Do not modify files yet and do not invent metric evidence."""
 input = ["port:objective"]
 output = ["slot:readiness"]
 
 [prompt.propose-one-fresh-bounded-experiment]
 text = """
-
-        Propose one small, falsifiable experiment for {port:objective}.
-        The metric being optimized is {port:metric-field}; lower is better.
-        Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
-        Use only this typed handoff. Do not infer hidden conversation, claim a result, or decide keep/discard.
-        Return a title, hypothesis, and exact bounded change.
-    """
+Propose one small, falsifiable experiment for {port:objective}.
+The metric being optimized is {port:metric-field}; lower is better.
+Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
+Use only this typed handoff. Do not infer hidden conversation, claim a result, or decide keep/discard.
+Return a title, hypothesis, and exact bounded change."""
 input = [
     "port:objective",
     "port:metric-field",

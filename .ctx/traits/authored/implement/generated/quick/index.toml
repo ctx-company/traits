@@ -283,22 +283,18 @@ summary = "Implementation role."
 
 [prompt.draft-the-implementation-plan]
 text = """
-
-    Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
-    Scope, files to touch, approach, reuse opportunities, validation plan, risks.
-"""
+Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
+Scope, files to touch, approach, reuse opportunities, validation plan, risks."""
 input = ["port:task"]
 output = ["slot:draft"]
 
 [prompt.implement-the-task]
 text = """
-
-    Implement {port:task} following the draft {slot:draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
-    Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
-    Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
-    Optionally attached work summary from previous rounds: {slot:work-summary}
-    Attached verdicts are the source of truth — always follow their guidance.
-  
+Implement {port:task} following the draft {slot:draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
+Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
+Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
+Optionally attached work summary from previous rounds: {slot:work-summary}
+Attached verdicts are the source of truth — always follow their guidance.
 
 
     Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary
@@ -311,10 +307,8 @@ output = ["slot:work-summary"]
 
 [prompt.write-the-commit-message]
 text = """
-
-    The work for {port:task} is being committed.
-    Write a concise commit message from the work summary into {slot:work-summary}.
-  
+The work for {port:task} is being committed.
+Write a concise commit message from the work summary into {slot:work-summary}.
 
 
     Return exactly the finished commit message into (slot:commit-message).

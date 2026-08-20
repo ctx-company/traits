@@ -203,11 +203,9 @@ summary = "Implementation role."
 
 [prompt.bump-the-declared-version-files]
 text = """
-
-    Read the release manifest {resource:release-manifest} with your tools: the version-file locations to bump, the changelog path, and the release branch.
-    The current branch is {slot:current-branch}. If it does not match the manifest's declared release branch, edit nothing and say so plainly in your summary.
-    If present, the version-file override is {port:version}, otherwise derive the next version from the commit log since the last tag ({slot:commit-log}.
-  """
+Read the release manifest {resource:release-manifest} with your tools: the version-file locations to bump, the changelog path, and the release branch.
+The current branch is {slot:current-branch}. If it does not match the manifest's declared release branch, edit nothing and say so plainly in your summary.
+If present, the version-file override is {port:version}, otherwise derive the next version from the commit log since the last tag ({slot:commit-log}."""
 input = [
     "resource:release-manifest",
     "slot:current-branch",
@@ -221,10 +219,9 @@ output = [
 
 [prompt.draft-the-changelog-entry]
 text = """
-
-    Draft the changelog entry for version {slot:new-version} from the commit log since the last tag: {slot:commit-log}. Do not consult anything else.
-    Every line must trace to a specific commit hash in that log — never invent, embellish, or infer beyond what a commit's own summary states.
-    Write the entry in the format the manifest {resource:release-manifest} declares for its changelog file, ready to insert at the top of the changelog section for unreleased entries."""
+Draft the changelog entry for version {slot:new-version} from the commit log since the last tag: {slot:commit-log}. Do not consult anything else.
+Every line must trace to a specific commit hash in that log — never invent, embellish, or infer beyond what a commit's own summary states.
+Write the entry in the format the manifest {resource:release-manifest} declares for its changelog file, ready to insert at the top of the changelog section for unreleased entries."""
 input = [
     "slot:new-version",
     "slot:commit-log",
@@ -234,10 +231,9 @@ output = ["slot:changelog-entry"]
 
 [prompt.insert-the-changelog-entry-into-the-changelog-file]
 text = """
-
-    The changelog entry {slot:changelog-entry} for version {slot:new-version} has been approved.
-    Read the release manifest {resource:release-manifest} with your tools to find the changelog file path.
-    Insert the approved entry at the top of that file's unreleased/new-version section."""
+The changelog entry {slot:changelog-entry} for version {slot:new-version} has been approved.
+Read the release manifest {resource:release-manifest} with your tools to find the changelog file path.
+Insert the approved entry at the top of that file's unreleased/new-version section."""
 input = [
     "slot:changelog-entry",
     "slot:new-version",
@@ -247,20 +243,18 @@ output = ["slot:changelog-write-output"]
 
 [prompt.review-the-version-bump]
 text = """
-
-    Review the release's version bump.
-    Information:
-      - Current branch: {slot:current-branch}
-      - New version: {slot:new-version}
-      - Worker's summary: {slot:version-summary}
-      - Scoped diff: {slot:version-diff}
-    Blocker Guidelines:
-      - the run is on a branch other than the manifest's declared release branch
-      - a file the manifest does not list was edited
-      - the new version does not match the manifest's declared bump rule
-      - the new version does not match the explicit override port when one was given
-      - the new version does not match any file the manifest lists was missed
-  """
+Review the release's version bump.
+Information:
+  - Current branch: {slot:current-branch}
+  - New version: {slot:new-version}
+  - Worker's summary: {slot:version-summary}
+  - Scoped diff: {slot:version-diff}
+Blocker Guidelines:
+  - the run is on a branch other than the manifest's declared release branch
+  - a file the manifest does not list was edited
+  - the new version does not match the manifest's declared bump rule
+  - the new version does not match the explicit override port when one was given
+  - the new version does not match any file the manifest lists was missed"""
 input = [
     "slot:current-branch",
     "slot:new-version",
@@ -271,10 +265,9 @@ output = ["slot:version-verdict"]
 
 [prompt.spot-check-the-changelog]
 text = """
-
-    Spot-check the changelog entry {slot:changelog-entry} against the commit log {slot:commit-log}.
-    Open a few of the cited commits with "git show" and try to REFUTE each line (default to blocking on what you cannot verify).
-    A blocker is any line not traceable to a listed commit, or any commit in the log with no corresponding line."""
+Spot-check the changelog entry {slot:changelog-entry} against the commit log {slot:commit-log}.
+Open a few of the cited commits with "git show" and try to REFUTE each line (default to blocking on what you cannot verify).
+A blocker is any line not traceable to a listed commit, or any commit in the log with no corresponding line."""
 input = [
     "slot:changelog-entry",
     "slot:commit-log",
@@ -283,9 +276,8 @@ output = ["slot:changelog-verdict"]
 
 [prompt.write-the-release-commit-message]
 text = """
-
-    The version-bump and changelog reviews have both approved.
-    Write the release commit message: subject line "release: v{slot:new-version}", then the changelog entry {slot:changelog-entry} as the body."""
+The version-bump and changelog reviews have both approved.
+Write the release commit message: subject line "release: v{slot:new-version}", then the changelog entry {slot:changelog-entry} as the body."""
 input = [
     "slot:new-version",
     "slot:changelog-entry",

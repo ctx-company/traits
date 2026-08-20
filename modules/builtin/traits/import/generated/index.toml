@@ -133,9 +133,8 @@ summary = "Trait import enrichment agent."
 
 [prompt.produce-first]
 text = """
-
-        Treat {port:scaffold} as the authoritative baseline for trait {port:trait-id}, imported from a {port:source-profile} source. Preserve trait identity and import provenance exactly as given in {port:scaffold}. Enrich only intent, behavior, metadata, and descriptions that {port:source} actually supports; never invent claims the source does not make.
-        Conform to {port:target-schema}, following {resource:spec/design-rubric} — classify the imported material by what it says rather than inventing runtime behavior for it, and name every identifier so it reads alone. Return exactly one complete trait draft JSON text — a single trait field holding the canonical trait draft — nothing else."""
+Treat {port:scaffold} as the authoritative baseline for trait {port:trait-id}, imported from a {port:source-profile} source. Preserve trait identity and import provenance exactly as given in {port:scaffold}. Enrich only intent, behavior, metadata, and descriptions that {port:source} actually supports; never invent claims the source does not make.
+Conform to {port:target-schema}, following {resource:spec/design-rubric} — classify the imported material by what it says rather than inventing runtime behavior for it, and name every identifier so it reads alone. Return exactly one complete trait draft JSON text — a single trait field holding the canonical trait draft — nothing else."""
 input = [
     "port:scaffold",
     "port:trait-id",
@@ -148,9 +147,8 @@ output = ["slot:candidate"]
 
 [prompt.revise]
 text = """
-
-        Round evaluation of the import for trait {port:trait-id} failed at rung {slot:round-report}. Current candidate draft: {slot:candidate}.
-        Fix exactly what the diagnostics in {slot:round-report} name; never invent claims {port:source} does not make, and never drop a declaration the {port:scaffold} baseline established — enrichment adds, it never deletes. Keep everything else. Return the complete corrected trait draft JSON text only, nothing else."""
+Round evaluation of the import for trait {port:trait-id} failed at rung {slot:round-report}. Current candidate draft: {slot:candidate}.
+Fix exactly what the diagnostics in {slot:round-report} name; never invent claims {port:source} does not make, and never drop a declaration the {port:scaffold} baseline established — enrichment adds, it never deletes. Keep everything else. Return the complete corrected trait draft JSON text only, nothing else."""
 input = [
     "port:trait-id",
     "slot:round-report",

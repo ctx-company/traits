@@ -138,9 +138,8 @@ summary = "Trait refinement agent."
 
 [prompt.produce-first]
 text = """
-
-        Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}.
-        Follow {resource:spec/design-rubric}: keep the derived kind honest, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else."""
+Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}.
+Follow {resource:spec/design-rubric}: keep the derived kind honest, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else."""
 input = [
     "port:source",
     "port:source-path",
@@ -152,9 +151,8 @@ output = ["slot:candidate"]
 
 [prompt.revise]
 text = """
-
-        Round evaluation of the refinement for {port:change-request} failed at rung {slot:round-report}. Current candidate scaffold: {slot:candidate}.
-        Fix exactly what the diagnostics in {slot:round-report} name; never change the trait's identity or drop its procedure — refinement edits a trait, it does not swap or gut it. Keep everything else. Return the complete corrected refine scaffold JSON text only, nothing else."""
+Round evaluation of the refinement for {port:change-request} failed at rung {slot:round-report}. Current candidate scaffold: {slot:candidate}.
+Fix exactly what the diagnostics in {slot:round-report} name; never change the trait's identity or drop its procedure — refinement edits a trait, it does not swap or gut it. Keep everything else. Return the complete corrected refine scaffold JSON text only, nothing else."""
 input = [
     "port:change-request",
     "slot:round-report",

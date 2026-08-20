@@ -121,9 +121,8 @@ summary = "Trait draft generator."
 
 [prompt.produce-first]
 text = """
-
-        Create exactly one complete trait authoring source in TypeScript, using the @ctx-traits/cdk builder, for {port:name} from {port:brief}. It must declare trait("{port:trait-id}", ...) with a non-empty procedure sequence — a candidate that compiles but declares no procedure never converges.
-        Follow {resource:spec/design-rubric}: classify the material by what it says before choosing a shape, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return the complete TypeScript source text only, nothing else."""
+Create exactly one complete trait authoring source in TypeScript, using the @ctx-traits/cdk builder, for {port:name} from {port:brief}. It must declare trait("{port:trait-id}", ...) with a non-empty procedure sequence — a candidate that compiles but declares no procedure never converges.
+Follow {resource:spec/design-rubric}: classify the material by what it says before choosing a shape, model dataflow only with declared ports and slots, and give every identifier a name that carries its meaning alone. Return the complete TypeScript source text only, nothing else."""
 input = [
     "port:name",
     "port:brief",
@@ -134,9 +133,8 @@ output = ["slot:candidate-source"]
 
 [prompt.revise]
 text = """
-
-        Round evaluation of trait {port:trait-id} for {port:brief} failed at rung {slot:round-report}. Current candidate source: {slot:candidate-source}.
-        Fix exactly what the diagnostics in {slot:round-report} name; keep everything else. Return the complete corrected TypeScript source text only, nothing else."""
+Round evaluation of trait {port:trait-id} for {port:brief} failed at rung {slot:round-report}. Current candidate source: {slot:candidate-source}.
+Fix exactly what the diagnostics in {slot:round-report} name; keep everything else. Return the complete corrected TypeScript source text only, nothing else."""
 input = [
     "port:trait-id",
     "port:brief",

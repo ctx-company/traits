@@ -15,6 +15,7 @@ import { metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
 import {
   collectMany,
   compact,
+  dedentPromptText,
   mergeDeclarationSets,
   normalizeRefList,
   slugFromName,
@@ -260,13 +261,18 @@ export function promptBoundText(text: string, bindings: Readonly<Record<string, 
 
 /** Attaches the hidden, non-enumerable `.extend` member every composable `PromptTemplate` carries. */
 function buildPromptTemplate(facets: TemplateFacets): PromptTemplate {
+  // Dedented here, at the one point composed text becomes a canonical value,
+  // and NOT in `facets` — `extend` below composes from the raw facets, so a
+  // chained template dedents once over the whole composition rather than
+  // per-part, where each part's own indent would be measured separately.
+  const text = dedentPromptText(facets.text);
   const template = withMeta<{ text: string }, "template", unknown, "prompt-template">(
-    { text: facets.text },
+    { text },
     {
       kind: "template",
       refs: [...new Set(facets.refs)],
       ...(facets.optionalRefs.length === 0 ? {} : { optionalRefs: [...new Set(facets.optionalRefs)] }),
-      declaration: { text: facets.text },
+      declaration: { text },
       declarations: facets.declarations,
     },
   );

@@ -57,12 +57,10 @@ summary = "Review role."
 
 [prompt.review-the-target]
 text = """
-
-      Review {port:target}.
-      Find it and read it with your own tools first — never review something from its name alone.
-      Report what would block a merge, then what is advisory, then what you checked and found sound.
-      Say plainly when it is fine; do not invent findings to fill the report.
-    """
+Review {port:target}.
+Find it and read it with your own tools first — never review something from its name alone.
+Report what would block a merge, then what is advisory, then what you checked and found sound.
+Say plainly when it is fine; do not invent findings to fill the report."""
 input = ["port:target"]
 output = ["slot:verdict"]
 

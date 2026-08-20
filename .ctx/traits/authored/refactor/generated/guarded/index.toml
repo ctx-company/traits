@@ -272,9 +272,7 @@ summary = "Implementation role."
 
 [prompt.checklist-the-target]
 text = """
-
-    Turn {port:target} into an actionable refactoring checklist.
-  
+Turn {port:target} into an actionable refactoring checklist.
 
 
     Return the checklist plan: slot:plan.
@@ -284,12 +282,10 @@ output = ["slot:plan"]
 
 [prompt.implement-the-checklist]
 text = """
-
-    Implement the plan {slot:plan}.
-    Execute exactly as specified, with no departure from what is written.
-    Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
-    When no verdicts are present, then implement the plan in full.
-
+Implement the plan {slot:plan}.
+Execute exactly as specified, with no departure from what is written.
+Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
+When no verdicts are present, then implement the plan in full.
 
 
     Return exactly two outputs:
@@ -324,11 +320,9 @@ output = ["slot:review-verdict-1"]
 
 [prompt.write-the-commit-message]
 text = """
-
-    The refinement for the refactor of {port:target} has ended and the work is being committed.
-    Write the commit message from the plan {slot:plan}.
-    Final reviewer verdicts: {slot:review-verdict-1} & {slot:review-verdict-2}.
-
+The refinement for the refactor of {port:target} has ended and the work is being committed.
+Write the commit message from the plan {slot:plan}.
+Final reviewer verdicts: {slot:review-verdict-1} & {slot:review-verdict-2}.
 
 
     Return exactly the finished commit message into (slot:commit-message).

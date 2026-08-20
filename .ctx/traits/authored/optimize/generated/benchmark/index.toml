@@ -431,11 +431,9 @@ summary = "Implementation role."
 
 [prompt.implement-the-draft-worker]
 text = """
-
-        Implement the draft {slot:draft} for {port:target} inside the isolated worktree.
-        Do not run or report the benchmark; the runtime executes the trusted benchmark command next.
-        Return a concise receipt naming the files changed.
-    """
+Implement the draft {slot:draft} for {port:target} inside the isolated worktree.
+Do not run or report the benchmark; the runtime executes the trusted benchmark command next.
+Return a concise receipt naming the files changed."""
 input = [
     "slot:draft",
     "port:target",
@@ -444,11 +442,9 @@ output = ["slot:implement-receipt"]
 
 [prompt.prepare-and-verify-the-isolated-workbench]
 text = """
-
-        Prepare the workbench for {port:target}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
-        Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
-        Do not modify files yet and do not invent metric evidence.
-    """
+Prepare the workbench for {port:target}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
+Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
+Do not modify files yet and do not invent metric evidence."""
 input = ["port:target"]
 output = ["slot:readiness"]
 
@@ -472,11 +468,9 @@ output = ["slot:review-verdict"]
 
 [prompt.scope-one-bounded-benchmark-improvement-attempt-smart-1]
 text = """
-
-        Scope one small, falsifiable attempt to improve the lower-is-better benchmark over {port:target}.
-        Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
-        Return the exact bounded area to touch and why it should improve the benchmark, staying inside {port:target}.
-    """
+Scope one small, falsifiable attempt to improve the lower-is-better benchmark over {port:target}.
+Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
+Return the exact bounded area to touch and why it should improve the benchmark, staying inside {port:target}."""
 input = [
     "port:target",
     "slot:best-metric",
@@ -485,10 +479,7 @@ input = [
 output = ["slot:scope"]
 
 [prompt.turn-the-scope-into-a-concrete-worker-draft-smart-1]
-text = """
-
-        Turn the scope {slot:scope} for {port:target} into a concrete, actionable draft the worker can implement directly: exact files/areas and the precise change. Keep it to one bounded attempt.
-    """
+text = "Turn the scope {slot:scope} for {port:target} into a concrete, actionable draft the worker can implement directly: exact files/areas and the precise change. Keep it to one bounded attempt."
 input = [
     "slot:scope",
     "port:target",

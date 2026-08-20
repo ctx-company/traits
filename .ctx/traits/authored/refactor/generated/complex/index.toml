@@ -301,10 +301,8 @@ output = ["slot:review-verdict-2"]
 
 [prompt.design-the-boundary]
 text = """
-
-    Design the refactor for the framed problem {slot:refactor-frame} on {port:target}.
-    Stay within the framing's constraints.
-
+Design the refactor for the framed problem {slot:refactor-frame} on {port:target}.
+Stay within the framing's constraints.
 
 
     Return the complete agreed design ready to implement from (slot:plan).
@@ -318,10 +316,8 @@ output = ["slot:plan"]
 
 [prompt.frame-the-problem]
 text = """
-
-    From the survey {slot:survey} of {port:target}.
-    Verify the selection against the actual code with your tools.
-
+From the survey {slot:survey} of {port:target}.
+Verify the selection against the actual code with your tools.
 
 
     Return the problem framing (slot:refactor-frame).
@@ -334,12 +330,10 @@ output = ["slot:refactor-frame"]
 
 [prompt.implement-the-design-specification]
 text = """
-
-    Implement the plan {slot:plan}.
-    Execute exactly as specified, with no departure from what is written.
-    Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
-    When no verdicts are present, then implement the plan in full.
-
+Implement the plan {slot:plan}.
+Execute exactly as specified, with no departure from what is written.
+Fix reviewer verdicts if present: {slot:review-verdict-1} and {slot:review-verdict-2}.
+When no verdicts are present, then implement the plan in full.
 
 
     Return exactly two outputs:
@@ -374,11 +368,9 @@ output = ["slot:review-verdict-1"]
 
 [prompt.survey-the-target]
 text = """
-
-    Survey {port:target} for refactoring opportunities.
-    Read the target with your tools.
-    Read its callers/callees with your tools — explore organically.
-
+Survey {port:target} for refactoring opportunities.
+Read the target with your tools.
+Read its callers/callees with your tools — explore organically.
 
 
     Return a numbered candidate list — for each:
@@ -393,11 +385,9 @@ output = ["slot:survey"]
 
 [prompt.write-the-commit-message]
 text = """
-
-    The refinement for the refactor of {port:target} has ended and the work is being committed.
-    Write the commit message from the plan {slot:plan}.
-    Final reviewer verdicts: {slot:review-verdict-1} & {slot:review-verdict-2}.
-
+The refinement for the refactor of {port:target} has ended and the work is being committed.
+Write the commit message from the plan {slot:plan}.
+Final reviewer verdicts: {slot:review-verdict-1} & {slot:review-verdict-2}.
 
 
     Return exactly the finished commit message into (slot:commit-message).

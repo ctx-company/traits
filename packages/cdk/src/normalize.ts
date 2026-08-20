@@ -811,3 +811,34 @@ export function sourceMapFor(value: unknown, draft: JsonObject): SourceMap {
   }
   return Object.fromEntries([...entries.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
+
+/**
+ * Removes the indentation a template literal picked up from the source it was
+ * written in.
+ *
+ * A prompt is authored inside a function, so its text arrives with a leading
+ * newline, the enclosing indent on every line, and usually a trailing newline
+ * before the closing backtick. None of that is content — it is where the code
+ * happened to sit — and it was reaching the canonical and then the model
+ * verbatim, so a frame showed a prompt opening on a blank line and indented
+ * eight spaces under its own tag.
+ *
+ * Only the COMMON indent is removed, so relative indentation inside the text
+ * survives: a nested list or an embedded snippet keeps its shape. Blank lines
+ * are ignored when measuring, since a blank line in a template literal is
+ * usually truly empty and would otherwise force the common indent to zero.
+ */
+export function dedentPromptText(text: string): string {
+  const lines = text.split("\n");
+  while (lines.length > 0 && lines[0]?.trim() === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1]?.trim() === "") lines.pop();
+  if (lines.length === 0) return "";
+  let common: number | undefined;
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (common === undefined || indent < common) common = indent;
+  }
+  if (common === undefined || common === 0) return lines.join("\n");
+  return lines.map((line) => (line.trim() === "" ? "" : line.slice(common))).join("\n");
+}
