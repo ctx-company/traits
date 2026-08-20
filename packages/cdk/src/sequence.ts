@@ -32,6 +32,7 @@ import type {
   SequenceLinearHandle,
   SettingHandle,
   SlotHandle,
+  SlotWithFields,
 } from "./handles.js";
 import { input } from "./input.js";
 import type { CommandTemplateValue, OptionalSlotInputValue } from "./input.js";
@@ -712,7 +713,7 @@ export interface SequenceFunction {
   check(
     id: string,
     fields: Omit<CheckSequenceFields, "id" | "kind">,
-  ): SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> };
+  ): SequenceHandle & { readonly pass: SlotWithFields<CheckResultValue> };
   /** Declares a signal-gated question that is answered by a human through the
    * normal current-frame submission path. */
   ask(id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle;
@@ -1077,8 +1078,16 @@ export const sequence: SequenceFunction = {
   check: (
     id: string,
     fields: Omit<CheckSequenceFields, "id" | "kind">,
-  ): SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> } =>
-    withHiddenField(sequenceOf({ ...fields, id, kind: "check" } as CheckSequenceFields), "pass", fields.output),
+  ): SequenceHandle & { readonly pass: SlotWithFields<CheckResultValue> } =>
+    withHiddenField(
+      sequenceOf({ ...fields, id, kind: "check" } as CheckSequenceFields),
+      "pass",
+      // The verdict slot the author declared, re-typed as the object-schema
+      // handle it is: a check's output must carry `ok`/`argv` (P565), so its
+      // fields are readable — `gate.pass.ok` is the whole reason `pass` is
+      // exposed, and a bare `SlotHandle` left that access at `unknown`.
+      fields.output as unknown as SlotWithFields<CheckResultValue>,
+    ),
   ask: (id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle =>
     sequenceOf({ ...fields, id, kind: "ask" } as AskSequenceFields),
   gate: sequenceGate,

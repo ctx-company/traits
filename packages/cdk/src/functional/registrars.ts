@@ -17,6 +17,7 @@ import type {
   SequenceLinearHandle,
   SettingHandle,
   SlotHandle,
+  SlotWithFields,
 } from "../handles.js";
 import type {
   CheckSequenceFields,
@@ -184,7 +185,7 @@ export const stepRegistrars = {
   check(
     title: string,
     opts: Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride,
-  ): SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> } {
+  ): SequenceHandle & { readonly pass: SlotWithFields<CheckResultValue> } {
     requireBuild(`step.check(${JSON.stringify(title)})`);
     const id = opts.id ?? mintId(title);
     const fields = withPositionalWhen({ ...opts, title });
