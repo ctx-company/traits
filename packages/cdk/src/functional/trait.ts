@@ -46,6 +46,16 @@ const BEHAVIOR_KEYS: readonly string[] = [
   "format",
 ];
 const INTENT_KEYS: readonly string[] = ["require", "focus", "avoid", "block"];
+/**
+ * The behavior axes that take a LIST. The rest hold a single value, and the
+ * difference decides what merging a family shell into a variant means: a list
+ * axis composes, a scalar axis is overridden.
+ *
+ * Mirrors the same split in core's `behavior_axes`. Two copies, because the
+ * CDK cannot see into Rust — a third would be one too many, so anything new
+ * needing this should read it from here.
+ */
+const BEHAVIOR_LIST_KEYS: readonly string[] = ["tone", "method", "format"];
 
 function assertKnownKeys(fields: Record<string, unknown>, allowed: readonly string[], caller: string): void {
   if ("procedure" in fields && !allowed.includes("procedure")) {
@@ -681,6 +691,7 @@ function mergeShellFacetsIntoVariant(familyFrame: TraitFrame, variantFrame: Trai
     });
     variantIntent[key] = [...additions, ...variantList];
   }
+  mergeShellBehaviorIntoVariant(familyFrame, variantFrame);
   const requireSlugs = new Set(guidanceSlugs(variantIntent.require));
   for (const slug of guidanceSlugs(variantIntent.avoid)) {
     if (requireSlugs.has(slug)) {
@@ -695,11 +706,58 @@ function mergeShellFacetsIntoVariant(familyFrame: TraitFrame, variantFrame: Trai
   }
 }
 
+/**
+ * The family shell's `useBehavior` reaching its variants — which it did not,
+ * for as long as both existed.
+ *
+ * `useIntent` and `useResource` on a shell composed into every variant;
+ * `useBehavior` on the same shell, on the line between them, was discarded
+ * without a word. A trait declaring `tone`/`method`/`verbosity` at its root
+ * built clean, checked clean, and shipped a canonical with no behavior in it,
+ * so no frame ever carried the guidance its author wrote.
+ *
+ * A list axis composes the way intent does: the shell's items first, the
+ * variant's after, and an item the variant already names is not doubled. A
+ * scalar axis cannot compose — `verbosity` is one value — so the variant
+ * wins where it declares one, which is what specializing a family means.
+ */
+function mergeShellBehaviorIntoVariant(familyFrame: TraitFrame, variantFrame: TraitFrame): void {
+  const shellBehavior = familyFrame.behavior as Record<string, unknown>;
+  const variantBehavior = variantFrame.behavior as Record<string, unknown>;
+  for (const key of Object.keys(shellBehavior)) {
+    const shellValue = shellBehavior[key];
+    const variantValue = variantBehavior[key];
+    if (variantValue === undefined) {
+      variantBehavior[key] = shellValue;
+      continue;
+    }
+    if (!BEHAVIOR_LIST_KEYS.includes(key)) {
+      // Scalar axis, declared on both: the variant is the specialization.
+      continue;
+    }
+    const shellList = Array.isArray(shellValue) ? shellValue : [shellValue];
+    const variantList = Array.isArray(variantValue) ? variantValue : [variantValue];
+    const seen = new Set(guidanceSlugs(variantList));
+    const additions = shellList.filter((item) => {
+      const slug = guidanceSlug(item);
+      return slug === undefined || !seen.has(slug);
+    });
+    variantBehavior[key] = [...additions, ...variantList];
+  }
+}
+
 function assembleFamily(familyFrame: TraitFrame, familyItems: readonly RegisteredItem[]): ReturnType<typeof trait> {
   if (familyItems.length > 0) {
     throw new Error("useVariant: a family shell must not register its own steps — procedures belong to the variants");
   }
-  const shellHasDeclaredFacets = Object.keys(familyFrame.intent).length > 0 || familyFrame.resources.length > 0;
+  // `behavior` belongs in this check for the same reason `intent` does: an
+  // object-style variant bypasses frame evaluation, so a shell facet cannot
+  // reach it. Its absence meant a shell declaring only behavior hit no guard
+  // and silently lost it.
+  const shellHasDeclaredFacets =
+    Object.keys(familyFrame.intent).length > 0 ||
+    Object.keys(familyFrame.behavior).length > 0 ||
+    familyFrame.resources.length > 0;
   const variants: Record<string, unknown> = {};
   let defaultKey: string | undefined;
   for (const binding of familyFrame.boundVariants) {
@@ -718,7 +776,7 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
     } else {
       if (shellHasDeclaredFacets) {
         throw new Error(
-          "useVariant: the family shell declares useIntent/useResource, but this variant is bound as an object-style handle — object-style handles bypass frame evaluation, so the shell's facets cannot reach it. Bind this variant as a function instead, or move the shell's useIntent/useResource calls into each variant.",
+          "useVariant: the family shell declares useIntent/useBehavior/useResource, but this variant is bound as an object-style handle — object-style handles bypass frame evaluation, so the shell's facets cannot reach it. Bind this variant as a function instead, or move the shell's facet calls into each variant.",
         );
       }
       key = binding.key as string;

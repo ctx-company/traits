@@ -44,6 +44,18 @@ id = "unbounded-loop"
 [[intent.avoid]]
 id = "rubber-stamp-review"
 
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
 [[port]]
 id = "commit-report"
 direction = "output"
