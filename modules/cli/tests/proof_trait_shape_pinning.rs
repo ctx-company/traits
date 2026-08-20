@@ -835,7 +835,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
         &[
             "traits",
             "trust",
-            "approve",
+            "--approved",
             "--digest",
             canonical_digest.as_str(),
         ],

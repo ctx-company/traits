@@ -991,7 +991,7 @@ mod build_cache_tests {
 
     #[test]
     fn matches_only_the_named_global_build_cache_shape() {
-        let path = Utf8Path::new("/home/u/.config/ctx/cache/repo-abcd1234/build/cargo");
+        let path = Utf8Path::new("/home/u/.config/ctx/traits/cache/repo-abcd1234/build/cargo");
         assert!(is_build_cache_root(path, "cargo"));
         assert!(!is_build_cache_root(path, "pnpm-store"));
     }
@@ -1003,14 +1003,15 @@ mod build_cache_tests {
             "build-target"
         ));
         assert!(!is_build_cache_root(
-            Utf8Path::new("/home/u/.config/ctx/cache/repo-abcd1234/traits"),
+            Utf8Path::new("/home/u/.config/ctx/traits/cache/repo-abcd1234/vendored"),
             "cargo"
         ));
     }
 
     #[test]
     fn resolves_lexical_parent_dir_aliases_before_matching() {
-        let path = Utf8Path::new("/home/u/.config/ctx/cache/repo-abcd1234/build/other/../cargo");
+        let path =
+            Utf8Path::new("/home/u/.config/ctx/traits/cache/repo-abcd1234/build/other/../cargo");
         assert!(is_build_cache_root(path, "cargo"));
     }
 }
