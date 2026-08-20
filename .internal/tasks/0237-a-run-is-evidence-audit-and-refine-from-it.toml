@@ -1,0 +1,73 @@
+schema-version = "0.2"
+key = "0237"
+title = "A run is evidence: audit a session, and refine a trait from what it showed"
+status = "ready"
+raised = "2026-08-20"
+content = """
+`critique` and `refine` both read a trait the way a reviewer reads a spec: the canonical document, the source map, and nothing else. Neither has ever seen the trait execute. Every judgment they make is about the text.
+
+A run holds the other half. The ledger records every slot revision in order, every verdict payload with its blockers and their `recurrence-of` links, every command's exit code and truncation flag, the resolved budgets against what was spent, and whether a merge frame ever ran. That is a description of what the trait *did*, and today nothing reads it back.
+
+Two things should be able to.
+
+## 1. `audit` — what stands out, what worries
+
+A new verb. Given a session or a run, produce an advisory report of what an experienced reader would flag. Read-only: it names things, it does not touch the trait, the worktree, or the run.
+
+Signals already visible in ledgers sitting on disk right now:
+
+- A blocker whose `recurrence-of` points at itself across many rounds. ctx-codecheck 0006.5 did this nine times.
+- Open step count flat while total climbs — the reviewer expanding scope as fast as the worker closes it. 0006.11 went from 9 open of 19 at round 22 to 14 open of 37 at round 31, closed frozen at 23 across the last two.
+- A worker that never commits. 0006.11 reached 31 rounds with zero commits and 1,869 uncommitted lines as the only copy of the work; its sibling 0006.10 committed thirteen times and fast-forwarded clean.
+- Command evidence accepted while `stdout_truncated` is set.
+- Budget spend per round trending up.
+- A terminal `completed` with no merge frame.
+- Gate prerequisites discovered mid-run rather than at dispatch — the wasm-bindgen, Playwright, vitest and Go installs that cost roughly 800k tokens across two runs.
+
+This absorbs 0216's second follow-up, which asked for exactly one of these ("a loop that cannot converge should be visible before the budget kills it") and scoped it to a single signal inside the implement family. It belongs here: general, and applicable to any trait.
+
+## What `audit` has to accept
+
+Live, failed, and successful runs — all three, by owner ruling. Each imposes a constraint the happy path does not.
+
+**Failed.** The run most worth auditing is the one whose ledger the normal loader refuses. The ctx-notify plan run `9246944495c6` died with `run ledger contract invalid: slot-revisions[4] duplicates acceptance-order 4`, and that message is the whole reason 0235 exists. An audit that opens a ledger only when it validates is useless exactly where it is needed. It must read a ledger structurally, report contract violations as findings, and keep going.
+
+**Live.** The driver holds `.driver-lock` and is appending. Audit must never take that lock, write beside it, or block a frame. A live ledger can also be read mid-write, so a partial tail is a normal condition, not an error. Because the run moves underneath it, every report states the revision count and `state-digest` it observed — a finding nobody can locate again is not evidence.
+
+**Successful.** A clean run is the negative case, and the one that decides whether any of this is worth running: on a run that closed and merged, audit should have almost nothing to say.
+
+## 2. Refine from the run
+
+Given the same evidence, propose a change to the *trait* — not to the task the run was working on.
+
+The constraint named at the outset is the whole difficulty: **generic enough to belong in the trait, while still demonstrably improving the run that motivated it.** A proposal that only helps this run is overfitting. A proposal that helps in general but would not have changed this run is unfalsifiable.
+
+So a proposal carries both halves: the evidence from this run it responds to, by ledger position — and what it changes for runs that never saw this run's inputs, including what it costs them.
+
+Overfit smells worth refusing outright: a task key, a repo name, a blocker id, or a specific tool or file path appearing in proposed canonical.
+
+The output is a candidate, gated like every other assist candidate, never applied silently.
+
+## Where it attaches
+
+`--session <SESSION>` is already a global CLI option accepting a run-session ID or a ledger path, which is the shape `audit` needs and the second, evidential source `refine` is missing — it takes a prose `<CHANGE_REQUEST>` from a human today.
+"""
+validation = """
+## Watch
+
+The audit must not become a second reviewer. It reports on the *run*, not on the code the run produced — the moment it judges the diff, it duplicates the review trait and inherits its cost.
+
+A signal that fires on healthy runs is worse than no signal. Each one needs a run it stays quiet on; 0006.10 closed and merged cleanly and sits in the same store as 0006.11.
+
+Structural reading is what makes the failed case work, and it cuts both ways: a reader loose enough to open a broken ledger can also silently misread a good one. Whatever it returns for a valid ledger must agree with what the strict loader returns.
+
+## Done when
+
+`audit` accepts a session ID, a run ID, and a ledger path, and completes against a live run, a run that ended in failure, and one that completed and merged.
+
+It emits typed findings carrying ledger positions and the observed revision count and `state-digest`; it stays silent on a clean run; it fires on at least the self-recurring-blocker and never-committed-worker signals; and on a ledger that violates the contract it reports the violation as a finding instead of refusing to load. Proven with scratch-fixture ledgers in a temp store, with the real 0006.10 / 0006.11 / `9246944495c6` ledgers as a live cross-check rather than as test inputs.
+
+Against a live session it acquires no lock and leaves no file beside the ledger, and a frame running concurrently is unaffected.
+
+`refine` accepts a session as evidence and produces a candidate citing the ledger positions it responds to and naming what it changes for unrelated runs. A candidate naming a task key, repo, or blocker id in proposed canonical is refused by a gate, not by a reviewer's judgment.
+"""
