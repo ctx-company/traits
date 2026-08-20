@@ -300,9 +300,9 @@ fn global_install_records_manifest_lock_vendor_and_audit_journal() {
         "global lock at ~/.config/ctx/traits.lock missing the installed package: {lock_text}"
     );
     assert!(
-        home.join("ctx/traits/global-demo/generated/index.toml")
+        home.join("ctx/traits/vendored/global-demo/generated/index.toml")
             .is_file(),
-        "global vendor tree was not written under ~/.config/ctx/traits/global-demo/"
+        "global vendor tree was not written under ~/.config/ctx/traits/vendored/global-demo/"
     );
 
     let audit_dir = home.join("ctx/audit");

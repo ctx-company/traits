@@ -1370,6 +1370,79 @@ struct MigrateConfigReport {
     note: &'static str,
 }
 
+/// `ctx traits doctor --migrate-state [--apply]`: report, and optionally
+/// perform, the move of run state under the global trait root.
+///
+/// Read-only without `--apply`. These directories hold run history and reach
+/// tens of gigabytes; a health check reports them and lets the owner decide.
+pub(crate) fn handle_doctor_migrate_state(
+    apply: bool,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    let plan = ctx_traits_io::state::plan_state_migration()?;
+    let moved = if apply {
+        ctx_traits_io::state::apply_state_migration(&plan)?
+    } else {
+        Vec::new()
+    };
+
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            let rows: Vec<_> = plan
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "family": entry.family,
+                        "from": entry.from.as_str(),
+                        "to": entry.to.as_str(),
+                        "blocked": entry.destination_occupied,
+                        "moved": moved.iter().any(|m| m.family == entry.family),
+                    })
+                })
+                .collect();
+            print_json_report(
+                &serde_json::json!({ "state": rows }),
+                "doctor migrate-state",
+            )?;
+        }
+        OutputMode::Human(mode) => {
+            let status = if plan.is_empty() {
+                PanelStatus::Passed("nothing to migrate".to_string())
+            } else if apply {
+                PanelStatus::Passed(format!("{} moved", moved.len()))
+            } else {
+                PanelStatus::Passed(format!("{} to migrate", plan.len()))
+            };
+            let mut panel = Panel::new("ctx", "doctor migrate-state", status);
+            for entry in &plan {
+                let tone = if entry.destination_occupied {
+                    RowTone::Warn
+                } else {
+                    RowTone::Default
+                };
+                let detail = if entry.destination_occupied {
+                    format!(
+                        "{} -> {} (destination exists; skipped)",
+                        entry.from, entry.to
+                    )
+                } else {
+                    format!("{} -> {}", entry.from, entry.to)
+                };
+                panel = panel.row(PanelRow::toned(&entry.family, detail, tone));
+            }
+            if !plan.is_empty() && !apply {
+                panel = panel.row(PanelRow::toned(
+                    "next",
+                    "ctx traits doctor --migrate-state --apply",
+                    RowTone::Default,
+                ));
+            }
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+    Ok(CommandOutput::new(()))
+}
+
 pub(crate) fn handle_doctor_migrate_config(
     apply: bool,
     json: bool,

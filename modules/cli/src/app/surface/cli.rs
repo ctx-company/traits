@@ -486,6 +486,13 @@ pub enum TraitsCommand {
         #[arg(long = "migrate-config", conflicts_with_all = ["config"])]
         migrate_config: bool,
 
+        /// Report run state, traces and caches still at their pre-0235
+        /// location beside the global trait root, and the path each moves to
+        /// under it. Read-only unless `--apply` is also given, because these
+        /// directories hold run history and can reach tens of gigabytes.
+        #[arg(long = "migrate-state", conflicts_with_all = ["config", "migrate_config"])]
+        migrate_state: bool,
+
         /// Perform the plan a companion mode reports. Two mutually exclusive
         /// modes: with `--migrate-config`, rewrite nonconflicting legacy
         /// `[agent]` keys to their `[agent.role.*]` destination (never

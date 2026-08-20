@@ -79,13 +79,18 @@ impl DistributionScope {
         }
     }
 
-    /// Vendor root for this scope: `.ctx/traits/vendored` under a project
-    /// root, or `traits` directly under the global config root (P439's
-    /// contracted `~/.config/ctx/traits/<package>/` layout).
+    /// Vendor root for this scope: `vendored/` under the trait root, project
+    /// or global.
+    ///
+    /// The global side used to be `traits/<package>/` directly. Once runs,
+    /// debug and cache moved under `traits/` (0235), a package could collide
+    /// with a state family by name; putting packages in `vendored/` removes
+    /// that and makes the global root mirror a project's, where they have
+    /// always been under `vendored/`.
     pub fn vendor_root(&self) -> Utf8PathBuf {
         match self {
             Self::Project(root) => crate::layout::trait_vendor_root_path(root),
-            Self::Global(root) => root.join("traits"),
+            Self::Global(root) => root.join("traits").join("vendored"),
         }
     }
 

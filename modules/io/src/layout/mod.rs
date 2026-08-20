@@ -740,20 +740,23 @@ pub fn build_target_cache_root_path(repo_root: &Utf8Path) -> crate::Result<Utf8P
 /// lexical `.`/`..` aliases. The opt-in build-cache prune uses this to
 /// refuse any target that is not precisely that repo-owned directory, so the
 /// destructive removal can never be redirected at an arbitrary path. The
-/// literal `ctx` component (the config-home root this crate always
-/// resolves, see `crate::state::global_ctx_root`) keeps this from also
-/// matching an unrelated caller path that merely happens to contain
-/// `cache/<anything>/build/<name>`.
+/// literal `ctx`/`traits` components (the config-home root this crate always
+/// resolves, see `crate::state::global_ctx_root`, and the trait root 0235
+/// moved state under) keep this from also matching an unrelated caller path
+/// that merely happens to contain `cache/<anything>/build/<name>`.
 pub fn is_build_cache_root(path: &Utf8Path, name: &str) -> bool {
     let components = normalized_normal_components(path);
-    matches!(components.as_slice(), [.., "ctx", "cache", _, "build", leaf] if *leaf == name)
+    matches!(
+        components.as_slice(),
+        [.., "ctx", "traits", "cache", _, "build", leaf] if *leaf == name
+    )
 }
 
 /// Whether `path` is exactly the legacy singleton build-target cache root.
 pub fn is_build_target_cache_root(path: &Utf8Path) -> bool {
     matches!(
         normalized_normal_components(path).as_slice(),
-        [.., "ctx", "cache", _, "build-target"]
+        [.., "ctx", "traits", "cache", _, "build-target"]
     )
 }
 
