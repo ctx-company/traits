@@ -4,6 +4,49 @@ title = "Delete the hidden commands instead of hiding them"
 status = "ready"
 raised = "2026-08-20"
 content = """
+PARTLY DONE 2026-08-20, and the rest needs a decision the original filing did
+not know it needed.
+
+DONE: `vendor` and its `sync` alias are gone. `vendor` was a pure forward to
+`dependency install` — the handler literally rebuilt the `Install` variant and
+called the same function — kept "for one release" alongside five sibling
+legacy verbs that had already been removed. Nothing in the repository invoked
+either spelling; two tests did, and now use the surviving one.
+
+NOT DONE, because it would break the product: the other ~50. Applying "not
+visible ⇒ delete" literally would remove `mcp`, which the binary SELF-INVOKES
+(`drive.rs`, spawning `["traits", "mcp"]`), the `next`/`set`/`call`/
+`run-status`/`run-frame` verbs that are the MCP frame protocol, `hook`, and
+`preview`, `session`, `task`, `config`, `state`.
+
+The help text already says what is going on, at the bottom:
+
+    Run `ctx traits <command> --help` for a command's full options, and
+    `ctx traits <hidden-command> --help` for internals not listed above.
+
+So `hide = true` is doing two unrelated jobs — "deprecated, do not use" and
+"plumbing, not for humans" — and nothing distinguishes them. That is the
+actual defect. `vendor` was the first kind; almost everything else is the
+second, and the second is legitimate: a frame protocol should not be in the
+help a person reads.
+
+## The decision this now needs
+
+Three ways, and the filing assumed the first without checking:
+
+- DELETE the rest. Not viable without also deleting the runtime's own
+  dispatch path.
+- SEPARATE the two meanings. Internals become a visible namespace
+  (`ctx traits internal <verb>`, one line in help) or gain a distinct
+  attribute, so "hidden" means only "deprecated" and a deprecated command can
+  then be deleted on sight. Larger, and it moves a surface the MCP transport
+  and the drive loop both spell out.
+- KEEP, and make the existing convention explicit — the help line already
+  documents it; the gap is that nothing enforces which kind a new
+  `hide = true` is.
+
+---
+
 Owner ruling 2026-08-20: whatever is not visible in `--help` should not exist.
 Commands only — hidden FLAGS are a separate question and are not in scope.
 

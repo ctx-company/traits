@@ -541,29 +541,6 @@ pub enum TraitsCommand {
         #[command(subcommand)]
         subcommand: DependencyCommand,
     },
-    #[command(alias = "sync", hide = true)]
-    Vendor {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        /// Omitted: vendor every package under .ctx/traits.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
-
-        /// Optional project manifest path. Defaults to shallow discovery in the current directory.
-        #[arg(long)]
-        manifest: Option<String>,
-
-        /// Trait file whose package-local lock is read or written.
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Verify the vendor tree and lock evidence without writing.
-        #[arg(long)]
-        locked: bool,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
     // The six pre-P567 bare dependency verbs (`install`, `remove`, `update`,
     // `outdated`, `info`, `publish`) lived here as hidden aliases for one
     // release after the `dependency` group superseded them. Removed before

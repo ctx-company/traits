@@ -257,7 +257,7 @@ fn operandless_vendor_locks_every_family_variant() {
     build_family_fixture(&proj, &home);
     add_family_variant_dependencies(&proj);
 
-    let vendor = run_ctx(&["traits", "vendor", "--json"], &proj, &home);
+    let vendor = run_ctx(&["traits", "dependency", "install", "--json"], &proj, &home);
     let (stdout, stderr) = utf8(&vendor);
     assert!(
         vendor.status.success(),
@@ -289,7 +289,7 @@ fn operandless_vendor_locks_every_family_variant() {
     )
     .unwrap();
 
-    let refresh = run_ctx(&["traits", "vendor", "--json"], &proj, &home);
+    let refresh = run_ctx(&["traits", "dependency", "install", "--json"], &proj, &home);
     assert!(
         refresh.status.success(),
         "vendor refresh failed: {}",
@@ -300,7 +300,7 @@ fn operandless_vendor_locks_every_family_variant() {
     assert!(refreshed.contains("command = \"proof\""));
     assert_eq!(refreshed.matches("id = \"family-fixture\"").count(), 2);
 
-    let locked = run_ctx(&["traits", "vendor", "--locked", "--json"], &proj, &home);
+    let locked = run_ctx(&["traits", "dependency", "install", "--locked", "--json"], &proj, &home);
     let (stdout, stderr) = utf8(&locked);
     assert!(
         locked.status.success(),

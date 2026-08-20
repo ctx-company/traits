@@ -381,26 +381,13 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             Some(cli::TraitsCommand::ClaimGate { json }) => {
                 crate::app::report_handlers::handle_claim_gate(json)
             }
-            // P567: `ctx traits dependency <verb>` is the real surface; the
-            // six legacy top-level verbs below are hidden aliases for one
-            // release. Both paths converge on `handle_dependency` so the two
-            // spellings can never drift in behavior.
+            // P567: `ctx traits dependency <verb>` is the whole surface. The
+            // six legacy top-level verbs it replaced are gone — five were
+            // removed earlier, and `vendor` (with its `sync` alias) followed
+            // in 0242.
             Some(cli::TraitsCommand::Dependency { json, subcommand }) => {
                 handle_dependency(merge_dependency_json(subcommand, json))
             }
-            Some(cli::TraitsCommand::Vendor {
-                trait_arg,
-                manifest,
-                file,
-                locked,
-                json,
-            }) => handle_dependency(cli::DependencyCommand::Install {
-                trait_arg,
-                manifest,
-                file,
-                locked,
-                json,
-            }),
             Some(cli::TraitsCommand::Trust {
                 trait_arg,
                 file,
