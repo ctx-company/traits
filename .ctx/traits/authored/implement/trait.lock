@@ -12,7 +12,7 @@ resolved-version = "0.25.0"
 [trait.digests]
 source = "sha256:c0a769f1ee763b7589cace25e67aa4660937585d65a1b6631f447145465a44c9"
 canonical = "sha256:81ad970a9500bc4a9c05c13265875d520789fc515af68f4e20c9a273b033a8e9"
-model-visible = "sha256:98ac0308e79320072528c2dfbc4ab7eb4ef3dca96540514fa857b87c8520d452"
+model-visible = "sha256:a894c1d9c28c455856a69e110cd26ff377114d6ae2580f49178f1c7d78d79245"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait]]
@@ -24,7 +24,7 @@ resolved-version = "0.25.0"
 [trait.digests]
 source = "sha256:8924cc4cc8559ffb38f14cd2fcfd03bc5f66ecec443c6993932c56c935ea34c9"
 canonical = "sha256:f480b0727fbcc3592400c5e9fae3aab790d49f80d29541a69f9622185b3e8e85"
-model-visible = "sha256:fa19b90adde30d8211a2514de3b420968a2354f9951a445adfba6e9a49217905"
+model-visible = "sha256:5ec1e7d67e2f446dc95e03f69b0d238d762ad3f40289541375ecafbd017395b8"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait]]
@@ -120,7 +120,7 @@ resolved-version = "0.25.0"
 [trait.digests]
 source = "sha256:d56f3e1b878bb299dc711530fdd43e83846c6f89356db7108cd33036bd94506e"
 canonical = "sha256:56e05d627a78abb3ce01b776c8da6f608d514d3342780b221c4e007a013cfbc0"
-model-visible = "sha256:5af8d3394115226f22a67cfb81d95e8d1b4d881f62dbe7e9b226e3aaa086b206"
+model-visible = "sha256:d4606dfe5a6057ada089c37e1db6844c1e6ef25a3dc5482ef2f98b153b931b0d"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait]]

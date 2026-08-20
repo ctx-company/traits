@@ -379,12 +379,19 @@ fn format_intent(
 ///
 /// `require` and `focus` are not two strengths of one idea: one enforces, the
 /// other asks. The same item in either group is a different instruction.
+/// What belonging to a group means, in terms of SEVERITY rather than of what
+/// to do about it.
+///
+/// The reaction is the agent's to choose; these say how much each group
+/// weighs. An earlier wording told it to refuse and stop, which read `block`
+/// as a halt — it is not. A blocked thing that has already happened means
+/// going back and correcting it takes precedence, not that the work ends.
 fn intent_group_meaning(group: &str) -> &'static str {
     match group {
-        "require" => "Must hold in the finished work. Falling short of one of these is a failure of the work itself, not a matter of degree.",
-        "focus" => "Where attention goes. These are the lenses the work is examined through, not conditions it has to satisfy.",
-        "avoid" => "Must not happen. Doing one of these is a defect in its own right, even when nothing else breaks.",
-        "block" => "A hard stop. Encountering one of these means refusing and saying so, rather than proceeding.",
+        "require" => "Conditions the finished work has to meet.",
+        "focus" => "Where to look. Attention, not acceptance criteria.",
+        "avoid" => "Not acceptable, unless unavoidable.",
+        "block" => "Unacceptable. If one has happened, correcting it comes before anything else.",
         _ => "",
     }
 }

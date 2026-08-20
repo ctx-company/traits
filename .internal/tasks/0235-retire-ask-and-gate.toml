@@ -1,0 +1,73 @@
+schema-version = "0.2"
+key = "0235"
+title = "Retire the ask and gate step kinds"
+status = "ready"
+raised = "2026-08-20"
+content = """
+Owner ruling 2026-08-20: the step kinds worth covering are prompt, command,
+check, sequence, branch, loop and parallel. `ask` and `gate` are not among
+them, and nothing uses either.
+
+`ask` is a question a human answers, resumed through the ordinary submission
+path — the human sibling of `prompt`. `gate` wraps a producer in a bounded
+loop until a human approves or edits its proposal.
+
+Both are implemented end to end: `SequenceKind::Ask` has a frame kind,
+readiness rules, transitions and ledger contract; `sequence.gate` lowers to a
+loop around an ask. Neither is reachable from the hook API — `step.*` exposes
+command, check and project, `agent.prompt` covers prompt, and `flow.error`/
+`flow.success` cover terminal. So they are authorable only through the object
+layer, which is the lowering target rather than the surface anyone writes.
+
+Zero users. Not one authored trait, built-in or template — the only call sites
+in the repository are CDK unit tests, and `release`'s `step.preflight.gate` is
+a locally defined function that happens to share the word.
+
+This is the shape `worktreeRequired` had: implemented, enforced by the
+runtime, and unauthorable. That was removed rather than left, on the reasoning
+that an enforced-but-unusable field is worse than none.
+
+## Scope
+
+- CDK: `sequence.ask`, `sequence.gate`, `AskSequenceFields`, `GateOptions`,
+  `sequenceGate`, the `ask` arm of the sequence-fields union and its `when`
+  lowering, and the four unit tests that exercise them.
+- Core: `SequenceKind::Ask` and every match arm — validate, render, search,
+  context cost, model view, control flow, readiness, transitions, ledger
+  contract, planner. Roughly 42 references across core, io and cli.
+- The `Ask` frame kind and its human-submission path, if nothing else uses it.
+
+## Why not half of it
+
+Removing the CDK builders alone leaves a kind the runtime supports and the
+canonical model accepts, authorable by hand-written TOML but not through the
+API — a worse state than either end of the choice. Do the whole stack or none
+of it.
+
+## Done when
+
+`ask` and `gate` are gone from the CDK, the canonical model and the runtime;
+no match arm mentions them; and the step kinds the system supports are exactly
+the seven the owner named.
+"""
+validation = """
+## Watch
+
+- `Ask` is a FRAME kind as well as a sequence kind
+  (`SequenceFrameKind::Ask` in `procedure/runtime/transitions.rs`). Check
+  whether anything else produces that frame before removing it.
+- `sequence.gate` builds an ask plus a bounded loop plus a projection for the
+  edit path. Removing the builder is not enough if a canonical somewhere still
+  carries the lowered shape — search generated documents, not just source.
+- Two CDK tests assert ask's `include` collection and its direct signal guard
+  (`cdk.test.ts`). They go with the feature; they are not evidence it should
+  stay.
+
+## Done when
+
+The seven kinds are the whole set, and `cargo test --workspace` plus
+`just builtins-check` pass with no reference to either name.
+"""
+
+[relations]
+depends-on = []
