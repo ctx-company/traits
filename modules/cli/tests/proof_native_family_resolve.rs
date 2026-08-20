@@ -300,7 +300,11 @@ fn operandless_vendor_locks_every_family_variant() {
     assert!(refreshed.contains("command = \"proof\""));
     assert_eq!(refreshed.matches("id = \"family-fixture\"").count(), 2);
 
-    let locked = run_ctx(&["traits", "dependency", "install", "--locked", "--json"], &proj, &home);
+    let locked = run_ctx(
+        &["traits", "dependency", "install", "--locked", "--json"],
+        &proj,
+        &home,
+    );
     let (stdout, stderr) = utf8(&locked);
     assert!(
         locked.status.success(),

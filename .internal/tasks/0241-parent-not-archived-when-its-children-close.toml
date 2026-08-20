@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0241"
 title = "A parent whose children all close is not archived"
-status = "ready"
+status = "done"
 raised = "2026-08-20"
 content = """
 Owner report, 2026-08-20: closing every child of a task through task-dispatch

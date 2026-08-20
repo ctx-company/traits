@@ -559,11 +559,105 @@ impl Board {
             effects.extend(self.sweep_dependents(&loaded, key));
         }
 
+        if closing && effects_config.archive_on_close {
+            effects.extend(self.sweep_closed_ancestors(key)?);
+        }
+
         let reloaded = self.load()?;
         Ok(UpdateOutcome {
             summary: provider::summarize(&reloaded.documents, key, archive_target),
             effects,
         })
+    }
+
+    /// Archive every ancestor whose work is now finished.
+    ///
+    /// A parent's closure is DERIVED, never stored: `graph::derived_status`
+    /// ignores a parent's own status field entirely and reads it from its
+    /// children — all closed means Done. Archive placement, meanwhile, was
+    /// only ever re-evaluated when a status was written to a document, and
+    /// nothing ever writes one to a parent. So a charter whose last child
+    /// closed read as Done everywhere and sat on the board forever, which
+    /// makes the board show open work that does not exist.
+    ///
+    /// Walks upward rather than one hop, because closing the last child of
+    /// the last child finishes a grandparent too, and stops at the first
+    /// ancestor still holding open work — nothing above it can be closed
+    /// either.
+    ///
+    /// Re-reads the board rather than using the pre-write snapshot: the
+    /// child's own close has to be visible for the parent to derive as Done.
+    /// Best-effort in spirit but not in error handling — a failure here is
+    /// returned, because an ancestor left on the board is exactly the bug
+    /// this exists to prevent, and silently swallowing it would recreate it.
+    fn sweep_closed_ancestors(&self, key: &str) -> Result<Vec<EffectRecord>, WriteError> {
+        let loaded = self.load()?;
+        let mut effects = Vec::new();
+        let mut current = loaded
+            .documents
+            .get(key)
+            .and_then(|doc| doc.relations.parent.clone());
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        while let Some(parent_key) = current {
+            // A stored parent cycle is already a refused shape, but data can
+            // survive a refusal — stop rather than loop.
+            if !seen.insert(parent_key.clone()) {
+                break;
+            }
+            if !graph::derived_status(&loaded.documents, &parent_key).is_closed() {
+                break;
+            }
+            let Some(parent) = loaded.documents.get(&parent_key) else {
+                break;
+            };
+            match self.archive_in_place(&loaded, &parent_key) {
+                Ok(Some(path)) => effects.push(EffectRecord {
+                    effect: EffectKind::ArchivePlacement,
+                    outcome: EffectOutcome::Applied,
+                    documents: vec![path],
+                }),
+                Ok(None) => {}
+                Err(error) => effects.push(EffectRecord {
+                    effect: EffectKind::ArchivePlacement,
+                    outcome: EffectOutcome::Failed {
+                        reason: error.to_string(),
+                    },
+                    documents: vec![parent_key.clone()],
+                }),
+            }
+            current = parent.relations.parent.clone();
+        }
+        Ok(effects)
+    }
+
+    /// Move one already-closed document into the archive, leaving its content
+    /// untouched. `Ok(None)` when it is already there — re-archiving is a
+    /// no-op, and must not report a placement change that did not happen.
+    fn archive_in_place(
+        &self,
+        loaded: &LoadedBoard,
+        key: &str,
+    ) -> Result<Option<String>, WriteError> {
+        let current_path = Self::single_location(loaded, key)?.clone();
+        if current_path.parent() == Some(self.archived_dir().as_path()) {
+            return Ok(None);
+        }
+        let file_name = current_path
+            .file_name()
+            .ok_or_else(|| {
+                WriteError::from(ProviderError(format!("{current_path}: no file name")))
+            })?
+            .to_string();
+        let target_dir = self.archived_dir();
+        let text = std::fs::read_to_string(current_path.as_std_path())
+            .map_err(|e| provider_error(&current_path, e))?;
+        let document = ctx_traits_core::task::parse(&text)
+            .map_err(|e| WriteError::from(ProviderError(e.to_string())))?;
+        self.write_document(&target_dir, &file_name, &document)?;
+        let target_path = target_dir.join(&file_name);
+        std::fs::remove_file(current_path.as_std_path())
+            .map_err(|e| provider_error(&current_path, e))?;
+        Ok(Some(target_path.to_string()))
     }
 
     /// The dependents sweep (0063.6): every task that directly
@@ -1444,6 +1538,97 @@ mod tests {
         assert!(outcome.effects.is_empty());
         assert!(board_dir.join("0001-a.toml").exists());
         assert!(!board_dir.join(ARCHIVED_DIR).join("0001-a.toml").exists());
+    }
+
+    #[test]
+    fn closing_the_last_child_archives_the_parent_too() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0010-charter.toml",
+            "schema-version = \"0.2\"\nkey = \"0010\"\ntitle = \"Charter\"\nstatus = \"ready\"\n",
+        );
+        for (file, key) in [("0010.1-one.toml", "0010.1"), ("0010.2-two.toml", "0010.2")] {
+            write_task(
+                &board_dir,
+                file,
+                &format!(
+                    "schema-version = \"0.2\"\nkey = \"{key}\"\ntitle = \"Child\"\nstatus = \"ready\"\n\n[relations]\nparent = \"0010\"\n"
+                ),
+            );
+        }
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        // First child closes: the charter still has open work, so it stays.
+        write
+            .update(
+                "0010.1",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            board_dir.join("0010-charter.toml").exists(),
+            "a charter with one child still open must stay on the board"
+        );
+
+        // Last child closes: the charter's derived status becomes Done, so
+        // the thing it stood for is finished and it follows its children.
+        write
+            .update(
+                "0010.2",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            board_dir
+                .join(ARCHIVED_DIR)
+                .join("0010-charter.toml")
+                .exists(),
+            "closing the last child must archive the charter: it derives Done from its children, \
+             and a board that keeps it reads as having open work that does not exist"
+        );
+        assert!(!board_dir.join("0010-charter.toml").exists());
+    }
+
+    #[test]
+    fn a_parent_is_not_archived_while_archive_on_close_is_false() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            BOARD_CONFIG_FILE,
+            "[effects]\narchive-on-close = false\n",
+        );
+        write_task(
+            &board_dir,
+            "0010-charter.toml",
+            "schema-version = \"0.2\"\nkey = \"0010\"\ntitle = \"Charter\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0010.1-one.toml",
+            "schema-version = \"0.2\"\nkey = \"0010.1\"\ntitle = \"Child\"\nstatus = \"ready\"\n\n[relations]\nparent = \"0010\"\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        write
+            .update(
+                "0010.1",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            board_dir.join("0010-charter.toml").exists(),
+            "archive-on-close = false governs the parent exactly as it governs the child"
+        );
     }
 
     #[test]
