@@ -45,6 +45,19 @@ const SECTIONS: &[SectionDef] = &[
         name: "behavior.uncertainty",
         constant: "BEHAVIOR_UNCERTAINTY",
     },
+    // What a GROUP or an AXIS means, as opposed to what an item is. Separate
+    // root sections rather than `intent.group`/`behavior.axis`, because a
+    // declared section swallows every child table as an entry — nesting these
+    // under the item sections would make the parser read `group` as an intent
+    // whose fields are `require`, `focus`, ... and reject it.
+    SectionDef {
+        name: "intent-group",
+        constant: "INTENT_GROUP",
+    },
+    SectionDef {
+        name: "behavior-axis",
+        constant: "BEHAVIOR_AXIS",
+    },
 ];
 
 type Entry = (String, String, String, Option<String>);

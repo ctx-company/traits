@@ -203,3 +203,30 @@ description = "Tests, examples, or acceptance criteria that actually exercise wh
 [intent.weaken-tests-to-pass]
 summary = "Loosening a test instead of repairing the implementation."
 description = "An assertion relaxed, skipped, or deleted so a change goes green, where the change was what broke it."
+
+# What belonging to a group MEANS, in terms of severity rather than of what to
+# do about it. The reaction is the agent's to choose; these say how much each
+# group weighs.
+#
+# `summary` is the line the model is shown. `description` is for whoever is
+# choosing a group at an authoring call site, and never reaches a frame.
+#
+# These four are the most consequential sentences in the catalog — they are
+# what tells a model how hard each group binds — which is why they are edited
+# here, beside the items they govern, rather than in a match arm.
+
+[intent-group.require]
+summary = "Conditions the finished work has to meet."
+description = "Acceptance criteria. The work is not finished until every one of these holds, and an agent that cannot satisfy one should say so rather than deliver around it."
+
+[intent-group.focus]
+summary = "Where to look. Attention, not acceptance criteria."
+description = "Directs effort without binding the outcome. An agent gives these its attention and reports what it found; nothing here makes the work incomplete on its own."
+
+[intent-group.avoid]
+summary = "Not acceptable, unless unavoidable."
+description = "Steer clear by default. Doing one anyway is a judgement call the agent may make, and having made it, should say so and why."
+
+[intent-group.block]
+summary = "Unacceptable. If one has happened, correcting it comes before anything else."
+description = "Not a halt — a priority. An earlier wording read as 'refuse and stop', which is wrong: a blocked thing that has already happened means going back and fixing it takes precedence over continuing, not that the work ends."

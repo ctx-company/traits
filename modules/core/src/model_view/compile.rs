@@ -383,17 +383,38 @@ fn format_intent(
 /// to do about it.
 ///
 /// The reaction is the agent's to choose; these say how much each group
-/// weighs. An earlier wording told it to refuse and stop, which read `block`
-/// as a halt — it is not. A blocked thing that has already happened means
-/// going back and correcting it takes precedence, not that the work ends.
+/// weighs.
+///
+/// The text lives in `vocabulary/intent.toml` beside the items each group
+/// governs, not here (0240). It is the most consequential prose in the
+/// system — it is what tells a model how hard each group binds — and it was
+/// being edited by rebuilding a compile unit, reviewed in a diff nowhere near
+/// the catalog. The wording has already been revised once for exactly the
+/// reason that made hard: `block` was reading as "halt" when it means "go
+/// back and fix this first".
 fn intent_group_meaning(group: &str) -> &'static str {
-    match group {
-        "require" => "Conditions the finished work has to meet.",
-        "focus" => "Where to look. Attention, not acceptance criteria.",
-        "avoid" => "Not acceptable, unless unavoidable.",
-        "block" => "Unacceptable. If one has happened, correcting it comes before anything else.",
-        _ => "",
-    }
+    group_meaning(crate::builtins::INTENT_GROUP, group, "intent group")
+}
+
+/// Both meanings come from the same embedded catalog, and an unknown slug is
+/// a panic rather than an empty string.
+///
+/// The groups and axes are a CLOSED set defined in this crate — every caller
+/// passes a literal from `intent_groups`/`behavior_axes` — so a miss is a
+/// vocabulary entry that was never authored, not user input. It used to
+/// render a group header with no meaning at all, and nothing noticed.
+fn group_meaning(
+    catalog: &'static [crate::builtins::BuiltinDefinition],
+    slug: &str,
+    kind: &str,
+) -> &'static str {
+    catalog
+        .iter()
+        .find(|entry| entry.slug == slug)
+        .unwrap_or_else(|| {
+            panic!("{kind} {slug:?} has no vocabulary entry; add one to modules/builtin/vocabulary/")
+        })
+        .summary
 }
 
 fn intent_groups(intent: &crate::r#trait::Intent) -> [(&str, Vec<&GuidanceItem>); 4] {

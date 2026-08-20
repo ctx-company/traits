@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0240"
 title = "Intent groups and behavior axes are explained in the vocabulary, not in Rust"
-status = "ready"
+status = "done"
 raised = "2026-08-20"
 content = """
 The intent and behavior catalogs are authored content:

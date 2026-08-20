@@ -193,3 +193,46 @@ description = "The open questions that could change the conclusion, listed as op
 [behavior.uncertainty.refuse-to-guess]
 summary = "No invented facts where evidence is required."
 description = "The missing evidence named, and the answer withheld, rather than a plausible value supplied in its place."
+
+# What each axis IS: the question its values answer.
+#
+# An axis had no authored meaning anywhere — a trait selected `tone = direct`
+# and the model was shown the value with nothing saying what tone governs.
+# `summary` is the line the model is shown; `description` is for the author
+# choosing a value and never reaches a frame.
+#
+# Some axes take a list and some take a single value. That distinction lives
+# in the trait model, not here, but it is stated in each description because
+# it is the first thing an author needs to know.
+
+[behavior-axis.tone]
+summary = "How the writing sounds."
+description = "The register and manner of the prose itself, independent of what it says. Takes a list: several tones compose."
+
+[behavior-axis.method]
+summary = "How the work is approached before it is reported."
+description = "The way an agent gets to an answer — what it does first, what it checks, what it refuses to assume. Takes a list."
+
+[behavior-axis.format]
+summary = "How the answer is laid out."
+description = "The shape of the response on the page, as distinct from its length or its tone. Takes a list."
+
+[behavior-axis.verbosity]
+summary = "How much is said."
+description = "The amount of detail, at a fixed level of correctness — never a licence to omit something that matters. Takes a single value."
+
+[behavior-axis.directness]
+summary = "How much is stated outright rather than hedged."
+description = "How willing the agent is to give a plain answer instead of qualifying it. Takes a single value."
+
+[behavior-axis.scope-control]
+summary = "How strictly the answer stays inside what was asked."
+description = "Whether an agent volunteers adjacent work, or holds the boundary and mentions what it saw. Takes a single value."
+
+[behavior-axis.initiative]
+summary = "How much is done without being asked."
+description = "Whether the agent proposes, acts, or waits when the next step is not specified. Takes a single value."
+
+[behavior-axis.uncertainty]
+summary = "What happens when the agent does not know."
+description = "How doubt is handled — stated, resolved, or worked around — and how visible that choice is. Takes a single value."
