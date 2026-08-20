@@ -142,7 +142,7 @@ fn generate_builtin_trait_packages(out_dir: &str) {
         relative_paths.extend(declared_resource_paths(&index_text, id));
 
         generated.push_str(&format!(
-            "    BuiltinTraitPackage {{ id: {id:?}, runnable: {runnable}, files: &[\n"
+            "    BuiltinTraitPackage {{ id: {id:?}, bucket: {packages_dir:?}, runnable: {runnable}, files: &[\n"
         ));
         for relative_path in &relative_paths {
             let file_abs = package_dir.join(relative_path);

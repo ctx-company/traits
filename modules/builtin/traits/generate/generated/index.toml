@@ -10,7 +10,7 @@ id = "spec"
 version = "0.1.0"
 
 [dependency.source]
-path = "../spec"
+path = "../../shared/spec"
 
 [metadata]
 tag = [

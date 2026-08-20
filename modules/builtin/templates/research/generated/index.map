@@ -1,103 +1,78 @@
 {
   "agent:researcher": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 16,
-    "end": 16
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 12,
+    "end": 12
   },
   "agent:reviewer": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 19,
-    "end": 19
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 15,
+    "end": 15
   },
   "agent:scout": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 13,
-    "end": 13
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 9,
+    "end": 9
   },
   "port:findings-report": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 64,
-    "end": 64
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 43,
+    "end": 43
   },
-  "port:output-dir": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 27,
-    "end": 27
-  },
-  "port:report-path-report": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 57,
-    "end": 57
-  },
-  "port:topic": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
+  "port:report-path": {
+    "file": "modules/builtin/templates/research/source/index.ts",
     "start": 23,
     "end": 23
   },
+  "port:topic": {
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 19,
+    "end": 19
+  },
   "prompt:research-the-topic": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 98,
-    "end": 98
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 74,
+    "end": 74
   },
   "prompt:review-the-report": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 108,
-    "end": 108
-  },
-  "prompt:scope-the-topic": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 90,
-    "end": 90
-  },
-  "sequence:procedure/derive-the-report-path": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
+    "file": "modules/builtin/templates/research/source/index.ts",
     "start": 84,
     "end": 84
   },
-  "sequence:procedure/derive-the-topic-slug": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 79,
-    "end": 79
+  "prompt:scope-the-topic": {
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 66,
+    "end": 66
   },
   "sequence:procedure/research-the-topic": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 97,
-    "end": 97
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 73,
+    "end": 73
   },
   "sequence:procedure/review-the-report": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 107,
-    "end": 107
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 83,
+    "end": 83
   },
   "sequence:procedure/scope-the-topic": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 89,
-    "end": 89
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 65,
+    "end": 65
   },
   "slot:questions": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 44,
-    "end": 44
-  },
-  "slot:report-path": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 40,
-    "end": 40
-  },
-  "slot:topic-slug": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 36,
-    "end": 36
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 30,
+    "end": 30
   },
   "slot:verdict": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 52,
-    "end": 52
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 38,
+    "end": 38
   },
   "slot:work-summary": {
-    "file": "modules/core/builtins/templates/research/source/index.ts",
-    "start": 48,
-    "end": 48
+    "file": "modules/builtin/templates/research/source/index.ts",
+    "start": 34,
+    "end": 34
   },
   "trait:research": {
     "file": "[eval1]",

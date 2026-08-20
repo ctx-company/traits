@@ -84,9 +84,9 @@ pub fn resolve_builtin_package_root(
     repo_root: &Utf8Path,
     trait_id: &str,
 ) -> crate::Result<Option<Utf8PathBuf>> {
-    if builtin_trait_packages::package(trait_id).is_none() {
+    let Some(package) = builtin_trait_packages::package(trait_id) else {
         return Ok(None);
-    }
+    };
     // Ordered read-candidate policy: a valid global store always wins; only
     // when it is not (yet) usable does this repair/publish the global store.
     // An unsafe shape is a hard `Err` propagated as-is — it is never
@@ -96,11 +96,16 @@ pub fn resolve_builtin_package_root(
         crate::layout::builtin_store_version_dir(repo_root, crate::layout::CLI_VERSION)?;
     if store_is_valid(&global_version_dir)? {
         crate::layout::validate_trait_id(trait_id)?;
-        return Ok(Some(global_version_dir.join(trait_id)));
+        crate::layout::validate_trait_id(package.bucket)?;
+        return Ok(Some(global_version_dir.join(package.bucket).join(trait_id)));
     }
     ensure_store_published(repo_root)?;
-    let package_root =
-        crate::layout::builtin_store_package_root(repo_root, crate::layout::CLI_VERSION, trait_id)?;
+    let package_root = crate::layout::builtin_store_package_root(
+        repo_root,
+        crate::layout::CLI_VERSION,
+        package.bucket,
+        trait_id,
+    )?;
     Ok(Some(package_root))
 }
 
@@ -243,11 +248,16 @@ fn expected_entries(package: &BuiltinTraitPackage) -> BTreeSet<Utf8PathBuf> {
 fn expected_version_entries() -> BTreeSet<Utf8PathBuf> {
     let mut entries = BTreeSet::new();
     for package in builtin_trait_packages::packages() {
-        let package_dir = Utf8PathBuf::from(package.id);
+        let bucket_dir = Utf8PathBuf::from(package.bucket);
+        let package_dir = bucket_dir.join(package.id);
         for relative in expected_entries(package) {
             entries.insert(package_dir.join(relative));
         }
         entries.insert(package_dir);
+        // The bucket directory is an expected entry in its own right: the
+        // exhaustiveness walk sees every level, so omitting it would read as
+        // an undeclared sibling and rebuild the store on every check.
+        entries.insert(bucket_dir);
     }
     entries
 }
@@ -343,7 +353,7 @@ fn store_is_valid(version_dir: &Utf8Path) -> crate::Result<bool> {
 /// walk in [`store_is_valid`], not duplicated here.
 fn package_is_valid(version_dir: &Utf8Path, package: &BuiltinTraitPackage) -> crate::Result<bool> {
     crate::layout::validate_trait_id(package.id)?;
-    let package_root = version_dir.join(package.id);
+    let package_root = version_dir.join(package.bucket).join(package.id);
     if !leaf_exists(&package_root, true, "built-in trait package directory")? {
         return Ok(false);
     }
@@ -424,7 +434,7 @@ fn claim_staging_dir(store_root: &Utf8Path) -> crate::Result<Utf8PathBuf> {
 fn write_staged_packages(staging_dir: &Utf8Path) -> crate::Result<()> {
     for package in builtin_trait_packages::packages() {
         crate::layout::validate_trait_id(package.id)?;
-        let package_root = staging_dir.join(package.id);
+        let package_root = staging_dir.join(package.bucket).join(package.id);
         for file in package.files {
             validate_embedded_relative_path(file.relative_path)?;
             let file_path = package_root.join(file.relative_path);
@@ -449,7 +459,7 @@ fn write_staged_packages(staging_dir: &Utf8Path) -> crate::Result<()> {
 /// if anything does not match its embedded digest exactly.
 fn verify_staged_packages(staging_dir: &Utf8Path) -> crate::Result<()> {
     for package in builtin_trait_packages::packages() {
-        let package_root = staging_dir.join(package.id);
+        let package_root = staging_dir.join(package.bucket).join(package.id);
         for file in package.files {
             let file_path = package_root.join(file.relative_path);
             if !leaf_exists(&file_path, false, "staged built-in trait package file")? {

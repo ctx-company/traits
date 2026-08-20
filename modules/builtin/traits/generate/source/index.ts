@@ -205,7 +205,7 @@ export default trait("generate", {
     alias: "spec",
     id: "spec",
     version: "0.1.0",
-    source: { path: "../spec" },
+    source: { path: "../../shared/spec" },
   }),
   // `procedure(...)` has no `input`/`output` fields of its own — the
   // procedure's contract is inferred from declared ports: input ports the

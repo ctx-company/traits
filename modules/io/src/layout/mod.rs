@@ -775,10 +775,17 @@ pub fn builtin_store_version_dir(
 pub fn builtin_store_package_root(
     repo_root: &Utf8Path,
     version: &str,
+    bucket: &str,
     trait_id: &str,
 ) -> crate::Result<Utf8PathBuf> {
     validate_trait_id(trait_id)?;
-    Ok(builtin_store_version_dir(repo_root, version)?.join(trait_id))
+    // `bucket` is validated the same way an id is: it becomes a path
+    // component under the store root, so it has to be one safe component
+    // whatever the embedded table claims.
+    validate_trait_id(bucket)?;
+    Ok(builtin_store_version_dir(repo_root, version)?
+        .join(bucket)
+        .join(trait_id))
 }
 
 /// Lexically normalize `path` into its sequence of `Normal` component
@@ -841,19 +848,25 @@ pub fn is_within_builtin_store(path: &Utf8Path) -> bool {
 /// [`is_canonical_package_root`] for that boundary.
 pub fn is_builtin_store_package_root(package_root: &Utf8Path) -> bool {
     let components = normalized_normal_components(package_root);
+    // The two shapes count back a DIFFERENT number of components, because
+    // the store they describe really is shaped differently: the legacy store
+    // was flat (`<version>/<id>`), the active one is bucketed to mirror the
+    // repository (`<version>/<bucket>/<id>`). A leftover legacy store is
+    // still read, so its arithmetic stays as it was.
     if let Some(len) = components.len().checked_sub(5) {
         let prefix = &components[len..len + 3];
-        // Legacy shape: `.ctx/cache/builtin-traits/<version>/<id>`.
+        // Legacy flat shape: `.ctx/cache/builtin-traits/<version>/<id>`.
         if matches!(prefix, [".ctx", "cache", "builtin-traits"]) {
             return true;
         }
     }
-    // Active global shape: `.../ctx/cache/<repo-key>/builtin-traits/<version>/<id>`,
+    // Active global shape:
+    // `.../ctx/cache/<repo-key>/builtin-traits/<version>/<bucket>/<id>`,
     // where `<repo-key>` is one arbitrary path component. Anchoring on the
     // literal `ctx` config-home component keeps this from matching an
     // unrelated caller path that merely happens to contain
-    // `cache/<anything>/builtin-traits/<version>/<id>`.
-    if let Some(len) = components.len().checked_sub(6) {
+    // `cache/<anything>/builtin-traits/<version>/<bucket>/<id>`.
+    if let Some(len) = components.len().checked_sub(7) {
         let prefix = &components[len..len + 4];
         if prefix[0] == "ctx" && prefix[1] == "cache" && prefix[3] == "builtin-traits" {
             return true;

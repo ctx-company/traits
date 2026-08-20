@@ -9,13 +9,19 @@
 # reaches its committed canonical. critique-trait sat unbuildable for an
 # unknown stretch because of exactly that.
 #
-# Why the scratch root: a package under modules/builtin is unreachable by id
-# (`ctx traits build <id>` resolves through .ctx/traits/authored), and the
-# five dependents declare `path = "../spec"` — true of the flat runtime store
-# they ship into, false of this bucketed tree, where spec sits at
-# ../../shared/spec. Copying every package into one flat authored root makes
-# both true at once. (0230 removed the third reason: a path build used to
-# resolve dependencies from source/ rather than the package root.)
+# Every package builds by source path, in the tree it actually lives in.
+# There used to be a flat scratch root here, because the five dependents
+# declared `path = "../spec"` — true of the flat runtime store they shipped
+# into, false of this bucketed tree. 0232 made the store bucketed too, so the
+# declared path is now true in both places and the flattening has nothing
+# left to do. (0230 removed the other reason: a path build used to resolve
+# dependencies from source/ rather than the package root.)
+#
+# `check` still builds into a sandbox, so a gate never writes to the tree it
+# is judging — but the sandbox MIRRORS the repo-relative layout rather than
+# flattening it. That is what makes the source map comparable: a map records
+# the repo-relative path it was built from, so an identical layout yields an
+# identical map, and all three artifacts are compared instead of two.
 set -euo pipefail
 
 MODE="${1:-build}"
@@ -43,50 +49,43 @@ git -C "$SCRATCH" init -q .
 ln -s "$REPO_ROOT/node_modules" "$SCRATCH/node_modules"
 (cd "$SCRATCH" && "$CTX" traits init >/dev/null)
 
-AUTHORED="$SCRATCH/.ctx/traits/authored"
-for package in "$BUILTINS"/traits/*/ "$BUILTINS"/templates/*/ "$BUILTINS"/shared/*/; do
-  cp -R "${package%/}" "$AUTHORED/"
+# The sandbox mirrors the repository's own relative layout, so a path built
+# inside it is spelled exactly as it is here.
+MIRROR="$SCRATCH/modules/builtin"
+mkdir -p "$MIRROR"
+for bucket in traits templates shared; do
+  cp -R "$BUILTINS/$bucket" "$MIRROR/$bucket"
 done
 
 # spec first: the other built-ins declare it as a path dependency, and a
 # dependency has to be resolvable before its dependents build.
-ORDER=(spec)
-for package in "$AUTHORED"/*/; do
-  id="$(basename "$package")"
-  [[ "$id" == "spec" ]] || ORDER+=("$id")
+ORDER=("shared/spec")
+for package in "$MIRROR"/traits/*/ "$MIRROR"/templates/*/ "$MIRROR"/shared/*/; do
+  relative="${package#"$MIRROR/"}"
+  relative="${relative%/}"
+  [[ "$relative" == "shared/spec" ]] || ORDER+=("$relative")
 done
 
 status=0
-for id in "${ORDER[@]}"; do
-  if ! (cd "$SCRATCH" && "$CTX" traits build "$id" >/dev/null 2>&1); then
-    echo "builtins: $id FAILED TO BUILD" >&2
-    (cd "$SCRATCH" && "$CTX" traits build "$id" 2>&1 | tail -20) >&2
+for relative in "${ORDER[@]}"; do
+  source_path="modules/builtin/$relative/source/index.ts"
+  if ! (cd "$SCRATCH" && "$CTX" traits build "$source_path" >/dev/null 2>&1); then
+    echo "builtins: $relative FAILED TO BUILD" >&2
+    (cd "$SCRATCH" && "$CTX" traits build "$source_path" 2>&1 | tail -20) >&2
     status=1
     continue
   fi
 
-  for bucket in traits templates shared; do
-    if [[ -d "$BUILTINS/$bucket/$id" ]]; then
-      dest="$BUILTINS/$bucket/$id"
-      break
-    fi
-  done
+  dest="$BUILTINS/$relative"
 
-  # Only the canonical and the lock are compared. A source map records the
-  # repo-relative path it was built from, so it differs between this scratch
-  # root and the real tree — a difference about where the build ran, not about
-  # whether the artifact is stale. The canonical is what ships and what a
-  # source edit must reach.
-  #
-  # 0230 fixed the package-root half of why this root exists: a path build now
-  # writes under generated/ and resolves relative dependencies from the
-  # package root, so spec and the three templates build by path directly.
-  # What still needs the flat root is the five dependents' `path = "../spec"`,
-  # which is correct in the flat runtime store and wrong in this bucketed
-  # tree, where spec is at ../../shared/spec. Until repo and store agree on
-  # one layout, the copy stands and the map stays uncomparable.
-  for artifact in generated/index.toml trait.lock; do
-    src="$AUTHORED/$id/$artifact"
+  # All three artifacts, the source map included. The map was excluded while
+  # the sandbox was flat, because it records the repo-relative path it was
+  # built from and so differed by construction — which also meant the
+  # committed maps pointed at authored paths that do not exist in this
+  # repository, and nothing noticed. A mirrored sandbox makes the map mean
+  # what it says, so it is now held to the same standard as the canonical.
+  for artifact in generated/index.toml generated/index.map trait.lock; do
+    src="$MIRROR/$relative/$artifact"
     [[ -e "$src" ]] || continue
     if [[ "$MODE" == "build" ]]; then
       # mkdir -p, because a package added since the last build has no
@@ -95,7 +94,7 @@ for id in "${ORDER[@]}"; do
       rm -rf "${dest:?}/$artifact"
       cp -R "$src" "$dest/$artifact"
     elif ! diff -rq "$src" "$dest/$artifact" >/dev/null 2>&1; then
-      echo "builtins: $id/$artifact is stale — rebuild with 'just builtins-build'" >&2
+      echo "builtins: $relative/$artifact is stale — rebuild with 'just builtins-build'" >&2
       status=1
     fi
   done

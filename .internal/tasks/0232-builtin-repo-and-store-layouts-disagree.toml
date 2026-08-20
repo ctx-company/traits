@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0232"
 title = "The built-in repo layout and the runtime store layout disagree"
-status = "ready"
+status = "done"
 raised = "2026-08-19"
 content = """
 The five built-in meta-traits declare their shared dependency as:

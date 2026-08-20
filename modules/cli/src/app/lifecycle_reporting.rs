@@ -413,7 +413,17 @@ pub(crate) fn handle_trust_approve(
             json,
         );
     }
-    let operand = operand.expect("clap enforces operand or --digest");
+    // Clap does NOT enforce this, despite what the `expect` here used to
+    // claim: the trait operand is optional and so is `--digest`, so
+    // recording a decision with neither is an ordinary way to hold the
+    // command wrong — and it was answered with a panic and a backtrace.
+    let Some(operand) = operand else {
+        return Err(crate::Error::Command {
+            message:
+                "trust needs something to record against: name a trait, or pass --file or --digest"
+                    .to_string(),
+        });
+    };
     // A native family is approved WHOLE. Each variant carries its own
     // canonical digest, so a per-variant trust model would make `trust
     // approve implement` silently cover one variant and leave
@@ -644,7 +654,17 @@ pub(crate) fn handle_trust_block(
             json,
         );
     }
-    let operand = operand.expect("clap enforces operand or --digest");
+    // Clap does NOT enforce this, despite what the `expect` here used to
+    // claim: the trait operand is optional and so is `--digest`, so
+    // recording a decision with neither is an ordinary way to hold the
+    // command wrong — and it was answered with a panic and a backtrace.
+    let Some(operand) = operand else {
+        return Err(crate::Error::Command {
+            message:
+                "trust needs something to record against: name a trait, or pass --file or --digest"
+                    .to_string(),
+        });
+    };
     let file = crate::app::command_handlers::resolve_trait_target(
         Some(&operand),
         None,

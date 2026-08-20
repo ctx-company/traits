@@ -23,11 +23,21 @@ pub struct BuiltinTraitFile {
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinTraitPackage {
     pub id: &'static str,
+    /// The repository bucket this package is authored in (`"traits"` or
+    /// `"shared"`), carried so the runtime store can materialize the same
+    /// shape the repository has. Without it the store was flat while the
+    /// repository was bucketed, which made the dependents' declared
+    /// `path = "../../shared/spec"` true in exactly one of the two places
+    /// the package exists.
+    ///
+    /// Distinct from `runnable` even though the two agree today: one says
+    /// where the package lives, the other whether a caller may select it.
+    pub bucket: &'static str,
     /// Whether this package is a trait a caller can select and run. A shared
     /// package (`spec`) is embedded and published exactly like a runnable one
-    /// — the store is what makes a sibling `../spec` dependency resolve — but
-    /// it declares no procedure, so offering it for selection would surface a
-    /// trait that cannot run.
+    /// — the store is what makes a `../../shared/spec` dependency resolve —
+    /// but it declares no procedure, so offering it for selection would
+    /// surface a trait that cannot run.
     pub runnable: bool,
     pub files: &'static [BuiltinTraitFile],
 }

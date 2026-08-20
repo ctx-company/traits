@@ -216,7 +216,7 @@ export default trait("refine", {
     alias: "spec",
     id: "spec",
     version: "0.1.0",
-    source: { path: "../spec" },
+    source: { path: "../../shared/spec" },
   }),
   port: envelopePort,
   procedure: procedure({

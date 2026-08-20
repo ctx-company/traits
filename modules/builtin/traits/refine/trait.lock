@@ -9,8 +9,8 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:93f4412f4bc1178c0aa9f5d2e3d9183c346f0ebfd548b885c775c70058bcb8e3"
-canonical = "sha256:06f27a5f1fed981e767252a4f1768b18f6f2e3378f5f3ea19ff4e747c79aaa01"
+source = "sha256:82fcbba975c6a5dcb6906e780cf11a9552b34ccb9b3520dcbb429334864786c5"
+canonical = "sha256:804e818db82fceef94d178f8497bdacef49f0a31cce3830828d819381d2b13eb"
 model-visible = "sha256:9282f0ac9a1665ad55118553073a8d4710a25fb11842a24dc0d8a375c8b438f2"
 resource-manifest = "sha256:bc1f21b424ec48e0cbb7cfb2d00ceb004312249c861cafebd9ec9f6a851833cb"
 
@@ -38,7 +38,7 @@ resolved-version = "0.1.0"
 vendored-path = ".ctx/traits/vendored/spec"
 
 [dependency.source]
-path = "../spec"
+path = "../../shared/spec"
 
 [dependency.digests]
 source = "sha256:448f90d9d4a7720b23b1c2f9cd00e568282e2338cd034b037ee73e4591d17218"

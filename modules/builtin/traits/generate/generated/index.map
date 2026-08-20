@@ -1,121 +1,121 @@
 {
   "agent:generator": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 16,
     "end": 16
   },
   "port:brief": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 23,
     "end": 23
   },
   "port:name": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 22,
     "end": 22
   },
   "port:result": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 190,
     "end": 190
   },
   "port:trait-id": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 24,
     "end": 24
   },
   "prompt:produce-first": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 68,
     "end": 68
   },
   "prompt:revise": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 103,
     "end": 103
   },
   "schema:generate-envelope": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 132,
     "end": 132
   },
   "schema:round-report": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 38,
     "end": 38
   },
   "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 198,
     "end": 198
   },
   "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then/revise": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 100,
     "end": 100
   },
   "sequence:procedure/derive-envelope": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 175,
     "end": 175
   },
   "sequence:procedure/guarded-loop": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 121,
     "end": 121
   },
   "sequence:procedure/init-rounds-spent": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 74,
     "end": 74
   },
   "sequence:procedure/produce-first": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 65,
     "end": 65
   },
   "sequence:round": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 123,
     "end": 123
   },
   "sequence:round/count-round": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 91,
     "end": 91
   },
   "sequence:round/evaluate-round": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 83,
     "end": 83
   },
   "sequence:round/revise-if-not-converged": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 114,
     "end": 114
   },
   "slot:candidate-source": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 33,
     "end": 33
   },
   "slot:envelope": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 156,
     "end": 156
   },
   "slot:round-report": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 52,
     "end": 52
   },
   "slot:rounds-spent": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 57,
     "end": 57
   },
-  "trait:generate-trait": {
-    "file": ".ctx/traits/authored/generate-trait/source/index.ts",
+  "trait:generate": {
+    "file": "modules/builtin/traits/generate/source/index.ts",
     "start": 198,
     "end": 198
   }

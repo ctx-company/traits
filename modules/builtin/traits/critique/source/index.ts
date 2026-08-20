@@ -58,7 +58,7 @@ export default trait("critique", {
     alias: "spec",
     id: "spec",
     version: "0.1.0",
-    source: { path: "../spec" },
+    source: { path: "../../shared/spec" },
   }),
   schema: [anchor, finding],
   // The output port is declared HERE, at trait level. It was declared on the

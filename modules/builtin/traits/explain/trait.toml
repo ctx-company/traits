@@ -5,4 +5,4 @@ name = "Explain Trait"
 status = "ready"
 
 [dependencies]
-spec = { version = "0.1.0", path = "../spec" }
+spec = { version = "0.1.0", path = "../../shared/spec" }
