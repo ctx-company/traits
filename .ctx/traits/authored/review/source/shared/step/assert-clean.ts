@@ -7,8 +7,7 @@ export const treeStatus = slot({
   description: "The porcelain listing of uncommitted changes; empty when the reviewed tree stayed clean.",
 });
 
-export const treeStatusReport = port.output.of(schema.text(), {
-  id: "tree-status-report",
+export const treeStatusReport = port.output.of("tree-status-report", schema.text(), {
   description: "Uncommitted changes left in the reviewed tree, empty when none.",
   optional: true,
   value: treeStatus,

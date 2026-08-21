@@ -49,10 +49,6 @@ direction = "output"
 schema = "[schema:write-receipt]"
 description = "Per-slice receipts naming every task file written under .internal/tasks/."
 title = "Written Task Files"
-format = [
-    "structured",
-    "table",
-]
 value = "slot:receipts"
 
 [[slot]]

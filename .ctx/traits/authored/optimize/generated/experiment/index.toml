@@ -63,7 +63,6 @@ direction = "output"
 schema = "schema:optimize-summary"
 description = "Typed baseline, aggregate measurements, kept count, and final best metric."
 title = "Optimize Summary"
-format = ["json"]
 value = "slot:summary"
 
 [[slot]]

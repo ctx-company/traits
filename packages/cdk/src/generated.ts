@@ -1008,9 +1008,11 @@ export type CanonicalPort = {
    */
   readonly "direction": CanonicalPortDirection;
   /**
-   * Optional format preferences (e.g. `["markdown"]`).
+   * Advisory guidance about the value: examples or constraints for whoever
+   * supplies it. Metadata only — the schema stays the validation contract.
+   * The same field a slot carries, for the same reason.
    */
-  readonly "format"?: CanonicalSlug | readonly CanonicalSlug[] | undefined;
+  readonly "hint"?: string | undefined;
   /**
    * Port identifier (e.g. `"user-prompt"`, `"finding"`).
    */
@@ -1829,6 +1831,11 @@ export type CanonicalSinks = {
  */
 export type CanonicalSlot = {
   /**
+   * A value the slot holds before any step writes one, so a first-pass
+   * prompt can interpolate it and a counter can start somewhere.
+   */
+  readonly "default"?: JsonValue | undefined;
+  /**
    * Human-readable description of what this slot represents.
    */
   readonly "description"?: string | undefined;
@@ -1843,10 +1850,22 @@ export type CanonicalSlot = {
    */
   readonly "id": string;
   /**
+   * Whether reading this slot blocks. A slot is written by a step, so a
+   * read before any step could have written is normally refused; an
+   * optional slot says otherwise once, at the declaration, rather than at
+   * every read site.
+   */
+  readonly "optional"?: boolean | undefined;
+  /**
    * Schema ref (e.g. `"schema:text"`, `"schema:scope"`,
    * `"[schema:scope]"`) or omitted.
    */
   readonly "schema"?: CanonicalSchemaForm | undefined;
+  /**
+   * Display name, when it must differ from the id. The same field a port
+   * carries, for the same reason.
+   */
+  readonly "title"?: string | undefined;
 };
 
 /**

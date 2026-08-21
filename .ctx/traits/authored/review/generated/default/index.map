@@ -11,8 +11,8 @@
   },
   "port:review-document-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 46,
-    "end": 46
+    "start": 45,
+    "end": 45
   },
   "port:review-verdict-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
@@ -51,8 +51,8 @@
   },
   "sequence:ctx-branch-arm-p-14-diff-non-empty-then/assert-the-reviewed-tree-stayed-clean": {
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
-    "start": 18,
-    "end": 18
+    "start": 17,
+    "end": 17
   },
   "sequence:ctx-branch-arm-p-14-diff-non-empty-then/review-the-range": {
     "file": ".ctx/traits/authored/review/source/variant/default/index.ts",

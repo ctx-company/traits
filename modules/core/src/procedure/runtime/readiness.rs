@@ -47,6 +47,7 @@ pub fn validate_run_ledger_contract(
         &status_maps,
         &accepted_evidence,
         ledger,
+        trait_ref,
         &mut diagnostics,
     );
     validate_emitted_signals(

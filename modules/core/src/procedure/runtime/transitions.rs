@@ -64,6 +64,42 @@ pub fn start_procedure_run(
         final_state: FinalState::Running,
     };
 
+    // Slot defaults, before any caller value is considered. A default is what
+    // the slot holds when no step has written one — so it belongs in the
+    // ledger from the start, which is what lets a first-pass prompt
+    // interpolate it and what makes the validator's "already produced"
+    // treatment of a defaulted slot true at run time as well as build time.
+    //
+    // Seeded HERE and not through `initial_port_values`, which is a port
+    // channel by contract: `validate_initial_port_value` rejects any ref that
+    // is not a local `port:*`, so a slot pushed in there is discarded.
+    for slot in &trait_ref.slots {
+        let Some(default) = slot.default.as_ref() else {
+            continue;
+        };
+        let ref_text = format!("slot:{}", slot.id);
+        let value_digest = value_digest(default)?;
+        state.accepted_slot_values.push(Value {
+            ref_text,
+            value: default.clone(),
+            value_digest,
+            schema_ref: match slot.schema.as_ref() {
+                Some(schema) => runtime_schema_reference(&schema.to_string())?,
+                None => None,
+            },
+            source: ValueSource::TraitConfig,
+            producer_evidence: Some(format!("slot[{}].default", slot.id)),
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
+            schema_validation: Vec::new(),
+        });
+    }
+
     for value in initial_port_values {
         let accepted = validate_initial_port_value(trait_ref, value)?;
         match accepted.acceptance {

@@ -37,8 +37,7 @@ export const review = cdk.defineStep.prompt({
   output: [reviewVerdict, reviewDocument],
 });
 
-export const reviewVerdictReport = port.output.of(reviewVerdictSchema, {
-  id: "review-verdict-report",
+export const reviewVerdictReport = port.output.of("review-verdict-report", reviewVerdictSchema, {
   description: "The reviewer's typed verdict. Absent when the range held no changes.",
   optional: true,
   value: reviewVerdict,

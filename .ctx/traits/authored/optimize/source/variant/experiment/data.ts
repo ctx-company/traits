@@ -10,8 +10,7 @@ export const metricField = port.input.text({
   description: "Human-readable meaning and unit normalized into the aggregate result's metric.",
 });
 
-export const experimentCommand = port.input.of(schema.list(schema.text()), {
-  id: "experiment-command",
+export const experimentCommand = port.input.of("experiment-command", schema.list(schema.text()), {
   description:
     'No-shell argv executed for one baseline or candidate run; must emit JSON matching { status: "ok" | "error", metric: number, "delta-lines"?: number }. The optional delta-lines feeds the max-delta-lines cap; omit it if unmeasured.',
 });

@@ -210,38 +210,26 @@ fn format_output_contract_lines(
     if p.title.as_deref().is_none_or(str::is_empty) {
         warnings.push(format!("port.{} output contract has no title", p.id));
     }
-    if p.format.is_empty() {
-        warnings.push(format!(
-            "port.{} output contract has no format guidance",
-            p.id
-        ));
-    }
     let title = match p.title.as_deref() {
         Some(t) if !t.trim().is_empty() => {
             sanitize_model_text(t, &format!("port.{}.title", p.id), warnings, normalizations)
         }
         _ => format!("Output port {}", p.id),
     };
-    let raw_format: Vec<String> = p.format.iter().map(|s| s.to_string()).collect();
-    let format_tags = sanitize_model_values(
-        &raw_format,
-        &format!("port.{}.format", p.id),
-        warnings,
-        normalizations,
-    )
-    .join(", ");
-    vec![
-        format!("Output contract title: {title}"),
-        format!(
-            "Output contract format: {}",
-            if format_tags.is_empty() {
-                "none"
-            } else {
-                &format_tags
-            }
-        ),
-    ]
+    let mut lines = vec![format!("Output contract title: {title}")];
+    // `format` is gone. It carried rendering PREFERENCES — `["structured",
+    // "table"]`, where both words switched the same CLI table renderer and
+    // any other value was accepted and ignored. This line put those tags in
+    // front of a model, which could act on none of them.
+    if let Some(hint) = p.hint.as_deref().filter(|hint| !hint.trim().is_empty()) {
+        lines.push(format!(
+            "Output contract hint: {}",
+            sanitize_model_text(hint, &format!("port.{}.hint", p.id), warnings, normalizations)
+        ));
+    }
+    lines
 }
+
 
 fn procedure_has_signal_emits(trait_ref: &Trait) -> bool {
     trait_ref

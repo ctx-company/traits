@@ -22,6 +22,22 @@ export interface SlotFields {
   readonly schema: SchemaValue;
   readonly description?: string;
   readonly hint?: string;
+  /** Display name, when it must differ from the name's kebab-casing. The same
+   * field a port carries. */
+  readonly title?: string;
+  /**
+   * Whether reading this slot blocks. A slot is written by a step, so a read
+   * before any step could have written is normally a build error; marking the
+   * slot optional says the opposite once, at the declaration, instead of
+   * `slot.optional()` at every site that reads it.
+   */
+  readonly optional?: boolean;
+  /**
+   * A value the slot holds before any step writes one — so a prompt can
+   * interpolate it on the first pass, and a counter can start somewhere.
+   * Validated against the slot's own schema when the trait is built.
+   */
+  readonly default?: JsonValue;
 }
 
 /**
@@ -73,6 +89,17 @@ export interface SlotFunction {
   number(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<number>;
   /** Any-JSON-schema slot shorthand, for output shapes not worth declaring precisely. @example `slot.any("raw")` */
   any(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<JsonValue>;
+  /**
+   * A slot with an explicit schema, named first. The barebones form —
+   * every shorthand above is this with the schema filled in.
+   * @example `slot.of("Review Verdict", reviewVerdictSchema)`
+   * @example `slot.of("Retry Count", schema.number(), { default: 0 })`
+   */
+  of<Value>(
+    name: string,
+    schemaValue: SchemaValue<Value>,
+    fields?: Omit<SlotFields, "schema" | "id">,
+  ): DeclaredSlotWithFields<Value>;
   /** Curried list-slot factory: bind the element schema once, declare several slots of that list shape. @example `const findingsList = slot.list(schema.text()); const findings = findingsList("findings");` */
   list<Value>(
     schemaValue: SchemaValue<Value>,
@@ -177,6 +204,8 @@ export const slot: SlotFunction = Object.assign(slotFn, {
     value === undefined
       ? (slotValue: string | Omit<SlotFields, "schema">) => slotWithSchema(slotValue, schemaList(schemaValue))
       : slotWithSchema(value, schemaList(schemaValue)),
+  of: <Value>(name: string, schemaValue: SchemaValue<Value>, fields?: Omit<SlotFields, "schema" | "id">) =>
+    slotOf({ ...fields, id: name, schema: schemaValue }) as DeclaredSlotWithFields<Value>,
   texts: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaList("schema:text")),
   numbers: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaList("schema:number")),
 }) as SlotFunction;
@@ -248,6 +277,9 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
     schema: refText(fields.schema, "slot.schema"),
     description: fields.description ?? `Runtime slot ${id}.`,
     hint: fields.hint,
+    title: fields.title,
+    optional: fields.optional,
+    default: fields.default,
   });
   // The handle's own enumerable surface is empty (only field access, via the
   // proxy below for object schemas, is public) — the canonical `{ id,

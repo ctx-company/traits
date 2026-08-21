@@ -16,13 +16,13 @@
   },
   "port:benchmark-runs": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 11,
-    "end": 11
+    "start": 10,
+    "end": 10
   },
   "port:improvement-target": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 14,
-    "end": 14
+    "start": 13,
+    "end": 13
   },
   "port:max-delta-lines": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
@@ -31,13 +31,13 @@
   },
   "port:noise-threshold": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 19,
-    "end": 19
+    "start": 17,
+    "end": 17
   },
   "port:summary": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 77,
-    "end": 77
+    "start": 75,
+    "end": 75
   },
   "port:target": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
@@ -91,8 +91,8 @@
   },
   "schema:optimize-benchmark-round-status": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 36,
-    "end": 36
+    "start": 33,
+    "end": 33
   },
   "schema:optimize-decision-status": {
     "file": ".ctx/traits/authored/optimize/source/shared/schema.ts",
@@ -331,103 +331,103 @@
   },
   "slot:baseline-result": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 35,
-    "end": 35
+    "start": 33,
+    "end": 33
   },
   "slot:best-metric": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 45,
-    "end": 45
+    "start": 43,
+    "end": 43
   },
   "slot:best-ref": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 22,
-    "end": 22
+    "start": 20,
+    "end": 20
   },
   "slot:candidate-result": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 40,
-    "end": 40
+    "start": 38,
+    "end": 38
   },
   "slot:captured-ref": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 26,
-    "end": 26
+    "start": 24,
+    "end": 24
   },
   "slot:command-receipt": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 31,
-    "end": 31
+    "start": 29,
+    "end": 29
   },
   "slot:commit-message": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 67,
-    "end": 67
+    "start": 65,
+    "end": 65
   },
   "slot:decisions": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 63,
-    "end": 63
+    "start": 61,
+    "end": 61
   },
   "slot:draft": {
+    "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
+    "start": 98,
+    "end": 98
+  },
+  "slot:history": {
+    "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
+    "start": 47,
+    "end": 47
+  },
+  "slot:implement-receipt": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
     "start": 102,
     "end": 102
   },
-  "slot:history": {
-    "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 49,
-    "end": 49
-  },
-  "slot:implement-receipt": {
-    "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 106,
-    "end": 106
-  },
   "slot:kept-count": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 58,
-    "end": 58
+    "start": 56,
+    "end": 56
   },
   "slot:margin-result": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 30,
-    "end": 30
+    "start": 27,
+    "end": 27
   },
   "slot:readiness": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 17,
-    "end": 17
+    "start": 15,
+    "end": 15
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 25,
-    "end": 25
+    "start": 22,
+    "end": 22
   },
   "slot:reviews": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 42,
-    "end": 42
+    "start": 39,
+    "end": 39
   },
   "slot:round-complete": {
     "file": ".ctx/traits/authored/optimize/source/variant/benchmark/data.ts",
-    "start": 34,
-    "end": 34
+    "start": 31,
+    "end": 31
   },
   "slot:round-count": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 53,
-    "end": 53
+    "start": 51,
+    "end": 51
   },
   "slot:scope": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 97,
-    "end": 97
+    "start": 93,
+    "end": 93
   },
   "slot:summary": {
     "file": ".ctx/traits/authored/optimize/source/shared/data.ts",
-    "start": 72,
-    "end": 72
+    "start": 70,
+    "end": 70
   },
   "trait:optimize": {
     "file": "[eval1]",

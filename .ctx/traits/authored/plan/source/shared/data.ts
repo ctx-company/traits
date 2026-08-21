@@ -143,10 +143,8 @@ export const revisionLog = slot.text({
   id: "revision-log",
   description: "The revise pass's account of the task files it changed or added, one path per line.",
 });
-export const writtenFiles = port.output.of(schema.list(writeReceiptSchema), {
-  id: "written-files",
+export const writtenFiles = port.output.of("written-files", schema.list(writeReceiptSchema), {
   title: "Written Task Files",
   description: "Per-slice receipts naming every task file written under .internal/tasks/.",
   value: receipts,
-  format: ["structured", "table"],
 });

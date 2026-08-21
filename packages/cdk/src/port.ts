@@ -1,11 +1,12 @@
 import { recordTraitMint } from "./functional/context.js";
-import type { JsonObject } from "./generated.js";
+import type { JsonObject, JsonValue } from "./generated.js";
 import type { InstructionOutputHandle, PortHandle, SlotHandle } from "./handles.js";
 import type { CdkObject } from "./meta.js";
-import { metaOf, withDeclaration } from "./meta.js";
-import { collectMany, compact, mutableScalarArray, slugFromName } from "./normalize.js";
+import { withDeclaration } from "./meta.js";
+import { collectMany, compact, slugFromName } from "./normalize.js";
 import { refText } from "./ref.js";
 import type { SchemaValue } from "./schema.js";
+import { schemaList } from "./schema.js";
 
 export interface PortDefaultCommand {
   readonly cmd?: string;
@@ -27,7 +28,10 @@ export interface PortFields {
   readonly value?: SlotHandle | InstructionOutputHandle;
   readonly optional?: boolean;
   readonly title?: string;
-  readonly format?: string | readonly string[];
+  /** Advisory guidance about the value: examples or constraints for whoever
+   * supplies it. Metadata only — the schema stays the validation contract.
+   * The same field a slot carries, for the same reason. */
+  readonly hint?: string;
   readonly default?:
     | { readonly value: string }
     | { readonly command?: PortDefaultCommand }
@@ -73,7 +77,6 @@ export interface PortFields {
  * @see {@link slot}
  */
 export interface PortFunction {
-  <Value>(fields: PortFields & { readonly schema: SchemaValue<Value> }): PortHandle<Value>;
   input: PortDirectionHelpers;
   output: PortDirectionHelpers;
 }
@@ -85,28 +88,37 @@ export interface PortFunction {
  * @example `port.input.of(schema.number(), { id: "limit" })`
  */
 export interface PortDirectionHelpers {
-  /** Text-schema port in this fixed direction. @example `port.output.text({ id: "summary" })` */
-  text(fields: Omit<PortFields, "direction" | "schema">): PortHandle<string>;
+  /** Text port. @example `port.output.text("Summary")` */
+  text(value: string | Omit<PortFields, "direction" | "schema">): PortHandle<string>;
+  /** Boolean port — and a boolean INPUT port is a flag at the command line:
+   * `ctx traits run work -- --draft` sets it true. @example `port.input.boolean("Draft")` */
+  boolean(value: string | Omit<PortFields, "direction" | "schema">): PortHandle<boolean>;
+  /** Numeric port. @example `port.input.number("Limit")` */
+  number(value: string | Omit<PortFields, "direction" | "schema">): PortHandle<number>;
+  /** List-of-text port. @example `port.output.texts("Findings")` */
+  texts(value: string | Omit<PortFields, "direction" | "schema">): PortHandle<string[]>;
+  /** List-of-number port. @example `port.output.numbers("Scores")` */
+  numbers(value: string | Omit<PortFields, "direction" | "schema">): PortHandle<number[]>;
+  /** Any JSON value, for shapes not worth declaring. @example `port.output.any("Raw")` */
+  any(value: string | Omit<PortFields, "direction" | "schema">): PortHandle<JsonValue>;
+  /** Curried list-port factory: bind the element schema once, declare several
+   * ports of that list shape. @example `const findings = port.output.list(findingSchema); const report = findings("Report");` */
+  list<Value>(
+    schemaValue: SchemaValue<Value>,
+  ): (value: string | Omit<PortFields, "direction" | "schema">) => PortHandle<Value[]>;
   /**
-   * Port with an explicit schema in this fixed direction.
-   * @example `port.input.of({ id: "limit", schema: schema.number() })`
+   * A port with an explicit schema. The barebones form — everything above is
+   * this with the schema filled in.
+   * @example `port.output.of("Report", schema.list(findingSchema))`
+   * @example `port.output.of("Report", schema.list(findingSchema), { value: findings })`
    */
+  of<Value>(
+    name: string,
+    schemaValue: SchemaValue<Value>,
+    fields?: Omit<PortFields, "direction" | "schema" | "id">,
+  ): PortHandle<Value>;
+  /** Fields-only form, for a port assembled programmatically. */
   of<Value>(fields: Omit<PortFields, "direction"> & { readonly schema: SchemaValue<Value> }): PortHandle<Value>;
-  /**
-   * Port with the schema passed positionally instead of nested in `fields`.
-   * @example `port.input.of(schema.number(), { id: "limit" })`
-   */
-  of<Value>(schemaValue: SchemaValue<Value>, fields: Omit<PortFields, "direction" | "schema">): PortHandle<Value>;
-}
-
-/**
- * Declares a typed trait boundary port.
- * @param fields Boundary direction, schema, and optional source slot.
- * @example `port.input.text({ id: "request" })`
- * @see {@link slot}
- */
-function portFn<Value>(fields: PortFields & { readonly schema: SchemaValue<Value> }): PortHandle<Value> {
-  return portOf<Value>(fields);
 }
 
 // `Object.assign`'s own typing doesn't preserve a merged value's generic
@@ -116,34 +128,63 @@ function portFn<Value>(fields: PortFields & { readonly schema: SchemaValue<Value
 // independently checked as real overloaded generics above; this is the one
 // remaining cast bridging `Object.assign`'s merge, not an unchecked
 // namespace-wide assertion.
-export const port: PortFunction = Object.assign(portFn, {
+export const port: PortFunction = {
   input: portDirectionHelpers("input"),
   output: portDirectionHelpers("output"),
-}) as PortFunction;
+};
 
 function portDirectionHelpers(direction: "input" | "output"): PortDirectionHelpers {
+  // Every builtin is `of` with the schema filled in, so a port declared as
+  // `port.input.text("Task")` and one declared as
+  // `port.input.of("Task", schema.text())` cannot lower differently.
+  const builtin =
+    <Value>(schemaValue: SchemaValue<Value>) =>
+    (value: string | Omit<PortFields, "direction" | "schema">): PortHandle<Value> =>
+      portOf<Value>({
+        ...(typeof value === "string" ? { id: value } : value),
+        direction,
+        schema: schemaValue,
+      });
+
+  function of<Value>(
+    name: string,
+    schemaValue: SchemaValue<Value>,
+    fields?: Omit<PortFields, "direction" | "schema" | "id">,
+  ): PortHandle<Value>;
   function of<Value>(
     fields: Omit<PortFields, "direction"> & { readonly schema: SchemaValue<Value> },
   ): PortHandle<Value>;
-  function of<Value>(
-    schemaValue: SchemaValue<Value>,
-    fields: Omit<PortFields, "direction" | "schema">,
-  ): PortHandle<Value>;
   function of(
-    fieldsOrSchema: (Omit<PortFields, "direction"> & { readonly schema: SchemaValue }) | SchemaValue,
-    maybeFields?: Omit<PortFields, "direction" | "schema">,
+    nameOrFields: string | (Omit<PortFields, "direction"> & { readonly schema: SchemaValue }),
+    maybeSchema?: SchemaValue,
+    maybeFields?: Omit<PortFields, "direction" | "schema" | "id">,
   ): PortHandle {
-    return typeof fieldsOrSchema === "string" || metaOf(fieldsOrSchema)?.ref !== undefined
-      ? portOf({
-          ...(maybeFields as Omit<PortFields, "direction" | "schema">),
-          direction,
-          schema: fieldsOrSchema as SchemaValue,
-        })
-      : portOf({ ...(fieldsOrSchema as Omit<PortFields, "direction">), direction });
+    if (typeof nameOrFields === "string") {
+      return portOf({
+        ...maybeFields,
+        id: nameOrFields,
+        direction,
+        schema: maybeSchema as SchemaValue,
+      });
+    }
+    return portOf({ ...nameOrFields, direction });
   }
+
   return {
-    text: (fields: Omit<PortFields, "direction" | "schema">): PortHandle<string> =>
-      portOf<string>({ ...fields, direction, schema: "schema:text" }),
+    text: builtin<string>("schema:text"),
+    boolean: builtin<boolean>("schema:boolean"),
+    number: builtin<number>("schema:number"),
+    texts: builtin<string[]>(schemaList<string>("schema:text")),
+    numbers: builtin<number[]>(schemaList<number>("schema:number")),
+    any: builtin<JsonValue>("schema:any"),
+    list:
+      <Value>(schemaValue: SchemaValue<Value>) =>
+      (value: string | Omit<PortFields, "direction" | "schema">): PortHandle<Value[]> =>
+        portOf<Value[]>({
+          ...(typeof value === "string" ? { id: value } : value),
+          direction,
+          schema: schemaList(schemaValue),
+        }),
     of,
   };
 }
@@ -165,7 +206,7 @@ function portOf<Value = unknown>(fields: PortFields): PortHandle<Value> {
     value: fields.value === undefined ? undefined : refText(fields.value, "port.value"),
     optional: fields.optional,
     title: fields.title,
-    format: mutableScalarArray(fields.format),
+    hint: fields.hint,
     default: normalizePortDefault(fields.default),
   });
   const handle = withDeclaration<CdkObject, "port", Value>(

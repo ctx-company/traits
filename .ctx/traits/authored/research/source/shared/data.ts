@@ -170,7 +170,6 @@ export const researchReportPort = port.output.text({
     "Final work summary for the completed research: what was written, how citations were verified, open concerns.",
   optional: true,
   value: workSummary,
-  format: "markdown",
 });
 export const reportPathPort = port.output.text({
   id: "report-path",

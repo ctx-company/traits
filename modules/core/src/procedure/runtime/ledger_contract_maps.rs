@@ -202,12 +202,24 @@ fn validate_accepted_slot_values(
     ledger: &State,
     diagnostics: &mut Vec<String>,
 ) -> crate::Result<()> {
+    // A slot's DECLARATION produces it when it carries a default: the value is
+    // in the ledger from run start, before any step has run, and its producer
+    // is the declaration rather than a sequence output. Without this the
+    // contract reads a defaulted slot as an accepted value nothing produced —
+    // which is the shape it exists to catch, and exactly wrong here.
     let produced_slots: BTreeSet<String> = runtime_produced_refs(trait_ref)
         .into_iter()
         .filter(|ref_text| {
             Reference::parse(ref_text)
                 .is_ok_and(|parsed| parsed.kind() == Kind::Slot && !parsed.is_qualified())
         })
+        .chain(
+            trait_ref
+                .slots
+                .iter()
+                .filter(|slot| slot.default.is_some())
+                .map(|slot| format!("slot:{}", slot.id)),
+        )
         .collect();
     validate_accepted_slot_value_collection(
         trait_ref,
@@ -633,9 +645,22 @@ fn validate_accepted_slot_producer_statuses(
     status_maps: &SequenceStatusMaps<'_>,
     accepted_evidence: &AcceptedEvidenceMaps<'_>,
     ledger: &State,
+    trait_ref: &Trait,
     diagnostics: &mut Vec<String>,
 ) {
+    // A defaulted slot's producer is its declaration, so there is no sequence
+    // to have run and no revision to point at. The check below asks which STEP
+    // produced the value; for these the honest answer is none, by design.
+    let defaulted: BTreeSet<String> = trait_ref
+        .slots
+        .iter()
+        .filter(|slot| slot.default.is_some())
+        .map(|slot| format!("slot:{}", slot.id))
+        .collect();
     for slot_ref in accepted_evidence.slots.keys() {
+        if defaulted.contains(slot_ref.as_str()) {
+            continue;
+        }
         let producers = sequence_contract
             .slot_producers
             .get(slot_ref)

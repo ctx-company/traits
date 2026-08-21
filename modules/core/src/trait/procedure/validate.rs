@@ -3165,7 +3165,20 @@ fn validate_produced_before_read(trait_ref: &Trait) -> crate::Result<()> {
     let Some(procedure) = trait_ref.procedure.as_ref() else {
         return Ok(());
     };
-    let mut produced = BTreeSet::new();
+    // A slot declared `optional`, or carrying a `default`, already holds
+    // something a step may read — so it starts the walk produced. The two
+    // reasons differ and both are true here: an optional slot says reading it
+    // never blocks, and a defaulted slot has a value before any step runs.
+    //
+    // Seeded once at the declaration rather than asserted at each read. The
+    // per-site `slot.optional()` still exists for a read that tolerates an
+    // empty slot the DECLARATION does not call optional.
+    let mut produced: BTreeSet<String> = trait_ref
+        .slots
+        .iter()
+        .filter(|slot| slot.optional.unwrap_or(false) || slot.default.is_some())
+        .map(|slot| format!("slot:{}", slot.id))
+        .collect();
     let mut possible = BTreeSet::new();
     let mut walk = ProducedBeforeReadWalk {
         first_producers: first_slot_producers(trait_ref, procedure)?,

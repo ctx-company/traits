@@ -2,14 +2,12 @@ import { port, schema, slot } from "@ctx-traits/cdk";
 
 import { aggregateResult, decisionStatus, gitRefSchema, proposalSchema, readiness, summarySchema } from "#trait/shared/schema.ts";
 
-export const maxDelta = port.input.of(schema.integer(), {
-  id: "max-delta-lines",
+export const maxDelta = port.input.of("max-delta-lines", schema.integer(), {
   optional: true,
   description:
     "Optional maximum accepted changed lines relative to the current best Git ref; the cap is skipped when omitted, and discards a candidate that supplies no delta-lines measurement.",
 });
-export const benchmarkRuns = port.input.of(schema.integer(), {
-  id: "benchmark-runs",
+export const benchmarkRuns = port.input.of("benchmark-runs", schema.integer(), {
   description:
     "Number of measurement runs per baseline/candidate; the deterministic aggregate (median) feeds the keep/discard guard. Odd counts pick the middle run; even counts pick the upper-median run — always an actually-measured value.",
 });
@@ -74,12 +72,10 @@ export const summary = slot({
   schema: summarySchema,
   description: "Terminal typed run report.",
 });
-export const summaryPort = port.output.of(summarySchema, {
-  id: "summary",
+export const summaryPort = port.output.of("summary", summarySchema, {
   title: "Optimize Summary",
   description: "Typed baseline, aggregate measurements, kept count, and final best metric.",
   value: summary,
-  format: "json",
 });
 
 // experiment-variant-only slots

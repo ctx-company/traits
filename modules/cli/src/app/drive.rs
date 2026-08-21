@@ -1839,7 +1839,7 @@ mod awaiting_input_prompt_tests {
             optional: false,
             description: description.to_string(),
             title: title.map(str::to_string),
-            format: Default::default(),
+            hint: None,
             value: None,
             default: None,
         }

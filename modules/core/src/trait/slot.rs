@@ -36,6 +36,23 @@ pub struct Slot {
     /// contract.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+
+    /// Display name, when it must differ from the id. The same field a port
+    /// carries, for the same reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Whether reading this slot blocks. A slot is written by a step, so a
+    /// read before any step could have written is normally refused; an
+    /// optional slot says otherwise once, at the declaration, rather than at
+    /// every read site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optional: Option<bool>,
+
+    /// A value the slot holds before any step writes one, so a first-pass
+    /// prompt can interpolate it and a counter can start somewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
 }
 
 /// Validate a list of slot declarations.

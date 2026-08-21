@@ -32,8 +32,7 @@ const changeRequest = port.input.text({ id: "change-request", description: "Requ
 // is the guard that stops the loop after exactly one round regardless of
 // convergence, reproducing that form's prior one-call contract (task 0066.3
 // approach note: this is the one behavior-preservation risk in this slice).
-const singleShot = port.input.of(schema.boolean(), {
-  id: "single-shot",
+const singleShot = port.input.of("single-shot", schema.boolean(), {
   description: "Stop after exactly one produce/evaluate round regardless of convergence.",
 });
 const designRubric = ref.resource({ id: "design-rubric", dependency: "spec" });

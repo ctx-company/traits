@@ -81,7 +81,6 @@ schema = "schema:text"
 optional = true
 description = "Final work summary for the completed research: what was written, how citations were verified, open concerns."
 title = "Research Report"
-format = ["markdown"]
 value = "slot:work-summary"
 
 [[port]]

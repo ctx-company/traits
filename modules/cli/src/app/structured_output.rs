@@ -74,22 +74,25 @@ fn field_widths(rows: &[Vec<(String, String)>]) -> BTreeMap<String, usize> {
     widths
 }
 
-/// Return a presentation only when both the declaration and value establish a
-/// bounded list of small objects. Shape sniffing is deliberately not enough:
-/// unhinted values retain the historical plain rendering.
+/// Return a presentation when the declaration and value establish a bounded
+/// list of small objects.
+///
+/// This used to require an opt-in tag in `port.format` as well, on the
+/// reasoning that shape alone was not enough to justify rendering a table.
+/// `format` is gone: it accepted any slug, only `structured` and `table` ever
+/// meant anything, both meant the same thing, and the tag reached a model as
+/// a line of text it could not act on.
+///
+/// What remains is the part that was doing the work — the SHAPE bounds below.
+/// A declared object schema, at most 12 fields, a list of at most 100 rows,
+/// every one an object. A value that narrow is a table; anything outside it
+/// keeps the plain rendering exactly as before.
 pub(crate) fn resolve(
     trait_ref: &ctx_traits_core::Trait,
     port_id: &str,
     value: &Value,
 ) -> Option<StructuredOutput> {
     let port = trait_ref.ports.iter().find(|port| port.id == port_id)?;
-    if !port
-        .format
-        .iter()
-        .any(|format| matches!(format.as_str(), "structured" | "table"))
-    {
-        return None;
-    }
     let ctx_traits_core::schema::form::Schema::List(inner) =
         ctx_traits_core::schema::form::Schema::try_from_str(&port.schema).ok()?
     else {

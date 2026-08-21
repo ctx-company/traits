@@ -11,7 +11,7 @@ resolved-version = "0.1.0"
 [trait.digests]
 source = "sha256:b06ebbb5a92be911eeba58f0de53b59c240c99a21e3ecf59882f91121a078eb9"
 canonical = "sha256:5ac9575c97863e603d12540169234cad8ed77aadcfd767c39170f5a15801a8f0"
-model-visible = "sha256:89b0e3c06e10e7c7aab312968c3c92849ce47fc5a3eec0ba766b7b534adc14e6"
+model-visible = "sha256:bb33f3d3fe38e427265c2940452ebba600dac352a02111d9331f47d335c7be63"
 resource-manifest = "sha256:97f245a1a51156cf1dcadc40571a541348acc4aa507475585d02b24f8bb9816f"
 
 [[trait]]

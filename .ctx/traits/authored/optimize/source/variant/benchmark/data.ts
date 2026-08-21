@@ -6,18 +6,15 @@ export const target = port.input.text({
   id: "target",
   description: "Module, file path, or code area to optimize the benchmark over.",
 });
-export const benchmarkCommand = port.input.of(schema.list(schema.text()), {
-  id: "benchmark-command",
+export const benchmarkCommand = port.input.of("benchmark-command", schema.list(schema.text()), {
   description:
     'No-shell argv executed for one baseline or candidate run; must emit JSON matching { status: "ok" | "error", metric: number, "delta-lines"?: number }. The optional delta-lines feeds the max-delta-lines cap; omit it if unmeasured.',
 });
-export const improvementTarget = port.input.of(schema.number(), {
-  id: "improvement-target",
+export const improvementTarget = port.input.of("improvement-target", schema.number(), {
   description:
     "Lower-is-better metric target; the run completes immediately once the baseline or any kept candidate reaches it.",
 });
-export const noiseThreshold = port.input.of(schema.number(), {
-  id: "noise-threshold",
+export const noiseThreshold = port.input.of("noise-threshold", schema.number(), {
   description:
     "Non-negative minimum improvement margin below which a lower aggregate metric is treated as noise, not a real improvement.",
 });

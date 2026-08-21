@@ -14,8 +14,6 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::shared::SlugList;
-
 /// Port direction: input or output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -93,9 +91,11 @@ pub struct Port {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
-    /// Optional format preferences (e.g. `["markdown"]`).
-    #[serde(default, skip_serializing_if = "SlugList::is_empty")]
-    pub format: SlugList,
+    /// Advisory guidance about the value: examples or constraints for whoever
+    /// supplies it. Metadata only — the schema stays the validation contract.
+    /// The same field a slot carries, for the same reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 
     /// For output ports: the slot ref that exposes the value (`"slot:<id>"`).
     /// Input ports must not declare `value`.
@@ -405,7 +405,7 @@ mod tests {
             optional: false,
             description: "A path.".to_string(),
             title: None,
-            format: SlugList::default(),
+            hint: None,
             value: None,
             default,
         }

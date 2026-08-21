@@ -10,9 +10,9 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:6054f02a8d51ec2516726182aceca6532ed77fba5b7207aefbcf3b25895f8e39"
-canonical = "sha256:d48ed07cdd6abd7663ba782f6df19349e1ba07d9cc21416c5cfb1b9734119bc8"
-model-visible = "sha256:0bd2e915764845819182204a5a307a30885b55d8068713553ebd571390dae626"
+source = "sha256:579e360c59a98015fed35c439b619f631a9ef18937487f8b08f9b5289850fc81"
+canonical = "sha256:96d27c77e2edcd29be2e5e91881b5f04eb09934bc7e0a1c2ff2a138929b0d808"
+model-visible = "sha256:3c37c4651f52431b74f56b08a661758c1a6fad23ceb4f34b077ac8f59c3fe89a"
 resource-manifest = "sha256:18a16be6e96a019bb72f168737a73abf773569ea736a809b8a1cac8f2550dead"
 
 [[trait]]
@@ -22,9 +22,9 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:c617456ea2efdabdc6d8f177190d75f09b3a1eed2f3dd5485282e01b5a02b2d1"
-canonical = "sha256:040e52ac6020df3e647cead9e8839aba6093fb215f61505062e5e47b57bdf8de"
-model-visible = "sha256:42bf8b3664a60b951a7e4d67463103036d6ff48aec61f0962fdbad7504b2a445"
+source = "sha256:2127d8ba36ad6cac41fbd5f0244c53ddfbb49638d9966a595ce35dc5c661c662"
+canonical = "sha256:8b54282192e1efe27787ab8a88c9fcfdd75f4061aeba4b95bd14e05d1043b03e"
+model-visible = "sha256:b4aba47ff0c99182af49cdc52633411709f8a296ef9cc58c50d3f05f5ebc0b79"
 resource-manifest = "sha256:18a16be6e96a019bb72f168737a73abf773569ea736a809b8a1cac8f2550dead"
 
 [[trait]]
@@ -34,7 +34,7 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:d1544068bb63176dac92fc0148a8ca3299f26615558c2613228acdd07ecb1b9f"
-canonical = "sha256:bc8d63f21a741c37a1f6470217e5cb7f496879f71efea80f37bb9eedb21687ef"
-model-visible = "sha256:cd8b973e8a859c704167851104c06d9297194324b1b71ea279c4d3df17f014b2"
+source = "sha256:dc6a1a7afae46da9939d7d78676740d55e76fa872ab8e29773d9df8b9b9a103f"
+canonical = "sha256:7ad8de0b404fdf4e00dab89acb87737126141945cec7ffbc3173e42c0052b5b7"
+model-visible = "sha256:8f8219bbc950720c16bf740a8feec313d1eb1e001308f3bf3cb29925e86afe23"
 resource-manifest = "sha256:18a16be6e96a019bb72f168737a73abf773569ea736a809b8a1cac8f2550dead"

@@ -31,8 +31,8 @@
   },
   "port:report-path": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 175,
-    "end": 175
+    "start": 174,
+    "end": 174
   },
   "port:research-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
