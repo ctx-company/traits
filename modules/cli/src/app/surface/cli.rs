@@ -62,7 +62,7 @@ Execute:
 Options:
       --session <SESSION>  Run-session ID or ledger path for commands such as `set`
   -h, --help                Print help
-Run `ctx traits <command> --help` for a command's full options. `ctx traits internal` holds the runtime's own dispatch surface and this project's tooling; it is not part of the supported CLI."
+Run `ctx traits <command> --help` for a command's full options."
     )
 }
 
