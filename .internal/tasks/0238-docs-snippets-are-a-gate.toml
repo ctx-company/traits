@@ -1,9 +1,35 @@
 schema-version = "0.2"
 key = "0238"
-title = "Every fenced ts block in the docs is built, or the docs are fiction"
-status = "ready"
+title = "Check that what the docs claim exists in the CDK"
+status = "done"
 raised = "2026-08-20"
 content = """
+DONE 2026-08-21, and smaller than filed. Owner ruling: no tool — just make sure
+what is written in the docs exists here.
+
+So it was checked, once, by resolving every dotted name the docs claim against
+the built CDK: 218 names extracted from the reference and authoring pages,
+narrowed to the 93 that are unambiguous API paths (a bare `description` is a
+field name, `correctness` a vocabulary slug, `build` a CLI verb — none of them
+claims about a namespace).
+
+88 of 93 resolve. Four of the five failures were my extractor's, not the
+docs': `agent.role.reviewer` and friends in config-general.md are TOML config
+paths that happen to start with a word the CDK also exports.
+
+The one real finding: step.md listed `agent.prompt` in its registrar table.
+`prompt` is installed on an agent HANDLE as a non-enumerable field, so
+`reviewer.prompt(...)` works and `cdk.agent.prompt` does not exist. The table
+read as a namespace path. Corrected to `<agent>.prompt` with the call form
+shown.
+
+The four defects that motivated the filing were all found and fixed by hand
+in the same sitting that raised it. A fifth, found by this check, was the same
+kind of thing. That is the whole of what was asked for; the gate design below
+is kept as the argument for building one if these keep appearing.
+
+---
+
 The CDK reference teaches the API by example. Nothing checks that the
 examples are the API.
 

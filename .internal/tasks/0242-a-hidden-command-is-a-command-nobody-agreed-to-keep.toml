@@ -4,6 +4,45 @@ title = "Delete the hidden commands instead of hiding them"
 status = "ready"
 raised = "2026-08-20"
 content = """
+OWNER RULING 2026-08-21: not gone, unreachable from the CLI. That is the
+"separate the two meanings" option below — internals stop being top-level
+verbs, and keep working for the runtime that spawns them.
+
+Blocked on one classification the filing cannot make for itself. The 50
+hidden commands are three different things, and moving all of them would bury
+commands that look like they were meant to be visible:
+
+- PLUMBING, machine-to-machine, never typed by a person (11): mcp, drive,
+  next, set, call, run-status, run-frame, session, hook, context status,
+  subagent. `mcp` is spawned by `drive.rs` as a subprocess, so whatever
+  namespace it moves to has to stay invocable.
+- REPO TOOLING, this project's own workflow, not a user's (20):
+  sdk-generate, tui-demo, synth, generate-round, refine-round, import-round,
+  import-refresh, schema, help, stats, story, running, claim-gate, hygiene,
+  cost, prepare-public, context-contracts, policy, evidence, compatibility.
+- LOOKS LIKE A USER COMMAND (19): state, config, task, preview, export, host,
+  explain, inspect, eval, search, resolve, pack, context, migrate, edit,
+  manifest, run-info, prompt, review.
+
+The third group is the question. `state` alone has 32 call sites. `config` and
+`task` carry a comment saying they are "off the release help screen since the
+2026-08-18 regroup" — a decision already taken, which moving them into an
+internals namespace would quietly overturn.
+
+## Correction to this task's own earlier claim
+
+`review` is NOT a second spelling of `trust`, and this file said it was. It
+reaches `handle_trust_named_update`; `trust --approved` reaches
+`handle_trust_approve`, which does package resolution and runs the approval
+guard. Removing `review` and pointing its callers at `trust --file … --approved`
+broke three tests on paths where the two resolve differently. Reverted.
+
+That makes `review` more interesting, not less: a hidden command that writes a
+trust verdict while bypassing the guard the visible one runs. Worth a decision
+of its own, and not a deletion anyone should do casually.
+
+---
+
 PARTLY DONE 2026-08-20, and the rest needs a decision the original filing did
 not know it needed.
 
