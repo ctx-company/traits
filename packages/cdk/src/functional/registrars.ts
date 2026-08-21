@@ -20,7 +20,19 @@ import type {
   SlotHandle,
   SlotWithFields,
 } from "../handles.js";
-import type { CheckSequenceFields, CommandSequenceFields, ExhaustionPolicy, ExhaustionSignalValue, ForEachSequenceFields, LoopSequenceFields, ParallelBranchFailurePolicy, ParallelOptions, ProjectSequenceFields, PromptRegistrarOptions, SignalOutputValue } from "../sequence.js";
+import type {
+  CheckSequenceFields,
+  CommandSequenceFields,
+  ExhaustionPolicy,
+  ExhaustionSignalValue,
+  ForEachSequenceFields,
+  LoopSequenceFields,
+  ParallelBranchFailurePolicy,
+  ParallelOptions,
+  ProjectSequenceFields,
+  PromptRegistrarOptions,
+  SignalOutputValue,
+} from "../sequence.js";
 import { metaOf } from "../meta.js";
 import type { SchemaValue } from "../schema.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
@@ -30,7 +42,17 @@ import { lazyForEachItem, slot } from "../slot.js";
 import { signalVerbLabel, signalVerbOf } from "../signal-verb.js";
 import type { SignalVerb, SignalVerbName } from "../signal-verb.js";
 import type { AuthorFrame, RegisteredItem, Scope } from "./context.js";
-import { captureAuthorFrame, currentScope, declareSessionTitleSink, dispatchAgentPrompt, installAgentPromptLowering, installSlotForEachLowering, nearestScope, registerItem, runInScope } from "./context.js";
+import {
+  captureAuthorFrame,
+  currentScope,
+  declareSessionTitleSink,
+  dispatchAgentPrompt,
+  installAgentPromptLowering,
+  installSlotForEachLowering,
+  nearestScope,
+  registerItem,
+  runInScope,
+} from "./context.js";
 
 function mintId(title: string): string {
   return idFromTitle(title);
@@ -166,10 +188,7 @@ export const stepRegistrars = {
    * prompt/command/check: you could DECLARE a reusable prompt step but not
    * PLACE one, which is an asymmetry with no reason behind it.
    */
-  prompt(
-    title: string,
-    opts: PromptRegistrarOptions & { readonly agent: AgentHandle },
-  ): SequenceHandle {
+  prompt(title: string, opts: PromptRegistrarOptions & { readonly agent: AgentHandle }): SequenceHandle {
     requireBuild(`step.prompt(${JSON.stringify(title)})`);
     const { agent, ...rest } = opts;
     return dispatchAgentPrompt(agent, title, rest as PromptRegistrarOptions) as SequenceHandle;
