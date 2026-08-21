@@ -1200,7 +1200,7 @@ pub(crate) fn package_cdk_source(trait_path: &Utf8Path) -> crate::Result<Option<
         return Ok(None);
     };
     let repo_root = ctx_traits_io::export::infer_repo_root_from_trait_file(trait_path);
-    let protocol_root = ctx_traits_io::layout::trait_protocol_root_path(repo_root);
+    let protocol_root = ctx_traits_io::layout::trait_authoring_root_path(repo_root);
     if package_root.parent() == Some(protocol_root.as_path()) {
         // A genuine `.ctx/traits/<id>` package: resolve through the
         // authoring-root-keyed lookup (covers both the v2 `source/index.*`
@@ -1235,7 +1235,7 @@ pub(crate) fn package_source_map(trait_path: &Utf8Path) -> crate::Result<Utf8Pat
         return Ok(trait_path.with_extension("map"));
     };
     let repo_root = ctx_traits_io::export::infer_repo_root_from_trait_file(trait_path);
-    let protocol_root = ctx_traits_io::layout::trait_protocol_root_path(repo_root);
+    let protocol_root = ctx_traits_io::layout::trait_authoring_root_path(repo_root);
     if package_root.parent() == Some(protocol_root.as_path()) {
         if let Some(variant_name) = trait_path
             .parent()

@@ -140,7 +140,7 @@ pub fn trait_inventory_ids(repo_root: &Utf8Path) -> Result<Vec<String>, crate::E
 /// encoding). Returns results in deterministic sorted order by trait ID.
 pub fn trait_packages(repo_root: &Utf8Path) -> Result<Vec<TraitPackage>, crate::Error> {
     crate::layout::refuse_retired_roots(repo_root)?;
-    let traits_root = crate::layout::trait_protocol_root_path(repo_root);
+    let traits_root = crate::layout::trait_authoring_root_path(repo_root);
     let mut packages = Vec::new();
 
     for name in trait_package_dir_names(&traits_root)? {
@@ -243,7 +243,7 @@ pub fn trait_package_variants(
     repo_root: &Utf8Path,
 ) -> Result<Vec<TraitPackageVariant>, crate::Error> {
     let mut variants = Vec::new();
-    let traits_root = crate::layout::trait_protocol_root_path(repo_root);
+    let traits_root = crate::layout::trait_authoring_root_path(repo_root);
     for trait_id in trait_package_dir_names(&traits_root)? {
         let root = traits_root.join(&trait_id);
         let package_manifest = crate::layout::package_manifest_path(&root);

@@ -223,11 +223,6 @@ pub fn trait_protocol_root() -> &'static str {
     TRAIT_PACKAGE_ROOT
 }
 
-/// Portable protocol/runtime root under `repo_root`.
-pub fn trait_protocol_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
-    resolved_package_root(repo_root)
-}
-
 /// Working-directory-relative worktree root.
 pub fn worktree_root() -> &'static str {
     WORKTREE_ROOT

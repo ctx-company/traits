@@ -264,15 +264,11 @@ const PROJECT_CONFIG_TEMPLATE: &str = r#"# ctx.traits config — the committed p
 # `runtime.toml` for HOW traits execute on this machine.
 #
 # `[vendor]` is exactly what `vendor.toml` used to hold: this project's
-# trait dependency declarations.
+# trait dependency declarations. Add them with `ctx traits dependency add`
+# rather than by hand — see the Dependency docs page.
 
 [vendor]
 schema-version = "0.1"
-# extends = "@org/team-base"      # depth-one manifest inheritance (P443)
-
-# [vendor.dependencies.some-alias]
-# npm = "@org/some-trait"
-# version = "^1.0.0"
 "#;
 
 /// Fully-commented machine-tier template written by [`ensure_runtime_example`].
