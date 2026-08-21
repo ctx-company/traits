@@ -30,6 +30,12 @@ sdk-check:
 set-version version:
 	./.internal/scripts/set-version.sh {{version}}
 
+# Cut a release: set the version everywhere, verify, commit, tag. Stops before
+# pushing — pushing the tag is what publishes to npm, and npm versions cannot
+# be reused, so that one command stays a deliberate human act.
+release version:
+	./.internal/scripts/release.sh {{version}}
+
 # Has a package we already published changed without its version moving?
 # Quiet through a release cycle (an unpublished version has nothing to compare
 # against), loud the moment someone edits a shipped version's code.
