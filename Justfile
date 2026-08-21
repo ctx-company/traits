@@ -24,6 +24,32 @@ sdk-generate:
 sdk-check:
 	cargo run -p ctx-traits-cli -- traits internal sdk-generate --check
 
+# Write one version number into the Cargo workspace and every publishable
+# package manifest. Run this instead of editing six files by hand; the release
+# workflow re-checks all of them against the tag.
+set-version version:
+	./.internal/scripts/set-version.sh {{version}}
+
+# Has a package we already published changed without its version moving?
+# Quiet through a release cycle (an unpublished version has nothing to compare
+# against), loud the moment someone edits a shipped version's code.
+published-drift:
+	just ts-build
+	./.internal/scripts/published-drift.sh
+
+# The path a user takes in an empty folder: init, install, create, build,
+# activate, trust, and the whole dependency lifecycle — against the tarballs
+# the release would upload, so it needs no registry and no published version.
+e2e:
+	cargo build -p ctx-traits-cli
+	just ts-build
+	./.internal/scripts/e2e-cold-start.sh
+
+# The same run against real npm, for after a publish.
+e2e-registry:
+	cargo build -p ctx-traits-cli
+	./.internal/scripts/e2e-cold-start.sh --registry
+
 # Rebuild the embedded built-in traits and scaffold templates from source.
 # Internal only: these ship inside the binary, so no user command rebuilds
 # them and nothing else notices when a source edit never reaches its

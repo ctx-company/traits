@@ -317,3 +317,34 @@ jobs:
           # anyway (trusted publishing cannot create a package), and the
           # owner parked the npm channel for now. Un-shelving = flip private
           # off; the discovered guard below then covers it automatically.
+
+  smoke:
+    name: cold start against the published packages
+    needs: [build, npm]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # The npm job publishing is not the same as the release working. This
+    # walks a user's whole path — init --install, create, build, activate,
+    # trust, the dependency lifecycle — against the packages that were just
+    # published, so "we published" becomes "we published something that
+    # works". A failure here is found in minutes, while yanking is cheap.
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: sudo apt-get update && sudo apt-get install --yes just jq
+      - run: pnpm install --frozen-lockfile
+      - run: just ts-build
+      # npm's registry is read-through-cache: a package published seconds ago
+      # can 404 on the first fetch. Give it a moment rather than failing a
+      # good release on propagation.
+      - run: sleep 30
+      - run: just e2e-registry

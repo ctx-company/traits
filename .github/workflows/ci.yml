@@ -58,3 +58,17 @@ jobs:
       - run: just ts-typecheck
       - run: just ts-lint
       - run: just ts-test
+
+      # Everything above compares this tree to itself, and every one of those
+      # checks passed for the six days `@ctx-traits/cdk@0.2.4` was published
+      # while the CDK's API moved underneath the same number. The only thing
+      # that disagreed was npm. These two ask npm, and walk a user's path.
+      #
+      # Linux only: both hit the network and neither is platform-sensitive,
+      # so running them twice buys nothing.
+      - name: Published packages match their version numbers
+        if: runner.os == 'Linux'
+        run: just published-drift
+      - name: Cold start — a user's path in an empty folder
+        if: runner.os == 'Linux'
+        run: just e2e
