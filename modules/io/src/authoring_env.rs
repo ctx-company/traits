@@ -390,3 +390,90 @@ fn which(binary: &str) -> Option<Utf8PathBuf> {
             .flatten()
     })
 }
+
+/// The one line of a node failure worth showing. A CDK mismatch surfaces as a
+/// full stack trace plus the entire evaluated script, and pasting that in
+/// front of a reader buries the sentence that tells them what to do — so the
+/// diagnosis leads and this supplies just the error node actually raised.
+fn first_meaningful_line(raw: &str) -> String {
+    raw.lines()
+        .map(str::trim)
+        .find(|line| line.contains("Error:") || line.contains("error:") || line.contains("Cannot "))
+        .unwrap_or_else(|| {
+            raw.lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("")
+        })
+        .chars()
+        .take(200)
+        .collect()
+}
+
+/// Build a built-in template against the CDK that is actually installed,
+/// and report the failure if it cannot.
+///
+/// The version this binary scaffolds with and the version npm resolves are
+/// two different facts, and they agreed only by convention until they did
+/// not: `@ctx-traits/cdk@0.2.4` was published, the API moved under the same
+/// number, and a fresh `init --install` then `create` died on a `TypeError`
+/// inside a scaffolded file — with nothing anywhere saying the installed CDK
+/// was not the one the templates were written for.
+///
+/// So this builds one, for real, right after installing. Not an inventory of
+/// expected exports — those go stale and prove only what someone remembered
+/// to list. A template that compiles is the whole claim: whatever diverged,
+/// and however, it is caught here rather than in a user's first command.
+///
+/// `Ok(None)` when the check could not run at all (no template embedded in
+/// this build); `Ok(Some(message))` when it ran and failed.
+pub fn smoke_build_template(repo_root: &Utf8Path) -> crate::Result<Option<String>> {
+    let Some(template) = ctx_traits_core::builtin_templates::template("plain")
+        .or_else(|| ctx_traits_core::builtin_templates::templates().first())
+    else {
+        return Ok(None);
+    };
+
+    // Inside `.ctx/traits/` so node resolves `@ctx-traits/cdk` from the
+    // node_modules that was just installed, exactly as a real build does.
+    let scratch = crate::layout::authoring_install_root(repo_root).join(".authoring-check");
+    let source_dir = scratch.join("source");
+    std::fs::create_dir_all(source_dir.as_std_path()).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: source_dir.to_string(),
+            source,
+        }
+    })?;
+    let source_path = source_dir.join("index.ts");
+    let write = std::fs::write(source_path.as_std_path(), template.source_ts);
+    for (relative, contents) in template.extra_source_files {
+        let extra = source_dir.join(relative);
+        if let Some(parent) = extra.parent() {
+            let _ = std::fs::create_dir_all(parent.as_std_path());
+        }
+        let _ = std::fs::write(extra.as_std_path(), contents);
+    }
+    let outcome = write.ok().map(|()| {
+        crate::cdk_build::emit_draft_json(crate::cdk_build::CdkBuildRequest {
+            source_path: source_path.clone(),
+            repo_root: Some(repo_root.to_path_buf()),
+            timeout_ms: 60_000,
+            capture_limit: 4 * 1024 * 1024,
+            env: Vec::new(),
+        })
+    });
+    let _ = std::fs::remove_dir_all(scratch.as_std_path());
+
+    match outcome {
+        None => Ok(None),
+        Some(Ok(_)) => Ok(None),
+        Some(Err(error)) => Ok(Some(format!(
+            "the installed @ctx-traits/cdk cannot build this binary's templates. \
+             Expected {}; installed {}. The two are not the same API, so scaffolding \
+             would fail at the first build. First failure line: {}",
+            crate::init::authoring_range_spec(),
+            installed_cdk_version(repo_root).unwrap_or_else(|| "none".to_string()),
+            first_meaningful_line(&error.to_string()),
+        ))),
+    }
+}
