@@ -1,6 +1,6 @@
 //! 0020: schemas are flattened at emit, never composed as `$ref`/`$defs`.
 //!
-//! `ctx traits preview` renders the same `requested_output_schema` value
+//! `ctx traits internal preview` renders the same `requested_output_schema` value
 //! both drive's provider payload (`--json-schema`) and the in-prompt
 //! `<schema>` block are built from (`frame_prompt.rs`), so asserting on the
 //! preview prompt text pins the one shared flattening source without
@@ -136,6 +136,7 @@ fn shared_nested_schema_is_fully_inlined_with_no_ref_or_defs() {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "preview",
             "--file",
             &format!(".ctx/traits/{TRAIT_ID}/generated/index.toml"),
@@ -180,6 +181,7 @@ fn recursive_schema_graph_fails_at_build_with_a_named_cycle_path() {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "preview",
             "--file",
             &format!(".ctx/traits/{TRAIT_ID}/generated/index.toml"),

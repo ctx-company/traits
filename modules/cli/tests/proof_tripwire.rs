@@ -75,13 +75,20 @@ argv = ["sh", "-c", "{cmd}"]
 
     let fixture = ".ctx/traits/demo/generated/index.toml";
     let output = run_ctx(
-        &["traits", "review", "--file", fixture, "--approve"],
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "state", "--active", "--file", fixture],
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -497,7 +504,14 @@ fn session_state_and_doctor_config_surface_the_tripwire() {
         .to_string();
 
     let state_output = run_ctx(
-        &["traits", "session", "state", "--session", &session_path],
+        &[
+            "traits",
+            "internal",
+            "session",
+            "state",
+            "--session",
+            &session_path,
+        ],
         &repo,
         &scratch.home(),
     );

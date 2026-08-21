@@ -436,7 +436,7 @@ fn compare_locked_exports(
     // No exports is the normal state, not drift.
     //
     // A trait is complete without ever having been exported: `SKILL.md` is
-    // produced only by `ctx traits export`, is a generated host placement, and
+    // produced only by `ctx traits internal export`, is a generated host placement, and
     // is gitignored. Treating its absence as drift made a trait depend on a
     // skill being present — it blocked `check --locked`, and through it
     // `publish`, until every package had been exported, which is backwards.

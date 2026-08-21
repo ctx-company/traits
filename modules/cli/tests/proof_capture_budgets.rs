@@ -32,14 +32,21 @@ fn commit_all(repo: &Path, message: &str) {
 fn review_and_activate(repo: &Path, home: &Path) {
     let fixture = ".ctx/traits/demo/generated/index.toml";
     require_success(
-        "`ctx traits review --approve`",
-        &["traits", "review", "--file", fixture, "--approve"],
+        "`ctx traits internal review --approve`",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
-        "`ctx traits state --active`",
-        &["traits", "state", "--active", "--file", fixture],
+        "`ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );

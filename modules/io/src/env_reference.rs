@@ -191,7 +191,7 @@ fn base_env_reference() -> Vec<EnvVarDoc> {
         },
         EnvVarDoc {
             name: "CTX_TRAITS_ELAPSED_SECONDS_BASELINE",
-            contract: "Internal parent→child only: the cumulative active-drive elapsed seconds a drive loop injects into the MCP server subprocess it spawns. A bare `ctx traits mcp` honors it if set. Unparsable or absent is always treated as absent — a malformed baseline never silently starts the clock at zero.",
+            contract: "Internal parent→child only: the cumulative active-drive elapsed seconds a drive loop injects into the MCP server subprocess it spawns. A bare `ctx traits internal mcp` honors it if set. Unparsable or absent is always treated as absent — a malformed baseline never silently starts the clock at zero.",
             kind: EnvVarKind::Internal,
         },
         EnvVarDoc {
@@ -241,7 +241,7 @@ fn base_env_reference() -> Vec<EnvVarDoc> {
         },
         EnvVarDoc {
             name: crate::run_liveness::SPAWNED_LOG_PATH_ENV,
-            contract: "P510 internal parent→child only: the log path a detached-spawn parent hands its child driver, read once at `try_acquire` time into the local liveness-index row's `log_path` so `ctx traits running` can name a live run's log without guessing its spawn-time filename.",
+            contract: "P510 internal parent→child only: the log path a detached-spawn parent hands its child driver, read once at `try_acquire` time into the local liveness-index row's `log_path` so `ctx traits internal running` can name a live run's log without guessing its spawn-time filename.",
             kind: EnvVarKind::Internal,
         },
     ]

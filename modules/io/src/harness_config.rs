@@ -5505,7 +5505,7 @@ fn global_runtime_config_paths() -> crate::Result<Vec<Utf8PathBuf>> {
 
 /// True when `dir` (already canonicalized) is the resolved `ctx` config-home
 /// directory — the same resolution [`global_runtime_config_paths`] anchors
-/// to. `ctx traits config build` uses this to decide whether a `config.ts`
+/// to. `ctx traits internal config build` uses this to decide whether a `config.ts`
 /// it is compiling is the user-global layer (where `[repo.*]`/`defineRepo`
 /// is legal) or a repo-local one — the authoring-time mirror of the
 /// `ConfigLayer::UserGlobal` check this module already applies at read

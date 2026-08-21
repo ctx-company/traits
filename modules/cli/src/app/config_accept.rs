@@ -1,4 +1,4 @@
-//! CLI orchestration for `ctx traits config accept` (0178): the operator
+//! CLI orchestration for `ctx traits internal config accept` (0178): the operator
 //! step that accepts a repo-committed `runtime.example.ts`/`.toml`, shows
 //! its content, materializes the machine-local `runtime.ts`/`.toml` copy,
 //! and records a digest stamp in the trust store. Never auto-accepts

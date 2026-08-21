@@ -59,9 +59,13 @@ fn command_error_has_no_command_error_prefix() {
     fs::create_dir_all(&repo).unwrap();
     git_init(&repo);
 
-    // `ctx traits set` with no `--session` is a genuine `Error::Command`
+    // `ctx traits internal set` with no `--session` is a genuine `Error::Command`
     // usage refusal.
-    let output = run_ctx(&["traits", "set", "foo", "bar"], &repo, &scratch.home());
+    let output = run_ctx(
+        &["traits", "internal", "set", "foo", "bar"],
+        &repo,
+        &scratch.home(),
+    );
     assert_ne!(output.status.code(), Some(0));
     let (_, stderr) = utf8(&output);
     assert!(
@@ -70,7 +74,7 @@ fn command_error_has_no_command_error_prefix() {
     );
 }
 
-/// `ctx traits next` with neither `--session` nor `--agent` is a genuine
+/// `ctx traits internal next` with neither `--session` nor `--agent` is a genuine
 /// usage error, not a filesystem effect — it must not wear a `filesystem
 /// error at run-next.agent` costume.
 #[test]
@@ -80,7 +84,7 @@ fn usage_error_wears_no_filesystem_path_costume() {
     fs::create_dir_all(&repo).unwrap();
     git_init(&repo);
 
-    let output = run_ctx(&["traits", "next"], &repo, &scratch.home());
+    let output = run_ctx(&["traits", "internal", "next"], &repo, &scratch.home());
     assert_ne!(output.status.code(), Some(0));
     let (_, stderr) = utf8(&output);
     assert!(
@@ -94,7 +98,7 @@ fn usage_error_wears_no_filesystem_path_costume() {
 }
 
 /// `ctx traits run <unmatched-query>` prints its own `ctx traits run`
-/// header (not `ctx traits run-info`, which `run_format::print_run_selection`
+/// header (not `ctx traits internal run-info`, which `run_format::print_run_selection`
 /// used to hardcode regardless of caller).
 #[test]
 fn query_run_refusal_prints_run_header_not_run_info_header() {
@@ -114,7 +118,7 @@ fn query_run_refusal_prints_run_header_not_run_info_header() {
     let (stdout, _) = utf8(&output);
     assert!(stdout.contains("ctx traits run"), "{stdout}");
     assert!(
-        !stdout.contains("ctx traits run-info"),
+        !stdout.contains("ctx traits internal run-info"),
         "a query-run refusal must not print run-info's own header: {stdout}"
     );
 }
@@ -248,13 +252,20 @@ argv = ["sh", "-c", "true"]
 
     let fixture = ".ctx/traits/demo/generated/index.toml";
     let output = run_ctx(
-        &["traits", "review", "--file", fixture, "--approve"],
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "state", "--active", "--file", fixture],
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );

@@ -1,4 +1,4 @@
-//! `ctx traits stats` (P442): deterministic, read-only aggregation over this
+//! `ctx traits internal stats` (P442): deterministic, read-only aggregation over this
 //! repository's run session ledgers. Loads the inventory and resolves the
 //! `--since` cutoff at this IO boundary, then hands everything to the pure
 //! `ctx_traits_core::procedure::stats` aggregator.
@@ -61,7 +61,7 @@ fn emit_plain_stats(
     pricing: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::ModelPricing>,
     billing: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::BillingMode>,
 ) -> crate::Result<()> {
-    w("ctx traits stats")?;
+    w("ctx traits internal stats")?;
     w(format!("  schema-version: {}", report.schema_version))?;
     w(format!(
         "  applied-since-epoch: {}",

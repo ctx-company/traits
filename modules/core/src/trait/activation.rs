@@ -214,7 +214,7 @@ pub struct RuleScore {
 pub struct Gate {
     pub code: String,
     pub message: String,
-    /// Exact command that clears this gate, e.g. `ctx traits state --active <id>`,
+    /// Exact command that clears this gate, e.g. `ctx traits internal state --active <id>`,
     /// when one canonical command exists. `None` for gates with no single
     /// canonical command (e.g. manual-activation direct-invocation evidence,
     /// which can be satisfied several ways).
@@ -746,7 +746,7 @@ fn explicit_values(request: &Request) -> Vec<String> {
 /// gates as activation. Returns the gate list; empty means pass.
 ///
 /// `trait_id` is embedded into each gate's remedy command so refusals name the
-/// exact `ctx traits state --active <id>` / `ctx traits trust --approved <id>` fix.
+/// exact `ctx traits internal state --active <id>` / `ctx traits trust --approved <id>` fix.
 pub fn lifecycle_trust_gates_for_check(
     trait_id: &str,
     status: &PackageStatus,
@@ -821,7 +821,7 @@ fn lifecycle_status_gates(trait_id: &str, status: &PackageStatus) -> Vec<Gate> {
         gates.push(Gate {
             code: gate_code::STATUS_DRAFT.to_string(),
             message: "draft traits do not auto-activate".to_string(),
-            remedy: Some(format!("ctx traits state --active {trait_id}")),
+            remedy: Some(format!("ctx traits internal state --active {trait_id}")),
         });
     }
     gates

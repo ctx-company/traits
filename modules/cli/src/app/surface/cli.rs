@@ -8,7 +8,7 @@ const AGENT_ROLE_HELP: &str =
     "Declared agent role serving this frame, e.g. reviewer or agent:reviewer.";
 
 /// The mandated release tagline (P453 review pass). Both `ctx traits -h`
-/// (via [`traits_help_text`]) and `ctx traits help --json` (its `tagline`
+/// (via [`traits_help_text`]) and `ctx traits internal help --json` (its `tagline`
 /// field, see `help_surface.rs`) render this exact string — one source, so
 /// the two surfaces cannot drift apart, and the byte-compare structural
 /// proof pins the literal itself rather than only their mutual consistency.
@@ -62,7 +62,7 @@ Execute:
 Options:
       --session <SESSION>  Run-session ID or ledger path for commands such as `set`
   -h, --help                Print help
-Run `ctx traits <command> --help` for a command's full options, and `ctx traits <hidden-command> --help` for internals not listed above."
+Run `ctx traits <command> --help` for a command's full options. `ctx traits internal` holds the runtime's own dispatch surface and this project's tooling; it is not part of the supported CLI."
     )
 }
 
@@ -102,7 +102,7 @@ pub enum Command {
 
     /// Task board document commands (sync, list, show) — the files-backed
     /// `TaskProvider` (0060), a top-level command since a task board is
-    /// project-scoped, not trait-scoped. `ctx traits task import` (a
+    /// project-scoped, not trait-scoped. `ctx traits internal task import` (a
     /// one-shot markdown-to-TOML conversion) stays under `traits`.
     Tasks {
         #[command(subcommand)]
@@ -388,73 +388,6 @@ pub enum TraitsCommand {
         #[arg(long)]
         verbose: bool,
     },
-    /// Deterministic, read-only aggregation over this repository's run
-    /// session ledgers: runs per trait, observed token evidence, and
-    /// truthfully classifiable outcome counts. Writes nothing.
-    #[command(hide = true)]
-    Stats {
-        /// Inclusive Unix-epoch-seconds cutoff against each run's recorded
-        /// drive-outcome timestamp. Ledgers with no recorded timestamp are
-        /// excluded from the filtered count and reported separately.
-        #[arg(long)]
-        since: Option<u64>,
-
-        /// Exact, case-sensitive match against the persisted canonical
-        /// trait ID recorded on each run.
-        #[arg(long = "trait", value_name = "TRAIT_ID")]
-        trait_id: Option<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Machine-wide "what is running": every session the local
-    /// liveness index has a row for, each probed against its own driver
-    /// lock and reported live, orphaned (row present, lock free — a crashed
-    /// or `kill -9`'d driver), or unknown (the local runtime root could not
-    /// be resolved). One small index file read plus at most one bounded
-    /// probe per row — never a scan of every ledger this machine has.
-    /// Read-only — writes nothing.
-    #[command(hide = true)]
-    Running {
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Render a persisted run-session ledger as a chronological narrative:
-    /// who did what, verdicts and blockers, commands run, escalations, and
-    /// how the run ended. Read-only — writes nothing.
-    #[command(hide = true)]
-    Story {
-        /// Internal run-id (as recorded in the run-session ledger), a full
-        /// session ID, an unambiguous session-ID prefix, or an explicit
-        /// ledger path.
-        run: String,
-
-        /// Run-session store directory to resolve the run-id/session from.
-        /// Defaults to this repository's global per-repository runs root.
-        #[arg(long)]
-        session_store: Option<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-
-        /// Emit a PR-comment-ready markdown block instead. Mutually
-        /// exclusive with `--json`.
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
-        /// Requested narration depth: `default` (free, always available;
-        /// per-step summaries and derived bullets from persisted activity),
-        /// `detailed` (every persisted activity event with timestamps), or
-        /// `assisted` (spends narrator model calls — the only level that
-        /// does). `detailed`/`assisted` degrade to `default` with a stated
-        /// notice when no activity was recorded for this run. Absent
-        /// resolves to `default`.
-        #[arg(long)]
-        level: Option<String>,
-    },
     /// Inspect a folder of Agent-Skills-style source files
     /// (SKILL.md/AGENTS.md/CLAUDE.md) before importing, without writing anything.
     ///
@@ -514,13 +447,6 @@ pub enum TraitsCommand {
         /// `--config` and `--migrate-config`.
         #[arg(long, conflicts_with_all = ["config", "migrate_config"])]
         verbose: bool,
-    },
-    /// Show launch claim readiness and allowed public wording.
-    #[command(hide = true)]
-    ClaimGate {
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
     },
     /// Resolve and vendor declared trait dependencies.
     ///
@@ -603,294 +529,6 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Report trait hygiene, trigger inventory, and safe prune planning.
-    #[command(hide = true)]
-    Hygiene {
-        /// Canonical trait file to include. Repeat for multiple traits.
-        #[arg(long = "file", value_name = "TRAIT_FILE", required = true)]
-        trait_files: Vec<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Estimate context cost by trait layer.
-    #[command(hide = true)]
-    Cost {
-        /// Trait file to estimate.
-        #[arg(long)]
-        file: String,
-
-        /// Optional token budget to compare against.
-        #[arg(long)]
-        budget: Option<u64>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Plan public/private publish preparation without writing public output.
-    #[command(hide = true)]
-    PreparePublic {
-        /// Trait file to inspect.
-        #[arg(long)]
-        file: String,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Explain behavior/project-memory/context contract boundaries.
-    #[command(hide = true)]
-    ContextContracts {
-        /// Trait file to inspect.
-        #[arg(long)]
-        file: String,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Classify advisory policy versus enforceable host/runtime plans.
-    #[command(hide = true)]
-    Policy {
-        /// Trait file to inspect.
-        #[arg(long)]
-        file: String,
-
-        /// Target render/profile capability context.
-        #[arg(long, default_value = "agent-skills")]
-        profile: String,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Generate a compact review evidence bundle.
-    #[command(hide = true)]
-    Evidence {
-        /// Trait file to inspect.
-        #[arg(long)]
-        file: String,
-
-        /// Target render/profile context.
-        #[arg(long, default_value = "agent-skills")]
-        profile: String,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show prioritized host compatibility matrix.
-    #[command(hide = true)]
-    Compatibility {
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Explain subagent advisory propagation for a profile.
-    #[command(hide = true)]
-    Subagent {
-        /// Trait file to inspect.
-        #[arg(long)]
-        file: String,
-
-        /// Target render/profile context.
-        #[arg(long, default_value = "agent-skills")]
-        profile: String,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Explain why a trait would or wouldn't activate for a task, or emit a
-    /// deterministic explain report with --scaffold.
-    ///
-    /// Off the release help screen since the 2026-08-18 regroup; runnable
-    /// as before.
-    #[command(hide = true)]
-    Explain {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
-
-        /// User task text for activation-explain mode. Required unless
-        /// --scaffold is supplied.
-        #[arg(long)]
-        task: Option<String>,
-
-        /// Emit deterministic ExplainScaffold mode. Requires exactly one
-        /// --file, rejects --task, and performs no provider/model call.
-        #[arg(long)]
-        scaffold: bool,
-
-        /// Canonical trait file to load and score. Repeat for multiple traits.
-        #[arg(long = "file", value_name = "TRAIT_FILE")]
-        trait_files: Vec<String>,
-
-        /// Task/source file paths used by activation matching. Repeat for
-        /// multiple files. Distinct from `--file` which loads trait manifests.
-        #[arg(long = "files", value_name = "FILE")]
-        files: Vec<String>,
-
-        /// Optional task mode hint.
-        #[arg(long)]
-        mode: Option<String>,
-
-        /// Language hint. Repeat for multiple languages.
-        #[arg(long = "language", value_name = "LANGUAGE")]
-        languages: Vec<String>,
-
-        /// Runtime signal fact. Repeat for multiple signals.
-        #[arg(long = "signal", value_name = "SIGNAL")]
-        signals: Vec<String>,
-
-        /// Direct invocation evidence text for manual-activation traits.
-        #[arg(long = "explicit-invocation", value_name = "TEXT")]
-        explicit_invocation: Option<String>,
-
-        /// Only show active candidates.
-        #[arg(long)]
-        active_only: bool,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-
-        /// Optional trait ID filter. Also counts as direct invocation evidence
-        /// for the matching candidate.
-        #[arg(long)]
-        trait_id: Option<String>,
-
-        /// Source map sidecar for --scaffold. Repository packages default to
-        /// `.ctx/traits/<id>/generated/index.map`.
-        #[arg(long = "source-map", visible_alias = "map", value_name = "TRAIT_MAP")]
-        source_map: Option<String>,
-
-        /// Show the full candidate/scaffold detail report instead of the compact summary.
-        #[arg(long)]
-        verbose: bool,
-
-        /// Narrate the --scaffold evidence through the explain runner
-        /// instead of stopping at the deterministic scaffold. No effect
-        /// without --scaffold; deterministic explain is unchanged.
-        #[arg(long = "llm-assisted")]
-        llm_assisted: bool,
-
-        /// Path to raw narrated explain-scaffold output (for testing gates
-        /// without a provider). No effect without --llm-assisted.
-        #[arg(long)]
-        candidate: Option<String>,
-
-        /// Provider/model ID for the explain narrator. No effect
-        /// without --llm-assisted.
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Path to a `[budget]` document (0176) capping the --llm-assisted
-        /// explain runner. Routing goes through --assign. No effect
-        /// without --llm-assisted or with --candidate.
-        #[arg(long, value_name = "PATH")]
-        budget: Option<String>,
-
-        /// Override the explain generator agent assignment. No effect
-        /// without --llm-assisted.
-        #[arg(
-            long = "assign",
-            value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
-        )]
-        assignments: Vec<String>,
-    },
-    /// Inspect trait identity, lifecycle, scenarios, evals, or dry-run plan.
-    #[command(hide = true)]
-    Inspect {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
-
-        /// Trait file to inspect.
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Show the procedure dry plan (ports, sequence items, slots).
-        #[arg(long)]
-        dry_plan: bool,
-
-        /// Render profile for resource compatibility warnings in dry-plan.
-        /// Defaults to agent-skills.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Discover the project manifest in the current directory.
-    #[command(hide = true)]
-    Manifest,
-    /// P468 TUI kit demo: exercises list scroll, master-detail focus, both
-    /// modal variants, and the `$EDITOR` round-trip in one screen. Requires
-    /// an interactive TTY.
-    #[command(hide = true)]
-    TuiDemo,
-    /// Open a modal alt-screen editor for one trait package: browse its
-    /// sections, open its authored source in `$EDITOR`, rebuild from CDK
-    /// source, and run `check` — all with the same one-keypress-per-action
-    /// model as the dashboard's TRAITS screen. Requires an interactive TTY.
-    #[command(hide = true)]
-    Edit {
-        /// Trait name or local trait file path.
-        trait_arg: String,
-    },
-    /// Emit JSON Schema for the canonical normalized JSON shape of the Agent
-    /// Traits trait-root model.
-    ///
-    /// This schema describes canonical serialized JSON output, not the full
-    /// TOML/YAML authoring shape. Taxonomy fields that accept scalar-or-array
-    /// shorthand appear as arrays (their canonical form). The schema targets
-    /// `.protocol/agent-traits/` as a non-authoritative support artifact.
-    #[command(hide = true)]
-    Schema {
-        /// Protocol to target (default: agent-traits).
-        #[arg(long, default_value = "agent-traits")]
-        protocol: String,
-
-        /// Output format (default: json).
-        #[arg(long, default_value = "json")]
-        format: String,
-
-        /// Output file path. If omitted, writes to stdout.
-        #[arg(long)]
-        out: Option<String>,
-    },
-    /// Generate the Rust-derived TypeScript SDK type mirror.
-    #[command(hide = true)]
-    SdkGenerate {
-        /// Verify generated output and hand-written vocabulary without writing.
-        #[arg(long)]
-        check: bool,
-    },
-    /// Deterministically synthesize canonical TOML/JSON/YAML from draft JSON.
-    ///
-    /// `synth` never executes TypeScript, Rust generators, model calls,
-    /// provider hooks, or host code. If `--out` is omitted and `--check` is not
-    /// set, stdout contains only the synthesized canonical document text.
-    #[command(hide = true)]
-    Synth {
-        /// Draft JSON input path.
-        path: String,
-
-        /// Output format: toml, json, or yaml. Defaults to toml.
-        #[arg(long, default_value = "toml")]
-        format: String,
-
-        /// Output file path. If omitted, synth writes canonical text to stdout;
-        /// with --check omitted, no report text is mixed into stdout.
-        #[arg(long)]
-        out: Option<String>,
-
-        /// Compare synthesized output with the target file and report drift
-        /// without rewriting. Uses --out as the target, or `<path>` with the
-        /// selected format extension when --out is omitted.
-        #[arg(long)]
-        check: bool,
-    },
     /// Compile a named trait or explicit TypeScript/JavaScript authoring source
     /// path into the canonical trait document.
     ///
@@ -921,37 +559,6 @@ pub enum TraitsCommand {
         /// ordinary build (task 0170).
         #[arg(long)]
         relock: bool,
-    },
-    /// Mechanically migrate a canonical trait from its declared
-    /// `schema-version` to a newer supported version.
-    ///
-    /// Without `--apply`, prints a reviewable diff and digest before/after
-    /// without writing. With `--apply`, writes the migrated document and
-    /// reports that its canonical digest moved — trust re-approval follows.
-    /// Refuses rather than guessing when a construct can't be mechanically
-    /// rewritten or the migrated output fails to round-trip decode.
-    ///
-    /// Off the release help screen since the 2026-08-18 regroup; runnable
-    /// as before.
-    #[command(hide = true)]
-    Migrate {
-        /// Trait name to migrate. Pass an explicit canonical trait file path
-        /// as an escape hatch.
-        #[arg(value_name = "TRAIT")]
-        id_or_path: String,
-
-        /// Target schema-version. Defaults to the latest version this
-        /// binary supports.
-        #[arg(long)]
-        to: Option<String>,
-
-        /// Write the migrated document after gates pass.
-        #[arg(long)]
-        apply: bool,
-
-        /// Emit structured JSON instead of the plain report.
-        #[arg(long)]
-        json: bool,
     },
     /// Use a model to draft a new trait from a brief.
     ///
@@ -995,53 +602,6 @@ pub enum TraitsCommand {
         /// Emit structured JSON using the assist candidate envelope.
         #[arg(long)]
         json: bool,
-    },
-    /// Evaluate one authoring-source candidate through the rung ladder.
-    ///
-    /// Internal: the only intended caller is `generate`'s in-loop
-    /// evaluate step (task 0066.1). Never calls a provider, never loops —
-    /// exactly one round, always exits 0 and prints the round report as
-    /// JSON regardless of convergence; the meta-trait's own loop primitive
-    /// decides whether to continue.
-    #[command(hide = true)]
-    GenerateRound {
-        /// Trait ID the candidate must declare; also keys the scratch package.
-        trait_id: String,
-
-        /// Candidate authoring source (TypeScript) text.
-        candidate: String,
-    },
-    /// Evaluate one refine scaffold candidate through the rung ladder.
-    ///
-    /// Internal: the only intended caller is `refine`'s in-loop
-    /// evaluate step (task 0066.3). Never calls a provider, never loops —
-    /// exactly one round, always exits 0 and prints the round report as
-    /// JSON regardless of convergence; the meta-trait's own loop primitive
-    /// decides whether to continue.
-    #[command(hide = true)]
-    RefineRound {
-        /// Filesystem path whose lines patch anchors must reference; also
-        /// re-read for the source trait identity and digest.
-        source_path: String,
-
-        /// Candidate refine scaffold (JSON) text.
-        candidate: String,
-    },
-    /// Evaluate one import trait-draft candidate through the rung ladder.
-    ///
-    /// Internal: the only intended caller is `import`'s in-loop
-    /// evaluate step (task 0066.3). Never calls a provider, never loops —
-    /// exactly one round, always exits 0 and prints the round report as
-    /// JSON regardless of convergence; the meta-trait's own loop primitive
-    /// decides whether to continue.
-    #[command(hide = true)]
-    ImportRound {
-        /// Trait ID the candidate must declare; also keys the scratch
-        /// package and the persisted scaffold baseline.
-        trait_id: String,
-
-        /// Candidate trait draft (JSON) text.
-        candidate: String,
     },
     /// LLM-assisted refinement of an existing canonical trait.
     ///
@@ -1186,11 +746,639 @@ pub enum TraitsCommand {
         #[arg(long)]
         verbose: bool,
     },
+    /// Run a trait end to end through configured harnesses; --no-drive
+    /// starts a resumable session without driving it.
+    Run {
+        #[command(flatten)]
+        args: Box<SessionStartArgs>,
+
+        /// Start the session without driving it: persist the resumable
+        /// ledger and exit. Advance later via the session/frame verbs or MCP.
+        #[arg(long = "no-drive")]
+        no_drive: bool,
+
+        /// With --no-drive: do not persist to the default session store
+        /// unless --out is supplied.
+        #[arg(long)]
+        ephemeral: bool,
+    },
+    /// Land a completed `--worktree` run. A true clean fast-forward (`main`
+    /// is the run branch's merge base) lands deterministically without
+    /// resolving, probing, or dispatching the standing merger agent.
+    /// Otherwise (a divergent history, or `--force-merger`), the branch is
+    /// rebased onto clean main and reconciled via the standing merger agent
+    /// (`--deep` selects a judgment-capable merger instead) before
+    /// fast-forwarding. Every landing path then runs the declared `[merge]
+    /// gate` — an ordered list of repository commands configured in
+    /// `.ctx/traits/runtime.toml`, empty by default — before touching `main`; merge
+    /// machinery executes only what a repository declares and judges its
+    /// outcome, it never inspects the repository for a Justfile or any other
+    /// tool. Any failed precondition, unresolved conflict, judgment call, red
+    /// gate, or lost fast-forward race parks the run with its branch and
+    /// worktree intact. A cross-process lock serializes merges: by default
+    /// this queues behind a concurrent merge up to a bounded wait;
+    /// `--no-wait` fails fast instead.
+    Merge {
+        /// Internal run-id (as recorded in the run-session ledger, not the
+        /// worktree id) of the completed `--worktree` run to land.
+        run_id: String,
+
+        /// Run-session store directory to resolve the run-id from. Defaults
+        /// to this repository's global per-repository runs root.
+        #[arg(long)]
+        session_store: Option<String>,
+
+        /// Override or synthesize the merger assignment, merger=harness[:transport[:session-mode[:model[:reasoning-effort]]]].
+        #[arg(
+            long = "assign",
+            value_name = "ROLE=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL[:REASONING_EFFORT]]]]"
+        )]
+        assignments: Vec<String>,
+
+        /// Fail immediately with a typed `lock-unavailable` result if another
+        /// merge already holds the cross-process merge lock, instead of
+        /// queueing behind it for the bounded default wait.
+        #[arg(long, conflicts_with = "wait_override")]
+        no_wait: bool,
+
+        /// Explicitly override `[merge].wait` and queue behind the lock.
+        #[arg(long = "wait", conflicts_with = "no_wait")]
+        wait_override: bool,
+
+        /// Send this merge through the standing merger agent's confirmation
+        /// path even though `main` is a true clean fast-forward for the run
+        /// branch. Supports operator inspection and makes result/ledger
+        /// differential proofs deterministic without a production-only test
+        /// hook; has no effect on a divergent history, which always goes
+        /// through the merger regardless of this flag.
+        #[arg(long)]
+        force_merger: bool,
+
+        /// Park on a detected stale-base overlap — the run branch and main
+        /// both changed the same paths since the branch's base — instead of
+        /// the default of landing anyway. Restores the strict prior
+        /// behavior: the typed `stale-base-overlap` detail is recorded on the
+        /// parked frame instead of on a landed one.
+        #[arg(long, conflicts_with = "land_on_overlap")]
+        park_on_overlap: bool,
+
+        /// Explicitly override `[merge].overlap` and land on overlap.
+        #[arg(long = "land-on-overlap", conflicts_with = "park_on_overlap")]
+        land_on_overlap: bool,
+
+        /// Deprecated no-op, kept for one release: landing despite a
+        /// detected stale-base overlap is now the default (see
+        /// `--park-on-overlap` to restore the old strict behavior). Passing
+        /// this flag no longer changes behavior; it only emits a deprecation
+        /// warning.
+        #[arg(long, hide = true)]
+        allow_stale_overlap: bool,
+
+        /// Reconcile a divergent history through a judgment-capable deep
+        /// merger (`[agent.role.merger-deep]`, falling back to
+        /// `[agent.role.merger]`) instead of the standard mechanical-only
+        /// merger. The deep merger
+        /// resolves conflicts under the five P420 phase doctrines, may make
+        /// logged supporting edits outside conflicted files, and refuses a
+        /// landed-fix regression (parking with the refusing rule named)
+        /// rather than guessing. Has no effect on a true clean fast-forward
+        /// unless combined with `--force-merger`.
+        #[arg(long)]
+        deep: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check a trait for validation, audit, and drift.
+    Check {
+        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
+        #[arg(value_name = "TRAIT")]
+        trait_arg: Option<String>,
+
+        /// Trait file to check.
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Compare against lock data.
+        #[arg(long)]
+        locked: bool,
+
+        /// Skip CDK source drift verification against the `.ctx` source tree.
+        #[arg(long)]
+        skip_cdk_drift: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Emit the byte-stable plain text report without ANSI styling or animation.
+        #[arg(long)]
+        plain: bool,
+
+        /// Alias for --plain; disables the terminal decode animation and styling.
+        #[arg(long = "no-animate")]
+        no_animate: bool,
+
+        /// List every flagged advisory instead of collapsing the tail into a summary line.
+        #[arg(long)]
+        verbose: bool,
+
+        /// Explicit run ledger JSON to include as runtime evidence.
+        #[arg(long)]
+        run_ledger: Option<String>,
+
+        /// Explicit eval report JSON to include as eval evidence. Repeat for multiple reports.
+        #[arg(long = "eval-report", value_name = "REPORT_JSON")]
+        eval_reports: Vec<String>,
+    },
+    /// Show layer-aware diff for a trait.
+    Diff {
+        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
+        #[arg(value_name = "TRAIT")]
+        trait_arg: Option<String>,
+
+        /// Trait file to diff.
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Compare against lock data.
+        #[arg(long)]
+        from_lock: bool,
+
+        /// Show model-view layer.
+        #[arg(long)]
+        model_view: bool,
+
+        /// Show export layer.
+        #[arg(long)]
+        exports: bool,
+
+        /// Show resource and policy manifest layers.
+        #[arg(long)]
+        resources: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Show every diff entry's full hunk detail instead of the compact summary.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Cache lifecycle commands.
+    Cache {
+        /// Emit structured JSON. Applies to whichever cache subcommand is
+        /// given; equivalent to that subcommand's own `--json`.
+        #[arg(long, global = true)]
+        json: bool,
+
+        #[command(subcommand)]
+        subcommand: CacheCommand,
+    },
+    /// Internals: the runtime's own dispatch surface and this project's
+    /// tooling. Not a user-facing command group — `ctx traits internal
+    /// <verb> --help` documents each one, and nothing here is part of the
+    /// supported CLI.
+    ///
+    /// These were 49 hidden TOP-LEVEL verbs, which meant one `hide = true`
+    /// was doing two unrelated jobs: "deprecated, do not use" and "plumbing,
+    /// not for humans". Nothing distinguished them, and a hidden top-level
+    /// verb is still a verb — parsed, routed, and reachable by anyone who
+    /// guesses the name. Behind one namespace, the top-level surface is
+    /// exactly what `--help` lists.
+    #[command(hide = true)]
+    Internal {
+        #[command(subcommand)]
+        subcommand: InternalCommand,
+    },
+}
+
+/// Every internal verb, moved out of the top-level command list
+/// wholesale (0242). Membership is the only thing that changed: each variant
+/// keeps its own flags, its own handler, and its own behavior.
+#[derive(Subcommand, Debug)]
+pub enum InternalCommand {
+    /// Deterministic, read-only aggregation over this repository's run
+    /// session ledgers: runs per trait, observed token evidence, and
+    /// truthfully classifiable outcome counts. Writes nothing.
+    Stats {
+        /// Inclusive Unix-epoch-seconds cutoff against each run's recorded
+        /// drive-outcome timestamp. Ledgers with no recorded timestamp are
+        /// excluded from the filtered count and reported separately.
+        #[arg(long)]
+        since: Option<u64>,
+
+        /// Exact, case-sensitive match against the persisted canonical
+        /// trait ID recorded on each run.
+        #[arg(long = "trait", value_name = "TRAIT_ID")]
+        trait_id: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Machine-wide "what is running": every session the local
+    /// liveness index has a row for, each probed against its own driver
+    /// lock and reported live, orphaned (row present, lock free — a crashed
+    /// or `kill -9`'d driver), or unknown (the local runtime root could not
+    /// be resolved). One small index file read plus at most one bounded
+    /// probe per row — never a scan of every ledger this machine has.
+    /// Read-only — writes nothing.
+    Running {
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render a persisted run-session ledger as a chronological narrative:
+    /// who did what, verdicts and blockers, commands run, escalations, and
+    /// how the run ended. Read-only — writes nothing.
+    Story {
+        /// Internal run-id (as recorded in the run-session ledger), a full
+        /// session ID, an unambiguous session-ID prefix, or an explicit
+        /// ledger path.
+        run: String,
+
+        /// Run-session store directory to resolve the run-id/session from.
+        /// Defaults to this repository's global per-repository runs root.
+        #[arg(long)]
+        session_store: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Emit a PR-comment-ready markdown block instead. Mutually
+        /// exclusive with `--json`.
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// Requested narration depth: `default` (free, always available;
+        /// per-step summaries and derived bullets from persisted activity),
+        /// `detailed` (every persisted activity event with timestamps), or
+        /// `assisted` (spends narrator model calls — the only level that
+        /// does). `detailed`/`assisted` degrade to `default` with a stated
+        /// notice when no activity was recorded for this run. Absent
+        /// resolves to `default`.
+        #[arg(long)]
+        level: Option<String>,
+    },
+    /// Show launch claim readiness and allowed public wording.
+    ClaimGate {
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Report trait hygiene, trigger inventory, and safe prune planning.
+    Hygiene {
+        /// Canonical trait file to include. Repeat for multiple traits.
+        #[arg(long = "file", value_name = "TRAIT_FILE", required = true)]
+        trait_files: Vec<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Estimate context cost by trait layer.
+    Cost {
+        /// Trait file to estimate.
+        #[arg(long)]
+        file: String,
+
+        /// Optional token budget to compare against.
+        #[arg(long)]
+        budget: Option<u64>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Plan public/private publish preparation without writing public output.
+    PreparePublic {
+        /// Trait file to inspect.
+        #[arg(long)]
+        file: String,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain behavior/project-memory/context contract boundaries.
+    ContextContracts {
+        /// Trait file to inspect.
+        #[arg(long)]
+        file: String,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Classify advisory policy versus enforceable host/runtime plans.
+    Policy {
+        /// Trait file to inspect.
+        #[arg(long)]
+        file: String,
+
+        /// Target render/profile capability context.
+        #[arg(long, default_value = "agent-skills")]
+        profile: String,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate a compact review evidence bundle.
+    Evidence {
+        /// Trait file to inspect.
+        #[arg(long)]
+        file: String,
+
+        /// Target render/profile context.
+        #[arg(long, default_value = "agent-skills")]
+        profile: String,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show prioritized host compatibility matrix.
+    Compatibility {
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain subagent advisory propagation for a profile.
+    Subagent {
+        /// Trait file to inspect.
+        #[arg(long)]
+        file: String,
+
+        /// Target render/profile context.
+        #[arg(long, default_value = "agent-skills")]
+        profile: String,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain why a trait would or wouldn't activate for a task, or emit a
+    /// deterministic explain report with --scaffold.
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    Explain {
+        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
+        #[arg(value_name = "TRAIT")]
+        trait_arg: Option<String>,
+
+        /// User task text for activation-explain mode. Required unless
+        /// --scaffold is supplied.
+        #[arg(long)]
+        task: Option<String>,
+
+        /// Emit deterministic ExplainScaffold mode. Requires exactly one
+        /// --file, rejects --task, and performs no provider/model call.
+        #[arg(long)]
+        scaffold: bool,
+
+        /// Canonical trait file to load and score. Repeat for multiple traits.
+        #[arg(long = "file", value_name = "TRAIT_FILE")]
+        trait_files: Vec<String>,
+
+        /// Task/source file paths used by activation matching. Repeat for
+        /// multiple files. Distinct from `--file` which loads trait manifests.
+        #[arg(long = "files", value_name = "FILE")]
+        files: Vec<String>,
+
+        /// Optional task mode hint.
+        #[arg(long)]
+        mode: Option<String>,
+
+        /// Language hint. Repeat for multiple languages.
+        #[arg(long = "language", value_name = "LANGUAGE")]
+        languages: Vec<String>,
+
+        /// Runtime signal fact. Repeat for multiple signals.
+        #[arg(long = "signal", value_name = "SIGNAL")]
+        signals: Vec<String>,
+
+        /// Direct invocation evidence text for manual-activation traits.
+        #[arg(long = "explicit-invocation", value_name = "TEXT")]
+        explicit_invocation: Option<String>,
+
+        /// Only show active candidates.
+        #[arg(long)]
+        active_only: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Optional trait ID filter. Also counts as direct invocation evidence
+        /// for the matching candidate.
+        #[arg(long)]
+        trait_id: Option<String>,
+
+        /// Source map sidecar for --scaffold. Repository packages default to
+        /// `.ctx/traits/<id>/generated/index.map`.
+        #[arg(long = "source-map", visible_alias = "map", value_name = "TRAIT_MAP")]
+        source_map: Option<String>,
+
+        /// Show the full candidate/scaffold detail report instead of the compact summary.
+        #[arg(long)]
+        verbose: bool,
+
+        /// Narrate the --scaffold evidence through the explain runner
+        /// instead of stopping at the deterministic scaffold. No effect
+        /// without --scaffold; deterministic explain is unchanged.
+        #[arg(long = "llm-assisted")]
+        llm_assisted: bool,
+
+        /// Path to raw narrated explain-scaffold output (for testing gates
+        /// without a provider). No effect without --llm-assisted.
+        #[arg(long)]
+        candidate: Option<String>,
+
+        /// Provider/model ID for the explain narrator. No effect
+        /// without --llm-assisted.
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Path to a `[budget]` document (0176) capping the --llm-assisted
+        /// explain runner. Routing goes through --assign. No effect
+        /// without --llm-assisted or with --candidate.
+        #[arg(long, value_name = "PATH")]
+        budget: Option<String>,
+
+        /// Override the explain generator agent assignment. No effect
+        /// without --llm-assisted.
+        #[arg(
+            long = "assign",
+            value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
+        )]
+        assignments: Vec<String>,
+    },
+    /// Inspect trait identity, lifecycle, scenarios, evals, or dry-run plan.
+    Inspect {
+        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
+        #[arg(value_name = "TRAIT")]
+        trait_arg: Option<String>,
+
+        /// Trait file to inspect.
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Show the procedure dry plan (ports, sequence items, slots).
+        #[arg(long)]
+        dry_plan: bool,
+
+        /// Render profile for resource compatibility warnings in dry-plan.
+        /// Defaults to agent-skills.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Discover the project manifest in the current directory.
+    Manifest,
+    /// P468 TUI kit demo: exercises list scroll, master-detail focus, both
+    /// modal variants, and the `$EDITOR` round-trip in one screen. Requires
+    /// an interactive TTY.
+    TuiDemo,
+    /// Open a modal alt-screen editor for one trait package: browse its
+    /// sections, open its authored source in `$EDITOR`, rebuild from CDK
+    /// source, and run `check` — all with the same one-keypress-per-action
+    /// model as the dashboard's TRAITS screen. Requires an interactive TTY.
+    Edit {
+        /// Trait name or local trait file path.
+        trait_arg: String,
+    },
+    /// Emit JSON Schema for the canonical normalized JSON shape of the Agent
+    /// Traits trait-root model.
+    ///
+    /// This schema describes canonical serialized JSON output, not the full
+    /// TOML/YAML authoring shape. Taxonomy fields that accept scalar-or-array
+    /// shorthand appear as arrays (their canonical form). The schema targets
+    /// `.protocol/agent-traits/` as a non-authoritative support artifact.
+    Schema {
+        /// Protocol to target (default: agent-traits).
+        #[arg(long, default_value = "agent-traits")]
+        protocol: String,
+
+        /// Output format (default: json).
+        #[arg(long, default_value = "json")]
+        format: String,
+
+        /// Output file path. If omitted, writes to stdout.
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Generate the Rust-derived TypeScript SDK type mirror.
+    SdkGenerate {
+        /// Verify generated output and hand-written vocabulary without writing.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Deterministically synthesize canonical TOML/JSON/YAML from draft JSON.
+    ///
+    /// `synth` never executes TypeScript, Rust generators, model calls,
+    /// provider hooks, or host code. If `--out` is omitted and `--check` is not
+    /// set, stdout contains only the synthesized canonical document text.
+    Synth {
+        /// Draft JSON input path.
+        path: String,
+
+        /// Output format: toml, json, or yaml. Defaults to toml.
+        #[arg(long, default_value = "toml")]
+        format: String,
+
+        /// Output file path. If omitted, synth writes canonical text to stdout;
+        /// with --check omitted, no report text is mixed into stdout.
+        #[arg(long)]
+        out: Option<String>,
+
+        /// Compare synthesized output with the target file and report drift
+        /// without rewriting. Uses --out as the target, or `<path>` with the
+        /// selected format extension when --out is omitted.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Mechanically migrate a canonical trait from its declared
+    /// `schema-version` to a newer supported version.
+    ///
+    /// Without `--apply`, prints a reviewable diff and digest before/after
+    /// without writing. With `--apply`, writes the migrated document and
+    /// reports that its canonical digest moved — trust re-approval follows.
+    /// Refuses rather than guessing when a construct can't be mechanically
+    /// rewritten or the migrated output fails to round-trip decode.
+    ///
+    /// Off the release help screen since the 2026-08-18 regroup; runnable
+    /// as before.
+    Migrate {
+        /// Trait name to migrate. Pass an explicit canonical trait file path
+        /// as an escape hatch.
+        #[arg(value_name = "TRAIT")]
+        id_or_path: String,
+
+        /// Target schema-version. Defaults to the latest version this
+        /// binary supports.
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Write the migrated document after gates pass.
+        #[arg(long)]
+        apply: bool,
+
+        /// Emit structured JSON instead of the plain report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Evaluate one authoring-source candidate through the rung ladder.
+    ///
+    /// Internal: the only intended caller is `generate`'s in-loop
+    /// evaluate step (task 0066.1). Never calls a provider, never loops —
+    /// exactly one round, always exits 0 and prints the round report as
+    /// JSON regardless of convergence; the meta-trait's own loop primitive
+    /// decides whether to continue.
+    GenerateRound {
+        /// Trait ID the candidate must declare; also keys the scratch package.
+        trait_id: String,
+
+        /// Candidate authoring source (TypeScript) text.
+        candidate: String,
+    },
+    /// Evaluate one refine scaffold candidate through the rung ladder.
+    ///
+    /// Internal: the only intended caller is `refine`'s in-loop
+    /// evaluate step (task 0066.3). Never calls a provider, never loops —
+    /// exactly one round, always exits 0 and prints the round report as
+    /// JSON regardless of convergence; the meta-trait's own loop primitive
+    /// decides whether to continue.
+    RefineRound {
+        /// Filesystem path whose lines patch anchors must reference; also
+        /// re-read for the source trait identity and digest.
+        source_path: String,
+
+        /// Candidate refine scaffold (JSON) text.
+        candidate: String,
+    },
+    /// Evaluate one import trait-draft candidate through the rung ladder.
+    ///
+    /// Internal: the only intended caller is `import`'s in-loop
+    /// evaluate step (task 0066.3). Never calls a provider, never loops —
+    /// exactly one round, always exits 0 and prints the round report as
+    /// JSON regardless of convergence; the meta-trait's own loop primitive
+    /// decides whether to continue.
+    ImportRound {
+        /// Trait ID the candidate must declare; also keys the scratch
+        /// package and the persisted scaffold baseline.
+        trait_id: String,
+
+        /// Candidate trait draft (JSON) text.
+        candidate: String,
+    },
     /// Refresh imported source artifacts and report dual-layer diffs.
     ///
     /// Re-reads source artifacts, builds a new import snapshot, and compares
     /// against the current package-local trait.lock snapshot.
-    #[command(hide = true)]
     ImportRefresh {
         /// Trait ID or package directory path to refresh.
         trait_id_or_package: String,
@@ -1212,7 +1400,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Inspect required inputs before starting a run. Does not create a session.
-    #[command(hide = true)]
     RunInfo {
         /// Trait ID to resolve from the repo-local trait source root.
         trait_id: Option<String>,
@@ -1221,7 +1408,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         file: Option<String>,
 
-        /// Query text after `--` for selection preflight, e.g. ctx traits run-info -- "review this code".
+        /// Query text after `--` for selection preflight, e.g. ctx traits internal run-info -- "review this code".
         #[arg(
             value_name = "QUERY_OR_TRAIT_ARGS",
             allow_hyphen_values = true,
@@ -1233,33 +1420,14 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run a trait end to end through configured harnesses; --no-drive
-    /// starts a resumable session without driving it.
-    Run {
-        #[command(flatten)]
-        args: Box<SessionStartArgs>,
-
-        /// Start the session without driving it: persist the resumable
-        /// ledger and exit. Advance later via the session/frame verbs or MCP.
-        #[arg(long = "no-drive")]
-        no_drive: bool,
-
-        /// With --no-drive: do not persist to the default session store
-        /// unless --out is supplied.
-        #[arg(long)]
-        ephemeral: bool,
-    },
     /// Runtime-owned run sessions.
-    #[command(hide = true)]
     Session {
         #[command(subcommand)]
         subcommand: SessionCommand,
     },
     /// Serve ctx.traits run-session MCP tools over line-delimited JSON-RPC stdio.
-    #[command(hide = true)]
     Mcp,
     /// Drive assigned agent frames through approved CLI harnesses.
-    #[command(hide = true)]
     Drive {
         /// Optional trait file override. If omitted, loads the trait file recorded in the run-session ledger.
         #[arg(long)]
@@ -1368,96 +1536,7 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Land a completed `--worktree` run. A true clean fast-forward (`main`
-    /// is the run branch's merge base) lands deterministically without
-    /// resolving, probing, or dispatching the standing merger agent.
-    /// Otherwise (a divergent history, or `--force-merger`), the branch is
-    /// rebased onto clean main and reconciled via the standing merger agent
-    /// (`--deep` selects a judgment-capable merger instead) before
-    /// fast-forwarding. Every landing path then runs the declared `[merge]
-    /// gate` — an ordered list of repository commands configured in
-    /// `.ctx/traits/runtime.toml`, empty by default — before touching `main`; merge
-    /// machinery executes only what a repository declares and judges its
-    /// outcome, it never inspects the repository for a Justfile or any other
-    /// tool. Any failed precondition, unresolved conflict, judgment call, red
-    /// gate, or lost fast-forward race parks the run with its branch and
-    /// worktree intact. A cross-process lock serializes merges: by default
-    /// this queues behind a concurrent merge up to a bounded wait;
-    /// `--no-wait` fails fast instead.
-    Merge {
-        /// Internal run-id (as recorded in the run-session ledger, not the
-        /// worktree id) of the completed `--worktree` run to land.
-        run_id: String,
-
-        /// Run-session store directory to resolve the run-id from. Defaults
-        /// to this repository's global per-repository runs root.
-        #[arg(long)]
-        session_store: Option<String>,
-
-        /// Override or synthesize the merger assignment, merger=harness[:transport[:session-mode[:model[:reasoning-effort]]]].
-        #[arg(
-            long = "assign",
-            value_name = "ROLE=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL[:REASONING_EFFORT]]]]"
-        )]
-        assignments: Vec<String>,
-
-        /// Fail immediately with a typed `lock-unavailable` result if another
-        /// merge already holds the cross-process merge lock, instead of
-        /// queueing behind it for the bounded default wait.
-        #[arg(long, conflicts_with = "wait_override")]
-        no_wait: bool,
-
-        /// Explicitly override `[merge].wait` and queue behind the lock.
-        #[arg(long = "wait", conflicts_with = "no_wait")]
-        wait_override: bool,
-
-        /// Send this merge through the standing merger agent's confirmation
-        /// path even though `main` is a true clean fast-forward for the run
-        /// branch. Supports operator inspection and makes result/ledger
-        /// differential proofs deterministic without a production-only test
-        /// hook; has no effect on a divergent history, which always goes
-        /// through the merger regardless of this flag.
-        #[arg(long)]
-        force_merger: bool,
-
-        /// Park on a detected stale-base overlap — the run branch and main
-        /// both changed the same paths since the branch's base — instead of
-        /// the default of landing anyway. Restores the strict prior
-        /// behavior: the typed `stale-base-overlap` detail is recorded on the
-        /// parked frame instead of on a landed one.
-        #[arg(long, conflicts_with = "land_on_overlap")]
-        park_on_overlap: bool,
-
-        /// Explicitly override `[merge].overlap` and land on overlap.
-        #[arg(long = "land-on-overlap", conflicts_with = "park_on_overlap")]
-        land_on_overlap: bool,
-
-        /// Deprecated no-op, kept for one release: landing despite a
-        /// detected stale-base overlap is now the default (see
-        /// `--park-on-overlap` to restore the old strict behavior). Passing
-        /// this flag no longer changes behavior; it only emits a deprecation
-        /// warning.
-        #[arg(long, hide = true)]
-        allow_stale_overlap: bool,
-
-        /// Reconcile a divergent history through a judgment-capable deep
-        /// merger (`[agent.role.merger-deep]`, falling back to
-        /// `[agent.role.merger]`) instead of the standard mechanical-only
-        /// merger. The deep merger
-        /// resolves conflicts under the five P420 phase doctrines, may make
-        /// logged supporting edits outside conflicted files, and refuses a
-        /// landed-fix regression (parking with the refusing rule named)
-        /// rather than guessing. Has no effect on a true clean fast-forward
-        /// unless combined with `--force-merger`.
-        #[arg(long)]
-        deep: bool,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
     /// Submit caller output for the current run-session frame.
-    #[command(hide = true)]
     Call {
         /// Optional trait file override. If omitted, loads the trait file recorded in the run-session ledger and verifies digests.
         #[arg(long)]
@@ -1488,7 +1567,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Inspect a run-session without advancing it.
-    #[command(hide = true)]
     RunStatus {
         /// Optional trait file override. If omitted, loads the trait file recorded in the run-session ledger and verifies digests.
         #[arg(long)]
@@ -1508,7 +1586,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Print the current run-session frame without advancing it.
-    #[command(hide = true)]
     RunFrame {
         /// Optional trait file override. If omitted, loads the trait file recorded in the run-session ledger and verifies digests.
         #[arg(long)]
@@ -1537,7 +1614,6 @@ pub enum TraitsCommand {
     /// role is inferred from the session's persisted frame assignment
     /// (P421). `--session` also accepts an unambiguous prefix of a
     /// persisted session ID.
-    #[command(hide = true)]
     Next {
         #[arg(long, value_name = "ROLE", help = AGENT_ROLE_HELP)]
         agent: Option<String>,
@@ -1565,7 +1641,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Submit a simple target/value update for the current run-session frame.
-    #[command(hide = true)]
     Set {
         /// Run-session ID or ledger path. May also be supplied as `ctx traits --session <id> set ...`.
         #[arg(long)]
@@ -1604,7 +1679,6 @@ pub enum TraitsCommand {
     /// Hidden as of P419: superseded by `ctx traits trust --approved` and
     /// `ctx traits trust --blocked`, which this command routes through
     /// unchanged. Kept invocable, undocumented, for one release.
-    #[command(hide = true)]
     Review {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1633,14 +1707,13 @@ pub enum TraitsCommand {
     /// Report or set a trait's lifecycle state.
     ///
     /// The state is a flag, so the operand is always the trait:
-    /// `ctx traits state --active <trait>`. Bare `ctx traits state <trait>`
+    /// `ctx traits internal state --active <trait>`. Bare `ctx traits internal state <trait>`
     /// reports the current state without changing it.
     ///
     /// A package is `draft` or `ready`; `--active` is what makes it
     /// resolver-eligible. `--deprecated` is `--draft` plus a recorded
     /// reason: there is no third status, and inventing one would mean a
     /// state the resolver has no rule for.
-    #[command(hide = true)]
     State {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1671,7 +1744,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Run deterministic declared evals and optionally update lock evidence.
-    #[command(hide = true)]
     Eval {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1709,7 +1781,7 @@ pub enum TraitsCommand {
     /// P497: refuses on a trust-blocked trait (no escape) or an unreviewed
     /// trait (pass `--allow-unreviewed`); a draft trait always renders, with
     /// a visible advisory.
-    #[command(hide = true, alias = "use")]
+    #[command(alias = "use")]
     Prompt {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1727,85 +1799,8 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Check a trait for validation, audit, and drift.
-    Check {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
-
-        /// Trait file to check.
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Compare against lock data.
-        #[arg(long)]
-        locked: bool,
-
-        /// Skip CDK source drift verification against the `.ctx` source tree.
-        #[arg(long)]
-        skip_cdk_drift: bool,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-
-        /// Emit the byte-stable plain text report without ANSI styling or animation.
-        #[arg(long)]
-        plain: bool,
-
-        /// Alias for --plain; disables the terminal decode animation and styling.
-        #[arg(long = "no-animate")]
-        no_animate: bool,
-
-        /// List every flagged advisory instead of collapsing the tail into a summary line.
-        #[arg(long)]
-        verbose: bool,
-
-        /// Explicit run ledger JSON to include as runtime evidence.
-        #[arg(long)]
-        run_ledger: Option<String>,
-
-        /// Explicit eval report JSON to include as eval evidence. Repeat for multiple reports.
-        #[arg(long = "eval-report", value_name = "REPORT_JSON")]
-        eval_reports: Vec<String>,
-    },
-    /// Show layer-aware diff for a trait.
-    Diff {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
-
-        /// Trait file to diff.
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Compare against lock data.
-        #[arg(long)]
-        from_lock: bool,
-
-        /// Show model-view layer.
-        #[arg(long)]
-        model_view: bool,
-
-        /// Show export layer.
-        #[arg(long)]
-        exports: bool,
-
-        /// Show resource and policy manifest layers.
-        #[arg(long)]
-        resources: bool,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-
-        /// Show every diff entry's full hunk detail instead of the compact summary.
-        #[arg(long)]
-        verbose: bool,
-    },
     /// Read-only mirror of a trait's prompt frames: no harness dispatch, no
     /// session start/advance, no runtime state written.
-    #[command(hide = true)]
     Preview {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1842,7 +1837,7 @@ pub enum TraitsCommand {
     /// P497: refuses on a trust-blocked trait (no escape) or an unreviewed
     /// trait (pass `--allow-unreviewed`); a draft trait always exports, with
     /// a visible advisory.
-    #[command(alias = "render", hide = true)]
+    #[command(alias = "render")]
     Export {
         /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
         #[arg(value_name = "TRAIT")]
@@ -1863,7 +1858,7 @@ pub enum TraitsCommand {
         /// skill emits a progressive-disclosure SKILL.md directory (plus any
         /// placeable declared resources as companion files); agents emits
         /// the same flat compat body to AGENTS.md; stub emits a body-free
-        /// SKILL.md that runs `ctx traits prompt <id>`.
+        /// SKILL.md that runs `ctx traits internal prompt <id>`.
         #[arg(long, default_value = "compat")]
         format: String,
 
@@ -1891,11 +1886,10 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Host-placement lifecycle: place, refresh, or remove exported traits
-    /// on host tools' expected locations (see `ctx traits host --help`).
+    /// on host tools' expected locations (see `ctx traits internal host --help`).
     ///
     /// Off the release help screen since the 2026-08-18 regroup; runnable
     /// as before.
-    #[command(hide = true)]
     Host {
         /// Emit structured JSON (applies to whichever subcommand is given).
         #[arg(long)]
@@ -1905,7 +1899,6 @@ pub enum TraitsCommand {
         subcommand: HostCommand,
     },
     /// Search traits by lexical query. Discovery only, not activation.
-    #[command(hide = true)]
     Search {
         /// Search query text.
         query: String,
@@ -1920,7 +1913,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Produce a budgeted activation plan for loaded traits.
-    #[command(hide = true)]
     Resolve {
         /// User task text to evaluate.
         #[arg(long)]
@@ -1969,7 +1961,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Plan a context pack from loaded traits under a token budget.
-    #[command(hide = true)]
     Pack {
         /// User task text to evaluate.
         #[arg(long)]
@@ -2002,7 +1993,6 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Context ledger operations.
-    #[command(hide = true)]
     Context {
         #[command(subcommand)]
         subcommand: ContextCommand,
@@ -2011,7 +2001,6 @@ pub enum TraitsCommand {
     /// writes `{"hookSpecificOutput":{...}}` on stdout, or prints the
     /// host's config snippet with `--settings`. Ships hidden pending P502's
     /// install story (D8).
-    #[command(hide = true)]
     Hook {
         /// Which harness's payload/config shape to speak. Defaults to
         /// claude-code for back-compat with the settings block P499 already
@@ -2028,7 +2017,6 @@ pub enum TraitsCommand {
     ///
     /// Off the release help screen since the 2026-08-18 regroup; runnable
     /// as before.
-    #[command(hide = true)]
     Config {
         /// Emit structured JSON. Applies to whichever config subcommand is
         /// given; equivalent to that subcommand's own `--json`.
@@ -2038,21 +2026,10 @@ pub enum TraitsCommand {
         #[command(subcommand)]
         subcommand: ConfigCommand,
     },
-    /// Cache lifecycle commands.
-    Cache {
-        /// Emit structured JSON. Applies to whichever cache subcommand is
-        /// given; equivalent to that subcommand's own `--json`.
-        #[arg(long, global = true)]
-        json: bool,
-
-        #[command(subcommand)]
-        subcommand: CacheCommand,
-    },
     /// Task board document commands.
     ///
     /// Off the release help screen since the 2026-08-18 regroup; runnable
     /// as before.
-    #[command(hide = true)]
     Task {
         /// Emit structured JSON. Applies to whichever task subcommand is
         /// given; equivalent to that subcommand's own `--json`.
@@ -2066,10 +2043,9 @@ pub enum TraitsCommand {
     /// commands, groups, one-line descriptions, aliases, flags, and nested
     /// subcommands) as JSON, generated from Clap's own command tree rather
     /// than a hand-copied inventory.
-    #[command(hide = true)]
     Help {
         /// Emit structured JSON. `help` currently supports only `--json`;
-        /// bare `ctx traits help` behaves like `-h`.
+        /// bare `ctx traits internal help` behaves like `-h`.
         #[arg(long)]
         json: bool,
     },
@@ -2081,7 +2057,7 @@ pub enum PromptLevel {
     Summary,
 }
 
-/// `ctx traits host` subcommands (P441 host-placement lifecycle). Folded
+/// `ctx traits internal host` subcommands (P441 host-placement lifecycle). Folded
 /// into one visible namespace row — like `trust` and `cache` — so the
 /// release help keeps its one-screen ceiling while every placement
 /// operation stays discoverable.
@@ -2114,7 +2090,7 @@ pub enum HostCommand {
 
         /// Export format override: `stub` (default for Agent Skills-shaped
         /// hosts) writes a body-free projection that runs
-        /// `ctx traits prompt <id>`; `skill` writes the fully rendered
+        /// `ctx traits internal prompt <id>`; `skill` writes the fully rendered
         /// directory (SKILL.md plus placed resource files). Ignored for
         /// hosts whose default format is not stub/skill (cursor, copilot,
         /// gemini, cline, kiro).
@@ -2195,7 +2171,7 @@ pub enum HostCommand {
     },
 }
 
-/// `ctx traits session ...` subcommands.
+/// `ctx traits internal session ...` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
     /// Start a run session and conduct it through configured harnesses.
@@ -2442,7 +2418,7 @@ pub struct SessionStateArgs {
     pub json: bool,
 }
 
-/// `ctx traits session frame ...` subcommands.
+/// `ctx traits internal session frame ...` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum SessionFrameCommand {
     /// Print the current run-session frame without advancing it.
@@ -2523,7 +2499,7 @@ pub enum MergeRung {
     Deep,
 }
 
-/// `ctx traits context ...` subcommands (P498). Machine/adapter surface for
+/// `ctx traits internal context ...` subcommands (P498). Machine/adapter surface for
 /// harness hooks and plugins (P499/P500/P501); `context` itself stays
 /// `#[command(hide = true)]` until an adapter phase decides to surface it.
 #[derive(Subcommand, Debug)]
@@ -2544,7 +2520,7 @@ pub enum ContextCommand {
     },
     /// Decide `inject` / `skip-fresh` / `reinject` per selected trait for a
     /// host key, rendering each selected trait through the same path
-    /// `ctx traits prompt` uses so the ledger's freshness claim always
+    /// `ctx traits internal prompt` uses so the ledger's freshness claim always
     /// matches what an adapter would actually inject.
     Plan {
         /// Harness identifier (e.g. `claude-code`), half of the host key.
@@ -2642,8 +2618,8 @@ impl ContextClearReason {
     }
 }
 
-/// `ctx traits hook --host` (P501): named `--host` rather than `--harness`
-/// to match `ctx traits context plan/clear --host`, the other half of the
+/// `ctx traits internal hook --host` (P501): named `--host` rather than `--harness`
+/// to match `ctx traits internal context plan/clear --host`, the other half of the
 /// same host key. A two-value enum (not a free string) buys validation and
 /// an exhaustive match in the snippet emitter — a typo'd harness id would
 /// otherwise silently mint a separate ledger namespace.
@@ -2885,7 +2861,7 @@ pub enum DependencyCommand {
     },
 }
 
-/// `ctx traits config ...` subcommands (P457).
+/// `ctx traits internal config ...` subcommands (P457).
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommand {
     /// Compile a `config.ts` or `runtime.ts` authoring source into its
@@ -3006,7 +2982,7 @@ pub enum CacheCommand {
     },
 }
 
-/// Nested `ctx traits task ...` subcommands.
+/// Nested `ctx traits internal task ...` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
     /// Import a markdown board file into a canonical TOML task document,
@@ -3048,7 +3024,7 @@ pub fn print_help() {
 /// Prints the same release help shown by `ctx traits -h`: locates the
 /// `traits` subcommand in the derived tree and renders its own
 /// (`override_help`-driven) help, rather than the top-level `ctx` command's
-/// — used by bare `ctx traits help` so it matches `-h` instead of falling
+/// — used by bare `ctx traits internal help` so it matches `-h` instead of falling
 /// back to unrelated top-level `ctx` help.
 pub fn print_traits_help() {
     let mut traits_command = Cli::command()
@@ -3058,7 +3034,7 @@ pub fn print_traits_help() {
     let _ = traits_command.print_help();
 }
 
-/// The full derived Clap command tree, for `ctx traits help --json`
+/// The full derived Clap command tree, for `ctx traits internal help --json`
 /// (P453): the source of truth this reference is generated from, rather
 /// than a hand-copied inventory.
 pub fn command() -> clap::Command {

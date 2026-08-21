@@ -1,4 +1,4 @@
-//! P498: `ctx traits context plan/clear/status` — the session context
+//! P498: `ctx traits internal context plan/clear/status` — the session context
 //! ledger's dedup, staleness, host-key isolation, and rejection behavior.
 //! Behavioral assertions only (exit code + parsed JSON fields), no goldens
 //! or byte-frozen fixtures (P461 doctrine).
@@ -53,8 +53,8 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
         &manifest("P498 context-ledger fixture."),
     );
     require_success(
-        "`ctx traits state --active` clears the draft gate",
-        &["traits", "state", "--active", TRAIT_ID],
+        "`ctx traits internal state --active` clears the draft gate",
+        &["traits", "internal", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -83,6 +83,7 @@ fn plan_json(
 ) -> serde_json::Value {
     let mut args = vec![
         "traits",
+        "internal",
         "context",
         "plan",
         "--host",
@@ -164,6 +165,7 @@ fn clear_then_replan_injects_again() {
     let clear_output = run_ctx(
         &[
             "traits",
+            "internal",
             "context",
             "clear",
             "--host",
@@ -297,6 +299,7 @@ fn a_symlinked_ledger_leaf_refuses_and_writes_nothing() {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "context",
             "plan",
             "--host",
@@ -337,6 +340,7 @@ fn rejects_a_path_traversal_host_session_and_an_empty_host() {
     let traversal = run_ctx(
         &[
             "traits",
+            "internal",
             "context",
             "status",
             "--host",
@@ -361,6 +365,7 @@ fn rejects_a_path_traversal_host_session_and_an_empty_host() {
     let empty = run_ctx(
         &[
             "traits",
+            "internal",
             "context",
             "status",
             "--host",
@@ -385,6 +390,7 @@ fn status_reports_missing_then_loaded_then_missing_after_clear() {
 
     let status_args = [
         "traits",
+        "internal",
         "context",
         "status",
         "--host",
@@ -410,9 +416,10 @@ fn status_reports_missing_then_loaded_then_missing_after_clear() {
     assert_eq!(loaded_json["value"]["entries"].as_array().unwrap().len(), 1);
 
     require_success(
-        "`ctx traits context clear` empties the ledger",
+        "`ctx traits internal context clear` empties the ledger",
         &[
             "traits",
+            "internal",
             "context",
             "clear",
             "--host",
@@ -442,6 +449,7 @@ fn resolve_json_carries_source_digest_and_stays_a_bare_object() {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "resolve",
             "--task",
             "use the fixture trait",

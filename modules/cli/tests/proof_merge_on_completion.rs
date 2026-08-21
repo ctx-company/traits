@@ -114,14 +114,21 @@ output = ["slot:notified"]
 
     let fixture = ".ctx/traits/demo/generated/index.toml";
     require_success(
-        "`ctx traits review --approve`",
-        &["traits", "review", "--file", fixture, "--approve"],
+        "`ctx traits internal review --approve`",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
-        "`ctx traits state --active`",
-        &["traits", "state", "--active", "--file", fixture],
+        "`ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -255,7 +262,7 @@ fn merge_requires_effective_worktree_and_excludes_no_drive() {
     assert!(stderr.contains("effective worktree"), "{stderr}");
 
     let output = run_ctx(
-        &["traits", "session", "start", "--merge"],
+        &["traits", "internal", "session", "start", "--merge"],
         &repo,
         &scratch.home(),
     );
@@ -459,13 +466,14 @@ fn parked_merge_is_not_retried_on_a_later_resume() {
         .and_then(|frame| frame["reason"].as_str())
         .map(str::to_string);
 
-    // A later `ctx traits drive --session ...` over the already-completed,
+    // A later `ctx traits internal drive --session ...` over the already-completed,
     // already-parked session must not attempt (or report) a second merge,
     // but must still exit with the same parked status as the original
     // attempt — never silently succeed.
     let resume = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             &session_path,
@@ -569,6 +577,7 @@ fn no_merge_clear_waits_for_the_driver_lock_before_mutating_the_ledger() {
     let busy = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             &session_path,
@@ -597,6 +606,7 @@ fn no_merge_clear_waits_for_the_driver_lock_before_mutating_the_ledger() {
     let resumed = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             &session_path,

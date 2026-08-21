@@ -123,7 +123,7 @@ pub(crate) fn handle_pack(
             .map_err(|e| crate::Error::json("serialize context pack", e))?;
         println!("{json_text}");
     } else {
-        println!("ctx traits pack");
+        println!("ctx traits internal pack");
         println!("  task: {task}");
         if let Some(session) = session {
             println!("  session: {session}");
@@ -221,7 +221,7 @@ pub(crate) fn handle_context_status(
         };
         print_json_report(&Envelope::ok(output), "context status")?;
     } else {
-        println!("ctx traits context status");
+        println!("ctx traits internal context status");
         println!("  host: {host}");
         println!("  host-session: {host_session}");
         println!("  ledger-state: {}", ledger_state.as_str());
@@ -281,7 +281,7 @@ pub(crate) struct ContextPlanInputs<'a> {
     pub(crate) json: bool,
 }
 
-/// One trait rendered through the exact path `ctx traits prompt` uses (P498
+/// One trait rendered through the exact path `ctx traits internal prompt` uses (P498
 /// decision on render fidelity): the injected bytes and their digest must be
 /// byte-identical to what an adapter's follow-up `prompt` call would yield,
 /// or the ledger's freshness claim breaks. Shared by every render call site
@@ -327,7 +327,7 @@ pub(crate) fn render_candidates(
             "discovery" => continue,
             other if tolerant => {
                 eprintln!(
-                    "ctx traits hook: skipping {} on restore (unsupported load level {other:?})",
+                    "ctx traits internal hook: skipping {} on restore (unsupported load level {other:?})",
                     candidate.trait_id
                 );
                 continue;
@@ -365,7 +365,7 @@ pub(crate) fn render_candidates(
             }
             Err(error) if tolerant => {
                 eprintln!(
-                    "ctx traits hook: skipping {} on restore ({error})",
+                    "ctx traits internal hook: skipping {} on restore ({error})",
                     candidate.trait_id
                 );
             }
@@ -523,7 +523,7 @@ pub(crate) fn plan_from_ledger(
                 trait_path: loaded_trait.trait_path.clone(),
             }),
             None => eprintln!(
-                "ctx traits hook: skipping {} on restore (no longer discoverable)",
+                "ctx traits internal hook: skipping {} on restore (no longer discoverable)",
                 entry.trait_id
             ),
         }
@@ -620,7 +620,7 @@ pub(crate) fn handle_context_plan(
         };
         print_json_report(&Envelope::ok(output), "context plan")?;
     } else {
-        println!("ctx traits context plan");
+        println!("ctx traits internal context plan");
         println!("  host: {}", input.host);
         println!("  host-session: {}", input.host_session);
         println!("  committed: {}", input.commit);
@@ -668,7 +668,7 @@ pub(crate) fn handle_context_clear(
         };
         print_json_report(&Envelope::ok(output), "context clear")?;
     } else {
-        println!("ctx traits context clear");
+        println!("ctx traits internal context clear");
         println!("  host: {host}");
         println!("  host-session: {host_session}");
         println!("  reason: {reason}");

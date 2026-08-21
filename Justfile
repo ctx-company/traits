@@ -16,13 +16,13 @@ install:
 
 sdk-schema:
 	mkdir -p "{{target_dir}}/code_review_group_5_6"
-	cargo run -p ctx-traits-cli -- traits schema --protocol sdk-types > "{{target_dir}}/code_review_group_5_6/sdk_types_schema.json"
+	cargo run -p ctx-traits-cli -- traits internal schema --protocol sdk-types > "{{target_dir}}/code_review_group_5_6/sdk_types_schema.json"
 
 sdk-generate:
-	cargo run -p ctx-traits-cli -- traits sdk-generate
+	cargo run -p ctx-traits-cli -- traits internal sdk-generate
 
 sdk-check:
-	cargo run -p ctx-traits-cli -- traits sdk-generate --check
+	cargo run -p ctx-traits-cli -- traits internal sdk-generate --check
 
 # Rebuild the embedded built-in traits and scaffold templates from source.
 # Internal only: these ship inside the binary, so no user command rebuilds

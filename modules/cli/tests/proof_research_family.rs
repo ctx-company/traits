@@ -391,14 +391,14 @@ fn setup_fixture(
         &home,
     );
     support::require_success(
-        "`ctx traits review --approve`",
-        &["traits", "review", id, "--approve"],
+        "`ctx traits internal review --approve`",
+        &["traits", "internal", "review", id, "--approve"],
         &repo,
         &home,
     );
     support::require_success(
-        "`ctx traits state --active`",
-        &["traits", "state", "--active", id],
+        "`ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", id],
         &repo,
         &home,
     );

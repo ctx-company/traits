@@ -1559,7 +1559,7 @@ fn sequence_bound_receipt(
                 // sequentially, in authored order, on the single ledger
                 // cursor (P402) — `concurrent` is only ever an opt-in hint a
                 // CLI/IO-layer driver may use to speculatively dispatch
-                // items ahead of that cursor (`ctx traits drive
+                // items ahead of that cursor (`ctx traits internal drive
                 // --max-in-flight`), never a change to core disposition.
                 format!("{base} concurrent=serial-core+optional-driver-dispatch(P402)")
             } else {

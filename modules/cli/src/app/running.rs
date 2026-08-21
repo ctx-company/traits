@@ -1,4 +1,4 @@
-//! `ctx traits running`: the machine-wide "what is running" read
+//! `ctx traits internal running`: the machine-wide "what is running" read
 //! — one small liveness-index file read plus at most one bounded `flock`
 //! probe per indexed row, never a scan of every ledger this machine has.
 
@@ -22,7 +22,7 @@ struct RunningRow {
     verdict: String,
 }
 
-/// JSON shape for `ctx traits running --json`: `available: false` is a
+/// JSON shape for `ctx traits internal running --json`: `available: false` is a
 /// distinct value from `rows: []`, so a machine reader can never confuse
 /// "the liveness index is unavailable" with "nothing is running".
 /// contract (a)).
@@ -83,15 +83,15 @@ pub(crate) fn handle_running(json: bool) -> crate::Result<CommandOutput<()>> {
 
     if !available {
         w(
-            "ctx traits running: local liveness index is unavailable (unknown, not \"nothing running\")",
+            "ctx traits internal running: local liveness index is unavailable (unknown, not \"nothing running\")",
         )?;
         return Ok(CommandOutput::new(()));
     }
     if rows.is_empty() {
-        w("ctx traits running: no rows in the local liveness index")?;
+        w("ctx traits internal running: no rows in the local liveness index")?;
         return Ok(CommandOutput::new(()));
     }
-    w("ctx traits running")?;
+    w("ctx traits internal running")?;
     for row in &rows {
         w(format!(
             "  {} [{}]",

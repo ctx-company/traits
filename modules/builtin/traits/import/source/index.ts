@@ -93,7 +93,7 @@ const initRoundsSpent = sequence.project("init-rounds-spent", {
 // already canonical JSON.
 const evaluateStep = sequence.command("evaluate-round", {
   title: "Evaluate the candidate through the rung ladder",
-  argv: ["ctx", "traits", "import-round", traitId, candidate],
+  argv: ["ctx", "traits", "internal", "import-round", traitId, candidate],
   output: roundReport,
   timeoutMs: 180_000,
 });

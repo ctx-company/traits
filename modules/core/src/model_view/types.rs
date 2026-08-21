@@ -91,7 +91,7 @@ pub struct Report {
     /// The behavior envelope: rule 3's four sections only (`<summary>`,
     /// `<intent>`, `<behavior>`, `<resource>`), zero procedure/prompt/agent/
     /// port/signal/activation/relations/scenario content. This is what
-    /// injection consumers (`ctx traits prompt`, `context plan`, host hooks)
+    /// injection consumers (`ctx traits internal prompt`, `context plan`, host hooks)
     /// emit.
     pub behavior_text: String,
     /// SHA-256 digest of the behavior envelope's inner body.

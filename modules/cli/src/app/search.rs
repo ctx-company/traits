@@ -103,7 +103,7 @@ pub(crate) fn handle_search(
             };
             print_json_report(&Envelope::ok(output), "search output")?;
         } else {
-            println!("ctx traits search");
+            println!("ctx traits internal search");
             println!("  query: {query}");
             println!("  note: search is discovery, not activation");
             println!("  target-profile-evidence: {target_profile_evidence}");
@@ -164,7 +164,7 @@ pub(crate) fn handle_search(
         };
         print_json_report(&Envelope::ok(output), "search output")?;
     } else {
-        println!("ctx traits search");
+        println!("ctx traits internal search");
         println!("  query: {query}");
         println!("  note: search is discovery, not activation");
         println!("  target-profile-evidence: {target_profile_evidence}");

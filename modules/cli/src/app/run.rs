@@ -116,7 +116,7 @@ struct SessionStartReport {
     merge: Option<crate::app::merge::MergeReport>,
 }
 
-/// Bounded `ctx traits call --json` projection (P421): the fields an agent
+/// Bounded `ctx traits internal call --json` projection (P421): the fields an agent
 /// operator loop needs to decide what happened and how to continue, without
 /// re-embedding the full internal `Session` ledger `CallResponse` carries
 /// for in-process callers. Full evidence stays on disk at `receipt_path`.
@@ -214,14 +214,14 @@ pub(crate) struct SetInputs<'a> {
 /// Run-dispatch acceptance gate (0178 deliverable 2): a repo carrying a
 /// committed `runtime.example.ts` that has never been accepted, or whose
 /// example has changed since the last acceptance, refuses run dispatch and
-/// names `ctx traits config accept`. Read-only commands (`check`, `doctor`,
+/// names `ctx traits internal config accept`. Read-only commands (`check`, `doctor`,
 /// `config build`, `config accept` itself) never call this. Non-TTY
 /// contexts always refuse — acceptance is never automatic.
 ///
 /// Scoped to the `.ts` example only, NOT the pre-existing `runtime.example.
 /// toml` (0037): that convention predates this gate and every repo/fixture
 /// that already relies on it (this repo included) would trip an unaccepted-
-/// example refusal on every run with no migration path. `ctx traits config
+/// example refusal on every run with no migration path. `ctx traits internal config
 /// accept` itself still accepts either format — this narrows only which
 /// example blocks *dispatch*.
 fn guard_runtime_acceptance() -> crate::Result<()> {
@@ -257,7 +257,7 @@ fn guard_runtime_acceptance() -> crate::Result<()> {
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     if !interactive {
         return Err(crate::Error::Command {
-            message: "this repo's runtime.example.ts/.toml has not been accepted — run `ctx traits config accept`".to_string(),
+            message: "this repo's runtime.example.ts/.toml has not been accepted — run `ctx traits internal config accept`".to_string(),
         });
     }
 
@@ -276,7 +276,7 @@ fn guard_runtime_acceptance() -> crate::Result<()> {
     if !matches!(answer.trim(), "y" | "Y" | "yes") {
         return Err(crate::Error::Command {
             message: format!(
-                "declined — run `ctx traits config accept` when ready to accept {example_path}"
+                "declined — run `ctx traits internal config accept` when ready to accept {example_path}"
             ),
         });
     }
@@ -1006,7 +1006,7 @@ fn print_task_queue_report(outcomes: &[(String, TaskQueueOutcome)], halted: bool
 /// P550 run-termination story hook: interactive-TTY-only pane, plain-text
 /// story otherwise. Never called under `--json` (the `json` branch above
 /// returns before reaching here) — `--json` output stays byte-identical to
-/// today, the story is already available separately via `ctx traits story
+/// today, the story is already available separately via `ctx traits internal story
 /// --json`. `stdio` uses the same three-way TTY rule the drive TUI default
 /// applies (`dashboard::interactive_available` plus a stdout check), so
 /// `[drive] story = "default"` stays inert in CI/scripts beyond this plain
@@ -1457,7 +1457,7 @@ pub(crate) fn complete_after_drive(
         // reflect that prior outcome honestly (P460 review) — collapsing
         // every case to "no intent" let a later resume over an already
         // parked run silently exit 0. The persisted `merge_frames`/
-        // `merge_intent` history stays readable via `ctx traits session
+        // `merge_intent` history stays readable via `ctx traits internal session
         // state`/`inspect` regardless.
         return Ok(CompletionOutcome {
             session: final_session,
@@ -1704,7 +1704,7 @@ fn emit_run_info_outcome(
                     "run info selection",
                 )?;
             } else {
-                run_format::print_run_selection("ctx traits run-info", &output.selection);
+                run_format::print_run_selection("ctx traits internal run-info", &output.selection);
             }
         }
     }
@@ -1930,7 +1930,7 @@ pub(crate) fn handle_run_frame(
                     "run frame",
                 )?;
             } else {
-                println!("ctx traits run-frame");
+                println!("ctx traits internal run-frame");
                 println!("  kind: not-your-frame");
                 println!("  agent: {agent}");
                 println!("  current-agent: {}", current.unwrap_or("none"));
@@ -1951,7 +1951,7 @@ pub(crate) fn handle_run_frame(
     } else if let Some(frame) = outcome.session.next_frame.as_deref() {
         run_format::print_sequence_frame("  ", frame);
     } else {
-        println!("ctx traits run-frame");
+        println!("ctx traits internal run-frame");
         println!(
             "  status: {}",
             crate::app::presentation::wire_name(&outcome.session.status)
@@ -1982,7 +1982,7 @@ pub(crate) fn handle_next(
         output
             .warnings
             .push(ctx_traits_core::launch::runtime_posture().0.message);
-        println!("ctx traits next");
+        println!("ctx traits internal next");
         println!(
             "  kind: {}",
             crate::app::presentation::wire_name(&output.kind)

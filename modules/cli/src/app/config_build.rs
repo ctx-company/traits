@@ -1,4 +1,4 @@
-//! CLI orchestration for `ctx traits config build` (0177; retires P457's
+//! CLI orchestration for `ctx traits internal config build` (0177; retires P457's
 //! `RuntimeConfig` target): compile `.ctx/traits/config.ts` into
 //! `.ctx/traits/generated/config.toml`, validated against `ConfigDocument`
 //! — the committed, declarative project document, not `RuntimeConfig`.
@@ -415,7 +415,7 @@ struct ConfigInitReportJson<'a> {
     package_json: &'a str,
 }
 
-/// `ctx traits config init --global` (0178): scaffold the config-home
+/// `ctx traits internal config init --global` (0178): scaffold the config-home
 /// `traits/` directory with a minimal `package.json` pinning
 /// `@ctx-traits/config`, so a global `traits/runtime.ts` can resolve the
 /// authoring package once the operator runs their package manager's

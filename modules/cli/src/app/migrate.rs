@@ -1,4 +1,4 @@
-//! `ctx traits migrate` handler: mechanical version-to-version migration.
+//! `ctx traits internal migrate` handler: mechanical version-to-version migration.
 //!
 //! Mirrors the `doctor migrate-config` plan/apply
 //! shape (`crate::app::doctor`): plan mode reports a diff and never writes;

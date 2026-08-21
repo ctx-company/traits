@@ -12,7 +12,7 @@ pub enum Format {
     Compat,
     Skill,
     Agents,
-    /// A body-free "run `ctx traits prompt <id>` and follow it" projection.
+    /// A body-free "run `ctx traits internal prompt <id>` and follow it" projection.
     /// Shares [`OwnershipKey::Skill`] with `Skill` (both occupy the same
     /// `SKILL.md` path and are equally ctx-managed) but keeps distinct lock
     /// evidence via [`Format::lock_target`], since a stub and a fully

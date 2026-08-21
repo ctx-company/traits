@@ -75,7 +75,7 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     fs::write(repo.join("session-package"), "pinned package root\n").unwrap();
     require_success(
         "activate fixture",
-        &["traits", "state", "--active", "--file", FILE],
+        &["traits", "internal", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
@@ -126,6 +126,7 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "run-status",
             "--file",
             FILE,
@@ -171,6 +172,7 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     let foreign_resume = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--file",
             foreign,
@@ -198,10 +200,15 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
         TraitSourceDrift::Rebuilt { .. }
     ));
 
-    let mut mcp = controlled_command(&ctx_bin(), &["traits", "mcp"], &repo, &scratch.home())
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("start MCP server");
+    let mut mcp = controlled_command(
+        &ctx_bin(),
+        &["traits", "internal", "mcp"],
+        &repo,
+        &scratch.home(),
+    )
+    .stdin(Stdio::piped())
+    .spawn()
+    .expect("start MCP server");
     writeln!(
         mcp.stdin.as_mut().unwrap(),
         "{}",
@@ -226,6 +233,7 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     let resumed = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--file",
             FILE,
@@ -267,7 +275,7 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     fs::write(repo.join(FILE), &source_a).unwrap();
     require_success(
         "activate fixture",
-        &["traits", "state", "--active", "--file", FILE],
+        &["traits", "internal", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
@@ -314,6 +322,7 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     let fallback = run_ctx(
         &[
             "traits",
+            "internal",
             "run-status",
             "--file",
             mismatch,
@@ -337,6 +346,7 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     let unavailable = run_ctx(
         &[
             "traits",
+            "internal",
             "run-status",
             "--session",
             ledger.to_str().unwrap(),
@@ -363,6 +373,7 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "run-status",
             "--file",
             recovered,
@@ -403,7 +414,7 @@ fn malformed_pin_is_not_reported_as_a_legacy_ledger() {
     fs::write(repo.join(FILE), manifest("source A")).unwrap();
     require_success(
         "activate fixture",
-        &["traits", "state", "--active", "--file", FILE],
+        &["traits", "internal", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );
@@ -478,7 +489,7 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     .unwrap();
     require_success(
         "activate flat fixture",
-        &["traits", "state", "--active", "--file", FILE],
+        &["traits", "internal", "state", "--active", "--file", FILE],
         &owner,
         &scratch.home(),
     );
@@ -525,6 +536,7 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     let resumed = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             without_file.to_str().unwrap(),
@@ -568,6 +580,7 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     let explicit_foreign = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--file",
             foreign.to_str().unwrap(),
@@ -636,7 +649,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
     .unwrap();
     require_success(
         "activate owner fixture",
-        &["traits", "state", "--active", "--file", FILE],
+        &["traits", "internal", "state", "--active", "--file", FILE],
         &owner,
         &scratch.home(),
     );
@@ -694,6 +707,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
     let unchanged_resume = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             unchanged.to_str().unwrap(),
@@ -734,6 +748,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
             "resume without explicit owner file",
             vec![
                 "traits",
+                "internal",
                 "drive",
                 "--session",
                 without_file.to_str().unwrap(),
@@ -745,6 +760,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
             "resume with explicit owner file",
             vec![
                 "traits",
+                "internal",
                 "drive",
                 "--file",
                 &owner_source,
@@ -820,6 +836,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
         "activate symlink traversal fixture",
         &[
             "traits",
+            "internal",
             "state",
             "--active",
             "--file",
@@ -883,6 +900,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
     let resumed = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             ledger.to_str().unwrap(),
@@ -914,7 +932,7 @@ fn trust_status_keeps_exact_digest_history_authoritative() {
     fs::write(repo.join(FILE), &source_a).unwrap();
     require_success(
         "activate fixture",
-        &["traits", "state", "--active", "--file", FILE],
+        &["traits", "internal", "state", "--active", "--file", FILE],
         &repo,
         &scratch.home(),
     );

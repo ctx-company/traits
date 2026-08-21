@@ -1,4 +1,4 @@
-//! Task 0124: `ctx traits explain --scaffold --llm-assisted` (no `--candidate`)
+//! Task 0124: `ctx traits internal explain --scaffold --llm-assisted` (no `--candidate`)
 //! now drives the `explain` runner through the harness — proving the
 //! Done-when end to end against a real (fixture) narrator: the deterministic
 //! evidence reaches the runner, the runner's echoed scaffold survives the
@@ -96,6 +96,7 @@ fn explain_llm_assisted_narrates_the_deterministic_scaffold() {
     let output = run_ctx_with_env(
         &[
             "traits",
+            "internal",
             "explain",
             "--scaffold",
             "--file",
@@ -168,6 +169,7 @@ fn explain_scaffold_without_llm_assisted_stays_deterministic() {
     let output = run_ctx_with_env(
         &[
             "traits",
+            "internal",
             "explain",
             "--scaffold",
             "--file",

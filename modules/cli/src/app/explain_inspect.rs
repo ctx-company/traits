@@ -102,7 +102,7 @@ pub(crate) fn handle_explain(input: ExplainInputs<'_>) -> crate::Result<CommandO
             if mode == HumanOutputMode::Compact {
                 panel = panel.next(PanelRow::toned(
                     "next",
-                    "ctx traits explain --verbose for the full activation report",
+                    "ctx traits internal explain --verbose for the full activation report",
                     RowTone::Default,
                 ));
             }
@@ -284,7 +284,7 @@ fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOut
                 let panel = if mode == HumanOutputMode::Compact {
                     panel.next(PanelRow::toned(
                         "next",
-                        "ctx traits explain --scaffold --verbose for the full scaffold report",
+                        "ctx traits internal explain --scaffold --verbose for the full scaffold report",
                         RowTone::Default,
                     ))
                 } else {
@@ -443,7 +443,7 @@ fn emit_plain_explain_scaffold_report(
     scaffold: &ctx_traits_core::scaffold::ExplainScaffold,
     map_path: &camino::Utf8Path,
 ) -> crate::Result<()> {
-    w("ctx traits explain")?;
+    w("ctx traits internal explain")?;
     w(format!("  trait: {}", scaffold.trait_id))?;
     w(format!("  source-map: {map_path}"))?;
     w(format!("  receipt-digest: {}", scaffold.receipt_digest))?;
@@ -469,7 +469,7 @@ fn styled_explain_scaffold_lines(
     map_path: &camino::Utf8Path,
 ) -> Vec<Line> {
     let mut lines = vec![
-        command_line("ctx traits explain"),
+        command_line("ctx traits internal explain"),
         Line::blank(),
         labeled_line("  trait: ", &scaffold.trait_id),
         labeled_line("  source-map: ", map_path.as_str()),
@@ -506,7 +506,7 @@ fn emit_plain_activation_explain_report(
     report: &ctx_traits_core::r#trait::activation::ExplainReport,
     active_only: bool,
 ) -> crate::Result<()> {
-    w("ctx traits explain")?;
+    w("ctx traits internal explain")?;
     w(format!("task: {}", report.request.task_text))?;
     w(format!(
         "mode: {}",
@@ -688,7 +688,7 @@ fn styled_activation_explain_lines(
     active_only: bool,
 ) -> Vec<Line> {
     let mut lines = vec![
-        command_line("ctx traits explain"),
+        command_line("ctx traits internal explain"),
         Line::blank(),
         labeled_line("task: ", &report.request.task_text),
         labeled_line("mode: ", report.request.mode.as_deref().unwrap_or("none")),
@@ -1070,13 +1070,13 @@ pub(crate) fn handle_inspect(
 }
 
 fn emit_plain_inspect_no_file_report() -> crate::Result<()> {
-    w("ctx traits inspect — use --file <trait-file> to inspect a trait")?;
+    w("ctx traits internal inspect — use --file <trait-file> to inspect a trait")?;
     w("  add --dry-plan for procedure/resource planning")?;
     Ok(())
 }
 
 fn styled_inspect_no_file_lines() -> Vec<Line> {
-    let mut lines = vec![command_line("ctx traits inspect"), Line::blank()];
+    let mut lines = vec![command_line("ctx traits internal inspect"), Line::blank()];
     let mut header = Line::blank();
     header.push("use --file <trait-file> to inspect a trait", Tone::Default);
     lines.push(header);
@@ -1129,7 +1129,7 @@ fn emit_plain_inspect_normal_report(
     status: &ctx_traits_core::manifest::PackageStatus,
     trust: &ctx_traits_core::r#trait::TrustVerdict,
 ) -> crate::Result<()> {
-    w("ctx traits inspect")?;
+    w("ctx traits internal inspect")?;
     w(format!("trait: {id}", id = trait_ref.id.as_str()))?;
     w(format!(
         "version: {version}",
@@ -1155,7 +1155,7 @@ fn styled_inspect_normal_lines(
     trust: &ctx_traits_core::r#trait::TrustVerdict,
 ) -> Vec<Line> {
     let mut lines = vec![
-        command_line("ctx traits inspect"),
+        command_line("ctx traits internal inspect"),
         Line::blank(),
         labeled_line("trait: ", trait_ref.id.as_str()),
         labeled_line("version: ", trait_ref.version.as_str()),
@@ -1172,7 +1172,7 @@ fn styled_inspect_normal_lines(
 }
 
 fn emit_plain_inspect_dry_plan_header(trait_ref: &ctx_traits_core::Trait) -> crate::Result<()> {
-    w("ctx traits inspect")?;
+    w("ctx traits internal inspect")?;
     w(format!("trait: {id}", id = trait_ref.id.as_str()))?;
     w(format!(
         "version: {version}",
@@ -1187,7 +1187,7 @@ fn emit_plain_inspect_dry_plan_header(trait_ref: &ctx_traits_core::Trait) -> cra
 
 fn styled_inspect_dry_plan_header_lines(trait_ref: &ctx_traits_core::Trait) -> Vec<Line> {
     vec![
-        command_line("ctx traits inspect"),
+        command_line("ctx traits internal inspect"),
         Line::blank(),
         labeled_line("trait: ", trait_ref.id.as_str()),
         labeled_line("version: ", trait_ref.version.as_str()),
@@ -1387,13 +1387,13 @@ fn emit_plain_dry_plan(plan: &ctx_traits_core::procedure::run::TraitPlan) -> cra
     use ctx_traits_core::procedure::run::TraitPlan;
     match plan {
         TraitPlan::GuidanceOnly { trait_id, reason } => {
-            w("ctx traits inspect --dry-plan")?;
+            w("ctx traits internal inspect --dry-plan")?;
             w(format!("trait: {trait_id}"))?;
             w("shape: guidance-only")?;
             w(format!("reason: {reason}"))?;
         }
         TraitPlan::Planned(run) => {
-            w("ctx traits inspect --dry-plan")?;
+            w("ctx traits internal inspect --dry-plan")?;
             w(format!("trait: {}", run.trait_id))?;
 
             if run.sequence_items.is_empty() {
@@ -1468,7 +1468,7 @@ fn styled_dry_plan_lines(plan: &ctx_traits_core::procedure::run::TraitPlan, line
     match plan {
         TraitPlan::GuidanceOnly { trait_id, reason } => {
             let mut header = Line::blank();
-            header.push("ctx traits inspect --dry-plan", Tone::Muted);
+            header.push("ctx traits internal inspect --dry-plan", Tone::Muted);
             lines.push(header);
             lines.push(labeled_line("trait: ", trait_id));
             lines.push(labeled_line("shape: ", "guidance-only"));
@@ -1476,7 +1476,7 @@ fn styled_dry_plan_lines(plan: &ctx_traits_core::procedure::run::TraitPlan, line
         }
         TraitPlan::Planned(run) => {
             let mut header = Line::blank();
-            header.push("ctx traits inspect --dry-plan", Tone::Muted);
+            header.push("ctx traits internal inspect --dry-plan", Tone::Muted);
             lines.push(header);
             lines.push(labeled_line("trait: ", &run.trait_id));
 

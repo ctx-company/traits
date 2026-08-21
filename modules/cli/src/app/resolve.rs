@@ -39,7 +39,7 @@ pub(crate) fn handle_resolve(input: ResolveInputs<'_>) -> crate::Result<CommandO
     )?;
 
     // P498 (f): carry each candidate's source digest along so a non-ledger
-    // adapter can skip a round trip through `ctx traits prompt` just to
+    // adapter can skip a round trip through `ctx traits internal prompt` just to
     // learn it. Additive-optional field, populated from the already-loaded
     // inventory — never from a fresh render, which would make this cheap
     // planning verb expensive (see `context plan`, which renders anyway and
@@ -61,7 +61,7 @@ pub(crate) fn handle_resolve(input: ResolveInputs<'_>) -> crate::Result<CommandO
             .map_err(|e| crate::Error::json("serialize resolve response", e))?;
         println!("{json_text}");
     } else {
-        println!("ctx traits resolve");
+        println!("ctx traits internal resolve");
         println!("  task: {}", input.task);
         if let Some(session) = input.session {
             println!("  session: {session}");

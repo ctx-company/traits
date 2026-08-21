@@ -2,7 +2,7 @@
 // Procedure runtime frame builders.
 
 /// Pure, read-only projection of a trait's *executable* prompt/command
-/// frames outside live control-flow advancement, for `ctx traits preview`.
+/// frames outside live control-flow advancement, for `ctx traits internal preview`.
 /// Reuses the same frame-content builder `next_sequence_frame` calls for the
 /// live position (`build_sequence_frame`), so preview frame content,
 /// ordering, and resolution behavior never diverge from a live frame for the

@@ -70,7 +70,7 @@ fn unbindable_dispatch_fixture() -> Fixture {
     );
     require_success(
         "activate fixture",
-        &["traits", "state", "--active", "demo"],
+        &["traits", "internal", "state", "--active", "demo"],
         &repo,
         &home,
     );
@@ -141,7 +141,7 @@ fn empty_charter_fixture() -> Fixture {
     );
     require_success(
         "activate fixture",
-        &["traits", "state", "--active", "demo"],
+        &["traits", "internal", "state", "--active", "demo"],
         &repo,
         &home,
     );

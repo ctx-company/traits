@@ -1,7 +1,7 @@
 //! Shared prompt-composition chain for a resolved procedure frame.
 //!
 //! Extracted from `drive.rs` so live dispatch (CLI and MCP transports) and
-//! `ctx traits preview` call one resolver/composer, never two. Every
+//! `ctx traits internal preview` call one resolver/composer, never two. Every
 //! function here is a pure read of a `LoadedTrait` + `Session` +
 //! `SequenceFrame` triple — no harness dispatch, no session mutation.
 
@@ -372,7 +372,7 @@ pub(crate) fn human_frame_prompt(
         .map(|output| output.slot_ref.to_string())
         .unwrap_or_else(|| "slot:<answer>".to_string());
     format!(
-        "Human question:\n{}\n{}\nSubmit the answer with:\nctx traits session frame set --session {} --key {} --value <value>\n",
+        "Human question:\n{}\n{}\nSubmit the answer with:\nctx traits internal session frame set --session {} --key {} --value <value>\n",
         context.prompt_section, context.input_section, session_id, output
     )
 }

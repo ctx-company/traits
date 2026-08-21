@@ -4,7 +4,7 @@
 //! `.ctx/traits/runtime.example.toml`) as the seed for the machine-local
 //! `RUNTIME_CONFIG_SOURCE`/`RUNTIME_CONFIG` document. Run-dispatching
 //! commands must refuse until the operator has explicitly accepted that
-//! example's exact bytes — `ctx traits config accept` — which materializes
+//! example's exact bytes — `ctx traits internal config accept` — which materializes
 //! the machine-local copy and records a digest stamp in the existing
 //! `crate::trust` store. The stamp covers the EXAMPLE's bytes, never the
 //! machine copy: editing the accepted copy never re-prompts, but a changed

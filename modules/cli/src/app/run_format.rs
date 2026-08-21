@@ -3,7 +3,7 @@
 use crate::app::presentation::wire_name;
 
 pub(crate) fn print_run_info(summary: &ctx_traits_core::run_info::RunInfoSummary) {
-    println!("ctx traits run-info");
+    println!("ctx traits internal run-info");
     println!("  trait: {}", summary.trait_identity.trait_id);
     println!(
         "  source: {}",
@@ -363,7 +363,7 @@ pub(crate) fn print_call_response(
     response: &ctx_traits_core::procedure::session::CallResponse,
     out: Option<&str>,
 ) {
-    println!("ctx traits call");
+    println!("ctx traits internal call");
     println!("  status: {}", wire_name(&response.status));
     println!("  response: {}", wire_name(&response.response_kind));
     println!("  session-id: {}", response.session_id.as_str());
@@ -762,7 +762,9 @@ pub(crate) fn print_sequence_frame(
             }
         }
     }
-    println!("{indent}instruction: do not skip steps; submit through ctx traits session frame set");
+    println!(
+        "{indent}instruction: do not skip steps; submit through ctx traits internal session frame set"
+    );
 }
 
 pub(crate) fn render_runtime_path(
@@ -816,7 +818,7 @@ fn next_action_hint(
         ctx_traits_core::procedure::session::Status::AwaitingAgentOutput
         | ctx_traits_core::procedure::session::Status::WaitingOnHuman
         | ctx_traits_core::procedure::session::Status::Rejected => format!(
-            "ctx traits session frame set --session {} --key <target> --value <value>{agent_flag}",
+            "ctx traits internal session frame set --session {} --key <target> --value <value>{agent_flag}",
             out.unwrap_or("<run-session>")
         ),
         ctx_traits_core::procedure::session::Status::BlockedAgentUnassigned => {
@@ -843,7 +845,7 @@ fn next_action_hint(
         ctx_traits_core::procedure::session::Status::Failed => "inspect diagnostics".to_string(),
         ctx_traits_core::procedure::session::Status::AwaitingInput => {
             format!(
-                "ctx traits session frame set --session {} --key <input-port> --value <value>",
+                "ctx traits internal session frame set --session {} --key <input-port> --value <value>",
                 out.unwrap_or("<run-session>")
             )
         }

@@ -107,7 +107,7 @@ pub fn builtin_content_frontmatter(host: &str) -> Option<&'static str> {
 ///   scope is unsupported and only global (`~/.codex/skills`) is wired.
 ///
 /// Default format for the four skill-shaped rows above is [`Format::Stub`]:
-/// a stub converges on fresh, trust-gated bytes via `ctx traits prompt`
+/// a stub converges on fresh, trust-gated bytes via `ctx traits internal prompt`
 /// rather than freezing a copy, and `--format skill` opts into the fully
 /// rendered directory.
 ///
@@ -221,7 +221,7 @@ pub enum Error {
         requested: String,
     },
     #[error(
-        "a {scope} placement for host {host:?} and trait {trait_id:?} already targets {existing_path:?}; the resolved target is now {new_path:?} — run `ctx traits host-remove` for the existing placement first, then reinstall"
+        "a {scope} placement for host {host:?} and trait {trait_id:?} already targets {existing_path:?}; the resolved target is now {new_path:?} — run `ctx traits internal host-remove` for the existing placement first, then reinstall"
     )]
     TargetChanged {
         scope: &'static str,

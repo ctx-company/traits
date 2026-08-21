@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand.
-// Regenerate with `ctx traits sdk-generate`.
+// Regenerate with `ctx traits internal sdk-generate`.
 
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue | undefined };
 

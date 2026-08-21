@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// source always has a path, and `ref` only exists on Git sources.
 /// [`JsonSchema`] is hand-written (below), delegating to [`TraitSourceRaw`]:
 /// the enum's own (de)serialization goes through that DTO already, and the
-/// schema (used by `ctx traits config build`'s camelCase-key rewrite) must
+/// schema (used by `ctx traits internal config build`'s camelCase-key rewrite) must
 /// describe the same `source = { git, ref, path, ... }` table shape
 /// authors actually write, not this normalized enum's variant shape.
 #[derive(Debug, Clone, PartialEq, Eq)]

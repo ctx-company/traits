@@ -1131,18 +1131,21 @@ mod tests {
     #[test]
     fn one_row_line_carries_house_vocabulary_and_status_tone() {
         let panel = Panel::new(
-            "ctx traits state --active",
+            "ctx traits internal state --active",
             "trait-a",
             PanelStatus::Passed("activated".to_string()),
         );
         let styled = panel.one_row_styled_line();
         let plain = plain_texts(std::slice::from_ref(&styled)).join("");
-        assert_eq!(plain, "ctx traits state --active trait-a · activated");
+        assert_eq!(
+            plain,
+            "ctx traits internal state --active trait-a · activated"
+        );
         assert!(tones(std::slice::from_ref(&styled)).contains(&Tone::Pass));
 
         assert_eq!(
             panel.one_row_plain_line(),
-            "ctx traits state --active trait-a · activated"
+            "ctx traits internal state --active trait-a · activated"
         );
     }
 
@@ -1150,7 +1153,7 @@ mod tests {
     fn emit_one_row_writes_through_the_same_styled_plain_gate() {
         emit_one_row(
             true,
-            "ctx traits state --active",
+            "ctx traits internal state --active",
             "trait-a",
             PanelStatus::Passed("activated".to_string()),
         )

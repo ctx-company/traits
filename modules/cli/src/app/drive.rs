@@ -285,7 +285,7 @@ pub struct DriveReport {
     /// Drive-local normalized observations, unbounded and uncoalesced —
     /// this in-memory snapshot is separate from the durable, coalesced
     /// activity sidecar `ctx_traits_io::activity_sidecar` persists
-    /// alongside the ledger (P521), which `ctx traits story` reads back.
+    /// alongside the ledger (P521), which `ctx traits internal story` reads back.
     #[serde(default)]
     pub activity: Vec<ctx_traits_core::procedure::activity::ActivityEvent>,
     /// Present only when `status` is `paused-provider-credits`.
@@ -3203,7 +3203,7 @@ fn drive_loop(
                 // Every retry answers identically until the account is topped
                 // up, and burns the dying balance doing so (P366 sibling:
                 // InvalidModel above). Pause instead of failing: leave the
-                // frame unsubmitted so `ctx traits drive --session <session>`
+                // frame unsubmitted so `ctx traits internal drive --session <session>`
                 // resumes it unchanged once credits return.
                 apply_credits_pause(
                     &mut report,
@@ -4150,7 +4150,7 @@ pub fn print_credits_pause(
         ))
         .next(PanelRow::toned(
             "resume",
-            format!("ctx traits drive --session {session}"),
+            format!("ctx traits internal drive --session {session}"),
             RowTone::Default,
         ));
     emit_human(
@@ -4224,7 +4224,7 @@ pub fn print_budget_pause(
         ))
         .next(PanelRow::toned(
             "resume",
-            format!("ctx traits drive --session {session}"),
+            format!("ctx traits internal drive --session {session}"),
             RowTone::Default,
         ));
     emit_human(
@@ -4236,7 +4236,7 @@ pub fn print_budget_pause(
 }
 
 /// 0130: this model's estimated cost — billing-aware (shared by
-/// [`print_budget_pause`] and `ctx traits stats`). A subscription-billed
+/// [`print_budget_pause`] and `ctx traits internal stats`). A subscription-billed
 /// model is marginal-cost-zero by construction (draft scope item 4) and
 /// always renders `$0 (subscription)`, never priced from `[pricing]`
 /// regardless of whether a pricing entry happens to exist for its model id.
@@ -4338,7 +4338,7 @@ mod model_cost_label_tests {
 
 /// 0130: the *current* config-resolved billing mode for every model this
 /// config has a known role/narrator/guide assignment for — used to label
-/// [`print_budget_pause`] and `ctx traits stats` output. Unlike
+/// [`print_budget_pause`] and `ctx traits internal stats` output. Unlike
 /// [`seed_model_billing_map`] (which classifies a specific prior drive's
 /// recorded `AgentAssignment`s for cost-ceiling accounting), this walks every
 /// currently declared role so a rendering call site needs only the resolved
@@ -8425,7 +8425,7 @@ fn mcp_harness_argv(
                 "mcpServers": {
                     "ctx": {
                         "command": exe.to_string_lossy(),
-                        "args": ["traits", "mcp"],
+                        "args": ["traits", "internal", "mcp"],
                         "env": {
                             "CTX_TRAITS_ELAPSED_SECONDS_BASELINE": elapsed_seconds.unwrap_or(0).to_string()
                         }
@@ -8495,7 +8495,7 @@ struct CurrentMcpFrame<'a> {
     env_overlay: &'a BTreeMap<String, String>,
     /// Cumulative active-drive elapsed seconds observed by this drive loop
     /// right before this frame's MCP harness is spawned. Handed to the
-    /// spawned `ctx traits mcp` subprocess as its elapsed-evidence baseline
+    /// spawned `ctx traits internal mcp` subprocess as its elapsed-evidence baseline
     /// (see `mcp_harness_argv`) so a call the harness submits directly
     /// through MCP observes the same growing cumulative value the CLI
     /// transport does, instead of accepting that frame against stale
@@ -8559,7 +8559,7 @@ fn drive_mcp_frame(
         cli,
         current.elapsed_seconds,
     )?;
-    // A worktree-scoped MCP harness spawns its own `ctx traits mcp` subprocess
+    // A worktree-scoped MCP harness spawns its own `ctx traits internal mcp` subprocess
     // from a different cwd; normalize the ledger address to an absolute path so
     // that nested call still finds the collision-safe session ledger. Without a
     // worktree the prompt stays byte-for-byte unchanged.
@@ -9673,7 +9673,7 @@ fn submit_harness_output(
             caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
                 surface: "cli-drive".to_string(),
                 caller: format!(
-                    "ctx traits drive {}@{}",
+                    "ctx traits internal drive {}@{}",
                     evidence_input.role, evidence_input.harness_id
                 ),
                 agent: frame

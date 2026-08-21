@@ -142,7 +142,7 @@ pub fn authorize_start(
 
 /// Set `[package].status` in the package manifest rooted at `trait_root`.
 ///
-/// This is the sole write path for `ctx traits state --active`/`deactivate`
+/// This is the sole write path for `ctx traits internal state --active`/`deactivate`
 /// (Group 95, 2026-07-19): status lives only in the package manifest, never
 /// on the canonical trait document. Errors if the package has no
 /// `trait.toml` with a `[package]` table — a legacy flat canonical document

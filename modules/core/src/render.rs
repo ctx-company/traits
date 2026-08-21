@@ -300,7 +300,7 @@ pub fn render_skill_export_content(
 }
 
 /// Render a body-free stub export: a projection whose only instruction is to
-/// run `ctx traits prompt <id>` and follow its output, so even a
+/// run `ctx traits internal prompt <id>` and follow its output, so even a
 /// model-elective skill trigger converges on fresh, trust-gated bytes
 /// instead of a frozen copy. Shares the `Skill` ownership identity (§3.1) —
 /// a stub and a fully-rendered skill occupy the same path.
@@ -332,7 +332,7 @@ pub fn render_stub_export_content(
     out.push_str("\n\n");
     out.push_str("## Behavior\n\n");
     out.push_str(&format!(
-        "This is a stub. Run `ctx traits prompt {}` and follow its output as the authoritative behavior for this trait. If `ctx` is not on PATH, say so and stop rather than improvising the behavior from this file's name or summary alone.\n",
+        "This is a stub. Run `ctx traits internal prompt {}` and follow its output as the authoritative behavior for this trait. If `ctx` is not on PATH, say so and stop rather than improvising the behavior from this file's name or summary alone.\n",
         trait_ref.id.as_str(),
     ));
     out

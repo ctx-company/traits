@@ -1,5 +1,5 @@
 //! Public-path proofs for 0177's `config.ts` -> `ConfigDocument` authoring
-//! pathway (`.ctx/traits/config.ts` -> `ctx traits config build` ->
+//! pathway (`.ctx/traits/config.ts` -> `ctx traits internal config build` ->
 //! `.ctx/traits/generated/config.toml`) and its drift guard, plus the
 //! retirement proofs for the P457 `.ctx/config.ts` -> `RuntimeConfig`
 //! pathway and the standalone `vendor.toml` manifest it replaces.
@@ -24,7 +24,7 @@ fn scaffold_repo(scratch: &ScratchRoot, label: &str) -> std::path::PathBuf {
 }
 
 fn build_config(proj: &Path, home: &Path) -> std::process::Output {
-    run_ctx(&["traits", "config", "build"], proj, home)
+    run_ctx(&["traits", "internal", "config", "build"], proj, home)
 }
 
 /// The `config.ts` this suite uses: a bare `[vendor]` table (`schema-version
@@ -111,7 +111,7 @@ export default defineConfig({\n\
         "refusal must name the source: {stderr}"
     );
     assert!(
-        stderr.contains("ctx traits config build"),
+        stderr.contains("ctx traits internal config build"),
         "refusal must state the rebuild command: {stderr}"
     );
 }
@@ -261,7 +261,13 @@ fn global_scope_vendor_declaration_refuses() {
 
     let source_path = global_dir.join("config.ts");
     let build = run_ctx(
-        &["traits", "config", "build", source_path.to_str().unwrap()],
+        &[
+            "traits",
+            "internal",
+            "config",
+            "build",
+            source_path.to_str().unwrap(),
+        ],
         &global_dir,
         &home,
     );

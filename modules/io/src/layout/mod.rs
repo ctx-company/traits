@@ -161,7 +161,7 @@ pub const RUNTIME_CONFIG_SOURCE: &str = ".ctx/traits/runtime.ts";
 pub const GLOBAL_RUNTIME_CONFIG_SOURCE: &str = "traits/runtime.ts";
 /// Repo-local committed example for [`RUNTIME_CONFIG_SOURCE`]'s acceptance
 /// model (0178): complete, works as-is TypeScript. A repo carrying this file
-/// refuses to run until the operator accepts it (`ctx traits config
+/// refuses to run until the operator accepts it (`ctx traits internal config
 /// accept`), which materializes [`RUNTIME_CONFIG_SOURCE`] and digest-stamps
 /// the acceptance in the trust store — see `crate::runtime_acceptance`.
 /// Committed, never gitignored.
@@ -251,7 +251,7 @@ pub fn project_manifest_path(repo_root: &Utf8Path, extension: &str) -> Utf8PathB
 /// `[`CONFIG_SOURCE`]`-generated pathway before the hand-authored
 /// [`PROJECT_CONFIG`] path: when `.ctx/traits/config.ts` exists, the
 /// document lives at `generated/config.toml` under
-/// [`TRAIT_GENERATED_ROOT`], compiled by `ctx traits config build`.
+/// [`TRAIT_GENERATED_ROOT`], compiled by `ctx traits internal config build`.
 /// Drift/staleness/both-present refusals are `crate::config_document`'s
 /// concern, not this path resolver's.
 pub fn config_document_path(repo_root: &Utf8Path) -> Utf8PathBuf {

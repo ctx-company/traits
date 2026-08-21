@@ -2,7 +2,7 @@
 //! in-file marker contract).
 //!
 //! `.ctx/traits/config.ts` is an optional TypeScript authoring source that
-//! `ctx traits config build` compiles into
+//! `ctx traits internal config build` compiles into
 //! `.ctx/traits/generated/config.toml`. LOCATION states authority now — a
 //! file under `generated/` is machine-written by construction, never
 //! hand-edited — so there is no in-file marker to parse or forge. This
@@ -121,7 +121,7 @@ fn resolve_relative(config_dir: &Utf8Path, entry_path: &Utf8Path) -> crate::Resu
 pub fn guard_never_built(source_path: &Utf8Path, generated_path: &Utf8Path) -> crate::Result<()> {
     if source_path.exists() && !generated_path.exists() {
         return Err(refusal(format!(
-            "{source_path} has no built {generated_path} — run `ctx traits config build`"
+            "{source_path} has no built {generated_path} — run `ctx traits internal config build`"
         )));
     }
     Ok(())
@@ -144,14 +144,14 @@ pub fn guard_generated_config(
             Ok(digest) => digest,
             Err(_) => {
                 return Err(refusal(format!(
-                    "{} changed since {generated_path} was built (missing) — run `ctx traits config build`",
+                    "{} changed since {generated_path} was built (missing) — run `ctx traits internal config build`",
                     entry.path
                 )));
             }
         };
         if actual != entry.digest {
             return Err(refusal(format!(
-                "{} changed since {generated_path} was built — run `ctx traits config build`",
+                "{} changed since {generated_path} was built — run `ctx traits internal config build`",
                 entry.path
             )));
         }

@@ -1,5 +1,5 @@
 //! Pure chronological narrative builder over an already-loaded run-session
-//! ledger (P383). `ctx traits story <run-id>` is strictly read-only: this
+//! ledger (P383). `ctx traits internal story <run-id>` is strictly read-only: this
 //! module never touches a filesystem, clock, or process. Callers (the
 //! CLI/IO boundary) resolve the ledger and, optionally, the trait's dry
 //! [`Plan`] (for producer/agent enrichment) and hand both to [`build`].
@@ -54,7 +54,7 @@ pub const STORY_SCHEMA_VERSION: &str = "1";
 pub const GLOSS_CHAR_BOUND: usize = 160;
 
 /// The requested depth of a rendered story (P550/P521). Threaded through
-/// every story-consuming surface (`ctx traits story --level`, `--story` on a
+/// every story-consuming surface (`ctx traits internal story --level`, `--story` on a
 /// driven run, `[drive] story` config, the dashboard's `S` key). `Default`
 /// renders per-step summaries and derived bullets from the ledger and,
 /// where available, the persisted activity sidecar — always free. `Detailed`

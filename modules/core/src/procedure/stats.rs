@@ -1,6 +1,6 @@
 //! Pure aggregation over already-loaded run-session ledgers (P442).
 //!
-//! `ctx traits stats` is strictly read-only: this module never touches a
+//! `ctx traits internal stats` is strictly read-only: this module never touches a
 //! filesystem, clock, or process. Callers (the CLI/IO boundary) load the
 //! run inventory and resolve the `--since` cutoff, then hand every readable
 //! [`Session`](crate::procedure::session::Session) plus each unreadable

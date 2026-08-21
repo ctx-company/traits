@@ -20,7 +20,13 @@ fn scaffold_repo(scratch: &ScratchRoot, label: &str) -> std::path::PathBuf {
 
 fn build_runtime(proj: &Path, home: &Path) -> std::process::Output {
     run_ctx(
-        &["traits", "config", "build", ".ctx/traits/runtime.ts"],
+        &[
+            "traits",
+            "internal",
+            "config",
+            "build",
+            ".ctx/traits/runtime.ts",
+        ],
         proj,
         home,
     )
@@ -91,7 +97,10 @@ fn stale_generated_runtime_refuses_naming_source() {
         "stale generated runtime document must refuse: stdout={stdout} stderr={stderr}"
     );
     assert!(stderr.contains("runtime.ts"), "{stderr}");
-    assert!(stderr.contains("ctx traits config build"), "{stderr}");
+    assert!(
+        stderr.contains("ctx traits internal config build"),
+        "{stderr}"
+    );
 }
 
 /// 3. `runtime.ts` and a hand-authored `runtime.toml` both present refuses,
@@ -190,7 +199,7 @@ fn preferences_in_repo_scope_hand_toml_refuses_at_resolve() {
     assert!(stderr.contains("preferences"), "{stderr}");
 }
 
-/// 7. `ctx traits config init --global` scaffolds a config-home
+/// 7. `ctx traits internal config init --global` scaffolds a config-home
 ///    `traits/package.json`, and a global `runtime.ts` placed there
 ///    compiles.
 #[test]
@@ -199,7 +208,11 @@ fn global_scaffold_and_runtime_ts_compile() {
     let home = scratch.home();
     fs::create_dir_all(&home).unwrap();
 
-    let init = run_ctx(&["traits", "config", "init", "--global"], &home, &home);
+    let init = run_ctx(
+        &["traits", "internal", "config", "init", "--global"],
+        &home,
+        &home,
+    );
     let (stdout, stderr) = utf8(&init);
     assert_eq!(
         init.status.code(),
@@ -221,7 +234,7 @@ fn global_scaffold_and_runtime_ts_compile() {
     // config init without --global refuses (no repo-tier scaffold, 0179 owns
     // init/layout rework).
     let repo = scaffold_repo(&scratch, "repo-no-global");
-    let init_local = run_ctx(&["traits", "config", "init"], &repo, &home);
+    let init_local = run_ctx(&["traits", "internal", "config", "init"], &repo, &home);
     assert_ne!(
         init_local.status.code(),
         Some(0),
@@ -229,7 +242,7 @@ fn global_scaffold_and_runtime_ts_compile() {
     );
 }
 
-/// 8. `ctx traits config accept --yes` materializes the machine copy and
+/// 8. `ctx traits internal config accept --yes` materializes the machine copy and
 ///    stamps the example's digest; a run refuses before acceptance and
 ///    proceeds after.
 #[test]
@@ -248,7 +261,7 @@ fn acceptance_gates_run_and_materializes_machine_copy() {
     );
 
     let accept = run_ctx(
-        &["traits", "config", "accept", "--yes"],
+        &["traits", "internal", "config", "accept", "--yes"],
         &proj,
         &scratch.home(),
     );
@@ -277,7 +290,7 @@ fn acceptance_gates_run_and_materializes_machine_copy() {
 
     // Accepting again with nothing changed refuses ("nothing to do").
     let reaccept = run_ctx(
-        &["traits", "config", "accept", "--yes"],
+        &["traits", "internal", "config", "accept", "--yes"],
         &proj,
         &scratch.home(),
     );
@@ -301,7 +314,7 @@ fn acceptance_gates_run_and_materializes_machine_copy() {
     // Mutating the example refuses again until re-accepted.
     fs::write(proj.join(".ctx/traits/runtime.example.ts"), RUNTIME_TS_V2).unwrap();
     let reaccept_after_mutation = run_ctx(
-        &["traits", "config", "accept", "--yes"],
+        &["traits", "internal", "config", "accept", "--yes"],
         &proj,
         &scratch.home(),
     );
@@ -344,12 +357,12 @@ fn run_dispatch_gated_by_acceptance() {
         "run must refuse before acceptance: stdout={stdout} stderr={stderr}"
     );
     assert!(
-        stderr.contains("ctx traits config accept"),
+        stderr.contains("ctx traits internal config accept"),
         "refusal must name the accept command: {stderr}"
     );
 
     let accept = run_ctx(
-        &["traits", "config", "accept", "--yes"],
+        &["traits", "internal", "config", "accept", "--yes"],
         &proj,
         &scratch.home(),
     );

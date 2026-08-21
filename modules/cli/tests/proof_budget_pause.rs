@@ -120,14 +120,21 @@ fn init_fixture_repo(repo: &Path, home: &Path, harness_id: &str, script: &Path, 
     );
     let fixture = ".ctx/traits/fixture-0130/generated/index.toml";
     require_success(
-        "0130-proof `ctx traits review --approve`",
-        &["traits", "review", "--file", fixture, "--approve"],
+        "0130-proof `ctx traits internal review --approve`",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
-        "0130-proof `ctx traits state --active`",
-        &["traits", "state", "--active", "--file", fixture],
+        "0130-proof `ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -241,6 +248,7 @@ printf '{{"answer2":"done2"}}'
     let resumed = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             &ledger.to_string_lossy(),
@@ -328,6 +336,7 @@ printf '{{"answer2":"done2"}}'
     let resumed = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--session",
             &ledger.to_string_lossy(),

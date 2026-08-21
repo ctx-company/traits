@@ -135,13 +135,20 @@ session-mode = "persistent"
     let fixture = ".ctx/traits/fixture-persistent-contract/generated/index.toml";
     require_success(
         "persistent fixture review",
-        &["traits", "review", "--file", fixture, "--approve"],
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
         "persistent fixture activate",
-        &["traits", "state", "--active", "--file", fixture],
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );

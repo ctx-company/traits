@@ -106,7 +106,7 @@ pub(crate) fn handle_synth(
     if let Some(out_path) = out {
         let target_path = camino::Utf8Path::new(out_path);
         ctx_traits_io::write::write_text(target_path, &response.output_text)?;
-        println!("ctx traits synth");
+        println!("ctx traits internal synth");
         println!("  source: {path}");
         println!("  target: {out_path}");
         println!(
@@ -721,7 +721,7 @@ fn print_synth_check_report(
     actual_digest: Option<&str>,
     drift: bool,
 ) {
-    println!("ctx traits synth --check");
+    println!("ctx traits internal synth --check");
     println!("  source: {source_path}");
     println!("  target: {target_path}");
     println!(

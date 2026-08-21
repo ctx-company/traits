@@ -118,7 +118,7 @@ pub fn fixture_agent_bin() -> PathBuf {
 /// Symlinks the repository's own already-installed `node_modules` into a
 /// scratch project, so a `config.ts` build resolves `@ctx-traits/config`
 /// (and any other repo-local package) without a network fetch or a second
-/// install — the one local dependency `ctx traits config build` needs on
+/// install — the one local dependency `ctx traits internal config build` needs on
 /// its node-invoking path (P457). Shared by every suite that drives a real
 /// `config.ts` build (P467's honesty layer, P457's own proofs).
 pub fn symlink_node_modules(proj: &Path) {
@@ -409,7 +409,7 @@ pub fn run_ctx_with_env(
 /// Run `ctx` with `args` in `cwd`, isolated under `home`, feeding `stdin`
 /// bytes to the child's stdin (closed after the write, so the child sees
 /// EOF). A sibling of [`run_ctx`] for commands that read a payload off
-/// stdin (`ctx traits hook`, P499) — `run_ctx`'s `.output()` gives the child
+/// stdin (`ctx traits internal hook`, P499) — `run_ctx`'s `.output()` gives the child
 /// a null stdin, which is wrong for those.
 pub fn run_ctx_with_stdin(args: &[&str], cwd: &Path, home: &Path, stdin: &[u8]) -> Output {
     let mut child = controlled_command(&ctx_bin(), args, cwd, home)
@@ -543,8 +543,8 @@ fn write_fixture_file(path: &Path, contents: &str) {
 /// render-trust gate never refuses it.
 pub fn ready_hook_fixture_trait(repo: &Path, home: &Path, id: &str) {
     require_success(
-        "`ctx traits state --active` clears the draft gate",
-        &["traits", "state", "--active", id],
+        "`ctx traits internal state --active` clears the draft gate",
+        &["traits", "internal", "state", "--active", id],
         repo,
         home,
     );

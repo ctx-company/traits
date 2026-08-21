@@ -14,7 +14,7 @@
 //!    string where `slot:answer` declares `schema:boolean`) — a real,
 //!    persisted content rejection (`persist_session = true`).
 //! 2. On the retry, the stub harness races ahead of drive: before replying,
-//!    it shells out to `ctx traits set` directly and submits the CURRENT,
+//!    it shells out to `ctx traits internal set` directly and submits the CURRENT,
 //!    schema-valid answer itself — advancing the session to the SECOND
 //!    agent step out from under drive. Drive's own retry then submits
 //!    against the now-stale call template it already built and gets a real
@@ -106,7 +106,7 @@ fn write_executable(path: &Path, contents: &str) {
 /// that fails `slot:answer`'s `schema:boolean` — a genuine, persisted core
 /// content rejection. Invocation 1 (the correction retry, resumed or cold
 /// per the caller's harness declaration) races ahead of drive: before
-/// replying at all, it shells out to `ctx traits set` and submits the real,
+/// replying at all, it shells out to `ctx traits internal set` and submits the real,
 /// schema-valid answer itself, advancing the session to the second step
 /// (which needs its own agent dispatch, so the racer's own submission
 /// cannot auto-advance past it). Drive's own retry then submits against the
@@ -129,7 +129,7 @@ if [ "$COUNT" = "0" ]; then
   exit 0
 fi
 if [ "$COUNT" = "1" ]; then
-  HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits set slot:answer true --session "{ledger}" --value-json --agent worker --json > "{log_dir}/../racer-output.json" 2>&1
+  HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits internal set slot:answer true --session "{ledger}" --value-json --agent worker --json > "{log_dir}/../racer-output.json" 2>&1
   printf '{{"answer":true,"sessionID":"fixed-session-token"}}'
   exit 0
 fi
@@ -152,7 +152,7 @@ printf '{{"answer2":"done"}}'
 /// in `racer_script`.
 ///
 /// Invocation 1 (the correction retry): races ahead of drive again, but this
-/// time via a SECOND `ctx traits set` submission of ANOTHER schema-mismatched
+/// time via a SECOND `ctx traits internal set` submission of ANOTHER schema-mismatched
 /// value against the CURRENT (just-refreshed) call template. That submission
 /// is itself rejected by core — content-rejected, persisted, re-templated —
 /// which changes the session's state digest a second time WITHOUT advancing
@@ -185,7 +185,7 @@ if [ "$COUNT" = "0" ]; then
   exit 0
 fi
 if [ "$COUNT" = "1" ]; then
-  HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits set slot:answer "still-not-a-boolean" --session "{ledger}" --agent worker --json > "{log_dir}/../racer-output.json" 2>&1
+  HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits internal set slot:answer "still-not-a-boolean" --session "{ledger}" --agent worker --json > "{log_dir}/../racer-output.json" 2>&1
   printf '{{"answer":true,"sessionID":"fixed-session-token"}}'
   exit 0
 fi
@@ -216,7 +216,7 @@ mkdir -p "{log_dir}"
 COUNT=$(ls "{log_dir}" 2>/dev/null | wc -l | tr -d ' ')
 cat > "{log_dir}/prompt-$COUNT.txt"
 if [ "$COUNT" = "0" ]; then
-  HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits set slot:answer "still-not-a-boolean" --session "{ledger}" --agent worker --json > "{log_dir}/../racer-output.json" 2>&1
+  HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits internal set slot:answer "still-not-a-boolean" --session "{ledger}" --agent worker --json > "{log_dir}/../racer-output.json" 2>&1
   printf '{{"answer":true,"sessionID":"old-session-token"}}'
   exit 0
 fi
@@ -248,7 +248,7 @@ if [ "$1" = "--fixture-probe" ]; then printf 'fixture-worker-1.0\n'; exit 0; fi
 mkdir -p "{log_dir}"
 COUNT=$(ls "{log_dir}" 2>/dev/null | wc -l | tr -d ' ')
 cat > "{log_dir}/prompt-$COUNT.txt"
-HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits set slot:answer "still-not-a-boolean" --session "{ledger}" --agent worker --json > "{log_dir}/../racer-$COUNT.json" 2>&1
+HOME="{home}" XDG_CONFIG_HOME="{home}" XDG_CACHE_HOME="{home}" "{ctx_bin}" traits internal set slot:answer "still-not-a-boolean" --session "{ledger}" --agent worker --json > "{log_dir}/../racer-$COUNT.json" 2>&1
 printf '{{"answer":true,"sessionID":"fixed-session-token"}}'
 "#,
         log_dir = log_dir.display(),
@@ -314,14 +314,21 @@ session-mode = "per-frame"
     );
     let fixture = ".ctx/traits/fixture-p464/generated/index.toml";
     require_success(
-        "p464-proof `ctx traits review --approve`",
-        &["traits", "review", "--file", fixture, "--approve"],
+        "p464-proof `ctx traits internal review --approve`",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
-        "p464-proof `ctx traits state --active`",
-        &["traits", "state", "--active", "--file", fixture],
+        "p464-proof `ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -371,13 +378,14 @@ fn prompt_text(log_dir: &Path, n: usize) -> String {
 }
 
 /// Number of `slot:answer` entries in the session's accepted-slot-values
-/// history, read through `ctx traits run-status --json` (never the raw
+/// history, read through `ctx traits internal run-status --json` (never the raw
 /// ledger file) — the public-path evidence that drive's own stale retry
 /// never phantom-doubled the racer's single accepted submission.
 fn accepted_answer_revisions(ledger: &Path, repo: &Path, home: &Path) -> usize {
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "run-status",
             "--session",
             &ledger.to_string_lossy(),

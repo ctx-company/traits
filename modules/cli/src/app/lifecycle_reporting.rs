@@ -889,7 +889,7 @@ pub(crate) fn handle_trust_named_update(
                     "next",
                     format!(
                         "this machine trusts the current digest, but package status is still \
-                         draft; run `ctx traits state --active {}` before it can run",
+                         draft; run `ctx traits internal state --active {}` before it can run",
                         trait_ref.id.as_str()
                     ),
                     RowTone::Default,

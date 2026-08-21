@@ -234,11 +234,11 @@ impl Ledger {
 }
 
 // ---------------------------------------------------------------------------
-// Plan actions (`ctx traits context plan`)
+// Plan actions (`ctx traits internal context plan`)
 // ---------------------------------------------------------------------------
 
 /// One trait's current render, as actually produced by this process's render
-/// path (`ctx traits prompt`'s render path — see P498 decision 3/4: the
+/// path (`ctx traits internal prompt`'s render path — see P498 decision 3/4: the
 /// freshness key is the model-view content digest, and the recorded load
 /// level is the level actually rendered, never the resolver's nominal
 /// pricing decision).

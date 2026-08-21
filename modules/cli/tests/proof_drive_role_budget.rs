@@ -122,14 +122,21 @@ session-mode = "per-frame"
     );
     let fixture = ".ctx/traits/fixture-p475-budget/generated/index.toml";
     require_success(
-        "p475-budget-proof `ctx traits review --approve`",
-        &["traits", "review", "--file", fixture, "--approve"],
+        "p475-budget-proof `ctx traits internal review --approve`",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
-        "p475-budget-proof `ctx traits state --active`",
-        &["traits", "state", "--active", "--file", fixture],
+        "p475-budget-proof `ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );

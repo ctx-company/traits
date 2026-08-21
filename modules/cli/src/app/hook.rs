@@ -1,4 +1,4 @@
-//! P499/P501: `ctx traits hook` — the claude-code and codex hook adapter.
+//! P499/P501: `ctx traits internal hook` — the claude-code and codex hook adapter.
 //!
 //! Reads a hook payload as JSON on stdin and writes
 //! `{"hookSpecificOutput":{"hookEventName":…,"additionalContext":…}}` on
@@ -61,7 +61,7 @@ pub(crate) fn handle_hook(host: HookHost, settings: bool) -> crate::Result<Comma
     }
 
     if let Err(error) = run(host) {
-        eprintln!("ctx traits hook: {error}");
+        eprintln!("ctx traits internal hook: {error}");
     }
     Ok(CommandOutput::new(()))
 }
@@ -106,7 +106,7 @@ fn run(host: HookHost) -> crate::Result<()> {
         }
         "SessionStart" => handle_session_start(&payload, &host_key)?,
         other => {
-            eprintln!("ctx traits hook: unrecognized hook_event_name {other:?}, no-op");
+            eprintln!("ctx traits internal hook: unrecognized hook_event_name {other:?}, no-op");
         }
     }
 
@@ -153,7 +153,9 @@ fn handle_session_start(
             // No ledger touch, no output.
         }
         other => {
-            eprintln!("ctx traits hook: unrecognized SessionStart source {other:?}, no-op");
+            eprintln!(
+                "ctx traits internal hook: unrecognized SessionStart source {other:?}, no-op"
+            );
         }
     }
     Ok(())
@@ -220,7 +222,7 @@ fn select_within_cap(rows: &[PlannedRow]) -> (Vec<&PlannedRow>, String) {
 
 fn report_omitted(row: &PlannedRow) {
     eprintln!(
-        "ctx traits hook: omitting {} from additionalContext ({CONTEXT_CAP_CHARS}-char cap)",
+        "ctx traits internal hook: omitting {} from additionalContext ({CONTEXT_CAP_CHARS}-char cap)",
         row.trait_id
     );
 }
@@ -249,16 +251,16 @@ fn print_hook_output(event_name: &str, additional_context: &str) {
     };
     match serde_json::to_string(&output) {
         Ok(json) => println!("{json}"),
-        Err(error) => eprintln!("ctx traits hook: cannot serialize hook output: {error}"),
+        Err(error) => eprintln!("ctx traits internal hook: cannot serialize hook output: {error}"),
     }
 }
 
-/// `ctx traits hook --host <host> --settings` (§4.5/P501 §3.1.B): prints the
+/// `ctx traits internal hook --host <host> --settings` (§4.5/P501 §3.1.B): prints the
 /// host's hooks config snippet, naming the running binary's absolute path
 /// as the command and an explicit timeout comfortably under the harness's
 /// 30s budget. No matcher — the handler dispatches on `source` itself.
 /// Stdout stays a pure JSON wire (hook.rs's stdout doctrine); any advisory
-/// note goes to stderr, keeping `ctx traits hook --host codex --settings >
+/// note goes to stderr, keeping `ctx traits internal hook --host codex --settings >
 /// ~/.codex/hooks.json` safe to pipe.
 fn emit_settings(host: HookHost) -> crate::Result<()> {
     let exe = std::env::current_exe().map_err(|source| crate::Error::Command {
@@ -290,7 +292,7 @@ fn emit_settings(host: HookHost) -> crate::Result<()> {
         }),
         HookHost::Codex => {
             eprintln!(
-                "ctx traits hook: codex gates hooks on a content hash of the configured \
+                "ctx traits internal hook: codex gates hooks on a content hash of the configured \
                  command string (`trusted_hash`); this snippet's command differs from any \
                  previously-trusted one, so codex will re-prompt for hook trust once after \
                  install. Pin `ctx` at a stable path (e.g. via `install-bin`, not a copy over \

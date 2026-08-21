@@ -193,7 +193,7 @@ fn fixture_path_from_ref(
 }
 
 fn print_eval_report(report: &ctx_traits_core::eval_run::Report, out: Option<&str>) {
-    println!("ctx traits eval");
+    println!("ctx traits internal eval");
     println!("  trait: {}", report.trait_id);
     println!("  source-digest: {}", report.source_digest);
     println!("  report: {}", out.unwrap_or("not written"));

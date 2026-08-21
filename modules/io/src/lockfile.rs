@@ -185,7 +185,7 @@ pub fn update_projection_evidence(
     let mut document = read_lockfile(trait_root)?.unwrap_or_else(|| {
         Document::new(Metadata {
             schema_version: Some("0.1".to_string()),
-            generated_by: Some("ctx traits export".to_string()),
+            generated_by: Some("ctx traits internal export".to_string()),
             generated_at: Some("not-recorded".to_string()),
         })
     });

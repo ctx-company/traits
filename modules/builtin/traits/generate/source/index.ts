@@ -82,7 +82,7 @@ const initRoundsSpent = sequence.project("init-rounds-spent", {
 // task 0066.1 §5), so the candidate rides one argv element.
 const evaluateStep = sequence.command("evaluate-round", {
   title: "Evaluate the candidate through the rung ladder",
-  argv: ["ctx", "traits", "generate-round", traitId, candidateSource],
+  argv: ["ctx", "traits", "internal", "generate-round", traitId, candidateSource],
   output: roundReport,
   // Node builds are slow; an undeclared timeout is a 120s kill.
   timeoutMs: 180_000,

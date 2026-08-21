@@ -234,8 +234,8 @@ fn config_build_default_output_matches_the_panel_registry_shape() {
     .unwrap();
 
     let stdout = require_success(
-        "`ctx traits config build` over a config.ts with no local import",
-        &["traits", "config", "build"],
+        "`ctx traits internal config build` over a config.ts with no local import",
+        &["traits", "internal", "config", "build"],
         &repo,
         &scratch.home(),
     );
@@ -311,8 +311,8 @@ fn check_default_output_matches_the_panel_registry_shape() {
 fn migrate_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-migrate-panel-shape", "fixture-migrate-panel");
     let stdout = require_success(
-        "`ctx traits migrate` over a freshly-init'd trait already at the latest schema version",
-        &["traits", "migrate", &fixture.trait_id],
+        "`ctx traits internal migrate` over a freshly-init'd trait already at the latest schema version",
+        &["traits", "internal", "migrate", &fixture.trait_id],
         &fixture.repo,
         &fixture.home,
     );
@@ -346,9 +346,10 @@ fn explain_default_output_matches_the_panel_registry_shape() {
         .to_string_lossy()
         .to_string();
     let stdout = require_success(
-        "`ctx traits explain` over a freshly-init'd trait",
+        "`ctx traits internal explain` over a freshly-init'd trait",
         &[
             "traits",
+            "internal",
             "explain",
             "--file",
             &trait_toml,
@@ -367,8 +368,14 @@ fn explain_default_output_matches_the_panel_registry_shape() {
 fn export_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-export-panel-shape", "fixture-export-panel");
     let stdout = require_success(
-        "`ctx traits export` over a freshly-init'd trait",
-        &["traits", "export", &fixture.trait_id, "--allow-unreviewed"],
+        "`ctx traits internal export` over a freshly-init'd trait",
+        &[
+            "traits",
+            "internal",
+            "export",
+            &fixture.trait_id,
+            "--allow-unreviewed",
+        ],
         &fixture.repo,
         &fixture.home,
     );
@@ -494,9 +501,10 @@ fn build_default_output_matches_the_panel_registry_shape() {
 fn host_install_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-host-panel-shape", "fixture-host-panel");
     let stdout = require_success(
-        "`ctx traits host install --host cursor` over a freshly-init'd trait",
+        "`ctx traits internal host install --host cursor` over a freshly-init'd trait",
         &[
             "traits",
+            "internal",
             "host",
             "install",
             "--host",
@@ -552,8 +560,8 @@ fn import_default_output_matches_the_panel_registry_shape() {
 fn activate_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-activate-panel-shape", "fixture-activate-panel");
     let stdout = require_success(
-        "`ctx traits state --active` over a freshly-init'd trait",
-        &["traits", "state", "--active", &fixture.trait_id],
+        "`ctx traits internal state --active` over a freshly-init'd trait",
+        &["traits", "internal", "state", "--active", &fixture.trait_id],
         &fixture.repo,
         &fixture.home,
     );
@@ -634,8 +642,15 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
         &home,
     );
     require_success(
-        "`ctx traits state --active --file`",
-        &["traits", "state", "--active", "--file", fixture_path],
+        "`ctx traits internal state --active --file`",
+        &[
+            "traits",
+            "internal",
+            "state",
+            "--active",
+            "--file",
+            fixture_path,
+        ],
         &repo,
         &home,
     );

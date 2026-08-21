@@ -204,7 +204,7 @@ pub(crate) fn render() -> crate::Result<String> {
 
     let mut out = String::new();
     out.push_str("// GENERATED FILE — do not edit by hand.\n");
-    out.push_str("// Regenerate with `ctx traits sdk-generate`.\n\n");
+    out.push_str("// Regenerate with `ctx traits internal sdk-generate`.\n\n");
     out.push_str(
         "export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue | undefined };\n\n",
     );

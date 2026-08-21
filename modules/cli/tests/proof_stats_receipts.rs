@@ -1,4 +1,4 @@
-//! 0120: `ctx traits stats` — a scratch-store CLI proof that the aggregation
+//! 0120: `ctx traits internal stats` — a scratch-store CLI proof that the aggregation
 //! wired at `modules/cli/src/app/stats.rs` reproduces hand-counted numbers
 //! over real and synthetic ledgers, is stable `--json` shape, and prints a
 //! clean zero state on an empty store.
@@ -66,13 +66,20 @@ fn init_fixture_repo(repo: &Path, home: &Path) {
 
     let fixture = ".ctx/traits/demo/generated/index.toml";
     let output = run_ctx(
-        &["traits", "review", "--file", fixture, "--approve"],
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "state", "--active", "--file", fixture],
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -91,7 +98,7 @@ fn value_json(output: &std::process::Output) -> serde_json::Value {
 }
 
 fn stats_json(repo: &Path, home: &Path, extra: &[&str]) -> serde_json::Value {
-    let mut args = vec!["traits", "stats", "--json"];
+    let mut args = vec!["traits", "internal", "stats", "--json"];
     args.extend_from_slice(extra);
     let output = run_ctx(&args, repo, home);
     assert_exit_code(&output, 0);

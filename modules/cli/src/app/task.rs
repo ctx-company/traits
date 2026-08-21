@@ -1,4 +1,4 @@
-//! `ctx traits task import` handler: markdown board file → canonical TOML
+//! `ctx traits internal task import` handler: markdown board file → canonical TOML
 //! task document.
 
 use camino::Utf8PathBuf;

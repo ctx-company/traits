@@ -8,7 +8,7 @@ pub(crate) fn handle_claim_gate(json: bool) -> crate::Result<CommandOutput<()>> 
     if json {
         print_json_report(&report, "claim gate")?;
     } else {
-        println!("ctx traits claim-gate");
+        println!("ctx traits internal claim-gate");
         println!("  summary: {}", report.summary);
         println!("  blocked-claims: {}", report.blocked_count);
         for row in &report.rows {

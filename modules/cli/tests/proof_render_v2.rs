@@ -1,4 +1,4 @@
-//! P493: `ctx traits prompt` emits the render v2 tagged **behavior**
+//! P493: `ctx traits internal prompt` emits the render v2 tagged **behavior**
 //! envelope (rule 3's four sections only), never authoring-surface
 //! procedure/prompt/agent/port/signal/activation/scenario plumbing.
 //! Behavioral assertions only — parse/inspect structure, never byte-compare
@@ -90,7 +90,7 @@ fn write_fixture_file(path: &Path, contents: &str) {
 }
 
 /// A fresh Git repository with the fixture trait activated and trust-approved
-/// so `ctx traits prompt` never refuses on the trust/status gate (P497).
+/// so `ctx traits internal prompt` never refuses on the trust/status gate (P497).
 fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
     let repo = scratch.home().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -108,8 +108,8 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
         TRAIT_MANIFEST,
     );
     require_success(
-        "`ctx traits state --active` clears the draft gate",
-        &["traits", "state", "--active", TRAIT_ID],
+        "`ctx traits internal state --active` clears the draft gate",
+        &["traits", "internal", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -127,7 +127,11 @@ fn prompt_behavior_envelope_carries_zero_authoring_plumbing() {
     let scratch = ScratchRoot::new("render-v2-behavior-only");
     let repo = ready_repo(&scratch);
 
-    let output = run_ctx(&["traits", "prompt", TRAIT_ID], &repo, &scratch.home());
+    let output = run_ctx(
+        &["traits", "internal", "prompt", TRAIT_ID],
+        &repo,
+        &scratch.home(),
+    );
     assert!(output.status.success(), "prompt should have succeeded");
     let (stdout, _) = support::utf8(&output);
 
@@ -171,12 +175,16 @@ fn json_text_is_byte_identical_to_plain_stdout_and_digest_matches_the_envelope_a
     let scratch = ScratchRoot::new("render-v2-json-parity");
     let repo = ready_repo(&scratch);
 
-    let plain_output = run_ctx(&["traits", "prompt", TRAIT_ID], &repo, &scratch.home());
+    let plain_output = run_ctx(
+        &["traits", "internal", "prompt", TRAIT_ID],
+        &repo,
+        &scratch.home(),
+    );
     assert!(plain_output.status.success());
     let (plain_stdout, _) = support::utf8(&plain_output);
 
     let json_output = run_ctx(
-        &["traits", "prompt", TRAIT_ID, "--json"],
+        &["traits", "internal", "prompt", TRAIT_ID, "--json"],
         &repo,
         &scratch.home(),
     );
@@ -215,9 +223,13 @@ fn prompt_levels_select_matching_artifacts_and_summary_is_compact() {
     let scratch = ScratchRoot::new("render-v2-prompt-levels");
     let repo = ready_repo(&scratch);
 
-    let flagless = run_ctx(&["traits", "prompt", TRAIT_ID], &repo, &scratch.home());
+    let flagless = run_ctx(
+        &["traits", "internal", "prompt", TRAIT_ID],
+        &repo,
+        &scratch.home(),
+    );
     let full = run_ctx(
-        &["traits", "prompt", TRAIT_ID, "--level", "full"],
+        &["traits", "internal", "prompt", TRAIT_ID, "--level", "full"],
         &repo,
         &scratch.home(),
     );
@@ -227,7 +239,9 @@ fn prompt_levels_select_matching_artifacts_and_summary_is_compact() {
     );
 
     let summary = run_ctx(
-        &["traits", "prompt", TRAIT_ID, "--level", "summary"],
+        &[
+            "traits", "internal", "prompt", TRAIT_ID, "--level", "summary",
+        ],
         &repo,
         &scratch.home(),
     );
@@ -239,7 +253,9 @@ fn prompt_levels_select_matching_artifacts_and_summary_is_compact() {
     assert!(!summary_text.contains("Keep the implementation"));
 
     let json = run_ctx(
-        &["traits", "prompt", TRAIT_ID, "--level", "summary", "--json"],
+        &[
+            "traits", "internal", "prompt", TRAIT_ID, "--level", "summary", "--json",
+        ],
         &repo,
         &scratch.home(),
     );

@@ -104,13 +104,20 @@ argv = ["git", "commit", "-m", "landing honesty fixture commit"]
 
     let fixture = ".ctx/traits/land-demo/generated/index.toml";
     let output = run_ctx(
-        &["traits", "review", "--file", fixture, "--approve"],
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "state", "--active", "--file", fixture],
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -176,13 +183,20 @@ output = ["slot:notified"]
 
     let fixture = ".ctx/traits/demo/generated/index.toml";
     let output = run_ctx(
-        &["traits", "review", "--file", fixture, "--approve"],
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "state", "--active", "--file", fixture],
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -253,7 +267,11 @@ fn worktree_run_without_merge_intent_reports_not_merged() {
         "summary sidecar must classify a completed, uncommitted-to-main worktree run as not-merged: {summary}"
     );
 
-    let story = run_ctx(&["traits", "story", &run_id], &repo, &scratch.home());
+    let story = run_ctx(
+        &["traits", "internal", "story", &run_id],
+        &repo,
+        &scratch.home(),
+    );
     assert_exit_code(&story, 0);
     let (stdout, _) = utf8(&story);
     assert!(
@@ -304,7 +322,11 @@ fn clean_tree_completed_run_has_no_landing_line() {
         "a clean-tree completed run must carry no landing field: {summary}"
     );
 
-    let story = run_ctx(&["traits", "story", &run_id], &repo, &scratch.home());
+    let story = run_ctx(
+        &["traits", "internal", "story", &run_id],
+        &repo,
+        &scratch.home(),
+    );
     assert_exit_code(&story, 0);
     let (stdout, _) = utf8(&story);
     assert!(
@@ -352,7 +374,11 @@ fn merged_run_reports_landed_with_revision() {
         "summary sidecar must classify a merged run as landed: {summary}"
     );
 
-    let story = run_ctx(&["traits", "story", &run_id], &repo, &scratch.home());
+    let story = run_ctx(
+        &["traits", "internal", "story", &run_id],
+        &repo,
+        &scratch.home(),
+    );
     assert_exit_code(&story, 0);
     let (stdout, _) = utf8(&story);
     assert!(

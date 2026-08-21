@@ -1499,9 +1499,17 @@ fn run_and_session_start_reject_contradictory_policy_flags() {
             "--no-strict-loops",
             "--no-drive",
         ][..],
-        &["traits", "session", "start", "--worktree", "--no-worktree"][..],
         &[
             "traits",
+            "internal",
+            "session",
+            "start",
+            "--worktree",
+            "--no-worktree",
+        ][..],
+        &[
+            "traits",
+            "internal",
             "session",
             "start",
             "--strict-loops",
@@ -1564,6 +1572,7 @@ output = ["slot:notified"]
         &run_ctx(
             &[
                 "traits",
+                "internal",
                 "review",
                 "--file",
                 fixture.to_str().unwrap(),
@@ -1578,6 +1587,7 @@ output = ["slot:notified"]
         &run_ctx(
             &[
                 "traits",
+                "internal",
                 "state",
                 "--active",
                 "--file",
@@ -1615,6 +1625,7 @@ output = ["slot:notified"]
     let flagged_output = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--file",
             fixture.to_str().unwrap(),
@@ -1645,6 +1656,7 @@ output = ["slot:notified"]
     let configured_output = run_ctx(
         &[
             "traits",
+            "internal",
             "drive",
             "--file",
             fixture.to_str().unwrap(),
@@ -1755,6 +1767,7 @@ output = ["slot:notified"]
         &run_ctx(
             &[
                 "traits",
+                "internal",
                 "review",
                 "--file",
                 fixture.to_str().unwrap(),
@@ -1769,6 +1782,7 @@ output = ["slot:notified"]
         &run_ctx(
             &[
                 "traits",
+                "internal",
                 "state",
                 "--active",
                 "--file",

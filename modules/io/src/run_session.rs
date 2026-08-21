@@ -202,7 +202,7 @@ pub fn write_run_session(
 /// Remove a persisted session ledger by id (0066.4): an ephemeral drive
 /// (built-in meta-trait runner, `run_builtin_trait_observed`) consumes its
 /// session in-process and must not leave it parked in the store afterward —
-/// a phantom session a later `ctx traits story`/`drive --session` would find
+/// a phantom session a later `ctx traits internal story`/`drive --session` would find
 /// with nothing left to do. Missing-file is not an error: the session may
 /// already be gone (e.g. a second cleanup attempt on the same path).
 pub fn delete_run_session(session: &str, store: Option<&str>) -> crate::Result<()> {
@@ -614,7 +614,7 @@ pub fn record_session_title_no_narrator(path: &Utf8Path, owner: &str) -> crate::
 }
 
 /// Clear the P460 automatic-landing merge intent on a session's provenance
-/// (`ctx traits drive --no-merge`, applied only once this invocation holds
+/// (`ctx traits internal drive --no-merge`, applied only once this invocation holds
 /// the per-session driver lock). The initial intent is set once, as part of
 /// the session's first persisted provenance at start — never by this
 /// function — so a globally discoverable ledger is never briefly missing its
@@ -1348,7 +1348,7 @@ mod session_title_tests {
         );
     }
 
-    /// 0110: `ctx traits run-status --json`/the receipt path is a thin
+    /// 0110: `ctx traits internal run-status --json`/the receipt path is a thin
     /// read-and-reserialize of the raw ledger (`ctx_traits_io::run::status`
     /// returns the session it read, unmodified) — so the source this test
     /// asserts on-disk is exactly what that surface reports, with no

@@ -144,7 +144,7 @@ impl CallerProvenance {
     pub fn mcp() -> Self {
         Self {
             surface: "mcp".to_string(),
-            caller: "ctx traits mcp adapter".to_string(),
+            caller: "ctx traits internal mcp adapter".to_string(),
             agent: None,
             harness: None,
         }
@@ -269,7 +269,7 @@ pub struct Provenance {
     /// credits-paused, later-resumed drive lands with the same rung
     /// regardless of `[merge]` config changes made in between. `None` for a
     /// run started without an effective `--merge` request (including every
-    /// legacy ledger); `ctx traits drive --no-merge` clears it before
+    /// legacy ledger); `ctx traits internal drive --no-merge` clears it before
     /// resuming.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_intent: Option<MergeRung>,
@@ -2312,7 +2312,7 @@ fn submit_run_submission(
             .caller
             .as_ref()
             .map(|caller| format!("{}:{}", caller.surface, caller.caller))
-            .unwrap_or_else(|| "ctx traits call".to_string())
+            .unwrap_or_else(|| "ctx traits internal call".to_string())
     };
     let envelope = StepOutputEnvelope {
         sequence_index: submission.expected_source_index,

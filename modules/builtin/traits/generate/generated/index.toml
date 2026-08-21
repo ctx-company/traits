@@ -169,6 +169,7 @@ output = ["slot:round-report"]
 argv = [
     "ctx",
     "traits",
+    "internal",
     "generate-round",
     "{port:trait-id}",
     "{slot:candidate-source}",

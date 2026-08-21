@@ -1,4 +1,4 @@
-//! P244 §4: `ctx traits edit <trait>` — a modal alt-screen master-detail
+//! P244 §4: `ctx traits internal edit <trait>` — a modal alt-screen master-detail
 //! screen for one trait package, built entirely on the landed P468 kit
 //! (`tui_kit`) and the alt-screen `RatatuiPane`. Left: the package's own
 //! canonical sections (metadata / intent / behavior / ports / slots /
@@ -40,7 +40,7 @@ enum ActionTag {
 }
 
 struct EditorState {
-    /// The path passed to `ctx traits edit` / resolved from the trait id —
+    /// The path passed to `ctx traits internal edit` / resolved from the trait id —
     /// the SAME canonical-document path `dashboard_trait_drift` and
     /// `dashboard_trait_editable_source` key off, so the editor and the
     /// dashboard's TRAITS screen can never resolve a different file for the
@@ -167,12 +167,12 @@ fn trait_sections(trait_ref: &ctx_traits_core::Trait) -> Vec<Section> {
     ]
 }
 
-/// Entry point: `ctx traits edit <trait>`. Refuses with a plain-text message
+/// Entry point: `ctx traits internal edit <trait>`. Refuses with a plain-text message
 /// and a nonzero exit off a TTY, mirroring `tui_demo::run`.
 pub(crate) fn run(trait_arg: &str) -> crate::Result<()> {
     if !super::dashboard::interactive_available() {
         return Err(crate::Error::Command {
-            message: "ctx traits edit requires an interactive TTY".to_string(),
+            message: "ctx traits internal edit requires an interactive TTY".to_string(),
         });
     }
     let canonical_path =
@@ -209,7 +209,7 @@ fn handle_key(pane: &mut RatatuiPane, state: &mut EditorState, key: KeyEvent) ->
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         state.modal_host.open(
             ActionTag::Exit,
-            Modal::confirm("exit editor", "Quit ctx traits edit?"),
+            Modal::confirm("exit editor", "Quit ctx traits internal edit?"),
         );
         return Ok(());
     }
@@ -217,7 +217,7 @@ fn handle_key(pane: &mut RatatuiPane, state: &mut EditorState, key: KeyEvent) ->
         KeyCode::Char('q') => {
             state.modal_host.open(
                 ActionTag::Exit,
-                Modal::confirm("exit editor", "Quit ctx traits edit?"),
+                Modal::confirm("exit editor", "Quit ctx traits internal edit?"),
             );
         }
         KeyCode::Enter | KeyCode::Esc => {
@@ -390,7 +390,7 @@ fn draw(pane: &mut RatatuiPane, state: &mut EditorState) -> std::io::Result<()> 
             .split(area);
         frame.render_widget(
             tui_kit::title_bar(format!(
-                "ctx traits edit — {} [{}/{}/{}]",
+                "ctx traits internal edit — {} [{}/{}/{}]",
                 state.trait_id, state.status, state.trust, state.drift
             )),
             layout[0],

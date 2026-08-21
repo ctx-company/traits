@@ -53,7 +53,11 @@ fn draft_and_unreviewed_prompt_refuses_flagless() {
     let scratch = ScratchRoot::new("render-trust-prompt-refuse");
     let repo = draft_repo(&scratch);
 
-    let output = run_ctx(&["traits", "prompt", TRAIT_ID], &repo, &scratch.home());
+    let output = run_ctx(
+        &["traits", "internal", "prompt", TRAIT_ID],
+        &repo,
+        &scratch.home(),
+    );
     assert!(!output.status.success(), "prompt should have refused");
     let (_, stderr) = support::utf8(&output);
     assert!(
@@ -72,7 +76,13 @@ fn allow_unreviewed_renders_with_draft_advisory_on_stderr() {
     let repo = draft_repo(&scratch);
 
     let baseline_output = run_ctx(
-        &["traits", "prompt", TRAIT_ID, "--allow-unreviewed"],
+        &[
+            "traits",
+            "internal",
+            "prompt",
+            TRAIT_ID,
+            "--allow-unreviewed",
+        ],
         &repo,
         &scratch.home(),
     );
@@ -95,7 +105,11 @@ fn allow_unreviewed_renders_with_draft_advisory_on_stderr() {
         &repo,
         &scratch.home(),
     );
-    let approved_output = run_ctx(&["traits", "prompt", TRAIT_ID], &repo, &scratch.home());
+    let approved_output = run_ctx(
+        &["traits", "internal", "prompt", TRAIT_ID],
+        &repo,
+        &scratch.home(),
+    );
     assert!(
         approved_output.status.success(),
         "prompt should render once trust is approved even while still draft: {:?}",
@@ -118,8 +132,8 @@ fn activated_and_verified_trait_renders_flagless_with_no_advisory() {
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits state --active` clears the draft gate",
-        &["traits", "state", "--active", TRAIT_ID],
+        "`ctx traits internal state --active` clears the draft gate",
+        &["traits", "internal", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -130,7 +144,11 @@ fn activated_and_verified_trait_renders_flagless_with_no_advisory() {
         &scratch.home(),
     );
 
-    let prompt_output = run_ctx(&["traits", "prompt", TRAIT_ID], &repo, &scratch.home());
+    let prompt_output = run_ctx(
+        &["traits", "internal", "prompt", TRAIT_ID],
+        &repo,
+        &scratch.home(),
+    );
     assert!(
         prompt_output.status.success(),
         "prompt should succeed flagless once activated/verified: {:?}",
@@ -146,6 +164,7 @@ fn activated_and_verified_trait_renders_flagless_with_no_advisory() {
     let export_output = run_ctx(
         &[
             "traits",
+            "internal",
             "export",
             TRAIT_ID,
             "--out",
@@ -161,7 +180,9 @@ fn activated_and_verified_trait_renders_flagless_with_no_advisory() {
     );
 
     let install_output = run_ctx(
-        &["traits", "host", "install", "--host", "cursor", TRAIT_ID],
+        &[
+            "traits", "internal", "host", "install", "--host", "cursor", TRAIT_ID,
+        ],
         &repo,
         &scratch.home(),
     );
@@ -185,10 +206,23 @@ fn blocked_trait_refuses_all_three_verbs_naming_trust_list() {
     );
 
     for args in [
-        vec!["traits", "prompt", TRAIT_ID, "--allow-unreviewed"],
-        vec!["traits", "export", TRAIT_ID, "--allow-unreviewed"],
         vec![
             "traits",
+            "internal",
+            "prompt",
+            TRAIT_ID,
+            "--allow-unreviewed",
+        ],
+        vec![
+            "traits",
+            "internal",
+            "export",
+            TRAIT_ID,
+            "--allow-unreviewed",
+        ],
+        vec![
+            "traits",
+            "internal",
             "host",
             "install",
             "--host",
@@ -221,7 +255,7 @@ fn json_refusal_parses_as_an_object_carrying_the_expected_gate_code() {
     let repo = draft_repo(&scratch);
 
     let output = run_ctx(
-        &["traits", "prompt", TRAIT_ID, "--json"],
+        &["traits", "internal", "prompt", TRAIT_ID, "--json"],
         &repo,
         &scratch.home(),
     );
@@ -254,7 +288,9 @@ fn host_install_refuses_draft_flagless_and_succeeds_with_allow_draft() {
     );
 
     let refused = run_ctx(
-        &["traits", "host", "install", "--host", "cursor", TRAIT_ID],
+        &[
+            "traits", "internal", "host", "install", "--host", "cursor", TRAIT_ID,
+        ],
         &repo,
         &scratch.home(),
     );
@@ -275,6 +311,7 @@ fn host_install_refuses_draft_flagless_and_succeeds_with_allow_draft() {
     let installed = run_ctx(
         &[
             "traits",
+            "internal",
             "host",
             "install",
             "--host",
@@ -298,8 +335,8 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits state --active` clears the draft gate",
-        &["traits", "state", "--active", TRAIT_ID],
+        "`ctx traits internal state --active` clears the draft gate",
+        &["traits", "internal", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -310,8 +347,10 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
         &scratch.home(),
     );
     require_success(
-        "`ctx traits host install` places the trait",
-        &["traits", "host", "install", "--host", "cursor", TRAIT_ID],
+        "`ctx traits internal host install` places the trait",
+        &[
+            "traits", "internal", "host", "install", "--host", "cursor", TRAIT_ID,
+        ],
         &repo,
         &scratch.home(),
     );
@@ -328,7 +367,7 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
     );
 
     let update_output = run_ctx(
-        &["traits", "host", "update", "--json"],
+        &["traits", "internal", "host", "update", "--json"],
         &repo,
         &scratch.home(),
     );

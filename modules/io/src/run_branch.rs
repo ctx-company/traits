@@ -1,6 +1,6 @@
 //! Durable per-unit sub-ledgers for P402 concurrent dispatch.
 //!
-//! `ctx traits drive`'s durable CLI/IO supervisor persists one JSON "sidecar"
+//! `ctx traits internal drive`'s durable CLI/IO supervisor persists one JSON "sidecar"
 //! record per speculatively-dispatched `parallel` branch or concurrent
 //! `for-each` item, so a wave's outcomes survive process interruption
 //! (graceful `SIGINT`) or restart, without ever becoming a second parent
@@ -12,7 +12,7 @@
 //! Sidecars are always resolved *relative to the parent ledger's own
 //! resolved path* (see [`sidecars_root`]) — never a hardcoded
 //! `.ctx/runs` — so a custom `--session-store` or an explicit ledger path
-//! (`ctx traits drive --session ./somewhere/ledger.json`) keeps its sidecars
+//! (`ctx traits internal drive --session ./somewhere/ledger.json`) keeps its sidecars
 //! alongside that same ledger, not the default store. They live nested under
 //! `<ledger-parent>/<ledger-stem>.branches/<activation-digest>/<ordinal>.json`
 //! (never a flat `*.json` scan of the session store) so repeated activations
@@ -326,7 +326,7 @@ pub struct HarnessSessionEntry {
 }
 
 /// Every live harness conversation for one parent run, persisted so a
-/// `ctx traits drive --session <id>` resume (a new process) can rejoin
+/// `ctx traits internal drive --session <id>` resume (a new process) can rejoin
 /// conversations a prior process observed instead of restarting them cold.
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

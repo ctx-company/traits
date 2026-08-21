@@ -1,6 +1,6 @@
 //! `<ledger>.json.activity.jsonl` sidecar: a per-run, append-during-drive log
 //! of normalized activity (P504's [`ActivityEvent`]) and finished-step
-//! summaries (P455), read back by `ctx traits story` (P521) to render
+//! summaries (P455), read back by `ctx traits internal story` (P521) to render
 //! detailed/assisted levels without re-deriving anything the drive already
 //! observed.
 //!

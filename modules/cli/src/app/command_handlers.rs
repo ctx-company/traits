@@ -189,7 +189,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     }
 }
 
-/// Fold `ctx traits config --json`'s namespace-level flag into whichever
+/// Fold `ctx traits internal config --json`'s namespace-level flag into whichever
 /// subcommand was given; see [`merge_trust_json`].
 fn merge_config_json(subcommand: cli::ConfigCommand, namespace_json: bool) -> cli::ConfigCommand {
     match subcommand {
@@ -324,34 +324,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             },
             Some(cli::TraitsCommand::Fork { id, json }) => crate::app::fork::handle_fork(&id, json),
             Some(cli::TraitsCommand::List { json, verbose }) => handle_list(json, verbose),
-            Some(cli::TraitsCommand::Stats {
-                since,
-                trait_id,
-                json,
-            }) => crate::app::stats::handle_stats(since, trait_id.as_deref(), json),
-            Some(cli::TraitsCommand::Running { json }) => crate::app::running::handle_running(json),
-            Some(cli::TraitsCommand::Story {
-                run,
-                session_store,
-                json,
-                markdown,
-                level,
-            }) => {
-                let level = level
-                    .map(|level| {
-                        level
-                            .parse::<ctx_traits_core::procedure::story::StoryLevel>()
-                            .map_err(|message| crate::Error::Command { message })
-                    })
-                    .transpose()?;
-                crate::app::story::handle_story(
-                    &run,
-                    session_store.as_deref(),
-                    json,
-                    markdown,
-                    level,
-                )
-            }
             Some(cli::TraitsCommand::Doctor {
                 path,
                 config,
@@ -377,9 +349,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 } else {
                     crate::app::doctor::handle_doctor(path.as_deref(), json, verbose, apply)
                 }
-            }
-            Some(cli::TraitsCommand::ClaimGate { json }) => {
-                crate::app::report_handlers::handle_claim_gate(json)
             }
             // P567: `ctx traits dependency <verb>` is the whole surface. The
             // six legacy top-level verbs it replaced are gone — five were
@@ -425,129 +394,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     )
                 }
             }
-            Some(cli::TraitsCommand::Hygiene { trait_files, json }) => {
-                handle_hygiene(&trait_files, json)
-            }
-            Some(cli::TraitsCommand::Cost { file, budget, json }) => {
-                handle_cost(&file, budget, json)
-            }
-            Some(cli::TraitsCommand::PreparePublic { file, json }) => {
-                handle_prepare_public(&file, json)
-            }
-            Some(cli::TraitsCommand::ContextContracts { file, json }) => {
-                handle_context_contracts(&file, json)
-            }
-            Some(cli::TraitsCommand::Policy {
-                file,
-                profile,
-                json,
-            }) => handle_policy(&file, &profile, json),
-            Some(cli::TraitsCommand::Evidence {
-                file,
-                profile,
-                json,
-            }) => handle_evidence(&file, &profile, json),
-            Some(cli::TraitsCommand::Compatibility { json }) => handle_compatibility(json),
-            Some(cli::TraitsCommand::Subagent {
-                file,
-                profile,
-                json,
-            }) => handle_subagent(&file, &profile, json),
-            Some(cli::TraitsCommand::Explain {
-                trait_arg,
-                task,
-                scaffold,
-                mut trait_files,
-                files,
-                mode,
-                languages,
-                signals,
-                explicit_invocation,
-                active_only,
-                json,
-                trait_id,
-                source_map,
-                verbose,
-                llm_assisted,
-                candidate,
-                model,
-                budget,
-                assignments,
-            }) => {
-                if let Some(file) = resolve_optional_trait_target(trait_arg.as_deref(), None)? {
-                    trait_files.push(file);
-                }
-                handle_explain(ExplainInputs {
-                    task: task.as_deref(),
-                    scaffold,
-                    trait_files: &trait_files,
-                    files: &files,
-                    mode: mode.as_deref(),
-                    languages: &languages,
-                    signals: &signals,
-                    explicit_invocation: explicit_invocation.as_deref(),
-                    active_only,
-                    json,
-                    trait_id: trait_id.as_deref(),
-                    source_map: source_map.as_deref(),
-                    verbose,
-                    llm_assisted,
-                    candidate_path: candidate.as_deref(),
-                    model: model.as_deref(),
-                    budget_document: budget.as_deref(),
-                    assignments: &assignments,
-                })
-            }
-            Some(cli::TraitsCommand::Inspect {
-                trait_arg,
-                file,
-                dry_plan,
-                profile,
-            }) => {
-                let file = resolve_optional_trait_target(trait_arg.as_deref(), file.as_deref())?;
-                handle_inspect(file.as_deref(), dry_plan, profile.as_deref())
-            }
-            Some(cli::TraitsCommand::TuiDemo) => {
-                crate::app::tui_demo::run()?;
-                Ok(CommandOutput::new(()))
-            }
-            Some(cli::TraitsCommand::Edit { trait_arg }) => {
-                crate::app::trait_editor::run(&trait_arg)?;
-                Ok(CommandOutput::new(()))
-            }
-            Some(cli::TraitsCommand::Manifest) => {
-                let cwd = current_utf8_dir()?;
-                let result = ctx_traits_io::discovery::manifest(&cwd)?;
-
-                match &result {
-                    ctx_traits_io::discovery::ManifestDiscovery::Found(_) => {
-                        println!("{}", format_manifest_discovery(&cwd, &result));
-                        Ok(CommandOutput::new(()))
-                    }
-                    ctx_traits_io::discovery::ManifestDiscovery::NotFound => {
-                        eprintln!("{}", format_manifest_discovery(&cwd, &result));
-                        Ok(CommandOutput::new(()))
-                    }
-                    ctx_traits_io::discovery::ManifestDiscovery::Conflict { .. } => {
-                        eprintln!("{}", format_manifest_discovery(&cwd, &result));
-                        Ok(CommandOutput::new(()))
-                    }
-                }
-            }
-            Some(cli::TraitsCommand::Schema {
-                protocol,
-                format,
-                out,
-            }) => handle_schema(&protocol, &format, &out),
-            Some(cli::TraitsCommand::SdkGenerate { check }) => {
-                crate::app::sdk_generate::handle(check)
-            }
-            Some(cli::TraitsCommand::Synth {
-                path,
-                format,
-                out,
-                check,
-            }) => handle_synth(&path, &format, out.as_deref(), check),
             Some(cli::TraitsCommand::Build {
                 path,
                 format,
@@ -555,12 +401,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 json,
                 relock,
             }) => handle_build(&path, &format, out.as_deref(), json, relock),
-            Some(cli::TraitsCommand::Migrate {
-                id_or_path,
-                to,
-                apply,
-                json,
-            }) => crate::app::migrate::handle_migrate(&id_or_path, to.as_deref(), apply, json),
             Some(cli::TraitsCommand::Generate {
                 name,
                 brief,
@@ -580,18 +420,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 check,
                 json,
             }),
-            Some(cli::TraitsCommand::GenerateRound {
-                trait_id,
-                candidate,
-            }) => crate::app::generate::handle_generate_round(&trait_id, &candidate),
-            Some(cli::TraitsCommand::RefineRound {
-                source_path,
-                candidate,
-            }) => crate::app::refine::handle_refine_round(&source_path, &candidate),
-            Some(cli::TraitsCommand::ImportRound {
-                trait_id,
-                candidate,
-            }) => crate::app::import_handlers::handle_import_round(&trait_id, &candidate),
             Some(cli::TraitsCommand::Refine {
                 id_or_path,
                 change_request,
@@ -656,87 +484,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     verbose,
                 },
             ),
-            Some(cli::TraitsCommand::ImportRefresh {
-                trait_id_or_package,
-                source,
-                check,
-                out,
-                json,
-            }) => crate::app::import_handlers::handle_import_refresh(
-                &trait_id_or_package,
-                source.as_deref(),
-                check,
-                out.as_deref(),
-                json,
-            ),
-            Some(cli::TraitsCommand::Review {
-                trait_arg,
-                file,
-                approve,
-                deny,
-                reason,
-                json,
-            }) => {
-                let file = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "review")?;
-                if approve && deny {
-                    return Err(crate::Error::Command {
-                        message: "review takes --approve or --deny, not both".to_string(),
-                    });
-                }
-                if !approve && !deny {
-                    return Err(crate::Error::Command {
-                        message: "review requires --approve or --deny".to_string(),
-                    });
-                }
-                let state = if approve {
-                    ctx_traits_io::trust::TrustState::Verified
-                } else {
-                    ctx_traits_io::trust::TrustState::Blocked
-                };
-                crate::app::lifecycle_reporting::handle_trust_named_update(
-                    &file, state, reason, json, "review",
-                )
-            }
-            Some(cli::TraitsCommand::State {
-                trait_arg,
-                file,
-                active,
-                draft,
-                deprecated,
-                reason,
-                json,
-            }) => {
-                let action = if active {
-                    Some(crate::app::lifecycle_handlers::LifecycleAction::Activate)
-                } else if draft {
-                    Some(crate::app::lifecycle_handlers::LifecycleAction::Deactivate)
-                } else if deprecated {
-                    Some(crate::app::lifecycle_handlers::LifecycleAction::Deprecate {
-                        reason: reason.as_deref(),
-                    })
-                } else {
-                    None
-                };
-                let target = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "state")?;
-                match action {
-                    Some(action) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
-                        &target, action, json,
-                    ),
-                    // No flag: report, do not transition.
-                    None => crate::app::lifecycle_handlers::handle_lifecycle_status(&target, json),
-                }
-            }
-            Some(cli::TraitsCommand::RunInfo {
-                trait_id,
-                file,
-                query,
-                json,
-            }) => crate::app::run::handle_run_info(RunInfoInputs {
-                trait_id: trait_id.as_deref(),
-                file: file.as_deref(),
-                query: &query,
-                json,
-            }),
             Some(cli::TraitsCommand::Run {
                 args,
                 no_drive,
@@ -996,239 +743,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     })
                 }
             }
-            Some(cli::TraitsCommand::Session { subcommand }) => match subcommand {
-                cli::SessionCommand::Start(args) => {
-                    let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
-                        camino::Utf8Path::new("."),
-                    )?;
-                    let policy = runtime.effective_run_policy();
-                    let budget = resolve_run_budget(
-                        policy,
-                        RunBudgetInputs {
-                            max_frames: args.max_frames,
-                            frame_seconds: args.frame_seconds,
-                            total_seconds: args.total_seconds,
-                            max_retries: args.max_retries,
-                            attach_wait_seconds: args.attach_wait_seconds,
-                            idle_seconds: args.idle_seconds,
-                            max_in_flight: args.max_in_flight,
-                        },
-                    );
-                    let worktree = resolved_run_worktree(
-                        policy.worktree,
-                        args.worktree
-                            .as_ref()
-                            .map(|value| value.as_ref().map(String::as_str)),
-                        args.no_worktree,
-                    );
-                    let merge_policy = runtime.effective_merge_policy();
-                    let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
-                    if merge_rung.is_some() && worktree.is_none() {
-                        return Err(crate::Error::Command {
-                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
-                        });
-                    }
-                    crate::app::run::handle_session_start(SessionStartInputs {
-                        trait_id: args.trait_id.as_deref(),
-                        file: args.file.as_deref(),
-                        master: args.master.as_deref(),
-                        input: args.input.as_deref(),
-                        sets: &args.sets,
-                        session_store: args.session_store.as_deref(),
-                        assignments: &args.assignments,
-                        resource_root: args.resource_root.as_deref(),
-                        out: args.out.as_deref(),
-                        max_frames: budget.max_frames,
-                        frame_seconds: budget.frame_seconds,
-                        total_seconds: budget.total_seconds,
-                        max_retries: budget.max_retries,
-                        attach_wait_seconds: budget.attach_wait_seconds,
-                        idle_seconds: budget.idle_seconds,
-                        max_in_flight: budget.max_in_flight,
-                        wait: resolved_run_wait(policy.wait, args.wait, args.no_wait),
-                        progress: crate::app::drive::resolve_progress(
-                            args.progress,
-                            args.json,
-                            args.no_tui,
-                        ),
-                        worktree,
-                        strict_loops: resolved_strict_loops(
-                            policy.strict_loops,
-                            args.strict_loops,
-                            args.no_strict_loops,
-                        ),
-                        override_dependencies: args.override_dependencies,
-                        task_dispatch: args.task_dispatch,
-                        json: args.json,
-                        verbose: args.verbose,
-                        trait_args: &args.trait_args,
-                        merge_rung,
-                        story: resolved_story_level(
-                            policy.story,
-                            args.story
-                                .as_ref()
-                                .map(|value| value.as_ref().map(String::as_str)),
-                            args.no_story,
-                        )?,
-                        startup: None,
-                    })
-                }
-                cli::SessionCommand::State(args) => crate::app::run::handle_run_status(
-                    args.file.as_deref(),
-                    &args.session,
-                    args.session_store.as_deref(),
-                    args.json,
-                ),
-                cli::SessionCommand::Frame { subcommand } => match subcommand {
-                    cli::SessionFrameCommand::State {
-                        file,
-                        session,
-                        session_store,
-                        agent,
-                        json,
-                    } => crate::app::run::handle_run_frame(
-                        file.as_deref(),
-                        &session,
-                        session_store.as_deref(),
-                        agent.as_deref(),
-                        json,
-                    ),
-                    cli::SessionFrameCommand::Set {
-                        session,
-                        file,
-                        session_store,
-                        key,
-                        value,
-                        value_json,
-                        agent,
-                        json,
-                    } => crate::app::run::handle_set(SetInputs {
-                        file: file.as_deref(),
-                        session: &session,
-                        session_store: session_store.as_deref(),
-                        target: &key,
-                        value: &value,
-                        value_json,
-                        agent: agent.as_deref(),
-                        json,
-                    }),
-                },
-            },
-            Some(cli::TraitsCommand::Mcp) => {
-                ctx_traits_io::mcp_server::serve_stdio()?;
-                Ok(CommandOutput::new(()))
-            }
-            Some(cli::TraitsCommand::Drive {
-                file,
-                session,
-                session_store,
-                assignments,
-                max_frames,
-                frame_seconds,
-                total_seconds,
-                max_retries,
-                attach_wait_seconds,
-                idle_seconds,
-                progress,
-                no_tui,
-                worktree,
-                max_in_flight,
-                wait,
-                no_wait,
-                no_worktree,
-                no_merge,
-                json,
-            }) => {
-                let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
-                    camino::Utf8Path::new("."),
-                )?;
-                let policy = runtime.effective_run_policy();
-                let budget = resolve_run_budget(
-                    policy,
-                    RunBudgetInputs {
-                        max_frames,
-                        frame_seconds,
-                        total_seconds,
-                        max_retries,
-                        attach_wait_seconds,
-                        idle_seconds,
-                        max_in_flight,
-                    },
-                );
-                // P460: `--no-merge` clears a persisted merge intent before
-                // resuming, so this drive completes without landing even
-                // when the original `run`/`session start` requested one.
-                // `drive()` applies the clear itself, only once this
-                // invocation has actually acquired the per-session driver
-                // lock (P460 review — a lock-losing invocation must never
-                // mutate the ledger a concurrent driver already holds).
-                // P549: installed unconditionally — see the analogous
-                // comment at `run.rs`'s `session start` call site.
-                let panel_handoff = crate::app::drive::PanelHandoff::new();
-                let mut report = crate::app::drive::drive(crate::app::drive::DriveInputs {
-                    file: file.as_deref(),
-                    session: &session,
-                    session_store: session_store.as_deref(),
-                    assignments: &assignments,
-                    max_frames: budget.max_frames,
-                    frame_seconds: budget.frame_seconds,
-                    total_seconds: budget.total_seconds,
-                    max_retries: budget.max_retries,
-                    attach_wait_seconds: budget.attach_wait_seconds,
-                    idle_seconds: budget.idle_seconds,
-                    max_in_flight: budget.max_in_flight,
-                    wait: resolved_run_wait(policy.wait, wait, no_wait),
-                    progress: crate::app::drive::resolve_progress(progress, json, no_tui),
-                    worktree: resolved_run_worktree(
-                        policy.worktree,
-                        worktree
-                            .as_ref()
-                            .map(|value| value.as_ref().map(String::as_str)),
-                        no_worktree,
-                    ),
-                    execution_dir: None,
-                    clear_merge_intent: no_merge,
-                    panel_handoff: Some(panel_handoff.clone()),
-                    startup: None,
-                    frame_observer: None,
-                })?;
-                let session_path = ctx_traits_io::run_session::resolve_session_path(
-                    &session,
-                    session_store.as_deref(),
-                )?;
-                let final_session =
-                    ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
-                        trait_file: file.as_deref(),
-                        trait_id: None,
-                        session: &session,
-                        session_store: session_store.as_deref(),
-                        elapsed_seconds: None,
-                    })?
-                    .session;
-                let (merge_live, merger_stdout_observer, merge_span_guard) =
-                    crate::app::run::merge_live_for_completion(
-                        panel_handoff.take(),
-                        final_session.run_id.as_str(),
-                        final_session.session_id.as_str(),
-                        &assignments,
-                    );
-                let completion = crate::app::run::complete_after_drive(
-                    session_store.as_deref(),
-                    &session_path,
-                    &assignments,
-                    final_session,
-                    merge_live,
-                    merger_stdout_observer,
-                )?;
-                drop(merge_span_guard);
-                report.merge = completion.merge.clone();
-                if json {
-                    print_json_report(&run_envelope(report, true, true, false), "drive")?;
-                } else {
-                    crate::app::drive::print_report(&report, Some(&completion.session))?;
-                }
-                completion.into_command_output()
-            }
             Some(cli::TraitsCommand::Merge {
                 run_id,
                 session_store,
@@ -1257,119 +771,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 live: crate::app::merge::tty_stage_line_live(),
                 merger_stdout_observer: None,
             }),
-            Some(cli::TraitsCommand::Call {
-                file,
-                session,
-                session_store,
-                data,
-                out,
-                agent,
-                json,
-            }) => crate::app::run::handle_call(CallInputs {
-                file: file.as_deref(),
-                session: &session,
-                session_store: session_store.as_deref(),
-                data: &data,
-                out: out.as_deref(),
-                agent: agent.as_deref(),
-                json,
-            }),
-            Some(cli::TraitsCommand::RunStatus {
-                file,
-                session,
-                session_store,
-                json,
-            }) => crate::app::run::handle_run_status(
-                file.as_deref(),
-                &session,
-                session_store.as_deref(),
-                json,
-            ),
-            Some(cli::TraitsCommand::RunFrame {
-                file,
-                session,
-                session_store,
-                agent,
-                json,
-            }) => crate::app::run::handle_run_frame(
-                file.as_deref(),
-                &session,
-                session_store.as_deref(),
-                agent.as_deref(),
-                json,
-            ),
-            Some(cli::TraitsCommand::Next {
-                agent,
-                session,
-                session_store,
-                wait_seconds,
-                peek,
-                json,
-            }) => crate::app::run::handle_next(
-                agent.as_deref(),
-                session.as_deref(),
-                session_store.as_deref(),
-                wait_seconds,
-                peek,
-                json,
-            ),
-            Some(cli::TraitsCommand::Set {
-                session: set_session,
-                file,
-                session_store,
-                target,
-                value,
-                value_json,
-                agent,
-                json,
-            }) => {
-                let session = set_session
-                    .as_deref()
-                    .or(session.as_deref())
-                    .ok_or_else(|| crate::Error::Command {
-                        message: "set requires --session <id-or-path>".to_string(),
-                    })?;
-                crate::app::run::handle_set(SetInputs {
-                    file: file.as_deref(),
-                    session,
-                    session_store: session_store.as_deref(),
-                    target: &target,
-                    value: &value,
-                    value_json,
-                    agent: agent.as_deref(),
-                    json,
-                })
-            }
-            Some(cli::TraitsCommand::Eval {
-                trait_arg,
-                file,
-                eval_ids,
-                variant,
-                out,
-                update_lock,
-                json,
-            }) => crate::app::eval::handle(EvalInputs {
-                file: &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "eval")?,
-                eval_ids: &eval_ids,
-                variant: variant.as_deref(),
-                out: out.as_deref(),
-                update_lock,
-                json,
-            }),
-            Some(cli::TraitsCommand::Prompt {
-                trait_arg,
-                allow_unreviewed,
-                level,
-                json,
-            }) => crate::app::report_handlers::handle_prompt(
-                &resolve_trait_target(trait_arg.as_deref(), None, "prompt")?,
-                allow_unreviewed,
-                match level {
-                    cli::PromptLevel::Full => ctx_traits_core::resolve::LoadLevel::Full,
-                    cli::PromptLevel::Summary => ctx_traits_core::resolve::LoadLevel::Summary,
-                },
-                json,
-            ),
             Some(cli::TraitsCommand::Check {
                 trait_arg,
                 file,
@@ -1412,193 +813,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 json,
                 verbose,
             ),
-            Some(cli::TraitsCommand::Preview {
-                trait_arg,
-                file,
-                step,
-                session,
-                session_store,
-                json,
-            }) => crate::app::preview::handle_preview(
-                &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "preview")?,
-                step.as_deref(),
-                session.as_deref(),
-                session_store.as_deref(),
-                json,
-            ),
-            Some(cli::TraitsCommand::Export {
-                trait_arg,
-                file,
-                profile,
-                format,
-                out,
-                update_skill_lock,
-                update_gitignore,
-                allow_unreviewed,
-                json,
-            }) => {
-                let file = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "export")?;
-                crate::app::report_handlers::handle_export(
-                    crate::app::report_handlers::ExportInputs {
-                        file: &file,
-                        profile: &profile,
-                        format: &format,
-                        out: out.as_deref(),
-                        update_skill_lock,
-                        update_gitignore,
-                        allow_unreviewed,
-                        json,
-                    },
-                )
-            }
-            Some(cli::TraitsCommand::Host {
-                json: namespace_json,
-                subcommand,
-            }) => match subcommand {
-                cli::HostCommand::Install {
-                    trait_arg,
-                    file,
-                    host,
-                    global,
-                    format,
-                    archive,
-                    allow_unreviewed,
-                    allow_draft,
-                    json,
-                } => crate::app::host_install::handle_install(
-                    crate::app::host_install::InstallInputs {
-                        trait_arg: trait_arg.as_deref(),
-                        file: file.as_deref(),
-                        host: &host,
-                        global,
-                        format: format.as_deref(),
-                        archive: archive.as_deref(),
-                        allow_unreviewed,
-                        allow_draft,
-                        json: json || namespace_json,
-                    },
-                ),
-                cli::HostCommand::Update {
-                    global,
-                    force,
-                    json,
-                } => crate::app::host_install::handle_update(global, force, json || namespace_json),
-                cli::HostCommand::Status { global, json } => {
-                    crate::app::host_install::handle_status(global, json || namespace_json)
-                }
-                cli::HostCommand::Remove {
-                    trait_id,
-                    host,
-                    global,
-                    json,
-                } => crate::app::host_install::handle_remove(
-                    &trait_id,
-                    &host,
-                    global,
-                    json || namespace_json,
-                ),
-            },
-            Some(cli::TraitsCommand::Search {
-                query,
-                repo_root,
-                json,
-            }) => crate::app::search::handle(&query, repo_root.as_deref(), json),
-            Some(cli::TraitsCommand::Resolve {
-                task,
-                trait_files,
-                repo_root,
-                files,
-                mode,
-                languages,
-                budget,
-                session,
-                explicit_invocation,
-                trait_id,
-                json,
-            }) => crate::app::resolve::handle(ResolveInputs {
-                task: &task,
-                trait_files: &trait_files,
-                repo_root: repo_root.as_deref(),
-                files: &files,
-                mode: mode.as_deref(),
-                languages: &languages,
-                budget,
-                session: session.as_deref(),
-                explicit_invocation: explicit_invocation.as_deref(),
-                trait_id: trait_id.as_deref(),
-                json,
-            }),
-            Some(cli::TraitsCommand::Pack {
-                task,
-                trait_files,
-                repo_root,
-                profile,
-                session,
-                budget,
-                json,
-            }) => handle_pack(
-                &task,
-                &trait_files,
-                repo_root.as_deref(),
-                &profile,
-                session.as_deref(),
-                budget,
-                json,
-            ),
-            Some(cli::TraitsCommand::Context { subcommand }) => match subcommand {
-                cli::ContextCommand::Status {
-                    host,
-                    host_session,
-                    json,
-                } => handle_context_status(&host, &host_session, json),
-                cli::ContextCommand::Plan {
-                    host,
-                    host_session,
-                    task,
-                    trait_files,
-                    repo_root,
-                    files,
-                    mode,
-                    languages,
-                    budget,
-                    commit,
-                    json,
-                } => handle_context_plan(crate::app::context_cache::ContextPlanInputs {
-                    host: &host,
-                    host_session: &host_session,
-                    task: &task,
-                    trait_files: &trait_files,
-                    repo_root: repo_root.as_deref(),
-                    files: &files,
-                    mode: mode.as_deref(),
-                    languages: &languages,
-                    budget,
-                    commit,
-                    json,
-                }),
-                cli::ContextCommand::Clear {
-                    host,
-                    host_session,
-                    reason,
-                    json,
-                } => handle_context_clear(&host, &host_session, reason.as_str(), json),
-            },
-            Some(cli::TraitsCommand::Hook { host, settings }) => {
-                crate::app::hook::handle_hook(host, settings)
-            }
-            Some(cli::TraitsCommand::Config { json, subcommand }) => {
-                match merge_config_json(subcommand, json) {
-                    cli::ConfigCommand::Build { path, json } => {
-                        crate::app::config_build::handle_config_build(path.as_deref(), json)
-                    }
-                    cli::ConfigCommand::Accept { yes, json } => {
-                        crate::app::config_accept::handle_config_accept(yes, json)
-                    }
-                    cli::ConfigCommand::Init { global, json } => {
-                        crate::app::config_build::handle_config_init(global, json)
-                    }
-                }
-            }
             Some(cli::TraitsCommand::Cache { json, subcommand }) => {
                 match merge_cache_json(subcommand, json) {
                     cli::CacheCommand::Rebuild {
@@ -1628,14 +842,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     ),
                 }
             }
-            Some(cli::TraitsCommand::Task { json, subcommand }) => {
-                match merge_task_json(subcommand, json) {
-                    cli::TaskCommand::Import { path, json } => {
-                        crate::app::task::handle_task_import(&path, json)
-                    }
-                }
+            Some(cli::TraitsCommand::Internal { subcommand }) => {
+                handle_internal(subcommand, session)
             }
-            Some(cli::TraitsCommand::Help { json }) => crate::app::help_surface::handle_help(json),
         },
         cli::Command::Tasks { subcommand } => match subcommand {
             None => {
@@ -1701,6 +910,799 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 json,
             ),
         },
+    }
+}
+
+/// Dispatch for `ctx traits internal <verb>` (0242).
+///
+/// `session` is the group-level `--session` override, which several of these
+/// read; it reaches them the same way it did when they were top-level arms
+/// of `handle`'s own match.
+///
+/// These arms were part of `handle`'s own match, as top-level verbs sitting
+/// beside `run` and `check`. Nothing about any of them changed except where
+/// they are reached from: same flags, same handlers, same behavior.
+fn handle_internal(
+    subcommand: cli::InternalCommand,
+    session: Option<String>,
+) -> crate::Result<CommandOutput<()>> {
+    match subcommand {
+        cli::InternalCommand::Stats {
+            since,
+            trait_id,
+            json,
+        } => crate::app::stats::handle_stats(since, trait_id.as_deref(), json),
+        cli::InternalCommand::Running { json } => crate::app::running::handle_running(json),
+        cli::InternalCommand::Story {
+            run,
+            session_store,
+            json,
+            markdown,
+            level,
+        } => {
+            let level = level
+                .map(|level| {
+                    level
+                        .parse::<ctx_traits_core::procedure::story::StoryLevel>()
+                        .map_err(|message| crate::Error::Command { message })
+                })
+                .transpose()?;
+            crate::app::story::handle_story(&run, session_store.as_deref(), json, markdown, level)
+        }
+        cli::InternalCommand::ClaimGate { json } => {
+            crate::app::report_handlers::handle_claim_gate(json)
+        }
+        cli::InternalCommand::Hygiene { trait_files, json } => handle_hygiene(&trait_files, json),
+        cli::InternalCommand::Cost { file, budget, json } => handle_cost(&file, budget, json),
+        cli::InternalCommand::PreparePublic { file, json } => handle_prepare_public(&file, json),
+        cli::InternalCommand::ContextContracts { file, json } => {
+            handle_context_contracts(&file, json)
+        }
+        cli::InternalCommand::Policy {
+            file,
+            profile,
+            json,
+        } => handle_policy(&file, &profile, json),
+        cli::InternalCommand::Evidence {
+            file,
+            profile,
+            json,
+        } => handle_evidence(&file, &profile, json),
+        cli::InternalCommand::Compatibility { json } => handle_compatibility(json),
+        cli::InternalCommand::Subagent {
+            file,
+            profile,
+            json,
+        } => handle_subagent(&file, &profile, json),
+        cli::InternalCommand::Explain {
+            trait_arg,
+            task,
+            scaffold,
+            mut trait_files,
+            files,
+            mode,
+            languages,
+            signals,
+            explicit_invocation,
+            active_only,
+            json,
+            trait_id,
+            source_map,
+            verbose,
+            llm_assisted,
+            candidate,
+            model,
+            budget,
+            assignments,
+        } => {
+            if let Some(file) = resolve_optional_trait_target(trait_arg.as_deref(), None)? {
+                trait_files.push(file);
+            }
+            handle_explain(ExplainInputs {
+                task: task.as_deref(),
+                scaffold,
+                trait_files: &trait_files,
+                files: &files,
+                mode: mode.as_deref(),
+                languages: &languages,
+                signals: &signals,
+                explicit_invocation: explicit_invocation.as_deref(),
+                active_only,
+                json,
+                trait_id: trait_id.as_deref(),
+                source_map: source_map.as_deref(),
+                verbose,
+                llm_assisted,
+                candidate_path: candidate.as_deref(),
+                model: model.as_deref(),
+                budget_document: budget.as_deref(),
+                assignments: &assignments,
+            })
+        }
+        cli::InternalCommand::Inspect {
+            trait_arg,
+            file,
+            dry_plan,
+            profile,
+        } => {
+            let file = resolve_optional_trait_target(trait_arg.as_deref(), file.as_deref())?;
+            handle_inspect(file.as_deref(), dry_plan, profile.as_deref())
+        }
+        cli::InternalCommand::TuiDemo => {
+            crate::app::tui_demo::run()?;
+            Ok(CommandOutput::new(()))
+        }
+        cli::InternalCommand::Edit { trait_arg } => {
+            crate::app::trait_editor::run(&trait_arg)?;
+            Ok(CommandOutput::new(()))
+        }
+        cli::InternalCommand::Manifest => {
+            let cwd = current_utf8_dir()?;
+            let result = ctx_traits_io::discovery::manifest(&cwd)?;
+
+            match &result {
+                ctx_traits_io::discovery::ManifestDiscovery::Found(_) => {
+                    println!("{}", format_manifest_discovery(&cwd, &result));
+                    Ok(CommandOutput::new(()))
+                }
+                ctx_traits_io::discovery::ManifestDiscovery::NotFound => {
+                    eprintln!("{}", format_manifest_discovery(&cwd, &result));
+                    Ok(CommandOutput::new(()))
+                }
+                ctx_traits_io::discovery::ManifestDiscovery::Conflict { .. } => {
+                    eprintln!("{}", format_manifest_discovery(&cwd, &result));
+                    Ok(CommandOutput::new(()))
+                }
+            }
+        }
+        cli::InternalCommand::Schema {
+            protocol,
+            format,
+            out,
+        } => handle_schema(&protocol, &format, &out),
+        cli::InternalCommand::SdkGenerate { check } => crate::app::sdk_generate::handle(check),
+        cli::InternalCommand::Synth {
+            path,
+            format,
+            out,
+            check,
+        } => handle_synth(&path, &format, out.as_deref(), check),
+        cli::InternalCommand::Migrate {
+            id_or_path,
+            to,
+            apply,
+            json,
+        } => crate::app::migrate::handle_migrate(&id_or_path, to.as_deref(), apply, json),
+        cli::InternalCommand::GenerateRound {
+            trait_id,
+            candidate,
+        } => crate::app::generate::handle_generate_round(&trait_id, &candidate),
+        cli::InternalCommand::RefineRound {
+            source_path,
+            candidate,
+        } => crate::app::refine::handle_refine_round(&source_path, &candidate),
+        cli::InternalCommand::ImportRound {
+            trait_id,
+            candidate,
+        } => crate::app::import_handlers::handle_import_round(&trait_id, &candidate),
+        cli::InternalCommand::ImportRefresh {
+            trait_id_or_package,
+            source,
+            check,
+            out,
+            json,
+        } => crate::app::import_handlers::handle_import_refresh(
+            &trait_id_or_package,
+            source.as_deref(),
+            check,
+            out.as_deref(),
+            json,
+        ),
+        cli::InternalCommand::Review {
+            trait_arg,
+            file,
+            approve,
+            deny,
+            reason,
+            json,
+        } => {
+            let file = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "review")?;
+            if approve && deny {
+                return Err(crate::Error::Command {
+                    message: "review takes --approve or --deny, not both".to_string(),
+                });
+            }
+            if !approve && !deny {
+                return Err(crate::Error::Command {
+                    message: "review requires --approve or --deny".to_string(),
+                });
+            }
+            let state = if approve {
+                ctx_traits_io::trust::TrustState::Verified
+            } else {
+                ctx_traits_io::trust::TrustState::Blocked
+            };
+            crate::app::lifecycle_reporting::handle_trust_named_update(
+                &file, state, reason, json, "review",
+            )
+        }
+        cli::InternalCommand::State {
+            trait_arg,
+            file,
+            active,
+            draft,
+            deprecated,
+            reason,
+            json,
+        } => {
+            let action = if active {
+                Some(crate::app::lifecycle_handlers::LifecycleAction::Activate)
+            } else if draft {
+                Some(crate::app::lifecycle_handlers::LifecycleAction::Deactivate)
+            } else if deprecated {
+                Some(crate::app::lifecycle_handlers::LifecycleAction::Deprecate {
+                    reason: reason.as_deref(),
+                })
+            } else {
+                None
+            };
+            let target = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "state")?;
+            match action {
+                Some(action) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
+                    &target, action, json,
+                ),
+                // No flag: report, do not transition.
+                None => crate::app::lifecycle_handlers::handle_lifecycle_status(&target, json),
+            }
+        }
+        cli::InternalCommand::RunInfo {
+            trait_id,
+            file,
+            query,
+            json,
+        } => crate::app::run::handle_run_info(RunInfoInputs {
+            trait_id: trait_id.as_deref(),
+            file: file.as_deref(),
+            query: &query,
+            json,
+        }),
+        cli::InternalCommand::Session { subcommand } => match subcommand {
+            cli::SessionCommand::Start(args) => {
+                let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
+                    camino::Utf8Path::new("."),
+                )?;
+                let policy = runtime.effective_run_policy();
+                let budget = resolve_run_budget(
+                    policy,
+                    RunBudgetInputs {
+                        max_frames: args.max_frames,
+                        frame_seconds: args.frame_seconds,
+                        total_seconds: args.total_seconds,
+                        max_retries: args.max_retries,
+                        attach_wait_seconds: args.attach_wait_seconds,
+                        idle_seconds: args.idle_seconds,
+                        max_in_flight: args.max_in_flight,
+                    },
+                );
+                let worktree = resolved_run_worktree(
+                    policy.worktree,
+                    args.worktree
+                        .as_ref()
+                        .map(|value| value.as_ref().map(String::as_str)),
+                    args.no_worktree,
+                );
+                let merge_policy = runtime.effective_merge_policy();
+                let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
+                if merge_rung.is_some() && worktree.is_none() {
+                    return Err(crate::Error::Command {
+                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
+                        });
+                }
+                crate::app::run::handle_session_start(SessionStartInputs {
+                    trait_id: args.trait_id.as_deref(),
+                    file: args.file.as_deref(),
+                    master: args.master.as_deref(),
+                    input: args.input.as_deref(),
+                    sets: &args.sets,
+                    session_store: args.session_store.as_deref(),
+                    assignments: &args.assignments,
+                    resource_root: args.resource_root.as_deref(),
+                    out: args.out.as_deref(),
+                    max_frames: budget.max_frames,
+                    frame_seconds: budget.frame_seconds,
+                    total_seconds: budget.total_seconds,
+                    max_retries: budget.max_retries,
+                    attach_wait_seconds: budget.attach_wait_seconds,
+                    idle_seconds: budget.idle_seconds,
+                    max_in_flight: budget.max_in_flight,
+                    wait: resolved_run_wait(policy.wait, args.wait, args.no_wait),
+                    progress: crate::app::drive::resolve_progress(
+                        args.progress,
+                        args.json,
+                        args.no_tui,
+                    ),
+                    worktree,
+                    strict_loops: resolved_strict_loops(
+                        policy.strict_loops,
+                        args.strict_loops,
+                        args.no_strict_loops,
+                    ),
+                    override_dependencies: args.override_dependencies,
+                    task_dispatch: args.task_dispatch,
+                    json: args.json,
+                    verbose: args.verbose,
+                    trait_args: &args.trait_args,
+                    merge_rung,
+                    story: resolved_story_level(
+                        policy.story,
+                        args.story
+                            .as_ref()
+                            .map(|value| value.as_ref().map(String::as_str)),
+                        args.no_story,
+                    )?,
+                    startup: None,
+                })
+            }
+            cli::SessionCommand::State(args) => crate::app::run::handle_run_status(
+                args.file.as_deref(),
+                &args.session,
+                args.session_store.as_deref(),
+                args.json,
+            ),
+            cli::SessionCommand::Frame { subcommand } => match subcommand {
+                cli::SessionFrameCommand::State {
+                    file,
+                    session,
+                    session_store,
+                    agent,
+                    json,
+                } => crate::app::run::handle_run_frame(
+                    file.as_deref(),
+                    &session,
+                    session_store.as_deref(),
+                    agent.as_deref(),
+                    json,
+                ),
+                cli::SessionFrameCommand::Set {
+                    session,
+                    file,
+                    session_store,
+                    key,
+                    value,
+                    value_json,
+                    agent,
+                    json,
+                } => crate::app::run::handle_set(SetInputs {
+                    file: file.as_deref(),
+                    session: &session,
+                    session_store: session_store.as_deref(),
+                    target: &key,
+                    value: &value,
+                    value_json,
+                    agent: agent.as_deref(),
+                    json,
+                }),
+            },
+        },
+        cli::InternalCommand::Mcp => {
+            ctx_traits_io::mcp_server::serve_stdio()?;
+            Ok(CommandOutput::new(()))
+        }
+        cli::InternalCommand::Drive {
+            file,
+            session,
+            session_store,
+            assignments,
+            max_frames,
+            frame_seconds,
+            total_seconds,
+            max_retries,
+            attach_wait_seconds,
+            idle_seconds,
+            progress,
+            no_tui,
+            worktree,
+            max_in_flight,
+            wait,
+            no_wait,
+            no_worktree,
+            no_merge,
+            json,
+        } => {
+            let runtime =
+                ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))?;
+            let policy = runtime.effective_run_policy();
+            let budget = resolve_run_budget(
+                policy,
+                RunBudgetInputs {
+                    max_frames,
+                    frame_seconds,
+                    total_seconds,
+                    max_retries,
+                    attach_wait_seconds,
+                    idle_seconds,
+                    max_in_flight,
+                },
+            );
+            // P460: `--no-merge` clears a persisted merge intent before
+            // resuming, so this drive completes without landing even
+            // when the original `run`/`session start` requested one.
+            // `drive()` applies the clear itself, only once this
+            // invocation has actually acquired the per-session driver
+            // lock (P460 review — a lock-losing invocation must never
+            // mutate the ledger a concurrent driver already holds).
+            // P549: installed unconditionally — see the analogous
+            // comment at `run.rs`'s `session start` call site.
+            let panel_handoff = crate::app::drive::PanelHandoff::new();
+            let mut report = crate::app::drive::drive(crate::app::drive::DriveInputs {
+                file: file.as_deref(),
+                session: &session,
+                session_store: session_store.as_deref(),
+                assignments: &assignments,
+                max_frames: budget.max_frames,
+                frame_seconds: budget.frame_seconds,
+                total_seconds: budget.total_seconds,
+                max_retries: budget.max_retries,
+                attach_wait_seconds: budget.attach_wait_seconds,
+                idle_seconds: budget.idle_seconds,
+                max_in_flight: budget.max_in_flight,
+                wait: resolved_run_wait(policy.wait, wait, no_wait),
+                progress: crate::app::drive::resolve_progress(progress, json, no_tui),
+                worktree: resolved_run_worktree(
+                    policy.worktree,
+                    worktree
+                        .as_ref()
+                        .map(|value| value.as_ref().map(String::as_str)),
+                    no_worktree,
+                ),
+                execution_dir: None,
+                clear_merge_intent: no_merge,
+                panel_handoff: Some(panel_handoff.clone()),
+                startup: None,
+                frame_observer: None,
+            })?;
+            let session_path = ctx_traits_io::run_session::resolve_session_path(
+                &session,
+                session_store.as_deref(),
+            )?;
+            let final_session = ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
+                trait_file: file.as_deref(),
+                trait_id: None,
+                session: &session,
+                session_store: session_store.as_deref(),
+                elapsed_seconds: None,
+            })?
+            .session;
+            let (merge_live, merger_stdout_observer, merge_span_guard) =
+                crate::app::run::merge_live_for_completion(
+                    panel_handoff.take(),
+                    final_session.run_id.as_str(),
+                    final_session.session_id.as_str(),
+                    &assignments,
+                );
+            let completion = crate::app::run::complete_after_drive(
+                session_store.as_deref(),
+                &session_path,
+                &assignments,
+                final_session,
+                merge_live,
+                merger_stdout_observer,
+            )?;
+            drop(merge_span_guard);
+            report.merge = completion.merge.clone();
+            if json {
+                print_json_report(&run_envelope(report, true, true, false), "drive")?;
+            } else {
+                crate::app::drive::print_report(&report, Some(&completion.session))?;
+            }
+            completion.into_command_output()
+        }
+        cli::InternalCommand::Call {
+            file,
+            session,
+            session_store,
+            data,
+            out,
+            agent,
+            json,
+        } => crate::app::run::handle_call(CallInputs {
+            file: file.as_deref(),
+            session: &session,
+            session_store: session_store.as_deref(),
+            data: &data,
+            out: out.as_deref(),
+            agent: agent.as_deref(),
+            json,
+        }),
+        cli::InternalCommand::RunStatus {
+            file,
+            session,
+            session_store,
+            json,
+        } => crate::app::run::handle_run_status(
+            file.as_deref(),
+            &session,
+            session_store.as_deref(),
+            json,
+        ),
+        cli::InternalCommand::RunFrame {
+            file,
+            session,
+            session_store,
+            agent,
+            json,
+        } => crate::app::run::handle_run_frame(
+            file.as_deref(),
+            &session,
+            session_store.as_deref(),
+            agent.as_deref(),
+            json,
+        ),
+        cli::InternalCommand::Next {
+            agent,
+            session,
+            session_store,
+            wait_seconds,
+            peek,
+            json,
+        } => crate::app::run::handle_next(
+            agent.as_deref(),
+            session.as_deref(),
+            session_store.as_deref(),
+            wait_seconds,
+            peek,
+            json,
+        ),
+        cli::InternalCommand::Set {
+            session: set_session,
+            file,
+            session_store,
+            target,
+            value,
+            value_json,
+            agent,
+            json,
+        } => {
+            let session = set_session
+                .as_deref()
+                .or(session.as_deref())
+                .ok_or_else(|| crate::Error::Command {
+                    message: "set requires --session <id-or-path>".to_string(),
+                })?;
+            crate::app::run::handle_set(SetInputs {
+                file: file.as_deref(),
+                session,
+                session_store: session_store.as_deref(),
+                target: &target,
+                value: &value,
+                value_json,
+                agent: agent.as_deref(),
+                json,
+            })
+        }
+        cli::InternalCommand::Eval {
+            trait_arg,
+            file,
+            eval_ids,
+            variant,
+            out,
+            update_lock,
+            json,
+        } => crate::app::eval::handle(EvalInputs {
+            file: &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "eval")?,
+            eval_ids: &eval_ids,
+            variant: variant.as_deref(),
+            out: out.as_deref(),
+            update_lock,
+            json,
+        }),
+        cli::InternalCommand::Prompt {
+            trait_arg,
+            allow_unreviewed,
+            level,
+            json,
+        } => crate::app::report_handlers::handle_prompt(
+            &resolve_trait_target(trait_arg.as_deref(), None, "prompt")?,
+            allow_unreviewed,
+            match level {
+                cli::PromptLevel::Full => ctx_traits_core::resolve::LoadLevel::Full,
+                cli::PromptLevel::Summary => ctx_traits_core::resolve::LoadLevel::Summary,
+            },
+            json,
+        ),
+        cli::InternalCommand::Preview {
+            trait_arg,
+            file,
+            step,
+            session,
+            session_store,
+            json,
+        } => crate::app::preview::handle_preview(
+            &resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "preview")?,
+            step.as_deref(),
+            session.as_deref(),
+            session_store.as_deref(),
+            json,
+        ),
+        cli::InternalCommand::Export {
+            trait_arg,
+            file,
+            profile,
+            format,
+            out,
+            update_skill_lock,
+            update_gitignore,
+            allow_unreviewed,
+            json,
+        } => {
+            let file = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "export")?;
+            crate::app::report_handlers::handle_export(crate::app::report_handlers::ExportInputs {
+                file: &file,
+                profile: &profile,
+                format: &format,
+                out: out.as_deref(),
+                update_skill_lock,
+                update_gitignore,
+                allow_unreviewed,
+                json,
+            })
+        }
+        cli::InternalCommand::Host {
+            json: namespace_json,
+            subcommand,
+        } => match subcommand {
+            cli::HostCommand::Install {
+                trait_arg,
+                file,
+                host,
+                global,
+                format,
+                archive,
+                allow_unreviewed,
+                allow_draft,
+                json,
+            } => {
+                crate::app::host_install::handle_install(crate::app::host_install::InstallInputs {
+                    trait_arg: trait_arg.as_deref(),
+                    file: file.as_deref(),
+                    host: &host,
+                    global,
+                    format: format.as_deref(),
+                    archive: archive.as_deref(),
+                    allow_unreviewed,
+                    allow_draft,
+                    json: json || namespace_json,
+                })
+            }
+            cli::HostCommand::Update {
+                global,
+                force,
+                json,
+            } => crate::app::host_install::handle_update(global, force, json || namespace_json),
+            cli::HostCommand::Status { global, json } => {
+                crate::app::host_install::handle_status(global, json || namespace_json)
+            }
+            cli::HostCommand::Remove {
+                trait_id,
+                host,
+                global,
+                json,
+            } => crate::app::host_install::handle_remove(
+                &trait_id,
+                &host,
+                global,
+                json || namespace_json,
+            ),
+        },
+        cli::InternalCommand::Search {
+            query,
+            repo_root,
+            json,
+        } => crate::app::search::handle(&query, repo_root.as_deref(), json),
+        cli::InternalCommand::Resolve {
+            task,
+            trait_files,
+            repo_root,
+            files,
+            mode,
+            languages,
+            budget,
+            session,
+            explicit_invocation,
+            trait_id,
+            json,
+        } => crate::app::resolve::handle(ResolveInputs {
+            task: &task,
+            trait_files: &trait_files,
+            repo_root: repo_root.as_deref(),
+            files: &files,
+            mode: mode.as_deref(),
+            languages: &languages,
+            budget,
+            session: session.as_deref(),
+            explicit_invocation: explicit_invocation.as_deref(),
+            trait_id: trait_id.as_deref(),
+            json,
+        }),
+        cli::InternalCommand::Pack {
+            task,
+            trait_files,
+            repo_root,
+            profile,
+            session,
+            budget,
+            json,
+        } => handle_pack(
+            &task,
+            &trait_files,
+            repo_root.as_deref(),
+            &profile,
+            session.as_deref(),
+            budget,
+            json,
+        ),
+        cli::InternalCommand::Context { subcommand } => match subcommand {
+            cli::ContextCommand::Status {
+                host,
+                host_session,
+                json,
+            } => handle_context_status(&host, &host_session, json),
+            cli::ContextCommand::Plan {
+                host,
+                host_session,
+                task,
+                trait_files,
+                repo_root,
+                files,
+                mode,
+                languages,
+                budget,
+                commit,
+                json,
+            } => handle_context_plan(crate::app::context_cache::ContextPlanInputs {
+                host: &host,
+                host_session: &host_session,
+                task: &task,
+                trait_files: &trait_files,
+                repo_root: repo_root.as_deref(),
+                files: &files,
+                mode: mode.as_deref(),
+                languages: &languages,
+                budget,
+                commit,
+                json,
+            }),
+            cli::ContextCommand::Clear {
+                host,
+                host_session,
+                reason,
+                json,
+            } => handle_context_clear(&host, &host_session, reason.as_str(), json),
+        },
+        cli::InternalCommand::Hook { host, settings } => {
+            crate::app::hook::handle_hook(host, settings)
+        }
+        cli::InternalCommand::Config { json, subcommand } => {
+            match merge_config_json(subcommand, json) {
+                cli::ConfigCommand::Build { path, json } => {
+                    crate::app::config_build::handle_config_build(path.as_deref(), json)
+                }
+                cli::ConfigCommand::Accept { yes, json } => {
+                    crate::app::config_accept::handle_config_accept(yes, json)
+                }
+                cli::ConfigCommand::Init { global, json } => {
+                    crate::app::config_build::handle_config_init(global, json)
+                }
+            }
+        }
+        cli::InternalCommand::Task { json, subcommand } => {
+            match merge_task_json(subcommand, json) {
+                cli::TaskCommand::Import { path, json } => {
+                    crate::app::task::handle_task_import(&path, json)
+                }
+            }
+        }
+        cli::InternalCommand::Help { json } => crate::app::help_surface::handle_help(json),
     }
 }
 

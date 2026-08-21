@@ -1,4 +1,4 @@
-//! `ctx traits tui-demo` (hidden): exercises the full P505 pane-tree/chrome
+//! `ctx traits internal tui-demo` (hidden): exercises the full P505 pane-tree/chrome
 //! kit in one screen — three named panes (rows/detail/notes) tiled by a
 //! [`super::tui_panes::PaneTree`], visible focus movement (`Tab`/`Shift-Tab`
 //! cycling plus `alt`+arrow directional movement), independent per-pane
@@ -108,13 +108,13 @@ impl DemoState {
     }
 }
 
-/// Entry point: `ctx traits tui-demo`. Refuses with a plain-text message and
+/// Entry point: `ctx traits internal tui-demo`. Refuses with a plain-text message and
 /// a nonzero exit off a TTY (or under `CI`/`TERM=dumb`, per
 /// `interactive_available`'s own checks).
 pub(crate) fn run() -> crate::Result<()> {
     if !super::dashboard::interactive_available() {
         return Err(crate::Error::Command {
-            message: "ctx traits tui-demo requires an interactive TTY".to_string(),
+            message: "ctx traits internal tui-demo requires an interactive TTY".to_string(),
         });
     }
     let mut pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {

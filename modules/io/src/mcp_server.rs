@@ -115,7 +115,7 @@ pub fn serve_stdio() -> crate::Result<()> {
     // subprocess as its MCP server, injects the cumulative active-drive
     // elapsed seconds already measured so far via this env var (see
     // `mcp_harness_argv` in `modules/cli/src/app/drive.rs`). Absent when this
-    // process was started outside a drive loop (a bare `ctx traits mcp`, or
+    // process was started outside a drive loop (a bare `ctx traits internal mcp`, or
     // a long-lived MCP host serving unrelated sessions) — elapsed
     // observation only ever starts when a trusted parent drive supplies a
     // baseline, so a bare/persistent host never accrues process age (idle

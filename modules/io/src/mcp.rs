@@ -21,7 +21,7 @@ static ELAPSED_BASELINE_AND_START: OnceLock<(u64, Instant)> = OnceLock::new();
 /// elapsed time the CLI drive loop already measured before spawning this
 /// subprocess. The caller (`serve_stdio`) invokes this only when a trusted
 /// parent drive actually supplied a baseline — a bare or persistently
-/// hosted `ctx traits mcp` never calls this at all, so it never starts the
+/// hosted `ctx traits internal mcp` never calls this at all, so it never starts the
 /// clock, rather than defaulting to a baseline of `0` (which would make a
 /// long-lived bare host silently accrue its own idle process age as
 /// elapsed evidence). Every tool call accepted by this process for the

@@ -1,4 +1,4 @@
-//! `ctx traits story <run-id>` (P383): renders a persisted run-session ledger
+//! `ctx traits internal story <run-id>` (P383): renders a persisted run-session ledger
 //! as a chronological narrative. Read-only — resolves the ledger and,
 //! best-effort, the trait's dry plan for producer-role enrichment, then hands
 //! both to the pure `ctx_traits_core::procedure::story` builder. Never
@@ -52,7 +52,8 @@ pub(crate) fn handle_story(
 ) -> crate::Result<CommandOutput<()>> {
     if json && markdown {
         return Err(crate::Error::Command {
-            message: "ctx traits story: --json and --markdown are mutually exclusive".to_string(),
+            message: "ctx traits internal story: --json and --markdown are mutually exclusive"
+                .to_string(),
         });
     }
     let level = level.unwrap_or(StoryLevel::Default);

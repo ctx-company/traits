@@ -609,7 +609,7 @@ pub(crate) fn run_builtin_trait_observed(
     let round_records = round_records_from_session(&session)?;
     // 0066.4: every built-in meta-trait runner drives a session that exists
     // only to carry this one call — never a user-facing run someone would
-    // later `ctx traits drive --session` or inspect with `ctx traits story`.
+    // later `ctx traits internal drive --session` or inspect with `ctx traits internal story`.
     // Leaving it in the store after this function returns (success or kill)
     // strands a phantom session; the candidate/scratch artifacts a caller
     // still needs live under the scratch package root, not the ledger.

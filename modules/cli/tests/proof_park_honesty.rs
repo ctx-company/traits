@@ -573,14 +573,14 @@ fn setup_fixture(
         &home,
     );
     require_success(
-        "`ctx traits review --approve`",
-        &["traits", "review", id, "--approve"],
+        "`ctx traits internal review --approve`",
+        &["traits", "internal", "review", id, "--approve"],
         &repo,
         &home,
     );
     require_success(
-        "`ctx traits state --active`",
-        &["traits", "state", "--active", id],
+        "`ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", id],
         &repo,
         &home,
     );
@@ -1140,6 +1140,7 @@ fn call_fixture_frame(
     let output = run_ctx(
         &[
             "traits",
+            "internal",
             "call",
             "--session",
             ledger_path.to_str().unwrap(),
@@ -1162,7 +1163,7 @@ fn call_fixture_frame(
 /// A quick-shaped guarded exit writes the optional park-report port through a
 /// project, then blocks at loop exhaustion. Before the refresh at the
 /// terminal control-flow boundary, the persisted session still held the
-/// entry-time output-port snapshot and `ctx traits call` rejected it.
+/// entry-time output-port snapshot and `ctx traits internal call` rejected it.
 #[test]
 fn guarded_exhaustion_refreshes_project_written_park_report_output() {
     let id = "implement-fixture-park-guarded-call";
@@ -1388,7 +1389,7 @@ fn dual_review_simultaneous_revise_keeps_both_entries() {
 /// `slot:park-report`, then conditionally appends it TWICE in the same
 /// transition (`record-1`'s branch, then `record-2`'s branch) before the
 /// loop's own exhaustion check makes the run terminal. Driven step by step
-/// through the persisted-ledger `ctx traits call` boundary (the same
+/// through the persisted-ledger `ctx traits internal call` boundary (the same
 /// boundary `guarded_exhaustion_refreshes_project_written_park_report_output`
 /// already regression-tests for a SINGLE append), smart-2's call is the one
 /// transition that must refresh `output-ports` after BOTH conditional

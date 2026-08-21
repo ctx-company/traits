@@ -4640,7 +4640,7 @@ fn open_resume_modal(state: &mut State) {
         .map(|worktree| format!(" (worktree {}, branch {})", worktree.id, worktree.branch))
         .unwrap_or_default();
     let body = format!(
-        "Resume {display_id}{worktree_line} as a detached `ctx traits drive` child, reusing its \
+        "Resume {display_id}{worktree_line} as a detached `ctx traits internal drive` child, reusing its \
          recorded worktree provenance?"
     );
     state.modal_host.open(
@@ -4862,7 +4862,7 @@ fn resolve_spawn_exe_and_log(
     Ok((exe, log_path))
 }
 
-/// `s` confirmed: spawns `ctx traits drive --session <id> --progress none`
+/// `s` confirmed: spawns `ctx traits internal drive --session <id> --progress none`
 /// detached (never `--worktree` — the drive's own `resolve_resume_worktree`
 /// reuses the ledger's recorded provenance by construction), with `cwd` set
 /// to the row's own repository path so ALL-mode resume is correct

@@ -78,7 +78,7 @@ pub(crate) fn handle_hygiene(
 }
 
 fn emit_plain_hygiene(report: &ctx_traits_core::launch::TraitHygieneReport) -> crate::Result<()> {
-    w("ctx traits hygiene")?;
+    w("ctx traits internal hygiene")?;
     for entry in &report.traits {
         w(format!("  - {}: {}", entry.trait_id, entry.action))?;
         for finding in &entry.findings {
@@ -135,11 +135,14 @@ fn styled_hygiene_lines(
     let command = trait_files
         .iter()
         .map(|file| format!("--file {file}"))
-        .fold("ctx traits hygiene".to_string(), |mut command, arg| {
-            command.push(' ');
-            command.push_str(&arg);
-            command
-        });
+        .fold(
+            "ctx traits internal hygiene".to_string(),
+            |mut command, arg| {
+                command.push(' ');
+                command.push_str(&arg);
+                command
+            },
+        );
     lines.push(crate::app::tui::command_line(command));
     lines.push(Line::blank());
 
@@ -253,7 +256,7 @@ fn opt_display<T: std::fmt::Display>(value: Option<T>) -> String {
 }
 
 fn emit_plain_cost(report: &ctx_traits_core::launch::ContextCostReport) -> crate::Result<()> {
-    w("ctx traits cost")?;
+    w("ctx traits internal cost")?;
     w(format!("  trait: {}", report.trait_id))?;
     w(format!("  tokenizer: {}", report.tokenizer))?;
     w(format!(
@@ -308,7 +311,7 @@ fn styled_cost_lines(
     budget: Option<u64>,
 ) -> Vec<Line> {
     let mut lines = Vec::new();
-    let mut command = format!("ctx traits cost --file {file}");
+    let mut command = format!("ctx traits internal cost --file {file}");
     if let Some(budget) = budget {
         command.push_str(&format!(" --budget {budget}"));
     }
@@ -373,7 +376,7 @@ pub(crate) fn handle_prepare_public(file: &str, json: bool) -> crate::Result<Com
     if json {
         print_json_report(&report, "publish prep report")?;
     } else {
-        println!("ctx traits prepare-public");
+        println!("ctx traits internal prepare-public");
         println!("  trait: {}", report.trait_id);
         println!("  requires-human-review: {}", report.requires_human_review);
         for finding in &report.findings {
@@ -395,7 +398,7 @@ pub(crate) fn handle_context_contracts(file: &str, json: bool) -> crate::Result<
     if json {
         print_json_report(&report, "context contract report")?;
     } else {
-        println!("ctx traits context-contracts");
+        println!("ctx traits internal context-contracts");
         println!("  trait: {}", report.trait_id);
         for layer in &report.layers {
             println!(
@@ -431,7 +434,7 @@ pub(crate) fn handle_policy(
 }
 
 fn emit_plain_policy(report: &ctx_traits_core::launch::PolicyReport) -> crate::Result<()> {
-    w("ctx traits policy")?;
+    w("ctx traits internal policy")?;
     w(format!("  trait: {}", report.trait_id))?;
     w(format!("  profile: {}", report.profile))?;
     for item in &report.items {
@@ -460,7 +463,7 @@ fn styled_policy_lines(
 ) -> Vec<Line> {
     let mut lines = Vec::new();
     let command_line = crate::app::tui::command_line(format!(
-        "ctx traits policy --file {file} --profile {profile}"
+        "ctx traits internal policy --file {file} --profile {profile}"
     ));
     lines.push(command_line);
     lines.push(Line::blank());
@@ -529,7 +532,7 @@ pub(crate) fn handle_evidence(
 }
 
 fn emit_plain_evidence(report: &ctx_traits_core::launch::EvidenceBundle) -> crate::Result<()> {
-    w("ctx traits evidence")?;
+    w("ctx traits internal evidence")?;
     w(format!("  trait: {} {}", report.trait_id, report.version))?;
     w(format!(
         "  lifecycle/trust: {}/{}",
@@ -557,7 +560,7 @@ fn styled_evidence_lines(
 ) -> Vec<Line> {
     let mut lines = Vec::new();
     let command_line = crate::app::tui::command_line(format!(
-        "ctx traits evidence --file {file} --profile {profile}"
+        "ctx traits internal evidence --file {file} --profile {profile}"
     ));
     lines.push(command_line);
     lines.push(Line::blank());
@@ -595,7 +598,7 @@ pub(crate) fn handle_compatibility(json: bool) -> crate::Result<CommandOutput<()
     if json {
         print_json_report(&report, "compatibility matrix")?;
     } else {
-        println!("ctx traits compatibility");
+        println!("ctx traits internal compatibility");
         for profile in &report.profiles {
             println!(
                 "  - {}: {}",
@@ -626,7 +629,7 @@ pub(crate) fn handle_subagent(
     if json {
         print_json_report(&report, "subagent report")?;
     } else {
-        println!("ctx traits subagent");
+        println!("ctx traits internal subagent");
         println!("  trait: {}", report.trait_id);
         println!("  profile: {}", report.profile);
         println!("  non-claim: {}", report.non_claim);

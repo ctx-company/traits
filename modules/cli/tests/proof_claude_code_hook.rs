@@ -1,4 +1,4 @@
-//! P499: `ctx traits hook` — the claude-code hook adapter's stdin→stdout
+//! P499: `ctx traits internal hook` — the claude-code hook adapter's stdin→stdout
 //! wire contract, dedup-through-the-ledger behavior, the `SessionStart`
 //! `compact`/`resume`/`startup` paths, the 10,000-char cap, and the
 //! never-fail-the-session exit-code contract. Behavioral assertions only
@@ -75,7 +75,12 @@ fn session_start_payload(session_id: &str, cwd: &Path, source: &str) -> String {
 }
 
 fn run_hook(repo: &Path, home: &Path, payload: &str) -> (i32, serde_json::Value, String) {
-    let output = run_ctx_with_stdin(&["traits", "hook"], repo, home, payload.as_bytes());
+    let output = run_ctx_with_stdin(
+        &["traits", "internal", "hook"],
+        repo,
+        home,
+        payload.as_bytes(),
+    );
     let (stdout, stderr) = support::utf8(&output);
     let code = output.status.code().expect("exit code");
     let value = if stdout.trim().is_empty() {
@@ -91,6 +96,7 @@ fn context_status(repo: &Path, home: &Path, session_id: &str) -> serde_json::Val
     let output = support::run_ctx(
         &[
             "traits",
+            "internal",
             "context",
             "status",
             "--host",
@@ -332,7 +338,11 @@ fn settings_snippet_is_json_and_names_both_events() {
     let repo = scratch.home().join("repo");
     fs::create_dir_all(&repo).unwrap();
 
-    let output = support::run_ctx(&["traits", "hook", "--settings"], &repo, &scratch.home());
+    let output = support::run_ctx(
+        &["traits", "internal", "hook", "--settings"],
+        &repo,
+        &scratch.home(),
+    );
     support::assert_exit_code(&output, 0);
     let (stdout, _) = support::utf8(&output);
     let value: serde_json::Value =

@@ -101,7 +101,7 @@ pub enum DependencyResourceAvailability {
 /// (`ctx_traits_io::resource::PresentationStatus`) already uses for the same
 /// statuses on a local reference resource, so a missing/symlinked/
 /// special-file dependency resource is described identically wherever it
-/// surfaces (model view, `ctx traits inspect`/`render` resource-plan output).
+/// surfaces (model view, `ctx traits internal inspect`/`render` resource-plan output).
 pub fn dependency_unavailable_reason(status: DependencyResourceAvailability) -> &'static str {
     match status {
         DependencyResourceAvailability::Available => "resolved path unexpectedly withheld",

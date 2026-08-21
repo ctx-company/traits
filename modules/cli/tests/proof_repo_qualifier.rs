@@ -115,14 +115,21 @@ model = "base-model"
     );
     let fixture = ".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml";
     require_success(
-        "p451-repo-qualifier-proof `ctx traits review --approve`",
-        &["traits", "review", "--file", fixture, "--approve"],
+        "p451-repo-qualifier-proof `ctx traits internal review --approve`",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
         repo,
         home,
     );
     require_success(
-        "p451-repo-qualifier-proof `ctx traits state --active`",
-        &["traits", "state", "--active", "--file", fixture],
+        "p451-repo-qualifier-proof `ctx traits internal state --active`",
+        &["traits", "internal", "state", "--active", "--file", fixture],
         repo,
         home,
     );

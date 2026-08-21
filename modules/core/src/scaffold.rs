@@ -251,7 +251,7 @@ fn invalid_review_field<T>(field: &str, message: &str) -> crate::Result<T> {
     invalid_scaffold_field("review-scaffold", field, message)
 }
 
-/// Source-anchored explanation scaffold emitted by `ctx traits explain`.
+/// Source-anchored explanation scaffold emitted by `ctx traits internal explain`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]

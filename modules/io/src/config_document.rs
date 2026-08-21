@@ -89,7 +89,7 @@ pub fn decode(path: &Utf8Path, text: &str) -> crate::Result<ConfigDocument> {
 
 /// Read and decode the config document under `repo_root`. The `[vendor]`-is-
 /// repo-only refusal for global-scope config lives at the build-time write
-/// site (`ctx traits config build`, `config_build.rs`) — the only place a
+/// site (`ctx traits internal config build`, `config_build.rs`) — the only place a
 /// global-scope document is ever produced — not here.
 pub fn read_document(repo_root: &Utf8Path) -> crate::Result<Option<ConfigDocument>> {
     let Some(path) = resolve_document_path(repo_root)? else {

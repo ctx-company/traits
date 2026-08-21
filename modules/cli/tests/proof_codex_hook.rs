@@ -1,4 +1,4 @@
-//! P501: `ctx traits hook --host codex` — the codex hook adapter rides
+//! P501: `ctx traits internal hook --host codex` — the codex hook adapter rides
 //! P499's handler unparameterized in substance; this proof asserts codex's
 //! own event/source shapes (snake_case `hooks.json` event keys, no `fork`
 //! source, the `UserPromptSubmit`/`SessionStart` wire shared with
@@ -64,7 +64,7 @@ fn run_hook(
     payload: &str,
 ) -> (i32, serde_json::Value, String) {
     let output = run_ctx_with_stdin(
-        &["traits", "hook", "--host", host],
+        &["traits", "internal", "hook", "--host", host],
         repo,
         home,
         payload.as_bytes(),
@@ -84,6 +84,7 @@ fn context_status(repo: &Path, home: &Path, host: &str, session_id: &str) -> ser
     let output = support::run_ctx(
         &[
             "traits",
+            "internal",
             "context",
             "status",
             "--host",
@@ -218,7 +219,14 @@ fn codex_settings_snippet_uses_snake_case_event_keys_and_notes_trust_hash_on_std
     fs::create_dir_all(&repo).unwrap();
 
     let output = support::run_ctx(
-        &["traits", "hook", "--host", "codex", "--settings"],
+        &[
+            "traits",
+            "internal",
+            "hook",
+            "--host",
+            "codex",
+            "--settings",
+        ],
         &repo,
         &scratch.home(),
     );

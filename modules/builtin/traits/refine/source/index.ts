@@ -100,7 +100,7 @@ const captureSingleShot = sequence.command("capture-single-shot", {
 // 0066.3 §2/§3) — no build rung, the candidate is already canonical JSON.
 const evaluateStep = sequence.command("evaluate-round", {
   title: "Evaluate the candidate through the rung ladder",
-  argv: ["ctx", "traits", "refine-round", sourcePath, candidate],
+  argv: ["ctx", "traits", "internal", "refine-round", sourcePath, candidate],
   output: roundReport,
   timeoutMs: 180_000,
 });

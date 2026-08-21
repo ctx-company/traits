@@ -1,14 +1,13 @@
 schema-version = "0.2"
 key = "0242"
-title = "Delete the hidden commands instead of hiding them"
-status = "ready"
+title = "Internals stop being top-level verbs"
+status = "done"
 raised = "2026-08-20"
 content = """
-OWNER RULING 2026-08-21: not gone, unreachable from the CLI. That is the
-"separate the two meanings" option below — internals stop being top-level
-verbs, and keep working for the runtime that spawns them.
+OWNER RULING 2026-08-21: not gone, unreachable from the CLI — and, asked
+which of the 19 ambiguous ones to promote, "all of those go internal for now".
 
-Blocked on one classification the filing cannot make for itself. The 50
+DONE. All 49 moved under `ctx traits internal <verb>`. The 50
 hidden commands are three different things, and moving all of them would bury
 commands that look like they were meant to be visible:
 

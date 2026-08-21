@@ -1,4 +1,4 @@
-//! Read-only mirror of a trait's prompt frames (`ctx traits preview`).
+//! Read-only mirror of a trait's prompt frames (`ctx traits internal preview`).
 //!
 //! No harness dispatch, no session start/advance, no runtime state written.
 //! Every prompt is composed through the [`frame_prompt`] chain, the same
@@ -514,7 +514,7 @@ fn build_session_frame(
 }
 
 fn print_report(report: &PreviewReport) {
-    println!("ctx traits preview");
+    println!("ctx traits internal preview");
     println!("  trait: {}", report.trait_id);
     println!("  session: {}", report.session.as_deref().unwrap_or("none"));
     for frame in &report.frames {

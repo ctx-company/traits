@@ -718,7 +718,7 @@ pub(crate) fn handle_export(inputs: ExportInputs<'_>) -> crate::Result<CommandOu
                 plan: &plan,
                 generated_markdown: Some(&content),
                 output_path: Some(result.path.as_str()),
-                command: "ctx traits export --update-skill-lock",
+                command: "ctx traits internal export --update-skill-lock",
                 options: vec![format!("--profile={}", render_profile.as_str())],
             },
         );
