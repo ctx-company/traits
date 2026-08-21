@@ -51,7 +51,7 @@ fn command_trait_fixture() -> Fixture {
     );
     require_success(
         "activate fixture",
-        &["traits", "internal", "state", "--active", "--file", path],
+        &["traits", "state", "--active", "--file", path],
         &repo,
         &home,
     );

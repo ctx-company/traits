@@ -10,6 +10,7 @@ import type { BranchCheckValue, GuardValue } from "../condition.js";
 import { CONDITION_FALSE, CONDITION_OTHERWISE, CONDITION_TRUE, condition, lowerCheckGuard } from "../condition.js";
 import type { JsonValue } from "../generated.js";
 import type {
+  AgentHandle,
   CheckResultValue,
   FieldRef,
   RefHandle,
@@ -19,18 +20,7 @@ import type {
   SlotHandle,
   SlotWithFields,
 } from "../handles.js";
-import type {
-  CheckSequenceFields,
-  CommandSequenceFields,
-  ExhaustionPolicy,
-  ExhaustionSignalValue,
-  ForEachSequenceFields,
-  LoopSequenceFields,
-  ParallelBranchFailurePolicy,
-  ParallelOptions,
-  ProjectSequenceFields,
-  SignalOutputValue,
-} from "../sequence.js";
+import type { CheckSequenceFields, CommandSequenceFields, ExhaustionPolicy, ExhaustionSignalValue, ForEachSequenceFields, LoopSequenceFields, ParallelBranchFailurePolicy, ParallelOptions, ProjectSequenceFields, PromptRegistrarOptions, SignalOutputValue } from "../sequence.js";
 import { metaOf } from "../meta.js";
 import type { SchemaValue } from "../schema.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
@@ -40,16 +30,7 @@ import { lazyForEachItem, slot } from "../slot.js";
 import { signalVerbLabel, signalVerbOf } from "../signal-verb.js";
 import type { SignalVerb, SignalVerbName } from "../signal-verb.js";
 import type { AuthorFrame, RegisteredItem, Scope } from "./context.js";
-import {
-  captureAuthorFrame,
-  currentScope,
-  declareSessionTitleSink,
-  installAgentPromptLowering,
-  installSlotForEachLowering,
-  nearestScope,
-  registerItem,
-  runInScope,
-} from "./context.js";
+import { captureAuthorFrame, currentScope, declareSessionTitleSink, dispatchAgentPrompt, installAgentPromptLowering, installSlotForEachLowering, nearestScope, registerItem, runInScope } from "./context.js";
 
 function mintId(title: string): string {
   return idFromTitle(title);
@@ -171,6 +152,28 @@ export interface IdOverride {
  * to import back from it.
  */
 export const stepRegistrars = {
+  /**
+   * `step.prompt`: an agent turn, placed inline like every other step.
+   *
+   * `<agent>.prompt(title, opts)` already existed and does the same thing
+   * with the agent as the subject. Both are wanted: the handle form reads
+   * naturally when a role is doing several things in a row, and this one
+   * keeps the call site parallel with its neighbours when a procedure is a
+   * list of steps of mixed kinds. They lower identically — this forwards to
+   * the same registrar — so the two spellings cannot drift.
+   *
+   * Without it `step.*` was command/check/project while `defineStep.*` was
+   * prompt/command/check: you could DECLARE a reusable prompt step but not
+   * PLACE one, which is an asymmetry with no reason behind it.
+   */
+  prompt(
+    title: string,
+    opts: PromptRegistrarOptions & { readonly agent: AgentHandle },
+  ): SequenceHandle {
+    requireBuild(`step.prompt(${JSON.stringify(title)})`);
+    const { agent, ...rest } = opts;
+    return dispatchAgentPrompt(agent, title, rest as PromptRegistrarOptions) as SequenceHandle;
+  },
   command(
     title: string,
     opts: Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride = {} as never,

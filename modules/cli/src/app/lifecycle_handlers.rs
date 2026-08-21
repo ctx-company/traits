@@ -117,7 +117,7 @@ fn package_id_from_normals<'a>(normals: &[&'a str]) -> Option<&'a str> {
     (!id.is_empty()).then_some(*id)
 }
 
-/// Bare `ctx traits internal state <trait>`: report the lifecycle state and the
+/// Bare `ctx traits state <trait>`: report the lifecycle state and the
 /// machine trust standing beside it, and change nothing.
 ///
 /// Trust is reported here because status alone never makes a trait runnable
@@ -135,7 +135,7 @@ pub(crate) fn handle_lifecycle_status(file: &str, json: bool) -> crate::Result<C
 
     let next_action = match (status, trust) {
         (ctx_traits_core::manifest::PackageStatus::Draft, _) => {
-            "draft: run `ctx traits internal state --active <trait>` to make it resolver-eligible"
+            "draft: run `ctx traits state --active <trait>` to make it resolver-eligible"
                 .to_string()
         }
         (
@@ -193,7 +193,7 @@ pub(crate) fn handle_lifecycle_status(file: &str, json: bool) -> crate::Result<C
     Ok(CommandOutput::new(()))
 }
 
-/// `ctx traits internal state --active`/`--draft`/`--deprecated`: edits the package
+/// `ctx traits state --active`/`--draft`/`--deprecated`: edits the package
 /// manifest's `[package].status`. Never touches the canonical trait
 /// document.
 pub(crate) fn handle_lifecycle_transition(

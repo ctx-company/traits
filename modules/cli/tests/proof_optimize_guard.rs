@@ -257,8 +257,8 @@ fn setup_fixture(
         &home,
     );
     support::require_success(
-        "`ctx traits internal state --active`",
-        &["traits", "internal", "state", "--active", fixture_id],
+        "`ctx traits state --active`",
+        &["traits", "state", "--active", fixture_id],
         &repo,
         &home,
     );

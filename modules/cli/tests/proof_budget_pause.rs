@@ -133,8 +133,8 @@ fn init_fixture_repo(repo: &Path, home: &Path, harness_id: &str, script: &Path, 
         home,
     );
     require_success(
-        "0130-proof `ctx traits internal state --active`",
-        &["traits", "internal", "state", "--active", "--file", fixture],
+        "0130-proof `ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

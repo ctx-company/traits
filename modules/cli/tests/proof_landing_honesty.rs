@@ -117,7 +117,7 @@ argv = ["git", "commit", "-m", "landing honesty fixture commit"]
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "internal", "state", "--active", "--file", fixture],
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );
@@ -196,7 +196,7 @@ output = ["slot:notified"]
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "internal", "state", "--active", "--file", fixture],
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

@@ -79,7 +79,7 @@ fn init_fixture_repo(repo: &Path, home: &Path) {
     );
     assert_exit_code(&output, 0);
     let output = run_ctx(
-        &["traits", "internal", "state", "--active", "--file", fixture],
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

@@ -699,6 +699,10 @@ pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "run",
     "merge",
     "trust",
+    // `state` is visible again: it is the step the quickstart walkthrough
+    // tells a reader to run, and a documented command that is not in the
+    // help is a command nobody can find.
+    "state",
     "import",
     "cache",
     // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info`/`publish`
@@ -724,8 +728,8 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
 
     let presentation = match name {
         "doctor" | "init" | "create" | "fork" | "list" | "build" | "generate" | "refine"
-        | "critique" | "merge" | "trust" | "import" | "cache" | "check" | "diff" | "run"
-        | "dependency" => Panel,
+        | "critique" | "merge" | "trust" | "state" | "import" | "cache" | "check" | "diff"
+        | "run" | "dependency" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \
@@ -1131,21 +1135,18 @@ mod tests {
     #[test]
     fn one_row_line_carries_house_vocabulary_and_status_tone() {
         let panel = Panel::new(
-            "ctx traits internal state --active",
+            "ctx traits state --active",
             "trait-a",
             PanelStatus::Passed("activated".to_string()),
         );
         let styled = panel.one_row_styled_line();
         let plain = plain_texts(std::slice::from_ref(&styled)).join("");
-        assert_eq!(
-            plain,
-            "ctx traits internal state --active trait-a · activated"
-        );
+        assert_eq!(plain, "ctx traits state --active trait-a · activated");
         assert!(tones(std::slice::from_ref(&styled)).contains(&Tone::Pass));
 
         assert_eq!(
             panel.one_row_plain_line(),
-            "ctx traits internal state --active trait-a · activated"
+            "ctx traits state --active trait-a · activated"
         );
     }
 
@@ -1153,7 +1154,7 @@ mod tests {
     fn emit_one_row_writes_through_the_same_styled_plain_gate() {
         emit_one_row(
             true,
-            "ctx traits internal state --active",
+            "ctx traits state --active",
             "trait-a",
             PanelStatus::Passed("activated".to_string()),
         )

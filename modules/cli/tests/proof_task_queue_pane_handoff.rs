@@ -77,7 +77,7 @@ fn failing_two_member_queue_fixture() -> Fixture {
     );
     require_success(
         "activate fixture",
-        &["traits", "internal", "state", "--active", "demo"],
+        &["traits", "state", "--active", "demo"],
         &repo,
         &home,
     );

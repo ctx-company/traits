@@ -327,8 +327,8 @@ session-mode = "per-frame"
         home,
     );
     require_success(
-        "p464-proof `ctx traits internal state --active`",
-        &["traits", "internal", "state", "--active", "--file", fixture],
+        "p464-proof `ctx traits state --active`",
+        &["traits", "state", "--active", "--file", fixture],
         repo,
         home,
     );

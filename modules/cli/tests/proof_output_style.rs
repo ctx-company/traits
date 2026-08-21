@@ -560,8 +560,8 @@ fn import_default_output_matches_the_panel_registry_shape() {
 fn activate_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-activate-panel-shape", "fixture-activate-panel");
     let stdout = require_success(
-        "`ctx traits internal state --active` over a freshly-init'd trait",
-        &["traits", "internal", "state", "--active", &fixture.trait_id],
+        "`ctx traits state --active` over a freshly-init'd trait",
+        &["traits", "state", "--active", &fixture.trait_id],
         &fixture.repo,
         &fixture.home,
     );
@@ -642,10 +642,9 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
         &home,
     );
     require_success(
-        "`ctx traits internal state --active --file`",
+        "`ctx traits state --active --file`",
         &[
             "traits",
-            "internal",
             "state",
             "--active",
             "--file",

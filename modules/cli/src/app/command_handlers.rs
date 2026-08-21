@@ -842,6 +842,35 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     ),
                 }
             }
+            Some(cli::TraitsCommand::State {
+                trait_arg,
+                file,
+                active,
+                draft,
+                deprecated,
+                reason,
+                json,
+            }) => {
+                let action = if active {
+                    Some(crate::app::lifecycle_handlers::LifecycleAction::Activate)
+                } else if draft {
+                    Some(crate::app::lifecycle_handlers::LifecycleAction::Deactivate)
+                } else if deprecated {
+                    Some(crate::app::lifecycle_handlers::LifecycleAction::Deprecate {
+                        reason: reason.as_deref(),
+                    })
+                } else {
+                    None
+                };
+                let target = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "state")?;
+                match action {
+                    Some(action) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
+                        &target, action, json,
+                    ),
+                    // No flag: report, do not transition.
+                    None => crate::app::lifecycle_handlers::handle_lifecycle_status(&target, json),
+                }
+            }
             Some(cli::TraitsCommand::Internal { subcommand }) => {
                 handle_internal(subcommand, session)
             }
@@ -1125,35 +1154,6 @@ fn handle_internal(
             crate::app::lifecycle_reporting::handle_trust_named_update(
                 &file, state, reason, json, "review",
             )
-        }
-        cli::InternalCommand::State {
-            trait_arg,
-            file,
-            active,
-            draft,
-            deprecated,
-            reason,
-            json,
-        } => {
-            let action = if active {
-                Some(crate::app::lifecycle_handlers::LifecycleAction::Activate)
-            } else if draft {
-                Some(crate::app::lifecycle_handlers::LifecycleAction::Deactivate)
-            } else if deprecated {
-                Some(crate::app::lifecycle_handlers::LifecycleAction::Deprecate {
-                    reason: reason.as_deref(),
-                })
-            } else {
-                None
-            };
-            let target = resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "state")?;
-            match action {
-                Some(action) => crate::app::lifecycle_handlers::handle_lifecycle_transition(
-                    &target, action, json,
-                ),
-                // No flag: report, do not transition.
-                None => crate::app::lifecycle_handlers::handle_lifecycle_status(&target, json),
-            }
         }
         cli::InternalCommand::RunInfo {
             trait_id,

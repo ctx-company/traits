@@ -108,8 +108,8 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
         TRAIT_MANIFEST,
     );
     require_success(
-        "`ctx traits internal state --active` clears the draft gate",
-        &["traits", "internal", "state", "--active", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );

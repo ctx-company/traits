@@ -579,8 +579,8 @@ fn setup_fixture(
         &home,
     );
     require_success(
-        "`ctx traits internal state --active`",
-        &["traits", "internal", "state", "--active", id],
+        "`ctx traits state --active`",
+        &["traits", "state", "--active", id],
         &repo,
         &home,
     );

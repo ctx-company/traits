@@ -132,8 +132,8 @@ fn activated_and_verified_trait_renders_flagless_with_no_advisory() {
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits internal state --active` clears the draft gate",
-        &["traits", "internal", "state", "--active", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );
@@ -335,8 +335,8 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
     let repo = draft_repo(&scratch);
 
     require_success(
-        "`ctx traits internal state --active` clears the draft gate",
-        &["traits", "internal", "state", "--active", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );

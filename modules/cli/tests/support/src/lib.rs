@@ -543,8 +543,8 @@ fn write_fixture_file(path: &Path, contents: &str) {
 /// render-trust gate never refuses it.
 pub fn ready_hook_fixture_trait(repo: &Path, home: &Path, id: &str) {
     require_success(
-        "`ctx traits internal state --active` clears the draft gate",
-        &["traits", "internal", "state", "--active", id],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", id],
         repo,
         home,
     );

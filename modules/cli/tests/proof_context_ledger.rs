@@ -53,8 +53,8 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
         &manifest("P498 context-ledger fixture."),
     );
     require_success(
-        "`ctx traits internal state --active` clears the draft gate",
-        &["traits", "internal", "state", "--active", TRAIT_ID],
+        "`ctx traits state --active` clears the draft gate",
+        &["traits", "state", "--active", TRAIT_ID],
         &repo,
         &scratch.home(),
     );

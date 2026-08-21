@@ -50,6 +50,7 @@ Manage:
   list        List local trait packages from .ctx/traits, plus the built-in meta-trait packages
   check       Check a trait for validation, audit, and drift
   trust       Report or record this machine's local trust decisions: <trait>, approve, block, list [--stale]
+  state       Report or set a trait's lifecycle state: <trait>, --active, --draft, --deprecated
   dependency  Packages this project depends on, and publishing your own: install (all declared), add <pkg>, remove, update, outdated, info, publish
   diff        Show layer-aware diff for a trait
 AI Assistance:
@@ -936,6 +937,45 @@ pub enum TraitsCommand {
         #[command(subcommand)]
         subcommand: CacheCommand,
     },
+    /// Report or set a trait's lifecycle state.
+    ///
+    /// The state is a flag, so the operand is always the trait:
+    /// `ctx traits state --active <trait>`. Bare `ctx traits state <trait>`
+    /// reports the current state without changing it.
+    ///
+    /// A package is `draft` or `ready`; `--active` is what makes it
+    /// resolver-eligible. `--deprecated` is `--draft` plus a recorded
+    /// reason: there is no third status, and inventing one would mean a
+    /// state the resolver has no rule for.
+    State {
+        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
+        #[arg(value_name = "TRAIT")]
+        trait_arg: Option<String>,
+
+        /// Trait file to report or transition.
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Make the trait resolver-eligible (status `ready`).
+        #[arg(long, conflicts_with_all = ["draft", "deprecated"])]
+        active: bool,
+
+        /// Remove resolver eligibility (status `draft`).
+        #[arg(long, conflicts_with_all = ["active", "deprecated"])]
+        draft: bool,
+
+        /// Remove resolver eligibility and record why.
+        #[arg(long, conflicts_with_all = ["active", "draft"])]
+        deprecated: bool,
+
+        /// Reason to record. Only meaningful with `--deprecated`.
+        #[arg(long, requires = "deprecated")]
+        reason: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Internals: the runtime's own dispatch surface and this project's
     /// tooling. Not a user-facing command group — `ctx traits internal
     /// <verb> --help` documents each one, and nothing here is part of the
@@ -1698,45 +1738,6 @@ pub enum InternalCommand {
 
         /// Optional reason recorded with a --deny decline.
         #[arg(long)]
-        reason: Option<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Report or set a trait's lifecycle state.
-    ///
-    /// The state is a flag, so the operand is always the trait:
-    /// `ctx traits internal state --active <trait>`. Bare `ctx traits internal state <trait>`
-    /// reports the current state without changing it.
-    ///
-    /// A package is `draft` or `ready`; `--active` is what makes it
-    /// resolver-eligible. `--deprecated` is `--draft` plus a recorded
-    /// reason: there is no third status, and inventing one would mean a
-    /// state the resolver has no rule for.
-    State {
-        /// Trait name (resolved from .ctx/traits, falling back to a built-in meta-trait) or explicit file path.
-        #[arg(value_name = "TRAIT")]
-        trait_arg: Option<String>,
-
-        /// Trait file to report or transition.
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Make the trait resolver-eligible (status `ready`).
-        #[arg(long, conflicts_with_all = ["draft", "deprecated"])]
-        active: bool,
-
-        /// Remove resolver eligibility (status `draft`).
-        #[arg(long, conflicts_with_all = ["active", "deprecated"])]
-        draft: bool,
-
-        /// Remove resolver eligibility and record why.
-        #[arg(long, conflicts_with_all = ["active", "draft"])]
-        deprecated: bool,
-
-        /// Reason to record. Only meaningful with `--deprecated`.
-        #[arg(long, requires = "deprecated")]
         reason: Option<String>,
 
         /// Emit structured JSON.

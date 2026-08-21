@@ -1587,7 +1587,6 @@ output = ["slot:notified"]
         &run_ctx(
             &[
                 "traits",
-                "internal",
                 "state",
                 "--active",
                 "--file",
@@ -1782,7 +1781,6 @@ output = ["slot:notified"]
         &run_ctx(
             &[
                 "traits",
-                "internal",
                 "state",
                 "--active",
                 "--file",
