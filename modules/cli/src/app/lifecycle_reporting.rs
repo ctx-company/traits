@@ -93,6 +93,13 @@ pub(crate) fn handle_init(
         });
         lock.authoring = Some(entry);
         ctx_traits_io::project_lock::write_project_lock(&cwd, &mut lock)?;
+        // Installing is not the same as installing something usable. Build a
+        // built-in template against what actually landed, so a CDK that does
+        // not match this binary is refused here rather than surfacing as a
+        // node TypeError inside the first scaffolded file.
+        if let Some(failure) = ctx_traits_io::authoring_env::smoke_build_template(&cwd)? {
+            return Err(crate::Error::Command { message: failure });
+        }
         Some(manager)
     } else {
         None
@@ -184,6 +191,28 @@ pub(crate) fn handle_sync_all(
         return Err(crate::Error::Command {
             message: "sync --locked detected project dependency drift".to_string(),
         });
+    }
+
+    // Say what the project reconcile did. It used to succeed in silence, so
+    // the only line a user saw was the per-package `dependencies: none` below
+    // — which counts one authored package's OWN dependencies and reads as
+    // "this project has none", with a declared project dependency sitting
+    // right there in config.toml.
+    if !json && project_warnings.is_empty() {
+        let declared = ctx_traits_io::distribution::project_dependency_aliases(&cwd);
+        if !declared.is_empty() {
+            emit_one_row(
+                false,
+                "ctx",
+                "vendor",
+                PanelStatus::Passed(format!(
+                    "{} project dependenc{} reproduced from lock: {}",
+                    declared.len(),
+                    if declared.len() == 1 { "y" } else { "ies" },
+                    declared.join(", ")
+                )),
+            )?;
+        }
     }
 
     let packages = ctx_traits_io::discovery::trait_package_variants(&cwd)?;
@@ -1818,11 +1847,10 @@ pub(crate) fn handle_list(json: bool, verbose: bool) -> crate::Result<CommandOut
         })
         .collect();
 
-    let repo_root_hint = format!(
-        "{} or {}",
-        ctx_traits_io::layout::trait_protocol_root_path(&cwd),
-        ctx_traits_io::layout::trait_authoring_root_path(&cwd)
-    );
+    // One path. This read `"{} or {}"` over two functions that had already
+    // collapsed into the same body when the layout unified on `authored/`,
+    // so it printed the same directory twice.
+    let repo_root_hint = ctx_traits_io::layout::trait_authoring_root_path(&cwd).to_string();
 
     let mut rows = Vec::new();
     let protocol_ids: std::collections::BTreeSet<String> = inventory

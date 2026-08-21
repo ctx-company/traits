@@ -1278,6 +1278,18 @@ fn manifest_text_removing_dependency(
     })?;
     if let Some(deps) = get_nested_table_mut(&mut document, scope.dependencies_table_path()) {
         deps.remove(alias);
+        // Drop the table itself once its last entry goes. A bare
+        // `[vendor.dependencies]` left behind says this project declares
+        // dependencies when it declares none, and it is the header that
+        // displaces any comment following it.
+        if deps.iter().count() == 0 {
+            let path = scope.dependencies_table_path();
+            if let Some((last, parents)) = path.split_last()
+                && let Some(parent) = get_nested_table_mut(&mut document, parents)
+            {
+                parent.remove(last);
+            }
+        }
     }
     Ok(document.to_string())
 }
@@ -3223,6 +3235,21 @@ fn append_audit(
 /// rather than trusting the vendor directory's mere presence. Only an
 /// explicit `update`, or manifest/lock evidence that is missing or
 /// incompatible, performs fresh range selection.
+/// The aliases this project declares in `[vendor.dependencies]`, for reports
+/// that need to name what was reconciled rather than only what went wrong.
+/// Empty when there is no manifest, no `[vendor]` table, or no declarations —
+/// all three mean the same thing to a caller: nothing to say.
+pub fn project_dependency_aliases(repo_root: &Utf8Path) -> Vec<String> {
+    DistributionScope::Project(repo_root.to_path_buf())
+        .read_manifest()
+        // `packages` is the `[dependencies]` TABLE — what the PROJECT
+        // installs. The field literally named `dependencies` is the
+        // `[[dependency]]` array, which is what a PACKAGE needs from another
+        // trait. Two different relationships, and the names invert.
+        .map(|manifest| manifest.packages.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 pub fn reconcile_project_dependencies(
     repo_root: &Utf8Path,
     locked: bool,
@@ -3338,6 +3365,28 @@ pub fn reconcile_project_dependencies(
         });
         if compatible {
             let entry = locked_entry.expect("compatible implies a locked entry");
+            // `--locked` asserts that nothing has moved. `vendor_matches_lock`
+            // only compares the VENDORED tree against the lock, and a clean
+            // reproduction always satisfies it — so an upstream `path:` source
+            // that has since been edited passed silently, which is exactly the
+            // thing `--locked` exists to refuse. Compare the source too, the
+            // same way `dependency outdated` already does.
+            if locked
+                && let Some(relative_path) = dependency.as_path()
+                && let Some(current) =
+                    stage_local_package(repo_root, relative_path)
+                        .ok()
+                        .and_then(|local| {
+                            crate::registry::compute_tree_digest(&local.staged.staging_root).ok()
+                        })
+                && current != entry.tree_digest
+            {
+                warnings.push(format!(
+                    "dependencies.{alias} drift: source at {relative_path} has moved on since it \
+                     was locked (run `ctx traits dependency update {alias}` to accept it)"
+                ));
+                continue;
+            }
             if vendor_matches_lock(repo_root, entry) {
                 continue;
             }
