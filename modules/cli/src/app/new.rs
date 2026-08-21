@@ -205,6 +205,7 @@ pub(crate) fn handle_new(
         generated: evidence.target_path.clone(),
         source_map: evidence.map_path.clone(),
         lock: sync_report.lockfile.clone(),
+        package_status: package_status_of(package.root()),
         trust,
     };
 
@@ -268,6 +269,11 @@ fn new_report_panel(report: &NewReport) -> Panel {
         ))
         .row(PanelRow::toned(
             "status",
+            report.package_status.as_str(),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "trust",
             trust_status_line_for(report),
             status_tone,
         ))
@@ -312,33 +318,52 @@ struct NewReport {
     generated: camino::Utf8PathBuf,
     source_map: camino::Utf8PathBuf,
     lock: String,
+    /// The lifecycle field as scaffolded — `draft`, until an author activates.
+    package_status: String,
     trust: ctx_traits_core::r#trait::TrustVerdict,
+}
+
+/// The lifecycle field as it stands in the package just written. Read back
+/// rather than assumed: the template owns this value, and a template that
+/// scaffolds something other than `draft` should say so rather than have this
+/// report claim otherwise.
+fn package_status_of(package_root: &camino::Utf8Path) -> String {
+    ctx_traits_io::lifecycle::resolve_package_status(package_root)
+        .map(|status| status.display_name().to_string())
+        .unwrap_or_else(|_| "draft".to_string())
 }
 
 fn trust_status_line_for(report: &NewReport) -> String {
-    trust_status_line(&report.trait_id, report.trust, "draft")
+    trust_status_line(&report.trait_id, report.trust)
 }
 
-/// Shared trust status line for a just-built package's report: `create`'s
-/// wording, parameterized by `verb` (`"draft"` for `create`, `"forked"` for
-/// `ctx traits fork`) so both commands render the exact same trust-by-digest
-/// story instead of two copies of it drifting apart.
+/// The trust half of a just-built package's report.
+///
+/// Status and trust are two facts with two owners, and this row is the second
+/// one. `status` is a field in the committed `trait.toml` — the author saying
+/// the package is finished, moved with `ctx traits state --active`. Trust is a
+/// verdict in this machine's own store, keyed on the exact canonical digest.
+/// A package is runnable when both hold, and neither implies the other.
+///
+/// They used to share one row, labelled `status`, whose text began with
+/// `status: ` — so it rendered as `status: status: draft (…)` and read as a
+/// claim about the lifecycle field while actually describing trust. Two rows
+/// now, each saying only its own thing.
 pub(crate) fn trust_status_line(
     trait_id: &str,
     trust: ctx_traits_core::r#trait::TrustVerdict,
-    verb: &str,
 ) -> String {
     match trust {
         ctx_traits_core::r#trait::TrustVerdict::Verified
         | ctx_traits_core::r#trait::TrustVerdict::Blocked => format!(
-            "status: {verb} (this machine already has a trust verdict for this exact canonical \
-             digest: {}; run `ctx traits check {trait_id}` to review it)",
+            "{} (this machine already has a verdict for this exact canonical digest; run \
+             `ctx traits check {trait_id}` to review it)",
             trust.display_name(),
         ),
         ctx_traits_core::r#trait::TrustVerdict::Unreviewed => format!(
-            "status: {verb} (no trust verdict on this machine for this canonical digest; run \
-             `ctx traits check {trait_id}` then `ctx traits trust --approved {trait_id}` before \
-             activating)",
+            "unreviewed (no verdict on this machine for this canonical digest; run \
+             `ctx traits check {trait_id}` then `ctx traits trust --approved {trait_id}`, and \
+             `ctx traits state --active {trait_id}` when it is ready)",
         ),
     }
 }

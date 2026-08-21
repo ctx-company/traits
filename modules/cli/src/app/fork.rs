@@ -528,8 +528,8 @@ fn fork_report_panel(report: &ForkReport) -> Panel {
             RowTone::Default,
         ))
         .row(PanelRow::toned(
-            "status",
-            trust_status_line(&report.id, report.trust, "forked"),
+            "trust",
+            trust_status_line(&report.id, report.trust),
             status_tone,
         ))
 }
