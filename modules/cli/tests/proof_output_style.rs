@@ -643,13 +643,7 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
     );
     require_success(
         "`ctx traits state --active --file`",
-        &[
-            "traits",
-            "state",
-            "--active",
-            "--file",
-            fixture_path,
-        ],
+        &["traits", "state", "--active", "--file", fixture_path],
         &repo,
         &home,
     );
