@@ -1,18 +1,17 @@
 import * as cdk from "@ctx-traits/cdk";
 
 import { worker } from "../agent.ts";
-import { slot, port } from "../data.ts";
+import { slot } from "../data.ts";
 
 export const implement = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
-    Implement ${port.task} following the draft ${slot.draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
-    Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
+    Implement the draft ${slot.draft}, which carries the task's restated scope and its validation plan.
+    Treat that validation plan as the definition of done: run the checks it names before reporting.
     Optionally attached verdicts from previous rounds: ${slot.verdict1.optional()} & ${slot.verdict2.optional()}
-    Optionally attached work summary from previous rounds: ${slot.workSummary.optional()}
     Attached verdicts are the source of truth — always follow their guidance.
   `,
   output: cdk.output.prompt`
-    Return the cumulative work summary (what changed, how it was validated & open concerns): ${slot.workSummary}
+    Return this round's work summary (what changed, how it was validated & open concerns): ${slot.workSummary}
   `,
 });

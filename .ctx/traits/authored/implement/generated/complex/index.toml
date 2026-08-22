@@ -116,8 +116,8 @@ description = "Output evidence from the git add command step."
 [[slot]]
 id = "work-summary"
 schema = "schema:text"
-description = "Worker's cumulative account of the implemented state, extended each round — the worker's cross-round memory."
-hint = "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict."
+description = "Worker's account of what this round changed — written for the reviewer, not read back by the worker."
+hint = "This round only: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict. Your own prior summary is not an input; the verdict and the draft are what carry forward."
 
 [[resource]]
 id = "task-board"
@@ -296,15 +296,15 @@ summary = "Implementation role."
 
 [prompt.cross-review-the-implementation]
 text = """
-Review the working tree's implemented state for {port:task} against the task file's own contract as source of truth.
-A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication.
+Review the working tree's implemented state against the draft {slot:draft} as source of truth.
+A BLOCKER is a correctness bug, an unmet item of the draft's validation plan, clear over-build, or un-abstracted duplication.
 Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
 Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
 Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
 
 Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-2)"""
 input = [
-    "port:task",
+    "slot:draft",
     "slot:work-summary",
     "slot:changed-files",
 ]
@@ -319,30 +319,26 @@ output = ["slot:draft"]
 
 [prompt.implement-the-task]
 text = """
-Implement {port:task} following the draft {slot:draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
-Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
+Implement the draft {slot:draft}, which carries the task's restated scope and its validation plan.
+Treat that validation plan as the definition of done: run the checks it names before reporting.
 Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
-Optionally attached work summary from previous rounds: {slot:work-summary}
 Attached verdicts are the source of truth — always follow their guidance.
 
-Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary"""
-input = [
-    "port:task",
-    "slot:draft",
-]
+Return this round's work summary (what changed, how it was validated & open concerns): slot:work-summary"""
+input = ["slot:draft"]
 output = ["slot:work-summary"]
 
 [prompt.review-the-implementation]
 text = """
-Review the working tree's implemented state for {port:task} against the task file's own contract as source of truth.
-A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication.
+Review the working tree's implemented state against the draft {slot:draft} as source of truth.
+A BLOCKER is a correctness bug, an unmet item of the draft's validation plan, clear over-build, or un-abstracted duplication.
 Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
 Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
 Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
 
 Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)"""
 input = [
-    "port:task",
+    "slot:draft",
     "slot:work-summary",
     "slot:changed-files",
 ]
@@ -403,11 +399,9 @@ title = "Implement the task"
 agent = "agent:worker"
 prompt = "prompt:implement-the-task"
 input = [
-    "port:task",
     "slot:draft",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
-    { slot = "slot:work-summary", optional = true },
 ]
 output = ["slot:work-summary"]
 
@@ -431,7 +425,7 @@ title = "Review the implementation"
 agent = "agent:smart"
 prompt = "prompt:review-the-implementation"
 input = [
-    "port:task",
+    "slot:draft",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
     "slot:work-summary",
@@ -445,7 +439,7 @@ title = "Cross-review the implementation"
 agent = "agent:smart"
 prompt = "prompt:cross-review-the-implementation"
 input = [
-    "port:task",
+    "slot:draft",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
     "slot:work-summary",

@@ -9,8 +9,8 @@ export const draft = cdk.slot.text({
 
 export const workSummary = cdk.slot.text({
   id: "work-summary",
-  description: "Worker's cumulative account of the implemented state, extended each round — the worker's cross-round memory.",
-  hint: "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict.",
+  description: "Worker's account of what this round changed — written for the reviewer, not read back by the worker.",
+  hint: "This round only: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict. Your own prior summary is not an input; the verdict and the draft are what carry forward.",
 });
 
 export const changedFiles = cdk.slot.text({
