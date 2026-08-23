@@ -1,0 +1,79 @@
+schema-version = "0.2"
+key = "0243"
+title = "The run pane paints on the first pass"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner-reported symptom: the run pane sits empty for seconds — up to ten — and
+un-sticks on refresh, selection move, or a screen toggle. The prior audit
+measured reload throughput (~460 ms) and proposed making it faster. That is
+not this bug. The pane cannot paint on the first pass BY CONSTRUCTION, and
+the wait that follows is a timer, not a computation.
+
+Two facts, each innocent alone:
+
+- `dashboard/worker.rs:134` runs `state.reload_sync()` — the whole inventory —
+  before it looks at the preview request at all.
+- `dashboard.rs:1427` `session_preview_request()` reads `selected_session(self)`
+  — the selection carried by the PREVIOUS snapshot.
+
+So on cold start: reload #1 goes out with `preview: None` (list is empty, no
+selection exists), the snapshot lands, a row becomes selected, `loading`
+clears — empty pane, no indicator, looks finished-and-broken. Nothing
+re-requests until the key-poll timeout branch (`dashboard.rs:2737`) fires at
+`last_reload.elapsed() >= 2s`, and `dashboard.rs:2772` resets that timer on
+EVERY keypress, so typing pushes the wait out further. The second reload then
+re-parses the whole inventory again before finally reading the one selected
+ledger. Floor: 2 s + two full inventory reloads + one full ledger parse,
+serialized on one worker thread.
+
+This also explains each workaround: `r` reloads immediately with a now-valid
+request (2929); `move_selection` (1395) deliberately does not reload; toggles
+hit one of the other reload call sites.
+
+## The fix — three changes, none of them throughput
+
+1. The preview gets its own worker command. `build_attached_view` (3359) and
+   `refresh_attached_view` (3429) take a ledger path and never touch the
+   inventory — the sequencing behind `reload_sync()` is accidental. Add
+   `Command::Preview(SessionPreviewRequest)` handled BEFORE the refresh
+   coalescer (worker.rs:117 keeps only the newest command — a queued Refresh
+   must not eat a Preview), with its own result channel mirroring
+   `explanations`. DELETE the preview branch from the refresh handler
+   (worker.rs:135-154): two owners means a Refresh snapshot carrying
+   `session_preview: None` clobbers a preview the new path just delivered.
+2. Request the preview the moment a selection exists: at the end of
+   `apply_snapshot` (1492), after `restore_visible_selection` /
+   `resolve_initial_session`, if `session_preview_request()` returns a request
+   whose identity differs from the current preview, send it. Same check in
+   `move_selection` — its no-reload posture existed because reload meant a
+   full store scan, and change 1 removes that reason.
+3. Stop reporting "loaded" for a pane with no data. `"loading..."` is gated on
+   `state.loading && !state.has_snapshot` (8513) and dies with the first
+   snapshot. Track `preview_pending` (set on send, cleared on receive) and
+   render the pane's own placeholder from it.
+
+Stale results: a preview can land after the selection moved — discard on
+identity mismatch, exactly as `apply_snapshots` already does for explanations.
+"""
+validation = """
+## Watch
+
+- The worker stays one thread; a 12.8 MB ledger read still blocks a concurrent
+  refresh. This fix must not make that worse. If the pane is still not snappy
+  after it, the next step is a second worker thread — measure first.
+- `worker.refresh()` loses its `preview` parameter; every caller compiles
+  against the new signature rather than passing `None` into a vestigial slot.
+
+## Done when
+
+On a cold dashboard start with sessions present, the run pane paints after
+one inventory reload plus one ledger read — no 2-second wait, no keypress
+needed. Moving the selection repaints the pane for the cost of one ledger
+read and no inventory scan. While a preview is in flight the pane shows a
+pending state, never a silent empty. A preview arriving for a row no longer
+selected is discarded. Proven with scratch-fixture ledgers driving the worker
+loop directly; the existing dashboard proofs stay green.
+"""
+
+[relations]

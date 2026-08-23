@@ -1,0 +1,69 @@
+schema-version = "0.2"
+key = "0248"
+title = "Start and interrupt go through the daemon"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The live half learns to act: `start_session` and `interrupt` join the
+protocol, and drivers begin notifying the daemon. This is the slice that
+unlocks another machine — after it, remote is the same protocol over a
+second transport plus the portability items below, none of which are this
+task.
+
+## The driver relationship
+
+A driver stays an independent foreground process: own process group, own
+`.driver-lock`, own harness child — exactly as today. The daemon may SPAWN
+one (detached; it returns a session id and holds nothing); it never owns
+one. Daemon death touches no running work.
+
+The ordering rule, never reversed, never conditional:
+
+    1. write the frame to the ledger    durable - required - never skipped
+    2. notify the daemon                best-effort - non-blocking - droppable
+
+Driver -> daemon messages, fire-and-forget on the shared socket: register,
+row-changed, activity-line, terminal-outcome. Dropped lines cost freshness,
+never data — `.activity.jsonl` is written regardless, and reconcile catches
+anything missed. Writes are non-blocking; a slow daemon must never slow a
+run.
+
+Daemon -> driver: interrupt only, as a CLIENT of `run_control`'s existing
+per-driver control socket with its unguessable token. No new channel in
+that direction.
+
+Driver startup: try the daemon socket; on absence take the spawn lock
+LOCK_NB — winner forks the daemon detached, loser proceeds. THE DRIVER
+NEVER WAITS: work starts immediately either way, and the notify channel
+connects lazily with backoff. (A run must be visible without the user
+running a second command — that is why the driver spawns; it must not block
+on daemon startup — that is why it never waits.)
+
+`subscribe` replaces the dashboard's remaining poll loops with the daemon's
+activity relay where the run is live; the ledger-derived view remains the
+fallback for everything else.
+"""
+validation = """
+## Watch
+
+- The interrupt path exists and works today CLI-to-driver; this adds the
+  daemon as a second client of it. Do not fork the mechanism.
+- A driver on a machine with a perpetually-failing daemon spawn must behave
+  exactly as ctx does today: run, write, exit cleanly, no retry storm.
+
+## Done when
+
+`ctx traits run` spawns a daemon it never waits for; killing the daemon
+mid-run leaves the run unaffected and a restarted daemon reconciles it back
+into view. `start_session` over the socket produces a driver that outlives
+the requesting CLI. Interrupt through the daemon stops a live run using the
+existing control socket. A dropped notify line is invisible in the ledger
+and repaired in the index by the next reconcile. Dashboard shows a live
+run's frames arriving via subscribe with the poll loop off. All proven with
+scratch stores and a fixture harness; the ordering rule proven by killing
+the daemon between step 1 and step 2 and observing a correct ledger and a
+correct post-reconcile index.
+"""
+
+[relations]
+depends-on = ["0246", "0247"]
