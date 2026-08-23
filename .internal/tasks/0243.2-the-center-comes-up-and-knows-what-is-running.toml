@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0243.2"
+title = "The center comes up, and knows what is running"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The center process itself: lifecycle plus discovery. No subscribers, no
+queries, no commands yet — this slice proves the center can exist, find the
+truth on disk, and lose nothing by dying.
+
+Lifecycle:
+- Socket at `/tmp/ctx-<uid>-<version>.sock`; version in the path, so a new
+  CLI and an old center simply never meet. Socket root and uid-scoping
+  reasoning inherited from `run_control::runtime_root()`.
+- Spawn arbitrated by flock(LOCK_EX | LOCK_NB) on a lock beside the socket:
+  winner forks the center detached (setsid), loser proceeds. A connection
+  closed during handshake means retry once, spawning if needed.
+- Exits when idle — safe because it holds nothing. Never while a registered
+  driver is live.
+- Wire format: JSON lines (ruled).
+
+Discovery — startup and periodic safety net, the same pass:
+- stat-scan the runs directories (no parsing on the happy path)
+- for each non-terminal ledger, probe the driver lock: HELD -> alive; read
+  the holder metadata (pid, control socket, token) and model it live.
+  FREE -> orphan; record interrupted via the existing
+  `record_interrupted_outcome` path (run_session.rs:664) — promoted from
+  "the dashboard infers it" to "the center does it on start".
+- parse a ledger only when its (mtime, size) moved since the model's row.
+
+The model this builds is in-memory, persisted to sqlite
+(`<runs-root>/index.sqlite3`, one DB for all repos, repo_key a column;
+rusqlite bundled, busy_timeout set explicitly). Rows are RunSummary's
+fields plus what the inventory needs plus (ledger_path, mtime, size) for
+freshness. The DB is derived and disposable: `rm` + restart rebuilds it
+from the ledgers, and that IS the recovery mechanism.
+"""
+validation = """
+## Watch
+
+- The center holds nothing it cannot rebuild from the ledgers. State that
+  survives only in center memory or only in the DB is a bug by definition.
+- InventoryCache's doc comment ("no disk, no invalidation protocol, no
+  second store") records the position the sqlite file deliberately crosses;
+  justify at the crossing point (the memo dies with the process; every cold
+  command re-pays the full parse) rather than deleting the comment.
+
+## Done when
+
+A center spawns on demand, discovers a live scratch driver (lock held) and
+an orphaned one (lock free, non-terminal ledger) correctly, records the
+orphan interrupted, exits on idle, and a concurrent second spawn joins
+rather than double-spawns. kill -9 the center mid-run: the driver is
+unaffected, and a restarted center rebuilds the same model from disk.
+`rm index.sqlite3` + restart yields the same model. Two CLI versions run
+two centers side by side without contention. Scratch stores and per-test
+socket paths throughout; no existing surface changes behavior.
+"""
+
+[relations]

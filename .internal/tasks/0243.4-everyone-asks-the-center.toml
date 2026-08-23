@@ -1,0 +1,51 @@
+schema-version = "0.2"
+key = "0243.4"
+title = "Everyone asks the center"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Every surface that reads session state directly converts to the center:
+the dashboard (subscribe replaces its whole IO worker loop — the 2 s
+reload tick, the 20 s flock sweep, reload_sync), `sessions`, `stats`,
+`tasks`' session overlay, and merge's run-id lookup. Four dashboards
+become four subscriptions to one model.
+
+This is the task with a clock on it: every direct read written between now
+and landing is a call site somebody has to find later, and the dashboard
+alone reads ledgers from a dozen places.
+
+What this DELETES — landing is not done until they are gone, not bypassed:
+- the summary sidecars and their apparatus: `summary_path`,
+  `summary_is_fresh`, `read_summary_or_ledger`,
+  `remove_summary_for_ledger`, and the missing-sidecars class with them
+  (390 of 886 in this repo's store)
+- `InventoryCache` and `run_inventory_from_paths`' scanning role — the
+  center's model is that memo, persistent and owned (the scan survives
+  only as the center's own reconcile reader)
+- 0243.1's bridge code, superseded by subscription
+
+Out of scope: driver writes (drivers never go through the center to write
+their own ledger), and the attach/preview detail view may keep reading its
+one ledger by path.
+
+The dashboard's degraded mode (center unreachable) shows a visibly stale
+view — footer line — never silently old data and never a hard error.
+Merge's posture when the center cannot start: per the hung-vs-dead ruling
+in the parent, decide explicitly whether merge's lookup falls back to a
+direct read behind a flag or fails loudly; silent fallback to a
+differently-shaped slow path is how unreproducible bugs are born.
+"""
+validation = """
+## Done when
+
+No code outside the center and the attach/preview path opens a session
+ledger for reading — proven by the call-site inventory, not grep alone.
+The dashboard runs with its poll loop deleted: an externally started run
+appears via delta without any tick. `stats`, `sessions`, `tasks`, and
+merge's lookup return the same answers as before against the same scratch
+store, cold and warm. The sidecar apparatus and InventoryCache are deleted
+and the workspace tests pass without them.
+"""
+
+[relations]
+depends-on = ["0243.3"]

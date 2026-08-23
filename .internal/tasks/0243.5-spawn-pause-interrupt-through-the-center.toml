@@ -1,0 +1,52 @@
+schema-version = "0.2"
+key = "0243.5"
+title = "Spawn, interrupt, and pause go through the center"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The center learns to act, without ever owning what it acts on.
+
+SPAWN — the dashboard's `n` key and any future remote viewer: viewer sends
+start(trait, args, request-token); the center forks the driver DETACHED and
+keeps no handle; the driver comes up exactly as if typed in a terminal and
+its register (0243.3) carries the token back; the center matches it,
+answers the requesting viewer with the session id, and every subscriber
+gets the new-session delta. A driver that dies before registering is
+reported back to the requester with its stderr. The dashboard's existing
+direct-spawn code converts to this path — one code path for local and,
+later, remote.
+
+INTERRUPT and PAUSE — the center is a CLIENT of the driver's existing
+per-run control socket, addressed by the socket + token it read from the
+lock-holder metadata (0243.2) or received at register. Interrupt is today's
+mechanism, unforked. Pause is a variant: stop at the next frame boundary,
+write outcome `paused`, exit — a deliberate sibling of interrupted, resumable
+by the same `--session` resume that exists today. Resume through the center
+is spawn with a session id instead of a trait.
+
+Pause is the primitive the future move/adopt (0243.6) stands on: pause ->
+copy -> resume. It must therefore leave the session in a state
+indistinguishable from any other resumable session — no center-only
+memory of "paused by whom" that a copy would lose.
+
+Open inside this task before code: does a paused `--worktree` run hold its
+worktree or release it? Holding blocks the pool; releasing means resume
+must re-derive it (worktree id + branch are already a function of session
+id, and the stored path is already never read — audit note 01).
+"""
+validation = """
+## Done when
+
+Spawn from a dashboard produces a driver that outlives the requesting
+dashboard and appears on every subscriber; the requester gets the session
+id via its token; a driver failing before register reports back with
+stderr. Interrupt through the center stops a live scratch run via the
+existing control socket — including one the center discovered after a
+restart rather than spawned. Pause stops at a frame boundary with outcome
+`paused`; resume through the center continues from the next frame and the
+ledger shows no gap and no re-executed frame. The worktree question has a
+recorded answer implemented and proven either way.
+"""
+
+[relations]
+depends-on = ["0243.2", "0243.3"]

@@ -1,0 +1,57 @@
+schema-version = "0.2"
+key = "0243.1"
+title = "Bridge: the run pane paints now, and the ALL-repos cache stops evicting itself"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Two fixes to today's dashboard, worth hours now even though 0243.4 later
+deletes the code they fix. Both are diagnosed, neither waits on the center.
+
+## a. The run pane cannot paint on the first pass
+
+Owner-reported: pane empty for seconds, up to ten, un-stuck by refresh /
+selection move / toggle. Not throughput — construction:
+
+- `dashboard/worker.rs:134` runs `reload_sync()` (whole inventory) before
+  looking at the preview request.
+- `dashboard.rs:1427` derives the preview request from the PREVIOUS
+  snapshot's selection, so reload #1 always carries `preview: None`.
+- Nothing re-requests until the 2 s timeout branch (2737), and 2772 resets
+  that timer on EVERY keypress. The second reload re-parses the whole
+  inventory again before reading the one selected ledger.
+
+Fix, three parts:
+1. Preview becomes its own worker command with its own result channel
+   (mirror `explanations`), handled BEFORE the refresh coalescer
+   (worker.rs:117) so a queued Refresh cannot eat it. Delete the preview
+   branch from the refresh handler (135-154) — two owners means a Refresh
+   snapshot with `session_preview: None` clobbers a fresh preview.
+2. Request the preview the moment a selection exists: end of
+   `apply_snapshot` (1492) and in `move_selection` (1395), on identity
+   change only. Discard stale results on identity mismatch, as
+   `apply_snapshots` already does for explanations.
+3. Track `preview_pending` and render a pending state — `"loading..."` is
+   gated on `!has_snapshot` (8513) and dies with the first snapshot, so the
+   pane reads finished-and-empty while it waits.
+
+## b. The ALL-repos scan evicts its own cache
+
+`run_inventory_from_paths` (run_session.rs): `cache.entries.retain(|path,_|
+present.contains(path))` keeps only THIS call's paths. The machine-wide scan
+calls it once per repo with a shared cache, so each repo's pass evicts every
+other repo's entries — full re-parse every 2 s tick, hit rate ~0%. Scope the
+eviction to the scanned roots; near one line plus a parameter.
+"""
+validation = """
+## Done when
+
+Cold dashboard start with sessions present: the run pane paints after one
+inventory reload plus one ledger read — no 2-second wait, no keypress.
+Selection move repaints for one ledger read, no inventory scan. In-flight
+preview shows a pending state; a preview for a no-longer-selected row is
+discarded. A machine-wide pass over two scratch repo stores, ticked twice
+with a shared cache, parses each unchanged ledger at most once (counting
+reader, not timing). Existing dashboard proofs stay green.
+"""
+
+[relations]
