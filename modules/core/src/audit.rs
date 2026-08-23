@@ -264,7 +264,7 @@ pub fn scan_hidden_content(text: &str, trait_id: &str, path: Option<&str>) -> Ve
 pub fn scan_forged_render_tags(text: &str, trait_id: &str, path: Option<&str>) -> Vec<Finding> {
     let mut findings = Vec::new();
     let path_str = path.map(|p| p.to_string());
-    for tag in crate::model_view::RENDER_TAGS {
+    for tag in crate::model_view::render_tags() {
         let opener = format!("<{tag}");
         for (offset, _) in text.match_indices(&opener) {
             let tag_end = offset + opener.len();

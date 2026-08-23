@@ -39,14 +39,14 @@ pub fn compile_model_view_with_evidence(
     if let Some(ref intent) = trait_ref.intent {
         sections.push(Section {
             heading: "Intent".to_string(),
-            content: format_intent(intent, trait_id, true, &mut warnings, &mut normalizations, &mut forged_tag_findings),
+            content: format_intent(intent, trait_id, GuidanceTag::Namespaced, &mut warnings, &mut normalizations, &mut forged_tag_findings),
         });
     }
 
     if let Some(ref behavior) = trait_ref.behavior {
         sections.push(Section {
             heading: "Behavior".to_string(),
-            content: format_behavior(behavior, trait_id, &mut warnings, &mut normalizations, &mut forged_tag_findings),
+            content: format_behavior(behavior, trait_id, GuidanceTag::Namespaced, &mut warnings, &mut normalizations, &mut forged_tag_findings),
         });
     }
 
@@ -341,12 +341,28 @@ fn format_description(
 // Intent / Behavior guidance: rule 4/5 directive resolution + tag emission.
 // ---------------------------------------------------------------------------
 
-/// `group_meanings` is false only for frame guidance, whose envelope states
-/// each group once in its own `<spec>` block.
+/// How one guidance item names itself.
+///
+/// The static model view renders items as flat children of `<trait>`, where
+/// the wrapper name is the only thing saying which vocabulary an item came
+/// from. A frame nests them inside `<intent>`/`<behavior>` and states each
+/// group once in `<spec>` first — so there, repeating the wrapper's own name
+/// on every child made every item read `intent.intent`, and the attribute
+/// carried the only word that meant anything.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GuidanceTag {
+    /// `<intent group="avoid" id="…">directive</intent>`
+    Namespaced,
+    /// `<avoid id="…">directive</avoid>`
+    GroupNamed,
+}
+
+/// `tag` is [`GuidanceTag::GroupNamed`] only for frame guidance, whose
+/// envelope states each group once in its own `<spec>` block.
 fn format_intent(
     intent: &crate::r#trait::Intent,
     trait_id: &str,
-    group_meanings: bool,
+    tag: GuidanceTag,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
@@ -364,13 +380,13 @@ fn format_intent(
         // an explanation and a member in the same list, distinguishable only
         // by an absent `id` — and rendering it in neither would leave the
         // static view naming groups it never defines.
-        if group_meanings {
+        if tag == GuidanceTag::Namespaced {
             elements.push(format!(
                 "<intent group=\"{group}\">{}</intent>",
                 intent_group_meaning(group)
             ));
         }
-        format_guidance_group("intent", "group", group, &format!("intent.{group}"), items.into_iter(), Some(intent_builtin), trait_id, warnings, normalizations, findings, &mut elements);
+        format_guidance_group(tag, "intent", "group", group, &format!("intent.{group}"), items.into_iter(), Some(intent_builtin), trait_id, warnings, normalizations, findings, &mut elements);
     }
     elements.join("\n")
 }
@@ -469,6 +485,7 @@ fn behavior_axes(behavior: &crate::r#trait::Behavior) -> [(&str, Vec<&GuidanceIt
 fn format_behavior(
     behavior: &crate::r#trait::Behavior,
     trait_id: &str,
+    tag: GuidanceTag,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
@@ -478,10 +495,10 @@ fn format_behavior(
         let field = format!("behavior.{axis}");
         if scalar {
             if let Some(item) = items.into_iter().next() {
-                elements.push(format_guidance_item_element("behavior", "axis", axis, item, &field, Some(behavior_builtin), trait_id, warnings, normalizations, findings));
+                elements.push(format_guidance_item_element(tag, "behavior", "axis", axis, item, &field, Some(behavior_builtin), trait_id, warnings, normalizations, findings));
             }
         } else {
-            format_guidance_group("behavior", "axis", axis, &field, items.into_iter(), Some(behavior_builtin), trait_id, warnings, normalizations, findings, &mut elements);
+            format_guidance_group(tag, "behavior", "axis", axis, &field, items.into_iter(), Some(behavior_builtin), trait_id, warnings, normalizations, findings, &mut elements);
         }
     }
     elements.join("\n")
@@ -508,12 +525,12 @@ pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
     let intent = trait_ref
         .intent
         .as_ref()
-        .map(|intent| format_intent(intent, trait_id, false, &mut warnings, &mut normalizations, &mut findings))
+        .map(|intent| format_intent(intent, trait_id, GuidanceTag::GroupNamed, &mut warnings, &mut normalizations, &mut findings))
         .unwrap_or_default();
     let behavior = trait_ref
         .behavior
         .as_ref()
-        .map(|behavior| format_behavior(behavior, trait_id, &mut warnings, &mut normalizations, &mut findings))
+        .map(|behavior| format_behavior(behavior, trait_id, GuidanceTag::GroupNamed, &mut warnings, &mut normalizations, &mut findings))
         .unwrap_or_default();
 
     if intent.is_empty() && behavior.is_empty() {
@@ -524,6 +541,7 @@ pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
 
 #[allow(clippy::too_many_arguments)]
 fn format_guidance_group<'a>(
+    style: GuidanceTag,
     tag: &str,
     attr_name: &str,
     attr_value: &str,
@@ -538,6 +556,7 @@ fn format_guidance_group<'a>(
 ) {
     for (index, item) in items.enumerate() {
         elements.push(format_guidance_item_element(
+            style,
             tag,
             attr_name,
             attr_value,
@@ -553,10 +572,12 @@ fn format_guidance_group<'a>(
 }
 
 /// `<intent group="…" id="…">directive</intent>` / `<behavior axis="…"
-/// id="…">directive</behavior>` — one line per item, no `Details:`
+/// id="…">directive</behavior>` for the static view, `<avoid id="…">` /
+/// `<tone id="…">` for a frame — one line per item either way, no `Details:`
 /// duplication.
 #[allow(clippy::too_many_arguments)]
 fn format_guidance_item_element(
+    style: GuidanceTag,
     tag: &str,
     attr_name: &str,
     attr_value: &str,
@@ -575,9 +596,13 @@ fn format_guidance_item_element(
         normalizations,
     );
     let directive = resolve_guidance_directive(item, field, builtin, warnings, normalizations);
+    let (element_tag, attrs) = match style {
+        GuidanceTag::Namespaced => (tag, vec![(attr_name, attr_value), ("id", id.as_str())]),
+        GuidanceTag::GroupNamed => (attr_value, vec![("id", id.as_str())]),
+    };
     leaf_element(
-        tag,
-        &[(attr_name, attr_value), ("id", &id)],
+        element_tag,
+        &attrs,
         &directive,
         &format!("{field}.directive"),
         trait_id,

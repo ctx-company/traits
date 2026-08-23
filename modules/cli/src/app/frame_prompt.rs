@@ -57,16 +57,28 @@ pub(crate) struct ResolvedFramePrompt {
     /// prompt cache can keep.
     pub(crate) include_section: String,
     /// `<spec>` children for the values the frame is given.
-    pub(crate) input_spec: Vec<(String, String)>,
+    pub(crate) input_spec: Vec<SpecEntry>,
     /// `<spec>` children for the values the frame must produce.
-    pub(crate) output_spec: Vec<(String, String)>,
-    /// The trait's own description, and the assigned role's.
-    pub(crate) trait_description: String,
+    pub(crate) output_spec: Vec<SpecEntry>,
+    /// What the assigned role IS, in the trait's own words.
     pub(crate) agent_identity: String,
-    pub(crate) title: String,
     /// Rendered `<intent>` / `<behavior>` items, already sanitized.
     pub(crate) intent_items: String,
     pub(crate) behavior_items: String,
+}
+
+/// One `<spec>` child: what a value MEANS, plus the author's advisory `hint`
+/// about filling or reading it.
+///
+/// The hint is a separate authored field from the description and stays one:
+/// a slot says what it holds, its hint says what a good value looks like, and
+/// folding the second into the first would make it impossible to tell an
+/// author's constraint from the value's definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpecEntry {
+    pub(crate) id: String,
+    pub(crate) description: String,
+    pub(crate) hint: Option<String>,
 }
 
 /// One declared-but-unaccepted input, carrying both the human-readable reason
@@ -148,6 +160,13 @@ pub(crate) fn frame_prompt(
     // Every block opens with what it IS. A frame used to show an agent its
     // intents without ever saying what an intent was, and separated a field's
     // meaning from its value by nothing at all.
+    //
+    // Two fields the first cut of that envelope carried are gone again (owner
+    // ruling 2026-08-23, reading the regenerated dumps). `<agent><trait>` said
+    // what the trait as a whole is for, which is the run's business and not
+    // the acting agent's. `<input><title>` restated the step name that the
+    // `<prompt>` immediately says again in its own imperative words — a
+    // heading above a sentence that already was the heading.
     let mut envelope = String::new();
     if !context.include_section.is_empty() {
         envelope.push_str(&format!(
@@ -171,13 +190,12 @@ pub(crate) fn frame_prompt(
     }
     if !context.agent_identity.is_empty() {
         envelope.push_str(&format!(
-            "<agent>\n  <info>Who you are on this step, and what the trait as a whole is for.</info>\n  <identity>{}</identity>\n  <trait>{}</trait>\n</agent>\n\n",
-            context.agent_identity, context.trait_description
+            "<agent>\n  <info>Who you are on this step.</info>\n  <identity>{}</identity>\n</agent>\n\n",
+            context.agent_identity
         ));
     }
     envelope.push_str(&format!(
-        "<input>\n  <info>The step to do, and the values you have been given to do it with. &lt;spec&gt; says what each value means; &lt;data&gt; carries it.</info>\n  <title>{}</title>\n{}  <data>\n{}  </data>\n{correction}  <prompt>\n{}\n  </prompt>\n</input>\n\n",
-        context.title,
+        "<input>\n  <info>The step to do, and the values you have been given to do it with. &lt;spec&gt; says what each value means; &lt;data&gt; carries it.</info>\n{}  <data>\n{}  </data>\n{correction}  <prompt>\n{}\n  </prompt>\n</input>\n\n",
         spec_block(&context.input_spec, 2),
         context.input_section,
         indent_block(&context.prompt_section, 4)
@@ -192,9 +210,13 @@ pub(crate) fn frame_prompt(
 /// The four intent groups and what belonging to one means. Read from the
 /// vocabulary (0240), never restated here.
 fn intent_spec_block() -> String {
-    let entries: Vec<(String, String)> = ctx_traits_core::model_view::intent_group_specs()
+    let entries: Vec<SpecEntry> = ctx_traits_core::model_view::intent_group_specs()
         .iter()
-        .map(|(slug, meaning)| ((*slug).to_string(), (*meaning).to_string()))
+        .map(|(slug, meaning)| SpecEntry {
+            id: (*slug).to_string(),
+            description: (*meaning).to_string(),
+            hint: None,
+        })
         .collect();
     spec_block(&entries, 2)
 }
@@ -202,10 +224,14 @@ fn intent_spec_block() -> String {
 /// Only the axes this frame actually sets — an axis the trait never chose a
 /// value for has nothing to explain.
 fn behavior_spec_block(items: &str) -> String {
-    let entries: Vec<(String, String)> = ctx_traits_core::model_view::behavior_axis_specs()
+    let entries: Vec<SpecEntry> = ctx_traits_core::model_view::behavior_axis_specs()
         .iter()
-        .filter(|(slug, _)| items.contains(&format!("axis=\"{slug}\"")))
-        .map(|(slug, meaning)| ((*slug).to_string(), (*meaning).to_string()))
+        .filter(|(slug, _)| items.contains(&format!("<{slug} ")))
+        .map(|(slug, meaning)| SpecEntry {
+            id: (*slug).to_string(),
+            description: (*meaning).to_string(),
+            hint: None,
+        })
         .collect();
     spec_block(&entries, 2)
 }
@@ -261,14 +287,13 @@ pub(crate) fn requested_output_contract_section(schema: &Value) -> String {
         )
     } else {
         (
-            format!("\n  <schema>\n{}\n  </schema>\n", indent_block(&named, 4)),
+            format!("  <schema>\n{}\n  </schema>\n", indent_block(&named, 4)),
             "Return ONLY one JSON object matching <schema>; <format> is a shape summary only — no prose before or after it, no code fences, no extra top-level fields. String-typed fields are single strings, never arrays.",
         )
     };
     let budget = response_byte_budget();
     format!(
-        "<output>\n  <format>\n{}\n  </format>\n{schema_section}\n  <budget>Your entire response must fit in {budget} bytes.</budget>\n  <response>\n    {response}\n  </response>\n</output>\n",
-        indent_block(&sketch, 4)
+        "<output>\n  <format>{sketch}</format>\n{schema_section}  <budget>Your entire response must fit in {budget} bytes.</budget>\n  <response>\n    {response}\n  </response>\n</output>\n"
     )
 }
 
@@ -279,7 +304,7 @@ pub(crate) fn requested_output_contract_section(schema: &Value) -> String {
 /// is here — the slot's own description existed and simply never travelled.
 pub(crate) fn requested_output_contract_section_with_spec(
     schema: &Value,
-    output_spec: &[(String, String)],
+    output_spec: &[SpecEntry],
 ) -> String {
     let base = requested_output_contract_section(schema);
     let info = "  <info>What to return, and in what shape. The response is validated against this before it is accepted.</info>\n";
@@ -287,12 +312,16 @@ pub(crate) fn requested_output_contract_section_with_spec(
     base.replacen("<output>\n", &format!("<output>\n{info}{spec}"), 1)
 }
 
-/// The key skeleton a model reads first: one line per requested output naming
-/// its type, with object/array shapes named rather than expanded. Every
+/// The key skeleton a model reads first: every requested output named with its
+/// type, with object/array shapes named rather than expanded. Every
 /// placeholder value is valid JSON (a quoted string), so the sketch parses on
 /// its own — but it stays a shape summary, never an example: the full JSON
 /// Schema stays the validation authority and rides in `<schema>`, and the
 /// runtime never validates against the sketch.
+///
+/// Rendered on one line, as `<schema>` beside it already is. Pretty-printing
+/// it spent a line per key to show indentation the model is not being asked to
+/// reproduce — a response is one JSON object either way.
 fn output_format_sketch(schema: &Value) -> (String, String) {
     let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
         return ("{}".to_string(), String::new());
@@ -325,11 +354,11 @@ fn output_format_sketch(schema: &Value) -> (String, String) {
                 }
                 _ => sketch_type(spec),
             };
-            format!("  \"{name}\": {rendered}")
+            format!("\"{name}\": {rendered}")
         })
         .collect::<Vec<_>>()
-        .join(",\n");
-    (format!("{{\n{fields}\n}}"), named.join("\n"))
+        .join(", ");
+    (format!("{{{fields}}}"), named.join("\n"))
 }
 
 fn sketch_type(spec: &Value) -> String {
@@ -449,9 +478,7 @@ pub(crate) fn resolved_frame_prompt(
         include_section,
         input_spec: input_spec_entries(loaded, &refs),
         output_spec: output_spec_entries(loaded, frame),
-        trait_description: loaded.trait_ref.description.to_string(),
         agent_identity: frame_agent_identity(loaded, frame),
-        title: frame.title.clone(),
         intent_items: guidance
             .as_ref()
             .map(|guidance| guidance.intent.clone())
@@ -1421,14 +1448,27 @@ fn frame_reference_texts(
 ///
 /// Stable across every frame of a run, where `<data>` is volatile by
 /// definition — so this sits before it, and a prompt cache keeps it.
-fn spec_block(entries: &[(String, String)], indent: usize) -> String {
+fn spec_block(entries: &[SpecEntry], indent: usize) -> String {
     if entries.is_empty() {
         return String::new();
     }
     let pad = " ".repeat(indent);
     let mut block = format!("{pad}<spec>\n");
-    for (id, description) in entries {
-        block.push_str(&format!("{pad}  <{id}>{description}</{id}>\n"));
+    for entry in entries {
+        let id = &entry.id;
+        // The hint rides as an attribute rather than a nested element so a
+        // spec child stays one line whether or not its author wrote one —
+        // a value with a hint and a value without must not read as two
+        // different kinds of thing.
+        let hint = entry
+            .hint
+            .as_deref()
+            .map(|hint| format!(" hint=\"{}\"", hint.replace('"', "&quot;")))
+            .unwrap_or_default();
+        block.push_str(&format!(
+            "{pad}  <{id}{hint}>{}</{id}>\n",
+            entry.description
+        ));
     }
     block.push_str(&format!("{pad}</spec>\n"));
     block
@@ -1466,11 +1506,58 @@ fn reference_description(
     .filter(|text| !text.trim().is_empty())
 }
 
-/// Spec entries for the values a frame is given, in the frame's own order.
-fn input_spec_entries(
+/// The author's advisory hint for one ref: what a good value looks like, its
+/// examples, its constraints. A port and a slot each carry one and neither was
+/// reaching the model — a step was asked to fill `draft` while the sentence
+/// saying what a well-formed draft is sat unread in the trait.
+///
+/// A resource has no hint here on purpose: `reference_description` already
+/// returns a resource's `hint` as its description, since that is the only
+/// prose a resource carries.
+fn reference_hint(loaded: &ctx_traits_io::run::LoadedTrait, ref_text: &str) -> Option<String> {
+    let (kind, id) = ref_text.split_once(':')?;
+    match kind {
+        "port" => loaded
+            .trait_ref
+            .ports
+            .iter()
+            .find(|port| port.id == id)
+            .and_then(|port| port.hint.clone()),
+        "slot" => loaded
+            .trait_ref
+            .slots
+            .iter()
+            .find(|slot| slot.id == id)
+            .and_then(|slot| slot.hint.clone()),
+        _ => None,
+    }
+    .filter(|text| !text.trim().is_empty())
+}
+
+/// One `<spec>` child for `ref_text`, or nothing when the trait wrote neither
+/// a description nor a hint for it — silence is better than a tag that says
+/// nothing.
+fn spec_entry(
     loaded: &ctx_traits_io::run::LoadedTrait,
-    refs: &[String],
-) -> Vec<(String, String)> {
+    ref_text: &str,
+    id: String,
+) -> Option<SpecEntry> {
+    let description = reference_description(loaded, ref_text);
+    let hint = reference_hint(loaded, ref_text);
+    if description.is_none() && hint.is_none() {
+        return None;
+    }
+    Some(SpecEntry {
+        id,
+        description: description
+            .map(|text| sanitize_spec_text(&text))
+            .unwrap_or_default(),
+        hint: hint.map(|text| sanitize_spec_text(&text)),
+    })
+}
+
+/// Spec entries for the values a frame is given, in the frame's own order.
+fn input_spec_entries(loaded: &ctx_traits_io::run::LoadedTrait, refs: &[String]) -> Vec<SpecEntry> {
     let mut seen = BTreeMap::<String, ()>::new();
     let mut entries = Vec::new();
     for ref_text in refs {
@@ -1478,8 +1565,8 @@ fn input_spec_entries(
         if seen.insert(id.clone(), ()).is_some() {
             continue;
         }
-        if let Some(description) = reference_description(loaded, ref_text) {
-            entries.push((id, sanitize_spec_text(&description)));
+        if let Some(entry) = spec_entry(loaded, ref_text, id) {
+            entries.push(entry);
         }
     }
     entries
@@ -1489,12 +1576,13 @@ fn input_spec_entries(
 fn output_spec_entries(
     loaded: &ctx_traits_io::run::LoadedTrait,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
-) -> Vec<(String, String)> {
+) -> Vec<SpecEntry> {
     let mut entries = Vec::new();
     for output in &frame.requested_outputs {
         let ref_text = output.slot_ref.to_string();
-        if let Some(description) = reference_description(loaded, &ref_text) {
-            entries.push((element_id(&ref_text), sanitize_spec_text(&description)));
+        let id = element_id(&ref_text);
+        if let Some(entry) = spec_entry(loaded, &ref_text, id) {
+            entries.push(entry);
         }
     }
     entries
