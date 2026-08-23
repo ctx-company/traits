@@ -3,13 +3,13 @@
 // The single renderer-owned tag table, plus the imperative-body element and
 // envelope constructors. Shared by the emitter, the delimiter-integrity
 // escape, and the forged-render-tag audit — nothing else may hardcode a
-// second tag list.
+// second tag list. The table has a fixed half and a vocabulary half; ask
+// `render_tags()` for both, never `STRUCTURAL_RENDER_TAGS` alone.
 
-/// The complete set of renderer-owned tag names used across both the
-/// behavior and authoring envelopes. A closing tag for any of these found
-/// inside an untrusted body is escaped by [`body_integrity`] and flagged by
-/// `crate::audit::scan_forged_render_tags`.
-pub static RENDER_TAGS: &[&str] = &[
+/// The renderer-owned tag names that are fixed structure rather than
+/// vocabulary. The full set — this plus every intent group and behavior axis,
+/// which the frame envelope renders as element names — is [`render_tags`].
+static STRUCTURAL_RENDER_TAGS: &[&str] = &[
     "trait",
     "summary",
     "intent",
@@ -24,6 +24,33 @@ pub static RENDER_TAGS: &[&str] = &[
     "scenario",
     "relations",
 ];
+
+/// The complete set of renderer-owned tag names used across the behavior,
+/// authoring, and frame envelopes. A closing tag for any of these found inside
+/// an untrusted body is escaped by [`body_integrity`] and flagged by
+/// `crate::audit::scan_forged_render_tags`.
+///
+/// The group and axis names are read from the vocabulary rather than listed
+/// here. A frame renders an intent item as `<avoid id="…">` and a behavior
+/// item as `<tone id="…">`, so every slug in either catalog is an element name
+/// a forged closer could terminate — and a hand-kept second copy of those
+/// slugs would be one vocabulary entry away from silently leaving a real
+/// element unescaped.
+pub fn render_tags() -> &'static [&'static str] {
+    static TAGS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        let mut tags: Vec<&'static str> = STRUCTURAL_RENDER_TAGS.to_vec();
+        tags.extend(
+            crate::builtins::INTENT_GROUP
+                .iter()
+                .chain(crate::builtins::BEHAVIOR_AXIS.iter())
+                .map(|entry| entry.slug),
+        );
+        tags.sort_unstable();
+        tags.dedup();
+        tags
+    });
+    &TAGS
+}
 
 /// Render one imperative-body element with a two-space indent inside its
 /// envelope: `<tag attr="value" ...>\n  body\n</tag>`.
@@ -74,7 +101,7 @@ pub fn body_integrity(
 ) -> String {
     let mut output = body.to_string();
     let mut total = 0usize;
-    for tag in RENDER_TAGS {
+    for tag in render_tags() {
         let closer = format!("</{tag}>");
         let escaped = format!("&lt;/{tag}>");
         let count = output.matches(closer.as_str()).count();

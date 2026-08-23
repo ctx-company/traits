@@ -750,7 +750,7 @@ fn content_rejection_then_same_frame_stale_identity_recovers_and_completes() {
     assert!(
         !retry_prompt_1.contains("<input>")
             && retry_prompt_1.contains("<output>")
-            && retry_prompt_2.contains("<title>Produce fixture answer</title>")
+            && retry_prompt_2.contains("<input>")
             && retry_prompt_2.contains("<data>")
             && retry_prompt_2.contains("<agent>")
             && retry_prompt_2.contains("<output>"),

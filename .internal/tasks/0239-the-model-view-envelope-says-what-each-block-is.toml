@@ -104,6 +104,32 @@ this is the same argument, arriving from the audit side.
 The cost is real and should be measured, not assumed: `<info>`/`<spec>` repeat
 in every frame, and per-frame sessions mean every frame pays. If the ordering
 work lands with it, they should be nearly free on the second frame onward.
+
+---
+
+Owner ruling 2026-08-23, reading the regenerated dumps. Four of these are the
+target shape above, landed differently; the fifth and sixth are new.
+
+- `<format>` was pretty-printed over one line per key. It is a shape summary
+  the model is not asked to reproduce, and `<schema>` beside it was already
+  one line. One line.
+- A port's and a slot's `hint` reached nothing. The frame asked a step to
+  fill `draft` while the sentence saying what a good draft looks like sat
+  unread in the trait. `<spec>` children carry it.
+- `<agent><trait>` stated what the trait as a whole is for. That is the run's
+  business, not the acting agent's. Gone.
+- `<input><title>` restated the step name that `<prompt>` says again in its
+  own imperative words. Gone.
+- `<intent>` held `<intent>` children and `<behavior>` held `<behavior>`
+  children, with the only meaningful word in an attribute. The item element
+  is named for its group or axis — `<avoid id="scope-creep">`, `<tone
+  id="direct">` — exactly as the target shape above wrote it. The static
+  model view keeps `<intent group="…" id="…">`: its items are flat children
+  of `<trait>` with no wrapper, so there the namespace is the only thing
+  saying which vocabulary an item came from, and changing it would move every
+  trait's model-visible digest for no reader's benefit.
+- `<data>` as JSON instead of elements: asked, declined, with the reasons in
+  `Watch` below.
 """
 validation = """
 ## Watch
@@ -119,6 +145,20 @@ validation = """
 - Renaming `{slot:x}` to `{x}` must not collide: a port and a slot can share
   a bare name. Decide what happens when they do before implementing — a
   build-time rejection is better than a silently ambiguous reference.
+- `<data>` stays elements, not one JSON object (2026-08-23). Three reasons,
+  any one sufficient. Its values are prose documents — a cumulative review
+  verdict runs to tens of kilobytes — and JSON-encoding one turns every
+  newline into `\\n` and every quote into `\\"` for a reader that then has to
+  unescape it to quote from it. A long value is wrapped in a delimiter whose
+  suffix is the first 12 hex of that value's OWN digest, which injected text
+  cannot predict; JSON offers no boundary marker at all, and the model — not
+  the parser — is who gets fooled by a value containing `", "next-key": "`.
+  And a pending input states WHY it is pending (`pending="produced by step
+  capture-the-commit-log"`); JSON has no place for that but `null`.
+  Note what is already true: a structured value inlines as JSON inside its own
+  element today. The output half is JSON because the model must PRODUCE JSON.
+  The input half is prose because the model READS it. That asymmetry is the
+  design, not an oversight.
 
 ## Done when
 
