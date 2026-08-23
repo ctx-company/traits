@@ -1,0 +1,91 @@
+schema-version = "0.2"
+key = "0243"
+title = "The center: one process everyone asks, drivers own their runs"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner design, 2026-08-24. The work lives in the children; do not dispatch
+this file.
+
+## The problem
+
+Open four dashboards and they do the same work four times: each one scans
+the runs directory, parses ledgers, and re-derives state on its own 2-second
+tick. Every viewer pays the full cost, forever.
+
+## The design
+
+One central process — THE CENTER. Dashboard, observers, CLI, whoever: they
+all ask it. Nobody scans directories themselves anymore.
+
+DRIVERS OWN THEIR RUNS. A driver (`ctx traits run`) stays an independent
+process: its own lock, its own harness child, its own ledger, exactly as
+today. The center watches and relays; it never owns a run. Center death
+touches no running work.
+
+The inversion that makes four dashboards cheap: activity happens once ->
+driver notifies the center once -> the center updates its model once ->
+pushes deltas to every subscriber. Work is proportional to what is actually
+happening, not to viewers x time.
+
+## Why a center restart loses nothing
+
+The driver's existence and controllability live ON DISK AND IN THE KERNEL,
+put there by the driver itself — the mechanism `--interrupt` uses today with
+no daemon existing at all:
+
+- ledger (non-terminal until the run ends)
+- flock on the driver lock — held means alive; the kernel cannot be lied to
+- lock-holder metadata: pid, control socket address, unguessable token
+- liveness-index row
+
+A restarted center stat-scans, probes each non-terminal ledger's lock
+(held -> live, read the metadata; free -> orphan, record interrupted via the
+existing path), and drivers additionally re-register on their next
+notification — two redundant paths, either alone sufficient. To control a
+driver it never spawned: read socket + token from the lock metadata,
+connect, interrupt or pause. Registration is a freshness optimization over
+what disk already proves, never the source of truth.
+
+THE CENTER HOLDS NOTHING IT CANNOT REBUILD FROM THE LEDGERS.
+
+## Spawning from a viewer
+
+Dashboard sends the center start(trait, args, token). The center spawns the
+driver DETACHED and keeps no handle. The driver comes up as if typed in a
+terminal, and its register carries the token back; the center matches it,
+answers the requesting viewer, and pushes the new-session delta to every
+subscriber. Remote is the same code path — the request goes where the
+center lives, which is the only place a spawn can happen.
+
+## The future this buys (not built in this arc)
+
+Move a run: local -> remote, or adopt remote -> local for testing. Pause at
+a frame boundary -> copy -> resume. The ledger already carries the state;
+resume from a ledger already exists. The real blockers are the worktree
+(uncommitted mid-run work must ship as a bundle) and repo identity
+(repo-key = hash of the absolute path, which another machine cannot name).
+Tracked in 0243.6.
+
+## Rulings already taken (2026-08-24)
+
+- Wire format: JSON lines. One request per line; streaming responses share a
+  correlation id. Version lives in the socket path
+  (`/tmp/ctx-<uid>-<version>.sock`), so skew cannot occur and the format
+  carries no version field.
+- Sharing the state beyond this machine: deferred. Local first; the OS
+  answers who may read.
+- Hung-vs-dead: dead is self-healing (kernel releases the flock; next CLI
+  spawns a replacement). Hung — alive but wedged, holding flock and socket —
+  is detected by ping timeout and SURFACED, never auto-killed; runs are
+  untouched either way. (Proposed; standing unless overruled.)
+"""
+validation = """
+## Done when
+
+All children are done. Four dashboards open against live runs cost one
+model update per event and four socket deliveries — no per-viewer scanning
+anywhere.
+"""
+
+[relations]

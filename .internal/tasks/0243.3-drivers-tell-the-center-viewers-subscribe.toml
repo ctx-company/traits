@@ -1,0 +1,51 @@
+schema-version = "0.2"
+key = "0243.3"
+title = "Drivers tell the center; viewers subscribe"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The inversion itself: push replaces poll.
+
+Driver side — fire-and-forget lines on the center socket: register,
+frame-done, activity-line, ended. The ordering rule, never reversed, never
+conditional:
+
+    1. write the frame to the ledger    durable - required - never skipped
+    2. tell the center                  best-effort - non-blocking - droppable
+
+Non-blocking writes, dropped under backpressure; the notify connection is
+lazy with backoff, so a driver that outlives a center reconnects to the new
+one at its next frame and re-registers. A dropped line costs freshness,
+never data — `.activity.jsonl` is written regardless, and 0243.2's scan
+repairs the model. A driver on a machine where the center never comes up
+behaves exactly as ctx does today: run, write, exit cleanly, no retry storm.
+
+Driver startup gains one step: if the center socket is absent, take the
+spawn lock LOCK_NB — winner forks a center detached, loser proceeds. THE
+DRIVER NEVER WAITS; work starts immediately either way. (Spawns so the run
+is visible without a second command; never waits so the run cannot block on
+the center.)
+
+Viewer side — subscribe: connect, receive a snapshot of the model, then
+deltas (session appeared / row changed / activity line / session ended).
+Queries (list, get, resolve, find-by-run-id, stats) answered from the model;
+list responses carry rows, never parsed sessions. Per-caller posture:
+queries spawn the center and wait; a subscriber (dashboard) spawns and
+shows a stale view rather than erroring; commands that touch no session
+never spawn one.
+"""
+validation = """
+## Done when
+
+A scratch driver's frames appear in a subscriber's delta stream as they
+land. Two subscribers see the same deltas from one driver notification (a
+counting fixture proves the driver notified once). Killing the center
+mid-run drops no ledger data; the restarted center's scan repairs the model
+and the driver's next frame re-registers it — both paths proven separately.
+find-by-run-id and prefix resolve answer from the model without opening
+ledgers (counting reader). A driver with notifications forcibly failing
+completes its run byte-identically to today.
+"""
+
+[relations]
+depends-on = ["0243.2"]

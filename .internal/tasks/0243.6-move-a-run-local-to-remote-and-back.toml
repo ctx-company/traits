@@ -1,0 +1,47 @@
+schema-version = "0.2"
+key = "0243.6"
+title = "Move a run: local to remote, and adopt remote to local"
+status = "draft"
+raised = "2026-08-24"
+content = """
+The future the arc buys. Raised now so the blockers are on record; not
+dispatchable until 0243.5 lands and the blockers below have owner
+decisions. Draft on purpose.
+
+The move itself is pause -> copy -> resume, and 0243.5 built all three
+primitives: pause leaves a resumable session, the ledger is self-contained
+(pinned trait bytes, digests, trust approval travel inside it), and resume
+re-derives position from it. Adopt (remote -> local, for testing) is the
+same operation in the other direction. The remote transport is the same
+JSON-lines protocol pointed at the other machine's center.
+
+## The real work — none of it is session mechanics
+
+- THE WORKTREE. A mid-run implement has uncommitted work in its worktree;
+  the ledger does not carry it. Moving means shipping a bundle (same class
+  as --deep's seed harvest, which already reads gitignored worktree bytes
+  that must ship as a bundle).
+- REPO IDENTITY. repo-key = hash(absolute path): machine B cannot name
+  machine A's repo. Needs a stable identity (origin URL or a recorded id);
+  one change relocates the whole state tree. TraitSource.path absolute and
+  the prompt-spill temp path are the same class.
+- AUTH. A uid-scoped /tmp socket has OS auth for free; TCP has none.
+  Sharing-the-state was ruled "deferred, local first" — this task is where
+  that deferral comes due.
+- CACHE WARMTH. {cache-slot} paths are local by definition; a moved run
+  accepts cold caches. Accepted cost, stated here so nobody debugs it as a
+  regression.
+"""
+validation = """
+## Done when
+
+A run started locally, paused mid-procedure, moved to a second machine
+(or a second fake root standing in for one), and resumed there completes
+with a ledger showing continuous frames, digests verifying, and no
+re-executed frame. The same in reverse (adopt). A moved implement-run's
+worktree state survives via the bundle. Each blocker above has either
+landed or has an owner decision recorded here before dispatch.
+"""
+
+[relations]
+depends-on = ["0243.5"]
