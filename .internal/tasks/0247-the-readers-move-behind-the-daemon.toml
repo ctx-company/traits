@@ -1,0 +1,53 @@
+schema-version = "0.2"
+key = "0247"
+title = "The readers move behind the daemon"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Every surface that reads session files directly converts to daemon queries:
+the dashboard tick (both scopes), `sessions`, `stats`, `tasks`' session
+overlay, and merge's run-id lookup. This is the task with a clock on it —
+every direct read written between now and landing is a call site somebody
+has to find later, and the dashboard alone reads ledgers from a dozen
+places.
+
+Spawn/wait posture per 0245's table: queries spawn the daemon and wait;
+the dashboard spawns and degrades to a stale view rather than erroring;
+commands that touch no session never spawn one.
+
+What this deletes, and landing is not done until they are gone rather than
+bypassed: the summary sidecars and their whole apparatus (`summary_path`,
+`summary_is_fresh`, `read_summary_or_ledger`, `remove_summary_for_ledger`,
+the 390-missing-sidecars class), and `InventoryCache` (run_session.rs) with
+its mtime+size memo — the daemon's index is that memo, persistent and owned.
+`run_inventory_from_paths` survives only as the daemon's own reconcile
+reader, if at all.
+
+Out of scope: anything a driver writes (drivers do not go through the daemon
+to write their own ledger — that ordering is 0248's contract), and the
+attached-view/preview path (0243 already gave it its own channel; it reads
+one ledger by path and may keep doing so).
+"""
+validation = """
+## Watch
+
+- The dashboard's stale-view degradation must be visibly stale (footer
+  line), not silently old — a wedged daemon showing yesterday's sessions as
+  current is worse than an error.
+- Merge is on the landing path; its run-id lookup converting to a daemon
+  query must not make `ctx traits merge` fail when the daemon cannot start.
+  Decide the posture explicitly against 0245's bypass ruling.
+
+## Done when
+
+No code outside the daemon and the preview path opens a session ledger for
+reading — proven by the call-site inventory, not by grep alone. The
+dashboard's ALL-repos mode no longer degrades per tick (0244's scenario
+cannot occur because the scan itself is gone). `stats`, `tasks`, `sessions`,
+and merge's lookup return byte-identical output to before, cold and warm.
+The sidecar apparatus and InventoryCache are deleted, and `cargo test`
+passes without them.
+"""
+
+[relations]
+depends-on = ["0246"]

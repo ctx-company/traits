@@ -1,0 +1,54 @@
+schema-version = "0.2"
+key = "0245"
+title = "Decide the daemon's open questions, before code"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner rulings 2026-08-24 (design note
+.hidden/2026-08-24-sessions-live-and-store.html, which supersedes the
+"one protocol" note): everything live goes through a daemon; it starts on
+need and exits when idle; recovery exists; sqlite is its private index; the
+daemon owns NO runs, NO harness children, NO leases, and not the truth;
+observation that outlives the producer is a separate published read-only
+store. The invariant everything hangs off: THE DAEMON HOLDS NOTHING IT
+CANNOT REBUILD FROM THE LEDGERS.
+
+Four questions remain, and each changes code that 0246+ would write, so they
+are decided here — a paper task with owner sign-off, not an implementation.
+
+1. Wire format for the daemon socket. Proposed: JSON lines — one request per
+   line, streaming responses share a correlation id; matches `.activity.jsonl`
+   and the harness's own stream-json; debugs with `nc`; no codegen. The
+   version already lives in the socket path
+   (`/tmp/ctx-daemon-<uid>-<version>.sock`), so the format carries no version
+   field and skew is impossible rather than negotiated.
+2. Hung-daemon policy. Dead is solved (its own flock; the kernel releases it,
+   and the spawn path takes `LOCK_NB` to arbitrate replacement). Hung is not:
+   it still holds flock and socket, so nothing replaces it and queries block.
+   Proposed: a ping timeout that SURFACES the condition (doctor, dashboard
+   footer) and never auto-kills — killing a merely-busy daemon is worse than
+   the hang. Includes: does a read-only direct-file bypass exist for queries
+   while the daemon is unreachable, and behind which explicit flag? (Silent
+   fallback to a differently-shaped slow path is how unreproducible bugs are
+   born.)
+3. Store publish timing: every frame, or at run end? This single choice
+   decides whether "observe" means WATCH or REVIEW, and shapes everything in
+   0249. Per-frame means an observer sees work as it happens, at the cost of
+   constant chatter; run-end is cheap and shows only finished work.
+4. Who may read the store. Locally the OS answers this; a shared store has no
+   OS to lean on. Same question as remote-daemon authentication, arriving
+   from the other side — one answer should cover both.
+
+Also to ratify (proposed in the note, not yet ruled on): the `live` / `store`
+naming itself, the idle-exit timeout, and the per-caller spawn/wait table
+(driver spawns but never waits; queries spawn and wait; dashboard degrades to
+stale; non-session commands never spawn).
+"""
+validation = """
+## Done when
+
+Each of the four questions has an owner ruling recorded in this file, and the
+ratify list is confirmed or renamed. No code.
+"""
+
+[relations]

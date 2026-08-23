@@ -1,0 +1,64 @@
+schema-version = "0.2"
+key = "0249"
+title = "The store: observation that outlives the producer"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The past-tense half. The live half (0246-0248) requires a daemon alive on
+the far end; it cannot answer "show me last month's runs" or "let a
+teammate look" — machine off, laptop closed, run long finished. The store
+is a published, durable, READ-ONLY copy that anyone allowed may read with
+nothing running at all: a web view, a colleague, you in a month.
+
+The producing side is the daemon (a publisher role, per 0245's publish-
+timing ruling: per-frame = watch, run-end = review). The reading side is
+whatever renders it, and needs no ctx at all if the published form is
+honest.
+
+The cheap part, and the reason this is a small task rather than a format
+design: a ledger is ALREADY self-contained — pinned trait bytes, digests,
+and the trust approval travel inside it. Publishing is copying something
+portable, not inventing a schema.
+
+Invariants:
+
+- The store is a COPY, never the original. The ledger where the run
+  happened stays the truth. A corrupt or lost store costs a view, never
+  evidence.
+- Publishing can be retried, rebuilt from local ledgers, or turned off
+  without touching how runs work — the same posture as every other
+  projection in this design.
+- Access control is 0245's question 4, decided before this lands, and the
+  same answer covers remote-daemon auth.
+
+This is NOT the swappable-backend `session::store::{Interface, Local}` from
+the retracted drafts — the daemon does not get pluggable storage. The store
+is a destination the daemon publishes TO, not a place it lives on.
+
+Scope stop: one backend (a directory or bucket of published ledgers plus a
+small index of rows), one reader (list + open). Comparison views, web UI,
+retention of the published set — follow-ups, not this task.
+"""
+validation = """
+## Watch
+
+- Nothing in the run path may block on publishing, under the same rule as
+  the daemon notify: the run's correctness has no dependency on the store
+  existing.
+- The published copy must verify: digests inside the ledger are the
+  integrity story, so the reader checks them rather than trusting the
+  transport.
+
+## Done when
+
+A finished run is published (at the timing 0245 ruled), and its full ledger
+plus a row summary are readable from the store by a process on a machine
+that has never run ctx, has no daemon, and holds no repo checkout — with
+digests verifying. Deleting the store and republishing from local ledgers
+reproduces it. A run with publishing disabled behaves byte-identically to
+today. Access follows the 0245 ruling and is proven denied for a reader
+outside it.
+"""
+
+[relations]
+depends-on = ["0245", "0248"]
