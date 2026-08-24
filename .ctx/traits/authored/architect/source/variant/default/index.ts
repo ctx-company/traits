@@ -25,5 +25,7 @@ export default function () {
     loop.until(cdk.condition.equals(shared.data.criticVerdict.status, "approved"));
   });
 
+  shared.step.commit.commitStep("Commit the rewritten task");
+
   return { receipts: shared.data.receipts };
 }

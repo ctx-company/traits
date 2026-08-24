@@ -1,3 +1,4 @@
+export * as commit from "./commit.ts";
 export * as critic from "./critic.ts";
 export * as ground from "./ground.ts";
 export * as rewrite from "./rewrite.ts";
