@@ -1654,6 +1654,22 @@ mod inventory_cache_tests {
         root
     }
 
+    fn scan(
+        root: &Utf8Path,
+        paths: Vec<Utf8PathBuf>,
+        cache: &mut InventoryCache,
+        reads: &Arc<Mutex<Vec<Utf8PathBuf>>>,
+    ) {
+        let reads = Arc::clone(reads);
+        run_inventory_from_paths_with_reader(root, paths, cache, move |path| {
+            reads.lock().expect("reads lock").push(path.to_path_buf());
+            InventoryOutcome::Unreadable {
+                error: "fixture".to_string(),
+            }
+        })
+        .expect("scan inventory");
+    }
+
     #[test]
     fn inventory_cache_evicts_only_the_scanned_root() {
         let root_a = scratch_root("a");
@@ -1664,25 +1680,23 @@ mod inventory_cache_tests {
         std::fs::write(ledger_b.as_std_path(), "b").expect("write ledger b");
         let reads = Arc::new(Mutex::new(Vec::new()));
         let mut cache = InventoryCache::new();
-        let mut scan = |root: &Utf8Path, paths: Vec<Utf8PathBuf>| {
-            let reads = Arc::clone(&reads);
-            run_inventory_from_paths_with_reader(root, paths, &mut cache, move |path| {
-                reads.lock().expect("reads lock").push(path.to_path_buf());
-                InventoryOutcome::Unreadable {
-                    error: "fixture".to_string(),
-                }
-            })
-            .expect("scan inventory")
-        };
 
-        scan(&root_a, vec![ledger_a.clone()]);
-        scan(&root_b, vec![ledger_b.clone()]);
-        scan(&root_a, vec![ledger_a.clone()]);
-        scan(&root_b, vec![ledger_b.clone()]);
+        scan(&root_a, vec![ledger_a.clone()], &mut cache, &reads);
+        scan(&root_b, vec![ledger_b.clone()], &mut cache, &reads);
+        scan(&root_a, vec![ledger_a.clone()], &mut cache, &reads);
+        scan(&root_b, vec![ledger_b.clone()], &mut cache, &reads);
         assert_eq!(reads.lock().expect("reads lock").len(), 2);
 
-        scan(&root_a, Vec::new());
-        scan(&root_b, vec![ledger_b]);
+        scan(&root_a, Vec::new(), &mut cache, &reads);
+        assert!(
+            !cache.entries.contains_key(&ledger_a),
+            "the deleted ledger under the scanned root is evicted"
+        );
+        assert!(
+            cache.entries.contains_key(&ledger_b),
+            "a ledger from another root remains cached"
+        );
+        scan(&root_b, vec![ledger_b], &mut cache, &reads);
         assert_eq!(reads.lock().expect("reads lock").len(), 2);
     }
 }
