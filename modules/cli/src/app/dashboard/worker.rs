@@ -133,21 +133,23 @@ fn run(
         let Command::Refresh { all_repos, screen } = command else {
             unreachable!("non-refresh commands are handled before refresh coalescing")
         };
-        // Preview work is independent of inventory scanning and must not be
-        // discarded when adjacent refreshes coalesce.
-        for request in pending_previews {
-            if previews.send(preview(&mut state, request)).is_err() {
-                return;
-            }
-        }
-        state.all_repos = all_repos;
-        state.screen = screen;
-        let result: RefreshResult = (|| -> crate::Result<Arc<DashboardSnapshot>> {
-            state.reload_sync()?;
-            Ok(Arc::new(DashboardSnapshot::from_state(&state)))
-        })()
-        .map_err(|error| error.to_string());
-        if snapshots.send(result).is_err() {
+        if execute_refresh_batch(
+            &mut state,
+            pending_previews,
+            |state, request| previews.send(preview(state, request)).map_err(|_| ()),
+            |state| {
+                state.all_repos = all_repos;
+                state.screen = screen;
+                let result: RefreshResult = (|| -> crate::Result<Arc<DashboardSnapshot>> {
+                    state.reload_sync()?;
+                    Ok(Arc::new(DashboardSnapshot::from_state(state)))
+                })()
+                .map_err(|error| error.to_string());
+                snapshots.send(result).map_err(|_| ())
+            },
+        )
+        .is_err()
+        {
             return;
         }
         for request in pending_explanations {
@@ -156,6 +158,19 @@ fn run(
             }
         }
     }
+}
+
+/// Runs retained preview reads before the coalesced inventory operation.
+fn execute_refresh_batch<T, E>(
+    state: &mut T,
+    previews: Vec<SessionPreviewRequest>,
+    mut process_preview: impl FnMut(&mut T, SessionPreviewRequest) -> Result<(), E>,
+    refresh: impl FnOnce(&mut T) -> Result<(), E>,
+) -> Result<(), E> {
+    for request in previews {
+        process_preview(state, request)?;
+    }
+    refresh(state)
 }
 
 fn coalesce_refresh_commands(
@@ -283,5 +298,45 @@ mod tests {
         ));
         assert_eq!(previews.len(), 1);
         assert_eq!(previews[0].session_id, "session");
+    }
+
+    #[test]
+    fn preview_between_refreshes_runs_before_inventory_refresh() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Command::Preview(SessionPreviewRequest {
+            session_id: "session".to_string(),
+            ledger_path: camino::Utf8PathBuf::from("/tmp/session.json"),
+            run_id: "run".to_string(),
+        }))
+        .expect("queue preview");
+        tx.send(Command::Refresh {
+            all_repos: true,
+            screen: Screen::Traits,
+        })
+        .expect("queue refresh");
+
+        let (_, previews, _) = coalesce_refresh_commands(
+            &rx,
+            Command::Refresh {
+                all_repos: false,
+                screen: Screen::Sessions,
+            },
+        );
+        let mut events = Vec::new();
+        execute_refresh_batch(
+            &mut events,
+            previews,
+            |events, request| {
+                events.push(format!("preview:{}", request.session_id));
+                Ok::<_, ()>(())
+            },
+            |events| {
+                events.push("refresh".to_string());
+                Ok(())
+            },
+        )
+        .expect("run batch");
+
+        assert_eq!(events, ["preview:session", "refresh"]);
     }
 }
