@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.14"
+title = "Rebuild guidance on retry"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Rebuild effective root-agent-prompt guidance whenever a model frame is retried. A retry targets the still-current ready prompt and assigned agent, but it must use current canonical and runtime state rather than a cached effective result from the failed attempt.
+
+The affected areas are retry frame construction, shared preview and live composition, model-visible cache ordering, and CLI and MCP retry coverage. This is a retry behavior outcome with its regression proof attached.
+"""
+scope = """
+## Decisions
+Every retry reruns the same effective resolution authority used for first dispatch. The still-ready prompt supplies prompt scope; the current assignment supplies agent scope. Additive replacement, scalar precedence, and scoped require/avoid refusal are evaluated again.
+
+Retrying does not resend agent `system` merely because categorized guidance is rebuilt. Existing attempt accounting, provider error policy, and session selection remain unchanged.
+"""
+validation = """
+## Watch
+Do not cache effective guidance in retry state, advance to another prompt while resolving the retry, duplicate renderer logic, or confuse standing system instructions with per-frame categorized guidance. Tests must observe an actual retry path.
+
+## Done when
+CLI and MCP retries rebuild the current ready frame's scoped intent and behavior through the shared composer; no stale or duplicate entries survive from the failed attempt; cache-visible content remains truthful; no-guidance retries and once-per-session `system` behavior remain unchanged; and focused retry coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.13"]
+
+[[checks]]
+name = "retry guidance refresh passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

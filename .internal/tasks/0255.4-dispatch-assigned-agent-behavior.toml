@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.4"
+title = "Dispatch assigned agent behavior"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Make additive and scalar behavior from the assigned agent visible in ordinary ready-frame preview and live CLI and MCP dispatch. This slice delivers the behavior-specific composition outcome through the shared frame envelope and attaches resolver, renderer, and live consumer coverage to that change.
+
+The affected runtime areas are model-view guidance resolution and the common frame composer used by preview and `modules/cli/src/app/drive.rs`. It builds on the assigned-agent selection proven by 0255.2 and the authored behavior from 0255.3.
+"""
+scope = """
+## Decisions
+For each additive axis, preserve root then assigned-agent order and replace a repeated axis-plus-normalized-ID item at the agent layer position. For each scalar axis, the assigned agent overrides a present root value; differing values are precedence, not contradiction. Omitted agent axes leave root behavior unchanged.
+
+Ready-frame preview, CLI, and MCP consume the same effective behavior and categorized renderer. Static declaration output and live effective output retain their distinct purposes, while sharing vocabulary meanings and sanitization.
+"""
+validation = """
+## Watch
+Do not resolve behavior separately per transport, emit duplicate categorized directives, disturb root-only frame bytes, or move agent `system` from its standing-instruction channel. Tests must distinguish additive replacement from scalar precedence.
+
+## Done when
+Ordinary preview and CLI and MCP dispatch render assigned-agent additive behavior in deterministic root-agent order with replacement, apply agent-over-root scalar precedence, exclude unassigned declarations, preserve no-agent-guidance frame bytes and agent `system` transport, and pass focused resolver, rendering, and live-path coverage in the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.2", "0255.3"]
+
+[[checks]]
+name = "assigned agent behavior dispatch passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

@@ -1,0 +1,35 @@
+schema-version = "0.2"
+key = "0255.1"
+title = "Author and inspect agent intent"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Let trait authors attach `require`, `focus`, `avoid`, and `block` intent to an agent through the TypeScript object and functional APIs, lower it to trusted schema-version `0.6` canonical data, and inspect each declaration in static model-view output. This is a complete authoring outcome rather than a schema-only change: authored rich, custom, and built-in guidance must reach Rust validation and the shared sanitized vocabulary renderer with agent source attribution.
+
+The affected areas are agent and guidance data under `modules/core/src/trait`, schema-version migration and SDK generation, `packages/cdk/src/agent.ts` and its functional delegation, and model-view compilation. Generated TypeScript definitions remain generator-owned output of this task.
+"""
+scope = """
+## Decisions
+Introduce schema-version `0.6`, a version-only migration from `0.5`, and optional agent intent accepted only at `0.6` or later. Preserve all older versions and omit absent intent from canonical serialization and digest input. Agent-local duplicate IDs within a group and local require/avoid collisions are invalid.
+
+Preserve the compatibility ruling from 0255: root intent validation continues to check lists independently, so a root-only require/avoid ID collision accepted at `0.5` remains accepted after migration to `0.6`. Agent intent uses existing catalogs, rich-item validation, sanitization, and second-personless rules. Static output audits declarations and their agent sources; it does not claim an agent is active without a ready frame and never folds agent `system` into categorized intent.
+"""
+validation = """
+## Watch
+Do not hand-edit generated definitions as their source of truth, bypass the CDK object lowering path from functional APIs, weaken typed agent handles, or add a cross-list rejection to root intent. Omitted agent intent must leave existing canonical bytes, digests, CDK output, and static output unchanged.
+
+## Done when
+Object and functional CDK APIs author all four agent intent groups; populated output decodes and validates as schema-version `0.6`; older versions reject the new field; malformed and locally contradictory agent declarations fail; a migrated `0.5` root-only require/avoid collision remains valid and renders as before; static model-view output identifies declared agent intent through the shared renderer; generated SDK definitions have no drift; focused Rust and TypeScript cases run in the repository gates.
+"""
+[relations]
+parent = "0255"
+
+[[checks]]
+name = "agent intent authoring passes the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+timeout-ms = 600000
+
+[[checks]]
+name = "agent intent canonical and static behavior pass the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000

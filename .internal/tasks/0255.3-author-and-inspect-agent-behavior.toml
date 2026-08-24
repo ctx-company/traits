@@ -1,0 +1,36 @@
+schema-version = "0.2"
+key = "0255.3"
+title = "Author and inspect agent behavior"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Let trait authors attach additive and scalar behavior guidance to an agent through the TypeScript object and functional APIs, lower it to canonical schema-version `0.6` data, and inspect each declaration in static model-view output. The outcome covers authored behavior from typed input through trusted canonical validation and sanitized source-attributed rendering.
+
+The affected areas are agent and behavior data under `modules/core/src/trait`, generated SDK definitions, `packages/cdk` agent builders and tests, and model-view compilation. It extends the schema-version and authoring path established by 0255.1 rather than creating another guidance representation.
+"""
+scope = """
+## Decisions
+Agent behavior exposes additive `tone`, `method`, and `format` plus scalar `verbosity`, `directness`, `scope-control`, `initiative`, and `uncertainty`. Additive lists use existing catalog, rich-item, custom-item, duplicate, blank-text, and sanitization rules. Scalar values use existing vocabulary and validation.
+
+Present behavior participates in deterministic serialization and digest semantics; absence remains omitted and byte-neutral. Static output attributes declared behavior to its agent without resolving assignments. Agent `system` remains separately rendered and transported standing instruction content.
+"""
+validation = """
+## Watch
+Do not create agent-only behavior vocabulary, bypass object-layer lowering from templates or functional registrars, hand-maintain generated definitions, or mix agent `system` into categorized behavior. Rich and custom entries must survive lowering apart from canonical normalization.
+
+## Done when
+Object and functional CDK APIs author every additive and scalar agent behavior axis; populated output validates and serializes deterministically at schema-version `0.6`; malformed or duplicate values fail; omitted output remains unchanged; static model-view output identifies declarations through the shared renderer; generated SDK definitions have no drift; and focused Rust and TypeScript cases pass their repository gates.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.1"]
+
+[[checks]]
+name = "agent behavior authoring passes the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+timeout-ms = 600000
+
+[[checks]]
+name = "agent behavior canonical and static behavior pass the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000

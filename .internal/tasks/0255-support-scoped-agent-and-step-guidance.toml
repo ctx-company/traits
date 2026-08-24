@@ -1,0 +1,29 @@
+schema-version = "0.2"
+key = "0255"
+title = "Support scoped agent and step guidance"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Support intent and behavior on both agent declarations and executable procedure steps so each model frame receives guidance scoped to the actual assigned agent and ready prompt, not only trait-root guidance. This charter covers the shared stop condition across canonical Rust data, TypeScript authoring, static and ready-frame previews, and live CLI and MCP consumers.
+
+The work exists to close the seat-scoping gap while preserving typed, digest-locked canonical traits and one auditable model-visible frame envelope. The stop condition is that each agent and prompt behavior slice is authored, validated, rendered, and consumed on its own live path, including control-flow and continuing-session transitions, while legacy traits retain their existing bytes, digests, acceptance, and prompt behavior.
+"""
+scope = """
+## Decisions
+Scoped guidance augments rather than replaces broader guidance. Effective layers are trait, assigned agent, then actual ready step, from least to most specific. Intent retains `require`, `focus`, `avoid`, and `block`; behavior retains additive `tone`, `method`, and `format` plus scalar `verbosity`, `directness`, `scope-control`, `initiative`, and `uncertainty`.
+
+For every intent group and additive behavior axis, preserve author order inside a layer and concatenate layers in trait-agent-step order. Deduplication identity is the pair of group or axis plus normalized guidance ID. A more-specific occurrence replaces an earlier occurrence and occupies the more-specific layer's position, including its local summary or description. Scalar behavior uses the most-specific present value, so step overrides agent and agent overrides trait; differing scalar values are precedence, not a contradiction.
+
+Root-level compatibility is explicit: a schema-version `0.5` trait may repeat one normalized ID across root `intent.require` and root `intent.avoid`, because root taxonomy validation currently checks each list independently. That root-only form remains valid and keeps its prior rendered behavior after the version-only migration to `0.6`; canonical root validation must not add a cross-list rejection. New agent or prompt declarations reject a local require/avoid collision. Effective resolution refuses an opposing require/avoid pair introduced across layers when at least one effective occurrence comes from agent or prompt scope, but it must not reinterpret a collision whose two effective occurrences both remain root-sourced. No contradiction is inferred from prose or from other intent groups.
+
+Only `prompt` sequence items may declare step intent or behavior. `ask` is human-owned, while `command`, `check`, `project`, `sequence`, `branch`, `loop`, `for-each`, `parallel`, and `terminal` items do not create model frames; scoped guidance on any of them is invalid. Agent guidance is model-visible on each prompt frame assigned to that agent, and step guidance is model-visible only on the exact ready prompt item, including items reached through named or nested control flow. Static model-view output exposes declared scoped guidance with its source; a dispatched frame exposes only the resolved effective guidance through the existing categorized envelope. Agent `system` remains a separate standing-instruction channel and does not participate in scoped ordering, deduplication, contradiction checks, or scalar precedence.
+
+This additive canonical feature introduces trait schema-version `0.6`. Versions `0.2` through `0.5` remain supported, migration from `0.5` to `0.6` is a version-only rewrite, and scoped agent or prompt fields are legal only at `0.6` or later. Reuse the guidance model in `modules/core/src/trait`, the model-view vocabulary and sanitizer, the shared frame composer in `modules/cli/src/app/frame_prompt.rs`, and the object and functional CDK surfaces in `packages/cdk`. Scope includes generated SDK types, named and nested ready-prompt resolution, and CLI, MCP, retry, persistent-session, sibling-dispatch, and preview consumers. This charter does not expand permissions, activation, resolver scoring, harness or model selection, or `extensions.ctx.subagent` policy.
+"""
+validation = """
+## Watch
+Do not infer scoped guidance from a top-level declaration index when named or nested control flow determines the ready prompt. Do not create separate preview or dispatch renderers, duplicate vocabulary prose, hand-maintain Rust-derived TypeScript canonical types, or let categorized guidance alter the transport of agent `system`. Optional fields must serialize deterministically, and absence must preserve existing canonical bytes and digest behavior. In particular, do not make a previously accepted root-only require/avoid collision fail canonical validation or effective resolution.
+
+## Done when
+Every child task is closed and the stop condition holds: agent and prompt guidance follow the explicit compatibility and composition contract through authoring, static and ready-frame previews, ordinary and nested CLI and MCP dispatch, retries, persistent sessions, and sibling dispatch without changing legacy prompt bytes, root-only collision acceptance, or the separate system-instruction channel.
+"""

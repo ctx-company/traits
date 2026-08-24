@@ -1,0 +1,36 @@
+schema-version = "0.2"
+key = "0255.7"
+title = "Author and inspect prompt behavior"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Let trait authors place additive and scalar behavior on executable prompt items through TypeScript object and functional sequence APIs, lower it to canonical schema-version `0.6` data, and inspect declarations at top-level, named, and nested locations. This slice carries typed authoring through canonical validation and static source-attributed rendering.
+
+The affected areas are procedure prompt data and validation, generated SDK definitions, `packages/cdk` sequence builders and functional registrars, and static model-view compilation. It reuses agent behavior vocabulary and the prompt placement boundary from 0255.5.
+"""
+scope = """
+## Decisions
+Prompt behavior exposes additive `tone`, `method`, and `format` plus scalar `verbosity`, `directness`, `scope-control`, `initiative`, and `uncertainty`. Only prompt items may carry it; all human, command, check, project, control, and terminal item forms reject it.
+
+Additive lists use existing catalog, rich-item, custom-item, duplicate, blank-text, and sanitization rules. Scalar values use existing vocabulary and validation. Present behavior is deterministic and digest-covered; absence remains omitted and byte-neutral. Static output attributes declarations to sequence and item locations without resolving readiness.
+"""
+validation = """
+## Watch
+Do not widen generic sequence item types, validate only one nesting level, invent prompt-only behavior meanings, bypass object lowering, or hand-maintain generated definitions. Omitted behavior must preserve canonical, CDK, and static output.
+
+## Done when
+Object and functional CDK APIs author every additive and scalar behavior axis on top-level, named, and nested prompts; non-prompt placements and malformed or duplicate values fail; populated output validates and serializes deterministically at schema-version `0.6`; omitted forms remain unchanged; static output identifies declarations through the shared renderer; generated SDK definitions have no drift; and focused Rust and TypeScript cases pass their gates.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.3", "0255.5"]
+
+[[checks]]
+name = "prompt behavior authoring passes the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+timeout-ms = 600000
+
+[[checks]]
+name = "prompt behavior canonical and static behavior pass the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
