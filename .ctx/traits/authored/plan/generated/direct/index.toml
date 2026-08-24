@@ -95,7 +95,7 @@ Format the described work into exactly one well-formed TaskDocument TOML task fi
     schema-version = "0.2"
     key = "<NNNN or NNNN.X>"
     title = "<short imperative title>"
-    status = "ready"
+    status = "draft"
     raised = "<YYYY-MM-DD>"
     content = """
     What this task is and why it exists — grounded, concrete, standalone.
@@ -123,7 +123,7 @@ Rules:
 - A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
 - Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
 - Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
-- Fold the grounding each task needs — its concrete files, validation gates with exact commands, invariants, constraints — into that task's own content/scope/validation, so every file stands alone.
+- Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
 - Never fabricate a check: if no existing command verifies the Done-when, or verification is judgment-based, declare no checks — a wrong check that passes is worse than none; check-less tasks fall to the configured [tasks] auto-close policy.

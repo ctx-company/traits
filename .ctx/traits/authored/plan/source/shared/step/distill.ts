@@ -13,7 +13,7 @@ export function tasks(agent: AgentHandle) {
   return agent.prompt("Distill into task files", {
     id: "distill",
     input: input.prompt(
-      `Turn the described work directly into TaskDocument TOML task files on the board — skip deriving separate grounding notes, but read the relevant parts of the repository with your tools so every task is grounded in this codebase's concrete files, modules, and validation gates.
+      `Turn the described work directly into TaskDocument TOML task files on the board — skip deriving separate grounding notes, but read the relevant parts of the repository with your tools so every task is grounded in this codebase's affected modules or areas, applicable constraints, and existing validation gates. Do not solicit or prescribe exact symbols, signatures, edits, or edit sequencing; architect makes those execution-level decisions later.
             The work, as described: {task}
             ${TASK_FORMAT_DOCTRINE}
             Key the first file {next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks; a single bare-key task when it does not). Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
