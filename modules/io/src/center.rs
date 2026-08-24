@@ -220,6 +220,7 @@ fn is_handshake_eof(error: &crate::Error) -> bool {
         || message.contains("unterminated line")
         || message.contains("connection reset")
         || message.contains("broken pipe")
+        || message.contains("not connected")
 }
 
 fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result<()> {
@@ -334,16 +335,21 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
 fn abort_spawn(child: &mut std::process::Child, failure: crate::Error) -> crate::Result<()> {
     match child.try_wait() {
         Ok(Some(_)) => Err(failure),
-        Ok(None) => {
-            child
-                .kill()
-                .map_err(|source| io_error(&Utf8PathBuf::from("center child"), source))?;
+        // A transient wait error cannot prove that the detached child exited.
+        // Still attempt SIGKILL and reap before the caller releases the spawn
+        // lock, rather than allowing a second contender to overlap this child.
+        Ok(None) | Err(_) => {
+            let kill = child.kill();
+            if let Err(source) = kill
+                && source.kind() != std::io::ErrorKind::InvalidInput
+            {
+                return Err(io_error(&Utf8PathBuf::from("center child"), source));
+            }
             child
                 .wait()
-                .map_err(|source| io_error(&Utf8PathBuf::from("center child"), source))?;
-            Err(failure)
+                .map_err(|source| io_error(&Utf8PathBuf::from("center child"), source))
+                .and(Err(failure))
         }
-        Err(source) => Err(io_error(&Utf8PathBuf::from("center child"), source)),
     }
 }
 
