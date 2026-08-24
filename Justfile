@@ -193,7 +193,7 @@ research-deep topic:
 	ctx traits run research:deep --worktree --progress tui -- --topic={{quote(topic)}}
 
 plan task:
-    ctx traits run plan --worktree --progress tui -- --task={{quote(task)}}
+    ctx traits run plan --worktree --merge --progress tui -- --task={{quote(task)}}
 
 architect task:
     ctx traits run architect --worktree --progress tui -- --task={{quote(task)}}
