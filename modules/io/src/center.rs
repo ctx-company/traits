@@ -635,9 +635,19 @@ impl CenterModel {
                     Some(mut maintenance) => {
                         // A terminal summary with an unchanged fingerprint is
                         // already a complete ledger projection. It still needs
-                        // maintenance ownership to clear stale holder metadata,
-                        // but must not repay ledger parsing every scan.
-                        if unchanged && terminal(&row.summary) {
+                        // maintenance ownership to clear stale holder metadata.
+                        // Re-stat under that ownership before trusting it: a driver
+                        // may have rewritten the ledger after discovery's first
+                        // stat and before releasing its lock.
+                        let unchanged_under_maintenance = unchanged
+                            && std::fs::metadata(ledger.as_std_path())
+                                .and_then(|metadata| {
+                                    metadata.modified().map(|modified| {
+                                        modified == row.modified && metadata.len() == row.size
+                                    })
+                                })
+                                .map_err(|source| io_error(ledger, source))?;
+                        if unchanged_under_maintenance && terminal(&row.summary) {
                             maintenance.clear_stale_metadata()?;
                             row.live = false;
                             row.live_holder = None;
@@ -1227,6 +1237,36 @@ mod tests {
             .expect("replace with nonterminal ledger");
         LEDGER_READS.with(|reads| reads.set(0));
         model.discover(&paths).expect("changed discovery");
+
+        let row = model.rows.get(&ledger).expect("repaired row");
+        assert!(terminal(&row.summary));
+        LEDGER_READS.with(|reads| assert!(reads.get() >= 2));
+        assert!(
+            crate::run_session::read_run_session(&ledger)
+                .expect("read repaired ledger")
+                .last_drive_outcome
+                .is_some()
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn terminal_cache_changed_after_initial_stat_is_reread_under_maintenance() {
+        let root = scratch("terminal-post-stat-change");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+
+        model.discover(&paths).expect("initial discovery");
+        // This is the state discovery would have observed before a finishing
+        // driver releases its lock. The stale `unchanged` argument must not
+        // bypass the maintenance-owned re-stat below.
+        crate::run_session::write_run_session(&ledger, &fixture_session("awaiting-agent-output"))
+            .expect("replace with nonterminal ledger");
+        LEDGER_READS.with(|reads| reads.set(0));
+        model
+            .refresh_liveness(&ledger, true)
+            .expect("maintenance rereads changed ledger");
 
         let row = model.rows.get(&ledger).expect("repaired row");
         assert!(terminal(&row.summary));
