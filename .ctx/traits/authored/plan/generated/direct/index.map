@@ -6,8 +6,8 @@
   },
   "port:final-keys": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 165,
-    "end": 165
+    "start": 170,
+    "end": 170
   },
   "port:task": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -16,8 +16,8 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 159,
-    "end": 159
+    "start": 164,
+    "end": 164
   },
   "prompt:format": {
     "file": ".ctx/traits/authored/plan/source/shared/step/distill.ts",
@@ -34,6 +34,11 @@
     "start": 77,
     "end": 77
   },
+  "sequence:procedure/commit-tasks": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/commit.ts",
+    "start": 20,
+    "end": 20
+  },
   "sequence:procedure/format": {
     "file": ".ctx/traits/authored/plan/source/shared/step/distill.ts",
     "start": 33,
@@ -44,6 +49,11 @@
     "start": 23,
     "end": 23
   },
+  "slot:commit-log": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 128,
+    "end": 128
+  },
   "slot:key-map": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 123,
@@ -51,13 +61,13 @@
   },
   "slot:raised-date": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 128,
-    "end": 128
+    "start": 133,
+    "end": 133
   },
   "slot:receipts": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 138,
-    "end": 138
+    "start": 143,
+    "end": 143
   },
   "trait:plan": {
     "file": "[eval1]",

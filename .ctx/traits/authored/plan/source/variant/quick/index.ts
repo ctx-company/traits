@@ -28,6 +28,7 @@ export default function () {
   shared.step.derive.raisedDateStep();
   shared.step.distill.tasks(smart1);
   shared.step.renumber.finalKeysStep();
+  shared.step.commit.boardCommitStep();
 
   return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };
 }
