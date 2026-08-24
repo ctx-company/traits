@@ -1,0 +1,32 @@
+schema-version = "0.2"
+key = "0256.4"
+title = "Drive the dashboard from live deltas"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Continue the dashboard subscription after its initial snapshot and bridge run-list deltas from the blocking background receiver into gpui state. Inserts and updates must reach the native rows in subscription order, making the center's snapshot-plus-delta stream the exclusive source of dashboard changes and proving that work started outside the desktop becomes visible without a polling loop.
+"""
+scope = """
+## Decisions
+Dashboard state is event-driven: after the coherent initial snapshot, every visible list update comes from a center delta. The desktop must not scan run directories, ledgers, stores, or sidecars, periodically query the center, or maintain GUI-only durable state. Snapshot and subsequent deltas form one ordered state stream, with externally started runs handled by the same path as all other inserts. This task covers connected steady-state delivery; absent centers, disconnects, subscriber eviction, and resubscription recovery belong to 0256.5.
+"""
+validation = """
+## Watch
+Do not create a race between installing the snapshot and accepting later deltas: state visible in the window must be neither lost nor duplicated at that boundary. Blocking receives stay off gpui's UI thread, and UI scheduling must preserve stream order. Repository identity carried by each row must survive inserts and updates. Drivers and ledgers remain authoritative; closing the GUI must have no effect on running work.
+## Done when
+An integration proof starts the desktop subscription, then starts or exposes a run outside the desktop and observes its row appear from a later center delta with no file or center poll loop. Coverage also demonstrates ordered snapshot-to-delta application without lost or duplicate visible rows. Focused center proofs, the independent desktop tests, and `just test` pass.
+"""
+[relations]
+parent = "0256"
+depends-on = ["0256.3"]
+
+[[checks]]
+name = "existing center subscription proofs pass"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 300000
+
+[[checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+timeout-ms = 600000

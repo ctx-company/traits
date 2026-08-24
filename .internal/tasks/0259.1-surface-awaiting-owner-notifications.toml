@@ -1,0 +1,36 @@
+schema-version = "0.2"
+key = "0259.1"
+title = "Surface awaiting-owner notifications"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Translate center-delivered awaiting-owner session evidence into a native notification containing the durable question and enough repository and run identity to locate the parked run. The notification must surface while the dashboard is not foregrounded and remain reconstructable from shared evidence rather than GUI-owned durable state.
+
+This extends the standalone desktop application's event-driven center subscription and shared core/IO session semantics. It establishes the presentation needed for later answer actions without creating a second protocol or reading run directories, ledgers, or sidecars in a GUI poll loop.
+"""
+scope = """
+## Decisions
+In scope are awaiting-owner recognition from center snapshot and deltas, native question notification, durable run identity, and coherent behavior across disconnect and restart. Repository identity comes from center data and must not be inferred from the GUI process's working directory.
+
+Notification state is derived from durable session evidence. Drivers retain ownership of runs and ledgers, while the center only observes and relays. Typed submission and choice controls are reserved for later children; remote notification transport and GUI-only recovery state are out of scope.
+"""
+validation = """
+## Watch
+Do not block gpui's UI thread on the center's synchronous receiver or filesystem work. Subscriber queues are bounded and slow consumers may be dropped, so reconnect and snapshot/delta ordering must avoid duplicate notifications and must expose stale or disconnected state rather than silently presenting old data as current.
+
+The desktop crate and its gpui dependency remain outside root workspace resolution. Use the independent desktop lane established by 0256 for native behavior; the existing workspace gate below guards shared-code regressions, while the separate isolation check guards root Cargo resolution and the lockfile. No exact desktop command exists in the repository at task-writing time.
+## Done when
+An awaiting-owner transition delivered by the center raises a native notification with the durable question and parked run identity while the dashboard is not foregrounded; restart or subscription recovery reconstructs the correct state without polling or GUI-only durable data; and the desktop lane plus the existing workspace gate pass.
+"""
+[relations]
+parent = "0259"
+depends-on = ["0256", "0253.4"]
+
+[[checks]]
+name = "shared-semantics regression gate passes"
+command = "just test"
+timeout-ms = 600000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

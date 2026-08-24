@@ -1,0 +1,24 @@
+schema-version = "0.2"
+key = "0259"
+title = "Answer durable summons from native notifications"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Add the native desktop summons surface after the walking skeleton and shared awaiting-owner contract are available. The work presents durable parked-run questions as operating-system notifications and lets an owner answer with typed input or supplied choices through the same center-served submission path available to other faces.
+
+This charter covers notification presentation, typed answering, and native choice controls. Its stop condition is that a parked scratch run can be identified, answered entirely from its notification, and observed continuing through center deltas without requiring the dashboard to be foregrounded.
+"""
+scope = """
+## Decisions
+The GUI is only a face over shared core and IO session, activity, and center-control semantics. Notification and answer state is derived from durable ledger evidence plus center snapshot-and-delta delivery; no GUI-only recovery state, polling, direct ledger mutation, or driver-direct control is in scope.
+
+Questions and answers remain available to the TUI and CLI through the same release's shared contracts. Native notifications may present the semantics differently, but do not establish a GUI-only protocol. Summons work may land independently after its prerequisites and must not block the other desktop work or shipment. Mobile, web, remote transport, and a general action registry are out of scope.
+"""
+validation = """
+## Watch
+Center subscriptions may block between events and bounded queues may disconnect slow consumers, so notification handling must not block the gpui UI thread and reconnects must not duplicate or lose the durable awaiting-owner state. Center and GUI memory is disposable; driver ownership, ledgers, locks, and authenticated control remain authoritative.
+
+The standalone gpui crate remains outside the root Cargo workspace with its own manifest, lockfile, and desktop lane. Its dependency must not enter root resolution or change the cost of existing workspace gates. Existing workspace commands cannot prove desktop behavior, so each child must use the independent desktop lane established by the walking skeleton in addition to any listed repository checks.
+## Done when
+Every child task is closed and the stop condition holds: a parked scratch run is answered entirely from a native notification and another center subscriber observes the durable answer and resumed continuation through deltas.
+"""

@@ -1,0 +1,30 @@
+schema-version = "0.2"
+key = "0256.5"
+title = "Recover visibly from center loss"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Complete the walking skeleton with an explicit degraded lifecycle for first contact when no matching center exists, later socket disconnects, and server-side eviction of a subscriber that cannot keep up with bounded queues. The standalone desktop must either start the matching center through a path valid for its own executable or identify the dashboard as stale, then recover through a fresh coherent snapshot instead of terminating or silently presenting old rows as current.
+"""
+scope = """
+## Decisions
+Center absence and loss are recoverable face states, not application-fatal errors. A valid result may use spawn-on-need or a visibly stale disconnected view, but it may not assume that linking the IO client gives a fresh GUI executable the CLI's hidden center-process invocation. Recovery replaces derived dashboard state from a fresh subscription snapshot before applying new deltas. No GUI-only recovery database, driver ownership, direct driver control, remote transport, packaging, launcher, or update behavior is introduced. The independent desktop lane is the gpui viability result for this slice.
+"""
+validation = """
+## Watch
+The center drops consumers whose bounded subscriber queues overflow; handle that as a lost subscription rather than continuing with apparently current state. Distinguish absent-center first contact from mid-stream disconnect while giving both an explicit nonfatal presentation. Resubscription must not merge an uncertain old stream with a new snapshot or duplicate rows. Center or GUI death must not affect drivers, ledgers, locks, or harness children. The gpui manifest and lockfile remain outside root resolution, and existing root gate and CI commands must not gain desktop build cost.
+## Done when
+Tests cover no-center startup, disconnect, bounded-subscriber loss, visible stale state, and recovery from a fresh snapshot without lost or duplicated rows. The application stays open and never labels stale data current, running work continues independently, the standalone desktop build and test lane passes, `just test-full` passes, and gpui remains absent from root workspace resolution and the root lockfile.
+"""
+[relations]
+parent = "0256"
+depends-on = ["0256.4"]
+
+[[checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+timeout-ms = 900000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

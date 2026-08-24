@@ -1,0 +1,36 @@
+schema-version = "0.2"
+key = "0259.3"
+title = "Answer summons with native choices"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Render native choice controls when the shared summons payload supplies choices, while retaining typed answering where the contract permits it. A selected choice follows the same shared center submission path as a typed response and produces durable answer evidence before the parked run continues.
+
+This completes the summons surface by proving a parked scratch run can be answered entirely from its notification. It consumes the shared choice payload as an interoperability seam without making completion of separate choice-authoring work a prerequisite.
+"""
+scope = """
+## Decisions
+Choice labels and values come from shared summons semantics and are presented natively; the GUI does not invent a separate choice model. Choice and typed responses share center-served submission, durable evidence, and delta-observed continuation. The TUI and CLI must be able to reach the same capability in the release.
+
+In scope are native controls, applicable typed fallback, submission outcomes, and end-to-end notification completion. Expanding the authoring model, introducing a general action registry, remote surfaces, or adding a GUI-to-driver path is out of scope.
+"""
+validation = """
+## Watch
+Do not infer successful continuation from a closed notification. Prove the answer through durable evidence and deltas received by another subscriber, including the parked-to-running transition. Preserve reconnect behavior, avoid duplicate submissions, and keep blocking center work off the gpui UI thread.
+
+The gpui crate, lockfile, and desktop checks remain independent of the root Cargo workspace. The root landing gate below guards shared-behavior regressions, while the separate isolation check guards root Cargo resolution and the lockfile. Neither replaces the desktop lane because no exact desktop command exists in the repository at task-writing time.
+## Done when
+A summons carrying shared choices renders native controls, a parked scratch run can be answered entirely from the notification by choice or applicable typed input, durable evidence records the response, and another subscriber observes resumed continuation through center deltas; the desktop lane and root landing gate pass without pulling gpui into workspace resolution.
+"""
+[relations]
+parent = "0259"
+depends-on = ["0259.2"]
+
+[[checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+timeout-ms = 900000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

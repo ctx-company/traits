@@ -1,0 +1,26 @@
+schema-version = "0.2"
+key = "0257.1"
+title = "Load the selected run from its ledger"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Make dashboard selection open detail state seeded by one authoritative full-session read through the existing IO store path. Resolve the selected run from the repository identity carried by its compact center row and perform the filesystem work away from gpui's UI thread, establishing a restart-safe detail baseline without expanding the dashboard list contract.
+"""
+scope = """
+## Decisions
+Selection may perform one initial full-session reconstruction through the shared IO-owned store boundary. The selected center row supplies run and repository identity; the desktop must not infer a repository from its current working directory or add a GUI-specific durable index. Keep this read isolated from list rendering: compact dashboard rows continue to come exclusively from center snapshot-plus-delta state and never require full-ledger, store, or sidecar reads. This task establishes loaded detail state but does not own its native frame-tree presentation or subsequent live-follow behavior.
+"""
+validation = """
+## Watch
+The ledger is authoritative, while the center database, in-memory center model, and activity sidecars are derived evidence. A finished session must remain reconstructible after process restart from the existing store path. Filesystem access must not block the UI thread, and selection must not introduce directory scans, list polling, or dependence on GUI-only state. Preserve workspace isolation: the standalone desktop's independent tests are not part of the root workspace gate.
+## Done when
+Selecting a center row loads the matching full session exactly once through the IO store path using center-provided repository identity, without blocking the native UI or causing list rows to read ledgers. Reconstruction fixtures cover live and finished session baselines in the desktop lane, and `just test` passes.
+"""
+[relations]
+parent = "0257"
+depends-on = ["0256"]
+
+[[checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+timeout-ms = 600000

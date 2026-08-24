@@ -1,0 +1,20 @@
+schema-version = "0.2"
+key = "0257"
+title = "Show authoritative native run detail"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Add native run detail to the standalone gpui face after the event-driven walking skeleton. The work covers selecting a compact center row, reconstructing its full session once from the authoritative ledger through IO, rendering shared frame and activity semantics as a native tree, and then keeping that tree current from center deltas. It exists to make live and finished work inspectable without weakening the separation between compact list state and authoritative detail state.
+"""
+scope = """
+## Decisions
+The umbrella covers 0257.1 through 0257.3 and owns their shared stop condition: a selected run opens as an authoritative native frame tree, updates while work proceeds, and reconstructs identically after the application restarts. The initial full-session read uses the existing IO store boundary and the repository identity carried by the selected center row; list rendering remains subscription-only and never reads full ledgers. After that initial read, live detail follows center activity deltas without polling or repeated ledger scans. Native presentation is built from shared core session, frame, and activity semantics rather than terminal lines or the CLI-private ratatui renderer. Controls, summons, packaging, the `ctx gui` launcher, remote transport, and changes to TUI behavior are outside this slice.
+"""
+validation = """
+## Watch
+Ledgers and kernel-backed driver liveness remain authoritative; center and activity-sidecar state is derived and disposable. Filesystem and blocking subscription work must stay off gpui's UI thread. Preserve the machine-wide repository identity supplied by the center rather than resolving runs relative to the desktop process's working directory. The standalone desktop remains outside the root Cargo workspace with its own manifest, lockfile, and lane, while gpui stays absent from root resolution, `Cargo.lock`, `just test`, `just test-full`, and existing CI lanes.
+## Done when
+Every child task is closed and the stop condition holds: selecting a live run shows an authoritative native frame tree that updates as frames land without a GUI poll loop, and a finished run's detail is identical after closing and reopening the application.
+"""
+[relations]
+depends-on = ["0256"]

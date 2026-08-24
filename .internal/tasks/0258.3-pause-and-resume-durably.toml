@@ -1,0 +1,40 @@
+schema-version = "0.2"
+key = "0258.3"
+title = "Pause and resume durably"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Add desktop pause and resume affordances that use the shared center capabilities and present outcomes from subscription deltas. Pause must settle at a frame boundary and persist a resumable outcome; resume must recover from authoritative run evidence rather than center-only or GUI-only memory.
+
+This task completes the desktop control surface across the gpui application, the IO-owned typed center client and protocol, shared run semantics, and cross-subscriber center proofs. It exists to preserve durable pause/resume behavior when either presentation process or the disposable center restarts.
+"""
+scope = """
+## Decisions
+Route pause and resume only through shared center verbs available to every face. Establish displayed outcomes from deltas and prove each effect through another subscriber. Pause at a frame boundary, persist the resumable outcome in authoritative run evidence, and make resume work after both GUI and center restart without relying on their prior in-memory state.
+
+The GUI must not call a driver directly, mutate a ledger, keep required recovery state, poll run files, or optimistically declare an action complete. Drivers remain owners of runs, ledgers, locks, and harness children; center and GUI state remain derived and disposable. Spawn, interruption, run detail, summons, packaging, and remote control are outside this task.
+"""
+validation = """
+## Watch
+0256 and board task 0243.5 are prerequisites. Pause requests must not manufacture a mid-frame outcome, and request acknowledgement alone does not prove persistence or resumability. Exercise restart behavior rather than relying on a still-live center model. Handle bounded-subscriber disconnects without silently current-looking stale state, keep blocking work off gpui's UI thread, and retain the standalone desktop build lane outside root workspace resolution.
+## Done when
+The desktop pauses a live run through the center at a frame boundary; another subscriber observes the durable paused outcome by delta; and the run resumes through the center after the GUI and center have been restarted, with another subscriber observing continued state. Focused center proofs cover cross-subscriber and restart semantics, the independent desktop lane covers the affordances and delta-derived state, and the full workspace landing gate passes without resolving or building gpui.
+"""
+
+[relations]
+parent = "0258"
+depends-on = ["0256", "0243.5"]
+
+[[checks]]
+name = "focused center pause and resume proofs pass"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+
+[[checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+timeout-ms = 900000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

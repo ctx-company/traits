@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0258.2"
+title = "Interrupt runs through the center"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Add desktop interrupt affordances that invoke the shared center control capability and reflect the resulting run state only when subscription deltas arrive. This preserves authenticated driver-channel handling behind the center and prevents the native face from creating a second control path.
+
+The task covers the gpui interaction, the IO-owned typed center client contract it consumes, and focused proofs that observe the effect from another subscriber. It exists to make interruption available from the desktop with the same product semantics available to the TUI and CLI.
+"""
+scope = """
+## Decisions
+Route interruption exclusively through the center. Keep driver authentication and driver-channel communication behind that boundary, and treat center deltas as the source of the displayed outcome. Prove the effect using a subscriber other than the requesting window.
+
+Do not contact the driver directly, mutate ledgers, infer success from request acknowledgement or button state, or add a GUI-specific verb. Authoritative ledgers and kernel-backed liveness remain driver-owned, and center or GUI failure must not terminate the run. Spawn, pause/resume, detail rendering, summons, and packaging are outside this task.
+"""
+validation = """
+## Watch
+0256 and board task 0243.5 are prerequisites. Interrupt completion may race with subscription delivery, and bounded queues can disconnect lagging subscribers; the UI must not present an unobserved outcome as current. Blocking socket work must remain off gpui's UI thread. The standalone desktop lane must exercise the affordance independently without adding gpui to workspace resolution or existing gates.
+## Done when
+Interrupting a live run from the desktop sends only the shared center verb, the center performs authenticated driver-channel handling, and a second subscriber receives the delta that establishes the effect. No local optimistic state is used as completion. The focused center proof suite and the independent desktop lane exercise the round trip.
+"""
+
+[relations]
+parent = "0258"
+depends-on = ["0256", "0243.5"]
+
+[[checks]]
+name = "focused center interrupt proof passes"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"

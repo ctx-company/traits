@@ -1,0 +1,26 @@
+schema-version = "0.2"
+key = "0256.3"
+title = "Render repository-aware run rows"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Build the walking skeleton's read-only dashboard from the compact run rows in the center subscription snapshot. Render enough native row state to identify and understand live and finished runs while preserving the repository identity supplied by the machine-wide center, so the same model can support all-repository and repository-scoped views without depending on the desktop process's working directory.
+"""
+scope = """
+## Decisions
+The dashboard list consumes compact center rows only and treats their repository identity as authoritative presentation input. It may present machine-wide or repository-scoped state, but it must not infer repository paths relative to the GUI working directory. List rendering must not read full ledgers, session stores, activity sidecars, or CLI-private ratatui output. Native presentation can differ from the TUI while preserving shared product semantics. Row selection, full run detail, controls, polling, and live-delta application remain outside this task.
+"""
+validation = """
+## Watch
+The center model is machine-wide rather than bound to the launch directory. Do not collapse same-named runs from different repositories or discard identity needed for later selection and updates. Keep list and detail data flows distinct: activity sidecars are derived tolerant evidence, ledgers are authoritative, and neither is needed to paint compact list rows. The dashboard must remain useful as a read-only face without changing existing TUI behavior.
+## Done when
+The native window renders the initial compact snapshot as repository-aware run rows, can represent both all-repository and repository-scoped state from center-provided identity, and does so without any full-ledger, store, sidecar, or working-directory-relative lookup. The desktop project's independent tests cover row projection and repository separation, and the workspace per-round gate passes.
+"""
+[relations]
+parent = "0256"
+depends-on = ["0256.2"]
+
+[[checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+timeout-ms = 600000

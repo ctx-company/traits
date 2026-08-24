@@ -1,0 +1,33 @@
+schema-version = "0.2"
+key = "0259.2"
+title = "Answer summons with typed input"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Allow an owner to type and submit an answer from an awaiting-owner native notification. Submission travels through the shared center control path, records durable answer evidence, and resumes the parked run so every face sees the same outcome.
+
+The work spans the desktop notification interaction and the shared IO-owned center client/protocol only as needed for the coherent user action. Success is established from center-delivered effects observed by another subscriber, not from optimistic local button state.
+"""
+scope = """
+## Decisions
+Typed answering uses the same shared submission and control semantics available to the TUI and CLI. The GUI neither mutates a ledger nor contacts a driver directly; the center relays the request while the driver and durable ledger remain authoritative. Submission must work without bringing the dashboard to the foreground.
+
+In scope are typed entry, submission feedback, durable answer evidence, resumed continuation, and delta-observable effects. Native choice controls are deferred to 0259.3. GUI-private answer protocols, center-only recovery memory, and changes to unrelated run controls are out of scope.
+"""
+validation = """
+## Watch
+Do not treat local notification dismissal or button state as proof of acceptance. Handle rejection, disconnect, duplicate action, and slow-subscriber behavior without fabricating a resumed state. Center or GUI death must not affect driver ownership or make recovery depend on disposable center state.
+
+The desktop's independent lane must cover the native interaction. The focused center suite should prove that durable answer and continuation effects reach another subscriber through snapshot-plus-delta semantics.
+## Done when
+A parked scratch run accepts a typed answer entirely from its native notification through the shared center path, records durable question-and-answer evidence, resumes, and exposes the resulting state and continuation to another subscriber through center deltas; the desktop lane and focused center proof pass.
+"""
+[relations]
+parent = "0259"
+depends-on = ["0259.1"]
+
+[[checks]]
+name = "center answer effects are covered by the focused proof suite"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 300000

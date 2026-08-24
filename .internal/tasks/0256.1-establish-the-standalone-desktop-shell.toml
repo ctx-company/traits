@@ -1,0 +1,30 @@
+schema-version = "0.2"
+key = "0256.1"
+title = "Establish the standalone desktop shell"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Create the minimal gpui application as a standalone desktop project that opens a basic native window. Give it its own Cargo manifest, lockfile, and independent build and test commands, with path dependencies on the existing core and IO crates only where shared semantics or boundaries are needed. This establishes a real desktop compilation surface without adding gpui's dependency graph or compile cost to the Rust workspace binary and its established gates.
+"""
+scope = """
+## Decisions
+The desktop project lives outside the root Cargo workspace and owns its dependency resolution and validation lane. Its shell is only the native window and application lifecycle needed by later walking-skeleton tasks. The root `Cargo.toml`, root `Cargo.lock`, `just test`, `just test-full`, and current macOS and Linux CI lanes must not resolve or build gpui. This task does not choose a distribution target matrix, produce an app bundle or icon, add release automation, add `ctx gui`, connect to the center, or build dashboard behavior.
+"""
+validation = """
+## Watch
+Do not inherit workspace-only dependencies in a way that pulls the desktop into root resolution. Keep the CLI launcher boundary and all packaging concerns out of this shell. The independent commands must be non-interactive and suitable for a clean checkout, but no pre-existing exact desktop command exists to use as a board check. Rust remains pinned to 1.97.1. Existing workspace behavior and the TUI must remain unchanged.
+## Done when
+The standalone desktop project has its own manifest and lockfile, its documented independent build and test commands pass from a clean checkout, and running it opens a basic native window. Root workspace resolution and the root lockfile contain no gpui dependency, and `just test-full` passes without building the desktop project.
+"""
+[relations]
+parent = "0256"
+depends-on = ["0243.4", "0243.5"]
+
+[[checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+timeout-ms = 900000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

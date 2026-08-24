@@ -1,0 +1,30 @@
+schema-version = "0.2"
+key = "0257.3"
+title = "Follow live detail and preserve reconstruction"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Keep an open native frame tree current by applying center activity deltas after its authoritative startup reconstruction. Reconcile live derived evidence with the ledger-seeded session so detail advances as frames land without polling or rereading the ledger for every update, while finished detail remains reproducible after the desktop process is closed and reopened.
+"""
+scope = """
+## Decisions
+The full-session store read from 0257.1 is the baseline; subsequent connected updates arrive through the shared center subscription contract and are applied to the native tree from 0257.2 in stream order. Activity sidecars and their deltas are tolerant derived evidence, never recovery authority or required GUI-only durable state. A restart discards derived in-memory detail, reconstructs from the ledger, and may then resume live-follow. This task does not add a poll loop, periodic center query, per-update ledger read, direct driver path, controls, or a divergent GUI protocol.
+"""
+validation = """
+## Watch
+Do not lose or duplicate activity at the boundary between the authoritative seed and later deltas. Synchronous subscription receives may block indefinitely and must stay off gpui's UI thread. The center can drop a slow consumer when its bounded queue fills; disconnect or eviction must not leave detail silently current-looking or merge an uncertain stream into authoritative state. Center or GUI death must not affect drivers, ledgers, locks, or harness children, and malformed or missing sidecar evidence must not prevent ledger reconstruction.
+## Done when
+An integration proof opens a live run, observes its native frame tree update as frames land through center deltas with no polling or repeated ledger reads, and demonstrates explicit stale or recovery behavior after subscription loss. After the run finishes, closing and reopening the application produces detail identical to the final live view from authoritative reconstruction. The standalone desktop lane and `just test-full` pass without adding gpui to root workspace resolution or existing CI cost.
+"""
+[relations]
+parent = "0257"
+depends-on = ["0257.2"]
+
+[[checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+timeout-ms = 900000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

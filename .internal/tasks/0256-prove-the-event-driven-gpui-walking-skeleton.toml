@@ -1,0 +1,18 @@
+schema-version = "0.2"
+key = "0256"
+title = "Prove the event-driven gpui walking skeleton"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Prove gpui is suitable for a native desktop face by delivering a read-only, list-only walking skeleton over the existing machine-local run center. The work covers a standalone desktop shell, first-process connection through the shared IO client, compact repository-aware rows, ordered snapshot-plus-delta updates, and visible recovery from center loss. It exists to establish the reusable desktop boundary before run detail, controls, summons, packaging, or launcher work proceeds.
+"""
+scope = """
+## Decisions
+The umbrella covers 0256.1 through 0256.5 and owns their shared stop condition: a fresh standalone gpui process can show and continuously update the center's run list without polling or compromising workspace isolation. The center remains a derived observer and relay; drivers, ledgers, locks, and harness children remain independently authoritative. The desktop uses the uid- and package-version-scoped local Unix socket and the shared JSON-lines subscription contract, not a GUI-specific backend, durable store, remote transport, or driver-direct path. The gpui application stays outside the root Cargo workspace with its own manifest, lockfile, and validation lane. Run detail, control verbs, summons, app-bundle distribution, icons, and the `ctx gui` launcher are outside this slice.
+"""
+validation = """
+## Watch
+The walking skeleton must test first contact from an executable that cannot assume the CLI's hidden center-process invocation. Blocking subscription receives must stay off gpui's UI thread. Compact list rows must retain center-provided repository identity and must not trigger ledger, store, or sidecar reads. Snapshot-to-delta ordering, bounded-subscriber eviction, disconnects, and absent-center behavior must not produce lost or duplicated visible state, a fatal application error, or stale data presented as current. Existing TUI behavior remains a parity reference and a first-class face. The gpui dependency must not enter root workspace resolution, the root lockfile, `just test`, `just test-full`, or existing CI lanes.
+## Done when
+Every child task is closed and the stop condition holds: a fresh standalone gpui window renders a coherent repository-aware run list from a center snapshot, an externally started run appears from a later delta without any GUI poll loop, center loss is explicit and recoverable, and the root workspace gates remain isolated from gpui.
+"""

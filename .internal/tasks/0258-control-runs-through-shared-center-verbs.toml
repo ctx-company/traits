@@ -1,0 +1,24 @@
+schema-version = "0.2"
+key = "0258"
+title = "Control runs through shared center verbs"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Complete the desktop face's run-control surface after the walking skeleton and the shared center control verbs are available. This charter covers spawning, interrupting, pausing, and resuming from the standalone gpui application while preserving the center as the only control boundary and subscriptions as the only source of resulting dashboard state.
+
+The work spans the standalone desktop application and its independent lane, the IO-owned typed center client and protocol, shared core run semantics, and focused center proofs. It exists to give the native face parity on the core actions without creating capabilities or durable state that other faces cannot reach.
+"""
+scope = """
+## Decisions
+Implement spawn, interrupt, pause, and resume as shared center-served capabilities consumed by the desktop face. Every action result is established by center deltas, including observation from a second subscriber, rather than optimistic GUI state. Drivers continue to own runs, ledgers, locks, and harness children; the GUI never contacts a driver or mutates authoritative run evidence directly.
+
+Keep gpui outside the root Cargo workspace with its own manifest, lockfile, and validation lane. The root workspace's dependency resolution and existing `just test` and `just test-full` costs must not acquire gpui. Preserve the TUI and CLI as first-class consumers of the same released capabilities. Run detail, summons handling, packaging, remote transport, and a general action registry are outside this charter.
+"""
+validation = """
+## Watch
+This work is blocked until 0256 and board task 0243.5 provide the proven desktop subscription skeleton and center control verbs. Center and GUI death must not affect detached work. Ledgers and kernel-backed driver liveness remain authoritative; center and GUI state are disposable. Blocking socket or filesystem work must stay off gpui's UI thread, and bounded subscription queues can disconnect lagging consumers. Preserve repository identity from center rows rather than deriving it from the GUI working directory.
+
+There is no existing desktop build or test command. The children must establish and use the independent desktop lane without adding it to root workspace gates; only existing repository commands may be declared as checks here.
+## Done when
+Every child task is closed and the stop condition holds: spawn, interrupt, pause, and resume round-trip through shared center verbs, another subscriber observes every effect through deltas, detached or resumable work survives requesting-face and center restarts as applicable, and no gpui dependency enters root workspace resolution or gates.
+"""

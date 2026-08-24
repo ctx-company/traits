@@ -1,0 +1,40 @@
+schema-version = "0.2"
+key = "0258.1"
+title = "Spawn runs through the center"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Add a desktop trait-and-arguments spawn form that submits the shared center spawn capability. The resulting run must enter the dashboard through the existing snapshot-plus-delta subscription contract, not through local form state, a GUI poll loop, or direct filesystem reads.
+
+This task covers the coherent spawn path across the standalone gpui application, the IO-owned typed center client and protocol, and the focused center proof suite. It exists so a desktop-requested driver is detached, remains owned by the existing runtime boundaries, and outlives the window that requested it.
+"""
+scope = """
+## Decisions
+Send spawn requests only through the shared center capability available to every face in the same release. Use the trait and arguments supplied by the form while preserving repository identity carried by center state; do not infer a repository from the GUI process's working directory. Derive all dashboard changes from subscription deltas and prove creation through a separate subscriber.
+
+The GUI must not invoke or retain a driver process directly, create GUI-only recovery state, scan run directories, or read full ledgers to populate list rows. The driver remains detached and authoritative ledgers, locks, and kernel-backed liveness remain outside the GUI. Keep blocking center work off gpui's UI thread. Run interruption, pause/resume, detail rendering, summons, and packaging are outside this task.
+"""
+validation = """
+## Watch
+0256 and board task 0243.5 are prerequisites. A locally added row or successful request acknowledgement does not prove spawn semantics. Center subscriber queues are bounded, so the implementation must handle disconnects without showing stale data as current. The standalone desktop lane must validate gpui behavior independently because no desktop command exists today, while root `Cargo.lock`, workspace resolution, `just test`, and `just test-full` must remain free of gpui.
+## Done when
+Submitting a valid trait and arguments from the desktop creates a detached run through the center; closing the requesting window does not stop it; and a second subscriber receives the delta that causes the run to appear without any GUI poll loop or optimistic row insertion. Focused center proofs cover the cross-subscriber result, the independent desktop lane covers the form and delta-driven rendering, and `just test` passes without resolving or building gpui.
+"""
+
+[relations]
+parent = "0258"
+depends-on = ["0256", "0243.5"]
+
+[[checks]]
+name = "focused center spawn proof passes"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+
+[[checks]]
+name = "workspace per-round gate remains green"
+command = "just test"
+timeout-ms = 600000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

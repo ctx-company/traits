@@ -1,0 +1,26 @@
+schema-version = "0.2"
+key = "0257.2"
+title = "Render the native frame tree"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Present the selected full session as a native gpui frame tree derived from the shared core session, frame, and activity semantics. Cover the meaningful frame states needed to inspect a run while keeping product meaning in shared core and IO boundaries rather than translating the session into terminal-oriented output.
+"""
+scope = """
+## Decisions
+Render loaded detail as native desktop structure whose hierarchy and states follow the shared session model. Presentation may differ from the TUI, but the TUI remains the behavioral parity reference and a first-class face. Do not reuse terminal lines, import the CLI-private ratatui renderer, duplicate product semantics in the GUI, or add controls and summons behavior. This task owns the native representation of the authoritative baseline loaded by 0257.1; live delta reconciliation belongs to 0257.3.
+"""
+validation = """
+## Watch
+Distinguish durable session and frame evidence from tolerant activity-sidecar embellishment so missing or malformed derived activity cannot corrupt the authoritative tree. Meaningful running, completed, failed, waiting, and nested frame states must remain distinguishable where those states exist in shared semantics. Keep gpui and its compile cost outside root workspace resolution and avoid changes that couple the CLI renderer to the desktop application.
+## Done when
+Focused desktop tests project representative shared session fixtures, including meaningful frame states and nesting, into a native gpui tree without terminal-line conversion or the ratatui renderer. The rendered hierarchy preserves shared product semantics, tolerates absent derived activity, and `just test` passes.
+"""
+[relations]
+parent = "0257"
+depends-on = ["0257.1"]
+
+[[checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+timeout-ms = 600000

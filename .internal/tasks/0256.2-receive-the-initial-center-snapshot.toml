@@ -1,0 +1,27 @@
+schema-version = "0.2"
+key = "0256.2"
+title = "Receive the initial center snapshot"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Connect the standalone desktop process to the machine-local run center and receive the coherent initial run-list snapshot through the typed public query and subscription client owned by IO. The integration proves that a fresh non-CLI executable can speak the same uid- and package-version-scoped Unix-socket contract as other faces while keeping synchronous, potentially indefinite socket receives off gpui's UI thread.
+"""
+scope = """
+## Decisions
+Use the shared IO client contract and its existing JSON-lines snapshot-plus-delta semantics. Extract a reusable client boundary only if standalone-process integration demonstrates that the current public boundary is unsuitable; do not implement a second wire protocol or expose private raw envelopes merely for the GUI. This task covers connection to an available matching center, coherent initial snapshot receipt, and the background-to-UI handoff needed to display that snapshot. Later deltas, row presentation, absent-center startup, disconnect recovery, controls, remote transport, and full-session reads remain outside this task.
+"""
+validation = """
+## Watch
+The wire has no separate version field, so connection must honor the existing version-scoped socket discovery rather than invent compatibility negotiation. A subscription receiver can block indefinitely between events and must never block gpui's UI thread. The initial state must be one coherent subscription snapshot, not an assembled set of polling queries. Linking the IO client alone does not prove that the desktop can invoke the CLI-specific center auto-launch path; center absence is handled by 0256.5.
+## Done when
+A freshly started desktop process connects to an available matching center through the shared typed client, receives one coherent initial compact-row snapshot, and presents that snapshot without blocking the native UI when no further events arrive. Focused center proofs and the desktop project's independent tests cover the connection and initial-snapshot boundary.
+"""
+[relations]
+parent = "0256"
+depends-on = ["0256.1"]
+
+[[checks]]
+name = "existing center protocol proofs pass"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 300000

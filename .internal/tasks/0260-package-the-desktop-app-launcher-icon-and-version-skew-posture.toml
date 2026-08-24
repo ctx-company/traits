@@ -1,0 +1,35 @@
+schema-version = "0.2"
+key = "0260"
+title = "Package the desktop app, launcher, icon, and version-skew posture"
+status = "ready"
+raised = "2026-08-25"
+content = """
+Ship the completed native run-center face as a distributable desktop application. This work adds the application bundle and icon, an independent desktop build and packaging lane, and a lightweight `ctx gui` launcher that starts the installed application without linking gpui into the workspace binary. It also defines and enforces what users see when the application cannot find a center at its own uid- and package-version-scoped socket, so installation and version skew have an explicit release posture rather than an accidental failure mode.
+
+The work spans the standalone desktop application's manifest and lockfile, platform packaging and icon assets, the CLI launcher boundary, and release documentation or automation for the supported desktop artifacts. It exists to make the live dashboard, native detail, and core run verbs distributable without folding gpui into the existing command-line archive matrix or claiming an unsupported desktop target matrix.
+"""
+scope = """
+## Decisions
+Keep the gpui application outside the root Cargo workspace with its own manifest, lockfile, build, test, bundle, and distribution commands. Publish only the desktop targets that this lane builds and validates; the existing macOS and Linux x64/ARM `ctx` binary matrix does not implicitly become the desktop support matrix. The desktop artifact owns an install and update posture, its icon and bundle metadata, and explicit acceptance for a missing matching center. When no version-scoped center is available, the application must either arrange first contact through a supported shared lifecycle path or present a visibly stale/unavailable state with actionable recovery; it must never fail as though the condition were fatal or show stale data as current.
+
+`ctx gui` is only a launcher for the separately built and installed application. It must not add gpui, desktop bundling, or their compile cost to the workspace binary, root dependency resolution, root `Cargo.lock`, `just test`, `just test-full`, or existing CI lanes. The shipped application uses the shared local center client and every displayed capability remains available to the TUI or CLI in the same release; no GUI-only backend, durable recovery state, direct driver access, poll loop, remote transport, or replacement of the TUI is in scope. Summons notifications may ship independently and do not block this task.
+"""
+validation = """
+## Watch
+Existing release automation packages only the `ctx` binary and has no application-bundle, desktop install/update, or version-skew contract. Keep desktop artifacts and their validation in the standalone lane instead of silently extending the CLI archive matrix. Preserve repository identity from center rows, authoritative ledger and driver ownership, detached run lifetime, and snapshot-plus-delta updates; packaging and launching must not introduce a GUI filesystem scan, data poll loop, GUI-only capability, or center-owned recovery requirement. Blocking center, filesystem, process, and packaging work must not block gpui's UI thread.
+
+The independent desktop lane must prove its own build, bundle contents, icon and metadata, launcher handoff, supported-target artifacts, and missing or mismatched center behavior. No exact desktop command exists yet, so no desktop check is declared here; the task must establish those commands while keeping the root workspace gates unchanged. `just test-full` remains the existing landing gate for CLI launcher integration and workspace regressions, not proof that a desktop artifact is distributable.
+## Done when
+A supported-target desktop artifact can be built by the independent lane, installed, and launched through `ctx gui`; its bundle carries the intended icon and metadata; it shows live runs with list, native detail, spawn, interrupt, pause, and resume behavior supplied through the shared center contract; and its documented and tested response to an absent matching version-scoped center is non-fatal and visibly honest. The distribution contract names the supported desktop targets and install/update posture without inheriting unsupported promises from the CLI release matrix. The root workspace dependency graph, lockfile, `just test`, `just test-full`, and existing CI lanes remain free of gpui and desktop build cost.
+"""
+[relations]
+depends-on = ["0256", "0257", "0258"]
+
+[[checks]]
+name = "Workspace launcher integration and regressions remain green"
+command = "just test-full"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
