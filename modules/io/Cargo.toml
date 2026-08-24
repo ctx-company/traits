@@ -25,4 +25,5 @@ toml_edit.workspace = true
 ureq.workspace = true
 ctx-traits-core = { workspace = true, features = ["builtin-trait-packages"] }
 libc = "0.2"
+rusqlite.workspace = true
 zip.workspace = true
