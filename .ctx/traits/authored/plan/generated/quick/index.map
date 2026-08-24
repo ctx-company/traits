@@ -4,6 +4,11 @@
     "start": 3,
     "end": 3
   },
+  "port:duration": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 17,
+    "end": 17
+  },
   "port:task": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 11,
@@ -11,8 +16,8 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 146,
-    "end": 146
+    "start": 155,
+    "end": 155
   },
   "prompt:distill": {
     "file": ".ctx/traits/authored/plan/source/shared/step/distill.ts",
@@ -21,8 +26,8 @@
   },
   "schema:write-receipt": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 71,
-    "end": 71
+    "start": 80,
+    "end": 80
   },
   "sequence:procedure/distill": {
     "file": ".ctx/traits/authored/plan/source/shared/step/distill.ts",
@@ -41,18 +46,18 @@
   },
   "slot:next-key": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 110,
-    "end": 110
+    "start": 119,
+    "end": 119
   },
   "slot:raised-date": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 115,
-    "end": 115
+    "start": 124,
+    "end": 124
   },
   "slot:receipts": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 125,
-    "end": 125
+    "start": 134,
+    "end": 134
   },
   "trait:plan": {
     "file": "[eval1]",

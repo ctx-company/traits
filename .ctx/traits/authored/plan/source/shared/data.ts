@@ -14,6 +14,15 @@ export const taskInput = port.input.text({
     "The work you describe, in your own words — rough is fine. May reference a source document (a research report, an MVP plan) by repo-relative path.",
 });
 
+export const durationTarget = port.input.text({
+  id: "duration",
+  title: "Task Duration Target",
+  optional: true,
+  default: { value: "10-15 minutes" },
+  description:
+    'Target duration of one child task, e.g. "10-15 minutes" or "~45m". Slicing and review both judge tasks against this.',
+});
+
 export const workItemSchema: SchemaHandle = schema.object(
   "work-item",
   {
@@ -36,14 +45,14 @@ export const planTaskSchema: SchemaHandle = schema.object(
   "plan-task",
   {
     key: schema.field(schema.text(), {
-      description: 'Final board key: the parent slice\'s NNNN plus a child ordinal, e.g. "0150.2".',
+      description: 'Final board key: the parent slice\'s NNNN plus a child ordinal, e.g. "0150.2" or "0150.11" — ordinals continue past 9, never zero-padded.',
     }),
     title: schema.field(schema.text(), { description: "Short imperative title." }),
     "depends-on": schema.field(schema.list(schema.text()), {
       description: "Keys of earlier tasks this one needs completed first; empty when independent.",
     }),
     summary: schema.field(schema.text(), {
-      description: "One-paragraph account of the task's work, sized to roughly 10-15 minutes of focused agent effort.",
+      description: "One-paragraph account of the task's work, sized to the run's duration target (default: roughly 10-15 minutes) of focused agent effort.",
     }),
   },
   {
@@ -63,7 +72,7 @@ export const planSliceSchema: SchemaHandle = schema.object(
         "work-item ids this slice is responsible for. Every extracted work item must appear in at least one slice's covers.",
     }),
     tasks: schema.field(schema.list(planTaskSchema), {
-      description: 'The slice\'s child tasks in dependency order, keys "NNNN.1", "NNNN.2", ...',
+      description: 'The slice\'s child tasks in dependency order, keys "NNNN.1", "NNNN.2", ... continuing ".10", ".11" beyond nine.',
     }),
   },
   { description: "One dependency-ordered slice of the plan: a parent charter key plus its child tasks." },

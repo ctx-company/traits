@@ -12,10 +12,10 @@ export default function () {
   defineVariant("Default", {
     name: "Plan",
     summary:
-      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus 10-15-minute children with typed relations, the format the board dispatch machinery actually resolves.",
+      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus duration-targeted children (default 10-15 minutes) with typed relations, the format the board dispatch machinery actually resolves.",
     metadata: { tag: shared.metadata.tag },
     description:
-      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus 10-15-minute children with typed relations, the format the board dispatch machinery actually resolves.",
+      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus duration-targeted children (default 10-15 minutes) with typed relations, the format the board dispatch machinery actually resolves.",
     procedureDescription:
       "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, and return the receipts.",
   });
