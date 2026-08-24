@@ -5,6 +5,8 @@ use std::os::unix::net::UnixStream;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use camino::Utf8PathBuf;
+
 // These proofs launch the same binary and compete for CPU during test-suite
 // startup. Serializing their short-lived sentinels removes scheduler-dependent
 // readiness failures without changing production arbitration behavior.
@@ -63,6 +65,34 @@ fn await_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
             }
         }
     }
+}
+
+fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
+    let root = Utf8PathBuf::from_path_buf(root.to_path_buf()).expect("UTF-8 scratch root");
+    let ledger = root.join("repository/session.json");
+    let session = serde_json::from_value(serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": "center-proof-session",
+        "run-id": "center-proof-run",
+        "trait-id": "center-proof-trait",
+        "current-run-index": 0,
+        "status": "awaiting-agent-output",
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "proof-center"},
+            "state-source": "test",
+            "started-at-epoch": 1000,
+        },
+        "ledger": {
+            "run-id": "center-proof-run",
+            "trait-id": "center-proof-trait",
+            "current-run-index": 0,
+            "final-state": "running",
+        },
+        "state-digest": "sha256:center-proof",
+    }))
+    .expect("fixture session");
+    ctx_traits_io::run_session::write_run_session(&ledger, &session).expect("write ledger");
+    ledger
 }
 
 #[test]
@@ -128,5 +158,34 @@ fn private_sentinel_exits_after_its_bounded_idle_period() {
     );
     let status = await_exit(&mut child.0);
     assert!(status.success());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn held_driver_lock_survives_center_idle_period() {
+    let _serial = SENTINEL_TEST_LOCK.lock().expect("lock sentinel proofs");
+    let root = scratch("held-lock");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let ledger = write_running_ledger(&root);
+    let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+    let lock =
+        ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open driver lock");
+    ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold driver lock");
+    let mut child = ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", root.join("center.sock"))
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", &root)
+            .env("CTX_CENTER_INDEX", root.join("index.sqlite3"))
+            .env("CTX_CENTER_IDLE_MS", "100")
+            .env("CTX_CENTER_SCAN_MS", "20")
+            .spawn()
+            .expect("spawn private sentinel"),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(child.0.try_wait().expect("poll center").is_none());
+    drop(lock);
+    assert!(await_exit(&mut child.0).success());
     let _ = std::fs::remove_dir_all(root);
 }
