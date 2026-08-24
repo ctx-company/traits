@@ -69,8 +69,8 @@ description = "The source's explicit definition-of-done items, empty when it sta
 [[slot]]
 id = "grounding"
 schema = "schema:text"
-description = "Codebase grounding for the described work: the concrete files and modules it touches, the repo's validation gates (exact commands), and the invariants, rules, and constraints the task files must honor."
-hint = "Grounded in the codebase: what the project is, its build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not the step-by-step plan."
+description = "Codebase grounding for the described work: the affected modules or areas, applicable invariants, rules, and constraints, and the repo's existing validation gates (exact commands) the task files must honor."
+hint = "Grounded scope-level context: affected modules or areas, existing build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not a step-by-step plan; defer exact files, symbols, signatures, edits, and edit sequencing to architect."
 
 [[slot]]
 id = "next-key"
@@ -218,16 +218,16 @@ output = [
 text = """
 Task is described as: {port:task}, ground it in the codebase & refine it.
 Read the relevant parts of the repository with your tools:
-    - identify the concrete files, modules, and patterns the task touches
+    - identify the affected modules or areas the task touches
     - the build/test/lint commands (the repo's validation gates, with exact invocations)
-    - architectural invariants and requirements
+    - architectural invariants, requirements, and constraints
     - dependencies or rules that need to be respected
 Produce the grounding notes:
     - short project/context overview,
     - rules and invariants an implementer and reviewer must honor,
     - validation gates (exact commands)
     - constraints specific to this task.
-This is the context the task files carry, not the step-by-step plan.
+This is the scope-level context the task files carry, not the step-by-step plan. Defer execution-level decisions to architect: do not solicit or prescribe exact files, symbols, signatures, edits, or edit sequencing.
 Do not implement anything, and write nothing to disk in this step — not task files, not notes. A later step writes the board from the reviewed plan; any file created here is out-of-plan and will not be adopted."""
 input = ["port:task"]
 output = ["slot:grounding"]
