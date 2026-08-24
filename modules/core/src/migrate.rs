@@ -103,6 +103,11 @@ pub const MIGRATION_STEPS: &[MigrationStep] = &[
         to: "0.5",
         rewrite: bump_0_4_to_0_5,
     },
+    MigrationStep {
+        from: "0.5",
+        to: "0.6",
+        rewrite: bump_0_5_to_0_6,
+    },
 ];
 
 /// The only 0.2 -> 0.3 rewrite: every 0.3-gated feature (`variant`,
@@ -150,6 +155,13 @@ fn rename_summary_to_description_0_3_to_0_4(doc: &mut DocumentMut) -> Result<Ste
 fn bump_0_4_to_0_5(doc: &mut DocumentMut) -> Result<StepOutcome, Error> {
     doc["schema-version"] = toml_edit::value("0.5");
     Ok(StepOutcome::rewrite("schema-version: \"0.4\" -> \"0.5\""))
+}
+
+/// 0.5 -> 0.6 adds optional agent-local intent, so existing documents only
+/// need their declared version updated.
+fn bump_0_5_to_0_6(doc: &mut DocumentMut) -> Result<StepOutcome, Error> {
+    doc["schema-version"] = toml_edit::value("0.6");
+    Ok(StepOutcome::rewrite("schema-version: \"0.5\" -> \"0.6\""))
 }
 
 /// A planned (or, once written by the caller, applied) migration.
@@ -302,6 +314,14 @@ name = "Demo"
 description = "A demo trait."
 "#;
 
+    const V05: &str = r#"
+schema-version = "0.5"
+id = "example/demo"
+version = "1.0.0"
+name = "Demo"
+description = "A demo trait."
+"#;
+
     #[test]
     fn plans_a_pure_version_bump() {
         let plan = plan_migration(V02, "0.3").expect("0.2 -> 0.3 migrates");
@@ -328,6 +348,39 @@ description = "A demo trait."
         assert_eq!(
             changed,
             vec![("schema-version = \"0.2\"", "schema-version = \"0.3\"")]
+        );
+    }
+
+    #[test]
+    fn v0_5_to_v0_6_touches_only_the_version_line() {
+        let plan = plan_migration(V05, "0.6").expect("migrates");
+        assert_eq!(
+            plan.output_text,
+            V05.replace("schema-version = \"0.5\"", "schema-version = \"0.6\"")
+        );
+    }
+
+    #[test]
+    fn root_require_avoid_overlap_survives_the_0_6_migration() {
+        let source = V05.replace(
+            "description = \"A demo trait.\"",
+            "description = \"A demo trait.\"\n\n[intent]\nrequire = [\"correctness\"]\navoid = [\"correctness\"]",
+        );
+        let before = decode_trait(Encoding::Toml, &source).expect("root overlap remains valid");
+        let plan = plan_migration(&source, "0.6").expect("migrates");
+        let after =
+            decode_trait(Encoding::Toml, &plan.output_text).expect("migrated trait decodes");
+        assert_eq!(
+            crate::model_view::compile_model_view(
+                &before,
+                crate::render::ExtendedRenderProfile::AgentSkills
+            )
+            .behavior_text,
+            crate::model_view::compile_model_view(
+                &after,
+                crate::render::ExtendedRenderProfile::AgentSkills
+            )
+            .behavior_text
         );
     }
 
@@ -428,6 +481,7 @@ description = "A demo trait."
                 "0.2" => V02,
                 "0.3" => V03,
                 "0.4" => V04,
+                "0.5" => V05,
                 other => panic!("add a minimal fixture for schema {other} (task 0029)"),
             }
         }

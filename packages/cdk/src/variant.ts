@@ -232,7 +232,7 @@ export const NATIVE_VARIANT_SCHEMA_VERSION = "0.5" as const;
 /**
  * Resolves every `variant.import(...)` variant (relative to the module that
  * called it) and assembles each variant's complete draft, injecting the
- * shared family `id`/`version`, the fixed native-variant schema version, and
+ * shared family `id`/`version`, the native-variant schema baseline, and
  * the variant's own colon-joined `variant` path. Returns the tagged envelope
  * a build tool writes as one canonical/map pair per variant.
  */
@@ -249,12 +249,14 @@ export async function resolveTraitFamily(handle: TraitFamilyHandle): Promise<Fam
       throw new Error(`variant(): could not capture the authoring source location for variant ${variant.path}`);
     }
     const resolvedFields = canonicalTraitFields(resolved.fields as TraitFields);
-    const assembled = assembleSingleTraitDraft({
-      ...resolvedFields,
-      id: meta.id as Slug,
-      version: meta.version as SemVer,
-      "schema-version": NATIVE_VARIANT_SCHEMA_VERSION,
-    });
+    const assembled = assembleSingleTraitDraft(
+      {
+        ...resolvedFields,
+        id: meta.id as Slug,
+        version: meta.version as SemVer,
+      },
+      NATIVE_VARIANT_SCHEMA_VERSION,
+    );
     const draft = stableObject({ ...assembled.draft, variant: variant.path });
     // Route through the same finalizer `toDraftJsonWithSourceMap` uses for an
     // ordinary trait, so a family variant gets the top-level `trait:<id>`

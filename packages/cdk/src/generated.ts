@@ -433,6 +433,10 @@ export type CanonicalAgent = {
    */
   readonly "id": string;
   /**
+   * Optional declaration-only guidance for this role.
+   */
+  readonly "intent"?: CanonicalIntent | undefined;
+  /**
    * Optional session binding for this agent's frames: `session:<id>`
    * (shared with every other agent bound to the same declared session),
    * or a bare `per-frame`/`persistent` lifecycle value, which is always

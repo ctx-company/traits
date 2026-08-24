@@ -39,7 +39,7 @@ pub fn compile_model_view_with_evidence(
     if let Some(ref intent) = trait_ref.intent {
         sections.push(Section {
             heading: "Intent".to_string(),
-            content: format_intent(intent, trait_id, GuidanceTag::Namespaced, &mut warnings, &mut normalizations, &mut forged_tag_findings),
+            content: format_intent(intent, trait_id, GuidanceTag::Namespaced, "intent", None, &mut warnings, &mut normalizations, &mut forged_tag_findings),
         });
     }
 
@@ -359,10 +359,13 @@ enum GuidanceTag {
 
 /// `tag` is [`GuidanceTag::GroupNamed`] only for frame guidance, whose
 /// envelope states each group once in its own `<spec>` block.
+#[allow(clippy::too_many_arguments)]
 fn format_intent(
     intent: &crate::r#trait::Intent,
     trait_id: &str,
     tag: GuidanceTag,
+    field_prefix: &str,
+    source: Option<&str>,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
@@ -381,12 +384,13 @@ fn format_intent(
         // by an absent `id` — and rendering it in neither would leave the
         // static view naming groups it never defines.
         if tag == GuidanceTag::Namespaced {
+            let source_attr = source.map(|source| format!(" source=\"{source}\"")).unwrap_or_default();
             elements.push(format!(
-                "<intent group=\"{group}\">{}</intent>",
+                "<intent group=\"{group}\"{source_attr}>{}</intent>",
                 intent_group_meaning(group)
             ));
         }
-        format_guidance_group(tag, "intent", "group", group, &format!("intent.{group}"), items.into_iter(), Some(intent_builtin), trait_id, warnings, normalizations, findings, &mut elements);
+        format_guidance_group(tag, "intent", "group", group, &format!("{field_prefix}.{group}"), source, items.into_iter(), Some(intent_builtin), trait_id, warnings, normalizations, findings, &mut elements);
     }
     elements.join("\n")
 }
@@ -495,10 +499,10 @@ fn format_behavior(
         let field = format!("behavior.{axis}");
         if scalar {
             if let Some(item) = items.into_iter().next() {
-                elements.push(format_guidance_item_element(tag, "behavior", "axis", axis, item, &field, Some(behavior_builtin), trait_id, warnings, normalizations, findings));
+                elements.push(format_guidance_item_element(tag, "behavior", "axis", axis, item, &field, None, Some(behavior_builtin), trait_id, warnings, normalizations, findings));
             }
         } else {
-            format_guidance_group(tag, "behavior", "axis", axis, &field, items.into_iter(), Some(behavior_builtin), trait_id, warnings, normalizations, findings, &mut elements);
+            format_guidance_group(tag, "behavior", "axis", axis, &field, None, items.into_iter(), Some(behavior_builtin), trait_id, warnings, normalizations, findings, &mut elements);
         }
     }
     elements.join("\n")
@@ -525,7 +529,7 @@ pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
     let intent = trait_ref
         .intent
         .as_ref()
-        .map(|intent| format_intent(intent, trait_id, GuidanceTag::GroupNamed, &mut warnings, &mut normalizations, &mut findings))
+        .map(|intent| format_intent(intent, trait_id, GuidanceTag::GroupNamed, "intent", None, &mut warnings, &mut normalizations, &mut findings))
         .unwrap_or_default();
     let behavior = trait_ref
         .behavior
@@ -546,6 +550,7 @@ fn format_guidance_group<'a>(
     attr_name: &str,
     attr_value: &str,
     field: &str,
+    source: Option<&str>,
     items: impl Iterator<Item = &'a GuidanceItem>,
     builtin: Option<BuiltinGuidanceLookup>,
     trait_id: &str,
@@ -562,6 +567,7 @@ fn format_guidance_group<'a>(
             attr_value,
             item,
             &format!("{field}[{index}]"),
+            source,
             builtin,
             trait_id,
             warnings,
@@ -583,6 +589,7 @@ fn format_guidance_item_element(
     attr_value: &str,
     item: &GuidanceItem,
     field: &str,
+    source: Option<&str>,
     builtin: Option<BuiltinGuidanceLookup>,
     trait_id: &str,
     warnings: &mut Vec<String>,
@@ -597,7 +604,13 @@ fn format_guidance_item_element(
     );
     let directive = resolve_guidance_directive(item, field, builtin, warnings, normalizations);
     let (element_tag, attrs) = match style {
-        GuidanceTag::Namespaced => (tag, vec![(attr_name, attr_value), ("id", id.as_str())]),
+        GuidanceTag::Namespaced => {
+            let mut attrs = vec![(attr_name, attr_value), ("id", id.as_str())];
+            if let Some(source) = source {
+                attrs.push(("source", source));
+            }
+            (tag, attrs)
+        }
         GuidanceTag::GroupNamed => (attr_value, vec![("id", id.as_str())]),
     };
     leaf_element(

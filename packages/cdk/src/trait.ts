@@ -345,10 +345,13 @@ export function trait(first: string | TraitFields, second?: Omit<TraitFields, "i
  * leaf of a `variants` family: walks a `TraitFields` value's declarations,
  * merges/dedupes them, and produces the canonical draft JSON plus its
  * diagnostics and source map. `trait()` wraps this once per call; family
- * assembly (`variant.ts`) invokes it once per resolved leaf, after
- * injecting the family's shared `id`/`version`/`schema-version`/`variant`.
+ * assembly (`variant.ts`) invokes it once per resolved leaf with the
+ * family's shared `id`/`version` and native schema baseline.
  */
-export function assembleSingleTraitDraft(fields: TraitFields): {
+export function assembleSingleTraitDraft(
+  fields: TraitFields,
+  baselineSchemaVersion: SchemaVersion = "0.5",
+): {
   readonly draft: CanonicalTraitDraft;
   readonly merged: ReturnType<typeof mergeDeclarationSets>;
   readonly diagnostics: readonly CdkDiagnostic[];
@@ -431,7 +434,9 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     ...(sessionTitleSinkInput === undefined
       ? {}
       : { sink: { "session-title": sessionTitleSinkDraft(sessionTitleSinkInput) } }),
-    "schema-version": fields["schema-version"] ?? "0.5",
+    "schema-version":
+      fields["schema-version"] ??
+      (merged.agent?.some((agent) => Object.hasOwn(agent, "intent")) ? "0.6" : baselineSchemaVersion),
     version: fields.version ?? "0.1.0",
     behavior: normalizeBehavior(fields.behavior),
     intent: normalizeIntent(fields.intent),
@@ -550,11 +555,11 @@ export type CustomSlug = string & { readonly __customSlugBrand: never };
 /** A lowercase trait identifier. Literal ids are checked for slug syntax by `trait`. */
 export type Slug = Lowercase<string>;
 /**
- * The canonical trait document schema version. `"0.5"` is reserved for
- * native-variant leaves (`variant`/`variant.import` under `trait(id, {
- * variants })`) and is injected automatically — never authored directly.
+ * The canonical trait document schema version. `"0.5"` is the default and
+ * native-variant baseline; agent-local intent infers `"0.6"` when no
+ * explicit version is authored.
  */
-export type SchemaVersion = "0.2" | "0.3" | "0.4" | "0.5";
+export type SchemaVersion = "0.2" | "0.3" | "0.4" | "0.5" | "0.6";
 /** A three-component semantic version for trait releases. */
 export type SemVer = `${number}.${number}.${number}`;
 export type Tone = GuidanceInput<ToneBuiltIn>;

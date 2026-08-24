@@ -9,6 +9,8 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::Intent;
+
 /// Model-quality intent attached to built-in authoring templates.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -107,6 +109,10 @@ pub struct Agent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
 
+    /// Optional declaration-only guidance for this role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<Intent>,
+
     /// Optional session binding for this agent's frames: `session:<id>`
     /// (shared with every other agent bound to the same declared session),
     /// or a bare `per-frame`/`persistent` lifecycle value, which is always
@@ -129,6 +135,7 @@ pub fn instantiate_agent_template(
         description: description.unwrap_or_else(|| template.description.to_string()),
         summary: Some(summary.unwrap_or_else(|| template.summary.to_string())),
         system: None,
+        intent: None,
         session: None,
     }
 }
@@ -139,7 +146,7 @@ pub const SESSION_LIFECYCLE_PER_FRAME: &str = "per-frame";
 pub const SESSION_LIFECYCLE_PERSISTENT: &str = "persistent";
 
 /// Validate `[[agent]]` declarations.
-pub fn validate_agents(agents: &[Agent]) -> crate::Result<()> {
+pub fn validate_agents(agents: &[Agent], schema_version: &str) -> crate::Result<()> {
     let mut seen_ids = BTreeSet::new();
 
     for (i, agent) in agents.iter().enumerate() {
@@ -171,6 +178,17 @@ pub fn validate_agents(agents: &[Agent]) -> crate::Result<()> {
                 message: "must not be empty when supplied".to_string(),
             }
             .into());
+        }
+
+        if let Some(intent) = &agent.intent {
+            if !super::schema_version_at_least(schema_version, "0.6") {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("agent[{i}].intent"),
+                    message: "requires schema-version \"0.6\" or later".to_string(),
+                }
+                .into());
+            }
+            intent.validate_scoped(&format!("agent[{i}].intent"))?;
         }
 
         if agent
@@ -232,19 +250,23 @@ mod tests {
             description: "Reviews the work.".to_string(),
             summary: None,
             system: system.map(str::to_string),
+            intent: None,
             session: None,
         }
     }
 
     #[test]
     fn system_instructions_are_accepted() {
-        validate_agents(&[agent(Some("Approve only what you verified with tools."))])
-            .expect("standing instructions are a valid agent declaration");
+        validate_agents(
+            &[agent(Some("Approve only what you verified with tools."))],
+            "0.6",
+        )
+        .expect("standing instructions are a valid agent declaration");
     }
 
     #[test]
     fn blank_system_instructions_are_rejected() {
-        let error = validate_agents(&[agent(Some("   \n  "))])
+        let error = validate_agents(&[agent(Some("   \n  "))], "0.6")
             .expect_err("a whitespace-only system field is authoring noise, not instructions");
         assert!(
             format!("{error}").contains("agent[0].system"),
@@ -268,5 +290,44 @@ mod tests {
             with.contains(r#""system":"Verify before approving.""#),
             "a set system field must be part of the canonical, digested document: {with}"
         );
+    }
+
+    #[test]
+    fn agent_intent_is_scoped_to_schema_0_6_and_rejects_only_require_avoid_collisions() {
+        let mut guided = agent(None);
+        guided.intent = Some(
+            serde_json::from_value(serde_json::json!({
+                "require": ["correctness"],
+                "focus": ["correctness"],
+                "avoid": ["correctness"],
+                "block": ["correctness"],
+            }))
+            .expect("intent fixture"),
+        );
+
+        for version in ["0.2", "0.3", "0.4", "0.5"] {
+            let error = validate_agents(&[guided.clone()], version)
+                .expect_err("pre-0.6 rejects agent intent");
+            assert!(error.to_string().contains("agent[0].intent"));
+        }
+        let error = validate_agents(&[guided], "0.6").expect_err("require/avoid collision rejects");
+        assert!(error.to_string().contains("agent[0].intent.avoid[0].id"));
+
+        let mut overlapping_non_conflicting = agent(None);
+        overlapping_non_conflicting.intent = Some(
+            serde_json::from_value(serde_json::json!({
+                "focus": ["correctness"],
+                "block": ["correctness"],
+            }))
+            .expect("intent fixture"),
+        );
+        validate_agents(&[overlapping_non_conflicting], "0.6")
+            .expect("focus/block overlap remains valid");
+    }
+
+    #[test]
+    fn absent_agent_intent_is_omitted_from_canonical_bytes() {
+        let without = crate::digest::canonical_json(&agent(None)).expect("canonical json");
+        assert!(!without.contains("intent"));
     }
 }

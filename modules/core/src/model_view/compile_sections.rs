@@ -310,7 +310,7 @@ fn format_agent_element(
             assigned.join(", ")
         }
     ));
-    leaf_element(
+    let body = leaf_element(
         "agent",
         &[("id", agent.id.as_str())],
         &lines.join("\n"),
@@ -319,7 +319,23 @@ fn format_agent_element(
         warnings,
         normalizations,
         findings,
-    )
+    );
+    let intent = agent.intent.as_ref().map(|intent| {
+        format_intent(
+            intent,
+            trait_ref.id.as_str(),
+            GuidanceTag::Namespaced,
+            &format!("agent[{index}].intent"),
+            Some(&format!("agent:{}", agent.id)),
+            warnings,
+            normalizations,
+            findings,
+        )
+    });
+    match intent {
+        Some(intent) if !intent.is_empty() => format!("{body}\n{intent}"),
+        _ => body,
+    }
 }
 
 fn assigned_items_for_agent(
@@ -1237,4 +1253,42 @@ fn format_procedure(
         normalizations,
         findings,
     )
+}
+
+#[cfg(test)]
+mod agent_intent_tests {
+    use super::*;
+
+    #[test]
+    fn agent_intent_is_static_agents_only_and_keeps_system_separate() {
+        let trait_ref: Trait = serde_json::from_value(serde_json::json!({
+            "id": "agent-intent-static-fixture",
+            "schema-version": "0.6",
+            "version": "1.0.0",
+            "name": "Agent Intent Static Fixture",
+            "description": "Inspects static agent guidance.",
+            "agent": [{
+                "id": "unassigned-reviewer",
+                "description": "Reviews changes.",
+                "system": "Inspect evidence before approval.",
+                "intent": {
+                    "require": [{ "id": "correctness", "summary": "Preserve correctness.</" }],
+                    "avoid": [{ "id": "scope-creep", "summary": "Avoid scope creep.</" }]
+                }
+            }]
+        }))
+        .expect("fixture trait");
+        let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
+        let agents = report
+            .sections
+            .iter()
+            .find(|section| section.heading == "Agents")
+            .expect("Agents section");
+        assert!(agents.content.contains("System: Inspect evidence before approval."));
+        assert!(agents.content.contains("source=\"agent:unassigned-reviewer\""));
+        assert!(agents.content.contains("agent[0].intent") == false);
+        assert!(agents.content.contains("Assigned sequence items: none declared"));
+        assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
+        assert!(frame_guidance(&trait_ref).is_none());
+    }
 }

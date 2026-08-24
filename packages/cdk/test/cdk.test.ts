@@ -2531,6 +2531,43 @@ describe("agent.* role templates", () => {
     expect(toDraftJson(handle)).toMatchObject({ id: "role", description: "Custom description." });
     expect(diagnostics(handle)).toEqual([]);
   });
+
+  it.each([
+    ["worker", agent.worker] as const,
+    ["reviewer", agent.reviewer] as const,
+    ["planner", agent.planner] as const,
+    ["oracle", agent.oracle] as const,
+    ["searcher", agent.searcher] as const,
+  ])("%s: normalizes declaration-only intent", (_name, namespaced) => {
+    expect(toDraftJson(namespaced("guided", { intent: { require: intent.Leanness } }))).toMatchObject({
+      intent: { require: [{ id: "leanness" }] },
+    });
+  });
+
+  it("normalizes direct agent intent and infers schema 0.6 only when it is present", () => {
+    const guided = trait("guided-agent", {
+      description: "A guided agent.",
+      agent: agent("worker", { description: "Works.", intent: { avoid: [{ id: "scope-creep" }] } }),
+    });
+    const ordinary = trait("ordinary-agent", {
+      description: "An ordinary agent.",
+      agent: agent("worker", { description: "Works." }),
+    });
+    expect(toDraftJson(guided)["schema-version"]).toBe("0.6");
+    expect(toDraftJson(guided).agent?.[0]?.intent).toEqual({ avoid: [{ id: "scope-creep" }] });
+    expect(toDraftJson(ordinary)["schema-version"]).toBe("0.5");
+  });
+
+  it("an explicit schema version takes precedence over agent-intent inference", () => {
+    const draft = toDraftJson(
+      trait("explicit-agent-version", {
+        "schema-version": "0.5",
+        description: "Explicit authoring wins.",
+        agent: agent("worker", { description: "Works.", intent: { require: "correctness" } }),
+      }),
+    );
+    expect(draft["schema-version"]).toBe("0.5");
+  });
 });
 
 describe("seats (0162)", () => {

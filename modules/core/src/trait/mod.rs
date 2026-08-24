@@ -158,7 +158,7 @@ impl<'de> Deserialize<'de> for SchemaVersion {
 /// order. Bump when a new schema version is introduced; never remove an
 /// entry a released binary already reads. Adding a version here requires a
 /// `MIGRATION_STEPS` entry; see migrate.rs release-gate tests / task 0029.
-pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["0.2", "0.3", "0.4", "0.5"];
+pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["0.2", "0.3", "0.4", "0.5", "0.6"];
 
 /// Whether this binary supports decoding a canonical document declaring
 /// `schema_version`.

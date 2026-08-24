@@ -218,7 +218,7 @@ pub fn decode_trait_with_warnings(
     if let Some(ref activation) = t.activation {
         crate::r#trait::activation::validate(activation)?;
     }
-    crate::r#trait::agent::validate_agents(&t.agents)?;
+    crate::r#trait::agent::validate_agents(&t.agents, t.schema_version.as_str())?;
     crate::r#trait::session::validate_sessions(&t.sessions)?;
     let session_ids: BTreeSet<&str> = t.sessions.iter().map(|s| s.id.as_str()).collect();
     crate::r#trait::agent::validate_agent_session_bindings(&t.agents, &session_ids)?;
