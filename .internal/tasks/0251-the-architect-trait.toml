@@ -15,8 +15,9 @@ and deviation-from-the-task.
 
 ## Shape
 
-- Port: `task` — one task key/name/filename, same resolution as
-  implement's task port. One task per run (owner ruling).
+- Port: `task` — text naming one board task (key, name, or filename); the
+  ground step locates the file itself with its tools. One task per run
+  (owner ruling).
 - Agents: the smart seat for every prompt step (owner ruling: "simply use
   smart"); no seat overrides, no runtime.toml.
 - Steps:
@@ -70,7 +71,7 @@ validation = """
 
 `ctx traits build` green with the new trait; `ctx traits internal preview
 architect` composes all steps with the smart seat and the task port
-resolving. A live run against a scratch draft task rewrites that one file
+declared. A live run against a scratch draft task rewrites that one file
 in place — status ready, every instruction naming files and symbols, every
 Done-when carrying a command, no hedge words in instructions — writes
 nothing else, and returns receipts naming the file. A second live run
