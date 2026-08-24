@@ -367,38 +367,59 @@ fn unavailable_socket(error: &std::io::Error) -> bool {
     )
 }
 
-/// Do not release spawn arbitration while a child from this attempt survives.
-///
-/// Launch failure is reported promptly, but the cloned descriptor keeps the
-/// advisory flock held until the reaper has observed child exit. This closes
-/// the gap where a failed `try_wait` or a slow kill could otherwise let another
-/// caller launch a second center before this child publishes its listener.
-fn abort_spawn(
-    mut child: std::process::Child,
+trait SpawnControl: Send + 'static {
+    fn kill(&mut self) -> std::io::Result<()>;
+    fn is_exited(&mut self) -> std::io::Result<bool>;
+}
+
+impl SpawnControl for std::process::Child {
+    fn kill(&mut self) -> std::io::Result<()> {
+        std::process::Child::kill(self)
+    }
+
+    fn is_exited(&mut self) -> std::io::Result<bool> {
+        std::process::Child::try_wait(self).map(|status| status.is_some())
+    }
+}
+
+/// Reap a child after a successfully delivered SIGKILL without extending the
+/// spawn lease. Signal delivery means it can no longer publish the listener;
+/// reaping is only resource cleanup and must not make the caller wait.
+fn reap_killed_child<C: SpawnControl>(mut child: C) {
+    let deadline = Instant::now() + SPAWN_ABORT_TIMEOUT;
+    while Instant::now() < deadline {
+        match child.is_exited() {
+            Ok(true) | Err(_) => return,
+            Ok(false) => std::thread::sleep(RETRY_DELAY),
+        }
+    }
+}
+
+/// Do not release spawn arbitration while a child whose termination could not
+/// be confirmed might still publish this attempt's listener. This is the one
+/// intentionally fail-closed case; the process exit closes the descriptor.
+fn retain_unconfirmed_spawn<C: SpawnControl>(child: C, lock: std::fs::File) {
+    std::mem::forget((child, lock));
+}
+
+/// Abort a spawn attempt without allowing a possibly surviving child to race a
+/// later launcher. A successful SIGKILL releases the lease immediately: the
+/// child cannot publish after accepting that signal, even if bounded reaping
+/// subsequently fails. If termination cannot be confirmed, retain the lease
+/// fail-closed for this process lifetime.
+fn abort_spawn<C: SpawnControl>(
+    mut child: C,
     lock: std::fs::File,
     failure: crate::Error,
 ) -> crate::Result<()> {
-    let _ = child.kill();
-    std::thread::spawn(move || {
-        // Polling is intentionally off the caller's bounded readiness path.
-        // Moving the lock into the reaper makes the lease survive until the
-        // kernel confirms this particular child cannot publish a listener.
-        let _lease = lock;
-        let deadline = Instant::now() + SPAWN_ABORT_TIMEOUT;
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(RETRY_DELAY),
-                // Do not release arbitration after an unconfirmed process
-                // observation. Keeping the lease for this caller's lifetime is
-                // fail-closed and bounded, unlike an indefinitely retrying reaper.
-                Ok(None) | Err(_) => {
-                    std::mem::forget(_lease);
-                    return;
-                }
-            }
-        }
-    });
+    if child.kill().is_ok() {
+        drop(lock);
+        std::thread::spawn(move || reap_killed_child(child));
+    } else if child.is_exited().unwrap_or(false) {
+        drop(lock);
+    } else {
+        retain_unconfirmed_spawn(child, lock);
+    }
     Err(failure)
 }
 
@@ -951,6 +972,28 @@ fn serve_handshake(stream: &mut UnixStream) -> crate::Result<()> {
 mod tests {
     use super::*;
 
+    struct FakeSpawnChild {
+        kill_succeeds: bool,
+        exited: std::io::Result<bool>,
+    }
+
+    impl SpawnControl for FakeSpawnChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            if self.kill_succeeds {
+                Ok(())
+            } else {
+                Err(std::io::Error::other("simulated kill failure"))
+            }
+        }
+
+        fn is_exited(&mut self) -> std::io::Result<bool> {
+            match &self.exited {
+                Ok(exited) => Ok(*exited),
+                Err(_) => Err(std::io::Error::other("simulated wait failure")),
+            }
+        }
+    }
+
     fn scratch(name: &str) -> Utf8PathBuf {
         let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
             .expect("UTF-8 temp directory")
@@ -967,6 +1010,64 @@ mod tests {
             runs_root: root.clone(),
             index: root.join("index.sqlite3"),
         }
+    }
+
+    #[test]
+    fn successful_kill_releases_spawn_lock_despite_reap_failure() {
+        let root = scratch("abort-killed");
+        let lock_path = root.join("center.lock");
+        let lock = crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        assert!(crate::file_lock::try_lock_exclusive(&lock).expect("acquire lock"));
+
+        assert!(
+            abort_spawn(
+                FakeSpawnChild {
+                    kill_succeeds: true,
+                    exited: Err(std::io::Error::other("simulated wait failure")),
+                },
+                lock,
+                protocol_error("expected abort"),
+            )
+            .is_err()
+        );
+
+        let contender =
+            crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open contender lock");
+        assert!(
+            crate::file_lock::try_lock_exclusive(&contender).expect("check released lock"),
+            "a successfully signaled child cannot retain spawn arbitration"
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn unconfirmed_child_retains_spawn_lock_after_kill_and_wait_failures() {
+        let root = scratch("abort-unconfirmed");
+        let lock_path = root.join("center.lock");
+        let lock = crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        assert!(crate::file_lock::try_lock_exclusive(&lock).expect("acquire lock"));
+
+        assert!(
+            abort_spawn(
+                FakeSpawnChild {
+                    kill_succeeds: false,
+                    exited: Err(std::io::Error::other("simulated wait failure")),
+                },
+                lock,
+                protocol_error("expected abort"),
+            )
+            .is_err()
+        );
+
+        // The fail-closed lease is intentionally process-lifetime scoped when
+        // neither signal delivery nor process exit can be confirmed.
+        let contender =
+            crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open contender lock");
+        assert!(
+            !crate::file_lock::try_lock_exclusive(&contender).expect("check retained lock"),
+            "an unconfirmed child could still publish the listener"
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     fn cached_summary() -> String {
