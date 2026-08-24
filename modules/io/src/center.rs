@@ -299,9 +299,10 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
             Ok(mut stream) => match handshake(&mut stream) {
                 Ok(()) => return Ok(()),
                 Err(_) => {
-                    return Err(protocol_error(
-                        "spawned center did not complete the handshake",
-                    ));
+                    return abort_spawn(
+                        &mut child,
+                        protocol_error("spawned center did not complete the handshake"),
+                    );
                 }
             },
             Err(error)
@@ -312,23 +313,38 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
             {
                 std::thread::sleep(RETRY_DELAY)
             }
-            Err(error) => return Err(io_error(&paths.socket, error)),
+            Err(error) => return abort_spawn(&mut child, io_error(&paths.socket, error)),
         }
     }
     // Never drop the arbitration lock while a timed-out detached child is
     // still alive: that would permit a later caller to spawn a second center
     // before the slow child binds. Terminate and reap it before releasing the
     // lock; its possible socket pathname is then recovered by the next winner.
-    child
-        .kill()
-        .map_err(|source| io_error(&paths.socket, source))?;
-    child
-        .wait()
-        .map_err(|source| io_error(&paths.socket, source))?;
-    Err(protocol_error(format!(
-        "spawned center did not become ready at {} within {:?}",
-        paths.socket, SPAWN_READY_TIMEOUT
-    )))
+    abort_spawn(
+        &mut child,
+        protocol_error(format!(
+            "spawned center did not become ready at {} within {:?}",
+            paths.socket, SPAWN_READY_TIMEOUT
+        )),
+    )
+}
+
+/// Do not release spawn arbitration while a child from this attempt survives.
+/// The caller still holds the spawn lock when this is called.
+fn abort_spawn(child: &mut std::process::Child, failure: crate::Error) -> crate::Result<()> {
+    match child.try_wait() {
+        Ok(Some(_)) => Err(failure),
+        Ok(None) => {
+            child
+                .kill()
+                .map_err(|source| io_error(&Utf8PathBuf::from("center child"), source))?;
+            child
+                .wait()
+                .map_err(|source| io_error(&Utf8PathBuf::from("center child"), source))?;
+            Err(failure)
+        }
+        Err(source) => Err(io_error(&Utf8PathBuf::from("center child"), source)),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -576,27 +592,7 @@ impl CenterModel {
                 row.live = true;
                 row.live_holder = holder;
             }
-            crate::run_control::DriverProbe::Unheld { stale_metadata } => {
-                if terminal(&row.summary) {
-                    // `record_interrupted_outcome` may have committed before a
-                    // transient metadata-clear failure. Probe it again on every
-                    // pass so that incomplete cleanup remains retryable.
-                    // `None` means metadata was absent *or malformed*. Clear
-                    // either shape while owning maintenance so a failed clear
-                    // remains retryable on every later scan.
-                    let _ = stale_metadata;
-                    match crate::run_control::try_acquire_maintenance(ledger)? {
-                        Some(mut maintenance) => maintenance.clear_stale_metadata()?,
-                        None => {
-                            row.live = true;
-                            row.live_holder = None;
-                            return Ok(());
-                        }
-                    }
-                    row.live = false;
-                    row.live_holder = None;
-                    return Ok(());
-                }
+            crate::run_control::DriverProbe::Unheld { .. } => {
                 match crate::run_control::try_acquire_maintenance(ledger)? {
                     None => {
                         row.live = true;
@@ -604,12 +600,16 @@ impl CenterModel {
                     }
                     Some(mut maintenance) => {
                         // A driver cannot appear until this guard drops. Re-read under it
-                        // before repairing the orphan found by the first probe.
+                        // before repairing the orphan found by the first probe. This is
+                        // also required for cached terminal rows: a concurrent writer may
+                        // have changed the ledger after the first probe.
                         let summary = crate::run_summary::read_summary_or_ledger(ledger)?;
                         if !terminal(&summary) {
                             crate::run_session::record_interrupted_outcome(ledger)?;
-                            maintenance.clear_stale_metadata()?;
                         }
+                        // Clear stale display metadata for both terminal and repaired
+                        // ledgers while maintenance ownership still excludes a driver.
+                        maintenance.clear_stale_metadata()?;
                         // The second read happens under maintenance ownership,
                         // so terminal races and repaired ledgers both refresh.
                         let summary = crate::run_summary::read_summary_or_ledger(ledger)?;
@@ -864,6 +864,39 @@ mod tests {
         r#"{"session_id":"session","run_id":"run","trait_id":"trait","status":"awaiting-input","has_merge_frames":false}"#.to_string()
     }
 
+    fn fixture_session(status: &str) -> ctx_traits_core::procedure::session::Session {
+        serde_json::from_value(serde_json::json!({
+            "schema-version": "0.1.0",
+            "session-id": "session-fixture",
+            "run-id": "run-fixture",
+            "trait-id": "fixture-trait",
+            "current-run-index": 0,
+            "status": status,
+            "provenance": {
+                "started-by": {"surface": "test", "caller": "center-fixture"},
+                "state-source": "test",
+                "started-at-epoch": 1000,
+            },
+            "ledger": {
+                "run-id": "run-fixture",
+                "trait-id": "fixture-trait",
+                "current-run-index": 0,
+                "final-state": "running",
+            },
+            "state-digest": "sha256:fixture",
+        }))
+        .expect("fixture session deserializes")
+    }
+
+    fn write_fixture_ledger(root: &Utf8Path, repo: &str, status: &str) -> Utf8PathBuf {
+        let store = root.join(repo);
+        std::fs::create_dir_all(store.as_std_path()).expect("create repository store");
+        let ledger = store.join("session-fixture.json");
+        crate::run_session::write_run_session(&ledger, &fixture_session(status))
+            .expect("write fixture ledger");
+        ledger
+    }
+
     #[test]
     fn version_scoped_paths_are_distinct() {
         let root = scratch("paths");
@@ -1042,6 +1075,74 @@ mod tests {
         assert_eq!(row.repo_key, "repo");
         assert_eq!(row.size, 99);
         assert_eq!(row.modified, UNIX_EPOCH + Duration::new(42, 7));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn discovery_reads_direct_unindexed_store_and_deletes_missing_ledger() {
+        let root = scratch("direct-discovery");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "unindexed-repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+
+        model.discover(&paths).expect("discover direct store");
+        let row = model.rows.get(&ledger).expect("unindexed ledger found");
+        assert_eq!(row.repo_key, "unindexed-repository");
+        assert!(row.repo_path.is_empty());
+
+        std::fs::remove_file(ledger.as_std_path()).expect("remove ledger");
+        model.discover(&paths).expect("rediscover after removal");
+        assert!(!model.rows.contains_key(&ledger));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn discovery_repairs_an_unheld_nonterminal_ledger() {
+        let root = scratch("orphan-repair");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "awaiting-agent-output");
+        let mut model = CenterModel::open(&paths).expect("open index");
+
+        model.discover(&paths).expect("discover orphan");
+        let row = model.rows.get(&ledger).expect("repaired row");
+        assert!(terminal(&row.summary));
+        assert!(!row.live);
+        assert!(
+            crate::run_session::read_run_session(&ledger)
+                .expect("read repaired ledger")
+                .last_drive_outcome
+                .is_some()
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn discovery_rechecks_terminal_row_and_clears_stale_metadata() {
+        let root = scratch("terminal-metadata");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let lock_path = crate::run_control::driver_lock_path(&ledger);
+        let mut lock =
+            crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open stale driver lock");
+        crate::file_lock::write_lock_metadata(
+            &mut lock,
+            &crate::run_control::DriverHolder {
+                pid: 1,
+                session_id: "stale-session".to_string(),
+                run_id: "stale-run".to_string(),
+                started_at_epoch_secs: 1,
+                control_token: String::new(),
+            },
+        )
+        .expect("write stale metadata");
+        let mut model = CenterModel::open(&paths).expect("open index");
+
+        model.discover(&paths).expect("discover terminal ledger");
+        assert!(!model.rows.get(&ledger).expect("terminal row").live);
+        assert!(
+            crate::file_lock::read_lock_metadata::<crate::run_control::DriverHolder>(&mut lock)
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
