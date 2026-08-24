@@ -80,7 +80,7 @@ fn await_socket_removal(socket: &std::path::Path) {
 }
 
 struct CenterEnvironment {
-    names: [&'static str; 7],
+    names: [&'static str; 8],
     previous: Vec<Option<std::ffi::OsString>>,
 }
 
@@ -94,6 +94,7 @@ impl CenterEnvironment {
             "CTX_CENTER_EXECUTABLE",
             "CTX_CENTER_IDLE_MS",
             "CTX_CENTER_SCAN_MS",
+            "CTX_CENTER_LAUNCH_MARKER",
         ];
         let previous = names.iter().map(std::env::var_os).collect();
         // Environment mutation is serialized by SENTINEL_TEST_LOCK for the
@@ -106,6 +107,7 @@ impl CenterEnvironment {
             std::env::set_var("CTX_CENTER_EXECUTABLE", env!("CARGO_BIN_EXE_ctx"));
             std::env::set_var("CTX_CENTER_IDLE_MS", "100");
             std::env::set_var("CTX_CENTER_SCAN_MS", "20");
+            std::env::set_var("CTX_CENTER_LAUNCH_MARKER", root.join("launches"));
         }
         Self { names, previous }
     }
@@ -291,6 +293,12 @@ fn concurrent_ensure_calls_share_one_auto_spawned_center() {
             .expect("ensure connection");
         drop(stream);
     }
+    let launches = std::fs::read_to_string(root.join("launches")).expect("read launch marker");
+    assert_eq!(
+        launches.lines().count(),
+        1,
+        "only the lock winner may launch"
+    );
     await_socket_removal(&root.join("center.sock"));
     let _ = std::fs::remove_dir_all(root);
 }
