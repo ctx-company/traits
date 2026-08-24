@@ -176,7 +176,7 @@ fn ensure_connected_at(
                 Ok(()) => return Ok(stream),
                 // One peer may have accepted then exited during a stale-socket
                 // handoff. Retry that complete handshake exactly once.
-                Err(error) if !retried_eof && error.to_string().contains("unexpected EOF") => {
+                Err(error) if !retried_eof && is_handshake_eof(&error) => {
                     retried_eof = true;
                     continue;
                 }
@@ -201,6 +201,16 @@ fn ensure_connected_at(
         "could not connect to {} within bounded retry",
         paths.socket
     )))
+}
+
+// A peer can close before sending any bytes or after a partial JSON line. Both
+// are one failed handshake, not two different protocol failures.
+fn is_handshake_eof(error: &crate::Error) -> bool {
+    let message = error.to_string();
+    message.contains("unexpected EOF")
+        || message.contains("unterminated line")
+        || message.contains("Connection reset")
+        || message.contains("Broken pipe")
 }
 
 fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result<()> {
@@ -263,7 +273,34 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
             ("CTX_CENTER_INDEX", paths.index.as_str()),
         ],
     )?;
-    Ok(())
+    // Keep the arbitration lock through listener readiness. Otherwise a second
+    // caller can acquire it between spawn_detached returning and the child
+    // binding its socket, then launch a duplicate center.
+    for _ in 0..CONNECT_RETRIES {
+        match UnixStream::connect(paths.socket.as_std_path()) {
+            Ok(mut stream) => match handshake(&mut stream) {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    return Err(protocol_error(
+                        "spawned center did not complete the handshake",
+                    ));
+                }
+            },
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                std::thread::sleep(RETRY_DELAY)
+            }
+            Err(error) => return Err(io_error(&paths.socket, error)),
+        }
+    }
+    Err(protocol_error(format!(
+        "spawned center did not become ready at {} within bounded retry",
+        paths.socket
+    )))
 }
 
 #[derive(Debug, Clone)]
@@ -377,11 +414,19 @@ impl CenterModel {
 
     fn discover(&mut self, paths: &CenterPaths) -> crate::Result<()> {
         let mut present = HashSet::new();
+        let mut unscanned_roots = HashSet::new();
+        let mut incomplete_directory_listing = false;
         self.uncertain = false;
-        let indexed: HashMap<_, _> = crate::state::read_repo_index()?
-            .into_iter()
-            .map(|repo| (repo.key.clone(), repo.path))
-            .collect();
+        let indexed: HashMap<_, _> = match crate::state::read_repo_index() {
+            Ok(index) => index
+                .into_iter()
+                .map(|repo| (repo.key.clone(), repo.path))
+                .collect(),
+            Err(_) => {
+                self.uncertain = true;
+                HashMap::new()
+            }
+        };
         let directories = match std::fs::read_dir(paths.runs_root.as_std_path()) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -393,10 +438,12 @@ impl CenterModel {
         for entry in directories {
             let Ok(entry) = entry else {
                 self.uncertain = true;
+                incomplete_directory_listing = true;
                 continue;
             };
             let Ok(kind) = entry.file_type() else {
                 self.uncertain = true;
+                incomplete_directory_listing = true;
                 continue;
             };
             if !kind.is_dir() {
@@ -411,10 +458,14 @@ impl CenterModel {
                 Ok(ledgers) => ledgers,
                 Err(_) => {
                     self.uncertain = true;
+                    unscanned_roots.insert(repo_key);
                     continue;
                 }
             };
             for ledger in ledgers {
+                // Metadata can fail transiently after enumeration. It is still
+                // present and must not be deleted from the last-good model.
+                present.insert(ledger.clone());
                 let metadata = match std::fs::metadata(ledger.as_std_path()) {
                     Ok(value) => value,
                     Err(_) => {
@@ -432,11 +483,16 @@ impl CenterModel {
                     }
                 };
                 let size = metadata.len();
-                present.insert(ledger.clone());
                 let unchanged = self
                     .rows
                     .get(&ledger)
                     .is_some_and(|row| row.modified == modified && row.size == size);
+                if let Some(row) = self.rows.get_mut(&ledger) {
+                    // Repository metadata is independent of ledger content,
+                    // including a changed ledger we cannot currently parse.
+                    row.repo_key = repo_key.clone();
+                    row.repo_path = repo_path.clone();
+                }
                 if !unchanged {
                     let Ok(summary) = crate::run_summary::read_summary_or_ledger(&ledger) else {
                         // Do not advance the fingerprint for unreadable content:
@@ -471,7 +527,11 @@ impl CenterModel {
                 }
             }
         }
-        self.rows.retain(|path, _| present.contains(path));
+        if !incomplete_directory_listing {
+            self.rows.retain(|path, row| {
+                present.contains(path) || unscanned_roots.contains(&row.repo_key)
+            });
+        }
         self.persist()?;
         Ok(())
     }
@@ -651,14 +711,21 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             paths.socket
         )));
     }
+    // Do the potentially slow reconstruction before publishing the listener.
+    // Spawn arbitration uses a successful handshake as its readiness signal,
+    // so a bound socket must always be able to service that handshake.
+    let mut model = CenterModel::open(&paths)?;
+    if model.discover(&paths).is_err() {
+        // The disk cache is derived, but a failed scan cannot prove that a
+        // driver disappeared. Keep the process alive and retry on cadence.
+        model.uncertain = true;
+    }
     let listener = UnixListener::bind(paths.socket.as_std_path())
         .map_err(|source| io_error(&paths.socket, source))?;
     let _guard = SocketGuard::for_listener(paths.socket.clone())?;
     listener
         .set_nonblocking(true)
         .map_err(|source| io_error(&paths.socket, source))?;
-    let mut model = CenterModel::open(&paths)?;
-    model.discover(&paths)?;
     let mut last_work = Instant::now();
     let mut last_scan = Instant::now();
     loop {
@@ -671,11 +738,15 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             Err(error) => return Err(io_error(&paths.socket, error)),
         }
         if last_scan.elapsed() >= scan_interval {
-            model.discover(&paths)?;
+            if model.discover(&paths).is_err() {
+                model.uncertain = true;
+            }
             last_scan = Instant::now();
         }
         if last_work.elapsed() >= idle {
-            model.discover(&paths)?;
+            if model.discover(&paths).is_err() {
+                model.uncertain = true;
+            }
             if !model.has_live() {
                 return Ok(());
             }
@@ -755,6 +826,32 @@ mod tests {
     }
 
     #[test]
+    fn partial_handshake_eof_gets_the_single_retry_classification() {
+        let (mut client, mut server) = UnixStream::pair().expect("socket pair");
+        let thread = std::thread::spawn(move || {
+            server
+                .write_all(b"{\"kind\":\"ready\"")
+                .expect("write partial line");
+        });
+        let error = handshake(&mut client).expect_err("partial reply must fail");
+        assert!(is_handshake_eof(&error));
+        thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn malformed_ready_correlation_is_rejected() {
+        let (mut client, mut server) = UnixStream::pair().expect("socket pair");
+        let thread = std::thread::spawn(move || {
+            let _ = read_line(&mut server).expect("read hello");
+            server
+                .write_all(b"{\"kind\":\"ready\",\"id\":\"other\"}\n")
+                .expect("write mismatched ready");
+        });
+        assert!(handshake(&mut client).is_err());
+        thread.join().expect("server thread");
+    }
+
+    #[test]
     fn oversized_protocol_line_is_rejected() {
         let (mut client, mut server) = UnixStream::pair().expect("socket pair");
         let thread = std::thread::spawn(move || {
@@ -803,6 +900,30 @@ mod tests {
         drop(model);
         let error = match CenterModel::open(&paths) {
             Ok(_) => panic!("negative field accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(paths.index.as_str()));
+        assert!(error.to_string().contains("remove"));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn incompatible_schema_names_the_disposable_index() {
+        let root = scratch("schema");
+        let paths = CenterPaths {
+            socket: root.join("center.sock"),
+            spawn_lock: root.join("center.lock"),
+            runs_root: root.clone(),
+            index: root.join("index.sqlite3"),
+        };
+        let model = CenterModel::open(&paths).expect("open index");
+        model
+            .db
+            .execute("UPDATE center_meta SET version = 999", [])
+            .expect("make schema incompatible");
+        drop(model);
+        let error = match CenterModel::open(&paths) {
+            Ok(_) => panic!("incompatible schema accepted"),
             Err(error) => error,
         };
         assert!(error.to_string().contains(paths.index.as_str()));
