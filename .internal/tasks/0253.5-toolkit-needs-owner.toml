@@ -35,4 +35,5 @@ adopt the new doctrine text). `just ts-test` green.
 """
 
 [relations]
+parent = "0253"
 depends-on = ["0253.4"]
