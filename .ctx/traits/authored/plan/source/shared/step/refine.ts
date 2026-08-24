@@ -6,15 +6,15 @@ export function task(agent: AgentHandle) {
   return agent.prompt("Ground & refine the task in the codebase", { id: "refine-task", input: input.prompt`
             Task is described as: ${taskInput}, ground it in the codebase & refine it.
             Read the relevant parts of the repository with your tools:
-                - identify the concrete files, modules, and patterns the task touches
+                - identify the affected modules or areas the task touches
                 - the build/test/lint commands (the repo's validation gates, with exact invocations)
-                - architectural invariants and requirements
+                - architectural invariants, requirements, and constraints
                 - dependencies or rules that need to be respected
             Produce the grounding notes:
                 - short project/context overview,
                 - rules and invariants an implementer and reviewer must honor,
                 - validation gates (exact commands)
                 - constraints specific to this task.
-            This is the context the task files carry, not the step-by-step plan.
+            This is the scope-level context the task files carry, not the step-by-step plan. Defer execution-level decisions to architect: do not solicit or prescribe exact files, symbols, signatures, edits, or edit sequencing.
             Do not implement anything, and write nothing to disk in this step — not task files, not notes. A later step writes the board from the reviewed plan; any file created here is out-of-plan and will not be adopted.`, output: grounding });
 }

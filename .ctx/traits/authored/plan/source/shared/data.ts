@@ -130,8 +130,8 @@ export const receipts = slot({
 export const grounding = slot.text({
   id: "grounding",
   description:
-    "Codebase grounding for the described work: the concrete files and modules it touches, the repo's validation gates (exact commands), and the invariants, rules, and constraints the task files must honor.",
-  hint: "Grounded in the codebase: what the project is, its build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not the step-by-step plan.",
+    "Codebase grounding for the described work: the affected modules or areas, applicable invariants, rules, and constraints, and the repo's existing validation gates (exact commands) the task files must honor.",
+  hint: "Grounded scope-level context: affected modules or areas, existing build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not a step-by-step plan; defer exact files, symbols, signatures, edits, and edit sequencing to architect.",
 });
 
 export const verdict = slot({
