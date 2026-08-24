@@ -38,6 +38,7 @@ const RETRY_DELAY: Duration = Duration::from_millis(50);
 // Opening the shared index can wait for another version's short SQLite
 // transaction. Keep the spawn lease through that bounded startup window.
 const SPAWN_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const SPAWN_ABORT_TIMEOUT: Duration = Duration::from_secs(10);
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 2_000;
@@ -54,14 +55,18 @@ pub struct CenterPaths {
 /// incompatible protocol. The durable index is deliberately shared.
 pub fn production_paths() -> crate::Result<CenterPaths> {
     let uid = unsafe { libc::getuid() };
-    let stem = format!("/tmp/ctx-{uid}-{}", env!("CARGO_PKG_VERSION"));
     let runs_root = crate::state::global_runs_family_root()?;
-    Ok(CenterPaths {
+    Ok(versioned_paths(uid, env!("CARGO_PKG_VERSION"), runs_root))
+}
+
+fn versioned_paths(uid: u32, version: &str, runs_root: Utf8PathBuf) -> CenterPaths {
+    let stem = format!("/tmp/ctx-{uid}-{version}");
+    CenterPaths {
         socket: Utf8PathBuf::from(format!("{stem}.sock")),
         spawn_lock: Utf8PathBuf::from(format!("{stem}.spawn.lock")),
         index: runs_root.join("index.sqlite3"),
         runs_root,
-    })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,10 +138,9 @@ fn read_line(stream: &mut UnixStream) -> crate::Result<Vec<u8>> {
             }
         }
     })();
-    let reset = stream
-        .set_nonblocking(false)
-        .map_err(|source| io_error(&Utf8PathBuf::from("center socket"), source));
-    reset?;
+    // A peer can close while this read is unwinding; Darwin then rejects the
+    // mode reset with EINVAL. The completed protocol result is authoritative.
+    let _ = stream.set_nonblocking(false);
     result
 }
 
@@ -376,18 +380,22 @@ fn abort_spawn(
 ) -> crate::Result<()> {
     let _ = child.kill();
     std::thread::spawn(move || {
-        // `wait` is intentionally off the caller's bounded readiness path.
-        // Moving the lock into the reaper makes the lease survive even if a
-        // descriptor clone would fail, until
-        // the kernel confirms this particular child cannot publish a listener.
+        // Polling is intentionally off the caller's bounded readiness path.
+        // Moving the lock into the reaper makes the lease survive until the
+        // kernel confirms this particular child cannot publish a listener.
         let _lease = lock;
+        let deadline = Instant::now() + SPAWN_ABORT_TIMEOUT;
         loop {
-            match child.wait() {
-                Ok(_) => return,
-                // Do not release arbitration after an unconfirmed wait. EINTR
-                // and other transient process-observation errors are retried
-                // by this detached reaper while it retains the flock lease.
-                Err(_) => std::thread::sleep(RETRY_DELAY),
+            match child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(RETRY_DELAY),
+                // Do not release arbitration after an unconfirmed process
+                // observation. Keeping the lease for this caller's lifetime is
+                // fail-closed and bounded, unlike an indefinitely retrying reaper.
+                Ok(None) | Err(_) => {
+                    std::mem::forget(_lease);
+                    return;
+                }
             }
         }
     });
@@ -644,10 +652,20 @@ impl CenterModel {
     }
 
     fn refresh_liveness(&mut self, ledger: &Utf8Path, unchanged: bool) -> crate::Result<()> {
+        let probe = crate::run_control::probe(ledger)?;
+        self.refresh_after_probe(ledger, unchanged, probe)
+    }
+
+    fn refresh_after_probe(
+        &mut self,
+        ledger: &Utf8Path,
+        unchanged: bool,
+        probe: crate::run_control::DriverProbe,
+    ) -> crate::Result<()> {
         let Some(row) = self.rows.get_mut(ledger) else {
             return Ok(());
         };
-        match crate::run_control::probe(ledger)? {
+        match probe {
             crate::run_control::DriverProbe::Held(holder) => {
                 // The kernel lock remains authoritative even if the ledger has
                 // already reached a terminal state. A finishing driver must
@@ -844,6 +862,16 @@ pub fn run_server() -> crate::Result<()> {
 }
 
 fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) -> crate::Result<()> {
+    if let Ok(marker) = std::env::var("CTX_CENTER_LAUNCH_MARKER") {
+        // Private test instrumentation: each sentinel process records exactly
+        // one launch before it can publish a listener.
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(marker)
+            .and_then(|mut file| file.write_all(b"center\n"))
+            .map_err(|source| io_error(&paths.socket, source))?;
+    }
     if paths.socket.exists() {
         return Err(protocol_error(format!(
             "center socket already exists: {}",
@@ -989,6 +1017,13 @@ mod tests {
             format!("/tmp/ctx-{uid}-{version}.spawn.lock")
         );
         assert_eq!(paths.index, paths.runs_root.join("index.sqlite3"));
+
+        let root = Utf8PathBuf::from("/tmp/ctx-center-version-test");
+        let first = versioned_paths(uid, "1.2.3", root.clone());
+        let second = versioned_paths(uid, "1.2.4", root);
+        assert_ne!(first.socket, second.socket);
+        assert_ne!(first.spawn_lock, second.spawn_lock);
+        assert_eq!(first.index, second.index);
     }
 
     #[test]
@@ -1361,6 +1396,58 @@ mod tests {
             drop(lock);
             let _ = std::fs::remove_dir_all(root.as_std_path());
         }
+    }
+
+    #[test]
+    fn maintenance_handoff_to_a_driver_remains_live() {
+        let root = scratch("maintenance-handoff");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("discover terminal ledger");
+
+        // This stages the gap between an uncontended probe and maintenance
+        // acquisition: the driver wins, so repair must classify it live.
+        let lock_path = crate::run_control::driver_lock_path(&ledger);
+        let lock = crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        crate::file_lock::lock_exclusive_blocking(&lock).expect("driver wins lock");
+        model
+            .refresh_after_probe(
+                &ledger,
+                true,
+                crate::run_control::DriverProbe::Unheld {
+                    stale_metadata: None,
+                },
+            )
+            .expect("maintenance handoff");
+        assert!(model.rows.get(&ledger).expect("row").live);
+        drop(lock);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn failed_liveness_probe_retains_cached_row_and_blocks_idle_exit() {
+        let root = scratch("failed-probe");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("initial discovery");
+        let previous = model.rows.get(&ledger).expect("cached row").summary.clone();
+
+        // A directory at the no-follow lock path makes maintenance acquisition
+        // fail after the probe's initial unheld result.
+        let lock_path = crate::run_control::driver_lock_path(&ledger);
+        std::fs::remove_file(lock_path.as_std_path()).expect("remove maintenance lock file");
+        std::fs::create_dir(lock_path.as_std_path()).expect("create invalid lock path");
+        model.discover(&paths).expect("failed probe is retained");
+        let row = model.rows.get(&ledger).expect("retained row");
+        assert_eq!(row.summary, previous);
+        assert!(row.live);
+        assert!(model.has_live());
+        std::fs::remove_dir(lock_path.as_std_path()).expect("remove invalid lock path");
+        model.discover(&paths).expect("retry liveness probe");
+        assert!(!model.has_live());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     #[test]
