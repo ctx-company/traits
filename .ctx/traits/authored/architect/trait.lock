@@ -1,0 +1,16 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "architect"
+variant = "default"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:85e649021ad1b71a119514139a5913b9bafe55419e789ad7afe1bc48b63b6fe7"
+canonical = "sha256:9af7a23ad1966e991ff4ed7614c01fc0417cc006d87fa5fe184d565994c9d6b8"
+model-visible = "sha256:3ccf8e553512c42119ffebd90bb1cc41f9c412f2e35e2535efbe285a57bc3bf1"
+resource-manifest = "sha256:b0906110b53023cd6f85df2d03c990ed9c7140de44f884cc191c395b11896388"
