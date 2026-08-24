@@ -21,6 +21,9 @@ const MAX_LINE_BYTES: usize = 4096;
 const STREAM_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_RETRIES: usize = 20;
 const RETRY_DELAY: Duration = Duration::from_millis(50);
+// Opening the shared index can wait for another version's short SQLite
+// transaction. Keep the spawn lease through that bounded startup window.
+const SPAWN_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 2_000;
@@ -133,7 +136,10 @@ fn handshake(stream: &mut UnixStream) -> crate::Result<()> {
     let id = format!(
         "{}-{}",
         std::process::id(),
-        Instant::now().elapsed().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
     );
     write_line(
         stream,
@@ -261,7 +267,7 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
     )
     .map_err(|path| protocol_error(format!("non-UTF-8 current directory {}", path.display())))?;
     let log = paths.socket.with_extension("log");
-    crate::process::spawn_detached(
+    let mut child = crate::process::spawn_detached(
         &exe,
         &[CENTER_PROCESS_SENTINEL.to_string()],
         &cwd,
@@ -276,7 +282,16 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
     // Keep the arbitration lock through listener readiness. Otherwise a second
     // caller can acquire it between spawn_detached returning and the child
     // binding its socket, then launch a duplicate center.
-    for _ in 0..CONNECT_RETRIES {
+    let deadline = Instant::now() + SPAWN_READY_TIMEOUT;
+    while Instant::now() < deadline {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|source| io_error(&paths.socket, source))?
+        {
+            return Err(protocol_error(format!(
+                "spawned center exited before readiness with {status}"
+            )));
+        }
         match UnixStream::connect(paths.socket.as_std_path()) {
             Ok(mut stream) => match handshake(&mut stream) {
                 Ok(()) => return Ok(()),
@@ -298,8 +313,8 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
         }
     }
     Err(protocol_error(format!(
-        "spawned center did not become ready at {} within bounded retry",
-        paths.socket
+        "spawned center did not become ready at {} within {:?}",
+        paths.socket, SPAWN_READY_TIMEOUT
     )))
 }
 
@@ -540,17 +555,33 @@ impl CenterModel {
         let Some(row) = self.rows.get_mut(ledger) else {
             return Ok(());
         };
-        if terminal(&row.summary) {
-            row.live = false;
-            row.live_holder = None;
-            return Ok(());
-        }
         match crate::run_control::probe(ledger)? {
             crate::run_control::DriverProbe::Held(holder) => {
+                // The kernel lock remains authoritative even if the ledger has
+                // already reached a terminal state. A finishing driver must
+                // prevent idle exit until it has released the lock.
                 row.live = true;
                 row.live_holder = holder;
             }
-            crate::run_control::DriverProbe::Unheld { .. } => {
+            crate::run_control::DriverProbe::Unheld { stale_metadata } => {
+                if terminal(&row.summary) {
+                    // `record_interrupted_outcome` may have committed before a
+                    // transient metadata-clear failure. Probe it again on every
+                    // pass so that incomplete cleanup remains retryable.
+                    if stale_metadata.is_some() {
+                        match crate::run_control::try_acquire_maintenance(ledger)? {
+                            Some(mut maintenance) => maintenance.clear_stale_metadata()?,
+                            None => {
+                                row.live = true;
+                                row.live_holder = None;
+                                return Ok(());
+                            }
+                        }
+                    }
+                    row.live = false;
+                    row.live_holder = None;
+                    return Ok(());
+                }
                 match crate::run_control::try_acquire_maintenance(ledger)? {
                     None => {
                         row.live = true;
@@ -793,6 +824,19 @@ mod tests {
         path
     }
 
+    fn paths(root: Utf8PathBuf) -> CenterPaths {
+        CenterPaths {
+            socket: root.join("center.sock"),
+            spawn_lock: root.join("center.lock"),
+            runs_root: root.clone(),
+            index: root.join("index.sqlite3"),
+        }
+    }
+
+    fn cached_summary() -> String {
+        r#"{"session_id":"session","run_id":"run","trait_id":"trait","status":"awaiting-input","has_merge_frames":false}"#.to_string()
+    }
+
     #[test]
     fn version_scoped_paths_are_distinct() {
         let root = scratch("paths");
@@ -866,12 +910,7 @@ mod tests {
     #[test]
     fn sqlite_index_initializes_and_reopens() {
         let root = scratch("sqlite");
-        let paths = CenterPaths {
-            socket: root.join("center.sock"),
-            spawn_lock: root.join("center.lock"),
-            runs_root: root.clone(),
-            index: root.join("index.sqlite3"),
-        };
+        let paths = paths(root.clone());
         let model = CenterModel::open(&paths).expect("open index");
         assert!(model.rows.is_empty());
         drop(model);
@@ -883,12 +922,7 @@ mod tests {
     #[test]
     fn corrupt_cached_fingerprint_is_removable_not_a_panic() {
         let root = scratch("bad-cache");
-        let paths = CenterPaths {
-            socket: root.join("center.sock"),
-            spawn_lock: root.join("center.lock"),
-            runs_root: root.clone(),
-            index: root.join("index.sqlite3"),
-        };
+        let paths = paths(root.clone());
         let model = CenterModel::open(&paths).expect("open index");
         model
             .db
@@ -910,12 +944,7 @@ mod tests {
     #[test]
     fn incompatible_schema_names_the_disposable_index() {
         let root = scratch("schema");
-        let paths = CenterPaths {
-            socket: root.join("center.sock"),
-            spawn_lock: root.join("center.lock"),
-            runs_root: root.clone(),
-            index: root.join("index.sqlite3"),
-        };
+        let paths = paths(root.clone());
         let model = CenterModel::open(&paths).expect("open index");
         model
             .db
@@ -929,6 +958,64 @@ mod tests {
         assert!(error.to_string().contains(paths.index.as_str()));
         assert!(error.to_string().contains("remove"));
         let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn sqlite_index_round_trips_a_populated_row() {
+        let root = scratch("round-trip");
+        let paths = paths(root.clone());
+        let mut model = CenterModel::open(&paths).expect("open index");
+        let ledger = root.join("repo/session.json");
+        model.rows.insert(
+            ledger.clone(),
+            CenterRow {
+                summary: serde_json::from_str(&cached_summary()).expect("summary"),
+                repo_key: "repo".to_string(),
+                repo_path: "/repo".to_string(),
+                ledger_path: ledger.clone(),
+                modified: UNIX_EPOCH + Duration::new(42, 7),
+                size: 99,
+                live_holder: None,
+                live: false,
+            },
+        );
+        model.persist().expect("persist row");
+        drop(model);
+        let reopened = CenterModel::open(&paths).expect("reopen index");
+        let row = reopened.rows.get(&ledger).expect("row restored");
+        assert_eq!(row.repo_key, "repo");
+        assert_eq!(row.size, 99);
+        assert_eq!(row.modified, UNIX_EPOCH + Duration::new(42, 7));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn every_invalid_cached_field_names_the_removable_index() {
+        for (name, secs, nanos, size, summary) in [
+            ("negative-seconds", -1, 0, 0, cached_summary()),
+            ("invalid-nanos", 0, 1_000_000_000, 0, cached_summary()),
+            ("negative-size", 0, 0, -1, cached_summary()),
+            ("bad-summary", 0, 0, 0, "not-json".to_string()),
+        ] {
+            let root = scratch(name);
+            let paths = paths(root.clone());
+            let model = CenterModel::open(&paths).expect("open index");
+            model
+                .db
+                .execute(
+                    "INSERT INTO center_rows VALUES ('x', 'key', '', ?1, ?2, ?3, ?4)",
+                    params![secs, nanos, size, summary],
+                )
+                .expect("insert corrupt row");
+            drop(model);
+            let error = match CenterModel::open(&paths) {
+                Ok(_) => panic!("invalid row accepted"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains(paths.index.as_str()));
+            assert!(error.to_string().contains("remove"));
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+        }
     }
 
     #[test]
