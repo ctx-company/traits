@@ -177,11 +177,31 @@ fn handshake(stream: &mut UnixStream) -> crate::Result<()> {
 /// Connect to the center, launching at most one detached center across all
 /// simultaneous callers. A complete handshake retries once after EOF.
 pub fn ensure_connected() -> crate::Result<UnixStream> {
-    ensure_connected_at(
-        &production_paths()?,
-        &std::env::current_exe()
+    let configured = |name: &str| std::env::var(name).ok().map(Utf8PathBuf::from);
+    let paths = match (
+        configured("CTX_CENTER_SOCKET"),
+        configured("CTX_CENTER_SPAWN_LOCK"),
+        configured("CTX_CENTER_RUNS_ROOT"),
+        configured("CTX_CENTER_INDEX"),
+    ) {
+        // These private variables are passed to the detached sentinel by
+        // `try_spawn`. They also give process-boundary proofs a hermetic
+        // endpoint without changing the user-facing command line.
+        (Some(socket), Some(spawn_lock), Some(runs_root), Some(index)) => CenterPaths {
+            socket,
+            spawn_lock,
+            runs_root,
+            index,
+        },
+        (None, None, None, None) => production_paths()?,
+        _ => return Err(protocol_error("incomplete private center configuration")),
+    };
+    let executable = match std::env::var_os("CTX_CENTER_EXECUTABLE") {
+        Some(executable) => std::path::PathBuf::from(executable),
+        None => std::env::current_exe()
             .map_err(|source| io_error(&Utf8PathBuf::from("current executable"), source))?,
-    )
+    };
+    ensure_connected_at(&paths, &executable)
 }
 
 fn ensure_connected_at(
@@ -202,12 +222,7 @@ fn ensure_connected_at(
                 }
                 Err(error) => return Err(error),
             },
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                ) =>
-            {
+            Err(error) if unavailable_socket(&error) => {
                 if !spawned {
                     try_spawn(paths, executable)?;
                     spawned = true;
@@ -254,12 +269,7 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
                 paths.socket
             )));
         }
-        Err(error)
-            if !matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            ) =>
-        {
+        Err(error) if !unavailable_socket(&error) => {
             return Err(io_error(&paths.socket, error));
         }
         Err(_) => {}
@@ -304,7 +314,7 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
             // Do not relinquish arbitration merely because observing the child
             // failed. It may still bind after another contender starts.
             Err(source) => {
-                return abort_spawn(&mut child, io_error(&paths.socket, source));
+                return abort_spawn(child, &lock, io_error(&paths.socket, source));
             }
         };
         if let Some(status) = child_status {
@@ -317,20 +327,14 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
                 Ok(()) => return Ok(()),
                 Err(_) => {
                     return abort_spawn(
-                        &mut child,
+                        child,
+                        &lock,
                         protocol_error("spawned center did not complete the handshake"),
                     );
                 }
             },
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                std::thread::sleep(RETRY_DELAY)
-            }
-            Err(error) => return abort_spawn(&mut child, io_error(&paths.socket, error)),
+            Err(error) if unavailable_socket(&error) => std::thread::sleep(RETRY_DELAY),
+            Err(error) => return abort_spawn(child, &lock, io_error(&paths.socket, error)),
         }
     }
     // Never drop the arbitration lock while a timed-out detached child is
@@ -338,7 +342,8 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
     // before the slow child binds. Terminate and reap it before releasing the
     // lock; its possible socket pathname is then recovered by the next winner.
     abort_spawn(
-        &mut child,
+        child,
+        &lock,
         protocol_error(format!(
             "spawned center did not become ready at {} within {:?}",
             paths.socket, SPAWN_READY_TIMEOUT
@@ -346,39 +351,41 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
     )
 }
 
+fn unavailable_socket(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::ConnectionRefused
+            // Darwin reports this while a just-accepted AF_UNIX listener is
+            // unlinked, before the pathname lookup observes NotFound.
+            | std::io::ErrorKind::InvalidInput
+            | std::io::ErrorKind::AddrNotAvailable
+    )
+}
+
 /// Do not release spawn arbitration while a child from this attempt survives.
-/// The caller still holds the spawn lock when this is called.
-fn abort_spawn(child: &mut std::process::Child, failure: crate::Error) -> crate::Result<()> {
-    let deadline = Instant::now() + SPAWN_READY_TIMEOUT;
-    let mut kill_error = None;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return match kill_error {
-                    Some(source) => Err(io_error(&Utf8PathBuf::from("center child"), source)),
-                    None => Err(failure),
-                };
-            }
-            Ok(None) | Err(_) => {
-                // A failed observation is not proof that the child cannot yet
-                // publish a listener. Keep the arbitration lease while asking
-                // it to exit, but never make cleanup itself an unbounded wait.
-                if kill_error.is_none() {
-                    kill_error = child
-                        .kill()
-                        .err()
-                        .filter(|error| error.kind() != std::io::ErrorKind::InvalidInput);
-                }
-            }
-        }
-        if Instant::now() >= deadline {
-            return Err(protocol_error(format!(
-                "could not confirm spawned center exit within {:?}",
-                SPAWN_READY_TIMEOUT
-            )));
-        }
-        std::thread::sleep(RETRY_DELAY);
-    }
+///
+/// Launch failure is reported promptly, but the cloned descriptor keeps the
+/// advisory flock held until the reaper has observed child exit. This closes
+/// the gap where a failed `try_wait` or a slow kill could otherwise let another
+/// caller launch a second center before this child publishes its listener.
+fn abort_spawn(
+    mut child: std::process::Child,
+    lock: &std::fs::File,
+    failure: crate::Error,
+) -> crate::Result<()> {
+    let lease = lock
+        .try_clone()
+        .map_err(|source| io_error(&Utf8PathBuf::from("center spawn lock"), source))?;
+    let _ = child.kill();
+    std::thread::spawn(move || {
+        // `wait` is intentionally off the caller's bounded readiness path.
+        // Holding this duplicate file descriptor makes the lease survive until
+        // the kernel confirms this particular child cannot publish a listener.
+        let _lease = lease;
+        let _ = child.wait();
+    });
+    Err(failure)
 }
 
 #[derive(Debug, Clone)]
@@ -951,23 +958,15 @@ mod tests {
 
     #[test]
     fn version_scoped_paths_are_distinct() {
-        let root = scratch("paths");
-        let a = CenterPaths {
-            socket: root.join("ctx-1.sock"),
-            spawn_lock: root.join("ctx-1.lock"),
-            runs_root: root.clone(),
-            index: root.join("index.sqlite3"),
-        };
-        let b = CenterPaths {
-            socket: root.join("ctx-2.sock"),
-            spawn_lock: root.join("ctx-2.lock"),
-            runs_root: root.clone(),
-            index: root.join("index.sqlite3"),
-        };
-        assert_ne!(a.socket, b.socket);
-        assert_ne!(a.spawn_lock, b.spawn_lock);
-        assert_eq!(a.index, b.index);
-        let _ = std::fs::remove_dir_all(root.as_std_path());
+        let paths = production_paths().expect("derive production paths");
+        let version = env!("CARGO_PKG_VERSION");
+        let uid = unsafe { libc::getuid() };
+        assert_eq!(paths.socket, format!("/tmp/ctx-{uid}-{version}.sock"));
+        assert_eq!(
+            paths.spawn_lock,
+            format!("/tmp/ctx-{uid}-{version}.spawn.lock")
+        );
+        assert_eq!(paths.index, paths.runs_root.join("index.sqlite3"));
     }
 
     #[test]
@@ -1127,6 +1126,31 @@ mod tests {
         assert_eq!(row.repo_key, "repo");
         assert_eq!(row.size, 99);
         assert_eq!(row.modified, UNIX_EPOCH + Duration::new(42, 7));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn deleting_the_disposable_index_rebuilds_from_ledgers() {
+        let root = scratch("deleted-index");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("initial discovery");
+        let summary = model
+            .rows
+            .get(&ledger)
+            .expect("initial row")
+            .summary
+            .clone();
+        drop(model);
+
+        std::fs::remove_file(paths.index.as_std_path()).expect("delete index");
+        let mut rebuilt = CenterModel::open(&paths).expect("reopen rebuilt index");
+        rebuilt.discover(&paths).expect("rebuild from ledger");
+        assert_eq!(
+            rebuilt.rows.get(&ledger).expect("rebuilt row").summary,
+            summary
+        );
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 

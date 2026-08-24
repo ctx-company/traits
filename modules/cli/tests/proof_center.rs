@@ -67,6 +67,63 @@ fn await_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
     }
 }
 
+fn await_socket_removal(socket: &std::path::Path) {
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    while socket.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !socket.exists(),
+        "center socket was not removed before {PROCESS_DEADLINE:?}: {}",
+        socket.display()
+    );
+}
+
+struct CenterEnvironment {
+    names: [&'static str; 7],
+    previous: Vec<Option<std::ffi::OsString>>,
+}
+
+impl CenterEnvironment {
+    fn install(root: &std::path::Path) -> Self {
+        let names = [
+            "CTX_CENTER_SOCKET",
+            "CTX_CENTER_SPAWN_LOCK",
+            "CTX_CENTER_RUNS_ROOT",
+            "CTX_CENTER_INDEX",
+            "CTX_CENTER_EXECUTABLE",
+            "CTX_CENTER_IDLE_MS",
+            "CTX_CENTER_SCAN_MS",
+        ];
+        let previous = names.iter().map(std::env::var_os).collect();
+        // Environment mutation is serialized by SENTINEL_TEST_LOCK for the
+        // whole proof, so no concurrently executing test can observe it.
+        unsafe {
+            std::env::set_var("CTX_CENTER_SOCKET", root.join("center.sock"));
+            std::env::set_var("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"));
+            std::env::set_var("CTX_CENTER_RUNS_ROOT", root);
+            std::env::set_var("CTX_CENTER_INDEX", root.join("index.sqlite3"));
+            std::env::set_var("CTX_CENTER_EXECUTABLE", env!("CARGO_BIN_EXE_ctx"));
+            std::env::set_var("CTX_CENTER_IDLE_MS", "100");
+            std::env::set_var("CTX_CENTER_SCAN_MS", "20");
+        }
+        Self { names, previous }
+    }
+}
+
+impl Drop for CenterEnvironment {
+    fn drop(&mut self) {
+        unsafe {
+            for (name, previous) in self.names.iter().zip(self.previous.iter()) {
+                match previous {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+}
+
 fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
     let root = Utf8PathBuf::from_path_buf(root.to_path_buf()).expect("UTF-8 scratch root");
     let ledger = root.join("repository/session.json");
@@ -109,7 +166,9 @@ fn center_sentinel_is_not_a_supported_clap_command() {
 
 #[test]
 fn private_sentinel_serves_only_the_center_handshake() {
-    let _serial = SENTINEL_TEST_LOCK.lock().expect("lock sentinel proofs");
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     // AF_UNIX paths have a small kernel limit; use /tmp instead of the
     // platform's potentially deep temporary directory.
     let root = scratch("center");
@@ -141,7 +200,9 @@ fn private_sentinel_serves_only_the_center_handshake() {
 
 #[test]
 fn private_sentinel_exits_after_its_bounded_idle_period() {
-    let _serial = SENTINEL_TEST_LOCK.lock().expect("lock sentinel proofs");
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let root = scratch("idle");
     std::fs::create_dir_all(&root).expect("create scratch root");
     let mut child = ChildGuard(
@@ -163,7 +224,9 @@ fn private_sentinel_exits_after_its_bounded_idle_period() {
 
 #[test]
 fn held_driver_lock_survives_center_idle_period() {
-    let _serial = SENTINEL_TEST_LOCK.lock().expect("lock sentinel proofs");
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let root = scratch("held-lock");
     std::fs::create_dir_all(&root).expect("create scratch root");
     let ledger = write_running_ledger(&root);
@@ -187,5 +250,95 @@ fn held_driver_lock_survives_center_idle_period() {
     assert!(child.0.try_wait().expect("poll center").is_none());
     drop(lock);
     assert!(await_exit(&mut child.0).success());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn concurrent_ensure_calls_share_one_auto_spawned_center() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("ensure-concurrent");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let _environment = CenterEnvironment::install(&root);
+    let callers: Vec<_> = (0..2)
+        .map(|_| std::thread::spawn(ctx_traits_io::center::ensure_connected))
+        .collect();
+    for caller in callers {
+        let stream = caller
+            .join()
+            .expect("ensure caller thread")
+            .expect("ensure connection");
+        drop(stream);
+    }
+    await_socket_removal(&root.join("center.sock"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn ensure_retries_eof_then_spawns_the_private_center() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("ensure-eof");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind eof listener");
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("accept hello");
+        std::fs::remove_file(&socket).expect("remove eof socket");
+        drop(stream);
+    });
+    let _environment = CenterEnvironment::install(&root);
+    let stream = ctx_traits_io::center::ensure_connected().expect("retry and spawn center");
+    drop(stream);
+    server.join().expect("eof server");
+    await_socket_removal(&root.join("center.sock"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sigkill_center_leaves_held_driver_and_restart_reconstructs_it() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("sigkill-rebuild");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let ledger = write_running_ledger(&root);
+    let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+    let lock =
+        ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open driver lock");
+    ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold driver lock");
+
+    let spawn = || {
+        ChildGuard(
+            std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .arg("__ctx-center")
+                .env("CTX_CENTER_SOCKET", root.join("center.sock"))
+                .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+                .env("CTX_CENTER_RUNS_ROOT", &root)
+                .env("CTX_CENTER_INDEX", root.join("index.sqlite3"))
+                .env("CTX_CENTER_IDLE_MS", "100")
+                .env("CTX_CENTER_SCAN_MS", "20")
+                .spawn()
+                .expect("spawn private sentinel"),
+        )
+    };
+    let mut first = spawn();
+    let stream = await_socket(&root.join("center.sock"));
+    drop(stream);
+    first.0.kill().expect("SIGKILL center");
+    assert!(!first.0.wait().expect("reap SIGKILL center").success());
+
+    let _environment = CenterEnvironment::install(&root);
+    let stream = ctx_traits_io::center::ensure_connected().expect("restart through arbitration");
+    drop(stream);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        root.join("center.sock").exists(),
+        "restarted center lost the still-held driver lock"
+    );
+    drop(lock);
+    await_socket_removal(&root.join("center.sock"));
     let _ = std::fs::remove_dir_all(root);
 }
