@@ -152,6 +152,26 @@ fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
     ledger
 }
 
+fn spawn_sentinel(
+    root: &std::path::Path,
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    idle_ms: &str,
+) -> ChildGuard {
+    ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", socket)
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", root)
+            .env("CTX_CENTER_INDEX", index)
+            .env("CTX_CENTER_IDLE_MS", idle_ms)
+            .env("CTX_CENTER_SCAN_MS", "20")
+            .spawn()
+            .expect("spawn private sentinel"),
+    )
+}
+
 #[test]
 fn center_sentinel_is_not_a_supported_clap_command() {
     // The sentinel is consumed before Clap by the binary entry point. Keeping
@@ -310,25 +330,14 @@ fn sigkill_center_leaves_held_driver_and_restart_reconstructs_it() {
         ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open driver lock");
     ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold driver lock");
 
-    let spawn = || {
-        ChildGuard(
-            std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
-                .arg("__ctx-center")
-                .env("CTX_CENTER_SOCKET", root.join("center.sock"))
-                .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
-                .env("CTX_CENTER_RUNS_ROOT", &root)
-                .env("CTX_CENTER_INDEX", root.join("index.sqlite3"))
-                .env("CTX_CENTER_IDLE_MS", "100")
-                .env("CTX_CENTER_SCAN_MS", "20")
-                .spawn()
-                .expect("spawn private sentinel"),
-        )
-    };
-    let mut first = spawn();
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let mut first = spawn_sentinel(&root, &socket, &index, "100");
     let stream = await_socket(&root.join("center.sock"));
     drop(stream);
     first.0.kill().expect("SIGKILL center");
     assert!(!first.0.wait().expect("reap SIGKILL center").success());
+    std::fs::remove_file(&index).expect("delete disposable index before restart");
 
     let _environment = CenterEnvironment::install(&root);
     let stream = ctx_traits_io::center::ensure_connected().expect("restart through arbitration");
@@ -340,5 +349,30 @@ fn sigkill_center_leaves_held_driver_and_restart_reconstructs_it() {
     );
     drop(lock);
     await_socket_removal(&root.join("center.sock"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn independent_socket_versions_share_the_disposable_sqlite_index() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("shared-index");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let index = root.join("index.sqlite3");
+    let first_socket = root.join("center-v1.sock");
+    let second_socket = root.join("center-v2.sock");
+    let mut first = spawn_sentinel(&root, &first_socket, &index, "5000");
+    let mut second = spawn_sentinel(&root, &second_socket, &index, "5000");
+    drop(await_socket(&first_socket));
+    drop(await_socket(&second_socket));
+    assert!(
+        index.exists(),
+        "both centers must use the same derived index"
+    );
+    first.0.kill().expect("stop first center");
+    second.0.kill().expect("stop second center");
+    first.0.wait().expect("reap first center");
+    second.0.wait().expect("reap second center");
     let _ = std::fs::remove_dir_all(root);
 }

@@ -314,7 +314,7 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
             // Do not relinquish arbitration merely because observing the child
             // failed. It may still bind after another contender starts.
             Err(source) => {
-                return abort_spawn(child, &lock, io_error(&paths.socket, source));
+                return abort_spawn(child, lock, io_error(&paths.socket, source));
             }
         };
         if let Some(status) = child_status {
@@ -328,13 +328,13 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
                 Err(_) => {
                     return abort_spawn(
                         child,
-                        &lock,
+                        lock,
                         protocol_error("spawned center did not complete the handshake"),
                     );
                 }
             },
             Err(error) if unavailable_socket(&error) => std::thread::sleep(RETRY_DELAY),
-            Err(error) => return abort_spawn(child, &lock, io_error(&paths.socket, error)),
+            Err(error) => return abort_spawn(child, lock, io_error(&paths.socket, error)),
         }
     }
     // Never drop the arbitration lock while a timed-out detached child is
@@ -343,7 +343,7 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
     // lock; its possible socket pathname is then recovered by the next winner.
     abort_spawn(
         child,
-        &lock,
+        lock,
         protocol_error(format!(
             "spawned center did not become ready at {} within {:?}",
             paths.socket, SPAWN_READY_TIMEOUT
@@ -371,19 +371,25 @@ fn unavailable_socket(error: &std::io::Error) -> bool {
 /// caller launch a second center before this child publishes its listener.
 fn abort_spawn(
     mut child: std::process::Child,
-    lock: &std::fs::File,
+    lock: std::fs::File,
     failure: crate::Error,
 ) -> crate::Result<()> {
-    let lease = lock
-        .try_clone()
-        .map_err(|source| io_error(&Utf8PathBuf::from("center spawn lock"), source))?;
     let _ = child.kill();
     std::thread::spawn(move || {
         // `wait` is intentionally off the caller's bounded readiness path.
-        // Holding this duplicate file descriptor makes the lease survive until
+        // Moving the lock into the reaper makes the lease survive even if a
+        // descriptor clone would fail, until
         // the kernel confirms this particular child cannot publish a listener.
-        let _lease = lease;
-        let _ = child.wait();
+        let _lease = lock;
+        loop {
+            match child.wait() {
+                Ok(_) => return,
+                // Do not release arbitration after an unconfirmed wait. EINTR
+                // and other transient process-observation errors are retried
+                // by this detached reaper while it retains the flock lease.
+                Err(_) => std::thread::sleep(RETRY_DELAY),
+            }
+        }
     });
     Err(failure)
 }
@@ -586,6 +592,7 @@ impl CenterModel {
                         let _ = self.refresh_liveness(&ledger, false);
                         continue;
                     };
+                    let previous = self.rows.get(&ledger).cloned();
                     self.rows.insert(
                         ledger.clone(),
                         CenterRow {
@@ -599,6 +606,21 @@ impl CenterModel {
                             live: false,
                         },
                     );
+                    // A successful parse does not make a new fingerprint safe
+                    // to retain if its lock probe is currently untrustworthy.
+                    // Restore the last verified projection so the next pass
+                    // retries this ledger rather than silently advancing it.
+                    if self.refresh_liveness(&ledger, false).is_err() {
+                        self.uncertain = true;
+                        if let Some(previous) = previous {
+                            self.rows.insert(ledger.clone(), previous);
+                        } else if let Some(row) = self.rows.get_mut(&ledger) {
+                            row.live = true;
+                            row.live_holder = None;
+                        }
+                        continue;
+                    }
+                    continue;
                 }
                 // A damaged lock or a ledger that changes under us must not
                 // hide the rest of the machine-wide inventory. Keep the last
