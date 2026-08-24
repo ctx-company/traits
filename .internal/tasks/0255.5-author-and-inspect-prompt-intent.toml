@@ -1,0 +1,36 @@
+schema-version = "0.2"
+key = "0255.5"
+title = "Author and inspect prompt intent"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Let trait authors place intent on executable prompt items through the TypeScript object and functional sequence APIs, lower it to canonical schema-version `0.6` data, and inspect every declaration with sequence and item attribution. The authored form must work for top-level, named, and nested prompt declarations because the same canonical prompt item can become ready through each runtime path.
+
+The affected areas are procedure sequence data and validation under `modules/core/src/trait/procedure`, generated SDK definitions, `packages/cdk/src/sequence.ts` and functional registrars, and static model-view compilation. This is an author-visible prompt-intent outcome, not a schema staging task.
+"""
+scope = """
+## Decisions
+Only `prompt` sequence items may carry intent. Reject it on `ask`, `command`, `check`, `project`, `sequence`, `branch`, `loop`, `for-each`, `parallel`, and `terminal` items because those items do not themselves create an agent model frame. Prompt-local duplicate IDs within a group and local require/avoid collisions are invalid.
+
+Reuse all four intent groups and their existing catalog, rich-item, custom-item, sanitization, and second-personless rules. Present intent is deterministic and digest-covered; absent intent preserves prior canonical bytes and digests. Static output identifies declared placement but does not imply that every prompt is simultaneously active.
+"""
+validation = """
+## Watch
+Do not make generic sequence items appear intent-capable, validate only top-level sequences, bypass object lowering from functional registrars, or hand-edit generated definitions. Root-only require/avoid compatibility remains governed by 0255 and must not be tightened while adding prompt-local validation.
+
+## Done when
+Object and functional CDK APIs author all four intent groups on top-level, named, and nested prompts; populated output validates at schema-version `0.6`; older versions, non-prompt placements, malformed values, duplicates, and prompt-local require/avoid collisions fail; omitted forms remain byte- and digest-neutral; static output identifies each declaration; generated SDK definitions have no drift; and focused Rust and TypeScript cases pass their gates.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.1"]
+
+[[checks]]
+name = "prompt intent authoring passes the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+timeout-ms = 600000
+
+[[checks]]
+name = "prompt intent canonical and static behavior pass the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000

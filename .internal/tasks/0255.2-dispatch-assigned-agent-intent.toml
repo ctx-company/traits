@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.2"
+title = "Dispatch assigned agent intent"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Make agent intent visible in the categorized model frame for the agent actually assigned to an ordinary ready prompt. Ready-frame preview, CLI dispatch, and MCP dispatch must consume one effective trait-agent result from the shared frame composition path rather than selecting or rendering agent intent independently.
+
+This slice covers assigned-agent lookup, intent resolution, frame composition in `modules/cli/src/app/frame_prompt.rs`, preview, and ordinary CLI and MCP consumers. Its tests belong with the behavior change and must exercise live composed frames, not only resolver data.
+"""
+scope = """
+## Decisions
+Resolve trait then assigned-agent intent. Preserve source order within each group; when group plus normalized ID repeats, the agent item replaces the root item at the agent layer position, including local summary or description. An unassigned declaration contributes nothing.
+
+Refuse an opposing require/avoid pair introduced across root and agent layers, but preserve a pair whose two effective occurrences remain root-sourced. This distinction keeps accepted root-only schema-version `0.5` and migrated `0.6` behavior unchanged while giving new scope composition a deterministic contradiction rule. Ready-frame preview and live dispatch use the same vocabulary renderer.
+"""
+validation = """
+## Watch
+Do not select agents by declaration order, infer contradictions from prose, duplicate resolution in CLI and MCP, or place agent `system` in the categorized user frame. A trait with no agent intent, including a root-only require/avoid collision, must retain prior prompt bytes and acceptance.
+
+## Done when
+An ordinary ready-frame preview and CLI and MCP dispatch render root then assigned-agent intent with deterministic order and replacement; unassigned agents do not leak; scoped cross-layer require/avoid contradictions refuse the frame; root-only collisions remain accepted and byte-compatible; agent `system` transport is unchanged; and focused unit and live-path coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.1"]
+
+[[checks]]
+name = "assigned agent intent dispatch passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.12"
+title = "Refresh for-each prompt guidance"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Rebuild scoped intent and behavior for the prompt leaf made ready for each `for-each` element. Element iteration can revisit one declaration while inputs and runtime provenance change, so model-visible guidance must be resolved per frame without being accumulated or frozen at collection entry.
+
+The affected areas are `for-each` expansion and readiness, ready-frame provenance, cache-sensitive frame composition, preview, and CLI and MCP execution tests. This remains separate from loop behavior because element expansion and receipts have their own runtime path.
+"""
+scope = """
+## Decisions
+The `for-each` container and collection contribute no categorized guidance. The ready prompt leaf supplies prompt scope for its element, composed with the current assigned agent and root using the charter's order, replacement, scalar precedence, and contradiction rule.
+
+Each element frame recomputes the effective result. Static output attributes the nested declaration once without pretending every element frame is active; live output reflects only the current element's leaf.
+"""
+validation = """
+## Watch
+Do not attach guidance to the collection or container, reuse the first element's resolved result, accumulate duplicate entries per element, or confuse element inputs with guidance identity. Preserve no-guidance and agent `system` behavior.
+
+## Done when
+Preview and CLI and MCP `for-each` execution render the current element's ready prompt guidance once per frame; transitions between elements and nested leaves refresh deterministically without accumulation; static source attribution remains accurate; legacy no-guidance behavior is unchanged; and focused `for-each` coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.11"]
+
+[[checks]]
+name = "for-each prompt guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

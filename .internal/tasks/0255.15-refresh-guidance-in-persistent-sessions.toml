@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.15"
+title = "Refresh guidance in persistent sessions"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Refresh categorized guidance for every new frame in a persistent or shared harness conversation while retaining the conversation's existing session state. As readiness or assignment changes, the next preview and live frame must reflect the current agent and prompt rather than the first frame's scope.
+
+The affected areas are persistent-session frame transitions, preview-to-live composition, CLI and MCP continuing dispatch, cache-sensitive prompt construction, and persistent harness coverage. This final child closes the continuing-consumer stop condition through observable frame-refresh behavior.
+"""
+scope = """
+## Decisions
+Conversation state may persist, but effective root-agent-prompt guidance does not. Resolve it for every frame using the current assignment and actual ready prompt, with the charter's ordering, replacement, scalar precedence, and scoped contradiction rule.
+
+Ready-frame preview and live dispatch share resolution and rendering authority while retaining their transport responsibilities. Agent `system` remains standing instruction content delivered according to existing once-per-session behavior; categorized guidance remains per frame.
+"""
+validation = """
+## Watch
+Do not store effective guidance at session creation, carry a prior prompt or agent into the next frame, maintain a preview-only resolver, or resend `system` on each categorized refresh. Tests must change scope inside a continuing session rather than repeat an identical frame.
+
+## Done when
+Persistent and shared-session preview and CLI and MCP dispatch rebuild effective guidance after agent or ready-prompt changes; the next frame contains current directives and no stale ones; model-visible cache behavior reflects the change; legacy no-guidance conversations remain byte-compatible; `system` keeps its existing channel and once-per-session semantics; and focused persistent-session coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.14"]
+
+[[checks]]
+name = "persistent-session guidance refresh passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

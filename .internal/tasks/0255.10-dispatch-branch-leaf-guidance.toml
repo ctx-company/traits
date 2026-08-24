@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.10"
+title = "Dispatch branch leaf guidance"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Resolve scoped intent and behavior from the prompt leaf selected by a branch, so unselected arms and the branch container cannot affect preview or live model frames. The outcome covers branch choice changes with behavior-specific regression coverage attached to the runtime change.
+
+The affected areas are branch expansion and readiness in procedure runtime, ready-frame provenance, shared frame composition, and CLI and MCP execution tests. It reuses the named-sequence leaf contract from 0255.9.
+"""
+scope = """
+## Decisions
+The selected ready prompt is the only branch-local source of scoped guidance. The branch item and every unselected arm contribute nothing. Apply root-agent-prompt ordering, additive replacement, scalar precedence, scoped require/avoid refusal, and source-attributed static auditing without branch-specific variants.
+
+When branch state selects a different leaf, the effective frame and any model-visible cache identity must change with it. Agent `system` and legacy no-guidance behavior remain outside this change.
+"""
+validation = """
+## Watch
+Do not precompose guidance from all arms, resolve the branch container, reuse guidance after branch state changes, or let static auditing imply that all arms are active. Tests must distinguish selected from unselected declarations.
+
+## Done when
+Preview and CLI and MCP dispatch render guidance only from the selected branch leaf; alternate and nested branch choices update the effective frame without stale or unselected entries; static output retains declaration attribution; no-guidance behavior and agent `system` remain unchanged; and focused branch execution coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.9"]
+
+[[checks]]
+name = "branch leaf guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

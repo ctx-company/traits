@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.6"
+title = "Dispatch top-level prompt intent"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Make intent on an ordinary top-level ready prompt visible alongside root and assigned-agent intent in ready-frame preview and live CLI and MCP dispatch. The actual ready item, not a declaration index or neighboring item, must supply the prompt layer to one shared effective frame.
+
+This slice covers top-level ready-item lookup, three-layer intent resolution, common frame composition, and ordinary preview and live consumers. Its tests exercise successive top-level readiness as part of the behavior change so stale prompt intent cannot pass unnoticed.
+"""
+scope = """
+## Decisions
+Resolve root, assigned agent, then ready prompt. Preserve source order in each group; a repeated group-plus-normalized-ID item moves to the most-specific layer position with that occurrence's text. Only the currently ready prompt contributes; earlier, later, command, and control items contribute nothing.
+
+Refuse an opposing require/avoid pair introduced when agent or prompt scope participates, while preserving a root-only pair whose effective occurrences remain root-sourced. Preview, CLI, and MCP use one resolution and rendering authority.
+"""
+validation = """
+## Watch
+Do not take prompt intent from top-level declaration position without checking readiness, carry the previous prompt's intent forward, duplicate logic per transport, or alter agent `system`. No-prompt-intent frames and accepted root-only collisions must retain prior bytes and behavior.
+
+## Done when
+Top-level ready-frame preview and CLI and MCP dispatch render only the actual ready prompt's root-agent-prompt intent; order, replacement, and scoped contradiction refusal follow the charter; advancing to the next top-level prompt changes intent without stale entries; root-only collision behavior, no-guidance frame bytes, and agent `system` transport remain unchanged; and focused live-path coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.2", "0255.5"]
+
+[[checks]]
+name = "top-level prompt intent dispatch passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

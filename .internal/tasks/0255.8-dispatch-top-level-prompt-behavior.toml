@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.8"
+title = "Dispatch top-level prompt behavior"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Make additive and scalar behavior on the actual top-level ready prompt visible in ready-frame preview and live CLI and MCP dispatch. The outcome completes ordinary three-layer behavior composition and verifies frame changes as readiness advances between top-level prompts.
+
+The affected runtime areas are ready-item lookup, effective behavior resolution, common frame composition, preview, and CLI and MCP drive paths. It extends the top-level intent path from 0255.6 instead of introducing a behavior-specific transport path.
+"""
+scope = """
+## Decisions
+For additive axes, preserve root-agent-prompt order and replace repeated axis-plus-normalized-ID items at the most-specific layer position. For scalar axes, prompt overrides agent and agent overrides root. Only the actual ready prompt contributes behavior; neighboring and non-prompt items contribute none.
+
+Changing top-level readiness rebuilds effective behavior for the next frame. Preview and live transports share the same effective result and renderer, while agent `system` remains outside categorized behavior.
+"""
+validation = """
+## Watch
+Do not retain behavior from the preceding prompt, resolve axes independently in each transport, treat differing scalar values as contradictions, or let categorized behavior alter `system` delivery. Legacy prompts without scoped behavior must keep prior frame bytes.
+
+## Done when
+Top-level preview and CLI and MCP dispatch render only the actual ready prompt's additive and scalar behavior; replacement and prompt-over-agent-over-root precedence are deterministic; advancing readiness removes stale behavior; no-guidance frames and agent `system` transport remain unchanged; and focused resolver, rendering, and live-path coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.4", "0255.6", "0255.7"]
+
+[[checks]]
+name = "top-level prompt behavior dispatch passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

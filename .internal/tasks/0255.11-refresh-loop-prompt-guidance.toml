@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.11"
+title = "Refresh loop prompt guidance"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Rebuild scoped intent and behavior for the prompt leaf made ready on each loop iteration. A repeated control path may revisit the same declaration or move among nested leaves, but every frame must derive guidance from current readiness rather than retaining the first iteration's effective result.
+
+The affected areas are loop expansion, iteration readiness, model-visible frame refresh, cache-sensitive ordering, preview, and CLI and MCP execution tests. The task owns the loop behavior and its verification, not a generic runtime audit.
+"""
+scope = """
+## Decisions
+The loop container contributes no guidance. Each ready prompt leaf contributes according to root-agent-prompt ordering, additive replacement, scalar precedence, and scoped require/avoid refusal. Re-entering a leaf recomputes the effective result even when conversation or runtime state persists.
+
+Static output identifies loop-nested declarations without presenting all iterations as active. Frame and cache content follows the current leaf; agent `system` stays on its existing session channel.
+"""
+validation = """
+## Watch
+Do not cache scoped guidance at loop entry, infer the active leaf from declaration order, accumulate guidance across iterations, or duplicate composition in loop handling. Tests must exercise iteration changes, not only one pass through a loop.
+
+## Done when
+Preview and CLI and MCP loop execution render only each iteration's ready prompt guidance; repeated and changing leaves rebuild deterministic frames without accumulated or stale entries; static attribution remains truthful; no-guidance loops and agent `system` behavior remain unchanged; and focused loop execution coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.10"]
+
+[[checks]]
+name = "loop prompt guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

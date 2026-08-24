@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.13"
+title = "Isolate parallel sibling guidance"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Resolve scoped intent and behavior independently for each prompt dispatched from parallel sibling branches. A sibling must use its own assigned agent and ready leaf, with no categorized guidance inherited from or leaked to another branch.
+
+The affected areas are parallel branch readiness, sibling dispatch, per-frame agent and prompt provenance, common frame composition, and CLI and MCP execution tests. This slice attaches isolation coverage to the consumer behavior it changes.
+"""
+scope = """
+## Decisions
+Each sibling frame resolves root, that sibling's assigned agent, and that sibling's ready prompt. Parallel and branch containers contribute no guidance. Additive replacement, scalar precedence, and scoped require/avoid refusal apply independently per sibling.
+
+Model-visible cache identity and frame text must reflect each sibling's effective content. Shared sessions may retain their existing transport constraints, but they do not authorize reusing another sibling's effective guidance. Agent `system` retains its existing per-session semantics.
+"""
+validation = """
+## Watch
+Do not compute one parent effective result for every sibling, inherit the spawning branch's agent or prompt scope, merge guidance from concurrently ready leaves, or resend `system` merely because categorized guidance differs. Tests must use siblings with distinguishable guidance.
+
+## Done when
+Parallel CLI and MCP sibling dispatches each render only their own assigned-agent and ready-prompt guidance; distinct siblings remain isolated under changing readiness and cache use; container and peer declarations do not leak; no-guidance and agent `system` behavior remain unchanged; and focused sibling execution coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.12"]
+
+[[checks]]
+name = "parallel sibling guidance isolation passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000

@@ -1,0 +1,31 @@
+schema-version = "0.2"
+key = "0255.9"
+title = "Dispatch named sequence prompt guidance"
+status = "draft"
+raised = "2026-08-24"
+content = """
+Carry intent and behavior into a prompt reached through a named sequence so preview and live frames use the leaf item made ready by runtime expansion, not the top-level sequence reference. This gives named-sequence authors the same scoped outcome already available to ordinary top-level prompts.
+
+The affected areas are named-sequence runtime expansion, ready-frame provenance, static source attribution, shared frame composition, and CLI and MCP execution coverage. Authoring and canonical legality already come from 0255.5 and 0255.7.
+"""
+scope = """
+## Decisions
+Only the leaf prompt contributes step scope. The named sequence container contributes no guidance and does not inherit or duplicate the leaf declaration. Apply the charter's root-agent-prompt ordering, additive replacement, scalar precedence, and scoped require/avoid refusal unchanged.
+
+Static output identifies the named sequence and prompt declaration; ready-frame preview and live output expose only the effective guidance for the resolved leaf. Transitioning into or out of the named sequence rebuilds the model-visible frame.
+"""
+validation = """
+## Watch
+Do not resolve the sequence reference as if it were the ready prompt, flatten declaration order into execution order, carry guidance into the next leaf, or fork the renderer for named sequences. Cache-sensitive model-visible content must reflect the resolved leaf.
+
+## Done when
+Ready-frame preview and CLI and MCP dispatch through a named sequence render the actual leaf prompt's effective intent and behavior and no container guidance; entering and leaving the sequence updates the frame deterministically; static output preserves source attribution; no-guidance behavior remains unchanged; and focused named-sequence live coverage passes the landing gate.
+"""
+[relations]
+parent = "0255"
+depends-on = ["0255.8"]
+
+[[checks]]
+name = "named sequence prompt guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
