@@ -6,13 +6,13 @@
   },
   "port:receipts": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 49,
-    "end": 49
+    "start": 54,
+    "end": 54
   },
   "port:task": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 45,
-    "end": 45
+    "start": 50,
+    "end": 50
   },
   "prompt:criticize-open-endedness": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
@@ -124,6 +124,11 @@
     "start": 18,
     "end": 18
   },
+  "sequence:procedure/commit-task": {
+    "file": ".ctx/traits/authored/architect/source/shared/step/commit.ts",
+    "start": 20,
+    "end": 20
+  },
   "sequence:procedure/extract-target-file": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
     "start": 12,
@@ -143,6 +148,11 @@
     "file": ".ctx/traits/authored/architect/source/shared/step/snapshot.ts",
     "start": 7,
     "end": 7
+  },
+  "slot:commit-log": {
+    "file": ".ctx/traits/authored/architect/source/shared/data.ts",
+    "start": 44,
+    "end": 44
   },
   "slot:critic-verdict": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",

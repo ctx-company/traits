@@ -41,6 +41,11 @@ export const criticVerdict = cdkSlot({
   description: "Open-endedness-only critic verdict for the rewritten task.",
 });
 export const receipt = cdkSlot({ id: "receipt", schema: receiptSchema, description: "Receipt for architect's one in-place rewrite." });
+export const commitLog = cdkSlot.text({
+  id: "commit-log",
+  description:
+    "The commit tail's account: git's own output for the pathspec commit of the rewritten task file (or the no-changes notice), so a worktree run has a commit for merge to adopt.",
+});
 
 export const task = cdkPort.input.text({
   id: "task",
@@ -52,4 +57,4 @@ export const receipts = cdkPort.output.of("receipts", receiptSchema, {
 });
 
 export const port = { task, receipts };
-export const slot = { target, targetFile, grounding, taskSnapshot, taskCheck, criticVerdict, receipt };
+export const slot = { target, targetFile, grounding, taskSnapshot, taskCheck, criticVerdict, receipt, commitLog };

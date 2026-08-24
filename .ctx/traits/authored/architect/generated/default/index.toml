@@ -71,6 +71,11 @@ schema = "schema:text"
 description = "One task to architect, named by its key, name, or filename in .internal/tasks/."
 
 [[slot]]
+id = "commit-log"
+schema = "schema:text"
+description = "The commit tail's account: git's own output for the pathspec commit of the rewritten task file (or the no-changes notice), so a worktree run has a commit for merge to adopt."
+
+[[slot]]
 id = "critic-verdict"
 schema = "schema:review-verdict"
 description = "Open-endedness-only critic verdict for the rewritten task."
@@ -545,3 +550,18 @@ on-exhausted = "abort"
 slot = "slot:critic-verdict"
 field = "status"
 equals = "approved"
+
+[[procedure.sequence]]
+id = "commit-task"
+title = "Commit the rewritten task"
+input = ["slot:target-file"]
+output = ["slot:commit-log"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'if git diff --quiet -- "$1"; then echo "no changes to commit for $1"; else git commit -m "architect: execution plan" -m "$1" -- "$1"; fi',
+    "_",
+    "{slot:target-file}",
+]
