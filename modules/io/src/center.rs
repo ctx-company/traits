@@ -19,7 +19,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const CENTER_PROCESS_SENTINEL: &str = "__ctx-center";
 const MAX_LINE_BYTES: usize = 4096;
 const STREAM_TIMEOUT: Duration = Duration::from_secs(2);
-const CONNECT_RETRIES: usize = 20;
+// This covers the complete bounded spawn-readiness lease as well as normal
+// connection retries. A caller that lost arbitration must not give up while
+// the winner is still exclusively bringing its child online.
+const CONNECT_RETRIES: usize = 220;
 const RETRY_DELAY: Duration = Duration::from_millis(50);
 // Opening the shared index can wait for another version's short SQLite
 // transaction. Keep the spawn lease through that bounded startup window.
@@ -212,11 +215,11 @@ fn ensure_connected_at(
 // A peer can close before sending any bytes or after a partial JSON line. Both
 // are one failed handshake, not two different protocol failures.
 fn is_handshake_eof(error: &crate::Error) -> bool {
-    let message = error.to_string();
-    message.contains("unexpected EOF")
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("unexpected eof")
         || message.contains("unterminated line")
-        || message.contains("Connection reset")
-        || message.contains("Broken pipe")
+        || message.contains("connection reset")
+        || message.contains("broken pipe")
 }
 
 fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result<()> {
@@ -312,6 +315,16 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
             Err(error) => return Err(io_error(&paths.socket, error)),
         }
     }
+    // Never drop the arbitration lock while a timed-out detached child is
+    // still alive: that would permit a later caller to spawn a second center
+    // before the slow child binds. Terminate and reap it before releasing the
+    // lock; its possible socket pathname is then recovered by the next winner.
+    child
+        .kill()
+        .map_err(|source| io_error(&paths.socket, source))?;
+    child
+        .wait()
+        .map_err(|source| io_error(&paths.socket, source))?;
     Err(protocol_error(format!(
         "spawned center did not become ready at {} within {:?}",
         paths.socket, SPAWN_READY_TIMEOUT
@@ -568,14 +581,16 @@ impl CenterModel {
                     // `record_interrupted_outcome` may have committed before a
                     // transient metadata-clear failure. Probe it again on every
                     // pass so that incomplete cleanup remains retryable.
-                    if stale_metadata.is_some() {
-                        match crate::run_control::try_acquire_maintenance(ledger)? {
-                            Some(mut maintenance) => maintenance.clear_stale_metadata()?,
-                            None => {
-                                row.live = true;
-                                row.live_holder = None;
-                                return Ok(());
-                            }
+                    // `None` means metadata was absent *or malformed*. Clear
+                    // either shape while owning maintenance so a failed clear
+                    // remains retryable on every later scan.
+                    let _ = stale_metadata;
+                    match crate::run_control::try_acquire_maintenance(ledger)? {
+                        Some(mut maintenance) => maintenance.clear_stale_metadata()?,
+                        None => {
+                            row.live = true;
+                            row.live_holder = None;
+                            return Ok(());
                         }
                     }
                     row.live = false;
@@ -714,6 +729,18 @@ impl Drop for SocketGuard {
 /// accepted connections only prove that the shared center is alive.
 pub fn run_server() -> crate::Result<()> {
     let configured = |name: &str| std::env::var(name).ok().map(Utf8PathBuf::from);
+    let configured_duration = |name: &str, default: Duration| -> crate::Result<Duration> {
+        match std::env::var(name) {
+            Ok(value) => value
+                .parse::<u64>()
+                .map(Duration::from_millis)
+                .map_err(|_| protocol_error(format!("invalid private {name}: {value}"))),
+            Err(std::env::VarError::NotPresent) => Ok(default),
+            Err(error) => Err(protocol_error(format!("read private {name}: {error}"))),
+        }
+    };
+    let idle = configured_duration("CTX_CENTER_IDLE_MS", IDLE_TIMEOUT)?;
+    let scan_interval = configured_duration("CTX_CENTER_SCAN_MS", SCAN_INTERVAL)?;
     match (
         configured("CTX_CENTER_SOCKET"),
         configured("CTX_CENTER_SPAWN_LOCK"),
@@ -727,10 +754,10 @@ pub fn run_server() -> crate::Result<()> {
                 runs_root,
                 index,
             },
-            IDLE_TIMEOUT,
-            SCAN_INTERVAL,
+            idle,
+            scan_interval,
         ),
-        (None, None, None, None) => run_server_at(production_paths()?, IDLE_TIMEOUT, SCAN_INTERVAL),
+        (None, None, None, None) => run_server_at(production_paths()?, idle, scan_interval),
         _ => Err(protocol_error("incomplete private center configuration")),
     }
 }
@@ -878,7 +905,36 @@ mod tests {
                 .expect("write partial line");
         });
         let error = handshake(&mut client).expect_err("partial reply must fail");
-        assert!(is_handshake_eof(&error));
+        assert!(is_handshake_eof(&error), "{error}");
+        thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn complete_handshake_eof_gets_the_single_retry_classification() {
+        let (mut client, mut server) = UnixStream::pair().expect("socket pair");
+        let thread = std::thread::spawn(move || {
+            let _ = read_line(&mut server).expect("read hello");
+        });
+        let error = handshake(&mut client).expect_err("empty reply must fail");
+        assert!(is_handshake_eof(&error), "{error}");
+        thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn trickling_line_uses_an_absolute_read_deadline() {
+        let (mut client, mut server) = UnixStream::pair().expect("socket pair");
+        let thread = std::thread::spawn(move || {
+            for _ in 0..100 {
+                if server.write_all(b"x").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        });
+        let started = Instant::now();
+        let error = read_line(&mut client).expect_err("trickled line must time out");
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < STREAM_TIMEOUT + Duration::from_secs(1));
         thread.join().expect("server thread");
     }
 
@@ -1016,6 +1072,32 @@ mod tests {
             assert!(error.to_string().contains("remove"));
             let _ = std::fs::remove_dir_all(root.as_std_path());
         }
+    }
+
+    #[test]
+    fn max_sqlite_time_is_checked_without_panicking() {
+        let root = scratch("overflowing-time");
+        let paths = paths(root.clone());
+        let model = CenterModel::open(&paths).expect("open index");
+        model
+            .db
+            .execute(
+                "INSERT INTO center_rows VALUES ('x', 'key', '', ?1, 0, 0, ?2)",
+                params![i64::MAX, cached_summary()],
+            )
+            .expect("insert overflowing row");
+        drop(model);
+        match CenterModel::open(&paths) {
+            // Some platforms can represent every timestamp expressible by the
+            // signed SQLite column. Others reject this value through the
+            // checked reconstruction in `open`; neither may panic.
+            Ok(_) => {}
+            Err(error) => {
+                assert!(error.to_string().contains(paths.index.as_str()));
+                assert!(error.to_string().contains("remove"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     #[test]
