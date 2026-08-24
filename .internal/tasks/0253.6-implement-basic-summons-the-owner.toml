@@ -1,0 +1,50 @@
+schema-version = "0.2"
+key = "0253.6"
+title = "implement:basic summons the owner"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The dogfood consumer — the parent's north-star snippet made real,
+verbatim where it names text.
+
+## Shape
+
+- shared/step/review.ts: the reviewer's output prompt gains exactly one
+  line — "Separately: for any contradiction or question only the owner
+  can answer, emit needs-owner." (interpolated signal). The verdict
+  instruction is untouched.
+- shared/data.ts: `owner-decisions` text slot — the run's persistent
+  decision record. The only new named slot.
+- shared/step/summon.ts: `ask` (factory over the signal; question built
+  from reason + question fields; `output: cdk.schema.text` virtual) and
+  `record` (scribe seat; formats one entry; writes via
+  `slot.ownerDecisions.with(operation.Append)` — no self-read).
+- variant/basic: after the review step, `flow.when("Owner ruling",
+  condition.signal(needsOwner), ...)` runs ask then record, passing the
+  signal and `ruling.output` positionally. The reviewer's input gains
+  `${slot.ownerDecisions.optional()}`; so does git.commitMessage's, so
+  a ruling can land in the commit message.
+- Worker raising, and the quick/complex variants: NOT in this task —
+  one consumer proves the arc; fan-out is a follow-up sized by what the
+  first live runs show.
+"""
+validation = """
+## Watch
+
+- Landing recipe: ts-build, `ctx traits build`, export
+  --update-skill-lock; trust approve is an owner step.
+- Live runs are owner steps; the audit reads the ledger.
+
+## Done when
+
+`ctx traits build` green; preview shows the summon point guarded on
+needs-owner and the owner-decisions slot wired into reviewer and commit
+inputs. A live run against a scratch task seeded with a contradiction:
+the reviewer emits on round one, the run parks `awaiting-owner` with the
+reason and question readable, the answer resumes it, the record carries
+one formatted entry, and the commit message cites the ruling. A live run
+with no contradiction never summons and is behaviorally unchanged.
+"""
+
+[relations]
+depends-on = ["0253.5"]

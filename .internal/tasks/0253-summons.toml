@@ -1,0 +1,80 @@
+schema-version = "0.2"
+key = "0253"
+title = "Summons: the trait asks, the run parks, the answer is evidence"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner design, 2026-08-24. The work lives in the children; do not dispatch
+this file.
+
+## The problem
+
+Traits have no way to ask the owner anything. The closest concept —
+the review verdict's `escalation: "needs-owner"` field — is RECORDED for
+triage and explicitly "does not stop the loop", which is the 47-round
+0251 run in one sentence: a reviewer whose only blocker needed an owner
+decision had no exit. Meanwhile `ask` exists end to end in the runtime
+(frame kind, readiness, ledger contract, submission path) but is
+unauthorable by 0236's ruling: hidden "until it is a surface someone is
+meant to reach for". This arc is that surface, and the recorded answer to
+0236's kept argument.
+
+## The design
+
+A step emits a schema-carrying SIGNAL (payload: reason + question). A
+block guarded on that signal runs an ask step: the run parks with outcome
+`awaiting-owner`, the question durable in the ledger. The owner answers —
+dashboard or CLI — and the answer lands as the ask's slot value: ordinary
+evidence, replay-visible. A scribe step appends the ruling to a persistent
+`owner-decisions` slot; the signal itself clears next iteration exactly as
+signals do today. Ephemeral signal, durable doctrine, nothing to remember
+to clear.
+
+## Rulings (owner, 2026-08-24)
+
+- Signals become the THIRD REFERENCE KIND beside ports and slots:
+  declared with a schema, field-typed by the same machinery as
+  schema-slots (`DeclaredSlotWithFields` -> signal analogue), and
+  interpolatable in templates. Interpolating a signal in an output prompt
+  IS the may-emit declaration.
+- A signal's fields may be read only inside a block guarded on that
+  signal — compose-time build error elsewhere.
+- Condition-first: `flow.when` + `condition.signal` (which exists today).
+  An `onEmit` handler form is reserved for the future, not built now.
+- Vocabulary: "emit"/"emitted", never "raise" or "emission" as a noun.
+- Step factories: `defineStep.x({...})` static or
+  `defineStep.x((refs) => ({...}))` parameterized; unannotated params
+  fall back to the reference union via the generic constraint (verified
+  against strict tsc); annotate only what needs field access.
+- Virtual slots: a step's `output: cdk.schema.text` is addressed only via
+  the step handle (`ruling.output`), lowering to an ordinary auto-named
+  slot. Named slot = shared state; virtual slot = local plumbing.
+- Accumulation by write mode — `slot.with(operation.Append)` — never by
+  read-format-rewrite.
+- Schema fields carry `description`, not `hint`.
+- An ask PARKS (`awaiting-owner`), never idles. Delivery upgrades ride
+  the center (0243.3-.5: pushed summons, auto-resume on answer) and
+  0252.3 (choice answers as buttons) as seams, not dependencies.
+- `needs-owner` ships as a toolkit builtin signal — opinionated,
+  optional, never required.
+
+## North star
+
+The `implement:basic` wiring the arc must make real, agreed verbatim in
+chat 2026-08-24: reviewer's output gains one line ("Separately: for any
+contradiction or question only the owner can answer, emit
+needs-owner."); a guarded block runs `summon.ask` (question from the
+payload's reason + question fields, text answer into a virtual slot) then
+`summon.record` (scribe appends one formatted entry to `owner-decisions`
+via Append); the reviewer and the commit-message step read
+`owner-decisions` optionally. One new named slot in the whole design.
+"""
+validation = """
+## Done when
+
+All children are done. A run whose reviewer needs an owner decision parks
+on round one with the question in the ledger, continues with the answer,
+and the commit message can cite what the owner decided.
+"""
+
+[relations]

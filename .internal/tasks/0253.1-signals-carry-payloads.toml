@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0253.1"
+title = "Signals carry payloads"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Core + runtime. Today a signal is a bare name: emitted by a step, guarded
+on by conditions, cleared per iteration. This slice gives it a value
+without touching its lifetime.
+
+## Shape
+
+- A signal declaration may carry a schema (like a schema-slot's). A
+  declaration without one behaves exactly as today — every existing
+  signal is untouched.
+- An emission of a schema'd signal carries a payload validated against
+  that schema at the boundary; an invalid payload is rejected and
+  surfaced the same way output-schema violations already are (same
+  retry path, no new mechanism).
+- The ledger records the emission with its payload on the emitting frame
+  — evidence, replay-visible.
+- Payload addressing: a frame inside a block guarded on the signal can
+  read the payload's fields (the interpolation target 0253.2 exposes).
+- Per-iteration clearing is UNCHANGED and gets pinned by a proof:
+  a payload emitted in iteration N is unreadable in iteration N+1.
+- The envelope renders emission guidance where the author interpolated
+  the signal in the output prompt — the same hint-travel mechanics the
+  envelope work landed for output hints, reused, so "how to emit" is
+  authored text in place, not runtime magic.
+"""
+validation = """
+## Watch
+
+- No behavior-freezing tests on committed trait content; scratch-fixture
+  canonicals throughout.
+- The model-view rendering of emission guidance moves digests; land it
+  with the static-view check regenerated, not suppressed.
+
+## Done when
+
+A scratch trait with a schema'd signal: a valid emission lands payload
+and all in the ledger frame; an invalid one is rejected through the
+existing violation path; a guarded frame reads the fields; iteration N+1
+cannot. A scratch trait with today's bare signal is byte-identical in
+canonical and ledger. `cargo test --workspace` green.
+"""
+
+[relations]

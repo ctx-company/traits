@@ -1,0 +1,38 @@
+schema-version = "0.2"
+key = "0253.5"
+title = "Toolkit: the needs-owner builtin, and the escalation reconcile"
+status = "ready"
+raised = "2026-08-24"
+content = """
+## Shape
+
+- `toolkit.signal.needsOwner`: builtin signal, schema
+  `{ reason, question }`, both fields with descriptions per the parent's
+  north star. Opinionated and OPTIONAL — a trait that never wires it
+  loses nothing.
+- The reconcile: the house already names this concept — the review
+  verdict's `escalation: "none" | "needs-owner"` field
+  (toolkit/src/schema.ts), whose doctrine says "recorded for owner
+  triage — it does not stop the loop". One concept, two postures, both
+  legitimate:
+  - a trait that WIRES a summon block: its reviewer doctrine says emit
+    the signal — the active path; escalation stays what it is on the
+    verdict (the record of why).
+  - a trait that wires nothing: escalation keeps today's passive
+    park-for-triage meaning, unchanged.
+  The doctrine text is amended to say exactly that — the field and the
+  signal are the passive and active faces of one concept, and the
+  "does not stop the loop" sentence gains its exit clause. No schema
+  change, no removed field.
+"""
+validation = """
+## Done when
+
+The builtin exports with the schema and typechecks in a consuming trait.
+The escalation doctrine text names the signal and the two postures; the
+verdict schema itself is unchanged (digest-stable for traits that do not
+adopt the new doctrine text). `just ts-test` green.
+"""
+
+[relations]
+depends-on = ["0253.4"]
