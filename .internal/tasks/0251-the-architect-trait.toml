@@ -1,0 +1,82 @@
+schema-version = "0.2"
+key = "0251"
+title = "The architect trait: a plan becomes an execution plan, in place"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner design 2026-08-24, second half of the pipeline. A new authored trait,
+sibling of the others under .ctx/traits/authored/architect/, that takes ONE
+board task and rewrites it in place from a well-detailed plan into an
+extra-detailed EXECUTION plan — nothing left to discussion, so implement's
+worker-reviewer loop converges instead of re-litigating scope every round.
+The contract ends up in a committed file neither the worker nor the
+reviewer wrote; the reviewer's blocker vocabulary shrinks to correctness
+and deviation-from-the-task.
+
+## Shape
+
+- Port: `task` — one task key/name/filename, same resolution as
+  implement's task port. One task per run (owner ruling).
+- Agents: the smart seat for every prompt step (owner ruling: "simply use
+  smart"); no seat overrides, no runtime.toml.
+- Steps:
+  1. GROUND — read the task file, its parent and siblings for context, and
+     the relevant code with tools.
+  2. REWRITE IN PLACE — same file, same key, no added header (owner
+     ruling): the task's own content/scope/validation BECOME the execution
+     plan. Every touched file repo-relative; every new symbol named with
+     its signature; every symbol that must cease to exist named; edit
+     ordering stated; every Done-when clause carries a runnable command.
+     Refine [[checks]] from them under the same rules plan's doctrine
+     states (commands must exist today, exit-code verdicts, expect guards,
+     cap 8, never fabricated). Flip `status = "draft"` -> `"ready"`.
+  3. CRITIC — one adversarial smart pass hunting OPEN-ENDEDNESS only,
+     never quality or taste: unnamed files, symbol-less instructions,
+     command-less Done-whens, and the mechanical hedge gate — "or",
+     "either", "consider", "optionally", "TBD", "as appropriate" in an
+     instruction are refusals sent back to the rewrite, not style notes.
+- Output: receipts — the task key, the file rewritten, and the status
+  flip, so the ledger records what was touched.
+
+## Boundaries
+
+- Architect never implements, never writes any file but the one task, and
+  never renumbers or re-keys. It may not change `key`, `raised`, or
+  `[relations]` except to correct a dependency the code reading proves
+  wrong — and says so in its receipt when it does.
+- implement stays untouched (owner ruling): its draft step already reads
+  the task file, and against an execution-plan body the in-run draft
+  collapses to near-verbatim adoption. If that still wastes a round, the
+  draft prompt tightening is a later one-liner, not this task.
+
+Also: a `just architect task` recipe beside the existing plan/refactor
+recipes, dispatching `ctx traits run architect --worktree --progress tui`.
+"""
+validation = """
+## Watch
+
+- 0243.1's lesson applies to the in-place edit: the task file is shared
+  state on the board; read-then-write with a content check (the write
+  refuses if the file changed since the ground step read it) rather than a
+  blind overwrite. Plan's board-snapshot cksum guard is the in-family
+  precedent.
+- The hedge gate is a refusal list inside the critic's prompt, not a
+  repo-side lint: no behavior-freezing test may pin the banned-word list
+  (frozen-inventory ruling).
+- New trait lands via the recipe: ts-build, `ctx traits build`, export
+  --update-skill-lock; trust approve is an owner step.
+
+## Done when
+
+`ctx traits build` green with the new trait; `ctx traits internal preview
+architect` composes all steps with the smart seat and the task port
+resolving. A live run against a scratch draft task rewrites that one file
+in place — status ready, every instruction naming files and symbols, every
+Done-when carrying a command, no hedge words in instructions — writes
+nothing else, and returns receipts naming the file. A second live run
+against a task whose file changed underneath refuses the write. Live runs
+are owner steps.
+"""
+
+[relations]
+depends-on = ["0250"]

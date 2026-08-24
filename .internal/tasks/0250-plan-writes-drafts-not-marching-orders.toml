@@ -1,0 +1,54 @@
+schema-version = "0.2"
+key = "0250"
+title = "Plan writes drafts, not marching orders"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner design 2026-08-24, first half of the plan -> architect -> implement
+pipeline: plan keeps splitting exactly as it does, but its output is a
+well-detailed PLAN, not an execution plan — and it is not dispatchable
+until the architect trait (0251) has rewritten it into one.
+
+Two changes, both in the plan family's shared sources:
+
+1. STATUS. `TASK_FORMAT_DOCTRINE`
+   (.ctx/traits/authored/plan/source/shared/resource.ts:10) hardcodes
+   `status = "ready"`. It becomes `status = "draft"` — draft means on the
+   board, visible, split, and NOT yet implementable. The architect flips
+   draft -> ready per task. No dispatch-side gate changes (owner ruling:
+   not needed now); the status is the communication.
+2. DETAIL RESTRAINT. The step prompts (distill.ts, split.ts,
+   writeSlices.ts) currently push each task to carry concrete files,
+   symbols, and validation gates. Grounding stays — a task still names the
+   modules and gates it is ABOUT — but the prompts stop reaching for
+   execution-level detail (exact symbols, signatures, edit ordering):
+   that is architect's job, done later against fresher code. Adjust the
+   doctrine's "fold the grounding" rule to say scope-level grounding,
+   never execution steps.
+
+All four variants (default, complex, quick, direct) write through the same
+doctrine, so the status change is one line covering all of them.
+"""
+validation = """
+## Watch
+
+- Trait-source edits move canonical digests: land via the recipe — ts-build,
+  `ctx traits build`, export --update-skill-lock — or check blocks on
+  projection-lock drift. Trust approve is an owner step.
+- `direct` formats a described task near-verbatim; it too now emits draft.
+  If the owner wants a jotted task immediately ready, that is a later
+  variant decision, not silently preserved behavior.
+- The [[checks]] derivation rules stay untouched: a draft task may already
+  carry checks; architect may refine them.
+
+## Done when
+
+`ctx traits build` is green and the built plan variants' canonicals show
+`status = "draft"` in the doctrine text. A live plan run writing a scratch
+board produces files with `status = "draft"` and content whose grounding
+names modules and gates but no symbol-level edit instructions — verified on
+the run's own output, not by a committed fixture. Live run is an owner
+step.
+"""
+
+[relations]
