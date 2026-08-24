@@ -900,7 +900,8 @@ pub fn current_repo_run_inventory() -> crate::Result<Vec<RunInventoryRow>> {
 pub fn current_repo_run_inventory_cached(
     cache: &mut InventoryCache,
 ) -> crate::Result<Vec<RunInventoryRow>> {
-    run_inventory_from_paths(session_store_paths(None)?, cache)
+    let root = default_session_store()?;
+    run_inventory_from_paths(&root, session_store_paths(Some(root.as_str()))?, cache)
 }
 
 /// Build inventory rows from an already-resolved set of ledger paths —
@@ -911,11 +912,41 @@ pub fn current_repo_run_inventory_cached(
 /// (the dashboard) owns and reuses one across calls so a cache hit is a
 /// refcount bump instead of a full re-parse.
 pub fn run_inventory_from_paths(
+    root: &Utf8Path,
     paths: Vec<Utf8PathBuf>,
     cache: &mut InventoryCache,
 ) -> crate::Result<Vec<RunInventoryRow>> {
+    run_inventory_from_paths_with_reader(root, paths, cache, |path| match read_run_session(path) {
+        Ok(session) => {
+            let latest_parked_merge = session
+                .provenance
+                .merge_frames
+                .last()
+                .filter(|frame| {
+                    frame.status == ctx_traits_core::procedure::session::MergeStatus::Parked
+                })
+                .cloned();
+            InventoryOutcome::Readable {
+                session: Arc::new(session),
+                latest_parked_merge,
+            }
+        }
+        Err(error) => InventoryOutcome::Unreadable {
+            error: error.to_string(),
+        },
+    })
+}
+
+fn run_inventory_from_paths_with_reader(
+    root: &Utf8Path,
+    paths: Vec<Utf8PathBuf>,
+    cache: &mut InventoryCache,
+    mut read: impl FnMut(&Utf8Path) -> InventoryOutcome,
+) -> crate::Result<Vec<RunInventoryRow>> {
     let present: std::collections::HashSet<_> = paths.iter().cloned().collect();
-    cache.entries.retain(|path, _| present.contains(path));
+    cache
+        .entries
+        .retain(|path, _| !path.starts_with(root) || present.contains(path));
     let mut rows = Vec::new();
     for path in paths {
         let session_id = path
@@ -935,26 +966,7 @@ pub fn run_inventory_from_paths(
                 cache.entries.get(&path).expect("cache hit").outcome.clone()
             }
             _ => {
-                let status = match read_run_session(&path) {
-                    Ok(session) => {
-                        let latest_parked_merge = session
-                            .provenance
-                            .merge_frames
-                            .last()
-                            .filter(|frame| {
-                                frame.status
-                                    == ctx_traits_core::procedure::session::MergeStatus::Parked
-                            })
-                            .cloned();
-                        InventoryOutcome::Readable {
-                            session: Arc::new(session),
-                            latest_parked_merge,
-                        }
-                    }
-                    Err(error) => InventoryOutcome::Unreadable {
-                        error: error.to_string(),
-                    },
-                };
+                let status = read(&path);
                 if let Some(modified) = modified {
                     cache.entries.insert(
                         path.clone(),
@@ -1008,7 +1020,8 @@ pub fn machine_wide_run_inventory_cached(
     let mut entries = Vec::new();
     for repo in crate::state::read_repo_index()? {
         let root = crate::state::global_runs_root(&repo.key)?;
-        let rows = run_inventory_from_paths(session_store_paths(Some(root.as_str()))?, cache)?;
+        let rows =
+            run_inventory_from_paths(&root, session_store_paths(Some(root.as_str()))?, cache)?;
         entries.push(MachineRunInventoryEntry {
             repo_key: repo.key,
             repo_path: repo.path,
@@ -1620,6 +1633,57 @@ mod short_session_display_tests {
         let resolved =
             resolve_session_path(&short, Some(store.as_str())).expect("resolves uniquely");
         assert_eq!(resolved, store.join(format!("{id}.json")));
+    }
+}
+
+#[cfg(test)]
+mod inventory_cache_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn scratch_root(name: &str) -> Utf8PathBuf {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is UTF-8")
+            .join(format!(
+                "ctx-run-inventory-cache-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+        std::fs::create_dir_all(root.as_std_path()).expect("create scratch root");
+        root
+    }
+
+    #[test]
+    fn inventory_cache_evicts_only_the_scanned_root() {
+        let root_a = scratch_root("a");
+        let root_b = scratch_root("b");
+        let ledger_a = root_a.join("a.json");
+        let ledger_b = root_b.join("b.json");
+        std::fs::write(ledger_a.as_std_path(), "a").expect("write ledger a");
+        std::fs::write(ledger_b.as_std_path(), "b").expect("write ledger b");
+        let reads = Arc::new(Mutex::new(Vec::new()));
+        let mut cache = InventoryCache::new();
+        let mut scan = |root: &Utf8Path, paths: Vec<Utf8PathBuf>| {
+            let reads = Arc::clone(&reads);
+            run_inventory_from_paths_with_reader(root, paths, &mut cache, move |path| {
+                reads.lock().expect("reads lock").push(path.to_path_buf());
+                InventoryOutcome::Unreadable {
+                    error: "fixture".to_string(),
+                }
+            })
+            .expect("scan inventory")
+        };
+
+        scan(&root_a, vec![ledger_a.clone()]);
+        scan(&root_b, vec![ledger_b.clone()]);
+        scan(&root_a, vec![ledger_a.clone()]);
+        scan(&root_b, vec![ledger_b.clone()]);
+        assert_eq!(reads.lock().expect("reads lock").len(), 2);
+
+        scan(&root_a, Vec::new());
+        scan(&root_b, vec![ledger_b]);
+        assert_eq!(reads.lock().expect("reads lock").len(), 2);
     }
 }
 

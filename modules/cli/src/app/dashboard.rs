@@ -717,7 +717,7 @@ struct AttachedView {
 /// Identity the renderer asks the IO worker to refresh. The renderer only
 /// creates this from its selected or attached row; all filesystem work remains
 /// on the worker thread.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct SessionPreviewRequest {
     session_id: String,
     ledger_path: camino::Utf8PathBuf,
@@ -1105,6 +1105,7 @@ struct State {
     /// structs each carried (P506 §3.7).
     pane_scrolls: PaneScrolls,
     session_preview: Option<AttachedView>,
+    preview_pending: bool,
     /// P081: a live SESSIONS row's Enter/`s`(resume) request, recorded here
     /// and picked up by `run_with_initial_session`'s own loop (never acted on
     /// inside `handle_key` itself — the attach loop tears down and rebuilds
@@ -1220,7 +1221,6 @@ struct DashboardSnapshot {
     trust: Vec<TrustRow>,
     run_sightings: Vec<RunSightingRow>,
     reload_duration: Option<Duration>,
-    session_preview: Option<AttachedView>,
 }
 
 impl DashboardSnapshot {
@@ -1232,7 +1232,6 @@ impl DashboardSnapshot {
             trust: state.trust.clone(),
             run_sightings: state.run_sightings.clone(),
             reload_duration: state.reload_duration,
-            session_preview: state.session_preview.clone(),
         }
     }
 }
@@ -1314,6 +1313,7 @@ impl State {
             last_pane_layout: PaneLayoutResult::default(),
             pane_scrolls: PaneScrolls::new(),
             session_preview: None,
+            preview_pending: false,
             attach_request: None,
             session_progress_follow: false,
             session_journey_follow: false,
@@ -1394,6 +1394,7 @@ impl State {
     }
 
     fn move_selection(&mut self, delta: i32) {
+        let previous_preview = self.session_preview_request();
         // Clamp against the list pane's last-rendered height so `clamp`'s
         // sticky-window rule applies at key time: moving within the window
         // only moves the selection, and the offset grows/shrinks only when
@@ -1410,12 +1411,21 @@ impl State {
         // snap the list back to the run-view handoff target.
         if self.screen == Screen::Sessions {
             self.initial_session_id = None;
+            if self.session_preview_request() != previous_preview {
+                self.session_preview = None;
+                self.set_session_follow_all(false);
+                self.dispatch_session_preview();
+            }
         }
     }
 
     fn reload(&mut self) {
-        if let Some(worker) = &self.worker {
-            worker.refresh(self.all_repos, self.screen, self.session_preview_request());
+        if self.worker.is_some() {
+            self.dispatch_session_preview();
+            self.worker
+                .as_ref()
+                .expect("worker was present")
+                .refresh(self.all_repos, self.screen);
             self.loading = true;
         }
     }
@@ -1436,11 +1446,26 @@ impl State {
         })
     }
 
+    fn dispatch_session_preview(&mut self) {
+        let request = self.session_preview_request();
+        let Some(request) = request else {
+            self.preview_pending = false;
+            return;
+        };
+        if let Some(worker) = &self.worker {
+            worker.preview(request);
+            self.preview_pending = true;
+        }
+    }
+
     fn apply_snapshots(&mut self) {
         let Some(worker) = &self.worker else {
             return;
         };
-        for result in worker.explanation_results() {
+        let explanation_results = worker.explanation_results();
+        let preview_results = worker.preview_results();
+        let refresh_results = worker.refresh_results();
+        for result in explanation_results {
             if self.traits.get(self.selected()).is_some_and(|row| {
                 row.id == result.trait_id && row.canonical_digest == result.canonical_digest
             }) {
@@ -1465,7 +1490,27 @@ impl State {
                 ));
             }
         }
-        self.apply_refresh_results(worker.refresh_results());
+        self.apply_preview_results(preview_results);
+        self.apply_refresh_results(refresh_results);
+    }
+
+    fn apply_preview_results(&mut self, results: impl IntoIterator<Item = worker::PreviewResult>) {
+        for preview in results {
+            if self.session_preview_request().is_some_and(|request| {
+                request.session_id == preview.session_id
+                    && request.ledger_path == preview.ledger_path
+                    && request.run_id == preview.run_id
+            }) {
+                follow_session_preview(
+                    state_pane_scroll_rows(self, PANE_SESSIONS_PROGRESS),
+                    self.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
+                    self.session_progress_follow,
+                    preview.progress_lines.len(),
+                );
+                self.session_preview = Some(preview);
+                self.preview_pending = false;
+            }
+        }
     }
 
     fn apply_refresh_results(&mut self, results: impl IntoIterator<Item = worker::RefreshResult>) {
@@ -1492,6 +1537,8 @@ impl State {
 
     fn apply_snapshot(&mut self, snapshot: &DashboardSnapshot) {
         let selected = selected_visible_row(self);
+        let had_selected = selected.is_some();
+        let previous_preview = self.session_preview_request();
         self.sessions = snapshot.sessions.clone();
         self.traits = snapshot.traits.clone();
         self.merges = snapshot.merges.clone();
@@ -1504,6 +1551,15 @@ impl State {
         rebuild_visible_sessions(self);
         restore_visible_selection(self, selected);
         resolve_initial_session(self);
+        if !had_selected
+            && selected_session(self).is_none()
+            && let Some(index) = self
+                .sessions_visible
+                .iter()
+                .position(|row| matches!(row, VisibleRow::Session(_)))
+        {
+            self.list_sessions.set_selected(index);
+        }
         rebuild_visible_trust(self);
         let trust_ids: Vec<String> = self
             .trust
@@ -1517,21 +1573,14 @@ impl State {
         // reload path has to keep re-pointing at (see [`AttachRequest`]) — the
         // list-visible preview always tracks the current selection.
         if self.screen == Screen::Sessions {
-            if self.session_preview.as_ref().is_some_and(|preview| {
-                selected_session(self).is_none_or(|row| row.session_id != preview.session_id)
-            }) {
+            let current_preview = self.session_preview_request();
+            if current_preview != previous_preview {
                 self.session_preview = None;
+                self.set_session_follow_all(false);
+                self.dispatch_session_preview();
             }
-            if let Some(preview) = &snapshot.session_preview
-                && session_preview_matches_current(self, &preview.session_id)
-            {
-                follow_session_preview(
-                    state_pane_scroll_rows(self, PANE_SESSIONS_PROGRESS),
-                    self.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
-                    self.session_progress_follow,
-                    preview.progress_lines.len(),
-                );
-                self.session_preview = Some(preview.clone());
+            if current_preview.is_none() {
+                self.preview_pending = false;
             }
         }
         // The session-inventory overlay (in-flight/parked) refreshes on this
@@ -3092,7 +3141,7 @@ fn apply_selection_move(state: &mut State, delta: i32) {
     state.move_selection(delta);
     state.trait_explanation = None;
     match state.screen {
-        Screen::Sessions => refresh_preview_for_selection(state),
+        Screen::Sessions => {}
         Screen::Traits => refresh_trait_preview_for_selection(state),
         Screen::Merges => refresh_merge_preview_for_selection(state),
         Screen::Trust => refresh_trust_preview_for_selection(state),
@@ -3289,20 +3338,6 @@ fn clamp_visible_pane_scroll(state: &mut State, pane_id: PaneId) {
 // ---------------------------------------------------------------------------
 // SESSIONS: preview/attach reconstruction (P469 §3.2)
 // ---------------------------------------------------------------------------
-
-/// Rebuilds (or reuses) [`State::session_preview`] for the currently
-/// selected SESSIONS row. A selection change always rebuilds (a different
-/// session_id is a different cache key); an unchanged selection only
-/// rebuilds when the ledger's `state_digest` moved since the last build
-/// (checked by [`refresh_attached_view`]) — so the 2s reload tick never
-/// re-parses a trait package for a session that has not advanced.
-fn refresh_preview_for_selection(state: &mut State) {
-    // Preview reads are worker-owned. Do not show a prior row while the new
-    // selected row's request is in flight.
-    state.session_preview = None;
-    state.set_session_follow_all(false);
-    state.reload();
-}
 
 fn labeled_dim_line(text: &str) -> tui::Line {
     let mut line = tui::Line::blank();
@@ -3626,10 +3661,6 @@ fn mark_view_unreadable(view: &mut AttachedView, error: String) {
     view.trait_degraded = Some(error);
     view.activity_degraded = None;
     view.activity_available = false;
-}
-
-fn session_preview_matches_current(state: &State, session_id: &str) -> bool {
-    selected_session(state).is_some_and(|row| row.session_id == session_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -8510,7 +8541,7 @@ fn footer_line(state: &State) -> Paragraph<'static> {
                 .err()
                 .map(|message| explanation_task_text(message, started.elapsed()))
         });
-    let task = if state.loading && !state.has_snapshot {
+    let task = if (state.loading && !state.has_snapshot) || state.preview_pending {
         Some("loading...".to_string())
     } else if let Some(error) = state.refresh_error.as_deref() {
         Some(format!("stale: {error}"))
@@ -8808,6 +8839,89 @@ mod tests {
 
         state.has_snapshot = true;
         assert!(!format!("{:?}", footer_line(&state)).contains("loading..."));
+
+        state.preview_pending = true;
+        assert!(format!("{:?}", footer_line(&state)).contains("loading..."));
+    }
+
+    #[test]
+    fn first_snapshot_dispatches_its_selected_preview() {
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker::Handle::new());
+
+        state.apply_snapshot(&snapshot_with_sessions(vec![row_with_id(
+            "selected",
+            SessionClass::Live,
+        )]));
+
+        assert!(state.preview_pending);
+    }
+
+    #[test]
+    fn session_movement_queues_preview_without_inventory_loading() {
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker::Handle::new());
+        state.sessions = vec![
+            row_with_id("first", SessionClass::Live),
+            row_with_id("second", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+
+        state.move_selection(1);
+
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("second")
+        );
+        assert!(state.preview_pending);
+        assert!(!state.loading);
+    }
+
+    #[test]
+    fn stale_preview_does_not_clear_pending_but_matching_preview_installs() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            row_with_id("first", SessionClass::Live),
+            row_with_id("second", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(2);
+        state.preview_pending = true;
+
+        state.apply_preview_results([attached_view_for("first")]);
+        assert!(state.session_preview.is_none());
+        assert!(state.preview_pending);
+
+        state.apply_preview_results([attached_view_for("second")]);
+        assert_eq!(
+            state
+                .session_preview
+                .as_ref()
+                .map(|view| view.session_id.as_str()),
+            Some("second")
+        );
+        assert!(!state.preview_pending);
+    }
+
+    #[test]
+    fn refresh_snapshot_cannot_clobber_applied_preview() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.session_preview = Some(attached_view_for("selected"));
+        let snapshot = snapshot_with_sessions(vec![row_with_id("selected", SessionClass::Live)]);
+
+        state.apply_snapshot(&snapshot);
+
+        assert_eq!(
+            state
+                .session_preview
+                .as_ref()
+                .map(|view| view.session_id.as_str()),
+            Some("selected")
+        );
     }
 
     #[test]
@@ -9047,8 +9161,20 @@ mod tests {
         rebuild_visible_sessions(&mut state);
         state.list_sessions.set_selected(2);
 
-        assert!(!session_preview_matches_current(&state, "A"));
-        assert!(session_preview_matches_current(&state, "B"));
+        assert_ne!(
+            state
+                .session_preview_request()
+                .as_ref()
+                .map(|request| &request.session_id),
+            Some(&"A".to_string())
+        );
+        assert_eq!(
+            state
+                .session_preview_request()
+                .as_ref()
+                .map(|request| &request.session_id),
+            Some(&"B".to_string())
+        );
     }
 
     #[test]
