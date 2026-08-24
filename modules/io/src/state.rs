@@ -345,8 +345,14 @@ pub fn legacy_global_family_root(family: &str) -> crate::Result<Utf8PathBuf> {
 /// migration moves.
 pub const GLOBAL_STATE_FAMILIES: &[&str] = &["runs", "debug", "cache"];
 
+/// The shared machine-wide runs family. Per-repository stores are direct
+/// children of this root; derived machine-wide indexes belong here too.
+pub fn global_runs_family_root() -> crate::Result<Utf8PathBuf> {
+    Ok(global_trait_root()?.join("runs"))
+}
+
 pub fn global_runs_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
-    Ok(global_trait_root()?.join("runs").join(repo_key))
+    Ok(global_runs_family_root()?.join(repo_key))
 }
 
 pub fn global_debug_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
