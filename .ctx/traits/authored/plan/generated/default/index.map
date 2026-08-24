@@ -4,6 +4,11 @@
     "start": 3,
     "end": 3
   },
+  "agent:smart-2": {
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 4,
+    "end": 4
+  },
   "port:duration": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 17,
@@ -11,8 +16,8 @@
   },
   "port:final-keys": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 165,
-    "end": 165
+    "start": 170,
+    "end": 170
   },
   "port:task": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -21,8 +26,8 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 159,
-    "end": 159
+    "start": 164,
+    "end": 164
   },
   "prompt:ingest": {
     "file": ".ctx/traits/authored/plan/source/shared/step/ingest.ts",
@@ -34,6 +39,16 @@
     "start": 6,
     "end": 6
   },
+  "prompt:review-the-board": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/review.ts",
+    "start": 16,
+    "end": 16
+  },
+  "prompt:revise-the-board": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/review.ts",
+    "start": 37,
+    "end": 37
+  },
   "prompt:split": {
     "file": ".ctx/traits/authored/plan/source/shared/step/split.ts",
     "start": 36,
@@ -44,10 +59,25 @@
     "start": 46,
     "end": 46
   },
+  "schema:blocker": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 125,
+    "end": 125
+  },
+  "schema:blocker-step": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 91,
+    "end": 91
+  },
   "schema:board-untouched": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 112,
     "end": 112
+  },
+  "schema:owner-item": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 238,
+    "end": 238
   },
   "schema:plan-slice": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -58,6 +88,11 @@
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 44,
     "end": 44
+  },
+  "schema:review-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 322,
+    "end": 322
   },
   "schema:work-item": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -73,6 +108,11 @@
     "file": ".ctx/traits/authored/plan/source/shared/step/writeSlices.ts",
     "start": 33,
     "end": 33
+  },
+  "sequence:ctx-branch-arm-s-18-simple-review-body-16-apply-the-review-then/revise-the-board": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/review.ts",
+    "start": 36,
+    "end": 36
   },
   "sequence:planning-body/split": {
     "file": ".ctx/traits/authored/plan/source/shared/step/split.ts",
@@ -93,6 +133,11 @@
     "file": ".ctx/traits/authored/plan/source/shared/step/writeSlices.ts",
     "start": 22,
     "end": 22
+  },
+  "sequence:procedure/commit-tasks": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/commit.ts",
+    "start": 20,
+    "end": 20
   },
   "sequence:procedure/ingest": {
     "file": ".ctx/traits/authored/plan/source/shared/step/ingest.ts",
@@ -124,10 +169,25 @@
     "start": 38,
     "end": 38
   },
+  "sequence:procedure/simple-review": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/review.ts",
+    "start": 68,
+    "end": 68
+  },
   "sequence:procedure/write-each-slice": {
     "file": ".ctx/traits/authored/plan/source/shared/step/writeSlices.ts",
     "start": 43,
     "end": 43
+  },
+  "sequence:simple-review-body/apply-the-review": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/review.ts",
+    "start": 35,
+    "end": 35
+  },
+  "sequence:simple-review-body/review-the-board": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/review.ts",
+    "start": 15,
+    "end": 15
   },
   "sequence:write-each-slice-body/write-the-slice": {
     "file": ".ctx/traits/authored/plan/source/shared/step/writeSlices.ts",
@@ -144,6 +204,11 @@
     "start": 105,
     "end": 105
   },
+  "slot:commit-log": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 128,
+    "end": 128
+  },
   "slot:done-criteria": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 100,
@@ -151,8 +216,8 @@
   },
   "slot:grounding": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 143,
-    "end": 143
+    "start": 148,
+    "end": 148
   },
   "slot:key-map": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -161,18 +226,28 @@
   },
   "slot:raised-date": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 128,
-    "end": 128
+    "start": 133,
+    "end": 133
   },
   "slot:receipts": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 138,
-    "end": 138
+    "start": 143,
+    "end": 143
+  },
+  "slot:review-verdict": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 155,
+    "end": 155
+  },
+  "slot:revision-log": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 160,
+    "end": 160
   },
   "slot:slice-plan": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 132,
-    "end": 132
+    "start": 137,
+    "end": 137
   },
   "slot:work-items": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",

@@ -125,6 +125,11 @@ export const keyMap = slot.text({
   description:
     'The renumber step\'s mapping, one "KEY<n> -> NNNN" line per assigned key — derived mechanically from the live board at the end of the run, never agent arithmetic.',
 });
+export const commitLog = slot.text({
+  id: "commit-log",
+  description:
+    "The board-commit step's account: git's own output for the commit that staged and recorded the written task files, so a worktree run has a commit for merge to adopt.",
+});
 export const raisedDate = slot.text({
   id: "raised-date",
   description: "Today's date (YYYY-MM-DD), derived by a command step — the Raised stamp every written task carries.",

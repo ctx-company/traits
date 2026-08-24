@@ -17,14 +17,18 @@ export default function () {
     description:
       "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — duration-targeted tasks (default 10-15 minutes) shaped as the work demands — bare tasks or charters with children — with typed relations, the format the board dispatch machinery actually resolves.",
     procedureDescription:
-      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a symbolic-keyed typed slice plan shaped as the work demands, write each slice's TaskDocument TOML files in its own frame, and assign final board keys mechanically from the live board.",
+      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a symbolic-keyed typed slice plan shaped as the work demands, write each slice's TaskDocument TOML files in its own frame, run one bounded independent review pass, then assign final board keys mechanically from the live board and commit the written files.",
   });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
 
   const smart1 = shared.agent.smart1(
-    "Strong model: extracts the source contract, grounds the work in the codebase, plans the slices, and writes each slice's task files in its own frame.",
-    "Contract + grounding + planning + composition role.",
+    "Strong model: extracts the source contract, grounds the work in the codebase, plans the slices, writes each slice's task files in its own frame, and applies review fixes.",
+    "Contract + grounding + planning + composition + revision role.",
+  );
+  const smart2 = shared.agent.smart2(
+    "Independent strong model: one bounded review pass of the written board, separately from smart-1.",
+    "Simple review role.",
   );
 
   shared.step.derive.boardSnapshotStep();
@@ -33,7 +37,9 @@ export default function () {
   shared.step.refine.task(smart1);
   shared.step.split.slices(smart1);
   shared.step.writeSlices.tasks(smart1, shared.step.split.MAX_SLICES);
+  shared.step.review.simple(smart2, smart1);
   shared.step.renumber.finalKeysStep();
+  shared.step.commit.boardCommitStep();
 
   return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };
 }
