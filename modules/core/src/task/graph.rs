@@ -117,12 +117,17 @@ pub fn blockers_of<'a>(
 /// A document with children derives its status from them (done only when
 /// every child is closed) regardless of its own stored status — the
 /// 0010/0051 pattern of a parent with no stored status at all is simply the
-/// common case of this rule. A document with no children derives `Blocked`
-/// when any `depends-on` target is not `Done`, otherwise its stored status
-/// (or `Ready` if none is stored). A missing key, or a status recursion
-/// that revisits a key already on the call stack (an already-refused-shape
-/// cycle surviving in stored data), derives to `Ready` defensively rather
-/// than looping.
+/// common case of this rule. A document with no children keeps a stored
+/// closed status (`done`/`cancelled`) UNCONDITIONALLY — a closed task is
+/// history, and history never re-derives to blocked because a dependency
+/// reopened or was archived open (one archived-but-ready file in ctx-notify
+/// cascaded `blocked` through dozens of stored-done tasks and made queue
+/// expansion dispatch an archived task, 2026-08-24). An OPEN leaf derives
+/// `Blocked` when any `depends-on` target is not `Done`, otherwise its
+/// stored status (or `Ready` if none is stored). A missing key, or a status
+/// recursion that revisits a key already on the call stack (an
+/// already-refused-shape cycle surviving in stored data), derives to
+/// `Ready` defensively rather than looping.
 pub fn derived_status(documents: &BTreeMap<String, TaskDocument>, key: &str) -> DerivedStatus {
     derived_status_inner(documents, key, &mut HashSet::new())
 }
@@ -149,19 +154,21 @@ fn derived_status_inner(
             DerivedStatus::Ready
         }
     } else {
-        let blocked = doc.relations.depends_on.iter().any(|dep| {
-            !matches!(
-                derived_status_inner(documents, dep, visiting),
-                DerivedStatus::Done
-            )
-        });
-        if blocked {
-            DerivedStatus::Blocked
-        } else {
-            match doc.status {
-                Some(TaskStatus::Done) => DerivedStatus::Done,
-                Some(TaskStatus::Cancelled) => DerivedStatus::Cancelled,
-                Some(TaskStatus::Ready) | None => DerivedStatus::Ready,
+        match doc.status {
+            Some(TaskStatus::Done) => DerivedStatus::Done,
+            Some(TaskStatus::Cancelled) => DerivedStatus::Cancelled,
+            Some(TaskStatus::Ready) | None => {
+                let blocked = doc.relations.depends_on.iter().any(|dep| {
+                    !matches!(
+                        derived_status_inner(documents, dep, visiting),
+                        DerivedStatus::Done
+                    )
+                });
+                if blocked {
+                    DerivedStatus::Blocked
+                } else {
+                    DerivedStatus::Ready
+                }
             }
         }
     };
@@ -399,6 +406,38 @@ mod tests {
         let documents = snapshot(vec![dependency, dependent]);
 
         assert_eq!(derived_status(&documents, "0002"), DerivedStatus::Ready);
+    }
+
+    #[test]
+    fn stored_closed_status_wins_over_open_dependency() {
+        // History never reopens: a done/cancelled task keeps its stored
+        // status even when a dependency is not done (the ctx-notify
+        // 2026-08-24 cascade — one open dependency re-derived dozens of
+        // stored-done tasks to blocked, and queue expansion dispatched an
+        // archived task).
+        let dependency = doc("0001", Some(TaskStatus::Ready));
+        let mut done = doc("0002", Some(TaskStatus::Done));
+        done.relations.depends_on = vec!["0001".to_string()];
+        let mut cancelled = doc("0003", Some(TaskStatus::Cancelled));
+        cancelled.relations.depends_on = vec!["0001".to_string()];
+        let documents = snapshot(vec![dependency, done, cancelled]);
+
+        assert_eq!(derived_status(&documents, "0002"), DerivedStatus::Done);
+        assert_eq!(derived_status(&documents, "0003"), DerivedStatus::Cancelled);
+    }
+
+    #[test]
+    fn one_open_task_does_not_cascade_through_a_closed_chain() {
+        // The transitive shape of the same incident: open <- done <- done.
+        // The tail of the chain must derive done, not blocked-by-proxy.
+        let open = doc("0001", Some(TaskStatus::Ready));
+        let mut mid = doc("0002", Some(TaskStatus::Done));
+        mid.relations.depends_on = vec!["0001".to_string()];
+        let mut tail = doc("0003", Some(TaskStatus::Done));
+        tail.relations.depends_on = vec!["0002".to_string()];
+        let documents = snapshot(vec![open, mid, tail]);
+
+        assert_eq!(derived_status(&documents, "0003"), DerivedStatus::Done);
     }
 
     #[test]
