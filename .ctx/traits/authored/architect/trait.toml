@@ -1,0 +1,25 @@
+[package]
+id = "architect"
+version = "0.1.0"
+name = "Architect"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant]
+
+[family.variant.default]
+path = "generated/default/index.toml"
+aliases = ["architect-default"]
+
+[publish]
+name = "@ctx-traits/architect"
+access = "public"
+
+[budget]
+max-frames = 20
+frame-seconds = 1200
+total-seconds = 3600
+max-retries = 3
+idle-seconds = 1200

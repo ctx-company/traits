@@ -25,6 +25,7 @@ export {
   scribeRole,
   SMART_VARIANT_DOCTRINE,
   STRICT_VARIANT_DOCTRINE,
+  TASK_CHECK_DOCTRINE,
   workerRole,
 } from "@ctx-traits/toolkit";
 export type { BlockerStepValue, BlockerValue, ReviewVerdictValue } from "@ctx-traits/toolkit";

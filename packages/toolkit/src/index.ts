@@ -18,6 +18,7 @@ export {
   SCOPE_SPLIT_DOCTRINE,
   SMART_VARIANT_DOCTRINE,
   STRICT_VARIANT_DOCTRINE,
+  TASK_CHECK_DOCTRINE,
 } from "./data.ts";
 export {
   blockerSchema,

@@ -195,6 +195,9 @@ research-deep topic:
 plan task:
     ctx traits run plan --worktree --progress tui -- --task={{quote(task)}}
 
+architect task:
+    ctx traits run architect --worktree --progress tui -- --task={{quote(task)}}
+
 refactor target:
     ctx traits run refactor --worktree --progress tui -- --target={{quote(target)}}
 

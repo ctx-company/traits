@@ -7,6 +7,16 @@
 export const SCOPE_SPLIT_DOCTRINE = `Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the task into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the task reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.`;
 
 /**
+ * The task-board check contract shared by plan, which creates draft tasks,
+ * and architect, which makes one draft executable. Pure static text so both
+ * families compose the same rules without independently maintained copies.
+ */
+export const TASK_CHECK_DOCTRINE = `- When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
+- Never fabricate a check: if no existing command verifies the Done-when, or verification is judgment-based, declare no checks — a wrong check that passes is worse than none; check-less tasks fall to the configured [tasks] auto-close policy.
+- At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
+- Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.`;
+
+/**
  * Private paragraphs composed into the public doctrines below. `RECURRENCE_VERIFICATION`,
  * `BLOCKER_REPORT_FORMAT`, and `STATUS_ADVISORY_SPLIT` are shared verbatim by every doctrine so
  * the reviewer contracts cannot silently diverge on them. The consultation and blocker-definition
