@@ -38,6 +38,17 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
+id = "duration"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = 'Target duration of one child task, e.g. "10-15 minutes" or "~45m". Slicing and review both judge tasks against this.'
+title = "Task Duration Target"
+
+[port.default]
+value = "10-15 minutes"
+
+[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -120,8 +131,8 @@ Turn the described work directly into TaskDocument TOML task files on the board 
 
 Rules:
 - A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
-- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
-- Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
+- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — "NNNN.10", "NNNN.11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9).
+- Size every child task to the run's requested duration target (default: roughly 10-15 minutes of focused agent work) — small enough to finish in one short pass at that scale; split anything larger into more children.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -129,18 +140,22 @@ Rules:
 - At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
 - Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
 - Never overwrite or renumber an existing file; keys are assigned once from the derived next-free key and are final.
-            Key the first file {slot:next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks; a single bare-key task when it does not). Stamp raised = {slot:raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
+            Key the first file {slot:next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks — ordinals continue ".10", ".11", ..., never zero-padded; a single bare-key task when it does not). Size every task to roughly {port:duration} of focused agent work. Stamp raised = {slot:raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
             Do not implement anything. Return the receipts: one entry per charter (or standalone task) naming every file written.'''
 input = [
     "port:task",
     "slot:next-key",
     "slot:raised-date",
+    "port:duration",
 ]
 output = ["slot:receipts"]
 
 [procedure]
 description = "Derive the next board key and date, then distill the described work — grounded by the frame's own repository reading — straight into TaskDocument TOML files on the board."
-input = ["port:task"]
+input = [
+    "port:duration",
+    "port:task",
+]
 output = ["port:written-files"]
 
 [[procedure.sequence]]
@@ -176,5 +191,6 @@ input = [
     "port:task",
     "slot:next-key",
     "slot:raised-date",
+    "port:duration",
 ]
 output = ["slot:receipts"]

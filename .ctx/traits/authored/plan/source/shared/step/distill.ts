@@ -1,7 +1,7 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
 import { input } from "@ctx-traits/cdk";
 
-import { nextKey, raisedDate, receipts, taskInput } from "../data.ts";
+import { durationTarget, nextKey, raisedDate, receipts, taskInput } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 /**
@@ -16,9 +16,9 @@ export function tasks(agent: AgentHandle) {
       `Turn the described work directly into TaskDocument TOML task files on the board — skip deriving separate grounding notes, but read the relevant parts of the repository with your tools so every task is grounded in this codebase's affected modules or areas, applicable constraints, and existing validation gates. Do not solicit or prescribe exact symbols, signatures, edits, or edit sequencing; architect makes those execution-level decisions later.
             The work, as described: {task}
             ${TASK_FORMAT_DOCTRINE}
-            Key the first file {next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks; a single bare-key task when it does not). Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
+            Key the first file {next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks — ordinals continue ".10", ".11", ..., never zero-padded; a single bare-key task when it does not). Size every task to roughly {duration} of focused agent work. Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
             Do not implement anything. Return the receipts: one entry per charter (or standalone task) naming every file written.`,
-      { task: taskInput, "next-key": nextKey, "raised-date": raisedDate },
+      { task: taskInput, "next-key": nextKey, "raised-date": raisedDate, duration: durationTarget },
     ),
     output: receipts,
   });

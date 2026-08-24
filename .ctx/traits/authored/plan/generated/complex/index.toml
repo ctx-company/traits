@@ -39,6 +39,17 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
+id = "duration"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = 'Target duration of one child task, e.g. "10-15 minutes" or "~45m". Slicing and review both judge tasks against this.'
+title = "Task Duration Target"
+
+[port.default]
+value = "10-15 minutes"
+
+[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -247,7 +258,7 @@ description = "Final board key of the slice's parent charter task: bare zero-pad
 [schema.fields.tasks]
 schema = "[schema:plan-task]"
 required = true
-description = """The slice's child tasks in dependency order, keys "NNNN.1", "NNNN.2", ..."""
+description = """The slice's child tasks in dependency order, keys "NNNN.1", "NNNN.2", ... continuing ".10", ".11" beyond nine."""
 
 [schema.fields.title]
 schema = "schema:text"
@@ -266,12 +277,12 @@ description = "Keys of earlier tasks this one needs completed first; empty when 
 [schema.fields.key]
 schema = "schema:text"
 required = true
-description = """Final board key: the parent slice's NNNN plus a child ordinal, e.g. "0150.2"."""
+description = """Final board key: the parent slice's NNNN plus a child ordinal, e.g. "0150.2" or "0150.11" — ordinals continue past 9, never zero-padded."""
 
 [schema.fields.summary]
 schema = "schema:text"
 required = true
-description = "One-paragraph account of the task's work, sized to roughly 10-15 minutes of focused agent effort."
+description = "One-paragraph account of the task's work, sized to the run's duration target (default: roughly 10-15 minutes) of focused agent effort."
 
 [schema.fields.title]
 schema = "schema:text"
@@ -435,8 +446,8 @@ Independently review the task files written for {port:task} against the plan {sl
 
 Rules:
 - A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
-- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
-- Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
+- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — "NNNN.10", "NNNN.11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9).
+- Size every child task to the run's requested duration target (default: roughly 10-15 minutes of focused agent work) — small enough to finish in one short pass at that scale; split anything larger into more children.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -444,7 +455,7 @@ Rules:
 - At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
 - Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
 - Never overwrite or renumber an existing file; keys are assigned once from the derived next-free key and are final.
-            A BLOCKER is: a file that fails the format contract (not parseable TaskDocument TOML, wrong key/name shape, missing status/raised); a planned task with no file, or a file outside the plan; a work item in {slot:work-items} no written task covers; an unmet or unrepresented entry of {slot:done-criteria}; a child task materially larger than 10-15 minutes of focused work, or with a vague, unverifiable Done when; a dependency error (depends-on naming a later or missing key, a child without its parent relation); grounding a task needs that its own body omits or contradicts; a mechanically verifiable Done when with no corresponding [[checks]] entry; or a declared check whose command does not exist in the repository or does not actually verify its Done when. Everything else is advisory.
+            A BLOCKER is: a file that fails the format contract (not parseable TaskDocument TOML, wrong key/name shape, missing status/raised); a planned task with no file, or a file outside the plan; a work item in {slot:work-items} no written task covers; an unmet or unrepresented entry of {slot:done-criteria}; a child task materially larger than the run's duration target {port:duration} of focused work, or with a vague, unverifiable Done when; a dependency error (depends-on naming a later or missing key, a child without its parent relation); grounding a task needs that its own body omits or contradicts; a mechanically verifiable Done when with no corresponding [[checks]] entry; or a declared check whose command does not exist in the repository or does not actually verify its Done when. Everything else is advisory.
             Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
             Set status to revise while any blocker remains, approved when none do.'''
 input = [
@@ -453,6 +464,7 @@ input = [
     "slot:receipts",
     "slot:work-items",
     "slot:done-criteria",
+    "port:duration",
 ]
 output = ["slot:review-verdict"]
 
@@ -490,8 +502,8 @@ Apply the review verdict {slot:review-verdict} to the written task files, in one
 
 Rules:
 - A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
-- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
-- Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
+- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — "NNNN.10", "NNNN.11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9).
+- Size every child task to the run's requested duration target (default: roughly 10-15 minutes of focused agent work) — small enough to finish in one short pass at that scale; split anything larger into more children.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -511,8 +523,8 @@ The source's work items: {slot:work-items}
 The source's done criteria: {slot:done-criteria}
 Grounding notes: {slot:grounding}
 Describe every slice and child as a dependency-ordered outcome at module/area and validation-gate scope. Include applicable constraints from the grounding notes, but defer exact symbols, signatures, edits, and edit sequencing to architect.
-Assign final board keys now, starting at {slot:next-key}: the first slice's charter takes that key, the next slice the following number, and so on; children are "<charter-key>.1", "<charter-key>.2", ... in dependency order. Keys are final — no placeholders.
-Plan at most eight slices — consolidate related work items into one slice rather than exceeding the cap. Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every child task to roughly 10-15 minutes of focused agent work; a slice with more than nine children is too big — split the slice. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
+Assign final board keys now, starting at {slot:next-key}: the first slice's charter takes that key, the next slice the following number, and so on; children are "<charter-key>.1", "<charter-key>.2", ... in dependency order (ordinals continue ".10", ".11", ... — never zero-padded). Keys are final — no placeholders.
+Plan at most eight slices — consolidate related work items into one slice rather than exceeding the cap. Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every child task to roughly {port:duration} of focused agent work; split anything larger into more children. A slice owns as many children as its scope needs — there is no fixed child count; split a slice only when its children stop serving one coherent outcome. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
 Do not implement anything, and write nothing to disk in this step — not task files, not notes; return only the plan. A later step writes the board from it; any file created here is out-of-plan and will not be adopted."""
 input = [
     "port:task",
@@ -520,6 +532,7 @@ input = [
     "slot:done-criteria",
     "slot:grounding",
     "slot:next-key",
+    "port:duration",
 ]
 output = ["slot:slice-plan"]
 
@@ -557,8 +570,8 @@ Write exactly one slice of the plan to the board — {slot:write-each-slice-item
 
 Rules:
 - A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
-- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
-- Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
+- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — "NNNN.10", "NNNN.11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9).
+- Size every child task to the run's requested duration target (default: roughly 10-15 minutes of focused agent work) — small enough to finish in one short pass at that scale; split anything larger into more children.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -603,6 +616,7 @@ input = [
     "slot:done-criteria",
     "slot:grounding",
     "slot:next-key",
+    "port:duration",
     { slot = "slot:slice-plan", optional = true },
 ]
 output = ["slot:slice-plan"]
@@ -618,6 +632,7 @@ input = [
     "slot:receipts",
     "slot:work-items",
     "slot:done-criteria",
+    "port:duration",
     { slot = "slot:review-verdict", optional = true },
 ]
 output = ["slot:review-verdict"]
@@ -652,7 +667,10 @@ operation = "append"
 
 [procedure]
 description = "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, then loop an independent typed-verdict review with composer-applied fixes until approved (exhaustion aborts with its stop reason)."
-input = ["port:task"]
+input = [
+    "port:duration",
+    "port:task",
+]
 output = ["port:written-files"]
 
 [[procedure.sequence]]
