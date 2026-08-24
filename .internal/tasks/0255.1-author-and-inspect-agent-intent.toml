@@ -63,6 +63,7 @@ validation = """
 
 Run generation and verification exactly as `just sdk-generate`, `pnpm --dir packages/cdk run test`, and `CARGO_TARGET_DIR=target just test`. Perform no more than two targeted repair-and-rerun rounds. Success requires both declared check commands to pass and the judgment review to be clean; otherwise stop with the concrete remaining failure.
 """
+
 [relations]
 parent = "0255"
 
