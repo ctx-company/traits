@@ -2,7 +2,7 @@
 //! code reads, with each variable's contract. `ctx traits doctor --config`
 //! renders [`env_reference`] in its `environment` section — the
 //! source-scanning `proof_env_reference` test keeps this table complete, and
-//! `just testhook-absence-check` keeps the four test-hook names below out of
+//! `just testhook-absence-check` keeps the test-hook names below out of
 //! release binaries. This is the one place either guard, or a reader, needs
 //! to look.
 
@@ -62,6 +62,13 @@ pub const TESTHOOK_FAIL_TERMINAL_WRITE_ORDINAL: &str =
 pub const TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL: &str =
     "CTX_INTERNAL_TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL";
 
+/// Forces the final drive-outcome ledger write to fail before it reaches the
+/// atomic writer. Compiled out of release builds; used only to prove that an
+/// `ended` notification cannot follow a failed durable outcome.
+#[cfg(debug_assertions)]
+pub const TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE: &str =
+    "CTX_INTERNAL_TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE";
+
 /// Every environment variable product code reads, with its contract. Kept
 /// complete by `modules/cli/tests/proof_env_reference.rs`, which walks
 /// `modules/*/src/**/*.rs` for quoted `CTX_`-prefixed literals and asserts
@@ -71,7 +78,7 @@ pub const TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL: &str =
 /// vars, and never appear as a source literal the scan can match — they are
 /// deliberately absent from this table.
 ///
-/// A function rather than a fixed-size `static` slice: the four
+/// A function rather than a fixed-size `static` slice: the test-hook
 /// `CTX_INTERNAL_TESTHOOK_*` rows are appended only `#[cfg(debug_assertions)]`,
 /// so a release build's reference (and `doctor --config`'s rendering of it)
 /// omits them entirely — matching those hooks' own compile-out, rather than
@@ -108,7 +115,7 @@ pub const TESTHOOK_TRUST_TEST_CONFIG_HOME: &str = "CTX_TRAITS_TRUST_TEST_CONFIG_
 pub const TESTHOOK_API_TRANSPORT_MISSING_KEY: &str = "CTX_TEST_NONEXISTENT_API_KEY_0079";
 
 #[cfg(debug_assertions)]
-fn testhook_env_reference() -> [EnvVarDoc; 7] {
+fn testhook_env_reference() -> [EnvVarDoc; 8] {
     [
         EnvVarDoc {
             name: TESTHOOK_CHECKPOINT_WAVE_PERSISTED,
@@ -128,6 +135,11 @@ fn testhook_env_reference() -> [EnvVarDoc; 7] {
         EnvVarDoc {
             name: TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL,
             contract: "P402 fault injection: forces the reservation write for the given ordinal to fail. A no-op unless set to an ordinal. Absent from release builds.",
+            kind: EnvVarKind::DebugOnlyTestHook,
+        },
+        EnvVarDoc {
+            name: TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE,
+            contract: "Center transport proof fault injection: forces the final drive-outcome ledger write to fail before persistence. A no-op unless set. Absent from release builds.",
             kind: EnvVarKind::DebugOnlyTestHook,
         },
         EnvVarDoc {

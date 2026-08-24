@@ -504,6 +504,7 @@ struct ActivityRecorderState {
     /// narration that resolves after it, since the narrator worker itself
     /// carries no frame id (P146).
     current_frame_id: String,
+    notifier: Option<ctx_traits_io::center::DriverNotifier>,
 }
 
 struct PendingCoalesce {
@@ -561,6 +562,12 @@ impl ActivityRecorder {
         }
     }
 
+    fn attach_notifier(&self, notifier: ctx_traits_io::center::DriverNotifier) {
+        if let Ok(mut state) = self.inner.lock() {
+            state.notifier = Some(notifier);
+        }
+    }
+
     /// Persist this drive's finished-step summary independent of whether a
     /// TUI panel exists to show it live (P521's summary-line resolution
     /// order needs it recorded regardless).
@@ -591,13 +598,17 @@ impl ActivityRecorder {
     /// unwritten until a later, unrelated frame's first event happens to
     /// trigger the flush.
     fn finish_frame(&self, frame_id: &str) {
-        if let Ok(mut state) = self.inner.lock()
-            && state
+        if let Ok(mut state) = self.inner.lock() {
+            if state
                 .pending
                 .as_ref()
                 .is_some_and(|pending| pending.frame_id == frame_id)
-        {
-            flush_pending(&mut state);
+            {
+                flush_pending(&mut state);
+            }
+            if let Some(notifier) = &state.notifier {
+                notifier.frame_done();
+            }
         }
     }
 
@@ -1225,6 +1236,15 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         );
         return Ok(report);
     };
+    // The center's startup reconciliation may take maintenance ownership of
+    // an unheld ledger. Acquire the authoritative driver flock first so this
+    // invocation cannot be mistaken for an orphan in the launch window.
+    ctx_traits_io::center::start_for_driver();
+    let notifier =
+        ctx_traits_io::center::DriverNotifier::new(ctx_traits_io::center::DriverRegistration {
+            ledger_path: ledger_path.to_string(),
+            holder: driver_lock.holder().clone(),
+        });
     // P460 `--no-merge`: only now, having actually acquired the driver
     // lock above (never on the `Busy` early return), clear a persisted
     // merge intent before the drive loop runs.
@@ -1280,8 +1300,12 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         ledger_path.clone(),
     )?;
     let activity = ActivityRecorder::default();
-    activity
-        .attach_sink(ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger_path));
+    let mut activity_sink =
+        ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger_path);
+    let activity_notifier = notifier.clone();
+    activity_sink.set_observer(move |record| activity_notifier.activity_line(record.clone()));
+    activity.attach_sink(activity_sink);
+    activity.attach_notifier(notifier.clone());
     // P552: the one permitted session-title attempt, claimed and dispatched
     // here — after the first pane paint and worktree preparation, under the
     // just-acquired driver lock, and strictly before `drive_loop` starts
@@ -1324,6 +1348,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             &mut profile,
             &pending_title,
             driver_lock.title_claim_owner(),
+            notifier.clone(),
         )
     };
     let drive_result = drive_loop(
@@ -1485,6 +1510,9 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         report
             .warnings
             .push(format!("drive outcome marker not recorded: {error}"));
+    } else {
+        // The terminal outcome is authoritative before this best-effort signal.
+        notifier.ended();
     }
     report.tokens_by_model = tokens_by_model;
     if let Some(status) = report.final_session_status.as_ref() {
@@ -5142,6 +5170,7 @@ fn maybe_dispatch_session_title(
     profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
     pending: &PendingSessionTitle,
     claim_owner: &str,
+    notifier: ctx_traits_io::center::DriverNotifier,
 ) -> bool {
     let Ok(loaded) = ctx_traits_io::run::load_trait_for_session(input.file, None, session, "drive")
     else {
@@ -5219,6 +5248,7 @@ fn maybe_dispatch_session_title(
     let pending = pending.clone();
     let owner = claim_owner.to_string();
     let sidecar_ledger_path = ledger_path.to_path_buf();
+    let title_notifier = notifier;
     // 0079: the api client owns its own bounded transient retry; re-driving
     // an api failure through the outer 3-attempt claim ladder would multiply
     // the two retry layers (worst case 3 claims × client retries × read
@@ -5246,8 +5276,10 @@ fn maybe_dispatch_session_title(
                 // show no title until the first step completes, no matter
                 // how fast the narrator answered. Append-only, best-effort,
                 // presentation-only; the ledger stays the authority.
-                ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&sidecar_ledger_path)
-                    .append_session_title(title.clone());
+                let mut sidecar =
+                    ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&sidecar_ledger_path);
+                sidecar.set_observer(move |record| title_notifier.activity_line(record.clone()));
+                sidecar.append_session_title(title.clone());
                 // Paint the live panel from here too, for the same reason: a
                 // panel write is just a mutex with no ledger-ordering
                 // constraint, and without it the live view keeps showing

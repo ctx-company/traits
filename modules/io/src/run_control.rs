@@ -97,6 +97,7 @@ pub struct DriverLockGuard {
     file: std::fs::File,
     control: Option<ControlListener>,
     title_claim_owner: String,
+    holder: DriverHolder,
     /// `None` when this acquisition never had liveness facts to index (not
     /// expected in production — every `try_acquire` caller supplies them —
     /// but tests and any future bare caller must still drop cleanly).
@@ -108,6 +109,13 @@ impl DriverLockGuard {
     /// for durable title-attempt ownership.
     pub fn title_claim_owner(&self) -> &str {
         &self.title_claim_owner
+    }
+
+    /// The metadata atomically written for this lock acquisition. Consumers
+    /// must reuse it rather than manufacturing a second description of the
+    /// live driver.
+    pub fn holder(&self) -> &DriverHolder {
+        &self.holder
     }
 }
 
@@ -438,6 +446,7 @@ pub fn try_acquire(
         file,
         control,
         title_claim_owner: control_token,
+        holder,
         session_id: Some(session_id.to_string()),
     }))
 }
