@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.1"
 title = "Author and inspect agent intent"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-24"
+origin = "run run-896fd82b907a12425ee8dbefe84338bef4b1d024e056b3ea0e148b5822854543 merged as 2d53f900d79aa6fee038582f222f0d48bfa3bd72"
 content = """
 ## Outcome
 Let authors attach `require`, `focus`, `avoid`, and `block` intent to direct agents, all five built-in agent templates, `seats(...)` results, and agents reached transitively through the functional `.prompt(...)` API. Lower authored scalar, built-in, custom, and rich guidance through the existing CDK normalizer into canonical `Agent.intent`, infer schema-version `0.6` only when an otherwise unversioned merged agent declaration contains intent, validate the new field in Rust, and show every declared agent's intent in static model-view inspection with `source="agent:<id>"`. Agent intent is authoring data in this task: it is not assigned-agent selection and is not live frame composition.
@@ -76,3 +78,19 @@ timeout-ms = 600000
 name = "agent intent canonical and static behavior pass the per-round gate"
 command = "CARGO_TARGET_DIR=target just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "2d53f900d79aa6fee038582f222f0d48bfa3bd72"
+
+[[closure.checks]]
+name = "agent intent authoring passes the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "agent intent canonical and static behavior pass the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+outcome = "failed"
+detail = "exited 1"
