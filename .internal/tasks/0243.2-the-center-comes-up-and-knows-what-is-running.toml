@@ -56,5 +56,3 @@ unaffected, and a restarted center rebuilds the same model from disk.
 two centers side by side without contention. Scratch stores and per-test
 socket paths throughout; no existing surface changes behavior.
 """
-
-[relations]
