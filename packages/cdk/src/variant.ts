@@ -28,9 +28,9 @@ export type {
 
 /**
  * Fields for one complete variant definition: everything `trait()` accepts
- * except `id`/`version`/`schema-version` — those are injected from the
- * containing family (shared `id`/`version`, and the next canonical
- * schema version) when the variant is resolved for build.
+ * except `id`/`version`/`schema-version` — the containing family supplies
+ * shared `id`/`version`, while resolution uses the native schema baseline
+ * unless the leaf's declarations require a newer inferred version.
  */
 export type VariantFields = Omit<TraitFields, "id" | "version" | "schema-version" | "variants">;
 
@@ -226,7 +226,7 @@ export function isTraitFamilyHandle(value: unknown): value is TraitFamilyHandle 
   return metaOf(value)?.family !== undefined;
 }
 
-/** The next canonical schema version, used for every native-variant regardless of the family's authored `schema-version`. */
+/** Native variant schema baseline; leaf declarations may infer a newer version. */
 export const NATIVE_VARIANT_SCHEMA_VERSION = "0.5" as const;
 
 /**

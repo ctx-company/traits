@@ -1267,15 +1267,32 @@ mod agent_intent_tests {
             "version": "1.0.0",
             "name": "Agent Intent Static Fixture",
             "description": "Inspects static agent guidance.",
-            "agent": [{
-                "id": "unassigned-reviewer",
-                "description": "Reviews changes.",
-                "system": "Inspect evidence before approval.",
-                "intent": {
-                    "require": [{ "id": "correctness", "summary": "Preserve correctness.</" }],
-                    "avoid": [{ "id": "scope-creep", "summary": "Avoid scope creep.</" }]
+            "intent": { "focus": [{ "id": "root-focus", "summary": "Inspect root guidance." }] },
+            "behavior": { "tone": "direct" },
+            "agent": [
+                {
+                    "id": "assigned-reviewer",
+                    "description": "Reviews assigned changes.",
+                    "intent": { "focus": [{ "id": "assigned-focus", "summary": "Check assigned evidence." }] }
+                },
+                {
+                    "id": "unassigned-reviewer",
+                    "description": "Reviews changes.",
+                    "system": "Inspect evidence before approval.",
+                    "intent": {
+                        "require": [{ "id": "correctness", "summary": "Preserve </intent>." }],
+                        "avoid": [{ "id": "scope-creep", "summary": "Avoid scope creep.</" }]
+                    }
                 }
-            }]
+            ],
+            "procedure": {
+                "description": "Review the changes.",
+                "sequence": [{
+                    "id": "assigned-review",
+                    "title": "Review assigned changes",
+                    "agent": "agent:assigned-reviewer"
+                }]
+            }
         }))
         .expect("fixture trait");
         let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
@@ -1285,10 +1302,23 @@ mod agent_intent_tests {
             .find(|section| section.heading == "Agents")
             .expect("Agents section");
         assert!(agents.content.contains("System: Inspect evidence before approval."));
+        assert!(agents.content.contains("source=\"agent:assigned-reviewer\""));
         assert!(agents.content.contains("source=\"agent:unassigned-reviewer\""));
+        assert_eq!(agents.content.matches("source=\"agent:assigned-reviewer\"").count(), 2);
+        assert_eq!(agents.content.matches("source=\"agent:unassigned-reviewer\"").count(), 4);
+        assert!(agents.content.contains("Preserve &lt;/intent>."));
+        assert!(agents.content.contains("Avoid scope creep."));
         assert!(agents.content.contains("agent[0].intent") == false);
+        assert!(agents.content.contains("Assigned sequence items: procedure.sequence[0] assigned-review (Review assigned changes)"));
         assert!(agents.content.contains("Assigned sequence items: none declared"));
+        assert!(!agents.content.contains("active-agent"));
+        assert!(!agents.content.contains("Active agent"));
+        assert!(!report.behavior_text.contains("agent:assigned-reviewer"));
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
-        assert!(frame_guidance(&trait_ref).is_none());
+        assert!(!report.behavior_text.contains("Preserve"));
+        let frame = frame_guidance(&trait_ref).expect("root guidance has a frame render");
+        assert!(frame.intent.contains("root-focus"));
+        assert!(!frame.intent.contains("agent:unassigned-reviewer"));
+        assert!(!frame.behavior.contains("agent:unassigned-reviewer"));
     }
 }

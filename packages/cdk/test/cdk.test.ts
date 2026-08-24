@@ -2558,6 +2558,31 @@ describe("agent.* role templates", () => {
     expect(toDraftJson(ordinary)["schema-version"]).toBe("0.5");
   });
 
+  it("normalizes scalar, array, and rich guidance forms on direct and seated agents", () => {
+    const direct = toDraftJson(
+      agent("guided", {
+        description: "Works.",
+        intent: {
+          require: "correctness",
+          focus: ["evidence", { id: "custom-focus", description: "Inspect boundary conditions." }],
+          avoid: { id: "scope-creep", summary: "Avoid unrelated changes." },
+          block: [{ id: "custom-block", description: "Reject unverifiable claims." }],
+        },
+      }),
+    );
+    expect(direct.intent).toEqual({
+      require: [{ id: "correctness" }],
+      focus: [{ id: "evidence" }, { id: "custom-focus", description: "Inspect boundary conditions." }],
+      avoid: [{ id: "scope-creep", summary: "Avoid unrelated changes." }],
+      block: [{ id: "custom-block", description: "Reject unverifiable claims." }],
+    });
+    const minted = seats(agent.reviewer, "guided", 2, { intent: { require: intent.Correctness } });
+    expect(minted.map((handle) => toDraftJson(handle).intent)).toEqual([
+      { require: [{ id: "correctness" }] },
+      { require: [{ id: "correctness" }] },
+    ]);
+  });
+
   it("an explicit schema version takes precedence over agent-intent inference", () => {
     const draft = toDraftJson(
       trait("explicit-agent-version", {

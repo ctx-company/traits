@@ -326,6 +326,83 @@ mod tests {
     }
 
     #[test]
+    fn agent_intent_validates_all_groups_and_has_stable_populated_canonical_bytes() {
+        let mut guided = agent(None);
+        guided.intent = Some(
+            serde_json::from_value(serde_json::json!({
+                "require": ["correctness", { "id": "custom-require", "summary": "Preserve relevant evidence." }],
+                "focus": [{ "id": "custom-focus", "description": "Inspect boundary conditions." }],
+                "avoid": ["scope-creep", { "id": "custom-avoid", "summary": "Avoid unrelated changes." }],
+                "block": [{ "id": "custom-block", "description": "Reject unverifiable claims." }]
+            }))
+            .expect("intent fixture"),
+        );
+
+        validate_agents(&[guided.clone()], "0.6").expect("all guidance forms are valid");
+        let first = crate::digest::canonical_json(&guided).expect("canonical json");
+        let second = crate::digest::canonical_json(&guided).expect("canonical json");
+        assert_eq!(
+            first,
+            r#"{"description":"Reviews the work.","id":"smart-1","intent":{"avoid":[{"id":"scope-creep"},{"id":"custom-avoid","summary":"Avoid unrelated changes."}],"block":[{"description":"Reject unverifiable claims.","id":"custom-block"}],"focus":[{"description":"Inspect boundary conditions.","id":"custom-focus"}],"require":[{"id":"correctness"},{"id":"custom-require","summary":"Preserve relevant evidence."}]}}"#,
+            "populated agent intent must serialize deterministically"
+        );
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn agent_intent_reports_shared_guidance_failures_at_indexed_paths() {
+        for (intent, path) in [
+            (
+                serde_json::json!({ "require": ["same", "same"] }),
+                "agent[0].intent.require[1].id",
+            ),
+            (
+                serde_json::json!({ "focus": ["Not A Slug"] }),
+                "agent[0].intent.focus[0].id",
+            ),
+            (
+                serde_json::json!({ "avoid": [{ "id": "blank", "summary": "  " }] }),
+                "agent[0].intent.avoid[0].summary",
+            ),
+            (
+                serde_json::json!({ "block": [{ "id": "second-person", "description": "You must verify evidence." }] }),
+                "agent[0].intent.block[0].description",
+            ),
+        ] {
+            let mut guided = agent(None);
+            guided.intent = Some(serde_json::from_value(intent).expect("intent fixture"));
+            let error = validate_agents(&[guided], "0.6").expect_err("invalid scoped guidance");
+            assert!(
+                error.to_string().contains(path),
+                "expected {path}, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_intent_only_rejects_canonical_require_avoid_id_intersections() {
+        let mut prose_match = agent(None);
+        prose_match.intent = Some(
+            serde_json::from_value(serde_json::json!({
+                "require": [{ "id": "first", "summary": "Preserve shared prose." }],
+                "avoid": [{ "id": "second", "summary": "Preserve shared prose." }],
+                "focus": ["first"],
+                "block": ["second"]
+            }))
+            .expect("intent fixture"),
+        );
+        validate_agents(&[prose_match], "0.6").expect("prose and focus/block overlaps are valid");
+
+        let mut collision = agent(None);
+        collision.intent = Some(
+            serde_json::from_value(serde_json::json!({ "require": ["same"], "avoid": ["same"] }))
+                .expect("intent fixture"),
+        );
+        let error = validate_agents(&[collision], "0.6").expect_err("id intersection rejects");
+        assert!(error.to_string().contains("agent[0].intent.avoid[0].id"));
+    }
+
+    #[test]
     fn absent_agent_intent_is_omitted_from_canonical_bytes() {
         let without = crate::digest::canonical_json(&agent(None)).expect("canonical json");
         assert!(!without.contains("intent"));
