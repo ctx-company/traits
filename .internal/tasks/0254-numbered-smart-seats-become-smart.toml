@@ -1,0 +1,55 @@
+schema-version = "0.2"
+key = "0254"
+title = "smart-1 and smart-2 become smart, everywhere"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner ruling 2026-08-24: array-based role assignment makes the numbered
+seat names obsolete — every `smart-1`/`smart-2` in the authored traits
+collapses to `smart`.
+
+## Where they live (grep 2026-08-24)
+
+- research: all three variants (quick, default, deep — deep defines both
+  numbers for its two independent reviewers)
+- optimize: shared/agent.ts, shared/data.ts, benchmark variant (data +
+  step titles like "(smart-1)")
+- plan: shared/agent.ts (`smart1`/`smart2` factory exports) and the
+  complex variant
+- implement and refactor: prose only, in slot descriptions
+
+## Shape
+
+- Seat definitions and assignments move to `smart` via array-based role
+  assignment. Where a variant runs two INDEPENDENT reviewers (research
+  deep, plan complex), the independence is preserved — same role name,
+  still separately seated steps.
+- Prose that leans on the numbers is reworded, not search-replaced:
+  "separately from smart-1" and "do not trust smart-1's verdict" say
+  what they mean ("the other reviewer" / "the first verdict") once no
+  number exists. Step titles drop the "(smart-1)" suffixes.
+- Slot ids stay untouched — `review-verdict-1`/`-2` name slots, not
+  seats, and renaming them is churn with no payoff.
+- Factory exports `smart1`/`smart2` in plan's agent.ts collapse to one.
+"""
+validation = """
+## Watch
+
+- Seat renames can silently strand model assignment: any trait-scoped
+  runtime.toml that scopes a model to `smart-1`/`smart-2` (the research
+  smart-both-sides ruling) must be checked, or the review seats fall back
+  to the default model without a peep. Verify the composed seat/model
+  table after the rename, not just the build.
+- Landing recipe: ts-build, `ctx traits build`, export
+  --update-skill-lock; trust approve is an owner step. Digests move —
+  regenerate, never suppress.
+
+## Done when
+
+`grep -r "smart-1\\|smart-2" .ctx/traits/authored` returns nothing in
+source; generated canonicals regenerate clean; `ctx traits build` green;
+preview of research deep and plan complex shows two independent review
+seats both named smart with their intended models assigned.
+"""
+
+[relations]
