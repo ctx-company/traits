@@ -37,6 +37,7 @@ export function slices(agent: AgentHandle) {
             The source's work items: ${workItems}
             The source's done criteria: ${doneCriteria}
             Grounding notes: ${grounding}
+            Describe every slice and child as a dependency-ordered outcome at module/area and validation-gate scope. Include applicable constraints from the grounding notes, but defer exact symbols, signatures, edits, and edit sequencing to architect.
             Assign final board keys now, starting at ${nextKey}: the first slice's charter takes that key, the next slice the following number, and so on; children are "<charter-key>.1", "<charter-key>.2", ... in dependency order. Keys are final — no placeholders.
             Plan at most eight slices — consolidate related work items into one slice rather than exceeding the cap. Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every child task to roughly 10-15 minutes of focused agent work; a slice with more than nine children is too big — split the slice. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
             Do not implement anything, and write nothing to disk in this step — not task files, not notes; return only the plan. A later step writes the board from it; any file created here is out-of-plan and will not be adopted.`,
