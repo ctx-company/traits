@@ -84,8 +84,11 @@ fn current_epoch_ms() -> u64 {
 /// ledger and reused across every record it appends. Best-effort: any open
 /// or write failure degrades to a no-op sink (derived evidence, never
 /// authority) rather than surfacing an error into the drive loop.
+type ActivityObserver = Box<dyn Fn(&ActivityRecord) + Send + Sync>;
+
 pub struct ActivitySidecarWriter {
     file: Option<std::fs::File>,
+    observer: Option<ActivityObserver>,
 }
 
 impl ActivitySidecarWriter {
@@ -94,14 +97,26 @@ impl ActivitySidecarWriter {
     pub fn open(ledger_path: &Utf8Path) -> Self {
         let path = activity_path(ledger_path);
         if crate::run_session::reject_symlink_leaf(&path).is_err() {
-            return Self { file: None };
+            return Self {
+                file: None,
+                observer: None,
+            };
         }
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path.as_std_path())
             .ok();
-        Self { file }
+        Self {
+            file,
+            observer: None,
+        }
+    }
+
+    /// Installs a best-effort observer invoked only after a complete record is
+    /// appended and flushed. The observer never participates in persistence.
+    pub fn set_observer(&mut self, observer: impl Fn(&ActivityRecord) + Send + Sync + 'static) {
+        self.observer = Some(Box::new(observer));
     }
 
     fn append_line(&mut self, record: &ActivityRecord) {
@@ -112,8 +127,12 @@ impl ActivitySidecarWriter {
             return;
         };
         line.push('\n');
-        let _ = file.write_all(line.as_bytes());
-        let _ = file.flush();
+        if file.write_all(line.as_bytes()).is_ok()
+            && file.flush().is_ok()
+            && let Some(observer) = &self.observer
+        {
+            observer(record);
+        }
     }
 
     pub fn append_activity(&mut self, event: ActivityEvent) {
@@ -342,6 +361,44 @@ mod tests {
         let target_contents = std::fs::read_to_string(dir.join("real-target.jsonl").as_std_path())
             .expect("read symlink target");
         assert!(target_contents.is_empty());
+    }
+
+    #[test]
+    fn observer_runs_only_after_a_flushed_record() {
+        let dir = scratch_dir("observer");
+        let ledger_path = dir.join("session-fixture.json");
+        let observed_after_write = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        let observer_path = ledger_path.clone();
+        let observer_seen = observed_after_write.clone();
+        writer.set_observer(move |record| {
+            // The observer is the notification seam. It must only observe a
+            // record after the exact JSONL line is durable and readable.
+            let (records, skipped) = read_activity(&observer_path);
+            observer_seen.store(
+                skipped == 0 && records.last() == Some(record),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        });
+        writer.append_activity(fixture_event(1));
+        assert!(observed_after_write.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn observer_is_suppressed_when_the_sidecar_is_unavailable() {
+        let dir = scratch_dir("observer-write-failure");
+        let ledger_path = dir.join("session-fixture.json");
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        let observer_seen = seen.clone();
+        writer.set_observer(move |_| {
+            observer_seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        // A failed open is the writer's best-effort failure representation and
+        // must not be mistaken for a successfully flushed durable record.
+        writer.file = None;
+        writer.append_activity(fixture_event(1));
+        assert_eq!(seen.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]

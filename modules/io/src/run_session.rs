@@ -641,6 +641,14 @@ pub fn record_drive_outcome(
     budget_pause: Option<ctx_traits_core::procedure::runtime::BudgetExhaustedPause>,
     evidence: ctx_traits_core::procedure::session::DriveTerminalEvidence,
 ) -> crate::Result<()> {
+    #[cfg(debug_assertions)]
+    if std::env::var_os(crate::env_reference::TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE).is_some() {
+        return Err(crate::environment::Error::Filesystem {
+            path: session.to_string(),
+            source: std::io::Error::other("injected drive-outcome write failure"),
+        }
+        .into());
+    }
     let path = resolve_session_path(session, store)?;
     let mut loaded = read_run_session(&path)?;
     loaded.last_drive_outcome = Some(ctx_traits_core::procedure::session::DriveOutcome {
@@ -663,6 +671,16 @@ pub fn record_drive_outcome(
 /// model or a dashboard-owned serialization path.
 pub fn record_interrupted_outcome(path: &Utf8Path) -> crate::Result<()> {
     let mut loaded = read_run_session(path)?;
+    record_interrupted_outcome_in_session(path, &mut loaded)
+}
+
+/// Persist an interrupted outcome using an already loaded authoritative
+/// session. Center reconciliation holds the maintenance lock while using this
+/// form, avoiding a second ledger read between classification and repair.
+pub fn record_interrupted_outcome_in_session(
+    path: &Utf8Path,
+    loaded: &mut ctx_traits_core::procedure::session::Session,
+) -> crate::Result<()> {
     loaded.last_drive_outcome = Some(ctx_traits_core::procedure::session::DriveOutcome {
         outcome: ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted,
         recorded_at_epoch: epoch_seconds(),
@@ -674,7 +692,7 @@ pub fn record_interrupted_outcome(path: &Utf8Path) -> crate::Result<()> {
         budget_pause: None,
         tokens_by_model: None,
     });
-    write_run_session(path, &loaded)
+    write_run_session(path, loaded)
 }
 
 /// The single owner of the `port:task` ref literal (P472; `port:phase`
