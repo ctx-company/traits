@@ -38,4 +38,5 @@ appending to one text slot yield both entries in order. Static form
 """
 
 [relations]
+parent = "0253"
 depends-on = ["0253.2"]

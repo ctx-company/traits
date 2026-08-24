@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0243.3"
 title = "Drivers tell the center; viewers subscribe"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
 content = """
 The inversion itself: push replaces poll.

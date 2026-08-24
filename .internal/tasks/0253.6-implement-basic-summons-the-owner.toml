@@ -47,4 +47,5 @@ with no contradiction never summons and is behaviorally unchanged.
 """
 
 [relations]
+parent = "0253"
 depends-on = ["0253.5"]

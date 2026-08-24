@@ -37,4 +37,5 @@ byte-identically. `just ts-test` and typecheck green.
 """
 
 [relations]
+parent = "0253"
 depends-on = ["0253.1"]

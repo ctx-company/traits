@@ -43,4 +43,5 @@ guard. A trait with no ask composes byte-identically to today.
 """
 
 [relations]
+parent = "0253"
 depends-on = ["0253.3"]
