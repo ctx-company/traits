@@ -16,6 +16,17 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+thread_local! {
+    static LEDGER_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn read_summary(ledger: &Utf8Path) -> crate::Result<crate::run_summary::RunSummary> {
+    #[cfg(test)]
+    LEDGER_READS.with(|reads| reads.set(reads.get() + 1));
+    crate::run_summary::read_summary_or_ledger(ledger)
+}
+
 pub const CENTER_PROCESS_SENTINEL: &str = "__ctx-center";
 const MAX_LINE_BYTES: usize = 4096;
 const STREAM_TIMEOUT: Duration = Duration::from_secs(2);
@@ -338,27 +349,35 @@ fn try_spawn(paths: &CenterPaths, executable: &std::path::Path) -> crate::Result
 /// Do not release spawn arbitration while a child from this attempt survives.
 /// The caller still holds the spawn lock when this is called.
 fn abort_spawn(child: &mut std::process::Child, failure: crate::Error) -> crate::Result<()> {
-    match child.try_wait() {
-        Ok(Some(_)) => Err(failure),
-        // A transient wait error cannot prove that the detached child exited.
-        // Still attempt SIGKILL and reap before the caller releases the spawn
-        // lock, rather than allowing a second contender to overlap this child.
-        Ok(None) | Err(_) => {
-            // Even a failed signal attempt is not evidence of exit. Reap first
-            // so that a concurrent caller cannot inherit the spawn lease while
-            // this child might still be able to publish a listener.
-            let kill_error = child
-                .kill()
-                .err()
-                .filter(|error| error.kind() != std::io::ErrorKind::InvalidInput);
-            child
-                .wait()
-                .map_err(|source| io_error(&Utf8PathBuf::from("center child"), source))?;
-            if let Some(source) = kill_error {
-                return Err(io_error(&Utf8PathBuf::from("center child"), source));
+    let deadline = Instant::now() + SPAWN_READY_TIMEOUT;
+    let mut kill_error = None;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return match kill_error {
+                    Some(source) => Err(io_error(&Utf8PathBuf::from("center child"), source)),
+                    None => Err(failure),
+                };
             }
-            Err(failure)
+            Ok(None) | Err(_) => {
+                // A failed observation is not proof that the child cannot yet
+                // publish a listener. Keep the arbitration lease while asking
+                // it to exit, but never make cleanup itself an unbounded wait.
+                if kill_error.is_none() {
+                    kill_error = child
+                        .kill()
+                        .err()
+                        .filter(|error| error.kind() != std::io::ErrorKind::InvalidInput);
+                }
+            }
         }
+        if Instant::now() >= deadline {
+            return Err(protocol_error(format!(
+                "could not confirm spawned center exit within {:?}",
+                SPAWN_READY_TIMEOUT
+            )));
+        }
+        std::thread::sleep(RETRY_DELAY);
     }
 }
 
@@ -529,7 +548,7 @@ impl CenterModel {
                     Ok(value) => value,
                     Err(_) => {
                         self.uncertain = true;
-                        let _ = self.refresh_liveness(&ledger);
+                        let _ = self.refresh_liveness(&ledger, false);
                         continue;
                     }
                 };
@@ -537,7 +556,7 @@ impl CenterModel {
                     Ok(value) => value,
                     Err(_) => {
                         self.uncertain = true;
-                        let _ = self.refresh_liveness(&ledger);
+                        let _ = self.refresh_liveness(&ledger, false);
                         continue;
                     }
                 };
@@ -553,11 +572,11 @@ impl CenterModel {
                     row.repo_path = repo_path.clone();
                 }
                 if !unchanged {
-                    let Ok(summary) = crate::run_summary::read_summary_or_ledger(&ledger) else {
+                    let Ok(summary) = read_summary(&ledger) else {
                         // Do not advance the fingerprint for unreadable content:
                         // the retained row is probed and retried next scan.
                         self.uncertain = true;
-                        let _ = self.refresh_liveness(&ledger);
+                        let _ = self.refresh_liveness(&ledger, false);
                         continue;
                     };
                     self.rows.insert(
@@ -577,7 +596,7 @@ impl CenterModel {
                 // A damaged lock or a ledger that changes under us must not
                 // hide the rest of the machine-wide inventory. Keep the last
                 // good cached row and try this path again on the next pass.
-                if self.refresh_liveness(&ledger).is_err() {
+                if self.refresh_liveness(&ledger, unchanged).is_err() {
                     self.uncertain = true;
                     if let Some(row) = self.rows.get_mut(&ledger) {
                         row.live = true;
@@ -595,7 +614,7 @@ impl CenterModel {
         Ok(())
     }
 
-    fn refresh_liveness(&mut self, ledger: &Utf8Path) -> crate::Result<()> {
+    fn refresh_liveness(&mut self, ledger: &Utf8Path, unchanged: bool) -> crate::Result<()> {
         let Some(row) = self.rows.get_mut(ledger) else {
             return Ok(());
         };
@@ -618,7 +637,7 @@ impl CenterModel {
                         // already a complete ledger projection. It still needs
                         // maintenance ownership to clear stale holder metadata,
                         // but must not repay ledger parsing every scan.
-                        if terminal(&row.summary) {
+                        if unchanged && terminal(&row.summary) {
                             maintenance.clear_stale_metadata()?;
                             row.live = false;
                             row.live_holder = None;
@@ -626,7 +645,7 @@ impl CenterModel {
                         }
                         // A driver cannot appear until this guard drops. Re-read under it
                         // before repairing the orphan found by the first probe.
-                        let summary = crate::run_summary::read_summary_or_ledger(ledger)?;
+                        let summary = read_summary(ledger)?;
                         if !terminal(&summary) {
                             crate::run_session::record_interrupted_outcome(ledger)?;
                         }
@@ -635,7 +654,7 @@ impl CenterModel {
                         maintenance.clear_stale_metadata()?;
                         // The second read happens under maintenance ownership,
                         // so terminal races and repaired ledgers both refresh.
-                        let summary = crate::run_summary::read_summary_or_ledger(ledger)?;
+                        let summary = read_summary(ledger)?;
                         let metadata = std::fs::metadata(ledger.as_std_path())
                             .map_err(|source| io_error(ledger, source))?;
                         let modified = metadata
@@ -1175,6 +1194,48 @@ mod tests {
         assert_eq!(
             model.rows.get(&ledger).expect("cached row").modified,
             cached_modified
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn unchanged_terminal_fingerprint_does_not_parse() {
+        let root = scratch("unchanged-terminal");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+
+        model.discover(&paths).expect("initial discovery");
+        LEDGER_READS.with(|reads| reads.set(0));
+        model.discover(&paths).expect("unchanged discovery");
+        LEDGER_READS.with(|reads| assert_eq!(reads.get(), 0));
+        assert!(terminal(
+            &model.rows.get(&ledger).expect("cached row").summary
+        ));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn changed_terminal_cache_is_reread_and_repaired() {
+        let root = scratch("changed-terminal");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+
+        model.discover(&paths).expect("initial discovery");
+        crate::run_session::write_run_session(&ledger, &fixture_session("awaiting-agent-output"))
+            .expect("replace with nonterminal ledger");
+        LEDGER_READS.with(|reads| reads.set(0));
+        model.discover(&paths).expect("changed discovery");
+
+        let row = model.rows.get(&ledger).expect("repaired row");
+        assert!(terminal(&row.summary));
+        LEDGER_READS.with(|reads| assert!(reads.get() >= 2));
+        assert!(
+            crate::run_session::read_run_session(&ledger)
+                .expect("read repaired ledger")
+                .last_drive_outcome
+                .is_some()
         );
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
