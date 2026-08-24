@@ -50,5 +50,3 @@ names modules and gates but no symbol-level edit instructions — verified on
 the run's own output, not by a committed fixture. Live run is an owner
 step.
 """
-
-[relations]
