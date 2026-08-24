@@ -15,7 +15,7 @@ export default function () {
     description:
       "Distill described work straight into board-ready TaskDocument TOML task files — no separate grounding pass, no review pass.",
     procedureDescription:
-      "Derive the next board key and date, then distill the described work — grounded by the frame's own repository reading — straight into TaskDocument TOML files on the board.",
+      "Distill the described work — grounded by the frame's own repository reading — straight into symbolic-keyed TaskDocument TOML files on the board, then assign final board keys mechanically from the live board.",
   });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
@@ -25,9 +25,9 @@ export default function () {
     "Distill-and-write role.",
   );
 
-  shared.step.derive.nextKeyStep();
   shared.step.derive.raisedDateStep();
   shared.step.distill.tasks(smart1);
+  shared.step.renumber.finalKeysStep();
 
-  return { writtenFiles: shared.data.writtenFiles };
+  return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };
 }

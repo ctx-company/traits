@@ -12,12 +12,12 @@ export default function () {
   defineVariant("Default", {
     name: "Plan",
     summary:
-      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus duration-targeted children (default 10-15 minutes) with typed relations, the format the board dispatch machinery actually resolves.",
+      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — duration-targeted tasks (default 10-15 minutes) shaped as the work demands — bare tasks or charters with children — with typed relations, the format the board dispatch machinery actually resolves.",
     metadata: { tag: shared.metadata.tag },
     description:
-      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus duration-targeted children (default 10-15 minutes) with typed relations, the format the board dispatch machinery actually resolves.",
+      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — duration-targeted tasks (default 10-15 minutes) shaped as the work demands — bare tasks or charters with children — with typed relations, the format the board dispatch machinery actually resolves.",
     procedureDescription:
-      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, and return the receipts.",
+      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a symbolic-keyed typed slice plan shaped as the work demands, write each slice's TaskDocument TOML files in its own frame, and assign final board keys mechanically from the live board.",
   });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
@@ -28,12 +28,12 @@ export default function () {
   );
 
   shared.step.derive.boardSnapshotStep();
-  shared.step.derive.nextKeyStep();
   shared.step.derive.raisedDateStep();
   shared.step.ingest.contract(smart1);
   shared.step.refine.task(smart1);
   shared.step.split.slices(smart1);
   shared.step.writeSlices.tasks(smart1, shared.step.split.MAX_SLICES);
+  shared.step.renumber.finalKeysStep();
 
-  return { writtenFiles: shared.data.writtenFiles };
+  return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };
 }

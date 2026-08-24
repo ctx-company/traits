@@ -16,7 +16,7 @@ export default function () {
     description:
       "Turn described work into board-ready TaskDocument TOML task files, then grind an independent-reviewer verdict loop over the written board until approved — coverage, sizing, dependencies, and format all blockable.",
     procedureDescription:
-      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, then loop an independent typed-verdict review with composer-applied fixes until approved (exhaustion aborts with its stop reason).",
+      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a symbolic-keyed typed slice plan shaped as the work demands, write each slice's TaskDocument TOML files in its own frame, loop an independent typed-verdict review with composer-applied fixes until approved (exhaustion aborts with its stop reason), then assign final board keys mechanically from the live board.",
   });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
@@ -31,13 +31,13 @@ export default function () {
   );
 
   shared.step.derive.boardSnapshotStep();
-  shared.step.derive.nextKeyStep();
   shared.step.derive.raisedDateStep();
   shared.step.ingest.contract(smart1);
   shared.step.refine.task(smart1);
   shared.step.split.slices(smart1);
   shared.step.writeSlices.tasks(smart1, shared.step.split.MAX_SLICES);
   shared.step.review.loop(smart2, smart1);
+  shared.step.renumber.finalKeysStep();
 
-  return { writtenFiles: shared.data.writtenFiles };
+  return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };
 }
