@@ -1,0 +1,40 @@
+schema-version = "0.2"
+key = "0252.6"
+title = "One action registry: footer, guide, and menu from the same rows"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Footer soup is a symptom: hints are hand-written strings living apart from
+the key handlers they describe, so screens accumulate both and neither
+can be trusted. The fix is structural.
+
+## Shape
+
+- Each screen declares its actions ONCE: key, short label, one-line
+  explanation, and applicability for the current item / screen state. The
+  declaration is the single source — key dispatch reads it, so an
+  unregistered key cannot act and a registered one cannot be hintless.
+- Three views derive from those rows, as reusable tui-kit components:
+  1. Footer: only the top few actions, exact format `[?] guide · [d]
+     dash`.
+  2. `?`: a full overlay listing every registered action with its
+     explanation.
+  3. Command menu: one key opens a menu over the CURRENT item listing
+     only the actions that apply, each with its explanation; enter fires
+     the selected one.
+- The dashboard's `footer_line` and per-screen hint strings are replaced,
+  not paralleled — landing is not done while a hand-written hint string
+  survives beside the registry.
+"""
+validation = """
+## Done when
+
+The sessions screen footer shows a handful of entries in the ruled
+format. `?` lists every registered action. The command menu over a
+selected session lists exactly the applicable actions and enter performs
+the selected one. A scratch-screen proof registers an action and sees it
+dispatch, appear in `?`, and appear in the menu; removing it removes all
+three — the same rows, by construction.
+"""
+
+[relations]

@@ -1,0 +1,34 @@
+schema-version = "0.2"
+key = "0252.3"
+title = "Buttons: a confirm is chosen, not typed"
+status = "ready"
+raised = "2026-08-24"
+content = """
+A button-row widget in the tui kit, then every fixed-answer modal uses it.
+
+## Shape
+
+- Widget: a horizontal row of labeled buttons. Tab/arrows move focus,
+  enter fires the focused button, esc cancels. Focused button highlighted;
+  destructive buttons red. Palette doctrine unchanged: named ANSI only,
+  no truecolor, no animation.
+- Conversion: every yes-or-no modal on `ModalHost` — spawn confirm,
+  session delete/drop, tasks archive, and the trust screens where the
+  answer set is fixed — stops asking for typed `y`/enter and renders
+  buttons. The ModalHost invariant stands: no keypress side effect
+  without a resolved modal.
+- Typed input remains only where actual text is entered (spawn args,
+  reasons, tags); those modals may gain Submit/Cancel buttons but keep
+  their text field.
+"""
+validation = """
+## Done when
+
+No dashboard modal with a fixed answer set asks for typed confirmation —
+shown by a sweep of `ModalHost` call sites. A scratch TUI proof drives
+focus with arrows and tab, fires with enter, cancels with esc leaving no
+side effect, and shows the destructive button toned red (behavioral
+assertion on the rendered buffer, scratch fixtures only).
+"""
+
+[relations]

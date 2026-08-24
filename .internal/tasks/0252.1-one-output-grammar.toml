@@ -1,0 +1,51 @@
+schema-version = "0.2"
+key = "0252.1"
+title = "One output grammar: every command ends in a panel"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The vehicle already exists: the P465 panel kit
+(modules/cli/src/app/presentation.rs) — header line, `│` gutter, aligned
+two-column rows with dimmed labels, one closing state line, and a plain
+indented fallback wherever styling is unavailable (non-TTY, NO_COLOR, CI,
+TERM=dumb). Only `doctor` uses it. Every complaint in the parent is a
+surface that does not.
+
+## Shape
+
+- Restyle the kit to the parent's ruling 2: `╭─ product ─ headline`
+  becomes `┌─ <Title> ──`; `╰─ state` becomes `└── <State>`. The kit's own
+  tests pin the old glyphs — repin them as behavioral proofs of the new
+  grammar, never as frozen inventories.
+- Adopt and cut. Run end (the drive/story/run reporting paths), spawn,
+  delete, merge, and the lifecycle commands that today print ledger, lock,
+  and worktree internals all route their final output through the kit.
+  Part of this task is tracing where the failure path assembles its
+  current dump — it accumulates across drive/story/run — and moving ALL of
+  it behind `--verbose`. The default panel carries the parent's ruling 1
+  and nothing more.
+- `next:` rows per ruling 3: only a real action (unmerged -> the merge
+  command), never `next: ctx run --verbose` or any other pointer at more
+  output.
+- `--json` outputs are untouched; this task is the human surface only.
+"""
+validation = """
+## Watch
+
+- The content rule is a ceiling, not a floor to decorate: resist adding a
+  "helpful" row. Two facts on failure, two on success.
+- No frozen-inventory tests: proofs render scratch panels and assert the
+  grammar behaviorally.
+
+## Done when
+
+A failed scratch run prints exactly: `┌── <title> · <trait>` /
+`│ session: <id>` / `│ error: <human-readable>` / `└── Failure`. A merged
+scratch run prints `merged: yes (<commit>)`; an unmerged one prints
+`merged: no (<merge command>)` — and `└── Success` either way. `--verbose`
+restores today's detail. `doctor` renders with the square glyph set. A
+call-site sweep (not grep alone) shows no command printing ledger, lock,
+or worktree rows outside `--verbose`.
+"""
+
+[relations]

@@ -1,0 +1,41 @@
+schema-version = "0.2"
+key = "0252.4"
+title = "Failure is a modal, not an ejection"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Runs are resumable and re-drivable; the surface must show that instead of
+ejecting on every failure. Parent ruling 5, owner scope: ALL "fail or
+let's exit" events.
+
+## Shape
+
+- Trigger set: driver failure, harness failure, and the ctrl-c interrupt
+  request in the run view — any event that today tears the pane down and
+  exits.
+- Behavior: the pane stays up, the background dims, a modal states in one
+  short line what happened and offers three buttons (0252.3 widget):
+  - Resume/Retry — re-drive the SAME session via the `--session` resume
+    path that exists today.
+  - Restart — a fresh run, same trait and args, new session.
+  - Abort — tear down and print 0252.1's failure panel.
+- Ctrl-c: the FIRST ctrl-c opens this modal instead of the run pane's
+  instant kill (`CtrlCPolicy`, P551); the SECOND stays the hard escape
+  hatch, and 0252.2's rescue erases behind it.
+- Seam with 0243.5: pause-at-frame-boundary is the center arc's
+  primitive. This task rides today's interrupt and resume mechanics and
+  adopts pause when it lands — no dependency on the center.
+"""
+validation = """
+## Done when
+
+A scratch run that fails shows the dimmed modal with three buttons.
+Resume continues the same session id and the ledger shows continuation.
+Restart begins a new session with the same args. Abort exits and prints
+the 0252.1 failure panel. One ctrl-c opens the modal; a second still
+hard-exits with 0252.2's rescue. No path exits the TUI without either a
+chosen Abort or the double-ctrl-c hatch.
+"""
+
+[relations]
+depends-on = ["0252.1", "0252.3"]
