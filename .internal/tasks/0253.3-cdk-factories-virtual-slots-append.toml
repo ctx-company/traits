@@ -1,0 +1,41 @@
+schema-version = "0.2"
+key = "0253.3"
+title = "CDK: parameterized factories, virtual slots, and Append"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The ergonomics trio. Pure CDK and lowering — no core changes.
+
+## Shape
+
+- Parameterized step factories: every `defineStep.x` gains the overload
+  `defineStep.x((refs) => ({...}))` beside the static object form. The
+  factory's generic is constrained to the reference union, so an
+  UNANNOTATED parameter falls back to that union under strict tsc —
+  verified against the compiler 2026-08-24, not assumed: bare `answer`
+  type-checks and is interpolatable; only params needing field access
+  annotate (`signal: typeof toolkit.signal.needsOwner`). Instantiation
+  passes references positionally after the title, and the inferred tuple
+  makes miswired arity or kind a compile error at the variant.
+- Virtual slots: `output: cdk.schema.text` on a step declares an output
+  with no named slot; the instantiation handle exposes `.output`, the
+  only way to address it. Lowering produces an ordinary auto-named slot —
+  ledger and replay unchanged. Doctrine line for the reference docs:
+  named slot = shared state, virtual slot = local plumbing.
+- `operation.Append` joins Merge/SetField (slot.ts write modes): appends
+  a step's output as one entry to a text or list slot, so accumulation
+  is a write mode, never read-format-rewrite.
+"""
+validation = """
+## Done when
+
+Compile-time proofs (the typecheck test suite): bare factory params
+type-check as the reference union and interpolate; a wrong-kind or
+missing wiring argument fails compilation. Synth proofs: a virtual slot
+lowers to an auto-named slot a scratch run writes and replays; two steps
+appending to one text slot yield both entries in order. Static form
+`defineStep.x({...})` byte-identical to today for every existing trait.
+"""
+
+[relations]
+depends-on = ["0253.2"]

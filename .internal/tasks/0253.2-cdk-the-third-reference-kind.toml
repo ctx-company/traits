@@ -1,0 +1,40 @@
+schema-version = "0.2"
+key = "0253.2"
+title = "CDK: signals are the third reference kind"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The CDK surface for 0253.1, built on machinery that already exists.
+
+## Shape
+
+- `cdk.signal({ id, schema })` returns the signal analogue of
+  `DeclaredSlotWithFields` (slot.ts): one typed `FieldRef` per payload
+  field, `SignalHandle` gains its phantom payload type. Schema fields
+  carry `description` (owner ruling).
+- Signal `FieldRef`s join the `PromptInterpolation` union (handles.ts),
+  so `${signal.reason}` type-checks by the identical machinery as
+  `${verdict1.status}`.
+- Interpolating a signal itself in an `output.prompt` template IS the
+  may-emit declaration: it lowers to the canonical emits entry for that
+  step, and the surrounding sentence is the authored emission guidance
+  0253.1 renders. No separate `emits:` field required.
+- Compose-time scope rule: a signal's fields interpolate only inside a
+  `flow.when` block whose guard includes `condition.signal(thatSignal)`.
+  Violation is a build error naming the signal and the step.
+- `condition.signal` (exists today) accepts the new schema'd handles
+  unchanged — guarding never requires the schema.
+"""
+validation = """
+## Done when
+
+TypeScript proofs: field interpolation type-checks against the declared
+schema and rejects unknown fields; synth of a scratch trait shows the
+canonical emits entry produced by interpolation alone; a field
+interpolated outside a guarded block fails the build with the named
+signal. An existing trait using bare `ref.signal` guards builds
+byte-identically. `just ts-test` and typecheck green.
+"""
+
+[relations]
+depends-on = ["0253.1"]

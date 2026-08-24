@@ -1,0 +1,46 @@
+schema-version = "0.2"
+key = "0253.4"
+title = "Ask is authorable; the run parks awaiting-owner"
+status = "ready"
+raised = "2026-08-24"
+content = """
+The 0236 reversal, whole surface — that ruling's own terms forbid doing
+half: expose it everywhere or nowhere. This is everywhere.
+
+## Shape
+
+- `cdk.defineStep.ask` — static and factory forms like every other kind;
+  `input` is the question shown to the owner (any template, fields of a
+  guarded signal included), `output` a schema like any step's. Lowers to
+  the existing `SequenceKind::Ask`.
+- Reaching an ask frame parks the run: new outcome `awaiting-owner`,
+  sibling of parked/interrupted, the rendered question durable in the
+  ledger. Never idles — no waiting process (owner ruling; the center
+  arc's decoupling is what makes this cheap to live with).
+- Answering surfaces the EXISTING submission path:
+  - a CLI verb that names the session, shows the question, takes the
+    answer, and resumes — the answer lands as the ask's slot value,
+    ordinary evidence;
+  - the dashboard: an `awaiting-owner` row is visibly a summons; opening
+    it shows the question and takes the answer in a modal. Text answers
+    now; a choice-schema output renders as buttons when 0252.3 lands.
+  - resume after answer is manual until the center arc; with 0243.3-.5
+    the summons pushes to subscribers and answering auto-resumes. Seams,
+    not dependencies.
+- Preview: a SUMMONS section — every ask step with its guard ("always"
+  or the signal name) and the slot its answer fills. The trait's
+  human-touch surface is part of the composed contract, digest-covered.
+"""
+validation = """
+## Done when
+
+A scratch trait with a guarded ask: the run parks `awaiting-owner` with
+the question in the ledger; the CLI verb answers and the resumed run
+consumes the answer from the slot; the dashboard shows the summons and
+answers it; an unanswered summons survives process death and answers
+after restart identically. Preview lists the summon point with its
+guard. A trait with no ask composes byte-identically to today.
+"""
+
+[relations]
+depends-on = ["0253.3"]
