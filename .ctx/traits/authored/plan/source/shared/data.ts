@@ -45,7 +45,7 @@ export const planTaskSchema: SchemaHandle = schema.object(
   "plan-task",
   {
     key: schema.field(schema.text(), {
-      description: 'Final board key: the parent slice\'s NNNN plus a child ordinal, e.g. "0150.2" or "0150.11" — ordinals continue past 9, never zero-padded.',
+      description: 'Symbolic key: the parent slice\'s KEY<n> plus a child ordinal, e.g. "KEY2.3" or "KEY2.11" — ordinals continue past 9, never zero-padded. Real board numbers are assigned by the final renumber step, never here.',
     }),
     title: schema.field(schema.text(), { description: "Short imperative title." }),
     "depends-on": schema.field(schema.list(schema.text()), {
@@ -64,7 +64,7 @@ export const planSliceSchema: SchemaHandle = schema.object(
   "plan-slice",
   {
     key: schema.field(schema.text(), {
-      description: "Final board key of the slice's parent charter task: bare zero-padded NNNN.",
+      description: 'Symbolic key of the slice: "KEY1", "KEY2", ... in plan order. The final renumber step assigns the real board number.',
     }),
     title: schema.field(schema.text(), { description: "The slice's goal, as a short title." }),
     covers: schema.field(schema.list(schema.text()), {
@@ -72,10 +72,14 @@ export const planSliceSchema: SchemaHandle = schema.object(
         "work-item ids this slice is responsible for. Every extracted work item must appear in at least one slice's covers.",
     }),
     tasks: schema.field(schema.list(planTaskSchema), {
-      description: 'The slice\'s child tasks in dependency order, keys "NNNN.1", "NNNN.2", ... continuing ".10", ".11" beyond nine.',
+      description:
+        'The slice\'s child tasks in dependency order, keys "KEY<n>.1", "KEY<n>.2", ... continuing ".10", ".11" beyond nine — EMPTY when the slice is one standalone bare task rather than a charter.',
     }),
   },
-  { description: "One dependency-ordered slice of the plan: a parent charter key plus its child tasks." },
+  {
+    description:
+      "One dependency-ordered slice of the plan: a standalone bare task (empty tasks), or a parent charter key plus its child tasks when a genuine umbrella exists.",
+  },
 );
 export const writeReceiptSchema: SchemaHandle = schema.object(
   "write-receipt",
@@ -116,10 +120,10 @@ export const boardCheck = slot({
   schema: boardCheckSchema,
   description: "The pre-write board guard's verdict: detection that no earlier step wrote to the board.",
 });
-export const nextKey = slot.text({
-  id: "next-key",
+export const keyMap = slot.text({
+  id: "key-map",
   description:
-    "Deterministic zero-padded next free board key, derived by a command step scanning .internal/tasks/ (archived/ included) — never agent arithmetic against the directory.",
+    'The renumber step\'s mapping, one "KEY<n> -> NNNN" line per assigned key — derived mechanically from the live board at the end of the run, never agent arithmetic.',
 });
 export const raisedDate = slot.text({
   id: "raised-date",
@@ -129,7 +133,7 @@ export const slicePlan = slot({
   id: "slice-plan",
   schema: schema.list(planSliceSchema),
   description:
-    "The typed plan: parent charter keys with their child tasks, final keys already assigned from slot:next-key.",
+    "The typed plan: symbolic-keyed slices — bare tasks or charters with children; real board numbers are assigned by the final renumber step.",
 });
 export const receipts = slot({
   id: "receipts",
@@ -154,6 +158,12 @@ export const revisionLog = slot.text({
 });
 export const writtenFiles = port.output.of("written-files", schema.list(writeReceiptSchema), {
   title: "Written Task Files",
-  description: "Per-slice receipts naming every task file written under .internal/tasks/.",
+  description:
+    "Per-slice receipts naming every task file written under .internal/tasks/ — symbolic paths as written; the key map translates them to final board keys.",
   value: receipts,
+});
+export const finalKeys = port.output.of("final-keys", schema.text(), {
+  title: "Final Board Keys",
+  description: 'The renumber step\'s "KEY<n> -> NNNN" mapping — the real board keys the written files ended up under.',
+  value: keyMap,
 });

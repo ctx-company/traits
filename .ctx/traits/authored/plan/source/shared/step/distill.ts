@@ -1,7 +1,7 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
 import { input } from "@ctx-traits/cdk";
 
-import { durationTarget, nextKey, raisedDate, receipts, taskInput } from "../data.ts";
+import { durationTarget, raisedDate, receipts, taskInput } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 /**
@@ -16,9 +16,9 @@ export function tasks(agent: AgentHandle) {
       `Turn the described work directly into TaskDocument TOML task files on the board — skip deriving separate grounding notes, but read the relevant parts of the repository with your tools so every task is grounded in this codebase's affected modules or areas, applicable constraints, and existing validation gates. Do not solicit or prescribe exact symbols, signatures, edits, or edit sequencing; architect makes those execution-level decisions later.
             The work, as described: {task}
             ${TASK_FORMAT_DOCTRINE}
-            Key the first file {next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks — ordinals continue ".10", ".11", ..., never zero-padded; a single bare-key task when it does not). Size every task to roughly {duration} of focused agent work. Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
+            Shape follows the work, per the doctrine: one bare task ("KEY1"), several independent bare tasks ("KEY1", "KEY2", ...), or a charter with children ("KEY1" plus "KEY1.1", "KEY1.2", ... — ordinals continue ".10", ".11", ..., never zero-padded) only when a genuine umbrella exists. Size every task symmetrically to roughly {duration} of focused agent work, cover the work with the FEWEST tasks that stay within it, and never write a gate-only task. Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
             Do not implement anything. Return the receipts: one entry per charter (or standalone task) naming every file written.`,
-      { task: taskInput, "next-key": nextKey, "raised-date": raisedDate, duration: durationTarget },
+      { task: taskInput, "raised-date": raisedDate, duration: durationTarget },
     ),
     output: receipts,
   });
@@ -37,9 +37,9 @@ export function verbatim(agent: AgentHandle) {
             The work, as described: {task}
             Keep the work's own wording near-verbatim. Do NOT refine, invent, or add requirements the description does not state; do not read the codebase or ground it in anything beyond the description itself.
             ${TASK_FORMAT_DOCTRINE}
-            Key the file {next-key} and stamp raised = {raised-date}.
+            Key the file "KEY1" (symbolic — the renumber step assigns the real board number) and stamp raised = {raised-date}.
             Do not implement anything. Return the receipt: one entry naming the file written.`,
-      { task: taskInput, "next-key": nextKey, "raised-date": raisedDate },
+      { task: taskInput, "raised-date": raisedDate },
     ),
     output: receipts,
   });

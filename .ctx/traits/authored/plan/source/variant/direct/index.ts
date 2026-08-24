@@ -14,7 +14,7 @@ export default function () {
     description:
       "Format described work into one well-formed board TaskDocument TOML file with wording kept near-verbatim — no refinement, no invention, the fastest path to just implement.",
     procedureDescription:
-      "Derive the next board key and date, then format the described work near-verbatim into one TaskDocument TOML file on the board.",
+      "Format the described work near-verbatim into one symbolic-keyed TaskDocument TOML file on the board, then assign its final board key mechanically from the live board.",
   });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
@@ -24,9 +24,9 @@ export default function () {
     "Format-and-write role.",
   );
 
-  shared.step.derive.nextKeyStep();
   shared.step.derive.raisedDateStep();
   shared.step.distill.verbatim(smart1);
+  shared.step.renumber.finalKeysStep();
 
-  return { writtenFiles: shared.data.writtenFiles };
+  return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };
 }
