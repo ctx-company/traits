@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0252.2"
+title = "Every exit erases the run view"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Diagnosis (2026-08-24). The run view paints directly onto the normal
+screen — an inline viewport at full terminal height
+(tui_ratatui.rs `inline_viewport_height`). Exactly ONE path cleans that
+up: `close()` (run_view.rs), which commits the final tree into scrollback
+via `commit_inline_scrollback` and erases the viewport. Every other way
+out skips it:
+
+- second ctrl-c while the driver is blocked in a model call — the SIGINT
+  handler hard-exits (`interrupt.rs` `_exit(130)`)
+- SIGTERM / external kill — same hard exit
+- a panic (the hook calls `restore_terminal` only), or an error that
+  propagates before `close()` runs
+
+All of these restore terminal MODES (`FULL_RESTORE_ESCAPE`: raw off,
+mouse off, cursor shown) — that machinery is solid — but modes are all
+they restore. Nobody erases the painted rows, so the shell prompt lands
+inside a dead frame. The dashboard shows the same class second-hand: the
+attach/detach rebuild path ignores `terminal.clear()` failures, and
+exiting while attached crosses the same gap.
+
+## Shape
+
+- Prefill, in the house grammar (parent ruling 6): at pane construction,
+  pre-render an interrupted panel — `┌── <title> · <trait>` /
+  `│ session: <id>` / `│ error: interrupted (signal)` / `└── Failure` —
+  into a process-global buffer. The signal handler writes one static
+  clear-screen sequence plus that buffer verbatim: a single write of
+  pre-formatted bytes, async-signal-safe, refreshed if the pane's title
+  changes. Clearing the whole screen is correct for this pane because the
+  inline viewport IS the whole screen; scrollback above is untouched.
+- Panic hook and error-propagation paths funnel through `close()` (commit
+  or erase) instead of restore-modes-only. The hook stays correct for Alt
+  panes, which must NOT clear the primary screen.
+- Dashboard gap: stop ignoring `clear()` failures on the attach/detach
+  rebuild path, and prove exit-while-attached leaves nothing.
+"""
+validation = """
+## Watch
+
+- Signal-handler code stays a write of pre-formatted static bytes —
+  no formatting, no allocation, no locks in the handler.
+- The prefilled panel matches 0252.1's grammar byte-for-byte; one proof
+  renders both and diffs them, from scratch fixtures.
+
+## Done when
+
+Proven from captured pty bytes, not eyeballs: SIGTERM to a live scratch
+run leaves modes restored and only the interrupted panel on screen;
+the double-ctrl-c path leaves the same; an injected panic mid-run leaves
+no frame rows; dashboard attach then exit leaves no remnant. A clean run
+is byte-identical to today (commit-to-scrollback path unchanged).
+"""
+
+[relations]

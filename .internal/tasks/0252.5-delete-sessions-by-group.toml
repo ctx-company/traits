@@ -1,0 +1,29 @@
+schema-version = "0.2"
+key = "0252.5"
+title = "Delete sessions by group"
+status = "ready"
+raised = "2026-08-24"
+content = """
+## Shape
+
+- CLI: `ctx traits sessions delete --failed` (owner-specified spelling)
+  deletes every failed session in the current repo's store. Never a live
+  run: probe the driver lock first — the same kernel-backed liveness the
+  dashboard uses — and skip holders. The flag family is extensible
+  (--interrupted and friends later); only `--failed` is in scope now.
+- Output through 0252.1's grammar: a panel reporting `deleted: <n>` (and
+  `skipped: <n> live` only when nonzero).
+- Dashboard: deleting a group header deletes the group's sessions behind
+  ONE confirm naming the count. Uses whatever confirm exists today;
+  0252.3 converts it to buttons when it lands — no dependency.
+"""
+validation = """
+## Done when
+
+Against a scratch store with mixed outcomes: the verb deletes exactly the
+failed sessions, a live driver (proof holds its flock) is untouched and
+reported skipped, and the panel names the count. The dashboard group
+delete removes the group's rows behind one confirm showing the count.
+"""
+
+[relations]

@@ -1,0 +1,55 @@
+schema-version = "0.2"
+key = "0252"
+title = "Quiet surfaces: what commands say, how they exit, what a failure does"
+status = "ready"
+raised = "2026-08-24"
+content = """
+Owner design, 2026-08-24. The work lives in the children; do not dispatch
+this file.
+
+## The problem
+
+Every surface over-talks and over-reacts. A failed run dumps pages of debug
+output when the user needs two facts. A successful run prints ledger, lock,
+and worktree internals and then advertises `next: ctx run --verbose` — a
+hint pointing at MORE output. An abnormal exit leaves a dead half-frame of
+the run view on the terminal. Any failure ejects the user from the TUI even
+though every run is resumable, so traits FEEL fragile precisely because the
+surface hides that they are not. Confirms make the user type. Footers list
+every shortcut at once.
+
+## Rulings (owner, 2026-08-24)
+
+1. Run-end content rule. Failure says: title · trait (variant if any),
+   session, human-readable error. Success says: title · trait, session,
+   merged yes (commit id) / no (the merge command). NOTHING ELSE on the
+   default path; today's detail moves behind `--verbose`.
+2. Glyphs. Header `┌─ <Title> ──`, gutter `│`, close `└── <State>` (e.g.
+   `└── Success`, `└── Failure`). Square corners replace the panel kit's
+   rounded set everywhere, doctor included. Rows are two columns: dimmed
+   label, normal value — palette doctrine unchanged.
+3. A `next:` row appears only when a real action exists (unmerged run ->
+   the merge command). Never a generic pointer at more output.
+4. Confirms are buttons. Typing remains only where actual text is entered
+   (spawn args, reasons, tags).
+5. Fail / interrupt / any "let's exit" event never tears the pane down:
+   dim the background, show a modal saying in one line what happened, offer
+   Resume-Retry / Restart / Abort. Applies to ALL such events ("yes, for
+   all" — owner).
+6. Even a hard kill leaves a panel, not wreckage: the signal-rescue
+   prefill follows the same glyph grammar as ruling 2 (owner amendment).
+7. Group delete verb: `ctx traits sessions delete --failed`
+   (owner-specified spelling).
+8. Shortcuts: the footer shows only a few, formatted `[?] guide · [d]
+   dash`; `?` opens the full list; a command-menu key lists what applies to
+   the current item — all three views derive from one action registry.
+"""
+validation = """
+## Done when
+
+All children are done. A failed run answers "what happened, which session"
+in four lines; an interrupted terminal shows a clean prompt; a failure
+inside the TUI is a choice, not an ejection.
+"""
+
+[relations]
