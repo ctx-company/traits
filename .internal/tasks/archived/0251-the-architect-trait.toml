@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0251"
 title = "The architect trait: a plan becomes an execution plan, in place"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-24"
+origin = "run run-a5361aeb49a4c7eb94c1fc4dc0b05e76879c739f2a2b680951b4ca32eaeedf37 merged as 8b848ec2b0a836679128bcf3cdbe705a05fd4b0e"
 content = """
 Owner design 2026-08-24, second half of the pipeline. A new authored trait,
 sibling of the others under .ctx/traits/authored/architect/, that takes ONE
@@ -81,3 +83,7 @@ are owner steps.
 
 [relations]
 depends-on = ["0250"]
+
+[closure]
+mode = "merge"
+commit = "8b848ec2b0a836679128bcf3cdbe705a05fd4b0e"

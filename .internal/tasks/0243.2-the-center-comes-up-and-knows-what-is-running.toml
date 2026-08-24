@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0243.2"
 title = "The center comes up, and knows what is running"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
 content = """
 The center process itself: lifecycle plus discovery. No subscribers, no

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0243.1"
 title = "Bridge: the run pane paints now, and the ALL-repos cache stops evicting itself"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-24"
+origin = "run run-a98691936aef3be0185a072741ced485cfceced4cbd1c779f96c4e020f7ec944 merged as 6829bbdaa35e6773296b84169c9c8e153f94b7f3"
 content = """
 Two fixes to today's dashboard, worth hours now even though 0243.4 later
 deletes the code they fix. Both are diagnosed, neither waits on the center.
@@ -53,3 +55,7 @@ discarded. A machine-wide pass over two scratch repo stores, ticked twice
 with a shared cache, parses each unchanged ledger at most once (counting
 reader, not timing). Existing dashboard proofs stay green.
 """
+
+[closure]
+mode = "merge"
+commit = "6829bbdaa35e6773296b84169c9c8e153f94b7f3"

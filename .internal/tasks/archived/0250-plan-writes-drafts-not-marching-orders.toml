@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0250"
 title = "Plan writes drafts, not marching orders"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-24"
+origin = "run run-c23d387a71462d3367761dc944a83d6a1d355f2ee93ed6de71b18f226cf30a59 merged as 62420aa5f096d3aa7d43fa43755e9710550a25ff"
 content = """
 Owner design 2026-08-24, first half of the plan -> architect -> implement
 pipeline: plan keeps splitting exactly as it does, but its output is a
@@ -50,3 +52,7 @@ names modules and gates but no symbol-level edit instructions — verified on
 the run's own output, not by a committed fixture. Live run is an owner
 step.
 """
+
+[closure]
+mode = "merge"
+commit = "62420aa5f096d3aa7d43fa43755e9710550a25ff"
