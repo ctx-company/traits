@@ -30,7 +30,7 @@ resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/plan-default/SKILL.md"
-digest = "sha256:5dfdb6c0f33a27262542173b2bf217c7f760e75988057666ef4d8b753023cc83"
+digest = "sha256:57a43d4ea60b9fb5b1897d594ee6be1385f4c5406386ea01bb099cb978f09675"
 
 [[trait.projection]]
 target-profile = "agent-skills"
@@ -38,15 +38,18 @@ renderer-version = "0.2.4"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
-source = "sha256:6b62487f5d868e7e0439ce935e51c0ecc9fa65708de25bdbee4ae29fc98e0c6c"
-canonical = "sha256:46ce174dc34002318df79605f7feaa64cfac80c42355311a67948a0a746a9cc0"
-model-visible = "sha256:5bfc0c3ec69bb8d4387c0724fc1f67a4880c815bb17a220e89e239b5b1c0ee0c"
-render = "sha256:72a64b1e07294c0718266ba43c53515b8d178f3e2799761fba4a82040ecb5365"
-generated-markdown = "sha256:5dfdb6c0f33a27262542173b2bf217c7f760e75988057666ef4d8b753023cc83"
+source = "sha256:e0525740ad38f07d32426ec16a4dae574173ff1084570a28b4e70b2ddcb67ba9"
+canonical = "sha256:d778454e2a20b8ef7197f84261484f3e944ad153873b83ed298cc17e439cd53b"
+model-visible = "sha256:aa6d3add4a3c1f0a7c72b69910b57e1aa7cac238c751d4ef2d356a226369235f"
+render = "sha256:cb49a28ccb5b0798c5bbef866631d61961fd81ebf35690f6e39827efb44349b8"
+generated-markdown = "sha256:57a43d4ea60b9fb5b1897d594ee6be1385f4c5406386ea01bb099cb978f09675"
 
 [trait.projection.warnings]
 semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
-advisory-policy = ["port.written-files output contract has no format guidance"]
+advisory-policy = [
+    "port.final-keys output contract has no format guidance",
+    "port.written-files output contract has no format guidance",
+]
 
 [trait.projection.static-output]
 drift-status = "in-sync"
