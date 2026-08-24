@@ -53,5 +53,3 @@ discarded. A machine-wide pass over two scratch repo stores, ticked twice
 with a shared cache, parses each unchanged ledger at most once (counting
 reader, not timing). Existing dashboard proofs stay green.
 """
-
-[relations]
