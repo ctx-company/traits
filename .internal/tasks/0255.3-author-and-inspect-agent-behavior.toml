@@ -69,9 +69,10 @@ validation = """
 
 Run verification in this strict order: `pnpm --dir packages/cdk run test`, then `CARGO_TARGET_DIR=target just test`. The archived closure for dependency 0255.1 is not baseline evidence because both recorded checks failed. Perform no more than two targeted repair-and-rerun rounds. Success requires both commands to exit 0, drift-free generated definitions, and a clean substantive review; otherwise report the concrete blocker instead of marking the task complete.
 """
+
 [relations]
-parent = "0255"
 depends-on = ["0255.1"]
+parent = "0255"
 
 [[checks]]
 name = "agent behavior authoring passes the CDK suite"
