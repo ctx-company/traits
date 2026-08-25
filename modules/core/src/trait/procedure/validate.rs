@@ -4689,10 +4689,14 @@ fn local_sequence_id(ref_text: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Shared prompt-guidance fixture graph: a single otherwise-valid prompt
+    /// item, placed at the top-level `procedure` or in a named `work`
+    /// sequence declaration depending on `named`.
     fn prompt_guidance_fixture(
         schema_version: &str,
         intent: Option<serde_json::Value>,
         behavior: Option<serde_json::Value>,
+        named: bool,
     ) -> Trait {
         let mut item = serde_json::json!({ "id": "prompt-step", "prompt": "Do the work." });
         if let Some(intent) = intent {
@@ -4701,40 +4705,21 @@ mod tests {
         if let Some(behavior) = behavior {
             item["behavior"] = behavior;
         }
-        let value = serde_json::json!({
+        let mut value = serde_json::json!({
             "id": "prompt-guidance-fixture",
             "schema-version": schema_version,
             "version": "0.1.0",
             "name": "Prompt guidance fixture",
             "description": "Validates prompt guidance.",
-            "procedure": {
+        });
+        if named {
+            value["sequence"] = serde_json::json!({ "work": { "sequence": [item] } });
+        } else {
+            value["procedure"] = serde_json::json!({
                 "description": "Validates prompt guidance.",
                 "sequence": [item]
-            }
-        });
-        serde_json::from_value(value).expect("fixture trait decodes")
-    }
-
-    fn named_prompt_guidance_fixture(
-        schema_version: &str,
-        intent: Option<serde_json::Value>,
-        behavior: Option<serde_json::Value>,
-    ) -> Trait {
-        let mut item = serde_json::json!({ "id": "prompt-step", "prompt": "Do the work." });
-        if let Some(intent) = intent {
-            item["intent"] = intent;
+            });
         }
-        if let Some(behavior) = behavior {
-            item["behavior"] = behavior;
-        }
-        let value = serde_json::json!({
-            "id": "prompt-guidance-fixture",
-            "schema-version": schema_version,
-            "version": "0.1.0",
-            "name": "Prompt guidance fixture",
-            "description": "Validates prompt guidance.",
-            "sequence": { "work": { "sequence": [item] } }
-        });
         serde_json::from_value(value).expect("fixture trait decodes")
     }
 
@@ -4754,25 +4739,25 @@ mod tests {
     #[test]
     fn prompt_intent_top_level_and_named_accept() {
         let intent = serde_json::json!({ "require": "correctness" });
-        validate(&prompt_guidance_fixture("0.6", Some(intent.clone()), None))
+        validate(&prompt_guidance_fixture("0.6", Some(intent.clone()), None, false))
             .expect("top-level prompt intent is valid");
-        validate(&named_prompt_guidance_fixture("0.6", Some(intent), None))
+        validate(&prompt_guidance_fixture("0.6", Some(intent), None, true))
             .expect("named prompt intent is valid");
     }
 
     #[test]
     fn prompt_behavior_accepts_all_axes_on_top_level_and_named_items() {
         let behavior = all_axes_behavior();
-        validate(&prompt_guidance_fixture("0.6", None, Some(behavior.clone())))
+        validate(&prompt_guidance_fixture("0.6", None, Some(behavior.clone()), false))
             .expect("top-level prompt behavior is valid");
-        validate(&named_prompt_guidance_fixture("0.6", None, Some(behavior)))
+        validate(&prompt_guidance_fixture("0.6", None, Some(behavior), true))
             .expect("named prompt behavior is valid");
     }
 
     #[test]
     fn prompt_intent_rejects_all_non_prompt_kinds() {
         for kind in ["ask", "command", "check", "project", "sequence", "branch", "loop", "for-each", "parallel", "terminal"] {
-            let mut trait_ref = prompt_guidance_fixture("0.6", Some(serde_json::json!({})), None);
+            let mut trait_ref = prompt_guidance_fixture("0.6", Some(serde_json::json!({})), None, false);
             trait_ref.procedure.as_mut().expect("fixture procedure").sequence[0].kind =
                 Some(
                     serde_json::from_value(serde_json::json!(kind))
@@ -4786,7 +4771,7 @@ mod tests {
     #[test]
     fn prompt_behavior_rejects_every_non_prompt_kind() {
         for kind in ["ask", "command", "check", "project", "sequence", "branch", "loop", "for-each", "parallel", "terminal"] {
-            let mut trait_ref = prompt_guidance_fixture("0.6", None, Some(serde_json::json!({})));
+            let mut trait_ref = prompt_guidance_fixture("0.6", None, Some(serde_json::json!({})), false);
             trait_ref.procedure.as_mut().expect("fixture procedure").sequence[0].kind =
                 Some(
                     serde_json::from_value(serde_json::json!(kind))
@@ -4799,7 +4784,7 @@ mod tests {
 
     #[test]
     fn prompt_intent_rejects_pre_06_schema() {
-        let error = validate(&prompt_guidance_fixture("0.5", Some(serde_json::json!({})), None))
+        let error = validate(&prompt_guidance_fixture("0.5", Some(serde_json::json!({})), None, false))
             .expect_err("0.6 is required")
             .to_string();
         assert!(error.contains("procedure.sequence[0].intent"));
@@ -4813,6 +4798,7 @@ mod tests {
                 version,
                 None,
                 Some(serde_json::json!({ "tone": "direct" })),
+                false,
             ))
             .expect_err("0.6 is required")
             .to_string();
@@ -4824,7 +4810,7 @@ mod tests {
     #[test]
     fn prompt_intent_reuses_guidance_list_validation() {
         let item = serde_json::json!({ "focus": [{ "id": "Bad Id" }] });
-        assert!(validate(&prompt_guidance_fixture("0.6", Some(item), None))
+        assert!(validate(&prompt_guidance_fixture("0.6", Some(item), None, false))
             .expect_err("shared guidance validation rejects bad ids")
             .to_string()
             .contains("procedure.sequence[0].intent.focus[0].id"));
@@ -4833,7 +4819,7 @@ mod tests {
     #[test]
     fn prompt_intent_reuses_scoped_collision_validation() {
         let item = serde_json::json!({ "require": "correctness", "avoid": "correctness" });
-        assert!(validate(&prompt_guidance_fixture("0.6", Some(item), None))
+        assert!(validate(&prompt_guidance_fixture("0.6", Some(item), None, false))
             .expect_err("scoped collision is rejected")
             .to_string()
             .contains("procedure.sequence[0].intent.avoid[0].id"));
@@ -4859,7 +4845,7 @@ mod tests {
                 "procedure.sequence[0].behavior.format[1].id",
             ),
         ] {
-            let error = validate(&prompt_guidance_fixture("0.6", None, Some(behavior)))
+            let error = validate(&prompt_guidance_fixture("0.6", None, Some(behavior), false))
                 .expect_err("invalid scoped guidance");
             assert!(
                 error.to_string().contains(path),
@@ -4867,10 +4853,11 @@ mod tests {
             );
         }
 
-        let named_error = validate(&named_prompt_guidance_fixture(
+        let named_error = validate(&prompt_guidance_fixture(
             "0.6",
             None,
             Some(serde_json::json!({ "tone": ["Not A Slug"] })),
+            true,
         ))
         .expect_err("invalid scoped guidance in named declaration");
         assert!(named_error
@@ -4945,7 +4932,7 @@ mod tests {
     #[test]
     fn prompt_intent_accepts_each_guidance_group() {
         let item = serde_json::json!({ "require": "correctness", "focus": "robustness", "avoid": "scope-creep", "block": "over-engineering" });
-        validate(&prompt_guidance_fixture("0.6", Some(item), None))
+        validate(&prompt_guidance_fixture("0.6", Some(item), None, false))
             .expect("all intent groups are accepted");
     }
 
