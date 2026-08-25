@@ -693,23 +693,37 @@ fn behavior_axes(
 
 fn effective_behavior_axes<'a>(
     root: Option<&'a crate::r#trait::Behavior>,
-    assigned: &'a crate::r#trait::Behavior,
+    assigned: Option<&'a crate::r#trait::Behavior>,
+    ready_prompt: Option<&'a crate::r#trait::Behavior>,
 ) -> [(&'static str, Vec<&'a GuidanceItem>, bool); 8] {
-    let additive = |root: Option<&'a [GuidanceItem]>, assigned: &'a [GuidanceItem]| {
-        layered_additive_guidance(root.unwrap_or_default(), assigned, (), ())
-            .into_iter()
-            .map(|(_, item)| item)
-            .collect()
+    let additive = |root: Option<&'a [GuidanceItem]>,
+                     assigned: Option<&'a [GuidanceItem]>,
+                     ready_prompt: Option<&'a [GuidanceItem]>| {
+        let ready_prompt = ready_prompt.unwrap_or_default();
+        layered_additive_guidance(
+            root.unwrap_or_default(),
+            assigned.unwrap_or_default(),
+            (),
+            (),
+        )
+        .into_iter()
+        .map(|(_, item)| item)
+        .filter(|item| !ready_prompt.iter().any(|prompt| prompt.id == item.id))
+        .chain(ready_prompt.iter())
+        .collect()
     };
-    let scalar = |root: Option<&'a GuidanceItem>, assigned: Option<&'a GuidanceItem>| {
-        assigned.or(root).into_iter().collect()
+    let scalar = |root: Option<&'a GuidanceItem>,
+                  assigned: Option<&'a GuidanceItem>,
+                  ready_prompt: Option<&'a GuidanceItem>| {
+        ready_prompt.or(assigned).or(root).into_iter().collect()
     };
     [
         (
             "tone",
             additive(
                 root.map(|behavior| behavior.tone.as_slice()),
-                assigned.tone.as_slice(),
+                assigned.map(|behavior| behavior.tone.as_slice()),
+                ready_prompt.map(|behavior| behavior.tone.as_slice()),
             ),
             false,
         ),
@@ -717,7 +731,8 @@ fn effective_behavior_axes<'a>(
             "method",
             additive(
                 root.map(|behavior| behavior.method.as_slice()),
-                assigned.method.as_slice(),
+                assigned.map(|behavior| behavior.method.as_slice()),
+                ready_prompt.map(|behavior| behavior.method.as_slice()),
             ),
             false,
         ),
@@ -725,7 +740,8 @@ fn effective_behavior_axes<'a>(
             "format",
             additive(
                 root.map(|behavior| behavior.format.as_slice()),
-                assigned.format.as_slice(),
+                assigned.map(|behavior| behavior.format.as_slice()),
+                ready_prompt.map(|behavior| behavior.format.as_slice()),
             ),
             false,
         ),
@@ -733,7 +749,8 @@ fn effective_behavior_axes<'a>(
             "verbosity",
             scalar(
                 root.and_then(|behavior| behavior.verbosity.as_ref()),
-                assigned.verbosity.as_ref(),
+                assigned.and_then(|behavior| behavior.verbosity.as_ref()),
+                ready_prompt.and_then(|behavior| behavior.verbosity.as_ref()),
             ),
             true,
         ),
@@ -741,7 +758,8 @@ fn effective_behavior_axes<'a>(
             "directness",
             scalar(
                 root.and_then(|behavior| behavior.directness.as_ref()),
-                assigned.directness.as_ref(),
+                assigned.and_then(|behavior| behavior.directness.as_ref()),
+                ready_prompt.and_then(|behavior| behavior.directness.as_ref()),
             ),
             true,
         ),
@@ -749,7 +767,8 @@ fn effective_behavior_axes<'a>(
             "scope-control",
             scalar(
                 root.and_then(|behavior| behavior.scope_control.as_ref()),
-                assigned.scope_control.as_ref(),
+                assigned.and_then(|behavior| behavior.scope_control.as_ref()),
+                ready_prompt.and_then(|behavior| behavior.scope_control.as_ref()),
             ),
             true,
         ),
@@ -757,7 +776,8 @@ fn effective_behavior_axes<'a>(
             "initiative",
             scalar(
                 root.and_then(|behavior| behavior.initiative.as_ref()),
-                assigned.initiative.as_ref(),
+                assigned.and_then(|behavior| behavior.initiative.as_ref()),
+                ready_prompt.and_then(|behavior| behavior.initiative.as_ref()),
             ),
             true,
         ),
@@ -765,7 +785,8 @@ fn effective_behavior_axes<'a>(
             "uncertainty",
             scalar(
                 root.and_then(|behavior| behavior.uncertainty.as_ref()),
-                assigned.uncertainty.as_ref(),
+                assigned.and_then(|behavior| behavior.uncertainty.as_ref()),
+                ready_prompt.and_then(|behavior| behavior.uncertainty.as_ref()),
             ),
             true,
         ),
@@ -931,11 +952,33 @@ pub fn frame_guidance(
             .iter()
             .any(|(_, items, _)| !items.is_empty())
     });
-    let behavior = if assigned_behavior_is_nonempty {
+    let ready_prompt_behavior = ready_prompt.and_then(|item| item.behavior.as_ref());
+    let ready_prompt_behavior_is_nonempty = ready_prompt_behavior.is_some_and(|behavior| {
+        behavior_axes(behavior)
+            .iter()
+            .any(|(_, items, _)| !items.is_empty())
+    });
+    let behavior = if ready_prompt_behavior_is_nonempty {
         format_behavior_axes(
             effective_behavior_axes(
                 trait_ref.behavior.as_ref(),
-                assigned_behavior.expect("non-empty assigned behavior is present"),
+                assigned_behavior,
+                ready_prompt_behavior,
+            ),
+            trait_id,
+            GuidanceTag::GroupNamed,
+            "behavior",
+            None,
+            &mut warnings,
+            &mut normalizations,
+            &mut findings,
+        )
+    } else if assigned_behavior_is_nonempty {
+        format_behavior_axes(
+            effective_behavior_axes(
+                trait_ref.behavior.as_ref(),
+                assigned_behavior,
+                None,
             ),
             trait_id,
             GuidanceTag::GroupNamed,
@@ -2384,6 +2427,151 @@ mod render_v2_shape_tests {
                 .expect("agent guidance")
                 .expect("agent behavior");
             assert_eq!(root.behavior, rendered.behavior);
+        }
+    }
+
+    fn ready_prompt_behavior(
+        behavior: serde_json::Value,
+    ) -> crate::r#trait::procedure::SequenceItem {
+        serde_json::from_value(serde_json::json!({
+            "id": "ready",
+            "prompt": "Ready.",
+            "behavior": behavior,
+        }))
+        .expect("ready prompt behavior fixture")
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_behavior_merges_three_layers_in_order() {
+        let trait_ref = behavior_guidance_fixture(
+            serde_json::json!({ "tone": [{ "id": "root", "summary": "Root." }] }),
+            serde_json::json!([{ "id": "worker", "description": "Worker.", "behavior": { "tone": [{ "id": "agent", "summary": "Agent." }] } }]),
+        );
+        let prompt = ready_prompt_behavior(
+            serde_json::json!({ "tone": [{ "id": "prompt", "summary": "Prompt." }] }),
+        );
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
+            .expect("guidance resolves")
+            .expect("behavior guidance")
+            .behavior;
+        assert!(
+            behavior.find("root").unwrap() < behavior.find("agent").unwrap(),
+            "{behavior}"
+        );
+        assert!(
+            behavior.find("agent").unwrap() < behavior.find("prompt").unwrap(),
+            "{behavior}"
+        );
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_behavior_replaces_root_and_agent_items() {
+        let trait_ref = behavior_guidance_fixture(
+            serde_json::json!({ "tone": [{ "id": "shared", "summary": "Root." }] }),
+            serde_json::json!([{ "id": "worker", "description": "Worker.", "behavior": { "tone": [{ "id": "shared", "summary": "Agent." }] } }]),
+        );
+        let prompt = ready_prompt_behavior(
+            serde_json::json!({ "tone": [{ "id": "shared", "summary": "Prompt." }] }),
+        );
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
+            .expect("guidance resolves")
+            .expect("behavior guidance")
+            .behavior;
+        assert_eq!(behavior.matches("id=\"shared\"").count(), 1, "{behavior}");
+        assert!(behavior.contains("Prompt."), "{behavior}");
+        assert!(!behavior.contains("Root."), "{behavior}");
+        assert!(!behavior.contains("Agent."), "{behavior}");
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_behavior_applies_scalar_precedence_and_preserves_omitted_axes()
+    {
+        let trait_ref = behavior_guidance_fixture(
+            serde_json::json!({
+                "verbosity": { "id": "root-verbosity", "summary": "Root verbosity." },
+                "directness": { "id": "root-directness", "summary": "Root directness." },
+                "scope-control": { "id": "root-scope", "summary": "Root scope." },
+                "initiative": { "id": "root-initiative", "summary": "Root initiative." },
+                "uncertainty": { "id": "root-uncertainty", "summary": "Root uncertainty." },
+            }),
+            serde_json::json!([{
+                "id": "worker",
+                "description": "Worker.",
+                "behavior": {
+                    "verbosity": { "id": "agent-verbosity", "summary": "Agent verbosity." },
+                    "directness": { "id": "agent-directness", "summary": "Agent directness." },
+                    "scope-control": { "id": "agent-scope", "summary": "Agent scope." },
+                },
+            }]),
+        );
+        let prompt = ready_prompt_behavior(serde_json::json!({
+            "verbosity": { "id": "prompt-verbosity", "summary": "Prompt verbosity." },
+            "scope-control": { "id": "prompt-scope", "summary": "Prompt scope." },
+        }));
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
+            .expect("guidance resolves")
+            .expect("behavior guidance")
+            .behavior;
+        for present in [
+            "prompt-verbosity",
+            "prompt-scope",
+            "agent-directness",
+            "root-initiative",
+            "root-uncertainty",
+        ] {
+            assert!(behavior.contains(present), "{behavior}");
+        }
+        for absent in [
+            "root-verbosity",
+            "agent-verbosity",
+            "root-scope",
+            "agent-scope",
+            "root-directness",
+        ] {
+            assert!(!behavior.contains(absent), "{behavior}");
+        }
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_behavior_participates_without_assigned_agent_behavior() {
+        let trait_ref = behavior_guidance_fixture(
+            serde_json::json!({ "tone": [{ "id": "root", "summary": "Root." }] }),
+            serde_json::json!([{ "id": "worker", "description": "Worker." }]),
+        );
+        let prompt = ready_prompt_behavior(
+            serde_json::json!({ "tone": [{ "id": "prompt-only", "summary": "Prompt only." }] }),
+        );
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
+            .expect("guidance resolves")
+            .expect("behavior guidance")
+            .behavior;
+        assert!(behavior.contains("prompt-only"), "{behavior}");
+        assert!(behavior.contains("root"), "{behavior}");
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_behavior_is_byte_identical_when_absent_or_default() {
+        let trait_ref = behavior_guidance_fixture(
+            serde_json::json!({ "tone": [{ "id": "root", "summary": "Root behavior." }] }),
+            serde_json::json!([{
+                "id": "worker",
+                "description": "Worker.",
+                "behavior": { "method": [{ "id": "agent", "summary": "Agent method." }] },
+            }]),
+        );
+        let baseline = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
+            .expect("guidance resolves")
+            .expect("baseline behavior");
+        for prompt in [None, Some(ready_prompt_behavior(serde_json::json!({})))] {
+            let rendered = frame_guidance(
+                &trait_ref,
+                Some(assigned(&trait_ref, "worker")),
+                prompt.as_ref(),
+            )
+            .expect("guidance resolves")
+            .expect("rendered behavior");
+            assert_eq!(baseline.behavior, rendered.behavior);
+            assert_eq!(baseline.intent, rendered.intent);
         }
     }
 }

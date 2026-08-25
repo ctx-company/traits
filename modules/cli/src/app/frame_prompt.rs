@@ -70,6 +70,8 @@ pub(crate) struct ResolvedFramePrompt {
     pub(crate) ready_prompt_intent_participated: bool,
     /// Whether the assigned agent contributed non-empty behavior guidance.
     pub(crate) assigned_agent_behavior_participated: bool,
+    /// Whether the ready top-level prompt contributed non-empty behavior guidance.
+    pub(crate) ready_prompt_behavior_participated: bool,
     pub(crate) behavior_items: String,
 }
 
@@ -126,12 +128,14 @@ pub(crate) fn mcp_frame_prompt(
     } else {
         "\n".to_string()
     };
-    let behavior =
-        if context.assigned_agent_behavior_participated && !context.behavior_items.is_empty() {
-            behavior_block(&context.behavior_items)
-        } else {
-            String::new()
-        };
+    let behavior = if (context.assigned_agent_behavior_participated
+        || context.ready_prompt_behavior_participated)
+        && !context.behavior_items.is_empty()
+    {
+        behavior_block(&context.behavior_items)
+    } else {
+        String::new()
+    };
     format!(
         "Serve this ctx.traits frame via MCP.\nAgent role: {role}\nHarness id: {harness_id}\nRun session: {}\nSession store: {}\n\nRequired steps:\n1. Call ctx_traits_run_next with agent={role}, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent={role} and harness={harness_id}.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: {}\n\n{}\n{}{}Resolved prompt instructions:\n{}\nResolved input values:\n{}\n",
         session,
@@ -531,6 +535,18 @@ pub(crate) fn resolved_frame_prompt(
                 || !intent.avoid.is_empty()
                 || !intent.block.is_empty()
         });
+    let ready_prompt_behavior_participated = ready_prompt
+        .and_then(|item| item.behavior.as_ref())
+        .is_some_and(|behavior| {
+            !behavior.tone.is_empty()
+                || !behavior.method.is_empty()
+                || !behavior.format.is_empty()
+                || behavior.verbosity.is_some()
+                || behavior.directness.is_some()
+                || behavior.scope_control.is_some()
+                || behavior.initiative.is_some()
+                || behavior.uncertainty.is_some()
+        });
     let guidance = ctx_traits_core::model_view::frame_guidance(
         &loaded.trait_ref,
         assigned_agent,
@@ -552,6 +568,7 @@ pub(crate) fn resolved_frame_prompt(
         assigned_agent_intent_participated,
         ready_prompt_intent_participated,
         assigned_agent_behavior_participated,
+        ready_prompt_behavior_participated,
         behavior_items: guidance
             .map(|guidance| guidance.behavior)
             .unwrap_or_default(),

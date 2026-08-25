@@ -481,6 +481,205 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         assert_system(&mcp_args, "--mcp-system");
     }
 
+    let prompt_behavior_canonical = behavior_canonical.replace(
+        "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
+        "prompt = \"Produce first answer.\"\nbehavior = { tone = [{ id = \"shared-tone\", summary = \"Prompt tone.\" }, { id = \"current-tone\", summary = \"Current prompt tone.\" }], verbosity = { id = \"current-verbosity\", summary = \"Current prompt verbosity.\" } }\noutput = [\"slot:answer\"]\n\n[[procedure.sequence]]\nid = \"next\"\ntitle = \"Next\"\nagent = \"agent:worker\"\nprompt = \"Produce second answer.\"\nbehavior = { method = [{ id = \"next-method\", summary = \"Next prompt method.\" }] }\ninput = [\"slot:answer\"]\noutput = [\"slot:answer\"]",
+    );
+    fs::write(&generated, &prompt_behavior_canonical).unwrap();
+    let behavior_previews = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "preview",
+            "--file",
+            generated.to_str().unwrap(),
+            "--json",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&behavior_previews, 0);
+    let (stdout, _) = utf8(&behavior_previews);
+    let behavior_previews: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let first_behavior_preview = behavior_previews["frames"][0]["prompt"].as_str().unwrap();
+    let second_behavior_preview = behavior_previews["frames"][1]["prompt"].as_str().unwrap();
+    let first_behavior = extract_behavior(first_behavior_preview);
+    let second_behavior = extract_behavior(second_behavior_preview);
+
+    assert!(
+        first_behavior.find("root-tone").unwrap() < first_behavior.find("agent-tone").unwrap(),
+        "{first_behavior}"
+    );
+    assert!(
+        first_behavior.find("agent-tone").unwrap() < first_behavior.find("shared-tone").unwrap(),
+        "{first_behavior}"
+    );
+    assert!(
+        first_behavior.find("shared-tone").unwrap() < first_behavior.find("current-tone").unwrap(),
+        "{first_behavior}"
+    );
+    assert_eq!(
+        first_behavior.matches("id=\"shared-tone\"").count(),
+        1,
+        "{first_behavior}"
+    );
+    assert!(first_behavior.contains("Prompt tone."), "{first_behavior}");
+    assert!(!first_behavior.contains("Agent tone."), "{first_behavior}");
+    assert!(!first_behavior.contains("Root tone."), "{first_behavior}");
+    assert!(
+        first_behavior.contains("current-verbosity"),
+        "{first_behavior}"
+    );
+    assert!(
+        !first_behavior.contains("agent-verbosity"),
+        "{first_behavior}"
+    );
+    assert!(
+        !first_behavior.contains("root-verbosity"),
+        "{first_behavior}"
+    );
+    for unchanged in [
+        "agent-directness",
+        "agent-scope",
+        "root-initiative",
+        "agent-uncertainty",
+    ] {
+        assert!(first_behavior.contains(unchanged), "{first_behavior}");
+    }
+    assert!(!first_behavior.contains("next-method"), "{first_behavior}");
+    assert!(
+        !first_behavior.contains("unassigned-tone"),
+        "{first_behavior}"
+    );
+
+    assert!(
+        second_behavior.find("root-method").unwrap()
+            < second_behavior.find("shared-method").unwrap(),
+        "{second_behavior}"
+    );
+    assert!(
+        second_behavior.find("shared-method").unwrap()
+            < second_behavior.find("agent-method").unwrap(),
+        "{second_behavior}"
+    );
+    assert!(
+        second_behavior.find("agent-method").unwrap()
+            < second_behavior.find("next-method").unwrap(),
+        "{second_behavior}"
+    );
+    assert_eq!(
+        second_behavior.matches("id=\"shared-method\"").count(),
+        1,
+        "{second_behavior}"
+    );
+    assert!(
+        second_behavior.contains("Agent method."),
+        "{second_behavior}"
+    );
+    assert!(
+        !second_behavior.contains("Root method."),
+        "{second_behavior}"
+    );
+    assert!(second_behavior.contains("Agent tone."), "{second_behavior}");
+    assert!(
+        !second_behavior.contains("Prompt tone."),
+        "{second_behavior}"
+    );
+    assert!(
+        !second_behavior.contains("current-tone"),
+        "{second_behavior}"
+    );
+    assert!(
+        !second_behavior.contains("current-verbosity"),
+        "{second_behavior}"
+    );
+    assert!(
+        second_behavior.contains("agent-verbosity"),
+        "{second_behavior}"
+    );
+    assert!(
+        !second_behavior.contains("unassigned-tone"),
+        "{second_behavior}"
+    );
+    assert_unassigned_absent(first_behavior_preview);
+    assert_unassigned_absent(second_behavior_preview);
+
+    let (_, cli_args) = run("cli", "behavior-prompt-cli.json");
+    let first_behavior_cli = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let second_behavior_cli = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+    assert_eq!(extract_behavior(&first_behavior_cli), first_behavior);
+    assert_eq!(extract_behavior(&second_behavior_cli), second_behavior);
+    assert_system(&cli_args, "--cli-system");
+    assert_unassigned_absent(&first_behavior_cli);
+    assert_unassigned_absent(&second_behavior_cli);
+    let (_, mcp_args) = run("mcp", "behavior-prompt-mcp.json");
+    let first_behavior_mcp = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let second_behavior_mcp = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+    assert_eq!(extract_behavior(&first_behavior_mcp), first_behavior);
+    assert_eq!(extract_behavior(&second_behavior_mcp), second_behavior);
+    assert_system(&mcp_args, "--mcp-system");
+    assert_unassigned_absent(&first_behavior_mcp);
+    assert_unassigned_absent(&second_behavior_mcp);
+
+    let behavior_prompt_only = canonical.replace(
+        "prompt = \"Produce an answer.\"",
+        "prompt = \"Produce an answer.\"\nbehavior = { tone = [{ id = \"prompt-only-tone\", summary = \"Prompt-only tone.\" }] }",
+    );
+    fs::write(&generated, &behavior_prompt_only).unwrap();
+    let (_, _) = run("mcp", "behavior-prompt-only-mcp.json");
+    let behavior_prompt_only_mcp = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let behavior_prompt_only_behavior = extract_behavior(&behavior_prompt_only_mcp);
+    assert!(
+        behavior_prompt_only_behavior.contains("prompt-only-tone"),
+        "{behavior_prompt_only_behavior}"
+    );
+    assert!(
+        behavior_prompt_only_behavior.contains("Prompt-only tone."),
+        "{behavior_prompt_only_behavior}"
+    );
+    assert!(
+        !behavior_prompt_only_behavior.contains("agent-only"),
+        "{behavior_prompt_only_behavior}"
+    );
+
+    let mut prompt_behavior_compatibility = None;
+    for (name, prompt_behavior) in [
+        ("prompt-behavior-absent", ""),
+        ("prompt-behavior-empty", "behavior = {}\n"),
+    ] {
+        fs::write(
+            &generated,
+            behavior_canonical.replace(
+                "prompt = \"Produce an answer.\"",
+                &format!("{prompt_behavior}prompt = \"Produce an answer.\""),
+            ),
+        )
+        .unwrap();
+        let preview = preview(name);
+        let (cli, cli_args) = run("cli", "prompt-behavior-compat-cli.json");
+        let (mcp, mcp_args) = run("mcp", "prompt-behavior-compat-mcp.json");
+        assert_system(&cli_args, "--cli-system");
+        assert_system(&mcp_args, "--mcp-system");
+        if let Some((baseline_preview, baseline_cli, baseline_mcp)) = &prompt_behavior_compatibility
+        {
+            assert_eq!(&preview, baseline_preview, "{name} preview changed");
+            assert_eq!(&cli, baseline_cli, "{name} CLI prompt changed");
+            assert_eq!(&mcp, baseline_mcp, "{name} MCP prompt changed");
+        } else {
+            prompt_behavior_compatibility = Some((preview, cli, mcp));
+        }
+    }
+    let baseline_behavior_preview = &prompt_behavior_compatibility.as_ref().unwrap().0;
+    let baseline_behavior = extract_behavior(baseline_behavior_preview);
+    assert!(
+        baseline_behavior.contains("agent-tone"),
+        "{baseline_behavior}"
+    );
+    assert!(
+        baseline_behavior.contains("root-tone"),
+        "{baseline_behavior}"
+    );
+
     for (name, intent) in [("absent", ""), ("default-empty", "[agent.intent]\n")] {
         fs::write(&generated, canonical.replace(worker_intent, intent)).unwrap();
         let legacy_preview = preview(name);
