@@ -66,6 +66,8 @@ pub(crate) struct ResolvedFramePrompt {
     pub(crate) intent_items: String,
     /// Whether the assigned agent contributed non-empty intent guidance.
     pub(crate) assigned_agent_intent_participated: bool,
+    /// Whether the ready top-level prompt contributed non-empty intent guidance.
+    pub(crate) ready_prompt_intent_participated: bool,
     /// Whether the assigned agent contributed non-empty behavior guidance.
     pub(crate) assigned_agent_behavior_participated: bool,
     pub(crate) behavior_items: String,
@@ -116,7 +118,10 @@ pub(crate) fn mcp_frame_prompt(
     role: &str,
     harness_id: &str,
 ) -> String {
-    let intent = if context.assigned_agent_intent_participated && !context.intent_items.is_empty() {
+    let intent = if (context.assigned_agent_intent_participated
+        || context.ready_prompt_intent_participated)
+        && !context.intent_items.is_empty()
+    {
         format!("\n{}", intent_block(&context.intent_items))
     } else {
         "\n".to_string()
@@ -497,6 +502,7 @@ pub(crate) fn resolved_frame_prompt(
     let input_section = resolved_input_section(loaded, session, frame, pending_inputs)?;
     let include_section = resolved_include_section(loaded, session, frame)?;
     let assigned_agent = assigned_agent(loaded, frame)?;
+    let ready_prompt = top_level_ready_prompt(loaded, frame)?;
     let assigned_agent_intent_participated = assigned_agent
         .and_then(|agent| agent.intent.as_ref())
         .is_some_and(|intent| {
@@ -517,7 +523,19 @@ pub(crate) fn resolved_frame_prompt(
                 || behavior.initiative.is_some()
                 || behavior.uncertainty.is_some()
         });
-    let guidance = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref, assigned_agent)?;
+    let ready_prompt_intent_participated = ready_prompt
+        .and_then(|item| item.intent.as_ref())
+        .is_some_and(|intent| {
+            !intent.require.is_empty()
+                || !intent.focus.is_empty()
+                || !intent.avoid.is_empty()
+                || !intent.block.is_empty()
+        });
+    let guidance = ctx_traits_core::model_view::frame_guidance(
+        &loaded.trait_ref,
+        assigned_agent,
+        ready_prompt,
+    )?;
     Ok(ResolvedFramePrompt {
         prompt_section,
         input_section,
@@ -532,11 +550,71 @@ pub(crate) fn resolved_frame_prompt(
             .map(|guidance| guidance.intent.clone())
             .unwrap_or_default(),
         assigned_agent_intent_participated,
+        ready_prompt_intent_participated,
         assigned_agent_behavior_participated,
         behavior_items: guidance
             .map(|guidance| guidance.behavior)
             .unwrap_or_default(),
     })
+}
+
+/// Resolves the exact declaration a frame was produced from by structural
+/// position rather than a globally ambiguous optional item id.
+pub(crate) fn resolve_declared_item<'a>(
+    loaded: &'a ctx_traits_io::run::LoadedTrait,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> Option<&'a ctx_traits_core::r#trait::procedure::SequenceItem> {
+    let path = frame.position_path.as_slice();
+    let owner = match path {
+        [.., last] if last.kind == "item" => path.get(path.len().wrapping_sub(2))?,
+        [.., last] => last,
+        [] => {
+            let sequence_index = frame.sequence_index?;
+            return loaded
+                .trait_ref
+                .procedure
+                .as_ref()?
+                .sequence
+                .get(sequence_index);
+        }
+    };
+    let sequence_id = owner.id.as_deref()?;
+    loaded
+        .trait_ref
+        .sequences
+        .get(sequence_id)?
+        .sequence
+        .get(owner.index)
+}
+
+fn top_level_ready_prompt<'a>(
+    loaded: &'a ctx_traits_io::run::LoadedTrait,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> crate::Result<Option<&'a ctx_traits_core::r#trait::procedure::SequenceItem>> {
+    use ctx_traits_core::procedure::runtime::SequenceFrameKind;
+    use ctx_traits_core::r#trait::procedure::SequenceKind;
+
+    if frame.kind != SequenceFrameKind::Step || !frame.position_path.is_empty() {
+        return Ok(None);
+    }
+    let Some(sequence_index) = frame.sequence_index else {
+        return Err(crate::Error::Command {
+            message: "top-level step frame is missing sequence index".to_string(),
+        });
+    };
+    let item = resolve_declared_item(loaded, frame).ok_or_else(|| crate::Error::Command {
+        message: format!(
+            "top-level step frame declaration at index {sequence_index} is absent or out of range"
+        ),
+    })?;
+    if item.effective_kind() != SequenceKind::Prompt {
+        return Err(crate::Error::Command {
+            message: format!(
+                "top-level step frame declaration at index {sequence_index} is not a prompt"
+            ),
+        });
+    }
+    Ok(Some(item))
 }
 
 fn assigned_agent<'a>(

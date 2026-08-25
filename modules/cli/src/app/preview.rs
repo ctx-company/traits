@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::app::command_handlers::print_json_report;
 use crate::app::frame_prompt::{
     PendingInput, frame_prompt, human_frame_prompt, mcp_frame_prompt, requested_output_schema,
-    requested_outputs, resolved_frame_prompt,
+    requested_outputs, resolve_declared_item, resolved_frame_prompt,
 };
 use ctx_traits_core::response::CommandOutput;
 
@@ -211,54 +211,6 @@ fn collect_producer_labels(
         collect_producer_labels(&item.children, ref_text, labels);
         collect_producer_labels(&item.otherwise_children, ref_text, labels);
     }
-}
-
-/// Resolves the exact declared [`SequenceItem`](ctx_traits_core::r#trait::procedure::SequenceItem)
-/// a frame was produced from, by structural position rather than `item_id`
-/// string match. `item_id` is optional (id-less items) and, when present, is
-/// only unique *within* the sequence that declares it — matching it globally
-/// across `loaded.trait_ref.sequences` can land on a same-named id in the
-/// wrong sequence.
-///
-/// `frame.position_path`'s trailing segments identify the item's owning
-/// named sequence and its index within it, but the two frame builders don't
-/// agree on shape: the live path (`path_for_nested_item`, used by session
-/// drive) appends a final `kind: "item"` segment after the owning
-/// control-frame segment, `[.., <owning sequence, id + index>, <item>]`,
-/// while the no-session static-preview path (`expand_nested_preview`) has no
-/// trailing item segment at all — the last segment itself is `<owning
-/// sequence, id + index>`. Both agree that the rightmost non-`"item"`
-/// segment carries the owning sequence's id *and* the item's index within
-/// it (duplicated onto the trailing item segment when one exists), so
-/// skipping a trailing `"item"` segment before reading `id`/`index`
-/// resolves either shape identically. An empty `position_path` means a
-/// top-level item, addressed instead by `frame.sequence_index` into
-/// `procedure.sequence`.
-fn resolve_declared_item<'a>(
-    loaded: &'a ctx_traits_io::run::LoadedTrait,
-    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
-) -> Option<&'a ctx_traits_core::r#trait::procedure::SequenceItem> {
-    let path = frame.position_path.as_slice();
-    let owner = match path {
-        [.., last] if last.kind == "item" => path.get(path.len().wrapping_sub(2))?,
-        [.., last] => last,
-        [] => {
-            let sequence_index = frame.sequence_index?;
-            return loaded
-                .trait_ref
-                .procedure
-                .as_ref()?
-                .sequence
-                .get(sequence_index);
-        }
-    };
-    let sequence_id = owner.id.as_deref()?;
-    loaded
-        .trait_ref
-        .sequences
-        .get(sequence_id)?
-        .sequence
-        .get(owner.index)
 }
 
 fn pending_inputs_for(

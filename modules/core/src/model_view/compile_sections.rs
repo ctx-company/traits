@@ -1351,7 +1351,7 @@ mod agent_intent_tests {
             "declaration guidance must not be escaped into the procedure body"
         );
         assert!(!report.behavior_text.contains("sequence:procedure/top"));
-        let frame = frame_guidance(&trait_ref, None)
+        let frame = frame_guidance(&trait_ref, None, None)
             .expect("root guidance resolves")
             .expect("root behavior has frame guidance");
         assert!(!frame.intent.contains("sequence:procedure/top"));
@@ -1415,7 +1415,7 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:assigned-reviewer"));
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
-        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves");
+        let frame = frame_guidance(&trait_ref, None, None).expect("root guidance resolves");
         let frame = frame.expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));
@@ -1483,7 +1483,7 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
         assert!(!report.behavior_text.contains("State conclusions plainly."));
-        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves");
+        let frame = frame_guidance(&trait_ref, None, None).expect("root guidance resolves");
         let frame = frame.expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));

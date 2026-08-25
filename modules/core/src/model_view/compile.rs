@@ -567,6 +567,7 @@ fn intent_groups(intent: &crate::r#trait::Intent) -> [(&str, Vec<&GuidanceItem>)
 enum IntentItemSource {
     Root,
     AssignedAgent,
+    ReadyPrompt,
 }
 
 fn layered_additive_guidance<'a, S: Copy>(
@@ -589,30 +590,36 @@ fn layered_additive_guidance<'a, S: Copy>(
 #[allow(clippy::type_complexity)]
 fn effective_intent_groups<'a>(
     root: Option<&'a crate::r#trait::Intent>,
-    assigned: &'a crate::r#trait::Intent,
+    assigned: Option<&'a crate::r#trait::Intent>,
+    ready_prompt: Option<&'a crate::r#trait::Intent>,
 ) -> crate::Result<[(&'static str, Vec<(IntentItemSource, &'a GuidanceItem)>); 4]> {
     let names = ["require", "focus", "avoid", "block"];
-    let effective = std::array::from_fn(|index| {
-        let (root_items, assigned_items) = match index {
+    let effective: [(&'static str, Vec<(IntentItemSource, &'a GuidanceItem)>); 4] =
+        std::array::from_fn(|index| {
+        let (root_items, assigned_items, prompt_items) = match index {
             0 => (
                 root.map(|intent| intent.require.as_slice())
                     .unwrap_or_default(),
-                assigned.require.as_slice(),
+                assigned.map(|intent| intent.require.as_slice()).unwrap_or_default(),
+                ready_prompt.map(|intent| intent.require.as_slice()).unwrap_or_default(),
             ),
             1 => (
                 root.map(|intent| intent.focus.as_slice())
                     .unwrap_or_default(),
-                assigned.focus.as_slice(),
+                assigned.map(|intent| intent.focus.as_slice()).unwrap_or_default(),
+                ready_prompt.map(|intent| intent.focus.as_slice()).unwrap_or_default(),
             ),
             2 => (
                 root.map(|intent| intent.avoid.as_slice())
                     .unwrap_or_default(),
-                assigned.avoid.as_slice(),
+                assigned.map(|intent| intent.avoid.as_slice()).unwrap_or_default(),
+                ready_prompt.map(|intent| intent.avoid.as_slice()).unwrap_or_default(),
             ),
             3 => (
                 root.map(|intent| intent.block.as_slice())
                     .unwrap_or_default(),
-                assigned.block.as_slice(),
+                assigned.map(|intent| intent.block.as_slice()).unwrap_or_default(),
+                ready_prompt.map(|intent| intent.block.as_slice()).unwrap_or_default(),
             ),
             _ => unreachable!("intent groups have four fixed entries"),
         };
@@ -623,24 +630,41 @@ fn effective_intent_groups<'a>(
                 assigned_items,
                 IntentItemSource::Root,
                 IntentItemSource::AssignedAgent,
-            ),
+            )
+            .into_iter()
+            .filter(|(_, item)| !prompt_items.iter().any(|prompt| prompt.id == item.id))
+            .chain(
+                prompt_items
+                    .iter()
+                    .map(|item| (IntentItemSource::ReadyPrompt, item)),
+            )
+            .collect(),
         )
-    });
+        });
 
     for (avoid_source, avoid) in &effective[2].1 {
         if let Some((require_source, _)) = effective[0]
             .1
             .iter()
             .find(|(_, require)| require.id == avoid.id)
-            && (*require_source == IntentItemSource::AssignedAgent
-                || *avoid_source == IntentItemSource::AssignedAgent)
+            && (*require_source != IntentItemSource::Root
+                || *avoid_source != IntentItemSource::Root)
         {
             return Err(crate::r#trait::Error::invalid_field(
                 "intent",
-                format!(
-                    "effective guidance id {:?} cannot appear in both require and avoid when assigned-agent intent participates",
-                    avoid.id.as_str()
-                ),
+                if *require_source == IntentItemSource::ReadyPrompt
+                    || *avoid_source == IntentItemSource::ReadyPrompt
+                {
+                    format!(
+                        "effective guidance id {:?} cannot appear in both require and avoid when ready-prompt intent participates",
+                        avoid.id.as_str()
+                    )
+                } else {
+                    format!(
+                        "effective guidance id {:?} cannot appear in both require and avoid when assigned-agent intent participates",
+                        avoid.id.as_str()
+                    )
+                },
             )
             .into());
         }
@@ -838,6 +862,7 @@ pub struct FrameGuidance {
 pub fn frame_guidance(
     trait_ref: &Trait,
     assigned_agent: Option<&crate::r#trait::Agent>,
+    ready_prompt: Option<&crate::r#trait::procedure::SequenceItem>,
 ) -> crate::Result<Option<FrameGuidance>> {
     let trait_id = trait_ref.id.as_str();
     let mut warnings = Vec::new();
@@ -851,11 +876,19 @@ pub fn frame_guidance(
             || !intent.avoid.is_empty()
             || !intent.block.is_empty()
     });
-    let intent = if assigned_intent_is_nonempty {
+    let ready_prompt_intent = ready_prompt.and_then(|item| item.intent.as_ref());
+    let ready_prompt_intent_is_nonempty = ready_prompt_intent.is_some_and(|intent| {
+        !intent.require.is_empty()
+            || !intent.focus.is_empty()
+            || !intent.avoid.is_empty()
+            || !intent.block.is_empty()
+    });
+    let intent = if assigned_intent_is_nonempty || ready_prompt_intent_is_nonempty {
         let mut elements = Vec::new();
         for (group, items) in effective_intent_groups(
             trait_ref.intent.as_ref(),
-            assigned_intent.expect("non-empty assigned intent is present"),
+            assigned_intent,
+            ready_prompt_intent,
         )? {
             format_guidance_group(
                 GuidanceTag::GroupNamed,
@@ -1966,6 +1999,15 @@ mod render_v2_shape_tests {
             .expect("fixture agent")
     }
 
+    fn ready_prompt(intent: serde_json::Value) -> crate::r#trait::procedure::SequenceItem {
+        serde_json::from_value(serde_json::json!({
+            "id": "ready",
+            "prompt": "Ready.",
+            "intent": intent,
+        }))
+        .expect("ready prompt fixture")
+    }
+
     fn behavior_guidance_fixture(
         root_behavior: serde_json::Value,
         agents: serde_json::Value,
@@ -2002,7 +2044,7 @@ mod render_v2_shape_tests {
                 },
             }]),
         );
-        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
             .expect("guidance resolves")
             .expect("intent guidance")
             .intent;
@@ -2041,7 +2083,7 @@ mod render_v2_shape_tests {
                 "intent": { "require": [{ "id": "shared", "summary": "Agent directive." }] },
             }]),
         );
-        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
             .expect("guidance resolves")
             .expect("intent guidance")
             .intent;
@@ -2059,7 +2101,7 @@ mod render_v2_shape_tests {
                 { "id": "unselected", "description": "Unselected.", "intent": { "focus": [{ "id": "unselected-only", "summary": "Unselected." }] } },
             ]),
         );
-        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "selected")))
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "selected")), None)
             .expect("guidance resolves")
             .expect("intent guidance")
             .intent;
@@ -2077,7 +2119,7 @@ mod render_v2_shape_tests {
                 "intent": { "avoid": [{ "id": "conflict", "summary": "Avoided." }] },
             }]),
         );
-        let error = match frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker"))) {
+        let error = match frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None) {
             Ok(_) => panic!("cross-layer conflict must fail"),
             Err(error) => error,
         };
@@ -2096,7 +2138,7 @@ mod render_v2_shape_tests {
             }),
             serde_json::json!([]),
         );
-        let intent = frame_guidance(&trait_ref, None)
+        let intent = frame_guidance(&trait_ref, None, None)
             .expect("root collision remains valid")
             .expect("intent guidance")
             .intent;
@@ -2113,15 +2155,87 @@ mod render_v2_shape_tests {
                 { "id": "empty", "description": "Empty.", "intent": {} },
             ]),
         );
-        let root = frame_guidance(&trait_ref, None)
+        let root = frame_guidance(&trait_ref, None, None)
             .expect("root guidance")
             .expect("root render");
         for id in ["absent", "empty"] {
-            let rendered = frame_guidance(&trait_ref, Some(assigned(&trait_ref, id)))
+            let rendered = frame_guidance(&trait_ref, Some(assigned(&trait_ref, id)), None)
                 .expect("agent guidance")
                 .expect("agent render");
             assert_eq!(root.intent, rendered.intent);
             assert_eq!(root.behavior, rendered.behavior);
+        }
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_intent_merges_three_layers_in_order() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "require": [{ "id": "root", "summary": "Root." }] }),
+            serde_json::json!([{ "id": "worker", "description": "Worker.", "intent": { "require": [{ "id": "agent", "summary": "Agent." }] } }]),
+        );
+        let prompt = ready_prompt(serde_json::json!({ "require": [{ "id": "prompt", "summary": "Prompt." }] }));
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
+            .expect("guidance resolves").expect("intent guidance").intent;
+        assert!(intent.find("root").unwrap() < intent.find("agent").unwrap(), "{intent}");
+        assert!(intent.find("agent").unwrap() < intent.find("prompt").unwrap(), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_intent_replaces_root_and_agent_items() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "require": [{ "id": "shared", "summary": "Root." }] }),
+            serde_json::json!([{ "id": "worker", "description": "Worker.", "intent": { "require": [{ "id": "shared", "summary": "Agent." }] } }]),
+        );
+        let prompt = ready_prompt(serde_json::json!({ "require": [{ "id": "shared", "summary": "Prompt." }] }));
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
+            .expect("guidance resolves").expect("intent guidance").intent;
+        assert_eq!(intent.matches("id=\"shared\"").count(), 1, "{intent}");
+        assert!(intent.contains("Prompt."), "{intent}");
+        assert!(!intent.contains("Root."), "{intent}");
+        assert!(!intent.contains("Agent."), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_intent_rejects_root_and_agent_conflicts() {
+        for (root, agent, prompt) in [
+            (serde_json::json!({ "require": [{ "id": "conflict", "summary": "Root." }] }), serde_json::json!([{ "id": "worker", "description": "Worker." }]), serde_json::json!({ "avoid": [{ "id": "conflict", "summary": "Prompt." }] })),
+            (serde_json::json!({}), serde_json::json!([{ "id": "worker", "description": "Worker.", "intent": { "require": [{ "id": "conflict", "summary": "Agent." }] } }]), serde_json::json!({ "avoid": [{ "id": "conflict", "summary": "Prompt." }] })),
+        ] {
+            let trait_ref = guidance_fixture(root, agent);
+            let prompt = ready_prompt(prompt);
+            let error = match frame_guidance(
+                &trait_ref,
+                Some(assigned(&trait_ref, "worker")),
+                Some(&prompt),
+            ) {
+                Ok(_) => panic!("prompt conflict must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.to_string(), "invalid manifest at intent: effective guidance id \"conflict\" cannot appear in both require and avoid when ready-prompt intent participates");
+        }
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_intent_accepts_root_collision_with_unrelated_prompt() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "require": [{ "id": "collision", "summary": "Required." }], "avoid": [{ "id": "collision", "summary": "Avoided." }] }),
+            serde_json::json!([]),
+        );
+        let prompt = ready_prompt(serde_json::json!({ "focus": [{ "id": "prompt", "summary": "Prompt." }] }));
+        let intent = frame_guidance(&trait_ref, None, Some(&prompt))
+            .expect("root collision remains valid").expect("intent guidance").intent;
+        assert!(intent.contains("Required.") && intent.contains("Avoided.") && intent.contains("Prompt."), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_ready_prompt_intent_is_byte_identical_when_absent_or_empty() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "focus": [{ "id": "root", "summary": "Root." }] }),
+            serde_json::json!([]),
+        );
+        let root = frame_guidance(&trait_ref, None, None).expect("root guidance");
+        for prompt in [None, Some(ready_prompt(serde_json::json!({})))] {
+            assert_eq!(frame_guidance(&trait_ref, None, prompt.as_ref()).expect("prompt guidance").map(|guidance| guidance.intent), root.as_ref().map(|guidance| guidance.intent.clone()));
         }
     }
 
@@ -2143,7 +2257,7 @@ mod render_v2_shape_tests {
                 },
             }]),
         );
-        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
             .expect("guidance resolves")
             .expect("behavior guidance")
             .behavior;
@@ -2177,7 +2291,7 @@ mod render_v2_shape_tests {
                 },
             }]),
         );
-        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
             .expect("guidance resolves")
             .expect("behavior guidance")
             .behavior;
@@ -2218,7 +2332,7 @@ mod render_v2_shape_tests {
                 },
             }]),
         );
-        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
             .expect("guidance resolves")
             .expect("behavior guidance")
             .behavior;
@@ -2245,7 +2359,7 @@ mod render_v2_shape_tests {
                 { "id": "unselected", "description": "Unselected.", "behavior": { "tone": [{ "id": "unselected-only", "summary": "Unselected." }] } },
             ]),
         );
-        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "selected")))
+        let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "selected")), None)
             .expect("guidance resolves")
             .expect("selected behavior renders")
             .behavior;
@@ -2262,11 +2376,11 @@ mod render_v2_shape_tests {
                 { "id": "empty", "description": "Empty.", "behavior": {} },
             ]),
         );
-        let root = frame_guidance(&trait_ref, None)
+        let root = frame_guidance(&trait_ref, None, None)
             .expect("root guidance")
             .expect("root behavior");
         for id in ["absent", "empty"] {
-            let rendered = frame_guidance(&trait_ref, Some(assigned(&trait_ref, id)))
+            let rendered = frame_guidance(&trait_ref, Some(assigned(&trait_ref, id)), None)
                 .expect("agent guidance")
                 .expect("agent behavior");
             assert_eq!(root.behavior, rendered.behavior);

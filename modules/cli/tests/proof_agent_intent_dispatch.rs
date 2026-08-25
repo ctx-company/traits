@@ -90,7 +90,11 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nfor last; do :; done\nprintf '%s' \"$last\" > {}\ntouch {}\nprintf '{{\"answer\":\"ok\"}}'\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nfor last; do :; done\nprintf '%s' \"$last\" > {}\nif [ -f {}.calls ]; then n=$(wc -l < {}.calls); else n=0; fi\nprintf '%s' \"$last\" > {}.$n\nprintf 'x\\n' >> {}.calls\ntouch {}\nprintf '{{\"answer\":\"ok\"}}'\n",
+            capture.display(),
+            capture.display(),
+            capture.display(),
+            capture.display(),
             capture.display(),
             capture.display(),
             marker.display(),
@@ -255,6 +259,9 @@ output = ["slot:answer"]
     let run = |transport: &str, output: &str| {
         let _ = fs::remove_file(&capture);
         let _ = fs::remove_file(capture.with_extension("txt.args"));
+        let _ = fs::remove_file(capture.with_extension("txt.0"));
+        let _ = fs::remove_file(capture.with_extension("txt.1"));
+        let _ = fs::remove_file(capture.with_extension("txt.calls"));
         let _ = fs::remove_file(&marker);
         fs::write(repo.join(".ctx/traits/runtime.toml"), runtime(transport)).unwrap();
         require_success(
@@ -545,4 +552,101 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         !marker.exists(),
         "harness ran before the cross-layer conflict was rejected"
     );
+
+    let prompt_canonical = canonical.replace(
+        "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
+        "prompt = \"Produce first answer.\"\nintent = { require = [{ id = \"shared\", summary = \"Prompt replacement text.\" }, { id = \"current-only\", summary = \"Current prompt guidance.\" }] }\noutput = [\"slot:answer\"]\n\n[[procedure.sequence]]\nid = \"next\"\ntitle = \"Next\"\nagent = \"agent:worker\"\nprompt = \"Produce second answer.\"\nintent = { require = [{ id = \"next-only\", summary = \"Next prompt guidance.\" }] }\ninput = [\"slot:answer\"]\noutput = [\"slot:answer\"]",
+    );
+    fs::write(&generated, &prompt_canonical).unwrap();
+    let previews = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "preview",
+            "--file",
+            generated.to_str().unwrap(),
+            "--json",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&previews, 0);
+    let (stdout, _) = utf8(&previews);
+    let previews: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let first_preview = previews["frames"][0]["prompt"].as_str().unwrap();
+    let second_preview = previews["frames"][1]["prompt"].as_str().unwrap();
+    let first_intent = extract_intent(first_preview);
+    let second_intent = extract_intent(second_preview);
+    assert!(first_intent.find("root-only").unwrap() < first_intent.find("shared").unwrap());
+    assert!(first_intent.find("shared").unwrap() < first_intent.find("current-only").unwrap());
+    assert!(first_intent.contains("Prompt replacement text."));
+    assert!(!first_intent.contains("Assigned replacement text."));
+    assert!(!first_intent.contains("next-only"));
+    assert!(second_intent.contains("next-only"));
+    assert!(!second_intent.contains("current-only"));
+    assert_unassigned_absent(first_preview);
+    assert_unassigned_absent(second_preview);
+    let (cli_prompt, _) = run("cli", "prompt-cli.json");
+    assert!(
+        matches!(extract_intent(&cli_prompt).as_str(), value if value == first_intent || value == second_intent)
+    );
+    let (mcp_prompt, _) = run("mcp", "prompt-mcp.json");
+    assert!(
+        matches!(extract_intent(&mcp_prompt).as_str(), value if value == first_intent || value == second_intent)
+    );
+
+    let prompt_only = canonical.replace(worker_intent, "").replace(
+        "prompt = \"Produce an answer.\"",
+        "prompt = \"Produce an answer.\"\nintent = { require = [{ id = \"prompt-only\", summary = \"Prompt-only guidance.\" }] }",
+    );
+    fs::write(&generated, &prompt_only).unwrap();
+    let (_, _) = run("mcp", "prompt-only-mcp.json");
+    let prompt_only_mcp = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let prompt_only_intent = extract_intent(&prompt_only_mcp);
+    assert!(prompt_only_intent.contains("Prompt-only guidance."));
+    assert!(prompt_only_intent.contains("prompt-only"));
+    assert!(!prompt_only_intent.contains("agent-only"));
+
+    let prompt_conflict = canonical.replace(
+        "prompt = \"Produce an answer.\"",
+        "prompt = \"Produce an answer.\"\nintent = { avoid = [{ id = \"shared\", summary = \"Prompt conflict.\" }] }",
+    );
+    fs::write(&generated, prompt_conflict).unwrap();
+    let _ = fs::remove_file(&marker);
+    let conflict = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            home.join("prompt-conflict.json").to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert!(
+        !conflict.status.success(),
+        "prompt conflict unexpectedly dispatched"
+    );
+    let _ = utf8(&conflict);
+    assert!(
+        !marker.exists(),
+        "harness ran before the prompt conflict was rejected"
+    );
+
+    for prompt_intent in ["", "intent = {}\n"] {
+        fs::write(
+            &generated,
+            canonical.replace(worker_intent, "").replace(
+                "prompt = \"Produce an answer.\"",
+                &format!("{prompt_intent}prompt = \"Produce an answer.\""),
+            ),
+        )
+        .unwrap();
+        assert_eq!(preview("prompt compatibility"), LEGACY_CLI_PROMPT);
+    }
 }
