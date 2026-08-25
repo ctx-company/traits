@@ -608,9 +608,9 @@ pub(crate) fn resolve_declared_item<'a>(
         .get(owner.index)
 }
 
-/// Structural admission gate for [`ready_prompt`]: which `position_path`
-/// shapes address a declaration `resolve_declared_item` can resolve
-/// unambiguously by position.
+/// Resolves the composed named-sequence prompt for a frame, gated by which
+/// `position_path` shapes address a declaration `resolve_declared_item` can
+/// resolve unambiguously by position.
 ///
 /// - Empty: a top-level item, addressed via `frame.sequence_index`.
 /// - Live/historical: `path_for_nested_item` always opens with a `procedure`
@@ -621,20 +621,6 @@ pub(crate) fn resolve_declared_item<'a>(
 /// - No-session static preview: `expand_nested_preview` never emits a
 ///   `procedure` or trailing `item` segment, so a non-empty all-`sequence`
 ///   path is the static shape of the same fixed chain.
-fn is_admitted_named_leaf_path(path: &[ctx_traits_core::procedure::runtime::PathSegment]) -> bool {
-    if path.is_empty() {
-        return true;
-    }
-    let is_live_shape = path.len() >= 3
-        && path[0].kind == "procedure"
-        && path[path.len() - 1].kind == "item"
-        && path[1..path.len() - 1]
-            .iter()
-            .all(|segment| segment.kind == "sequence");
-    let is_static_shape = path.iter().all(|segment| segment.kind == "sequence");
-    is_live_shape || is_static_shape
-}
-
 fn ready_prompt<'a>(
     loaded: &'a ctx_traits_io::run::LoadedTrait,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
@@ -642,7 +628,18 @@ fn ready_prompt<'a>(
     use ctx_traits_core::procedure::runtime::SequenceFrameKind;
     use ctx_traits_core::r#trait::procedure::SequenceKind;
 
-    if frame.kind != SequenceFrameKind::Step || !is_admitted_named_leaf_path(&frame.position_path) {
+    let path = frame.position_path.as_slice();
+    let is_admitted = path.is_empty() || {
+        let is_live_shape = path.len() >= 3
+            && path[0].kind == "procedure"
+            && path[path.len() - 1].kind == "item"
+            && path[1..path.len() - 1]
+                .iter()
+                .all(|segment| segment.kind == "sequence");
+        let is_static_shape = path.iter().all(|segment| segment.kind == "sequence");
+        is_live_shape || is_static_shape
+    };
+    if frame.kind != SequenceFrameKind::Step || !is_admitted {
         return Ok(None);
     }
     let Some(sequence_index) = frame.sequence_index else {

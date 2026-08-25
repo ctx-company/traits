@@ -901,7 +901,18 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
     // vs `later` (top-level, after the container) — so a lookup keyed on
     // index or item id alone, rather than full structural position, would
     // select the wrong declaration.
-    let nested_header = canonical.split_once("[procedure]").unwrap().0;
+    // Named leaves must prove the same root->agent->prompt precedence used by
+    // the top-level behavior fixture above, so this base carries the same
+    // root/agent behavior alongside the existing root/agent intent — reusing
+    // `root_behavior`/`worker_behavior` rather than duplicating them.
+    let nested_canonical_base = canonical
+        .replacen("\n[[agent]]", &format!("{root_behavior}\n[[agent]]"), 1)
+        .replace(worker_intent, &format!("{worker_intent}\n{worker_behavior}"))
+        .replace(
+            "[agent.intent]\nrequire = [{ id = \"unassigned-only\", summary = \"Unassigned guidance.\" }]",
+            "[agent.intent]\nrequire = [{ id = \"unassigned-only\", summary = \"Unassigned guidance.\" }]\n[agent.behavior]\ntone = [{ id = \"unassigned-tone\", summary = \"Unassigned behavior.\" }]",
+        );
+    let nested_header = nested_canonical_base.split_once("[procedure]").unwrap().0;
     let nested_fixture = |inner_absent_guidance: &str| {
         format!(
             r#"{nested_header}[[sequence.inner.sequence]]
@@ -917,6 +928,7 @@ title = "Inner guided"
 agent = "agent:worker"
 prompt = "Produce inner-guided answer."
 intent = {{ require = [{{ id = "shared", summary = "Inner guided replacement text." }}, {{ id = "inner-guided-marker", summary = "Inner guided leaf marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Inner guided tone." }}, {{ id = "inner-guided-tone-marker", summary = "Inner guided tone marker." }}], verbosity = {{ id = "inner-guided-verbosity-marker", summary = "Inner guided verbosity marker." }} }}
 output = ["slot:answer"]
 
 [[sequence.outer.sequence]]
@@ -1044,6 +1056,56 @@ output = ["slot:answer"]
             "{label} inner-guided stale agent text leaked: {inner_guided}"
         );
 
+        // Behavior mirrors the intent proof above: root->agent->named-leaf
+        // ordering, same-axis (tone) replacement, leaf scalar (verbosity)
+        // precedence over the agent scalar, and broader-axis (initiative)
+        // fallback all the way to root when neither agent nor leaf sets it.
+        assert!(
+            inner_guided.contains("inner-guided-tone-marker"),
+            "{label} inner-guided missing its own behavior marker: {inner_guided}"
+        );
+        assert_eq!(
+            inner_guided.matches("id=\"shared-tone\"").count(),
+            1,
+            "{label} inner-guided: {inner_guided}"
+        );
+        assert!(
+            inner_guided.find("root-tone").unwrap() < inner_guided.find("agent-tone").unwrap(),
+            "{label} inner-guided root/agent tone ordering: {inner_guided}"
+        );
+        assert!(
+            inner_guided.find("agent-tone").unwrap() < inner_guided.find("shared-tone").unwrap(),
+            "{label} inner-guided agent/shared tone ordering: {inner_guided}"
+        );
+        assert!(
+            inner_guided.find("shared-tone").unwrap()
+                < inner_guided.find("inner-guided-tone-marker").unwrap(),
+            "{label} inner-guided shared/leaf tone ordering: {inner_guided}"
+        );
+        assert!(
+            inner_guided.contains("Inner guided tone."),
+            "{label} inner-guided tone scalar precedence: {inner_guided}"
+        );
+        assert!(
+            !inner_guided.contains("Agent tone."),
+            "{label} inner-guided stale agent tone text leaked: {inner_guided}"
+        );
+        assert!(
+            inner_guided.contains("inner-guided-verbosity-marker")
+                && !inner_guided.contains("agent-verbosity"),
+            "{label} inner-guided verbosity scalar precedence: {inner_guided}"
+        );
+        assert!(
+            inner_guided.contains("root-initiative"),
+            "{label} inner-guided broader-axis fallback to root: {inner_guided}"
+        );
+        for unchanged in ["agent-directness", "agent-scope", "agent-uncertainty"] {
+            assert!(
+                inner_guided.contains(unchanged),
+                "{label} inner-guided agent-scalar fallback: {inner_guided}"
+            );
+        }
+
         assert!(
             later.contains("later-prompt-marker"),
             "{label} later missing its own marker: {later}"
@@ -1055,6 +1117,26 @@ output = ["slot:answer"]
 
         for prompt in prompts {
             assert_unassigned_absent(prompt);
+            assert!(
+                !prompt.contains("unassigned-tone"),
+                "{label} leaked unassigned-agent behavior: {prompt}"
+            );
+            // `outer-ref`/`outer-inner-ref` are pure grouping containers that
+            // schema validation forbids from ever carrying intent/behavior
+            // (`ln and behavior are valid only on prompt sequence items`), so
+            // the only leak they could cause is their own structural
+            // identifiers bleeding into a leaf's resolved guidance.
+            for container_id in [
+                "outer-ref",
+                "outer-inner-ref",
+                "sequence:outer",
+                "sequence:inner",
+            ] {
+                assert!(
+                    !prompt.contains(container_id),
+                    "{label} leaked a container identifier {container_id}: {prompt}"
+                );
+            }
             assert!(
                 !prompt.contains("source=\""),
                 "{label} leaked static declaration source attribution: {prompt}"
@@ -1101,6 +1183,50 @@ output = ["slot:answer"]
             .collect();
         assert_nested_markers(&format!("{name} mcp"), &mcp_prompts);
 
+        // The direct named leaf, the recursively nested leaf, and the
+        // post-sequence top-level leaf must all select the same structurally
+        // current declaration regardless of transport: complete intent and
+        // behavior blocks are byte-identical across preview, CLI, and MCP.
+        for index in [0usize, 2, 3] {
+            let preview_intent = extract_intent(&preview_prompts[index]);
+            let preview_behavior = extract_behavior(&preview_prompts[index]);
+            assert_eq!(
+                extract_intent(&cli_prompts[index]),
+                preview_intent,
+                "{name} frame {index} intent differs between preview and CLI"
+            );
+            assert_eq!(
+                extract_intent(&mcp_prompts[index]),
+                preview_intent,
+                "{name} frame {index} intent differs between preview and MCP"
+            );
+            assert_eq!(
+                extract_behavior(&cli_prompts[index]),
+                preview_behavior,
+                "{name} frame {index} behavior differs between preview and CLI"
+            );
+            assert_eq!(
+                extract_behavior(&mcp_prompts[index]),
+                preview_behavior,
+                "{name} frame {index} behavior differs between preview and MCP"
+            );
+        }
+
+        // A named leaf with no local guidance must compose to the exact same
+        // root+agent-only guidance as the top-level no-participation oracle
+        // established earlier in this test, not merely to a value equal to
+        // its own empty-guidance sibling.
+        assert_eq!(
+            extract_intent(&preview_prompts[1]),
+            happy_intent,
+            "{name} inner-absent intent must match the established no-participation oracle"
+        );
+        assert_eq!(
+            extract_behavior(&preview_prompts[1]),
+            behavior_block,
+            "{name} inner-absent behavior must match the established no-participation oracle"
+        );
+
         if let Some((baseline_preview, baseline_cli, baseline_mcp)) = &nested_baseline {
             assert_eq!(&preview_prompts, baseline_preview, "{name} preview changed");
             assert_eq!(&cli_prompts, baseline_cli, "{name} CLI prompts changed");
@@ -1109,6 +1235,69 @@ output = ["slot:answer"]
             nested_baseline = Some((preview_prompts, cli_prompts, mcp_prompts));
         }
     }
+
+    // A named leaf's own prompt-scoped guidance must be able to enable
+    // categorized MCP participation entirely on its own, with no assigned-
+    // agent-scoped guidance declared anywhere in the trait.
+    let prompt_only_nested_header = canonical.replace(worker_intent, "");
+    let prompt_only_nested_header = prompt_only_nested_header
+        .split_once("[procedure]")
+        .unwrap()
+        .0;
+    let prompt_only_nested_fixture = format!(
+        r#"{prompt_only_nested_header}[[sequence.outer.sequence]]
+id = "outer-prompt-only"
+title = "Outer prompt only"
+agent = "agent:worker"
+prompt = "Produce prompt-only answer."
+intent = {{ require = [{{ id = "prompt-only-marker", summary = "Prompt-only nested guidance." }}] }}
+behavior = {{ tone = [{{ id = "prompt-only-tone-marker", summary = "Prompt-only nested tone." }}] }}
+output = ["slot:answer"]
+
+[procedure]
+description = "Nested named-sequence prompt-only participation."
+
+[[procedure.sequence]]
+id = "outer-ref"
+title = "Outer ref"
+kind = "sequence"
+sequence = "sequence:outer"
+"#
+    );
+    fs::write(&generated, &prompt_only_nested_fixture).unwrap();
+    require_success(
+        "approve nested prompt-only fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let (_, _) = run("mcp", "nested-prompt-only-mcp.json");
+    let nested_prompt_only_mcp = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let nested_prompt_only_intent = extract_intent(&nested_prompt_only_mcp);
+    let nested_prompt_only_behavior = extract_behavior(&nested_prompt_only_mcp);
+    assert!(
+        nested_prompt_only_intent.contains("prompt-only-marker"),
+        "{nested_prompt_only_intent}"
+    );
+    assert!(
+        !nested_prompt_only_intent.contains("agent-only"),
+        "{nested_prompt_only_intent}"
+    );
+    assert!(
+        nested_prompt_only_behavior.contains("prompt-only-tone-marker"),
+        "{nested_prompt_only_behavior}"
+    );
+    assert!(
+        !nested_prompt_only_behavior.contains("agent-tone"),
+        "{nested_prompt_only_behavior}"
+    );
 
     // A nested (non-top-level) leaf's require/avoid conflict must still fail
     // before the harness ever runs — the structural admission broadening
