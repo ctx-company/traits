@@ -192,11 +192,22 @@ research-quick topic:
 research-deep topic:
 	ctx traits run research:deep --worktree --progress tui -- --topic={{quote(topic)}}
 
-plan task:
-    ctx traits run plan --worktree --merge --progress tui -- --task={{quote(task)}}
+[positional-arguments]
+plan +tasks:
+    #!/usr/bin/env sh
+    set -e
+    for t in "$@"; do
+        echo "== plan $t"
+        ctx traits run plan --worktree --merge --progress tui -- --task="$t"
+    done
 
-architect task:
-    ctx traits run architect --worktree --progress tui -- --task={{quote(task)}}
+architect +tasks:
+    #!/usr/bin/env sh
+    set -e
+    for t in $(echo "{{tasks}}" | tr ',' ' '); do
+        echo "== architect $t"
+        ctx traits run architect --worktree --merge --progress tui -- --task="$t"
+    done
 
 refactor target:
     ctx traits run refactor --worktree --progress tui -- --target={{quote(target)}}

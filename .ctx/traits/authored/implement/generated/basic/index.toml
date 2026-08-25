@@ -115,8 +115,8 @@ description = "Output evidence from the git add command step."
 [[slot]]
 id = "work-summary"
 schema = "schema:text"
-description = "Worker's account of what this round changed — written for the reviewer, not read back by the worker."
-hint = "This round only: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict. Your own prior summary is not an input; the verdict and the draft are what carry forward."
+description = "Worker's account of what this round changed."
+hint = "What changed, how it was validated, and open concerns."
 
 [[resource]]
 id = "task-board"
@@ -302,22 +302,20 @@ output = ["slot:draft"]
 
 [prompt.implement-the-task]
 text = """
-Implement the draft {slot:draft}, which carries the task's restated scope and its validation plan.
-Treat that validation plan as the definition of done: run the checks it names before reporting.
-Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
-Attached verdicts are the source of truth — always follow their guidance.
+Implement the draft task's drafted plan: {slot:draft}.
+Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
+Attached verdicts are the source of truth - work on exactly what they request, to completion.
 
-Return this round's work summary (what changed, how it was validated & open concerns): slot:work-summary"""
+Return this round's work summary: slot:work-summary"""
 input = ["slot:draft"]
 output = ["slot:work-summary"]
 
 [prompt.review-the-implementation]
 text = """
-Review the working tree's implemented state against the draft {slot:draft} as source of truth.
-A BLOCKER is a correctness bug, an unmet item of the draft's validation plan, clear over-build, or un-abstracted duplication.
-Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
-Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
+Review the implemented state against the draft {slot:draft} as source of truth.
 Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
+Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
+Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
 
 Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)"""
 input = [
@@ -409,10 +407,10 @@ agent = "agent:smart"
 prompt = "prompt:review-the-implementation"
 input = [
     "slot:draft",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:review-verdict-2", optional = true },
     "slot:work-summary",
     "slot:changed-files",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
 ]
 output = ["slot:review-verdict-1"]
 

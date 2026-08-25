@@ -49,3 +49,4 @@ or worktree rows outside `--verbose`.
 """
 
 [relations]
+parent = "0252"

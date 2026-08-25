@@ -27,3 +27,4 @@ delete removes the group's rows behind one confirm showing the count.
 """
 
 [relations]
+parent = "0252"

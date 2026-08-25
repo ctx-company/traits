@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.3"
 title = "Author and inspect agent behavior"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-2e2af6b1e03147461455f5504b610e85d1f789609362d9315ac423ead2fb1a8d merged as 131e98aaab86f92cbec639ed319d2ccd5dead9e6"
 content = """
 ## Outcome
 Let trait authors attach behavior to direct agents, every built-in agent template, `seats(...)` results, and agents collected transitively through `.prompt(...)`. Lower additive `tone`, `method`, and `format` plus scalar `verbosity`, `directness`, `scope-control`, `initiative`, and `uncertainty` through the existing behavior normalizer into canonical schema-version `0.6` data. Validate the canonical declaration through the shared behavior authorities, emit its generated SDK type, and render every declared agent's behavior in the authoring-only `Agents` section with `source="agent:<id>"`.
@@ -83,3 +85,19 @@ timeout-ms = 600000
 name = "agent behavior canonical and static behavior pass the per-round gate"
 command = "CARGO_TARGET_DIR=target just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "131e98aaab86f92cbec639ed319d2ccd5dead9e6"
+
+[[closure.checks]]
+name = "agent behavior authoring passes the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "agent behavior canonical and static behavior pass the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+outcome = "failed"
+detail = "exited 1"
