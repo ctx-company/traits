@@ -1,9 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use support::{
-    ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, run_ctx_with_env, utf8,
-};
+use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
 
 #[test]
 fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
@@ -95,7 +93,9 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     // own harness answer via a `CTX_TEST_<KEY>` env var while every existing
     // `slot:answer` step keeps its prior hardcoded "ok" behavior unchanged (the
     // `*) value=ok` default).
-    const CAPTURE_SCRIPT_TEMPLATE: &str = r#"#!/bin/sh
+    fs::write(
+        &script,
+        r#"#!/bin/sh
 if [ "$1" = "--probe" ]; then printf 'capture-1.0\n'; exit 0; fi
 printf '%s\n' "$@" > __CAPTURE__.args
 ctx=
@@ -124,12 +124,9 @@ if [ -n "$session" ]; then
   printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_traits_run_set","arguments":{"session":"%s","target":"slot:%s","value":"%s","agent":"worker","harness":"capture"}}}\n' "$session" "$key" "$value" | "$ctx" traits internal mcp >/dev/null || exit 1
 fi
 printf '{"%s":"%s"}' "$key" "$value"
-"#;
-    fs::write(
-        &script,
-        CAPTURE_SCRIPT_TEMPLATE
-            .replace("__CAPTURE__", &capture.display().to_string())
-            .replace("__MARKER__", &marker.display().to_string()),
+"#
+        .replace("__CAPTURE__", &capture.display().to_string())
+        .replace("__MARKER__", &marker.display().to_string()),
     )
     .unwrap();
     let mut permissions = fs::metadata(&script).unwrap().permissions();
@@ -309,7 +306,7 @@ output = ["slot:answer"]
             &repo,
             &home,
         );
-        let outcome = run_ctx_with_env(
+        let outcome = support::run_ctx_with_env(
             &[
                 "traits",
                 "run",
@@ -1577,6 +1574,41 @@ output = ["slot:answer"]
             .collect()
     };
 
+    // Session-scoped preview (as opposed to the no-session preview above):
+    // `--session <path>` alone previews the active (not-yet-accepted) frame;
+    // `--session <path> --step <id>` reconstructs a completed frame exactly
+    // as it activated, historically. Both must expose only the recorded arm
+    // — never the sibling arm a no-session preview projects alongside it.
+    let session_preview = |label: &str, session: &std::path::Path, step: Option<&str>| -> String {
+        let session_str = session.to_str().unwrap().to_string();
+        let mut argv = vec![
+            "traits",
+            "internal",
+            "preview",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            session_str.as_str(),
+            "--json",
+        ];
+        if let Some(step) = step {
+            argv.push("--step");
+            argv.push(step);
+        }
+        let output = run_ctx(&argv, &repo, &home);
+        assert_exit_code(&output, 0);
+        let (stdout, stderr) = utf8(&output);
+        let json: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|error| {
+            panic!(
+                "{label} session preview was not JSON: {error}\nstdout={stdout}\nstderr={stderr}"
+            )
+        });
+        json["frames"][0]["prompt"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{label} session preview had no prompt: {json}"))
+            .to_string()
+    };
+
     // True outer choice, true nested choice: both branches select their
     // `sequence` (then) arm.
     let (_, tt_cli_args) = run_with_env(
@@ -1640,6 +1672,7 @@ output = ["slot:answer"]
         extract_behavior(branch_preview_nested_then),
         "true/true nested-then behavior differs between preview and CLI"
     );
+    let tt_session = home.join("branch-tt-cli.json");
 
     // True outer choice, false nested choice, over MCP: the nested branch has
     // no `otherwise`, so a false nested choice must emit no leaf frame — only
@@ -1681,6 +1714,7 @@ output = ["slot:answer"]
         extract_behavior(branch_preview_then),
         "true/false then behavior differs between preview and MCP"
     );
+    let tf_session = home.join("branch-tf-mcp.json");
 
     // False outer choice: the top-level branch selects its `otherwise` arm
     // and the `then`/nested-branch arms never dispatch at all.
@@ -1718,6 +1752,363 @@ output = ["slot:answer"]
         extract_behavior(branch_preview_otherwise),
         "false then otherwise behavior differs between preview and CLI"
     );
+    let f_session = home.join("branch-f-cli.json");
+
+    // Every recorded leaf across the three real dispatches must show the
+    // same root->agent->leaf scalar precedence the top-level and named-leaf
+    // proofs above established, and must exclude every marker belonging to a
+    // sibling, opposite, previous, next, or later declaration — table-driven
+    // so the sweep covers the same ground for every arm exactly once.
+    let all_branch_markers = [
+        "then-arm-marker",
+        "then-arm-tone-marker",
+        "nested-arm-marker",
+        "nested-arm-tone-marker",
+        "otherwise-arm-marker",
+        "otherwise-arm-tone-marker",
+        "pre-branch-sibling-marker",
+        "post-branch-sibling-marker",
+        "branch-later-marker",
+    ];
+    let assert_branch_leaf = |label: &str,
+                              prompt: &str,
+                              own_marker: &str,
+                              own_tone_marker: &str,
+                              own_text: &str,
+                              own_tone_text: &str| {
+        let intent = extract_intent(prompt);
+        let behavior = extract_behavior(prompt);
+        assert!(
+            intent.find("root-only").unwrap() < intent.find("agent-only").unwrap(),
+            "{label} root/agent intent ordering: {intent}"
+        );
+        assert!(
+            intent.find("agent-only").unwrap() < intent.find("shared").unwrap(),
+            "{label} agent/shared intent ordering: {intent}"
+        );
+        assert!(
+            intent.find("shared").unwrap() < intent.find(own_marker).unwrap(),
+            "{label} shared/leaf intent ordering: {intent}"
+        );
+        assert_eq!(
+            intent.matches("id=\"shared\"").count(),
+            1,
+            "{label}: {intent}"
+        );
+        assert!(
+            intent.contains(own_text),
+            "{label} scalar precedence: {intent}"
+        );
+        assert!(
+            !intent.contains("Assigned replacement text."),
+            "{label} stale agent text leaked: {intent}"
+        );
+        assert!(
+            behavior.find("root-tone").unwrap() < behavior.find("agent-tone").unwrap(),
+            "{label} root/agent tone ordering: {behavior}"
+        );
+        assert!(
+            behavior.find("agent-tone").unwrap() < behavior.find("shared-tone").unwrap(),
+            "{label} agent/shared tone ordering: {behavior}"
+        );
+        assert!(
+            behavior.find("shared-tone").unwrap() < behavior.find(own_tone_marker).unwrap(),
+            "{label} shared/leaf tone ordering: {behavior}"
+        );
+        assert_eq!(
+            behavior.matches("id=\"shared-tone\"").count(),
+            1,
+            "{label}: {behavior}"
+        );
+        assert!(
+            behavior.contains(own_tone_text),
+            "{label} tone scalar precedence: {behavior}"
+        );
+        for marker in all_branch_markers {
+            if marker == own_marker || marker == own_tone_marker {
+                continue;
+            }
+            assert!(
+                !prompt.contains(marker),
+                "{label} leaked marker {marker}: {prompt}"
+            );
+        }
+        assert_unassigned_absent(prompt);
+        assert!(
+            !prompt.contains("unassigned-tone"),
+            "{label} leaked unassigned behavior: {prompt}"
+        );
+    };
+    assert_branch_leaf(
+        "true/true then",
+        tt_then,
+        "then-arm-marker",
+        "then-arm-tone-marker",
+        "Then leaf replacement text.",
+        "Then leaf tone.",
+    );
+    assert_branch_leaf(
+        "true/true nested-then",
+        tt_nested_then,
+        "nested-arm-marker",
+        "nested-arm-tone-marker",
+        "Nested then leaf replacement text.",
+        "Nested then leaf tone.",
+    );
+    assert_branch_leaf(
+        "true/false then",
+        tf_then,
+        "then-arm-marker",
+        "then-arm-tone-marker",
+        "Then leaf replacement text.",
+        "Then leaf tone.",
+    );
+    assert_branch_leaf(
+        "false otherwise",
+        f_otherwise,
+        "otherwise-arm-marker",
+        "otherwise-arm-tone-marker",
+        "Otherwise leaf replacement text.",
+        "Otherwise leaf tone.",
+    );
+    assert_ne!(
+        extract_intent(tt_then),
+        extract_intent(f_otherwise),
+        "distinct arm selection must produce distinct effective intent text"
+    );
+
+    // Historical session preview reconstructs each recorded leaf exactly as
+    // it activated, from the same completed session the real dispatch above
+    // produced — proving `--session <path> --step <id>` exposes only the
+    // recorded arm rather than a no-session preview's projection of both.
+    for (label, prompt, step_id, session) in [
+        ("true/true then", tt_then.as_str(), "then-leaf", &tt_session),
+        (
+            "true/true nested-then",
+            tt_nested_then.as_str(),
+            "nested-then-leaf",
+            &tt_session,
+        ),
+        (
+            "true/false then",
+            tf_then.as_str(),
+            "then-leaf",
+            &tf_session,
+        ),
+        (
+            "false otherwise",
+            f_otherwise.as_str(),
+            "otherwise-leaf",
+            &f_session,
+        ),
+    ] {
+        let historical = session_preview(&format!("{label} historical"), session, Some(step_id));
+        assert_eq!(
+            extract_intent(&historical),
+            extract_intent(prompt),
+            "{label} historical intent differs from the recorded dispatch"
+        );
+        assert_eq!(
+            extract_behavior(&historical),
+            extract_behavior(prompt),
+            "{label} historical behavior differs from the recorded dispatch"
+        );
+    }
+
+    // Active session preview: pause a fresh session immediately before the
+    // `then` leaf activates (3 driven frames: decide, decide-nested,
+    // pre-branch-sibling) and confirm the not-yet-accepted frame already
+    // exposes only the recorded arm, matching the completed true/true
+    // dispatch above byte for byte.
+    let active_session = home.join("branch-active-cli.json");
+    fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("cli")).unwrap();
+    require_success(
+        "approve branch fixture for active preview",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let seed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            active_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&seed, 0);
+    let drive = support::run_ctx_with_env(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            active_session.to_str().unwrap(),
+            "--max-frames",
+            "3",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[
+            ("CTX_TEST_CHOICE", "yes"),
+            ("CTX_TEST_NESTED_CHOICE", "yes"),
+        ],
+    );
+    assert_exit_code(&drive, 0);
+    let active = session_preview("true/true then (active)", &active_session, None);
+    assert_eq!(
+        extract_intent(&active),
+        extract_intent(tt_then),
+        "active session preview intent differs from the recorded then dispatch"
+    );
+    assert_eq!(
+        extract_behavior(&active),
+        extract_behavior(tt_then),
+        "active session preview behavior differs from the recorded then dispatch"
+    );
+    assert!(
+        !active.contains("otherwise-arm-marker") && !active.contains("nested-arm-marker"),
+        "active session preview leaked a sibling arm: {active}"
+    );
+
+    // A branch-path leaf's require/avoid conflict must still fail before the
+    // harness ever runs, exactly as the top-level and named-leaf conflicts
+    // above did — admission broadening must not move conflict detection.
+    let branch_conflict_fixture = branch_fixture.replace(
+        "intent = { require = [{ id = \"shared\", summary = \"Then leaf replacement text.\" }, { id = \"then-arm-marker\", summary = \"Then leaf marker.\" }] }",
+        "intent = { avoid = [{ id = \"shared\", summary = \"Then leaf conflict.\" }] }",
+    );
+    assert_ne!(
+        branch_conflict_fixture, branch_fixture,
+        "then-leaf intent replacement point moved"
+    );
+    fs::write(&generated, &branch_conflict_fixture).unwrap();
+    require_success(
+        "approve branch conflict fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let _ = fs::remove_file(capture.with_extension("txt.calls"));
+    let branch_conflict = support::run_ctx_with_env(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            home.join("branch-conflict.json").to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[
+            ("CTX_TEST_CHOICE", "yes"),
+            ("CTX_TEST_NESTED_CHOICE", "yes"),
+        ],
+    );
+    assert!(
+        !branch_conflict.status.success(),
+        "branch-path conflict unexpectedly dispatched"
+    );
+    let (_, stderr) = utf8(&branch_conflict);
+    assert!(
+        stderr.contains(
+            "effective guidance id \"shared\" cannot appear in both require and avoid when ready-prompt intent participates"
+        )
+    );
+    // Three prior steps (decide, decide-nested, pre-branch-sibling) dispatch
+    // normally before the conflicting then-leaf is ever reached, so the
+    // proof is that dispatch stops there — the harness must not have been
+    // called a fourth time for the rejected leaf itself.
+    let branch_conflict_calls =
+        fs::read_to_string(capture.with_extension("txt.calls")).unwrap_or_default();
+    assert_eq!(
+        branch_conflict_calls.lines().count(),
+        3,
+        "harness ran for the conflicting then-leaf before the branch-path conflict was rejected: {branch_conflict_calls:?}"
+    );
+
+    // A branch leaf's own prompt-scoped guidance must be able to enable
+    // categorized MCP participation entirely on its own, with no
+    // assigned-agent-scoped guidance declared anywhere in the trait —
+    // mirroring the equivalent named-leaf proof above, now on a branch arm.
+    let branch_prompt_only_fixture = branch_fixture
+        .replace(worker_intent, "")
+        .replace(worker_behavior, "");
+    assert_ne!(
+        branch_prompt_only_fixture, branch_fixture,
+        "agent-scoped guidance removal point moved"
+    );
+    fs::write(&generated, &branch_prompt_only_fixture).unwrap();
+    require_success(
+        "approve branch prompt-only fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let (_, _) = run_with_env(
+        "mcp",
+        "branch-prompt-only-mcp.json",
+        &[
+            ("CTX_TEST_CHOICE", "yes"),
+            ("CTX_TEST_NESTED_CHOICE", "yes"),
+        ],
+    );
+    let branch_prompt_only_then = fs::read_to_string(capture.with_extension("txt.3")).unwrap();
+    let branch_prompt_only_intent = extract_intent(&branch_prompt_only_then);
+    let branch_prompt_only_behavior = extract_behavior(&branch_prompt_only_then);
+    assert!(
+        branch_prompt_only_intent.contains("then-arm-marker"),
+        "{branch_prompt_only_intent}"
+    );
+    assert!(
+        !branch_prompt_only_intent.contains("agent-only"),
+        "{branch_prompt_only_intent}"
+    );
+    assert!(
+        branch_prompt_only_behavior.contains("then-arm-tone-marker"),
+        "{branch_prompt_only_behavior}"
+    );
+    assert!(
+        !branch_prompt_only_behavior.contains("agent-tone"),
+        "{branch_prompt_only_behavior}"
+    );
+
     for frames in [&tt_frames, &tf_frames, &f_frames] {
         for prompt in frames {
             assert_unassigned_absent(prompt);
