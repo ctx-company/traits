@@ -1,29 +1,109 @@
 schema-version = "0.2"
 key = "0255.8"
 title = "Dispatch top-level prompt behavior"
-status = "draft"
+status = "ready"
 raised = "2026-08-24"
 content = """
-Make additive and scalar behavior on the actual top-level ready prompt visible in ready-frame preview and live CLI and MCP dispatch. The outcome completes ordinary three-layer behavior composition and verifies frame changes as readiness advances between top-level prompts.
+## Dependency gate
+Before any implementation edit, require the joined landed state of `0255.4`, `0255.6`, and `0255.7`, including every transitive dependency. The clean grounding baseline is HEAD `874c70f4`, where those plans are not implemented: `Agent` has intent but no behavior in `modules/core/src/trait/agent.rs:92-124`; `SequenceItem` has neither intent nor behavior in `modules/core/src/trait/procedure/model.rs:914-948`; `frame_guidance` is root-only and infallible in `modules/core/src/model_view/compile.rs:511-544`; `resolved_frame_prompt` resolves only root guidance in `modules/cli/src/app/frame_prompt.rs:463-489`; `resolve_declared_item` remains private to `modules/cli/src/app/preview.rs:216-262`; and `modules/cli/tests/proof_agent_intent_dispatch.rs` does not exist. No files were edited and no checks were run during grounding.
 
-The affected runtime areas are ready-item lookup, effective behavior resolution, common frame composition, preview, and CLI and MCP drive paths. It extends the top-level intent path from 0255.6 instead of introducing a behavior-specific transport path.
+Inspect the joined implementation before touching any allowlisted file. Confirm at minimum: `Agent.behavior`; `SequenceItem.intent` and `SequenceItem.behavior`; prompt-scoped behavior validation and static rendering; private `layered_additive_guidance`, `effective_behavior_axes`, and `format_behavior_axes`; fallible `frame_guidance(trait_ref, assigned_agent, ready_prompt)`; exact canonical `assigned_agent`; relocated `resolve_declared_item`; fallible `top_level_ready_prompt`; fields `ResolvedFramePrompt::{assigned_agent_behavior_participated,ready_prompt_intent_participated}`; shared `intent_block` and `behavior_block`; and the existing `modules/cli/tests/proof_agent_intent_dispatch.rs` containing exactly one test, `fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible()`. Stop before implementation edits and report the first missing or materially different contract. Do not recreate a missing dependency inside this task.
+
+## Outcome
+Compose ordinary ready-frame behavior from root `Trait.behavior`, the exact assigned `Agent.behavior`, and only the exact canonical top-level ready prompt's `SequenceItem.behavior`, least to most specific. Static ready preview, session preview, ordinary live CLI dispatch, and live MCP dispatch must consume one effective `ResolvedFramePrompt.behavior_items` string from the common resolver. Advancing from one top-level prompt to the next must rebuild that string without stale, neighboring, unassigned-agent, or other-prompt guidance. Preserve all joined intent bytes and errors, absent/empty behavior compatibility, root-only MCP omission, and the separate `Agent.system` transport channels.
+
+The additive axes are exactly `tone`, `method`, and `format`. Within each axis compare already-canonical `GuidanceItem.id` values directly. Remove root occurrences shadowed by either agent or prompt, remove agent occurrences shadowed by prompt, preserve source order among survivors, and render surviving root items followed by surviving agent items followed by every prompt item. Replacement identity is axis plus canonical ID, so the same ID on another axis is unrelated. Never normalize an ID again.
+
+The scalar axes are exactly `verbosity`, `directness`, `scope-control`, `initiative`, and `uncertainty`. Select prompt over agent over root independently on each axis. Differing scalar values express precedence and are not contradictions. A prompt may supply behavior without root or agent behavior, and every omitted prompt axis retains the selected broader value.
+
+Only the canonical item returned by dependency-owned `top_level_ready_prompt` may provide prompt intent or behavior. That selector accepts only an empty-path `SequenceFrameKind::Step`, resolves the structural declaration from `frame.sequence_index`, requires `SequenceKind::Prompt`, and returns that exact `SequenceItem`; it returns no prompt for asks, non-step frames, or any non-empty-path named/nested leaf. Resolve it once and reuse the same reference for intent and behavior. Do not add a behavior lookup, scan declarations, globally match optional item IDs, infer from prompt evidence or text, inspect neighboring items, or broaden selection to named/nested prompts.
+
+A ready prompt participates in behavior exactly when its behavior has at least one item in `tone`, `method`, or `format`, or a present value in `verbosity`, `directness`, `scope_control`, `initiative`, or `uncertainty`. No selected prompt, `behavior: None`, and `behavior: Some(Behavior::default())` are non-participating. They must preserve the complete joined pre-`0255.8` behavior output byte-for-byte, including root-only behavior, effective root-agent behavior, MCP participation rules, and frames with no behavior.
+
+## Touched files
+The complete implementation allowlist is:
+
+- `modules/core/src/model_view/compile.rs`
+- `modules/cli/src/app/frame_prompt.rs`
+- `modules/cli/tests/proof_agent_intent_dispatch.rs`
+
+Create, remove, rename, generate, or edit no implementation file outside those paths. The task-file rewrite itself changes only `.internal/tasks/0255.8-dispatch-top-level-prompt-behavior.toml`; implementation must not edit another task.
+
+## Symbol contract
+In `modules/core/src/model_view/compile.rs`, change dependency-owned private helper to exact signature `fn effective_behavior_axes<'a>(root: Option<&'a crate::r#trait::Behavior>, assigned: Option<&'a crate::r#trait::Behavior>, ready_prompt: Option<&'a crate::r#trait::Behavior>) -> [(&'static str, Vec<&'a GuidanceItem>, bool); 8]`. It remains the sole effective behavior authority. Reuse the additive overlay operation already used by joined three-layer `effective_intent_groups`; do not add a prompt-specific resolver or renderer. For the three additive axes, apply root-agent-prompt shadowing by canonical ID and retain the required layer/source order. For the five scalar axes, use `ready_prompt.or(assigned).or(root)` independently. Return axes in unchanged `behavior_axes` order.
+
+Keep dependency-owned private `layered_additive_guidance` and private `format_behavior_axes` as the one shared additive operation and one behavior renderer; neither is renamed, removed, duplicated, or made public. Reuse canonical IDs, unchanged `behavior_axes`, `format_guidance_group`, `format_guidance_item_element`, directive lookup, `behavior_builtin`, `sanitize_model_text`, and `leaf_element`. Rendering effective runtime behavior continues through `format_behavior_axes` with `GuidanceTag::GroupNamed`, field prefix `"behavior"`, and source `None`.
+
+Edit the body, but not the joined exact signature, of `pub fn frame_guidance(trait_ref: &Trait, assigned_agent: Option<&crate::r#trait::Agent>, ready_prompt: Option<&crate::r#trait::procedure::SequenceItem>) -> crate::Result<Option<FrameGuidance>>`. Obtain prompt behavior only from `ready_prompt.and_then(|item| item.behavior.as_ref())`. When prompt behavior is populated, pass root, selected-agent, and ready-prompt behavior references to `effective_behavior_axes` once and render once through `format_behavior_axes`. When prompt behavior is absent or empty, preserve the dependency-owned root/agent behavior branch and its output exactly. Preserve joined intent resolution, source tracking, contradiction behavior, warning/normalization/finding handling, errors, and rendered bytes unchanged.
+
+Add exactly these five new core test symbols in the existing `modules/core/src/model_view/compile.rs` test module: `fn frame_guidance_ready_prompt_behavior_merges_additive_axes_in_layer_order()`, `fn frame_guidance_ready_prompt_behavior_replaces_broader_items_at_prompt_layer()`, `fn frame_guidance_ready_prompt_behavior_applies_scalar_precedence_and_preserves_omitted_axes()`, `fn frame_guidance_ready_prompt_behavior_supports_prompt_only_behavior()`, and `fn frame_guidance_ready_prompt_behavior_is_byte_identical_when_prompt_is_absent_or_empty()`. Together they are the complete focused `frame_guidance_ready_prompt_behavior` surface; add no production helper for fixtures or assertions unless one already exists and can be reused.
+
+In `modules/cli/src/app/frame_prompt.rs`, edit dependency-owned `pub(crate) struct ResolvedFramePrompt` only by adding exact field `pub(crate) ready_prompt_behavior_participated: bool`. Edit the body, but not the exact signature, of `pub(crate) fn resolved_frame_prompt(loaded: &ctx_traits_io::run::LoadedTrait, session: &ctx_traits_core::procedure::session::Session, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, pending_inputs: &[PendingInput]) -> crate::Result<ResolvedFramePrompt>`. Resolve `assigned_agent(loaded, frame)?` once and `top_level_ready_prompt(loaded, frame)?` once. Reuse those exact references for identity, joined intent flags, the two behavior participation flags, and one call to `ctx_traits_core::model_view::frame_guidance`. Derive `ready_prompt_behavior_participated` inline from the eight-axis populated rule; add no participation helper or second prompt selection.
+
+Keep `pub(crate) fn frame_prompt(context: &ResolvedFramePrompt, schema: &Value, correction: Option<&str>) -> String` unchanged: it must continue inserting dependency-owned `behavior_block(&context.behavior_items)` whenever the one effective behavior string is non-empty. Edit the body, but not the exact signature, of `pub(crate) fn mcp_frame_prompt(session: &str, session_store: Option<&str>, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, context: &ResolvedFramePrompt, role: &str, harness_id: &str) -> String`. Insert that same `behavior_block` after any categorized `intent_block` and before `Resolved prompt instructions:` exactly when `context.behavior_items` is non-empty and either `context.assigned_agent_behavior_participated` or `context.ready_prompt_behavior_participated` is true. Root-only MCP behavior remains omitted. Preserve composer signatures, callers, and all other bytes.
+
+In existing `modules/cli/tests/proof_agent_intent_dispatch.rs`, edit only exact test `fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible()`. Add no second test, helper API, or capture framework. Reuse the dependency-owned scratch root, custom CLI and MCP capture harnesses, block extraction, system-channel checks, two-position top-level prompt fixture, and frozen compatibility oracles.
+
+No symbol is removed. The only new production symbol is field `ResolvedFramePrompt::ready_prompt_behavior_participated`; the only new test symbols are the five exact `frame_guidance_ready_prompt_behavior_*` functions above. The edited symbols are private `effective_behavior_axes` with the exact generalized signature above, unchanged-signature `frame_guidance`, `resolved_frame_prompt`, and `mcp_frame_prompt`, and unchanged-signature integration test `assigned_agent_intent_dispatch_is_shared_and_legacy_compatible`. Every other named symbol is reused unchanged.
 """
 scope = """
-## Decisions
-For additive axes, preserve root-agent-prompt order and replace repeated axis-plus-normalized-ID items at the most-specific layer position. For scalar axes, prompt overrides agent and agent overrides root. Only the actual ready prompt contributes behavior; neighboring and non-prompt items contribute none.
+## Ordered work
+1. Run the dependency gate first, before any implementation edit. Inspect the joined landed contracts from `0255.4`, `0255.6`, and `0255.7`, including transitive dependencies, in the exact minimum order listed in `content`. Confirm the proof file exists and contains one integration test. Stop at the first missing or materially different contract and report it; do not edit around the blocker.
+2. Edit `modules/core/src/model_view/compile.rs` first. Generalize only `effective_behavior_axes` to optional root/agent/prompt layers, reuse the joined additive operation and renderer, extend only the behavior branch of unchanged-signature `frame_guidance`, and add exactly the five named `frame_guidance_ready_prompt_behavior_*` tests.
+3. Run `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_behavior`. Require exit 0 and exactly five matching passing tests before proceeding.
+4. Edit `modules/cli/src/app/frame_prompt.rs` second. Add only `ResolvedFramePrompt::ready_prompt_behavior_participated`; derive it from the already-selected prompt; pass the one selected agent and prompt to core once; preserve one `behavior_items`; and extend only the MCP behavior condition. Do not edit `frame_prompt`, selector logic, composer signatures, or callers.
+5. Edit `modules/cli/tests/proof_agent_intent_dispatch.rs` third. Extend only `fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible()` with ready-prompt behavior cases while reusing all joined fixture and capture machinery.
+6. Run `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch`. Require exit 0 with exactly one integration test.
+7. Run `CARGO_TARGET_DIR=target just test-full`. It performs frozen pnpm installation, generated SDK and builtin drift checks, TypeScript formatting/typechecking/tests, Rust formatting and Clippy, workspace binary builds, and all workspace tests (`Justfile:152-180`).
+8. Run `git diff -- modules/core/src/model_view/compile.rs modules/cli/src/app/frame_prompt.rs modules/cli/tests/proof_agent_intent_dispatch.rs` and perform a substantive review against every semantic, reuse, compatibility, ordering, participation, stale-state, system-channel, and exclusion requirement. Also inspect the worktree file list and stop if implementation changed anything outside the three-file allowlist.
+9. A focused failure, landing-gate failure, or substantive review finding permits at most two targeted repair-and-rerun rounds. Repair only allowlisted files and preserve core-before-CLI-before-proof edit order when dependencies require it. After each repair, rerun the affected focused command and every later command in the sequence. Complete only when both focused commands and the landing gate exit 0 and final review is clean; otherwise stop with the concrete dependency, test, or review blocker.
 
-Changing top-level readiness rebuilds effective behavior for the next frame. Preview and live transports share the same effective result and renderer, while agent `system` remains outside categorized behavior.
+## Core proof
+The five `modules/core/src/model_view/compile.rs::frame_guidance_ready_prompt_behavior_*` tests must respectively cover: all three additive axes in deterministic root-agent-prompt order; root and agent replacement by prompt at the prompt layer with exactly one occurrence and prompt-local rendered directive text; all five scalar axes with prompt-over-agent-over-root precedence and broader fallback for omitted prompt axes; prompt-only behavior with no root or assigned-agent behavior; and exact output equality with joined pre-`0255.8` behavior for no ready prompt, prompt `behavior: None`, and prompt `behavior: Some(Behavior::default())`. Use non-empty broader behavior in compatibility cases so drift is observable. Assert joined intent output remains byte-identical in every relevant comparison.
+
+## Dispatch proof
+Within the sole `modules/cli/tests/proof_agent_intent_dispatch.rs::assigned_agent_intent_dispatch_is_shared_and_legacy_compatible` test, use both successively ready top-level prompts. At each position capture static `internal preview --json`, real CLI dispatch, and real MCP dispatch; extract the complete behavior block and assert byte equality across all three paths. Assert root-agent-current-prompt additive order, prompt replacement count and prompt-local text, scalar precedence, omitted-axis broader retention, absence of unassigned-agent, neighboring-prompt, other-prompt, and stale-prior-prompt markers, and a changed effective block after advancement.
+
+Add a prompt-only behavior case proving MCP receives categorized behavior when assigned-agent behavior does not participate. Preserve and extend the joined frozen absent-prompt and present-empty-prompt behavior oracles for ordinary and MCP output. Prove unique `Agent.system` text is absent from every behavior block and remains on the established CLI `harness_argv`/system-prompt channel and MCP `mcp_harness_argv` channel. Preserve every joined intent assertion and oracle.
+
+## Reuse
+`modules/core/src/model_view/compile.rs` remains the sole effective behavior and rendering authority. Reuse joined three-layer `effective_intent_groups` only as the established additive-overlay pattern; do not change intent. Reuse `layered_additive_guidance`, canonical `GuidanceItem.id`, `behavior_axes`, `format_behavior_axes`, `format_guidance_group`, `format_guidance_item_element`, directive lookup, `behavior_builtin`, `sanitize_model_text`, and `leaf_element`. Do not duplicate overlay, canonicalization, directive, sanitization, or rendering logic.
+
+`modules/cli/src/app/frame_prompt.rs::resolved_frame_prompt` remains the common resolver already consumed by static preview, session preview, ordinary CLI dispatch, refreshed ordinary frames, and MCP dispatch. Reuse dependency-owned `assigned_agent` and `top_level_ready_prompt` once each, one core `frame_guidance` call, one `ResolvedFramePrompt.behavior_items`, shared `intent_block`, and shared `behavior_block`. Ordinary advancement already rebuilds `ResolvedFramePrompt`; add no readiness, frame, cache, transport, or persisted state.
+
+Reuse only the existing proof test and its scratch root, custom harnesses, captures, block extraction, marker assertions, top-level sequence fixture, frozen byte oracles, and system-channel assertions. Do not create another integration test or support abstraction.
+
+## Exclusions
+Do not edit trait, schema, validation, CDK, generated authoring, or static declaration work owned by `0255.7`. Do not edit `modules/core/src/model_view/compile_sections.rs`, runtime readiness or transitions, `SequenceFrame`, `AgentRole`, `modules/cli/src/app/preview.rs`, `modules/cli/src/app/drive.rs`, transport selection, retry handling, persistent-session handling, shared-session refresh, harness argument construction, or any task sibling. Static declaration rendering and `Report::behavior_text` remain unchanged.
+
+Do not add behavior fields to runtime frames or persisted wire data. Do not add a behavior-specific ready-item lookup, scan declarations, globally match optional IDs, use evidence/text, consult neighboring items, select asks or non-step frames, or include any non-empty-path named/nested leaf. Named sequences, branches, loops, for-each, parallel siblings, retries, and persistent/shared-session refresh belong to `0255.9` through `0255.15`.
+
+Do not normalize canonical IDs again, compare prose, shadow across axes, reorder layers or items, treat scalar precedence as contradiction, discard broader scalar values when prompt axes are omitted, duplicate additive or rendering authorities, produce separate behavior strings per transport, change intent bytes or errors, emit root-only MCP behavior, or place `Agent.system` text in categorized behavior.
 """
 validation = """
-## Watch
-Do not retain behavior from the preceding prompt, resolve axes independently in each transport, treat differing scalar values as contradictions, or let categorized behavior alter `system` delivery. Legacy prompts without scoped behavior must keep prior frame bytes.
-
 ## Done when
-Top-level preview and CLI and MCP dispatch render only the actual ready prompt's additive and scalar behavior; replacement and prompt-over-agent-over-root precedence are deterministic; advancing readiness removes stale behavior; no-guidance frames and agent `system` transport remain unchanged; and focused resolver, rendering, and live-path coverage passes the landing gate.
+1. `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_behavior` exits 0 with exactly the five named matching tests from `modules/core/src/model_view/compile.rs`. They prove all three additive and five scalar axes, canonical-ID root-agent-prompt replacement/order, prompt-local directive rendering, broader scalar fallback, prompt-only behavior, exact absent/`None`/default compatibility against non-empty broader behavior, and unchanged intent output.
+2. `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch` exits 0 with exactly one `fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible()` in `modules/cli/tests/proof_agent_intent_dispatch.rs`. It proves complete behavior-block byte equality among static preview, real CLI, and real MCP at both top-level positions; correct order/replacement/scalar fallback; stale-free advancement; unassigned, neighboring, and other-prompt exclusion; prompt-only MCP participation; frozen absent/empty compatibility; and `Agent.system` separation on both established channels.
+3. `CARGO_TARGET_DIR=target just test-full` exits 0 after implementation changes only to `modules/core/src/model_view/compile.rs`, `modules/cli/src/app/frame_prompt.rs`, and `modules/cli/tests/proof_agent_intent_dispatch.rs`.
+4. Substantive review of `git diff -- modules/core/src/model_view/compile.rs modules/cli/src/app/frame_prompt.rs modules/cli/tests/proof_agent_intent_dispatch.rs` confirms the complete implementation diff stays within that three-file allowlist; all eight axes use direct canonical-ID comparison and one shared additive authority/renderer; there is one ready-prompt lookup, one core resolution, and one effective behavior string; prompt participation gates MCP after intent and before resolved instructions; top-level advancement is stale-free; absent/empty outputs are byte-compatible; unassigned and neighboring declarations are excluded; joined intent is unchanged; and `Agent.system` remains separate. This judgment criterion intentionally has no `[[checks]]` entry because the diff command presents evidence but cannot encode the substantive verdict in its exit status.
+
+Run verification strictly in the four-step order above. Permit at most two targeted repair-and-rerun rounds; after each repair rerun the affected focused command and every later command. Mark complete only when both focused commands and `just test-full` pass and final review has no finding. Otherwise stop and report the concrete blocker.
 """
 [relations]
 parent = "0255"
 depends-on = ["0255.4", "0255.6", "0255.7"]
+
+[[checks]]
+name = "top-level ready prompt behavior core proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_behavior"
+expect = "test result: ok\\. 5 passed; 0 failed"
+timeout-ms = 600000
+
+[[checks]]
+name = "top-level ready prompt behavior dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+expect = "test result: ok\\. 1 passed; 0 failed"
+timeout-ms = 1800000
 
 [[checks]]
 name = "top-level prompt behavior dispatch passes the landing gate"
