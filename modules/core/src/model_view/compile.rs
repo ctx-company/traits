@@ -2442,30 +2442,53 @@ mod render_v2_shape_tests {
     }
 
     #[test]
-    fn frame_guidance_ready_prompt_behavior_merges_three_layers_in_order() {
+    fn frame_guidance_ready_prompt_behavior_merges_additive_axes_in_layer_order() {
         let trait_ref = behavior_guidance_fixture(
-            serde_json::json!({ "tone": [{ "id": "root", "summary": "Root." }] }),
-            serde_json::json!([{ "id": "worker", "description": "Worker.", "behavior": { "tone": [{ "id": "agent", "summary": "Agent." }] } }]),
+            serde_json::json!({
+                "tone": [{ "id": "root-tone", "summary": "Root tone." }],
+                "method": [{ "id": "root-method", "summary": "Root method." }],
+                "format": [{ "id": "root-format", "summary": "Root format." }],
+            }),
+            serde_json::json!([{
+                "id": "worker",
+                "description": "Worker.",
+                "behavior": {
+                    "tone": [{ "id": "agent-tone", "summary": "Agent tone." }],
+                    "method": [{ "id": "agent-method", "summary": "Agent method." }],
+                    "format": [{ "id": "agent-format", "summary": "Agent format." }],
+                },
+            }]),
         );
-        let prompt = ready_prompt_behavior(
-            serde_json::json!({ "tone": [{ "id": "prompt", "summary": "Prompt." }] }),
-        );
+        let prompt = ready_prompt_behavior(serde_json::json!({
+            "tone": [{ "id": "prompt-tone", "summary": "Prompt tone." }],
+            "method": [{ "id": "prompt-method", "summary": "Prompt method." }],
+            "format": [{ "id": "prompt-format", "summary": "Prompt format." }],
+        }));
         let behavior = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), Some(&prompt))
             .expect("guidance resolves")
             .expect("behavior guidance")
             .behavior;
-        assert!(
-            behavior.find("root").unwrap() < behavior.find("agent").unwrap(),
-            "{behavior}"
-        );
-        assert!(
-            behavior.find("agent").unwrap() < behavior.find("prompt").unwrap(),
-            "{behavior}"
-        );
+        for (axis, root, agent, prompt) in [
+            ("tone", "root-tone", "agent-tone", "prompt-tone"),
+            ("method", "root-method", "agent-method", "prompt-method"),
+            ("format", "root-format", "agent-format", "prompt-format"),
+        ] {
+            let root_pos = behavior
+                .find(root)
+                .unwrap_or_else(|| panic!("missing {root} for {axis}: {behavior}"));
+            let agent_pos = behavior
+                .find(agent)
+                .unwrap_or_else(|| panic!("missing {agent} for {axis}: {behavior}"));
+            let prompt_pos = behavior
+                .find(prompt)
+                .unwrap_or_else(|| panic!("missing {prompt} for {axis}: {behavior}"));
+            assert!(root_pos < agent_pos, "{axis}: {behavior}");
+            assert!(agent_pos < prompt_pos, "{axis}: {behavior}");
+        }
     }
 
     #[test]
-    fn frame_guidance_ready_prompt_behavior_replaces_root_and_agent_items() {
+    fn frame_guidance_ready_prompt_behavior_replaces_broader_items_at_prompt_layer() {
         let trait_ref = behavior_guidance_fixture(
             serde_json::json!({ "tone": [{ "id": "shared", "summary": "Root." }] }),
             serde_json::json!([{ "id": "worker", "description": "Worker.", "behavior": { "tone": [{ "id": "shared", "summary": "Agent." }] } }]),
@@ -2533,9 +2556,9 @@ mod render_v2_shape_tests {
     }
 
     #[test]
-    fn frame_guidance_ready_prompt_behavior_participates_without_assigned_agent_behavior() {
+    fn frame_guidance_ready_prompt_behavior_supports_prompt_only_behavior() {
         let trait_ref = behavior_guidance_fixture(
-            serde_json::json!({ "tone": [{ "id": "root", "summary": "Root." }] }),
+            serde_json::json!({}),
             serde_json::json!([{ "id": "worker", "description": "Worker." }]),
         );
         let prompt = ready_prompt_behavior(
@@ -2546,11 +2569,10 @@ mod render_v2_shape_tests {
             .expect("behavior guidance")
             .behavior;
         assert!(behavior.contains("prompt-only"), "{behavior}");
-        assert!(behavior.contains("root"), "{behavior}");
     }
 
     #[test]
-    fn frame_guidance_ready_prompt_behavior_is_byte_identical_when_absent_or_default() {
+    fn frame_guidance_ready_prompt_behavior_is_byte_identical_when_prompt_is_absent_or_empty() {
         let trait_ref = behavior_guidance_fixture(
             serde_json::json!({ "tone": [{ "id": "root", "summary": "Root behavior." }] }),
             serde_json::json!([{
@@ -2562,7 +2584,11 @@ mod render_v2_shape_tests {
         let baseline = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")), None)
             .expect("guidance resolves")
             .expect("baseline behavior");
-        for prompt in [None, Some(ready_prompt_behavior(serde_json::json!({})))] {
+        for prompt in [
+            None,
+            Some(ready_prompt_behavior(serde_json::Value::Null)),
+            Some(ready_prompt_behavior(serde_json::json!({}))),
+        ] {
             let rendered = frame_guidance(
                 &trait_ref,
                 Some(assigned(&trait_ref, "worker")),
