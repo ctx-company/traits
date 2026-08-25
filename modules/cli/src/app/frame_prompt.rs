@@ -559,7 +559,11 @@ pub(crate) fn resolved_frame_prompt(
 }
 
 /// Resolves the exact declaration a frame was produced from by structural
-/// position rather than a globally ambiguous optional item id.
+/// position rather than a globally ambiguous optional item id. The live path
+/// appends a trailing `item` segment after the owning sequence segment, while
+/// static preview ends at the owner. In both forms, the rightmost non-`item`
+/// segment identifies the sequence and item index. An empty path addresses a
+/// top-level item through `frame.sequence_index` in `procedure.sequence`.
 pub(crate) fn resolve_declared_item<'a>(
     loaded: &'a ctx_traits_io::run::LoadedTrait,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,

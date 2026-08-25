@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -83,6 +84,7 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     let generated = package.join("generated/index.toml");
     let capture = home.join("capture.txt");
     let marker = home.join("called");
+    let preserve_captures = Cell::new(false);
     fs::create_dir_all(generated.parent().unwrap()).unwrap();
     git_init(&repo);
 
@@ -90,7 +92,7 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nfor last; do :; done\nprintf '%s' \"$last\" > {}\nif [ -f {}.calls ]; then n=$(wc -l < {}.calls); else n=0; fi\nprintf '%s' \"$last\" > {}.$n\nprintf 'x\\n' >> {}.calls\ntouch {}\nprintf '{{\"answer\":\"ok\"}}'\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nfor last; do :; done\nprintf '%s' \"$last\" > {}\nif [ -f {}.calls ]; then n=$(($(wc -l < {}.calls))); else n=0; fi\nprintf '%s' \"$last\" > {}.$n\nprintf 'x\\n' >> {}.calls\ntouch {}\nprintf '{{\"answer\":\"ok\"}}'\n",
             capture.display(),
             capture.display(),
             capture.display(),
@@ -257,11 +259,13 @@ output = ["slot:answer"]
         )
     };
     let run = |transport: &str, output: &str| {
-        let _ = fs::remove_file(&capture);
-        let _ = fs::remove_file(capture.with_extension("txt.args"));
-        let _ = fs::remove_file(capture.with_extension("txt.0"));
-        let _ = fs::remove_file(capture.with_extension("txt.1"));
-        let _ = fs::remove_file(capture.with_extension("txt.calls"));
+        if !preserve_captures.get() {
+            let _ = fs::remove_file(&capture);
+            let _ = fs::remove_file(capture.with_extension("txt.args"));
+            let _ = fs::remove_file(capture.with_extension("txt.0"));
+            let _ = fs::remove_file(capture.with_extension("txt.1"));
+            let _ = fs::remove_file(capture.with_extension("txt.calls"));
+        }
         let _ = fs::remove_file(&marker);
         fs::write(repo.join(".ctx/traits/runtime.toml"), runtime(transport)).unwrap();
         require_success(
@@ -557,6 +561,10 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
         "prompt = \"Produce first answer.\"\nintent = { require = [{ id = \"shared\", summary = \"Prompt replacement text.\" }, { id = \"current-only\", summary = \"Current prompt guidance.\" }] }\noutput = [\"slot:answer\"]\n\n[[procedure.sequence]]\nid = \"next\"\ntitle = \"Next\"\nagent = \"agent:worker\"\nprompt = \"Produce second answer.\"\nintent = { require = [{ id = \"next-only\", summary = \"Next prompt guidance.\" }] }\ninput = [\"slot:answer\"]\noutput = [\"slot:answer\"]",
     );
+    let prompt_second = canonical.replace(
+        "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
+        "prompt = \"Produce second answer.\"\nintent = { require = [{ id = \"next-only\", summary = \"Next prompt guidance.\" }] }\noutput = [\"slot:answer\"]",
+    );
     fs::write(&generated, &prompt_canonical).unwrap();
     let previews = run_ctx(
         &[
@@ -586,14 +594,25 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
     assert!(!second_intent.contains("current-only"));
     assert_unassigned_absent(first_preview);
     assert_unassigned_absent(second_preview);
-    let (cli_prompt, _) = run("cli", "prompt-cli.json");
-    assert!(
-        matches!(extract_intent(&cli_prompt).as_str(), value if value == first_intent || value == second_intent)
-    );
-    let (mcp_prompt, _) = run("mcp", "prompt-mcp.json");
-    assert!(
-        matches!(extract_intent(&mcp_prompt).as_str(), value if value == first_intent || value == second_intent)
-    );
+    let _ = run("cli", "prompt-cli.json");
+    fs::write(&generated, &prompt_second).unwrap();
+    preserve_captures.set(true);
+    let _ = run("cli", "prompt-cli.json");
+    preserve_captures.set(false);
+    let first_cli = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let second_cli = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+    assert_eq!(extract_intent(&first_cli), first_intent);
+    assert_eq!(extract_intent(&second_cli), second_intent);
+    assert_unassigned_absent(&first_cli);
+    assert_unassigned_absent(&second_cli);
+    fs::write(&generated, &prompt_canonical).unwrap();
+    let (first_mcp, _) = run("mcp", "prompt-mcp.json");
+    fs::write(&generated, &prompt_second).unwrap();
+    let (second_mcp, _) = run("mcp", "prompt-mcp-second.json");
+    assert_eq!(extract_intent(&first_mcp), first_intent);
+    assert_eq!(extract_intent(&second_mcp), second_intent);
+    assert_unassigned_absent(&first_mcp);
+    assert_unassigned_absent(&second_mcp);
 
     let prompt_only = canonical.replace(worker_intent, "").replace(
         "prompt = \"Produce an answer.\"",
@@ -612,6 +631,19 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         "prompt = \"Produce an answer.\"\nintent = { avoid = [{ id = \"shared\", summary = \"Prompt conflict.\" }] }",
     );
     fs::write(&generated, prompt_conflict).unwrap();
+    require_success(
+        "approve prompt conflict fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
     let _ = fs::remove_file(&marker);
     let conflict = run_ctx(
         &[
@@ -632,21 +664,36 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         !conflict.status.success(),
         "prompt conflict unexpectedly dispatched"
     );
-    let _ = utf8(&conflict);
+    let (_, stderr) = utf8(&conflict);
+    assert!(
+        stderr.contains("effective guidance id \"shared\" cannot appear in both require and avoid when ready-prompt intent participates")
+    );
     assert!(
         !marker.exists(),
         "harness ran before the prompt conflict was rejected"
     );
 
-    for prompt_intent in ["", "intent = {}\n"] {
+    let mut prompt_compatibility = None;
+    for (name, prompt_intent) in [("prompt-absent", ""), ("prompt-empty", "intent = {}\n")] {
         fs::write(
             &generated,
-            canonical.replace(worker_intent, "").replace(
+            canonical.replace(
                 "prompt = \"Produce an answer.\"",
                 &format!("{prompt_intent}prompt = \"Produce an answer.\""),
             ),
         )
         .unwrap();
-        assert_eq!(preview("prompt compatibility"), LEGACY_CLI_PROMPT);
+        let preview = preview(name);
+        let (cli, cli_args) = run("cli", "prompt-compat-cli.json");
+        let (mcp, mcp_args) = run("mcp", "prompt-compat-mcp.json");
+        assert_system(&cli_args, "--cli-system");
+        assert_system(&mcp_args, "--mcp-system");
+        if let Some((baseline_preview, baseline_cli, baseline_mcp)) = &prompt_compatibility {
+            assert_eq!(&preview, baseline_preview, "{name} preview changed");
+            assert_eq!(&cli, baseline_cli, "{name} CLI prompt changed");
+            assert_eq!(&mcp, baseline_mcp, "{name} MCP prompt changed");
+        } else {
+            prompt_compatibility = Some((preview, cli, mcp));
+        }
     }
 }
