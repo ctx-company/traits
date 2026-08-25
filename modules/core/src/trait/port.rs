@@ -259,6 +259,7 @@ fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> cr
                 kind: Some(crate::r#trait::procedure::SequenceKind::Command),
                 agent: None,
                 prompt: String::new(),
+                intent: None,
                 cmd: None,
                 command: Some(plan),
                 projection: Vec::new(),

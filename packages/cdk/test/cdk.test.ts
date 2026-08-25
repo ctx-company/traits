@@ -305,6 +305,90 @@ describe("draft synthesis", () => {
   });
 });
 
+describe("prompt sequence intent", () => {
+  it("lowers all prompt spellings, including named and inline-nested declarations, and infers schema 0.6", () => {
+    const named = sequence.linear("intent-named", [
+      sequence.prompt("named-intent", { prompt: input.prompt`Named.`, intent: { focus: intent.Robustness } }),
+    ]);
+    const nested = sequence.branch("intent-branch", {
+      check: condition.empty(slot.text("intent-branch-check")),
+      success: [
+        sequence.prompt("nested-intent", { input: input.prompt`Nested.`, intent: { avoid: intent.ScopeCreep } }),
+      ],
+    });
+    const draft = toDraftJson(
+      trait("prompt-sequence-intent", {
+        name: "Prompt Sequence Intent",
+        description: "Prompt intent lowering fixture.",
+        procedure: procedure({
+          description: "Exercise prompt intent.",
+          sequence: [
+            sequence.prompt("top-intent", {
+              text: input.prompt`Top.`,
+              intent: { require: intent.Correctness, block: intent.OverEngineering },
+            }),
+            nested,
+            sequence.prompt("empty-intent", { input: input.prompt`Empty.`, intent: {} }),
+          ],
+        }),
+        sequence: named,
+      }),
+    ) as {
+      readonly "schema-version": string;
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+      readonly sequence?: Record<string, { readonly sequence: readonly Record<string, unknown>[] }>;
+    };
+
+    expect(draft["schema-version"]).toBe("0.6");
+    expect(draft.procedure?.sequence?.[0]?.intent).toEqual({
+      require: [{ id: "correctness" }],
+      block: [{ id: "over-engineering" }],
+    });
+    expect(draft.procedure?.sequence?.[2]?.intent).toEqual({});
+    expect(draft.sequence?.["intent-named"]?.sequence[0]?.intent).toEqual({ focus: [{ id: "robustness" }] });
+    const nestedSequence = Object.values(draft.sequence ?? {}).find(
+      (entry) => entry.sequence[0]?.id === "nested-intent",
+    );
+    expect(nestedSequence?.sequence[0]?.intent).toEqual({ avoid: [{ id: "scope-creep" }] });
+  });
+
+  it("preserves the 0.5 baseline when prompt intent is absent and explicit schema versions win", () => {
+    const ordinary = toDraftJson(
+      trait("ordinary-prompt-sequence", {
+        name: "Ordinary Prompt Sequence",
+        description: "No intent.",
+        procedure: procedure({
+          description: "No intent.",
+          sequence: [sequence.prompt("ordinary", { input: input.prompt`Do work.` })],
+        }),
+      }),
+    );
+    const explicit = toDraftJson(
+      trait("explicit-prompt-sequence", {
+        name: "Explicit Prompt Sequence",
+        description: "Explicit version wins.",
+        "schema-version": "0.5",
+        procedure: procedure({
+          description: "Intent.",
+          sequence: [sequence.prompt("explicit", { input: input.prompt`Do work.`, intent: {} })],
+        }),
+      }),
+    );
+    expect(ordinary["schema-version"]).toBe("0.5");
+    expect(explicit["schema-version"]).toBe("0.5");
+  });
+
+  it("rejects intent on non-prompt items at typecheck and runtime", () => {
+    if (false) {
+      // @ts-expect-error intent is prompt-only.
+      sequence.command("typed-illegal-intent", { cmd: "true", intent: {} });
+    }
+    expect(() => sequence.command("runtime-illegal-intent", { cmd: "true", intent: {} } as never)).toThrow(
+      /intent is valid only on prompt items/,
+    );
+  });
+});
+
 // `zod-to-json-schema` emits a top-level `$schema` key by default, outside
 // the documented/enforced `schema.zod` subset; a real adapter strips it —
 // matches `test/fixtures/adapter-trait.mjs`'s callback.

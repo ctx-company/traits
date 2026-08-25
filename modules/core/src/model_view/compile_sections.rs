@@ -1257,7 +1257,7 @@ fn format_procedure(
         }
     ));
 
-    leaf_element(
+    let body = leaf_element(
         "procedure",
         &[],
         &lines.join("\n"),
@@ -1266,7 +1266,46 @@ fn format_procedure(
         warnings,
         normalizations,
         findings,
-    )
+    );
+    let mut intents = Vec::new();
+    let mut collect = |container: &str, index: usize, item: &crate::r#trait::procedure::SequenceItem, field: String| {
+        if item.effective_kind() != crate::r#trait::procedure::SequenceKind::Prompt {
+            return;
+        }
+        let Some(intent) = item.intent.as_ref() else {
+            return;
+        };
+        let step = item
+            .id
+            .clone()
+            .unwrap_or_else(|| format!("step-{}", index + 1));
+        let source = format!("sequence:{container}/{step}");
+        let formatted = format_intent(
+            intent,
+            trait_ref.id.as_str(),
+            GuidanceTag::Namespaced,
+            &format!("{field}.intent"),
+            Some(&source),
+            warnings,
+            normalizations,
+            findings,
+        );
+        if !formatted.is_empty() {
+            intents.push(formatted);
+        }
+    };
+    for (index, item) in proc.sequence.iter().enumerate() {
+        collect("procedure", index, item, format!("procedure.sequence[{index}]"));
+    }
+    for (id, sequence) in trait_ref.sequences.iter() {
+        for (index, item) in sequence.sequence.iter().enumerate() {
+            collect(id, index, item, format!("sequence.{id}.sequence[{index}]"));
+        }
+    }
+    std::iter::once(body)
+        .chain(intents)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

@@ -346,6 +346,7 @@ fn validate_sequence_item_declaration(
     }
 
     let kind = item.effective_kind();
+    validate_prompt_intent(trait_ref, item, kind, base)?;
     validate_item_shape(item, kind, base)?;
     validate_item_refs(trait_ref, item, base, sets)?;
 
@@ -630,6 +631,32 @@ fn validate_sequence_item_declaration(
         SequenceKind::Terminal => validate_terminal_item(trait_ref, item, base, sets)?,
     }
     Ok(())
+}
+
+fn validate_prompt_intent(
+    trait_ref: &Trait,
+    item: &SequenceItem,
+    kind: SequenceKind,
+    base: &str,
+) -> crate::Result<()> {
+    let Some(intent) = item.intent.as_ref() else {
+        return Ok(());
+    };
+    if kind != SequenceKind::Prompt {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.intent"),
+            message: "intent is valid only on prompt sequence items".to_string(),
+        }
+        .into());
+    }
+    if !crate::r#trait::schema_version_at_least(trait_ref.schema_version.as_str(), "0.6") {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.intent"),
+            message: "prompt sequence item intent requires schema-version \"0.6\" or newer".to_string(),
+        }
+        .into());
+    }
+    intent.validate_scoped(&format!("{base}.intent"))
 }
 
 /// Validate a `kind = "terminal"` item: `flow.error`/`flow.success` authored
@@ -4650,6 +4677,100 @@ fn local_sequence_id(ref_text: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn prompt_intent_trait(version: &str) -> Trait {
+        serde_json::from_value(serde_json::json!({
+            "id": "prompt-intent-fixture",
+            "schema-version": version,
+            "version": "0.1.0",
+            "name": "Prompt intent fixture",
+            "description": "Validates prompt intent."
+        }))
+        .expect("fixture trait decodes")
+    }
+
+    fn prompt_intent_item(kind: Option<&str>, intent: serde_json::Value) -> SequenceItem {
+        let mut item = serde_json::json!({ "id": "prompt-step", "prompt": "Do the work.", "intent": intent });
+        if let Some(kind) = kind {
+            item["kind"] = serde_json::json!(kind);
+        }
+        serde_json::from_value(item).expect("fixture item decodes")
+    }
+
+    #[test]
+    fn prompt_intent_top_level_and_named_accept() {
+        let trait_ref = prompt_intent_trait("0.6");
+        let item = prompt_intent_item(None, serde_json::json!({ "require": "correctness" }));
+        validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+            .expect("top-level prompt intent is valid");
+        validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "sequence.work.sequence[0]")
+            .expect("named prompt intent is valid");
+    }
+
+    #[test]
+    fn prompt_intent_rejects_all_non_prompt_kinds() {
+        let trait_ref = prompt_intent_trait("0.6");
+        for kind in ["ask", "command", "check", "project", "sequence", "branch", "loop", "for-each", "parallel", "terminal"] {
+            let item = prompt_intent_item(Some(kind), serde_json::json!({}));
+            let error = validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+                .expect_err("intent is prompt-only");
+            assert!(error.to_string().contains("procedure.sequence[0].intent"));
+        }
+    }
+
+    #[test]
+    fn prompt_intent_rejects_pre_06_schema() {
+        let trait_ref = prompt_intent_trait("0.5");
+        let item = prompt_intent_item(None, serde_json::json!({}));
+        assert!(validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+            .expect_err("0.6 is required")
+            .to_string()
+            .contains("schema-version \"0.6\""));
+    }
+
+    #[test]
+    fn prompt_intent_reuses_guidance_list_validation() {
+        let trait_ref = prompt_intent_trait("0.6");
+        let item = prompt_intent_item(None, serde_json::json!({ "focus": [{ "id": "Bad Id" }] }));
+        assert!(validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+            .expect_err("shared guidance validation rejects bad ids")
+            .to_string()
+            .contains("procedure.sequence[0].intent.focus[0].id"));
+    }
+
+    #[test]
+    fn prompt_intent_reuses_scoped_collision_validation() {
+        let trait_ref = prompt_intent_trait("0.6");
+        let item = prompt_intent_item(None, serde_json::json!({ "require": "correctness", "avoid": "correctness" }));
+        assert!(validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+            .expect_err("scoped collision is rejected")
+            .to_string()
+            .contains("procedure.sequence[0].intent.avoid[0].id"));
+    }
+
+    #[test]
+    fn prompt_intent_participates_in_deterministic_digest() {
+        let without = prompt_intent_item(None, serde_json::json!({}));
+        let with = prompt_intent_item(None, serde_json::json!({ "focus": "correctness" }));
+        assert_ne!(crate::digest::canonical_digest(&without).unwrap(), crate::digest::canonical_digest(&with).unwrap());
+        assert_eq!(crate::digest::canonical_digest(&with).unwrap(), crate::digest::canonical_digest(&with).unwrap());
+    }
+
+    #[test]
+    fn prompt_intent_absence_preserves_canonical_bytes() {
+        let absent: SequenceItem = serde_json::from_value(serde_json::json!({ "id": "prompt-step", "prompt": "Do the work." }))
+            .expect("absent fixture decodes");
+        let explicit = prompt_intent_item(None, serde_json::json!(null));
+        assert_eq!(toml::to_string(&absent).unwrap(), toml::to_string(&explicit).unwrap());
+    }
+
+    #[test]
+    fn prompt_intent_accepts_each_guidance_group() {
+        let trait_ref = prompt_intent_trait("0.6");
+        let item = prompt_intent_item(None, serde_json::json!({ "require": "correctness", "focus": "robustness", "avoid": "scope-creep", "block": "over-engineering" }));
+        validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+            .expect("all intent groups are accepted");
+    }
 
     fn item_from_toml(toml_src: &str) -> SequenceItem {
         toml::from_str(toml_src).expect("test fixture must be a valid sequence item")

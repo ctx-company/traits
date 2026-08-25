@@ -1575,6 +1575,10 @@ export type CanonicalSequenceItem = {
    */
   readonly "input"?: CanonicalSequenceInput | readonly CanonicalSequenceInput[] | undefined;
   /**
+   * Declaration-only guidance for a prompt sequence item.
+   */
+  readonly "intent"?: CanonicalIntent | undefined;
+  /**
    * `for-each` per-item slot ref.
    */
   readonly "item"?: string | undefined;

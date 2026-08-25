@@ -328,6 +328,45 @@ describe("functional layer build rules (0106)", () => {
     expect(built).toMatchObject({ id: "functional-smoke" });
   });
 
+  it("agent.prompt, step.prompt, and defineStep.prompt reuse prompt intent lowering and infer schema 0.6", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("functional-prompt-intent", { description: "Prompt intent paths." });
+      const worker = agent.worker("intent-worker");
+      const first = slot.text("intent-first");
+      const second = slot.text("intent-second");
+      const third = slot.text("intent-third");
+      const declared = defineStep.prompt({
+        agent: worker,
+        input: input.prompt`Declared.`,
+        output: third,
+        intent: { block: intent.OverEngineering },
+      });
+      worker.prompt("Agent Prompt", {
+        input: input.prompt`Agent.`,
+        output: first,
+        intent: { require: intent.Correctness },
+      });
+      step.prompt("Inline Prompt", {
+        agent: worker,
+        input: input.prompt`Inline.`,
+        output: second,
+        intent: { focus: intent.Robustness },
+      });
+      declared("Declared Prompt");
+      return { first, second, third };
+    });
+    const draft = envelope.draft as {
+      readonly "schema-version": string;
+      readonly procedure?: { readonly sequence?: readonly { readonly intent?: unknown }[] };
+    };
+    expect(draft["schema-version"]).toBe("0.6");
+    expect(draft.procedure?.sequence?.map((item) => item.intent)).toEqual([
+      { require: [{ id: "correctness" }] },
+      { focus: [{ id: "robustness" }] },
+      { block: [{ id: "over-engineering" }] },
+    ]);
+  });
+
   it("an `id:` override wins over idFromTitle(title) on every step.*/agent.prompt/flow.when/flow.loop registrar (0109 F2)", () => {
     const worker = agent.worker("id-override-worker");
     const out = slot.text("id-override-out");

@@ -436,7 +436,9 @@ export function assembleSingleTraitDraft(
       : { sink: { "session-title": sessionTitleSinkDraft(sessionTitleSinkInput) } }),
     "schema-version":
       fields["schema-version"] ??
-      (merged.agent?.some((agent) => Object.hasOwn(agent, "intent") || Object.hasOwn(agent, "behavior"))
+      (merged.agent?.some((agent) => Object.hasOwn(agent, "intent") || Object.hasOwn(agent, "behavior")) ||
+      sequenceContainerHasPromptIntent(procedureValue) ||
+      (merged.sequence ?? []).some(sequenceContainerHasPromptIntent)
         ? "0.6"
         : baselineSchemaVersion),
     version: fields.version ?? "0.1.0",
@@ -471,6 +473,20 @@ export function assembleSingleTraitDraft(
     diagnostics: collectDiagnostics(declarationSources),
     sourceMap: collectSourceMaps(declarationSources),
   };
+}
+
+function sequenceContainerHasPromptIntent(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const sequence = (value as { readonly sequence?: unknown }).sequence;
+  if (!Array.isArray(sequence)) return false;
+  return sequence.some(
+    (item) =>
+      item !== null &&
+      typeof item === "object" &&
+      !Array.isArray(item) &&
+      Object.hasOwn(item, "intent") &&
+      (!Object.hasOwn(item, "kind") || (item as { readonly kind?: unknown }).kind === "prompt"),
+  );
 }
 
 /**
