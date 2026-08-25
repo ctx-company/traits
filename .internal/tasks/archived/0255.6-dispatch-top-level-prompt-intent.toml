@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.6"
 title = "Dispatch top-level prompt intent"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-a2d0ea3c6d139aa2d9fce983dd0576fad45c6691176e890c400235a04db1e22e merged as f8550c47c89b313644e86ea3cce28d5c83b89cb9"
 content = """
 ## Outcome
 Compose effective intent for an ordinary top-level prompt frame from root `Trait.intent`, the one canonical assigned `Agent.intent`, and only the canonical `SequenceItem.intent` represented by the current ready `SequenceFrame`, in that order. For each of `require`, `focus`, `avoid`, and `block`, preserve source order within each layer; when a more-specific layer repeats the same canonical `GuidanceItem.id` in that group, remove the broader occurrence and render the more-specific occurrence once at its own layer position with its own text and directive resolution.
@@ -102,3 +104,25 @@ expect = 'test result: ok\. 1 passed; 0 failed'
 name = "top-level prompt intent dispatch passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "f8550c47c89b313644e86ea3cce28d5c83b89cb9"
+
+[[closure.checks]]
+name = "top-level ready prompt intent resolver tests pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_intent"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "top-level ready prompt intent public dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "top-level prompt intent dispatch passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

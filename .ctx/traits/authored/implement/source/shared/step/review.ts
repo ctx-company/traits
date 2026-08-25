@@ -12,7 +12,9 @@ export const primary = cdk.defineStep.prompt({
     Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
   `,
   output: cdk.output.prompt`
-    Return the typed review verdict — status is revise while any blocker remains, approved when none do (${slot.verdict1})
+    Return the typed review verdict: (${slot.verdict1}).
+    Verdict should come with proposed solutions.
+    Put solutions in most efficient order.
   `,
 });
 

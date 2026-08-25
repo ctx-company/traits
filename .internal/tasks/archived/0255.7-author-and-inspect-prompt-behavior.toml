@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.7"
 title = "Author and inspect prompt behavior"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-b91a1bdd207bcb9e1f2d2ddd91c5d0f5386ac332dfccb4365cc2e5d3105684af merged as 03443b107c08497873ef37bcbfb7cf869acd03fa"
 content = """
 ## Outcome
 Let trait authors attach behavior only to prompt sequence items through object and functional CDK APIs. Lower additive `tone`, `method`, and `format` plus scalar `verbosity`, `directness`, `scope-control`, `initiative`, and `uncertainty` into canonical schema `0.6`, validate them through the shared scoped behavior authority, emit generated typing, and statically render top-level, named, and CDK-materialized nested declarations with source `sequence:<container>/<item-id-or-step-N>` and one-based fallback numbering.
@@ -118,3 +120,31 @@ timeout-ms = 600000
 name = "prompt behavior passes the per-round gate"
 command = "CARGO_TARGET_DIR=target just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "03443b107c08497873ef37bcbfb7cf869acd03fa"
+
+[[closure.checks]]
+name = "prompt behavior focused canonical and static tests pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core prompt_behavior"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "prompt behavior SDK generation succeeds"
+command = "just sdk-generate"
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "prompt behavior object and functional authoring pass the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "prompt behavior passes the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+outcome = "failed"
+detail = "exited 1"

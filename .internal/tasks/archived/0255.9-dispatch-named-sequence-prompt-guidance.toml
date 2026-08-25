@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.9"
 title = "Dispatch named sequence prompt guidance"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-e6b7e659bdee77accb3deabebfdc14835f8e4f7b7835c3d99cd633172332e69f merged as f0ae9edcd3674df6132252b09b552b21be208aac"
 content = """
 ## Dependency gate
 Before any implementation edit, require the joined landed state of `0255.8` and every transitive dependency. Grounding was read-only at clean HEAD `48080c2e`; no checks were run and no files were edited. That baseline is not implementation-ready: `SequenceItem` has neither prompt `intent` nor `behavior`, `frame_guidance` is root-only, `resolved_frame_prompt` has no ready-prompt selection, `resolve_declared_item` is still private in `modules/cli/src/app/preview.rs`, and `modules/cli/tests/proof_agent_intent_dispatch.rs` does not exist. Stop before edits and report the first missing or materially different joined contract. A missing dependency is a blocker, not permission to recreate it here.
@@ -95,3 +97,19 @@ expect = 'test result: ok\. 1 passed; 0 failed'
 name = "named sequence prompt guidance passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "f0ae9edcd3674df6132252b09b552b21be208aac"
+
+[[closure.checks]]
+name = "named sequence ready prompt dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "named sequence prompt guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

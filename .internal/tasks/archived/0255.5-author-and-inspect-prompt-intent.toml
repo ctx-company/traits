@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.5"
 title = "Author and inspect prompt intent"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-eb7c35bb3b421e5946fe10adf1546781535ce11c17e4c42ac976cb016d447e6f merged as e062fd95139bff9a78e1b615849c369206667897"
 content = """
 ## Outcome
 Let trait authors attach `require`, `focus`, `avoid`, and `block` intent only to prompt sequence items through the object and functional CDK APIs. Lower top-level, named, and CDK-materialized nested prompt declarations into one canonical `SequenceItem.intent` field, infer schema `0.6` from every such declaration, validate through the existing scoped intent authority, emit generated typing, and render each declaration statically with the established `sequence:<container>/<item-id-or-step-N>` source.
@@ -104,3 +106,31 @@ timeout-ms = 600000
 name = "prompt intent passes the per-round gate"
 command = "CARGO_TARGET_DIR=target just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "e062fd95139bff9a78e1b615849c369206667897"
+
+[[closure.checks]]
+name = "prompt intent focused canonical and static tests pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core prompt_intent"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "prompt intent SDK generation succeeds"
+command = "just sdk-generate"
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "prompt intent object and functional authoring pass the CDK suite"
+command = "pnpm --dir packages/cdk run test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "prompt intent passes the per-round gate"
+command = "CARGO_TARGET_DIR=target just test"
+outcome = "failed"
+detail = "exited 1"

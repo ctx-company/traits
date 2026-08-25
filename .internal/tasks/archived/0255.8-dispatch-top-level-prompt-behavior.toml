@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.8"
 title = "Dispatch top-level prompt behavior"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-68e11fc4cce39e26dcdf924b7cadff1f3f4311b952c54edf99645957225879ca merged as 7246e270aa0abe83ba1552a151b7fa093a7998a8"
 content = """
 ## Dependency gate
 Before any implementation edit, require the joined landed state of `0255.4`, `0255.6`, and `0255.7`, including every transitive dependency. The clean grounding baseline is HEAD `874c70f4`, where those plans are not implemented: `Agent` has intent but no behavior in `modules/core/src/trait/agent.rs:92-124`; `SequenceItem` has neither intent nor behavior in `modules/core/src/trait/procedure/model.rs:914-948`; `frame_guidance` is root-only and infallible in `modules/core/src/model_view/compile.rs:511-544`; `resolved_frame_prompt` resolves only root guidance in `modules/cli/src/app/frame_prompt.rs:463-489`; `resolve_declared_item` remains private to `modules/cli/src/app/preview.rs:216-262`; and `modules/cli/tests/proof_agent_intent_dispatch.rs` does not exist. No files were edited and no checks were run during grounding.
@@ -114,3 +116,25 @@ expect = 'test result: ok\. 1 passed; 0 failed'
 name = "top-level prompt behavior dispatch passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "7246e270aa0abe83ba1552a151b7fa093a7998a8"
+
+[[closure.checks]]
+name = "top-level ready prompt behavior core proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_behavior"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "top-level ready prompt behavior dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "top-level prompt behavior dispatch passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"
