@@ -1,7 +1,9 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
+use support::{
+    ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, run_ctx_with_env, utf8,
+};
 
 #[test]
 fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
@@ -87,18 +89,47 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     git_init(&repo);
 
     let script = home.join("capture.sh");
+    // The response key/value is derived from the frame's own `<format>{"<key>": ...}`
+    // line rather than hardcoded, so a step whose declared output is not
+    // `slot:answer` (the branch-guard decision leaves added below) can drive its
+    // own harness answer via a `CTX_TEST_<KEY>` env var while every existing
+    // `slot:answer` step keeps its prior hardcoded "ok" behavior unchanged (the
+    // `*) value=ok` default).
+    const CAPTURE_SCRIPT_TEMPLATE: &str = r#"#!/bin/sh
+if [ "$1" = "--probe" ]; then printf 'capture-1.0\n'; exit 0; fi
+printf '%s\n' "$@" > __CAPTURE__.args
+ctx=
+for arg; do
+  case "$arg" in
+    *'"command":'*) ctx=$(printf '%s' "$arg" | sed -n 's/.*"command":"\([^"]*\)".*/\1/p') ;;
+  esac
+done
+for last; do :; done
+printf '%s' "$last" > __CAPTURE__
+if [ -f __CAPTURE__.calls ]; then n=$(($(wc -l < __CAPTURE__.calls))); else n=0; fi
+printf '%s' "$last" > __CAPTURE__.$n
+printf 'x\n' >> __CAPTURE__.calls
+touch __MARKER__
+key=$(printf '%s\n' "$last" | sed -n 's/.*<format>{"\([a-zA-Z0-9_-]*\)".*/\1/p')
+if [ -z "$key" ]; then
+  key=$(printf '%s\n' "$last" | sed -n 's/^- slot:\([a-zA-Z0-9_-]*\) (replace)$/\1/p' | head -n1)
+fi
+case "$key" in
+  choice) value=${CTX_TEST_CHOICE:-ok} ;;
+  nested-choice) value=${CTX_TEST_NESTED_CHOICE:-ok} ;;
+  *) value=ok ;;
+esac
+session=$(printf '%s\n' "$last" | sed -n 's/^Run session: //p')
+if [ -n "$session" ]; then
+  printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_traits_run_set","arguments":{"session":"%s","target":"slot:%s","value":"%s","agent":"worker","harness":"capture"}}}\n' "$session" "$key" "$value" | "$ctx" traits internal mcp >/dev/null || exit 1
+fi
+printf '{"%s":"%s"}' "$key" "$value"
+"#;
     fs::write(
         &script,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nctx=\nfor arg; do\n  case \"$arg\" in\n    *'\"command\":'*) ctx=$(printf '%s' \"$arg\" | sed -n 's/.*\"command\":\"\\([^\"]*\\)\".*/\\1/p') ;;\n  esac\ndone\nfor last; do :; done\nprintf '%s' \"$last\" > {}\nif [ -f {}.calls ]; then n=$(($(wc -l < {}.calls))); else n=0; fi\nprintf '%s' \"$last\" > {}.$n\nprintf 'x\\n' >> {}.calls\ntouch {}\nsession=$(printf '%s\\n' \"$last\" | sed -n 's/^Run session: //p')\nif [ -n \"$session\" ]; then\n  printf '{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"name\":\"ctx_traits_run_set\",\"arguments\":{{\"session\":\"%s\",\"target\":\"slot:answer\",\"value\":\"ok\",\"agent\":\"worker\",\"harness\":\"capture\"}}}}}}\\n' \"$session\" | \"$ctx\" traits internal mcp >/dev/null || exit 1\nfi\nprintf '{{\"answer\":\"ok\"}}'\n",
-            capture.display(),
-            capture.display(),
-            capture.display(),
-            capture.display(),
-            capture.display(),
-            capture.display(),
-            marker.display(),
-        ),
+        CAPTURE_SCRIPT_TEMPLATE
+            .replace("__CAPTURE__", &capture.display().to_string())
+            .replace("__MARKER__", &marker.display().to_string()),
     )
     .unwrap();
     let mut permissions = fs::metadata(&script).unwrap().permissions();
@@ -256,10 +287,10 @@ output = ["slot:answer"]
             session.display(),
         )
     };
-    let run = |transport: &str, output: &str| {
+    let run_with_env = |transport: &str, output: &str, extra_env: &[(&str, &str)]| {
         let _ = fs::remove_file(&capture);
         let _ = fs::remove_file(capture.with_extension("txt.args"));
-        for index in 0..4 {
+        for index in 0..8 {
             let _ = fs::remove_file(capture.with_extension(format!("txt.{index}")));
         }
         let _ = fs::remove_file(capture.with_extension("txt.calls"));
@@ -278,7 +309,7 @@ output = ["slot:answer"]
             &repo,
             &home,
         );
-        let outcome = run_ctx(
+        let outcome = run_ctx_with_env(
             &[
                 "traits",
                 "run",
@@ -292,6 +323,7 @@ output = ["slot:answer"]
             ],
             &repo,
             &home,
+            extra_env,
         );
         assert_exit_code(&outcome, 0);
         (
@@ -299,6 +331,7 @@ output = ["slot:answer"]
             fs::read_to_string(capture.with_extension("txt.args")).expect("argv capture"),
         )
     };
+    let run = |transport: &str, output: &str| run_with_env(transport, output, &[]);
 
     let happy_preview = preview("assigned");
     let happy_intent = extract_intent(&happy_preview);
@@ -1388,4 +1421,307 @@ sequence = "sequence:outer"
         !marker.exists(),
         "harness ran before the nested prompt conflict was rejected"
     );
+
+    // 0255.10: a branch reached through the same named-sequence chain
+    // (procedure -> branch-ref -> branch-outer.sequence -> the-branch
+    // (branch) -> branch-then/branch-otherwise.sequence), with a second
+    // branch nested inside the `then` arm (branch-then.sequence ->
+    // nested-branch-ref (branch) -> nested-branch-then.sequence) — a
+    // recursively nested branch reached through mixed sequence/branch
+    // segments. `nested-branch-ref` deliberately has no `otherwise`, so a
+    // false nested choice must emit no leaf frame at all. Local indices
+    // collide across every owner (index 0 in `branch-outer`, `branch-then`,
+    // `branch-otherwise`, and `nested-branch-then` alike), and `then-leaf`/
+    // `nested-then-leaf`/`otherwise-leaf` all reuse the "shared" id to prove
+    // the same root->agent->leaf scalar precedence the earlier named-leaf
+    // proof established, now across sibling branch arms.
+    let branch_header = nested_header.replace(
+        "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n",
+        "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n\n[[slot]]\nid = \"choice\"\nschema = \"schema:text\"\ndescription = \"Outer branch choice.\"\n\n[[slot]]\nid = \"nested-choice\"\nschema = \"schema:text\"\ndescription = \"Nested branch choice.\"\n",
+    );
+    assert_ne!(branch_header, nested_header, "slot insertion point moved");
+    let branch_fixture = format!(
+        r#"{branch_header}[[sequence.branch-then.sequence]]
+id = "then-leaf"
+title = "Then leaf"
+agent = "agent:worker"
+prompt = "Produce then-leaf answer."
+intent = {{ require = [{{ id = "shared", summary = "Then leaf replacement text." }}, {{ id = "then-arm-marker", summary = "Then leaf marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Then leaf tone." }}, {{ id = "then-arm-tone-marker", summary = "Then leaf tone marker." }}] }}
+output = ["slot:answer"]
+
+[[sequence.branch-then.sequence]]
+id = "nested-branch-ref"
+title = "Nested branch ref"
+kind = "branch"
+sequence = "sequence:nested-branch-then"
+when = {{ slot = "slot:nested-choice", equals = "yes" }}
+
+[[sequence.nested-branch-then.sequence]]
+id = "nested-then-leaf"
+title = "Nested then leaf"
+agent = "agent:worker"
+prompt = "Produce nested-then-leaf answer."
+intent = {{ require = [{{ id = "shared", summary = "Nested then leaf replacement text." }}, {{ id = "nested-arm-marker", summary = "Nested then leaf marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Nested then leaf tone." }}, {{ id = "nested-arm-tone-marker", summary = "Nested then leaf tone marker." }}] }}
+output = ["slot:answer"]
+
+[[sequence.branch-otherwise.sequence]]
+id = "otherwise-leaf"
+title = "Otherwise leaf"
+agent = "agent:worker"
+prompt = "Produce otherwise-leaf answer."
+intent = {{ require = [{{ id = "shared", summary = "Otherwise leaf replacement text." }}, {{ id = "otherwise-arm-marker", summary = "Otherwise leaf marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Otherwise leaf tone." }}, {{ id = "otherwise-arm-tone-marker", summary = "Otherwise leaf tone marker." }}] }}
+output = ["slot:answer"]
+
+[[sequence.branch-outer.sequence]]
+id = "pre-branch-sibling"
+title = "Pre branch sibling"
+agent = "agent:worker"
+prompt = "Produce pre-branch-sibling answer."
+intent = {{ require = [{{ id = "pre-branch-sibling-marker", summary = "Pre branch sibling marker." }}] }}
+output = ["slot:answer"]
+
+[[sequence.branch-outer.sequence]]
+id = "the-branch"
+title = "The branch"
+kind = "branch"
+sequence = "sequence:branch-then"
+otherwise = "sequence:branch-otherwise"
+when = {{ slot = "slot:choice", equals = "yes" }}
+
+[[sequence.branch-outer.sequence]]
+id = "post-branch-sibling"
+title = "Post branch sibling"
+agent = "agent:worker"
+prompt = "Produce post-branch-sibling answer."
+intent = {{ require = [{{ id = "post-branch-sibling-marker", summary = "Post branch sibling marker." }}] }}
+output = ["slot:answer"]
+
+[procedure]
+description = "Nested named-sequence branch leaf guidance."
+
+[[procedure.sequence]]
+id = "decide"
+title = "Decide"
+agent = "agent:worker"
+prompt = "Decide the outer branch."
+output = ["slot:choice"]
+
+[[procedure.sequence]]
+id = "decide-nested"
+title = "Decide nested"
+agent = "agent:worker"
+prompt = "Decide the nested branch."
+output = ["slot:nested-choice"]
+
+[[procedure.sequence]]
+id = "branch-ref"
+title = "Branch ref"
+kind = "sequence"
+sequence = "sequence:branch-outer"
+
+[[procedure.sequence]]
+id = "branch-later"
+title = "Branch later"
+agent = "agent:worker"
+prompt = "Produce branch-later answer."
+intent = {{ require = [{{ id = "branch-later-marker", summary = "Branch later top-level prompt marker." }}] }}
+output = ["slot:answer"]
+"#
+    );
+    fs::write(&generated, &branch_fixture).unwrap();
+    require_success(
+        "approve branch fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+
+    // No-session static preview exposes both arms of every branch, including
+    // the nested one, regardless of any guard value.
+    let branch_preview_prompts = preview_all("branch");
+    assert_eq!(
+        branch_preview_prompts.len(),
+        8,
+        "branch preview frame count: {branch_preview_prompts:?}"
+    );
+    let branch_preview_then = &branch_preview_prompts[3];
+    let branch_preview_nested_then = &branch_preview_prompts[4];
+    let branch_preview_otherwise = &branch_preview_prompts[5];
+    assert!(branch_preview_then.contains("then-arm-marker"));
+    assert!(branch_preview_nested_then.contains("nested-arm-marker"));
+    assert!(branch_preview_otherwise.contains("otherwise-arm-marker"));
+    for container_id in ["branch-ref", "the-branch", "nested-branch-ref"] {
+        for prompt in &branch_preview_prompts {
+            assert!(
+                !prompt.contains(container_id),
+                "branch preview leaked container identifier {container_id}: {prompt}"
+            );
+        }
+    }
+
+    let read_frames = |count: usize| -> Vec<String> {
+        (0..count)
+            .map(|index| {
+                fs::read_to_string(capture.with_extension(format!("txt.{index}"))).unwrap()
+            })
+            .collect()
+    };
+
+    // True outer choice, true nested choice: both branches select their
+    // `sequence` (then) arm.
+    let (_, tt_cli_args) = run_with_env(
+        "cli",
+        "branch-tt-cli.json",
+        &[
+            ("CTX_TEST_CHOICE", "yes"),
+            ("CTX_TEST_NESTED_CHOICE", "yes"),
+        ],
+    );
+    assert_system(&tt_cli_args, "--cli-system");
+    let tt_frames = read_frames(7);
+    let tt_then = &tt_frames[3];
+    let tt_nested_then = &tt_frames[4];
+    let tt_post_sibling = &tt_frames[5];
+    let tt_later = &tt_frames[6];
+    assert!(tt_then.contains("then-arm-marker"), "{tt_then}");
+    assert!(
+        tt_nested_then.contains("nested-arm-marker"),
+        "{tt_nested_then}"
+    );
+    assert!(
+        !tt_then.contains("nested-arm-marker") && !tt_then.contains("otherwise-arm-marker"),
+        "{tt_then}"
+    );
+    assert!(
+        !tt_nested_then.contains("then-arm-marker")
+            && !tt_nested_then.contains("otherwise-arm-marker"),
+        "{tt_nested_then}"
+    );
+    assert_eq!(
+        tt_nested_then.matches("id=\"shared\"").count(),
+        1,
+        "{tt_nested_then}"
+    );
+    assert!(
+        tt_nested_then.contains("Nested then leaf replacement text."),
+        "{tt_nested_then}"
+    );
+    assert!(
+        !tt_post_sibling.contains("then-arm-marker")
+            && !tt_post_sibling.contains("nested-arm-marker"),
+        "{tt_post_sibling}"
+    );
+    assert!(tt_later.contains("branch-later-marker"), "{tt_later}");
+    for container_id in ["branch-ref", "the-branch", "nested-branch-ref"] {
+        for prompt in &tt_frames {
+            assert!(
+                !prompt.contains(container_id),
+                "true/true CLI leaked container identifier {container_id}: {prompt}"
+            );
+        }
+    }
+    assert_eq!(
+        extract_intent(tt_nested_then),
+        extract_intent(branch_preview_nested_then),
+        "true/true nested-then intent differs between preview and CLI"
+    );
+    assert_eq!(
+        extract_behavior(tt_nested_then),
+        extract_behavior(branch_preview_nested_then),
+        "true/true nested-then behavior differs between preview and CLI"
+    );
+
+    // True outer choice, false nested choice, over MCP: the nested branch has
+    // no `otherwise`, so a false nested choice must emit no leaf frame — only
+    // 6 frames total instead of 7, and the `.calls` ledger proves the harness
+    // was invoked exactly that many times, not silently skipped.
+    let (_, tf_mcp_args) = run_with_env(
+        "mcp",
+        "branch-tf-mcp.json",
+        &[("CTX_TEST_CHOICE", "yes"), ("CTX_TEST_NESTED_CHOICE", "no")],
+    );
+    assert_system(&tf_mcp_args, "--mcp-system");
+    let calls = fs::read_to_string(capture.with_extension("txt.calls")).unwrap();
+    assert_eq!(
+        calls.lines().count(),
+        6,
+        "false nested choice without otherwise must not add a leaf frame: {calls:?}"
+    );
+    let tf_frames = read_frames(6);
+    let tf_then = &tf_frames[3];
+    let tf_post_sibling = &tf_frames[4];
+    let tf_later = &tf_frames[5];
+    assert!(tf_then.contains("then-arm-marker"), "{tf_then}");
+    assert!(
+        !tf_then.contains("nested-arm-marker") && !tf_then.contains("otherwise-arm-marker"),
+        "{tf_then}"
+    );
+    assert!(
+        !tf_post_sibling.contains("nested-arm-marker"),
+        "{tf_post_sibling}"
+    );
+    assert!(tf_later.contains("branch-later-marker"), "{tf_later}");
+    assert_eq!(
+        extract_intent(tf_then),
+        extract_intent(branch_preview_then),
+        "true/false then intent differs between preview and MCP"
+    );
+    assert_eq!(
+        extract_behavior(tf_then),
+        extract_behavior(branch_preview_then),
+        "true/false then behavior differs between preview and MCP"
+    );
+
+    // False outer choice: the top-level branch selects its `otherwise` arm
+    // and the `then`/nested-branch arms never dispatch at all.
+    let (_, f_cli_args) = run_with_env(
+        "cli",
+        "branch-f-cli.json",
+        &[("CTX_TEST_CHOICE", "no"), ("CTX_TEST_NESTED_CHOICE", "no")],
+    );
+    assert_system(&f_cli_args, "--cli-system");
+    let f_frames = read_frames(6);
+    let f_otherwise = &f_frames[3];
+    let f_post_sibling = &f_frames[4];
+    let f_later = &f_frames[5];
+    assert!(
+        f_otherwise.contains("otherwise-arm-marker"),
+        "{f_otherwise}"
+    );
+    assert!(
+        !f_otherwise.contains("then-arm-marker") && !f_otherwise.contains("nested-arm-marker"),
+        "{f_otherwise}"
+    );
+    assert!(
+        !f_post_sibling.contains("otherwise-arm-marker"),
+        "{f_post_sibling}"
+    );
+    assert!(f_later.contains("branch-later-marker"), "{f_later}");
+    assert_eq!(f_frames.len(), 6);
+    assert_eq!(
+        extract_intent(f_otherwise),
+        extract_intent(branch_preview_otherwise),
+        "false then otherwise intent differs between preview and CLI"
+    );
+    assert_eq!(
+        extract_behavior(f_otherwise),
+        extract_behavior(branch_preview_otherwise),
+        "false then otherwise behavior differs between preview and CLI"
+    );
+    for frames in [&tt_frames, &tf_frames, &f_frames] {
+        for prompt in frames {
+            assert_unassigned_absent(prompt);
+            assert!(!prompt.contains("source=\""));
+        }
+    }
 }
