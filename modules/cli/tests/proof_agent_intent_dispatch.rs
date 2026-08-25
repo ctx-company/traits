@@ -1557,13 +1557,23 @@ output = ["slot:answer"]
     assert!(branch_preview_then.contains("then-arm-marker"));
     assert!(branch_preview_nested_then.contains("nested-arm-marker"));
     assert!(branch_preview_otherwise.contains("otherwise-arm-marker"));
-    for container_id in ["branch-ref", "the-branch", "nested-branch-ref"] {
-        for prompt in &branch_preview_prompts {
+    // Each static declaration renders its own declared prompt text and no
+    // other arm's, proving the no-session preview attributes every projected
+    // leaf to its own owner path rather than a shared/ambiguous lookup.
+    assert!(branch_preview_then.contains("Produce then-leaf answer."));
+    assert!(branch_preview_nested_then.contains("Produce nested-then-leaf answer."));
+    assert!(branch_preview_otherwise.contains("Produce otherwise-leaf answer."));
+    for prompt in &branch_preview_prompts {
+        for container_id in ["branch-ref", "the-branch", "nested-branch-ref"] {
             assert!(
                 !prompt.contains(container_id),
                 "branch preview leaked container identifier {container_id}: {prompt}"
             );
         }
+        assert!(
+            !prompt.contains("source=\""),
+            "branch preview leaked static declaration source attribution: {prompt}"
+        );
     }
 
     let read_frames = |count: usize| -> Vec<String> {
@@ -1754,6 +1764,77 @@ output = ["slot:answer"]
     );
     let f_session = home.join("branch-f-cli.json");
 
+    // The direct leaf was reached only via CLI (true/true) and MCP
+    // (true/false) above, and the nested/alternate leaves only via CLI —
+    // repeat true/true and false over MCP so every one of direct, alternate,
+    // and recursively nested selected leaves is exercised through both
+    // transports, matching the same no-session preview and CLI counterparts.
+    let (_, tt_mcp_args) = run_with_env(
+        "mcp",
+        "branch-tt-mcp.json",
+        &[
+            ("CTX_TEST_CHOICE", "yes"),
+            ("CTX_TEST_NESTED_CHOICE", "yes"),
+        ],
+    );
+    assert_system(&tt_mcp_args, "--mcp-system");
+    let tt_mcp_frames = read_frames(7);
+    let tt_mcp_then = &tt_mcp_frames[3];
+    let tt_mcp_nested_then = &tt_mcp_frames[4];
+    assert!(
+        tt_mcp_then.contains("Produce then-leaf answer."),
+        "{tt_mcp_then}"
+    );
+    assert!(
+        tt_mcp_nested_then.contains("Produce nested-then-leaf answer."),
+        "{tt_mcp_nested_then}"
+    );
+    assert_eq!(
+        extract_intent(tt_mcp_then),
+        extract_intent(tt_then),
+        "true/true then intent differs between CLI and MCP"
+    );
+    assert_eq!(
+        extract_behavior(tt_mcp_then),
+        extract_behavior(tt_then),
+        "true/true then behavior differs between CLI and MCP"
+    );
+    assert_eq!(
+        extract_intent(tt_mcp_nested_then),
+        extract_intent(tt_nested_then),
+        "true/true nested-then intent differs between CLI and MCP"
+    );
+    assert_eq!(
+        extract_behavior(tt_mcp_nested_then),
+        extract_behavior(tt_nested_then),
+        "true/true nested-then behavior differs between CLI and MCP"
+    );
+    let tt_mcp_session = home.join("branch-tt-mcp.json");
+
+    let (_, f_mcp_args) = run_with_env(
+        "mcp",
+        "branch-f-mcp.json",
+        &[("CTX_TEST_CHOICE", "no"), ("CTX_TEST_NESTED_CHOICE", "no")],
+    );
+    assert_system(&f_mcp_args, "--mcp-system");
+    let f_mcp_frames = read_frames(6);
+    let f_mcp_otherwise = &f_mcp_frames[3];
+    assert!(
+        f_mcp_otherwise.contains("Produce otherwise-leaf answer."),
+        "{f_mcp_otherwise}"
+    );
+    assert_eq!(
+        extract_intent(f_mcp_otherwise),
+        extract_intent(f_otherwise),
+        "false otherwise intent differs between CLI and MCP"
+    );
+    assert_eq!(
+        extract_behavior(f_mcp_otherwise),
+        extract_behavior(f_otherwise),
+        "false otherwise behavior differs between CLI and MCP"
+    );
+    let f_mcp_session = home.join("branch-f-mcp.json");
+
     // Every recorded leaf across the three real dispatches must show the
     // same root->agent->leaf scalar precedence the top-level and named-leaf
     // proofs above established, and must exclude every marker belonging to a
@@ -1770,14 +1851,33 @@ output = ["slot:answer"]
         "post-branch-sibling-marker",
         "branch-later-marker",
     ];
+    let all_branch_prompt_texts = [
+        "Produce then-leaf answer.",
+        "Produce nested-then-leaf answer.",
+        "Produce otherwise-leaf answer.",
+    ];
     let assert_branch_leaf = |label: &str,
                               prompt: &str,
                               own_marker: &str,
                               own_tone_marker: &str,
                               own_text: &str,
-                              own_tone_text: &str| {
+                              own_tone_text: &str,
+                              own_prompt_text: &str| {
         let intent = extract_intent(prompt);
         let behavior = extract_behavior(prompt);
+        assert!(
+            prompt.contains(own_prompt_text),
+            "{label} missing its own declared prompt text: {prompt}"
+        );
+        for prompt_text in all_branch_prompt_texts {
+            if prompt_text == own_prompt_text {
+                continue;
+            }
+            assert!(
+                !prompt.contains(prompt_text),
+                "{label} leaked sibling declared prompt text {prompt_text}: {prompt}"
+            );
+        }
         assert!(
             intent.find("root-only").unwrap() < intent.find("agent-only").unwrap(),
             "{label} root/agent intent ordering: {intent}"
@@ -1824,6 +1924,20 @@ output = ["slot:answer"]
             behavior.contains(own_tone_text),
             "{label} tone scalar precedence: {behavior}"
         );
+        // Branch leaves declare only `tone`; every other behavior axis must
+        // still fall back through agent to root exactly as the plain
+        // named-sequence leaf proof (`inner_guided`) established, proving
+        // the shared composer's fallback is unaffected by branch admission.
+        assert!(
+            behavior.contains("root-initiative"),
+            "{label} broader-axis fallback to root: {behavior}"
+        );
+        for unchanged in ["agent-directness", "agent-scope", "agent-uncertainty"] {
+            assert!(
+                behavior.contains(unchanged),
+                "{label} agent-scalar fallback: {behavior}"
+            );
+        }
         for marker in all_branch_markers {
             if marker == own_marker || marker == own_tone_marker {
                 continue;
@@ -1840,41 +1954,80 @@ output = ["slot:answer"]
         );
     };
     assert_branch_leaf(
-        "true/true then",
+        "true/true then (CLI)",
         tt_then,
         "then-arm-marker",
         "then-arm-tone-marker",
         "Then leaf replacement text.",
         "Then leaf tone.",
+        "Produce then-leaf answer.",
     );
     assert_branch_leaf(
-        "true/true nested-then",
+        "true/true nested-then (CLI)",
         tt_nested_then,
         "nested-arm-marker",
         "nested-arm-tone-marker",
         "Nested then leaf replacement text.",
         "Nested then leaf tone.",
+        "Produce nested-then-leaf answer.",
     );
     assert_branch_leaf(
-        "true/false then",
+        "true/false then (MCP)",
         tf_then,
         "then-arm-marker",
         "then-arm-tone-marker",
         "Then leaf replacement text.",
         "Then leaf tone.",
+        "Produce then-leaf answer.",
     );
     assert_branch_leaf(
-        "false otherwise",
+        "false otherwise (CLI)",
         f_otherwise,
         "otherwise-arm-marker",
         "otherwise-arm-tone-marker",
         "Otherwise leaf replacement text.",
         "Otherwise leaf tone.",
+        "Produce otherwise-leaf answer.",
+    );
+    assert_branch_leaf(
+        "true/true then (MCP)",
+        tt_mcp_then,
+        "then-arm-marker",
+        "then-arm-tone-marker",
+        "Then leaf replacement text.",
+        "Then leaf tone.",
+        "Produce then-leaf answer.",
+    );
+    assert_branch_leaf(
+        "true/true nested-then (MCP)",
+        tt_mcp_nested_then,
+        "nested-arm-marker",
+        "nested-arm-tone-marker",
+        "Nested then leaf replacement text.",
+        "Nested then leaf tone.",
+        "Produce nested-then-leaf answer.",
+    );
+    assert_branch_leaf(
+        "false otherwise (MCP)",
+        f_mcp_otherwise,
+        "otherwise-arm-marker",
+        "otherwise-arm-tone-marker",
+        "Otherwise leaf replacement text.",
+        "Otherwise leaf tone.",
+        "Produce otherwise-leaf answer.",
     );
     assert_ne!(
         extract_intent(tt_then),
         extract_intent(f_otherwise),
         "distinct arm selection must produce distinct effective intent text"
+    );
+    assert_ne!(
+        tt_then, f_otherwise,
+        "distinct arm selection must produce distinct effective prompt text"
+    );
+    assert_ne!(
+        tt_then, tt_nested_then,
+        "sibling and nested arms must produce distinct effective prompt text"
     );
 
     // Historical session preview reconstructs each recorded leaf exactly as
@@ -1900,6 +2053,24 @@ output = ["slot:answer"]
             f_otherwise.as_str(),
             "otherwise-leaf",
             &f_session,
+        ),
+        (
+            "true/true then (MCP)",
+            tt_mcp_then.as_str(),
+            "then-leaf",
+            &tt_mcp_session,
+        ),
+        (
+            "true/true nested-then (MCP)",
+            tt_mcp_nested_then.as_str(),
+            "nested-then-leaf",
+            &tt_mcp_session,
+        ),
+        (
+            "false otherwise (MCP)",
+            f_mcp_otherwise.as_str(),
+            "otherwise-leaf",
+            &f_mcp_session,
         ),
     ] {
         let historical = session_preview(&format!("{label} historical"), session, Some(step_id));
@@ -1987,6 +2158,124 @@ output = ["slot:answer"]
     assert!(
         !active.contains("otherwise-arm-marker") && !active.contains("nested-arm-marker"),
         "active session preview leaked a sibling arm: {active}"
+    );
+
+    // Active session preview, false outcome: pause a fresh session at the
+    // same 3-frame boundary but with the outer choice false, so the
+    // not-yet-accepted frame is the `otherwise` arm instead of `then`.
+    let active_false_session = home.join("branch-active-false-cli.json");
+    let seed_false = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            active_false_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&seed_false, 0);
+    let drive_false = support::run_ctx_with_env(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            active_false_session.to_str().unwrap(),
+            "--max-frames",
+            "3",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[("CTX_TEST_CHOICE", "no"), ("CTX_TEST_NESTED_CHOICE", "no")],
+    );
+    assert_exit_code(&drive_false, 0);
+    let active_false = session_preview("false otherwise (active)", &active_false_session, None);
+    assert_eq!(
+        extract_intent(&active_false),
+        extract_intent(f_otherwise),
+        "active session preview intent differs from the recorded otherwise dispatch"
+    );
+    assert_eq!(
+        extract_behavior(&active_false),
+        extract_behavior(f_otherwise),
+        "active session preview behavior differs from the recorded otherwise dispatch"
+    );
+    assert!(
+        !active_false.contains("then-arm-marker") && !active_false.contains("nested-arm-marker"),
+        "active session preview leaked a sibling arm: {active_false}"
+    );
+
+    // Active session preview, nested outcome: pause a fresh session one
+    // frame further (decide, decide-nested, pre-branch-sibling, then-leaf)
+    // so the not-yet-accepted frame is the recursively nested `then` arm.
+    let active_nested_session = home.join("branch-active-nested-cli.json");
+    let seed_nested = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            active_nested_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&seed_nested, 0);
+    let drive_nested = support::run_ctx_with_env(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            active_nested_session.to_str().unwrap(),
+            "--max-frames",
+            "4",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[
+            ("CTX_TEST_CHOICE", "yes"),
+            ("CTX_TEST_NESTED_CHOICE", "yes"),
+        ],
+    );
+    assert_exit_code(&drive_nested, 0);
+    let active_nested = session_preview(
+        "true/true nested-then (active)",
+        &active_nested_session,
+        None,
+    );
+    assert_eq!(
+        extract_intent(&active_nested),
+        extract_intent(tt_nested_then),
+        "active session preview intent differs from the recorded nested-then dispatch"
+    );
+    assert_eq!(
+        extract_behavior(&active_nested),
+        extract_behavior(tt_nested_then),
+        "active session preview behavior differs from the recorded nested-then dispatch"
+    );
+    assert!(
+        !active_nested.contains("then-arm-marker")
+            && !active_nested.contains("otherwise-arm-marker"),
+        "active session preview leaked a sibling arm: {active_nested}"
     );
 
     // A branch-path leaf's require/avoid conflict must still fail before the
@@ -2109,7 +2398,13 @@ output = ["slot:answer"]
         "{branch_prompt_only_behavior}"
     );
 
-    for frames in [&tt_frames, &tf_frames, &f_frames] {
+    for frames in [
+        &tt_frames,
+        &tf_frames,
+        &f_frames,
+        &tt_mcp_frames,
+        &f_mcp_frames,
+    ] {
         for prompt in frames {
             assert_unassigned_absent(prompt);
             assert!(!prompt.contains("source=\""));
