@@ -27,7 +27,10 @@ In `modules/cli/src/app/frame_prompt.rs`, add exact helper `fn assigned_agent<'a
 
 Edit `pub(crate) struct ResolvedFramePrompt` by adding exact field `pub(crate) assigned_agent_intent_participated: bool`. Keep exact signature `pub(crate) fn resolved_frame_prompt(loaded: &ctx_traits_io::run::LoadedTrait, session: &ctx_traits_core::procedure::session::Session, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, pending_inputs: &[PendingInput]) -> crate::Result<ResolvedFramePrompt>`. Resolve `assigned_agent(loaded, frame)?` once, pass that same declaration to changed `ctx_traits_core::model_view::frame_guidance`, derive `agent_identity` from that same declaration's sanitized description, and retain one effective `intent_items` string. Set `assigned_agent_intent_participated` to true exactly when the selected declaration's intent contains at least one item across `require`, `focus`, `avoid`, or `block`; both `None` and `Some(Intent::default())` must set it to false. Remove private `fn frame_agent_identity(loaded: &ctx_traits_io::run::LoadedTrait, frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> String`; this is the only removed symbol in the task.
 
-Add exact helper `fn intent_block(intent_items: &str) -> String` in `modules/cli/src/app/frame_prompt.rs`. It must own the current byte shape from `<intent>\n` through `</intent>\n\n`, call unchanged `fn intent_spec_block() -> String`, and indent the already-effective item string once. Keep exact signature `pub(crate) fn frame_prompt(context: &ResolvedFramePrompt, schema: &Value, correction: Option<&str>) -> String` and replace only its inline construction with `intent_block`, retaining its existing non-empty guard and exact bytes. Keep exact signature `pub(crate) fn mcp_frame_prompt(session: &str, session_store: Option<&str>, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, context: &ResolvedFramePrompt, role: &str, harness_id: &str) -> String`; insert `intent_block(&context.intent_items)` before `Resolved prompt instructions:` only when `assigned_agent_intent_participated` is true and `intent_items` is non-empty. Structure the empty insertion so legacy MCP bytes are identical.
+Add exact helper `fn intent_block(intent_items: &str) -> String` in `modules/cli/src/app/frame_prompt.rs`. It must own the current byte shape from `<intent>
+` through `</intent>
+
+`, call unchanged `fn intent_spec_block() -> String`, and indent the already-effective item string once. Keep exact signature `pub(crate) fn frame_prompt(context: &ResolvedFramePrompt, schema: &Value, correction: Option<&str>) -> String` and replace only its inline construction with `intent_block`, retaining its existing non-empty guard and exact bytes. Keep exact signature `pub(crate) fn mcp_frame_prompt(session: &str, session_store: Option<&str>, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, context: &ResolvedFramePrompt, role: &str, harness_id: &str) -> String`; insert `intent_block(&context.intent_items)` before `Resolved prompt instructions:` only when `assigned_agent_intent_participated` is true and `intent_items` is non-empty. Structure the empty insertion so legacy MCP bytes are identical.
 
 Add `modules/cli/tests/proof_agent_intent_dispatch.rs` with one exact public-path test `fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible()`. The test may define fixtures and closures only inside that function; add no shared support API. In an isolated `support::ScratchRoot`, author a schema `0.6` trait whose guided unassigned agent is declared before the actually assigned guided agent. Drive `ctx traits internal preview --file <fixture> --json`, a real custom CLI harness capture, and a real custom harness configured with MCP transport. Extract the complete `<intent>...</intent>` block from all three captures and assert equality, root-before-agent ordering, same-group replacement count and agent text, and absence of unassigned guidance. Configure CLI and MCP `system-prompt-flag`, capture argv, and assert the unique assigned `Agent.system` text is the flag value and absent from every intent block. In the same test, run a cross-layer require/avoid fixture and assert failure before a harness marker is created. Then use frozen literal pre-change oracles with non-empty root intent and a root-only require/avoid collision for both `intent: None` and present-but-empty assigned intent; assert exact preview, CLI, and MCP prompt bytes and successful acceptance in both cases. No symbols other than this test are added in the new file.
 """
@@ -62,21 +65,22 @@ validation = """
 
 Run verification in this strict order: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch`, then `CARGO_TARGET_DIR=target just test-full`. Perform no more than two targeted repair-and-rerun rounds. Success requires all three commands to exit 0 and the substantive final review to pass; otherwise report the concrete remaining failure rather than marking the task complete.
 """
+
 [relations]
-parent = "0255"
 depends-on = ["0255.1"]
+parent = "0255"
 
 [[checks]]
 name = "assigned agent intent resolver tests pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance"
-expect = "test result: ok\\. 6 passed; 0 failed"
 timeout-ms = 600000
+expect = 'test result: ok\. 6 passed; 0 failed'
 
 [[checks]]
 name = "assigned agent intent public dispatch proof passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
-expect = "test result: ok\\. 1 passed; 0 failed"
 timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
 
 [[checks]]
 name = "assigned agent intent dispatch passes the landing gate"
