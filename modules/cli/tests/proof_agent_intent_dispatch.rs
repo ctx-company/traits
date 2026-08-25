@@ -233,6 +233,7 @@ output = ["slot:answer"]
     };
     let assert_unassigned_absent = |prompt: &str| {
         assert!(!prompt.contains("unassigned-only"));
+        assert!(!prompt.contains("ASSIGNED SYSTEM"));
         assert!(!prompt.contains("UNASSIGNED SYSTEM"));
     };
     let run = |transport: &str, output: &str| {
