@@ -425,6 +425,10 @@ export interface RuntimeDelegationPlan {
  */
 export type CanonicalAgent = {
   /**
+   * Optional declaration-only behavioral guidance for this role.
+   */
+  readonly "behavior"?: CanonicalBehavior | undefined;
+  /**
    * Required human-readable role description.
    */
   readonly "description": string;

@@ -2544,7 +2544,19 @@ describe("agent.* role templates", () => {
     });
   });
 
-  it("normalizes direct agent intent and infers schema 0.6 only when it is present", () => {
+  it.each([
+    ["worker", agent.worker] as const,
+    ["reviewer", agent.reviewer] as const,
+    ["planner", agent.planner] as const,
+    ["oracle", agent.oracle] as const,
+    ["searcher", agent.searcher] as const,
+  ])("%s: normalizes declaration-only behavior", (_name, namespaced) => {
+    expect(toDraftJson(namespaced("guided", { behavior: { tone: behavior.tone.Direct } }))).toMatchObject({
+      behavior: { tone: [{ id: "direct" }] },
+    });
+  });
+
+  it("normalizes direct agent guidance and infers schema 0.6 only when it is present", () => {
     const guided = trait("guided-agent", {
       description: "A guided agent.",
       agent: agent("worker", { description: "Works.", intent: { avoid: [{ id: "scope-creep" }] } }),
@@ -2553,9 +2565,15 @@ describe("agent.* role templates", () => {
       description: "An ordinary agent.",
       agent: agent("worker", { description: "Works." }),
     });
+    const behaviorGuided = trait("behavior-guided-agent", {
+      description: "A behavior-guided agent.",
+      agent: agent("worker", { description: "Works.", behavior: {} }),
+    });
     expect(toDraftJson(guided)["schema-version"]).toBe("0.6");
     expect(toDraftJson(guided).agent?.[0]?.intent).toEqual({ avoid: [{ id: "scope-creep" }] });
     expect(toDraftJson(ordinary)["schema-version"]).toBe("0.5");
+    expect(toDraftJson(behaviorGuided)["schema-version"]).toBe("0.6");
+    expect(toDraftJson(behaviorGuided).agent?.[0]?.behavior).toEqual({});
   });
 
   it("normalizes scalar, array, and rich guidance forms on direct and seated agents", () => {
@@ -2581,14 +2599,44 @@ describe("agent.* role templates", () => {
       { require: [{ id: "correctness" }] },
       { require: [{ id: "correctness" }] },
     ]);
+    const behaviorGuided = toDraftJson(
+      agent("behavior-guided", {
+        description: "Works.",
+        behavior: {
+          tone: [behavior.tone.Direct, { id: "custom-tone", summary: "State conclusions plainly." }],
+          method: behavior.method.EvidenceFirst,
+          format: { id: "custom-format", description: "Use concise bullets." },
+          verbosity: behavior.verbosity.Brief,
+          directness: behavior.directness.High,
+          scopeControl: behavior.scopeControl.Strict,
+          initiative: behavior.initiative.ProactivelyExecuteSafeSteps,
+          uncertainty: behavior.uncertainty.StateAssumptions,
+        },
+      }),
+    );
+    expect(behaviorGuided.behavior).toMatchObject({
+      tone: [{ id: "direct" }, { id: "custom-tone", summary: "State conclusions plainly." }],
+      method: [{ id: "evidence-first" }],
+      format: [{ id: "custom-format", description: "Use concise bullets." }],
+      verbosity: { id: "brief" },
+      directness: { id: "high" },
+      "scope-control": { id: "strict" },
+      initiative: { id: "proactively-execute-safe-steps" },
+      uncertainty: { id: "state-assumptions" },
+    });
+    expect(
+      seats(agent.reviewer, "behavior-guided", 2, { behavior: { tone: behavior.tone.Direct } }).map(
+        (handle) => toDraftJson(handle).behavior,
+      ),
+    ).toEqual([{ tone: [{ id: "direct" }] }, { tone: [{ id: "direct" }] }]);
   });
 
-  it("an explicit schema version takes precedence over agent-intent inference", () => {
+  it("an explicit schema version takes precedence over agent guidance inference", () => {
     const draft = toDraftJson(
       trait("explicit-agent-version", {
         "schema-version": "0.5",
         description: "Explicit authoring wins.",
-        agent: agent("worker", { description: "Works.", intent: { require: "correctness" } }),
+        agent: agent("worker", { description: "Works.", behavior: { tone: behavior.tone.Direct } }),
       }),
     );
     expect(draft["schema-version"]).toBe("0.5");

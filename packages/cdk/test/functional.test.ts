@@ -802,11 +802,11 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     expect(JSON.stringify(seatDraft)).toBe(JSON.stringify(handDraft));
   });
 
-  it("a guided agent collected through .prompt is normalized and infers schema 0.6", () => {
+  it("an agent guided through .prompt is normalized and infers schema 0.6", () => {
     const envelope = evaluateTraitFunction(() => {
       defineTrait("guided-prompt-agent", { description: "Review a diff." });
       const review = slot.text("review");
-      agent.reviewer("reviewer", { intent: { require: "correctness" } }).prompt("Review", {
+      agent.reviewer("reviewer", { behavior: { tone: behavior.tone.Direct } }).prompt("Review", {
         input: input.prompt`Review the diff.`,
         output: review,
       });
@@ -814,7 +814,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     });
     expect(envelope.draft).toMatchObject({
       "schema-version": "0.6",
-      agent: [{ id: "reviewer", intent: { require: [{ id: "correctness" }] } }],
+      agent: [{ id: "reviewer", behavior: { tone: [{ id: "direct" }] } }],
     });
   });
 });
@@ -888,14 +888,26 @@ describe("defineVariant/useVariant hook-style families", () => {
   });
 
   it("native variants infer 0.6 for guided transitively collected agents and retain 0.5 for ordinary leaves", async () => {
-    const guidedVariant = (ctx: unknown) => {
+    const intentGuidedVariant = (ctx: unknown) => {
       void ctx;
-      defineVariant("guided", { description: "Guided step." });
-      const out = slot.text("guided-result");
-      agent.worker("guided-worker", { intent: { avoid: "scope-creep" } }).prompt("Do guided work", {
+      defineVariant("intent-guided", { description: "Intent-guided step." });
+      const out = slot.text("intent-guided-result");
+      agent.worker("intent-guided-worker", { intent: { avoid: "scope-creep" } }).prompt("Do intent-guided work", {
         input: input.prompt`Do it.`,
         output: out,
       });
+      return { out };
+    };
+    const behaviorGuidedVariant = (ctx: unknown) => {
+      void ctx;
+      defineVariant("behavior-guided", { description: "Behavior-guided step." });
+      const out = slot.text("behavior-guided-result");
+      agent
+        .worker("behavior-guided-worker", { behavior: { tone: behavior.tone.Direct } })
+        .prompt("Do behavior-guided work", {
+          input: input.prompt`Do it.`,
+          output: out,
+        });
       return { out };
     };
     const ordinaryVariant = (ctx: unknown) => {
@@ -907,14 +919,16 @@ describe("defineVariant/useVariant hook-style families", () => {
     };
     const family = evaluateTraitFunction(function () {
       defineTrait("agent-version-family", { version: "0.1.0" });
-      useVariant(guidedVariant).default();
+      useVariant(intentGuidedVariant).default();
+      useVariant(behaviorGuidedVariant);
       useVariant(ordinaryVariant);
     });
     if (!isTraitFamilyHandle(family)) {
       throw new Error("expected a trait family handle");
     }
     const resolved = await resolveTraitFamily(family);
-    expect(resolved.variants.find((entry) => entry.path === "guided")?.draft["schema-version"]).toBe("0.6");
+    expect(resolved.variants.find((entry) => entry.path === "intent-guided")?.draft["schema-version"]).toBe("0.6");
+    expect(resolved.variants.find((entry) => entry.path === "behavior-guided")?.draft["schema-version"]).toBe("0.6");
     const ordinary = resolved.variants.find((entry) => entry.path === "ordinary")?.draft;
     expect(JSON.stringify(ordinary)).toBe(
       '{"agent":[{"description":"Completes assigned work and produces the requested outputs.","id":"ordinary-worker","summary":"Execution role."}],"description":"Ordinary step.","id":"agent-version-family","port":[{"description":"output port out.","direction":"output","id":"out","schema":"schema:text","value":"slot:ordinary-result"}],"procedure":{"description":"Ordinary step.","output":["port:out"],"sequence":[{"agent":"agent:ordinary-worker","id":"do-ordinary-work","output":["slot:ordinary-result"],"prompt":"prompt:do-ordinary-work","title":"Do ordinary work"}]},"prompt":{"do-ordinary-work":{"output":["slot:ordinary-result"],"text":"Do it."}},"schema-version":"0.5","slot":[{"description":"Runtime slot ordinary-result.","id":"ordinary-result","schema":"schema:text"}],"variant":"ordinary","version":"0.1.0"}',

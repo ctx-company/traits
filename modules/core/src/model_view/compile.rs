@@ -46,7 +46,7 @@ pub fn compile_model_view_with_evidence(
     if let Some(ref behavior) = trait_ref.behavior {
         sections.push(Section {
             heading: "Behavior".to_string(),
-            content: format_behavior(behavior, trait_id, GuidanceTag::Namespaced, &mut warnings, &mut normalizations, &mut forged_tag_findings),
+            content: format_behavior(behavior, trait_id, GuidanceTag::Namespaced, "behavior", None, &mut warnings, &mut normalizations, &mut forged_tag_findings),
         });
     }
 
@@ -486,23 +486,26 @@ fn behavior_axes(behavior: &crate::r#trait::Behavior) -> [(&str, Vec<&GuidanceIt
     ]
 }
 
+#[allow(clippy::too_many_arguments)]
 fn format_behavior(
     behavior: &crate::r#trait::Behavior,
     trait_id: &str,
     tag: GuidanceTag,
+    field_prefix: &str,
+    source: Option<&str>,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
 ) -> String {
     let mut elements = Vec::new();
     for (axis, items, scalar) in behavior_axes(behavior) {
-        let field = format!("behavior.{axis}");
+        let field = format!("{field_prefix}.{axis}");
         if scalar {
             if let Some(item) = items.into_iter().next() {
-                elements.push(format_guidance_item_element(tag, "behavior", "axis", axis, item, &field, None, Some(behavior_builtin), trait_id, warnings, normalizations, findings));
+                elements.push(format_guidance_item_element(tag, "behavior", "axis", axis, item, &field, source, Some(behavior_builtin), trait_id, warnings, normalizations, findings));
             }
         } else {
-            format_guidance_group(tag, "behavior", "axis", axis, &field, None, items.into_iter(), Some(behavior_builtin), trait_id, warnings, normalizations, findings, &mut elements);
+            format_guidance_group(tag, "behavior", "axis", axis, &field, source, items.into_iter(), Some(behavior_builtin), trait_id, warnings, normalizations, findings, &mut elements);
         }
     }
     elements.join("\n")
@@ -534,7 +537,7 @@ pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
     let behavior = trait_ref
         .behavior
         .as_ref()
-        .map(|behavior| format_behavior(behavior, trait_id, GuidanceTag::GroupNamed, &mut warnings, &mut normalizations, &mut findings))
+        .map(|behavior| format_behavior(behavior, trait_id, GuidanceTag::GroupNamed, "behavior", None, &mut warnings, &mut normalizations, &mut findings))
         .unwrap_or_default();
 
     if intent.is_empty() && behavior.is_empty() {

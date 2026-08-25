@@ -436,7 +436,9 @@ export function assembleSingleTraitDraft(
       : { sink: { "session-title": sessionTitleSinkDraft(sessionTitleSinkInput) } }),
     "schema-version":
       fields["schema-version"] ??
-      (merged.agent?.some((agent) => Object.hasOwn(agent, "intent")) ? "0.6" : baselineSchemaVersion),
+      (merged.agent?.some((agent) => Object.hasOwn(agent, "intent") || Object.hasOwn(agent, "behavior"))
+        ? "0.6"
+        : baselineSchemaVersion),
     version: fields.version ?? "0.1.0",
     behavior: normalizeBehavior(fields.behavior),
     intent: normalizeIntent(fields.intent),

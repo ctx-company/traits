@@ -4,11 +4,11 @@ import type { AgentTemplateDefinition } from "./generated.js";
 import type { AgentHandle, SequenceHandle } from "./handles.js";
 import { withDeclaration, withHiddenField } from "./meta.js";
 import { collectMany, compact, slugFromName, validateSlug } from "./normalize.js";
-import { normalizeIntent } from "./normalize.js";
+import { normalizeBehavior, normalizeIntent } from "./normalize.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
 import type { SessionBinding } from "./session.js";
 import { sessionFieldOf } from "./session.js";
-import type { Intent } from "./trait.js";
+import type { Behavior, Intent } from "./trait.js";
 
 export interface AgentTemplateFunctions {
   /** Built-in worker template: an implementer that makes a change and reports what it did. @example `agent.worker("worker")` */
@@ -35,6 +35,8 @@ export interface AgentFields {
   readonly system?: string;
   /** Declaration-only guidance for this role. */
   readonly intent?: Intent;
+  /** Declaration-only behavioral guidance for this role. */
+  readonly behavior?: Behavior;
   /** Session binding for this agent's frames — see {@link SessionBinding}. */
   readonly session?: SessionBinding;
 }
@@ -45,6 +47,8 @@ export interface AgentTemplateFields {
   readonly system?: string;
   /** Declaration-only guidance for this role. */
   readonly intent?: Intent;
+  /** Declaration-only behavioral guidance for this role. */
+  readonly behavior?: Behavior;
   /** Session binding for this agent's frames — see {@link SessionBinding}. */
   readonly session?: SessionBinding;
 }
@@ -64,6 +68,7 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
     summary: fields.summary,
     system: fields.system,
     intent: normalizeIntent(fields.intent),
+    behavior: normalizeBehavior(fields.behavior),
     session: sessionFieldOf(fields.session),
   });
   // `fields.session` lowers to a bare `session:<id>` ref string above, so the
@@ -142,6 +147,7 @@ function agentTemplateOf(
       // the caller supplied none.
       ...(fields.system === undefined ? {} : { system: fields.system }),
       ...(fields.intent === undefined ? {} : { intent: fields.intent }),
+      ...(fields.behavior === undefined ? {} : { behavior: fields.behavior }),
       ...(fields.session === undefined ? {} : { session: fields.session }),
     },
     extraMeta,

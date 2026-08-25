@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::Intent;
+use super::{Behavior, Intent};
 
 /// Model-quality intent attached to built-in authoring templates.
 #[derive(
@@ -113,6 +113,10 @@ pub struct Agent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<Intent>,
 
+    /// Optional declaration-only behavioral guidance for this role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<Behavior>,
+
     /// Optional session binding for this agent's frames: `session:<id>`
     /// (shared with every other agent bound to the same declared session),
     /// or a bare `per-frame`/`persistent` lifecycle value, which is always
@@ -136,6 +140,7 @@ pub fn instantiate_agent_template(
         summary: Some(summary.unwrap_or_else(|| template.summary.to_string())),
         system: None,
         intent: None,
+        behavior: None,
         session: None,
     }
 }
@@ -189,6 +194,17 @@ pub fn validate_agents(agents: &[Agent], schema_version: &str) -> crate::Result<
                 .into());
             }
             intent.validate_scoped(&format!("agent[{i}].intent"))?;
+        }
+
+        if let Some(behavior) = &agent.behavior {
+            if !super::schema_version_at_least(schema_version, "0.6") {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("agent[{i}].behavior"),
+                    message: "requires schema-version \"0.6\" or later".to_string(),
+                }
+                .into());
+            }
+            behavior.validate_scoped(&format!("agent[{i}].behavior"))?;
         }
 
         if agent
@@ -251,6 +267,7 @@ mod tests {
             summary: None,
             system: system.map(str::to_string),
             intent: None,
+            behavior: None,
             session: None,
         }
     }
@@ -406,5 +423,82 @@ mod tests {
     fn absent_agent_intent_is_omitted_from_canonical_bytes() {
         let without = crate::digest::canonical_json(&agent(None)).expect("canonical json");
         assert!(!without.contains("intent"));
+    }
+
+    #[test]
+    fn agent_behavior_decodes_all_axes_from_builtin_custom_and_rich_forms() {
+        let mut guided = agent(None);
+        guided.behavior = Some(
+            serde_json::from_value(serde_json::json!({
+                "tone": ["direct", { "id": "custom-tone", "summary": "State conclusions plainly." }],
+                "method": "evidence-first",
+                "format": [{ "id": "custom-format", "description": "Use concise bullets." }],
+                "verbosity": "brief",
+                "directness": "direct",
+                "scope-control": "strict",
+                "initiative": "proactive",
+                "uncertainty": "explicit"
+            }))
+            .expect("behavior fixture"),
+        );
+        validate_agents(&[guided], "0.6").expect("all behavior axes and guidance forms are valid");
+    }
+
+    #[test]
+    fn agent_behavior_requires_schema_0_6() {
+        let mut guided = agent(None);
+        guided.behavior = Some(
+            serde_json::from_value(serde_json::json!({ "tone": "direct" }))
+                .expect("behavior fixture"),
+        );
+        for version in ["0.2", "0.3", "0.4", "0.5"] {
+            let error = validate_agents(&[guided.clone()], version)
+                .expect_err("pre-0.6 rejects agent behavior");
+            assert!(error.to_string().contains("agent[0].behavior"));
+        }
+    }
+
+    #[test]
+    fn agent_behavior_rejects_arrays_on_scalar_axes_during_decode() {
+        let scalar_array: Result<Behavior, _> =
+            serde_json::from_value(serde_json::json!({ "verbosity": ["brief"] }));
+        assert!(
+            scalar_array.is_err(),
+            "scalar behavior axes must not decode arrays"
+        );
+    }
+
+    #[test]
+    fn agent_behavior_reports_shared_validation_failures_at_indexed_paths() {
+        let mut guided = agent(None);
+        guided.behavior = Some(
+            serde_json::from_value(serde_json::json!({ "tone": ["direct", "direct"] }))
+                .expect("behavior fixture"),
+        );
+        let error =
+            validate_agents(&[guided], "0.6").expect_err("duplicate additive guidance rejects");
+        assert!(error.to_string().contains("agent[0].behavior.tone[1].id"));
+    }
+
+    #[test]
+    fn agent_behavior_is_deterministic_and_absence_preserves_legacy_bytes() {
+        let mut guided = agent(None);
+        guided.behavior = Some(
+            serde_json::from_value(serde_json::json!({ "tone": "direct", "verbosity": "brief" }))
+                .expect("behavior fixture"),
+        );
+        let first = crate::digest::canonical_json(&guided).expect("canonical json");
+        let second = crate::digest::canonical_json(&guided).expect("canonical json");
+        assert_eq!(
+            first,
+            r#"{"behavior":{"tone":[{"id":"direct"}],"verbosity":{"id":"brief"}},"description":"Reviews the work.","id":"smart-1"}"#
+        );
+        assert_eq!(first, second);
+
+        let without = crate::digest::canonical_json(&agent(None)).expect("canonical json");
+        assert_eq!(
+            without,
+            r#"{"description":"Reviews the work.","id":"smart-1"}"#
+        );
     }
 }

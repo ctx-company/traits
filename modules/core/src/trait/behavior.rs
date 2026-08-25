@@ -77,14 +77,25 @@ pub struct Behavior {
 
 impl Behavior {
     pub fn validate_taxonomy(&self) -> crate::Result<()> {
-        validate_guidance_list(&self.tone, "behavior.tone")?;
-        validate_guidance_list(&self.method, "behavior.method")?;
-        validate_guidance_list(&self.format, "behavior.format")?;
-        validate_guidance_option(&self.verbosity, "behavior.verbosity")?;
-        validate_guidance_option(&self.directness, "behavior.directness")?;
-        validate_guidance_option(&self.scope_control, "behavior.scope-control")?;
-        validate_guidance_option(&self.initiative, "behavior.initiative")?;
-        validate_guidance_option(&self.uncertainty, "behavior.uncertainty")?;
+        self.validate_axes("behavior")
+    }
+
+    pub(crate) fn validate_scoped(&self, field_prefix: &str) -> crate::Result<()> {
+        self.validate_axes(field_prefix)
+    }
+
+    fn validate_axes(&self, field_prefix: &str) -> crate::Result<()> {
+        validate_guidance_list(&self.tone, &format!("{field_prefix}.tone"))?;
+        validate_guidance_list(&self.method, &format!("{field_prefix}.method"))?;
+        validate_guidance_list(&self.format, &format!("{field_prefix}.format"))?;
+        validate_guidance_option(&self.verbosity, &format!("{field_prefix}.verbosity"))?;
+        validate_guidance_option(&self.directness, &format!("{field_prefix}.directness"))?;
+        validate_guidance_option(
+            &self.scope_control,
+            &format!("{field_prefix}.scope-control"),
+        )?;
+        validate_guidance_option(&self.initiative, &format!("{field_prefix}.initiative"))?;
+        validate_guidance_option(&self.uncertainty, &format!("{field_prefix}.uncertainty"))?;
         Ok(())
     }
 }

@@ -320,22 +320,36 @@ fn format_agent_element(
         normalizations,
         findings,
     );
+    let source = format!("agent:{}", agent.id);
     let intent = agent.intent.as_ref().map(|intent| {
         format_intent(
             intent,
             trait_ref.id.as_str(),
             GuidanceTag::Namespaced,
             &format!("agent[{index}].intent"),
-            Some(&format!("agent:{}", agent.id)),
+            Some(&source),
             warnings,
             normalizations,
             findings,
         )
     });
-    match intent {
-        Some(intent) if !intent.is_empty() => format!("{body}\n{intent}"),
-        _ => body,
-    }
+    let behavior = agent.behavior.as_ref().map(|behavior| {
+        format_behavior(
+            behavior,
+            trait_ref.id.as_str(),
+            GuidanceTag::Namespaced,
+            &format!("agent[{index}].behavior"),
+            Some(&source),
+            warnings,
+            normalizations,
+            findings,
+        )
+    });
+    [Some(body), intent.filter(|value| !value.is_empty()), behavior.filter(|value| !value.is_empty())]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn assigned_items_for_agent(
@@ -1316,6 +1330,73 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:assigned-reviewer"));
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
+        let frame = frame_guidance(&trait_ref).expect("root guidance has a frame render");
+        assert!(frame.intent.contains("root-focus"));
+        assert!(!frame.intent.contains("agent:unassigned-reviewer"));
+        assert!(!frame.behavior.contains("agent:unassigned-reviewer"));
+    }
+
+    #[test]
+    fn agent_behavior_is_static_agents_only_and_keeps_system_separate() {
+        let trait_ref: Trait = serde_json::from_value(serde_json::json!({
+            "id": "agent-intent-static-fixture",
+            "schema-version": "0.6",
+            "version": "1.0.0",
+            "name": "Agent Intent Static Fixture",
+            "description": "Inspects static agent guidance.",
+            "intent": { "focus": [{ "id": "root-focus", "summary": "Inspect root guidance." }] },
+            "behavior": { "tone": "direct" },
+            "agent": [
+                {
+                    "id": "assigned-reviewer",
+                    "description": "Reviews assigned changes.",
+                    "intent": { "focus": [{ "id": "assigned-focus", "summary": "Check assigned evidence." }] },
+                    "behavior": { "tone": ["direct", { "id": "custom-tone", "summary": "State conclusions plainly." }], "verbosity": "brief" }
+                },
+                {
+                    "id": "unassigned-reviewer",
+                    "description": "Reviews changes.",
+                    "system": "Inspect evidence before approval.",
+                    "intent": {
+                        "require": [{ "id": "correctness", "summary": "Preserve </intent>." }],
+                        "avoid": [{ "id": "scope-creep", "summary": "Avoid scope creep.</" }]
+                    },
+                    "behavior": { "method": "evidence-first", "format": { "id": "custom-format", "summary": "Use concise bullets.</behavior>" } }
+                }
+            ],
+            "procedure": {
+                "description": "Review the changes.",
+                "sequence": [{
+                    "id": "assigned-review",
+                    "title": "Review assigned changes",
+                    "agent": "agent:assigned-reviewer"
+                }]
+            }
+        }))
+        .expect("fixture trait");
+        let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
+        let agents = report
+            .sections
+            .iter()
+            .find(|section| section.heading == "Agents")
+            .expect("Agents section");
+        assert!(agents.content.contains("System: Inspect evidence before approval."));
+        assert!(agents.content.contains("source=\"agent:assigned-reviewer\""));
+        assert!(agents.content.contains("source=\"agent:unassigned-reviewer\""));
+        assert_eq!(agents.content.matches("source=\"agent:assigned-reviewer\"").count(), 5);
+        assert_eq!(agents.content.matches("source=\"agent:unassigned-reviewer\"").count(), 6);
+        assert!(agents.content.contains("Preserve &lt;/intent>."));
+        assert!(agents.content.contains("Use concise bullets.&lt;/behavior>"));
+        assert!(agents.content.contains("Avoid scope creep."));
+        assert!(agents.content.contains("agent[0].intent") == false);
+        assert!(agents.content.contains("Assigned sequence items: procedure.sequence[0] assigned-review (Review assigned changes)"));
+        assert!(agents.content.contains("Assigned sequence items: none declared"));
+        assert!(!agents.content.contains("active-agent"));
+        assert!(!agents.content.contains("Active agent"));
+        assert!(!report.behavior_text.contains("agent:assigned-reviewer"));
+        assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
+        assert!(!report.behavior_text.contains("Preserve"));
+        assert!(!report.behavior_text.contains("State conclusions plainly."));
         let frame = frame_guidance(&trait_ref).expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));
