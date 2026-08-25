@@ -1322,7 +1322,7 @@ mod agent_intent_tests {
         assert_eq!(agents.content.matches("source=\"agent:unassigned-reviewer\"").count(), 4);
         assert!(agents.content.contains("Preserve &lt;/intent>."));
         assert!(agents.content.contains("Avoid scope creep."));
-        assert!(agents.content.contains("agent[0].intent") == false);
+        assert!(!agents.content.contains("agent[0].intent"));
         assert!(agents.content.contains("Assigned sequence items: procedure.sequence[0] assigned-review (Review assigned changes)"));
         assert!(agents.content.contains("Assigned sequence items: none declared"));
         assert!(!agents.content.contains("active-agent"));
@@ -1330,7 +1330,7 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:assigned-reviewer"));
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
-        let frame = frame_guidance(&trait_ref).expect("root guidance has a frame render");
+        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves").expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));
         assert!(!frame.behavior.contains("agent:unassigned-reviewer"));
@@ -1388,7 +1388,7 @@ mod agent_intent_tests {
         assert!(agents.content.contains("Preserve &lt;/intent>."));
         assert!(agents.content.contains("Use concise bullets.&lt;/behavior>"));
         assert!(agents.content.contains("Avoid scope creep."));
-        assert!(agents.content.contains("agent[0].intent") == false);
+        assert!(!agents.content.contains("agent[0].intent"));
         assert!(agents.content.contains("Assigned sequence items: procedure.sequence[0] assigned-review (Review assigned changes)"));
         assert!(agents.content.contains("Assigned sequence items: none declared"));
         assert!(!agents.content.contains("active-agent"));
@@ -1397,7 +1397,7 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
         assert!(!report.behavior_text.contains("State conclusions plainly."));
-        let frame = frame_guidance(&trait_ref).expect("root guidance has a frame render");
+        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves").expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));
         assert!(!frame.behavior.contains("agent:unassigned-reviewer"));

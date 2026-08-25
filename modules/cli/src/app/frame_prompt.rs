@@ -64,6 +64,8 @@ pub(crate) struct ResolvedFramePrompt {
     pub(crate) agent_identity: String,
     /// Rendered `<intent>` / `<behavior>` items, already sanitized.
     pub(crate) intent_items: String,
+    /// Whether the assigned agent contributed non-empty intent guidance.
+    pub(crate) assigned_agent_intent_participated: bool,
     pub(crate) behavior_items: String,
 }
 
@@ -112,13 +114,19 @@ pub(crate) fn mcp_frame_prompt(
     role: &str,
     harness_id: &str,
 ) -> String {
+    let intent = if context.assigned_agent_intent_participated && !context.intent_items.is_empty() {
+        format!("\n{}", intent_block(&context.intent_items))
+    } else {
+        "\n".to_string()
+    };
     format!(
-        "Serve this ctx.traits frame via MCP.\nAgent role: {role}\nHarness id: {harness_id}\nRun session: {}\nSession store: {}\n\nRequired steps:\n1. Call ctx_traits_run_next with agent={role}, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent={role} and harness={harness_id}.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: {}\n\n{}\n\nResolved prompt instructions:\n{}\nResolved input values:\n{}\n",
+        "Serve this ctx.traits frame via MCP.\nAgent role: {role}\nHarness id: {harness_id}\nRun session: {}\nSession store: {}\n\nRequired steps:\n1. Call ctx_traits_run_next with agent={role}, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent={role} and harness={harness_id}.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: {}\n\n{}\n{}Resolved prompt instructions:\n{}\nResolved input values:\n{}\n",
         session,
         session_store.unwrap_or(""),
         session,
         frame.title,
         frame_summary_text(frame),
+        intent,
         context.prompt_section,
         context.input_section
     )
@@ -175,11 +183,7 @@ pub(crate) fn frame_prompt(
         ));
     }
     if !context.intent_items.is_empty() {
-        envelope.push_str(&format!(
-            "<intent>\n  <info>What the finished work is judged against. Each item below carries the group it belongs to; the group says how much it weighs.</info>\n{}{}\n</intent>\n\n",
-            intent_spec_block(),
-            indent_block(&context.intent_items, 2)
-        ));
+        envelope.push_str(&intent_block(&context.intent_items));
     }
     if !context.behavior_items.is_empty() {
         envelope.push_str(&format!(
@@ -205,6 +209,14 @@ pub(crate) fn frame_prompt(
         &context.output_spec,
     ));
     envelope
+}
+
+fn intent_block(intent_items: &str) -> String {
+    format!(
+        "<intent>\n  <info>What the finished work is judged against. Each item below carries the group it belongs to; the group says how much it weighs.</info>\n{}{}\n</intent>\n\n",
+        intent_spec_block(),
+        indent_block(intent_items, 2)
+    )
 }
 
 /// The four intent groups and what belonging to one means. Read from the
@@ -471,44 +483,55 @@ pub(crate) fn resolved_frame_prompt(
     let prompt_section = bare_reference_names(&raw_prompt);
     let input_section = resolved_input_section(loaded, session, frame, pending_inputs)?;
     let include_section = resolved_include_section(loaded, session, frame)?;
-    let guidance = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref);
+    let assigned_agent = assigned_agent(loaded, frame)?;
+    let assigned_agent_intent_participated = assigned_agent
+        .and_then(|agent| agent.intent.as_ref())
+        .is_some_and(|intent| {
+            !intent.require.is_empty()
+                || !intent.focus.is_empty()
+                || !intent.avoid.is_empty()
+                || !intent.block.is_empty()
+        });
+    let guidance = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref, assigned_agent)?;
     Ok(ResolvedFramePrompt {
         prompt_section,
         input_section,
         include_section,
         input_spec: input_spec_entries(loaded, &refs),
         output_spec: output_spec_entries(loaded, frame),
-        agent_identity: frame_agent_identity(loaded, frame),
+        agent_identity: assigned_agent
+            .map(|agent| sanitize_spec_text(&agent.description))
+            .unwrap_or_default(),
         intent_items: guidance
             .as_ref()
             .map(|guidance| guidance.intent.clone())
             .unwrap_or_default(),
+        assigned_agent_intent_participated,
         behavior_items: guidance
             .map(|guidance| guidance.behavior)
             .unwrap_or_default(),
     })
 }
 
-/// What the assigned role IS, in the trait's own words.
-///
-/// `<identity>You are agent:smart.</identity>` named the role by its
-/// canonical ref, which says only that a ref exists. The agent's
-/// `description` is the field written for exactly this, so it is what the
-/// model is given; the ref stays as the name it answers to.
-fn frame_agent_identity(
-    loaded: &ctx_traits_io::run::LoadedTrait,
+fn assigned_agent<'a>(
+    loaded: &'a ctx_traits_io::run::LoadedTrait,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
-) -> String {
+) -> crate::Result<Option<&'a ctx_traits_core::r#trait::Agent>> {
     let Some(assigned) = frame.assigned_agent.as_ref() else {
-        return String::new();
+        return Ok(None);
     };
     loaded
         .trait_ref
         .agents
         .iter()
         .find(|agent| agent.id == assigned.role)
-        .map(|agent| sanitize_spec_text(&agent.description))
-        .unwrap_or_default()
+        .map(Some)
+        .ok_or_else(|| crate::Error::Command {
+            message: format!(
+                "assigned agent role {} is not declared by trait {}",
+                assigned.role, loaded.trait_ref.id
+            ),
+        })
 }
 
 fn resolved_input_section(

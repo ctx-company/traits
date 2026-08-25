@@ -477,6 +477,63 @@ fn intent_groups(intent: &crate::r#trait::Intent) -> [(&str, Vec<&GuidanceItem>)
     ]
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IntentItemSource {
+    Root,
+    AssignedAgent,
+}
+
+#[allow(clippy::type_complexity)]
+fn effective_intent_groups<'a>(
+    root: Option<&'a crate::r#trait::Intent>,
+    assigned: &'a crate::r#trait::Intent,
+) -> crate::Result<[(&'static str, Vec<(IntentItemSource, &'a GuidanceItem)>); 4]> {
+    let names = ["require", "focus", "avoid", "block"];
+    let root_groups = root.map(intent_groups);
+    let assigned_groups = intent_groups(assigned);
+    let effective = std::array::from_fn(|index| {
+        let assigned_items = &assigned_groups[index].1;
+        let assigned_ids = assigned_items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut items = root_groups
+            .as_ref()
+            .map(|groups| groups[index].1.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|item| !assigned_ids.contains(item.id.as_str()))
+            .map(|item| (IntentItemSource::Root, item))
+            .collect::<Vec<_>>();
+        items.extend(
+            assigned_items
+                .iter()
+                .map(|item| (IntentItemSource::AssignedAgent, *item)),
+        );
+        (names[index], items)
+    });
+
+    for (avoid_source, avoid) in &effective[2].1 {
+        if let Some((require_source, _)) = effective[0]
+            .1
+            .iter()
+            .find(|(_, require)| require.id == avoid.id)
+            && (*require_source == IntentItemSource::AssignedAgent
+                || *avoid_source == IntentItemSource::AssignedAgent)
+        {
+            return Err(crate::r#trait::Error::invalid_field(
+                "intent",
+                format!(
+                    "effective guidance id {:?} cannot appear in both require and avoid when assigned-agent intent participates",
+                    avoid.id.as_str()
+                ),
+            )
+            .into());
+        }
+    }
+    Ok(effective)
+}
+
 fn behavior_axes(behavior: &crate::r#trait::Behavior) -> [(&str, Vec<&GuidanceItem>, bool); 8] {
     [
         ("tone", behavior.tone.iter().collect(), false), ("method", behavior.method.iter().collect(), false),
@@ -523,17 +580,52 @@ pub struct FrameGuidance {
 /// Resolve a trait's intent/behavior guidance for frame dispatch. Returns
 /// `None` if the trait declares neither, mirroring the static model view's
 /// `Some(intent)`/`Some(behavior)` gating.
-pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
+pub fn frame_guidance(
+    trait_ref: &Trait,
+    assigned_agent: Option<&crate::r#trait::Agent>,
+) -> crate::Result<Option<FrameGuidance>> {
     let trait_id = trait_ref.id.as_str();
     let mut warnings = Vec::new();
     let mut normalizations = Vec::new();
     let mut findings = Vec::new();
 
-    let intent = trait_ref
-        .intent
-        .as_ref()
-        .map(|intent| format_intent(intent, trait_id, GuidanceTag::GroupNamed, "intent", None, &mut warnings, &mut normalizations, &mut findings))
-        .unwrap_or_default();
+    let assigned_intent = assigned_agent.and_then(|agent| agent.intent.as_ref());
+    let assigned_intent_is_nonempty = assigned_intent.is_some_and(|intent| {
+        !intent.require.is_empty()
+            || !intent.focus.is_empty()
+            || !intent.avoid.is_empty()
+            || !intent.block.is_empty()
+    });
+    let intent = if assigned_intent_is_nonempty {
+        let mut elements = Vec::new();
+        for (group, items) in effective_intent_groups(
+            trait_ref.intent.as_ref(),
+            assigned_intent.expect("non-empty assigned intent is present"),
+        )? {
+            format_guidance_group(
+                GuidanceTag::GroupNamed,
+                "intent",
+                "group",
+                group,
+                &format!("intent.{group}"),
+                None,
+                items.into_iter().map(|(_, item)| item),
+                Some(intent_builtin),
+                trait_id,
+                &mut warnings,
+                &mut normalizations,
+                &mut findings,
+                &mut elements,
+            );
+        }
+        elements.join("\n")
+    } else {
+        trait_ref
+            .intent
+            .as_ref()
+            .map(|intent| format_intent(intent, trait_id, GuidanceTag::GroupNamed, "intent", None, &mut warnings, &mut normalizations, &mut findings))
+            .unwrap_or_default()
+    };
     let behavior = trait_ref
         .behavior
         .as_ref()
@@ -541,9 +633,9 @@ pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
         .unwrap_or_default();
 
     if intent.is_empty() && behavior.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(FrameGuidance { intent, behavior })
+    Ok(Some(FrameGuidance { intent, behavior }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1522,5 +1614,157 @@ mod render_v2_shape_tests {
         );
         assert!(!fallback.trim().is_empty());
         assert!(warnings.iter().any(|w| w.contains("has no built-in or local summary/description")));
+    }
+
+    fn guidance_fixture(root_intent: serde_json::Value, agents: serde_json::Value) -> Trait {
+        serde_json::from_value(serde_json::json!({
+            "id": "frame-guidance-fixture",
+            "schema-version": "0.6",
+            "version": "1.0.0",
+            "name": "Frame Guidance Fixture",
+            "description": "Exercises assigned-agent intent rendering.",
+            "intent": root_intent,
+            "agent": agents,
+        }))
+        .expect("frame guidance fixture")
+    }
+
+    fn assigned<'a>(trait_ref: &'a Trait, id: &str) -> &'a crate::r#trait::Agent {
+        trait_ref
+            .agents
+            .iter()
+            .find(|agent| agent.id == id)
+            .expect("fixture agent")
+    }
+
+    #[test]
+    fn frame_guidance_merges_assigned_agent_intent_in_layer_order() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({
+                "require": [{ "id": "root-require", "summary": "Root require." }],
+                "focus": [{ "id": "root-focus", "summary": "Root focus." }],
+                "avoid": [{ "id": "root-avoid", "summary": "Root avoid." }],
+                "block": [{ "id": "root-block", "summary": "Root block." }],
+            }),
+            serde_json::json!([{
+                "id": "worker",
+                "description": "Worker.",
+                "intent": {
+                    "require": [{ "id": "agent-require", "summary": "Agent require." }],
+                    "focus": [{ "id": "agent-focus", "summary": "Agent focus." }],
+                    "avoid": [{ "id": "agent-avoid", "summary": "Agent avoid." }],
+                    "block": [{ "id": "agent-block", "summary": "Agent block." }],
+                },
+            }]),
+        );
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+            .expect("guidance resolves")
+            .expect("intent guidance")
+            .intent;
+        for pair in [
+            ("root-require", "agent-require"),
+            ("root-focus", "agent-focus"),
+            ("root-avoid", "agent-avoid"),
+            ("root-block", "agent-block"),
+        ] {
+            assert!(intent.find(pair.0).unwrap() < intent.find(pair.1).unwrap(), "{intent}");
+        }
+        assert!(intent.find("agent-require").unwrap() < intent.find("root-focus").unwrap(), "{intent}");
+        assert!(intent.find("agent-focus").unwrap() < intent.find("root-avoid").unwrap(), "{intent}");
+        assert!(intent.find("agent-avoid").unwrap() < intent.find("root-block").unwrap(), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_replaces_root_item_at_agent_layer_with_agent_directive() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "require": [{ "id": "shared", "summary": "Root directive." }] }),
+            serde_json::json!([{
+                "id": "worker",
+                "description": "Worker.",
+                "intent": { "require": [{ "id": "shared", "summary": "Agent directive." }] },
+            }]),
+        );
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker")))
+            .expect("guidance resolves")
+            .expect("intent guidance")
+            .intent;
+        assert_eq!(intent.matches("id=\"shared\"").count(), 1, "{intent}");
+        assert!(intent.contains("Agent directive."), "{intent}");
+        assert!(!intent.contains("Root directive."), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_excludes_unselected_agent_intent() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "focus": [{ "id": "root", "summary": "Root." }] }),
+            serde_json::json!([
+                { "id": "selected", "description": "Selected.", "intent": { "focus": [{ "id": "selected-only", "summary": "Selected." }] } },
+                { "id": "unselected", "description": "Unselected.", "intent": { "focus": [{ "id": "unselected-only", "summary": "Unselected." }] } },
+            ]),
+        );
+        let intent = frame_guidance(&trait_ref, Some(assigned(&trait_ref, "selected")))
+            .expect("guidance resolves")
+            .expect("intent guidance")
+            .intent;
+        assert!(intent.contains("selected-only"), "{intent}");
+        assert!(!intent.contains("unselected-only"), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_rejects_cross_layer_require_avoid_collision() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "require": [{ "id": "conflict", "summary": "Required." }] }),
+            serde_json::json!([{
+                "id": "worker",
+                "description": "Worker.",
+                "intent": { "avoid": [{ "id": "conflict", "summary": "Avoided." }] },
+            }]),
+        );
+        let error = match frame_guidance(&trait_ref, Some(assigned(&trait_ref, "worker"))) {
+            Ok(_) => panic!("cross-layer conflict must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.to_string(),
+            "invalid manifest at intent: effective guidance id \"conflict\" cannot appear in both require and avoid when assigned-agent intent participates"
+        );
+    }
+
+    #[test]
+    fn frame_guidance_accepts_root_only_require_avoid_collision() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({
+                "require": [{ "id": "collision", "summary": "Required." }],
+                "avoid": [{ "id": "collision", "summary": "Avoided." }],
+            }),
+            serde_json::json!([]),
+        );
+        let intent = frame_guidance(&trait_ref, None)
+            .expect("root collision remains valid")
+            .expect("intent guidance")
+            .intent;
+        assert!(intent.contains("Required."), "{intent}");
+        assert!(intent.contains("Avoided."), "{intent}");
+    }
+
+    #[test]
+    fn frame_guidance_is_byte_identical_when_assigned_agent_has_no_intent() {
+        let trait_ref = guidance_fixture(
+            serde_json::json!({ "focus": [{ "id": "root", "summary": "Root guidance." }] }),
+            serde_json::json!([
+                { "id": "absent", "description": "Absent." },
+                { "id": "empty", "description": "Empty.", "intent": {} },
+            ]),
+        );
+        let root = frame_guidance(&trait_ref, None)
+            .expect("root guidance")
+            .expect("root render");
+        for id in ["absent", "empty"] {
+            let rendered = frame_guidance(&trait_ref, Some(assigned(&trait_ref, id)))
+                .expect("agent guidance")
+                .expect("agent render");
+            assert_eq!(root.intent, rendered.intent);
+            assert_eq!(root.behavior, rendered.behavior);
+        }
     }
 }
