@@ -2658,9 +2658,11 @@ output = ["slot:answer"]
     );
     let loop_preview = preview_all("loop");
     assert_eq!(loop_preview.len(), 5, "loop preview: {loop_preview:?}");
+    let loop_preview_decide = &loop_preview[0];
     let loop_preview_a = &loop_preview[1];
     let loop_preview_nested = &loop_preview[2];
     let loop_preview_verdict = &loop_preview[3];
+    let loop_preview_later = &loop_preview[4];
     assert!(loop_preview_a.contains("loop-a-marker"), "{loop_preview_a}");
     assert!(
         loop_preview_nested.contains("loop-nested-marker"),
@@ -2796,6 +2798,33 @@ output = ["slot:answer"]
         extract_behavior(loop_nested1)
     );
     assert_ne!(extract_intent(loop_a0), extract_intent(loop_nested0));
+    assert_eq!(extract_intent(loop_verdict0), extract_intent(loop_verdict1));
+    assert_eq!(
+        extract_behavior(loop_verdict0),
+        extract_behavior(loop_verdict1)
+    );
+    for distinct in [loop_a0, loop_nested0, loop_verdict0] {
+        for other in [loop_a0, loop_nested0, loop_verdict0] {
+            if std::ptr::eq(distinct, other) {
+                continue;
+            }
+            assert_ne!(
+                extract_intent(distinct),
+                extract_intent(other),
+                "loop declarations must remain distinct"
+            );
+        }
+    }
+    for (preview, cli, label) in [
+        (loop_preview_decide, &loop_cli_frames[0], "decide"),
+        (loop_preview_a, loop_a0, "loop A"),
+        (loop_preview_nested, loop_nested0, "loop nested"),
+        (loop_preview_verdict, loop_verdict0, "loop verdict"),
+        (loop_preview_later, &loop_cli_frames[7], "loop later"),
+    ] {
+        assert_eq!(extract_intent(preview), extract_intent(cli), "{label}");
+        assert_eq!(extract_behavior(preview), extract_behavior(cli), "{label}");
+    }
     assert_eq!(extract_intent(loop_a0), extract_intent(loop_preview_a));
     assert_eq!(extract_behavior(loop_a0), extract_behavior(loop_preview_a));
     assert_eq!(
@@ -2818,9 +2847,149 @@ output = ["slot:answer"]
         );
         assert_unassigned_absent(mcp);
     }
+    for (label, prompt, marker, tone_marker, text, tone, declared, verbosity) in [
+        (
+            "loop A0 (MCP)",
+            &loop_mcp_frames[1],
+            "loop-a-marker",
+            "loop-a-tone-marker",
+            "Loop A replacement text.",
+            "Loop A tone.",
+            "Produce loop-a answer.",
+            Some("loop-a-verbosity-marker"),
+        ),
+        (
+            "loop nested0 (MCP)",
+            &loop_mcp_frames[2],
+            "loop-nested-marker",
+            "loop-nested-tone-marker",
+            "Loop nested replacement text.",
+            "Loop nested tone.",
+            "Produce loop-nested answer.",
+            None,
+        ),
+        (
+            "loop A1 (MCP)",
+            &loop_mcp_frames[4],
+            "loop-a-marker",
+            "loop-a-tone-marker",
+            "Loop A replacement text.",
+            "Loop A tone.",
+            "Produce loop-a answer.",
+            Some("loop-a-verbosity-marker"),
+        ),
+        (
+            "loop nested1 (MCP)",
+            &loop_mcp_frames[5],
+            "loop-nested-marker",
+            "loop-nested-tone-marker",
+            "Loop nested replacement text.",
+            "Loop nested tone.",
+            "Produce loop-nested answer.",
+            None,
+        ),
+    ] {
+        assert_leaf(
+            label,
+            prompt,
+            &all_loop_markers,
+            &all_loop_prompt_texts,
+            marker,
+            tone_marker,
+            text,
+            tone,
+            declared,
+            verbosity,
+            "loop-a-verbosity-marker",
+        );
+    }
+    for (label, prompt, own_markers) in [
+        (
+            "preview decide",
+            loop_preview_decide.as_str(),
+            &["loop-pre-marker"][..],
+        ),
+        (
+            "preview A",
+            loop_preview_a.as_str(),
+            &["loop-a-marker", "loop-a-tone-marker"][..],
+        ),
+        (
+            "preview nested",
+            loop_preview_nested.as_str(),
+            &["loop-nested-marker", "loop-nested-tone-marker"][..],
+        ),
+        ("preview verdict", loop_preview_verdict.as_str(), &[][..]),
+        (
+            "preview later",
+            loop_preview_later.as_str(),
+            &["loop-later-marker"][..],
+        ),
+    ] {
+        for marker in all_loop_markers {
+            if own_markers.contains(&marker) {
+                assert_eq!(prompt.matches(marker).count(), 1, "{label}: {prompt}");
+            } else {
+                assert!(
+                    !prompt.contains(marker),
+                    "{label} leaked {marker}: {prompt}"
+                );
+            }
+        }
+        for container in [
+            "the-loop",
+            "loop-branch",
+            "sequence:loop-body",
+            "sequence:loop-branch-then",
+        ] {
+            assert!(!prompt.contains(container), "{label}: {prompt}");
+        }
+        assert!(!prompt.contains("source=\""), "{label}: {prompt}");
+    }
+    for (index, prompt) in loop_mcp_frames.iter().enumerate() {
+        let guidance = format!("{}{}", extract_intent(prompt), extract_behavior(prompt));
+        for container in [
+            "the-loop",
+            "loop-branch",
+            "sequence:loop-body",
+            "sequence:loop-branch-then",
+        ] {
+            assert!(
+                !guidance.contains(container),
+                "loop MCP frame {index}: {guidance}"
+            );
+        }
+        assert!(
+            !prompt.contains("source=\""),
+            "loop MCP frame {index}: {prompt}"
+        );
+    }
     for (cli, mcp) in loop_cli_frames.iter().zip(&loop_mcp_frames) {
         assert_eq!(extract_intent(cli), extract_intent(mcp));
         assert_eq!(extract_behavior(cli), extract_behavior(mcp));
+    }
+    for frames in [&loop_cli_frames, &loop_mcp_frames] {
+        for (index, own_markers) in [
+            &["loop-pre-marker"][..],
+            &["loop-a-marker", "loop-a-tone-marker"][..],
+            &["loop-nested-marker", "loop-nested-tone-marker"][..],
+            &[][..],
+            &["loop-a-marker", "loop-a-tone-marker"][..],
+            &["loop-nested-marker", "loop-nested-tone-marker"][..],
+            &[][..],
+            &["loop-later-marker"][..],
+        ]
+        .iter()
+        .enumerate()
+        {
+            for marker in *own_markers {
+                assert_eq!(
+                    frames[index].matches(marker).count(),
+                    1,
+                    "loop frame {index}"
+                );
+            }
+        }
     }
 
     let loop_session = home.join("loop-cli.json");
@@ -3042,27 +3211,54 @@ output = ["slot:answer"]
     assert_exit_code(&loop_export, 0);
     let loop_skill =
         fs::read_to_string(loop_export_dir.join("agent-intent").join("SKILL.md")).unwrap();
-    for (source, text) in [
-        ("sequence:loop-body/loop-a", "Loop A replacement text."),
+    for (source, text, tone) in [
+        (
+            "sequence:loop-body/loop-a",
+            "Loop A replacement text.",
+            "Loop A tone.",
+        ),
         (
             "sequence:loop-branch-then/loop-nested-leaf",
             "Loop nested replacement text.",
+            "Loop nested tone.",
         ),
     ] {
-        assert_eq!(
-            loop_skill
-                .matches(&format!("id=\"shared\" source=\"{source}\""))
-                .count(),
-            1,
-            "{loop_skill}"
-        );
-        assert!(loop_skill.contains(text), "{loop_skill}");
+        for (id, own_text) in [("shared", text), ("shared-tone", tone)] {
+            let own_tag = format!("id=\"{id}\" source=\"{source}\">");
+            assert_eq!(loop_skill.matches(&own_tag).count(), 1, "{loop_skill}");
+            let block_start = loop_skill
+                .find(&own_tag)
+                .unwrap_or_else(|| panic!("static export missing {own_tag}: {loop_skill}"));
+            let block_end = loop_skill[block_start..]
+                .find(if id == "shared" {
+                    "</intent>"
+                } else {
+                    "</behavior>"
+                })
+                .map(|offset| block_start + offset)
+                .unwrap_or(loop_skill.len());
+            assert!(
+                loop_skill[block_start..block_end].contains(own_text),
+                "static export source block for {own_tag} leaked or omitted its own text: {loop_skill}"
+            );
+        }
     }
+    let verdict_tag = "id=\"loop-verdict-marker\" source=\"sequence:loop-body/step-3\">";
+    assert_eq!(loop_skill.matches(verdict_tag).count(), 1, "{loop_skill}");
+    let verdict_start = loop_skill.find(verdict_tag).unwrap();
+    let verdict_end = loop_skill[verdict_start..]
+        .find("</intent>")
+        .map(|offset| verdict_start + offset)
+        .unwrap_or(loop_skill.len());
     assert!(
-        loop_skill.contains("source=\"sequence:loop-body/step-3\""),
+        loop_skill[verdict_start..verdict_end].contains("Loop verdict static marker."),
         "{loop_skill}"
     );
-    for claim in ["active", "ready", "selected"] {
+    assert!(
+        loop_skill.contains("Static render advisory") && loop_skill.contains("Static host note"),
+        "loop static export must remain explicitly labeled static: {loop_skill}"
+    );
+    for claim in ["active", "ready", "selected", "not-yet-accepted"] {
         assert!(
             !loop_skill.to_ascii_lowercase().contains(claim),
             "loop static export claimed {claim}: {loop_skill}"
