@@ -259,8 +259,9 @@ output = ["slot:answer"]
     let run = |transport: &str, output: &str| {
         let _ = fs::remove_file(&capture);
         let _ = fs::remove_file(capture.with_extension("txt.args"));
-        let _ = fs::remove_file(capture.with_extension("txt.0"));
-        let _ = fs::remove_file(capture.with_extension("txt.1"));
+        for index in 0..4 {
+            let _ = fs::remove_file(capture.with_extension(format!("txt.{index}")));
+        }
         let _ = fs::remove_file(capture.with_extension("txt.calls"));
         let _ = fs::remove_file(&marker);
         fs::write(repo.join(".ctx/traits/runtime.toml"), runtime(transport)).unwrap();
@@ -890,4 +891,289 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
             prompt_compatibility = Some((preview, cli, mcp));
         }
     }
+
+    // 0255.9: a nested named-sequence chain (procedure -> outer-ref ->
+    // outer.sequence -> outer-inner-ref -> inner.sequence). `outer-ref` and
+    // `outer-inner-ref` are pure grouping containers, never dispatch targets.
+    // Sequence-local indices deliberately collide across distinct owners —
+    // index 0: `outer-direct` (in `outer`) vs `inner-absent` (in `inner`);
+    // index 1: `outer-inner-ref` (in `outer`) vs `inner-guided` (in `inner`)
+    // vs `later` (top-level, after the container) — so a lookup keyed on
+    // index or item id alone, rather than full structural position, would
+    // select the wrong declaration.
+    let nested_header = canonical.split_once("[procedure]").unwrap().0;
+    let nested_fixture = |inner_absent_guidance: &str| {
+        format!(
+            r#"{nested_header}[[sequence.inner.sequence]]
+id = "inner-absent"
+title = "Inner absent"
+agent = "agent:worker"
+prompt = "Produce inner-absent answer."
+{inner_absent_guidance}output = ["slot:answer"]
+
+[[sequence.inner.sequence]]
+id = "inner-guided"
+title = "Inner guided"
+agent = "agent:worker"
+prompt = "Produce inner-guided answer."
+intent = {{ require = [{{ id = "shared", summary = "Inner guided replacement text." }}, {{ id = "inner-guided-marker", summary = "Inner guided leaf marker." }}] }}
+output = ["slot:answer"]
+
+[[sequence.outer.sequence]]
+id = "outer-direct"
+title = "Outer direct"
+agent = "agent:worker"
+prompt = "Produce outer-direct answer."
+intent = {{ require = [{{ id = "outer-direct-marker", summary = "Outer direct sibling marker." }}] }}
+output = ["slot:answer"]
+
+[[sequence.outer.sequence]]
+id = "outer-inner-ref"
+title = "Outer inner ref"
+kind = "sequence"
+sequence = "sequence:inner"
+
+[procedure]
+description = "Nested named-sequence chain proving structural leaf selection."
+
+[[procedure.sequence]]
+id = "outer-ref"
+title = "Outer ref"
+kind = "sequence"
+sequence = "sequence:outer"
+
+[[procedure.sequence]]
+id = "later"
+title = "Later"
+agent = "agent:worker"
+prompt = "Produce later answer."
+intent = {{ require = [{{ id = "later-prompt-marker", summary = "Later top-level prompt marker." }}] }}
+output = ["slot:answer"]
+"#
+        )
+    };
+
+    let preview_all = |label: &str| -> Vec<String> {
+        let output = run_ctx(
+            &[
+                "traits",
+                "internal",
+                "preview",
+                "--file",
+                generated.to_str().unwrap(),
+                "--json",
+            ],
+            &repo,
+            &home,
+        );
+        assert_exit_code(&output, 0);
+        let (stdout, stderr) = utf8(&output);
+        let json: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|error| {
+            panic!("{label} preview was not JSON: {error}\nstdout={stdout}\nstderr={stderr}")
+        });
+        json["frames"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label} preview had no frames array: {json}"))
+            .iter()
+            .map(|frame| {
+                frame["prompt"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{label} preview frame had no prompt: {json}"))
+                    .to_string()
+            })
+            .collect()
+    };
+
+    let assert_nested_markers = |label: &str, prompts: &[String]| {
+        assert_eq!(prompts.len(), 4, "{label} frame count: {prompts:?}");
+        let outer_direct = &prompts[0];
+        let inner_absent = &prompts[1];
+        let inner_guided = &prompts[2];
+        let later = &prompts[3];
+
+        assert!(
+            outer_direct.contains("outer-direct-marker"),
+            "{label} outer-direct missing its own marker: {outer_direct}"
+        );
+        assert!(
+            !outer_direct.contains("inner-guided-marker")
+                && !outer_direct.contains("later-prompt-marker"),
+            "{label} outer-direct leaked a sibling/later marker: {outer_direct}"
+        );
+
+        assert!(
+            !inner_absent.contains("outer-direct-marker")
+                && !inner_absent.contains("inner-guided-marker")
+                && !inner_absent.contains("later-prompt-marker"),
+            "{label} inner-absent leaked a container/sibling/later marker: {inner_absent}"
+        );
+
+        assert!(
+            inner_guided.contains("inner-guided-marker"),
+            "{label} inner-guided missing its own marker: {inner_guided}"
+        );
+        assert!(
+            !inner_guided.contains("outer-direct-marker")
+                && !inner_guided.contains("later-prompt-marker"),
+            "{label} inner-guided leaked a stale/previous/later marker: {inner_guided}"
+        );
+        assert_eq!(
+            inner_guided.matches("id=\"shared\"").count(),
+            1,
+            "{label} inner-guided: {inner_guided}"
+        );
+        assert!(
+            inner_guided.find("root-only").unwrap() < inner_guided.find("agent-only").unwrap(),
+            "{label} inner-guided root/agent ordering: {inner_guided}"
+        );
+        assert!(
+            inner_guided.find("agent-only").unwrap() < inner_guided.find("shared").unwrap(),
+            "{label} inner-guided agent/shared ordering: {inner_guided}"
+        );
+        assert!(
+            inner_guided.find("shared").unwrap()
+                < inner_guided.find("inner-guided-marker").unwrap(),
+            "{label} inner-guided shared/prompt ordering: {inner_guided}"
+        );
+        assert!(
+            inner_guided.contains("Inner guided replacement text."),
+            "{label} inner-guided scalar precedence: {inner_guided}"
+        );
+        assert!(
+            !inner_guided.contains("Assigned replacement text."),
+            "{label} inner-guided stale agent text leaked: {inner_guided}"
+        );
+
+        assert!(
+            later.contains("later-prompt-marker"),
+            "{label} later missing its own marker: {later}"
+        );
+        assert!(
+            !later.contains("outer-direct-marker") && !later.contains("inner-guided-marker"),
+            "{label} later leaked a container/sibling marker: {later}"
+        );
+
+        for prompt in prompts {
+            assert_unassigned_absent(prompt);
+            assert!(
+                !prompt.contains("source=\""),
+                "{label} leaked static declaration source attribution: {prompt}"
+            );
+        }
+    };
+
+    let mut nested_baseline: Option<(Vec<String>, Vec<String>, Vec<String>)> = None;
+    for (name, inner_absent_guidance) in [("nested-absent", ""), ("nested-empty", "intent = {}\n")]
+    {
+        fs::write(&generated, nested_fixture(inner_absent_guidance)).unwrap();
+        require_success(
+            "approve nested fixture",
+            &[
+                "traits",
+                "internal",
+                "review",
+                "--file",
+                generated.to_str().unwrap(),
+                "--approve",
+            ],
+            &repo,
+            &home,
+        );
+
+        let preview_prompts = preview_all(name);
+        assert_nested_markers(&format!("{name} preview"), &preview_prompts);
+
+        let (_, cli_args) = run("cli", "nested-cli.json");
+        assert_system(&cli_args, "--cli-system");
+        let cli_prompts: Vec<String> = (0..4)
+            .map(|index| {
+                fs::read_to_string(capture.with_extension(format!("txt.{index}"))).unwrap()
+            })
+            .collect();
+        assert_nested_markers(&format!("{name} cli"), &cli_prompts);
+
+        let (_, mcp_args) = run("mcp", "nested-mcp.json");
+        assert_system(&mcp_args, "--mcp-system");
+        let mcp_prompts: Vec<String> = (0..4)
+            .map(|index| {
+                fs::read_to_string(capture.with_extension(format!("txt.{index}"))).unwrap()
+            })
+            .collect();
+        assert_nested_markers(&format!("{name} mcp"), &mcp_prompts);
+
+        if let Some((baseline_preview, baseline_cli, baseline_mcp)) = &nested_baseline {
+            assert_eq!(&preview_prompts, baseline_preview, "{name} preview changed");
+            assert_eq!(&cli_prompts, baseline_cli, "{name} CLI prompts changed");
+            assert_eq!(&mcp_prompts, baseline_mcp, "{name} MCP prompts changed");
+        } else {
+            nested_baseline = Some((preview_prompts, cli_prompts, mcp_prompts));
+        }
+    }
+
+    // A nested (non-top-level) leaf's require/avoid conflict must still fail
+    // before the harness ever runs — the structural admission broadening
+    // must not move conflict detection later than dispatch.
+    let nested_conflict_fixture = format!(
+        r#"{nested_header}[[sequence.outer.sequence]]
+id = "outer-conflict"
+title = "Outer conflict"
+agent = "agent:worker"
+prompt = "Produce an answer."
+intent = {{ avoid = [{{ id = "shared", summary = "Prompt conflict." }}] }}
+output = ["slot:answer"]
+
+[procedure]
+description = "Nested named-sequence conflict fixture."
+
+[[procedure.sequence]]
+id = "outer-ref"
+title = "Outer ref"
+kind = "sequence"
+sequence = "sequence:outer"
+"#
+    );
+    fs::write(&generated, &nested_conflict_fixture).unwrap();
+    require_success(
+        "approve nested conflict fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let _ = fs::remove_file(&marker);
+    let nested_conflict = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            home.join("nested-conflict.json").to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert!(
+        !nested_conflict.status.success(),
+        "nested prompt conflict unexpectedly dispatched"
+    );
+    let (_, stderr) = utf8(&nested_conflict);
+    assert!(
+        stderr.contains(
+            "effective guidance id \"shared\" cannot appear in both require and avoid when ready-prompt intent participates"
+        )
+    );
+    assert!(
+        !marker.exists(),
+        "harness ran before the nested prompt conflict was rejected"
+    );
 }
