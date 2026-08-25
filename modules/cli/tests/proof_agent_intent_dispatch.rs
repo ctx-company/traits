@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -84,7 +83,6 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     let generated = package.join("generated/index.toml");
     let capture = home.join("capture.txt");
     let marker = home.join("called");
-    let preserve_captures = Cell::new(false);
     fs::create_dir_all(generated.parent().unwrap()).unwrap();
     git_init(&repo);
 
@@ -92,7 +90,7 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nfor last; do :; done\nprintf '%s' \"$last\" > {}\nif [ -f {}.calls ]; then n=$(($(wc -l < {}.calls))); else n=0; fi\nprintf '%s' \"$last\" > {}.$n\nprintf 'x\\n' >> {}.calls\ntouch {}\nprintf '{{\"answer\":\"ok\"}}'\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then printf 'capture-1.0\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > {}.args\nctx=\nfor arg; do\n  case \"$arg\" in\n    *'\"command\":'*) ctx=$(printf '%s' \"$arg\" | sed -n 's/.*\"command\":\"\\([^\"]*\\)\".*/\\1/p') ;;\n  esac\ndone\nfor last; do :; done\nprintf '%s' \"$last\" > {}\nif [ -f {}.calls ]; then n=$(($(wc -l < {}.calls))); else n=0; fi\nprintf '%s' \"$last\" > {}.$n\nprintf 'x\\n' >> {}.calls\ntouch {}\nsession=$(printf '%s\\n' \"$last\" | sed -n 's/^Run session: //p')\nif [ -n \"$session\" ]; then\n  printf '{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"name\":\"ctx_traits_run_set\",\"arguments\":{{\"session\":\"%s\",\"target\":\"slot:answer\",\"value\":\"ok\",\"agent\":\"worker\",\"harness\":\"capture\"}}}}}}\\n' \"$session\" | \"$ctx\" traits internal mcp >/dev/null || exit 1\nfi\nprintf '{{\"answer\":\"ok\"}}'\n",
             capture.display(),
             capture.display(),
             capture.display(),
@@ -156,7 +154,7 @@ output = ["slot:answer"]
 
     let runtime = |transport: &str| {
         format!(
-            "schema-version = \"0.4\"\n\n[harness.capture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\", \"mcp\"]\nversion-probe = [\"--probe\"]\n\n[harness.capture.cli]\nargv = []\nprompt-via = \"arg\"\noutput = \"raw-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[harness.capture.mcp]\nsystem-prompt-flag = \"--mcp-system\"\n\n[agent.role.worker]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n",
+            "schema-version = \"0.4\"\n\n[harness.capture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\", \"mcp\"]\nversion-probe = [\"--probe\"]\n\n[harness.capture.cli]\nargv = []\nprompt-via = \"arg\"\noutput = \"raw-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[harness.capture.mcp]\nmcp-config-flag = \"--mcp-config\"\nsystem-prompt-flag = \"--mcp-system\"\n\n[agent.role.worker]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n",
             script.to_string_lossy(),
         )
     };
@@ -259,13 +257,11 @@ output = ["slot:answer"]
         )
     };
     let run = |transport: &str, output: &str| {
-        if !preserve_captures.get() {
-            let _ = fs::remove_file(&capture);
-            let _ = fs::remove_file(capture.with_extension("txt.args"));
-            let _ = fs::remove_file(capture.with_extension("txt.0"));
-            let _ = fs::remove_file(capture.with_extension("txt.1"));
-            let _ = fs::remove_file(capture.with_extension("txt.calls"));
-        }
+        let _ = fs::remove_file(&capture);
+        let _ = fs::remove_file(capture.with_extension("txt.args"));
+        let _ = fs::remove_file(capture.with_extension("txt.0"));
+        let _ = fs::remove_file(capture.with_extension("txt.1"));
+        let _ = fs::remove_file(capture.with_extension("txt.calls"));
         let _ = fs::remove_file(&marker);
         fs::write(repo.join(".ctx/traits/runtime.toml"), runtime(transport)).unwrap();
         require_success(
@@ -561,10 +557,6 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
         "prompt = \"Produce first answer.\"\nintent = { require = [{ id = \"shared\", summary = \"Prompt replacement text.\" }, { id = \"current-only\", summary = \"Current prompt guidance.\" }] }\noutput = [\"slot:answer\"]\n\n[[procedure.sequence]]\nid = \"next\"\ntitle = \"Next\"\nagent = \"agent:worker\"\nprompt = \"Produce second answer.\"\nintent = { require = [{ id = \"next-only\", summary = \"Next prompt guidance.\" }] }\ninput = [\"slot:answer\"]\noutput = [\"slot:answer\"]",
     );
-    let prompt_second = canonical.replace(
-        "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
-        "prompt = \"Produce second answer.\"\nintent = { require = [{ id = \"next-only\", summary = \"Next prompt guidance.\" }] }\noutput = [\"slot:answer\"]",
-    );
     fs::write(&generated, &prompt_canonical).unwrap();
     let previews = run_ctx(
         &[
@@ -585,32 +577,35 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
     let second_preview = previews["frames"][1]["prompt"].as_str().unwrap();
     let first_intent = extract_intent(first_preview);
     let second_intent = extract_intent(second_preview);
-    assert!(first_intent.find("root-only").unwrap() < first_intent.find("shared").unwrap());
+    assert!(first_intent.find("root-only").unwrap() < first_intent.find("agent-only").unwrap());
+    assert!(first_intent.find("agent-only").unwrap() < first_intent.find("shared").unwrap());
     assert!(first_intent.find("shared").unwrap() < first_intent.find("current-only").unwrap());
+    assert_eq!(first_intent.matches("id=\"shared\"").count(), 1);
     assert!(first_intent.contains("Prompt replacement text."));
     assert!(!first_intent.contains("Assigned replacement text."));
     assert!(!first_intent.contains("next-only"));
     assert!(second_intent.contains("next-only"));
+    assert!(second_intent.find("root-only").unwrap() < second_intent.find("shared").unwrap());
+    assert!(second_intent.find("shared").unwrap() < second_intent.find("agent-only").unwrap());
+    assert!(second_intent.find("agent-only").unwrap() < second_intent.find("next-only").unwrap());
+    assert_eq!(second_intent.matches("id=\"shared\"").count(), 1);
     assert!(!second_intent.contains("current-only"));
     assert_unassigned_absent(first_preview);
     assert_unassigned_absent(second_preview);
-    let _ = run("cli", "prompt-cli.json");
-    fs::write(&generated, &prompt_second).unwrap();
-    preserve_captures.set(true);
-    let _ = run("cli", "prompt-cli.json");
-    preserve_captures.set(false);
+    let (_, cli_args) = run("cli", "prompt-cli.json");
     let first_cli = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
     let second_cli = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
     assert_eq!(extract_intent(&first_cli), first_intent);
     assert_eq!(extract_intent(&second_cli), second_intent);
+    assert_system(&cli_args, "--cli-system");
     assert_unassigned_absent(&first_cli);
     assert_unassigned_absent(&second_cli);
-    fs::write(&generated, &prompt_canonical).unwrap();
-    let (first_mcp, _) = run("mcp", "prompt-mcp.json");
-    fs::write(&generated, &prompt_second).unwrap();
-    let (second_mcp, _) = run("mcp", "prompt-mcp-second.json");
+    let (_, mcp_args) = run("mcp", "prompt-mcp.json");
+    let first_mcp = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+    let second_mcp = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
     assert_eq!(extract_intent(&first_mcp), first_intent);
     assert_eq!(extract_intent(&second_mcp), second_intent);
+    assert_system(&mcp_args, "--mcp-system");
     assert_unassigned_absent(&first_mcp);
     assert_unassigned_absent(&second_mcp);
 
