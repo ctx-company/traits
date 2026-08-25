@@ -937,6 +937,7 @@ title = "Outer direct"
 agent = "agent:worker"
 prompt = "Produce outer-direct answer."
 intent = {{ require = [{{ id = "outer-direct-marker", summary = "Outer direct sibling marker." }}] }}
+behavior = {{ tone = [{{ id = "outer-direct-tone-marker", summary = "Outer direct sibling tone marker." }}] }}
 output = ["slot:answer"]
 
 [[sequence.outer.sequence]]
@@ -960,6 +961,7 @@ title = "Later"
 agent = "agent:worker"
 prompt = "Produce later answer."
 intent = {{ require = [{{ id = "later-prompt-marker", summary = "Later top-level prompt marker." }}] }}
+behavior = {{ tone = [{{ id = "later-tone-marker", summary = "Later top-level prompt tone marker." }}] }}
 output = ["slot:answer"]
 "#
         )
@@ -1008,15 +1010,24 @@ output = ["slot:answer"]
             "{label} outer-direct missing its own marker: {outer_direct}"
         );
         assert!(
+            outer_direct.contains("outer-direct-tone-marker"),
+            "{label} outer-direct missing its own behavior marker: {outer_direct}"
+        );
+        assert!(
             !outer_direct.contains("inner-guided-marker")
-                && !outer_direct.contains("later-prompt-marker"),
+                && !outer_direct.contains("later-prompt-marker")
+                && !outer_direct.contains("inner-guided-tone-marker")
+                && !outer_direct.contains("later-tone-marker"),
             "{label} outer-direct leaked a sibling/later marker: {outer_direct}"
         );
 
         assert!(
             !inner_absent.contains("outer-direct-marker")
                 && !inner_absent.contains("inner-guided-marker")
-                && !inner_absent.contains("later-prompt-marker"),
+                && !inner_absent.contains("later-prompt-marker")
+                && !inner_absent.contains("outer-direct-tone-marker")
+                && !inner_absent.contains("inner-guided-tone-marker")
+                && !inner_absent.contains("later-tone-marker"),
             "{label} inner-absent leaked a container/sibling/later marker: {inner_absent}"
         );
 
@@ -1026,7 +1037,9 @@ output = ["slot:answer"]
         );
         assert!(
             !inner_guided.contains("outer-direct-marker")
-                && !inner_guided.contains("later-prompt-marker"),
+                && !inner_guided.contains("later-prompt-marker")
+                && !inner_guided.contains("outer-direct-tone-marker")
+                && !inner_guided.contains("later-tone-marker"),
             "{label} inner-guided leaked a stale/previous/later marker: {inner_guided}"
         );
         assert_eq!(
@@ -1111,7 +1124,14 @@ output = ["slot:answer"]
             "{label} later missing its own marker: {later}"
         );
         assert!(
-            !later.contains("outer-direct-marker") && !later.contains("inner-guided-marker"),
+            later.contains("later-tone-marker"),
+            "{label} later missing its own behavior marker: {later}"
+        );
+        assert!(
+            !later.contains("outer-direct-marker")
+                && !later.contains("inner-guided-marker")
+                && !later.contains("outer-direct-tone-marker")
+                && !later.contains("inner-guided-tone-marker"),
             "{label} later leaked a container/sibling marker: {later}"
         );
 
@@ -1145,8 +1165,11 @@ output = ["slot:answer"]
     };
 
     let mut nested_baseline: Option<(Vec<String>, Vec<String>, Vec<String>)> = None;
-    for (name, inner_absent_guidance) in [("nested-absent", ""), ("nested-empty", "intent = {}\n")]
-    {
+    for (name, inner_absent_guidance) in [
+        ("nested-absent", ""),
+        ("nested-empty", "intent = {}\n"),
+        ("nested-behavior-empty", "behavior = {}\n"),
+    ] {
         fs::write(&generated, nested_fixture(inner_absent_guidance)).unwrap();
         require_success(
             "approve nested fixture",
