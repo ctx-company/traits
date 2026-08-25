@@ -79,15 +79,16 @@ validation = """
 
 Run verification in this strict order: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core prompt_intent`, `just sdk-generate`, `pnpm --dir packages/cdk run test`, then `CARGO_TARGET_DIR=target just test`. The clean observed baseline is HEAD `9fd7ebb9`: the CDK suite passed 278/278 and focused existing agent-intent tests passed 6/6. The archived `0255.1` closure's failed broad checks are not green-baseline evidence. Perform no more than two targeted repair-and-rerun rounds; success requires all four commands and substantive final review to pass, otherwise report the concrete blocker instead of completing the task.
 """
+
 [relations]
-parent = "0255"
 depends-on = ["0255.1"]
+parent = "0255"
 
 [[checks]]
 name = "prompt intent focused canonical and static tests pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core prompt_intent"
-expect = "test result: ok\\. 8 passed; 0 failed"
 timeout-ms = 600000
+expect = 'test result: ok\. 8 passed; 0 failed'
 
 [[checks]]
 name = "prompt intent SDK generation succeeds"
