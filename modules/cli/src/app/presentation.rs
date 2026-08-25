@@ -1,9 +1,9 @@
 //! Shared scrollback-output kit for human-facing CLI commands (P465).
 //!
 //! Locks the ctx.gate-style panel grammar every migrated command reuses: a
-//! `╭─ product ─ headline` top border, a `│` gutter on every body/section
+//! `┌── product · headline` top border, a `│` gutter on every body/section
 //! line, ordered rows and sections, aligned lowercase-labelled rows, an
-//! explicit `next` action row, and a `╰─ state` closing line. Styled output
+//! explicit `next` action row, and a `└── state` closing line. Styled output
 //! reuses [`tui`]'s named ANSI/faint palette; anywhere styling is
 //! unavailable (non-TTY, `NO_COLOR`, `CI`, `TERM=dumb`) the same semantic
 //! content renders as plain indented text with no ANSI or box glyphs.
@@ -36,6 +36,8 @@ const MIN_VALUE_WIDTH: usize = 1;
 const BODY_INDENT: &str = "  ";
 /// The locked gutter bar prefixing every body/section content line.
 const BAR: &str = "│";
+const TOP_BORDER: &str = "┌── ";
+const BOTTOM_BORDER: &str = "└── ";
 
 /// The closed set of tones a panel row may use — narrower than [`Tone`]
 /// itself so callers cannot reach for `Tone::Warn`/`Tone::Bold` here. Labels
@@ -166,9 +168,9 @@ impl PanelStatus {
     }
 }
 
-/// A structured ctx.gate-style panel: a `╭─ product ─ headline` top border,
+/// A structured ctx.gate-style panel: a `┌── product · headline` top border,
 /// ordered rows/sections behind a `│` gutter, an optional explicit `next`
-/// action row, and a required `╰─ state` closing line. Construct with
+/// action row, and a required `└── state` closing line. Construct with
 /// [`Panel::new`], which requires the product, headline, and closing state
 /// up front, then add rows/sections with the builder methods.
 #[derive(Clone, Debug)]
@@ -270,11 +272,11 @@ impl Panel {
     }
 
     /// The styled ctx.gate-style rendering at an explicit frame width: a
-    /// `╭─ product ─ headline` top border with no separator directly after
+    /// `┌── product · headline` top border with no separator directly after
     /// it, indented `│   {label} value` rows, each section introduced by
     /// exactly one bare `│` separator immediately before its `│ {title}`
     /// line (never after), the explicit `next` row with no separator before
-    /// or after it, and a `╰─ state` closing line with no right wall and no
+    /// or after it, and a `└── state` closing line with no right wall and no
     /// separator before it. [`Self::styled_lines`] delegates here using the
     /// panel's own detected width; tests call this directly to exercise the
     /// same renderer at an explicit narrow width.
@@ -318,7 +320,7 @@ impl Panel {
     /// title, rows, sections, next action, closing state — with no ANSI
     /// escapes and no frame glyphs.
     pub(crate) fn plain_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("{} {}", self.product, self.headline)];
+        let mut lines = vec![header_text(&self.product, &self.headline)];
         for item in &self.items {
             match item {
                 PanelItem::Row(row) => lines.push(plain_row_line(row)),
@@ -349,14 +351,14 @@ impl Panel {
 
     /// The one-row styled projection (P467 §3.1a): the same top-border and
     /// closing-state text `render_styled` would emit as two lines, collapsed
-    /// onto one — `{product} {headline} · {state}` — with the closing
+    /// onto one — `{product} · {headline} · {state}` — with the closing
     /// state's tone preserved exactly as [`Self::render_styled`] applies it
     /// to the bottom border. Ignores `items`/`next`; callers of
     /// [`emit_one_row`] never add either.
     fn one_row_styled_line(&self) -> Line {
         let mut line = Line::blank();
         line.push(
-            format!("{} {} · ", self.product, self.headline),
+            format!("{} · ", header_text(&self.product, &self.headline)),
             Tone::Default,
         );
         line.push(self.status.text().to_string(), self.status.tone());
@@ -367,15 +369,14 @@ impl Panel {
     /// [`Self::one_row_styled_line`], no ANSI or frame glyphs.
     fn one_row_plain_line(&self) -> String {
         format!(
-            "{} {} · {}",
-            self.product,
-            self.headline,
+            "{} · {}",
+            header_text(&self.product, &self.headline),
             self.status.text()
         )
     }
 }
 
-/// Emits a single line in house vocabulary — `{product} {headline} ·
+/// Emits a single line in house vocabulary — `{product} · {headline} ·
 /// {status}` — through the same styled/plain gate [`emit_human`] uses, for
 /// commands whose default output is one fact, not a panel (P467 §3.1a).
 /// There is no verbose/detail variant: a one-row command has no detail body
@@ -432,16 +433,14 @@ fn section_title_lines(title: &str, frame_width: usize) -> Vec<Line> {
         .collect()
 }
 
-/// Renders the `╭─ product ─ headline` top border. When the combined
+/// Renders the `┌── product · headline` top border. When the combined
 /// product/headline text is wider than the frame, it wraps at word
 /// boundaries (hard-splitting a single overlong word) onto gutter-prefixed
 /// continuation lines rather than dropping content.
 fn top_border_lines(product: &str, headline: &str, frame_width: usize) -> Vec<Line> {
-    let prefix = "╭─ ";
-    let glue = " ─ ";
-    let content = format!("{product}{glue}{headline}");
+    let content = header_text(product, headline);
     wrap_border(
-        prefix,
+        TOP_BORDER,
         &gutter_prefix(),
         &content,
         frame_width,
@@ -449,13 +448,20 @@ fn top_border_lines(product: &str, headline: &str, frame_width: usize) -> Vec<Li
     )
 }
 
-/// Renders the `╰─ state` closing line with no right wall. Wraps overlong
+/// Renders the `└── state` closing line with no right wall. Wraps overlong
 /// state text the same way as the top border, using plain spaces (there is
 /// no gutter below the closing line) for continuations.
 fn bottom_border_lines(state: &str, tone: Tone, frame_width: usize) -> Vec<Line> {
-    let prefix = "╰─ ";
-    let continuation = " ".repeat(tui::display_width(prefix));
-    wrap_border(prefix, &continuation, state, frame_width, tone)
+    let continuation = " ".repeat(tui::display_width(BOTTOM_BORDER));
+    wrap_border(BOTTOM_BORDER, &continuation, state, frame_width, tone)
+}
+
+fn header_text(product: &str, headline: &str) -> String {
+    if headline.is_empty() {
+        product.to_string()
+    } else {
+        format!("{product} · {headline}")
+    }
 }
 
 fn wrap_border(
@@ -801,6 +807,12 @@ mod tests {
             .next(PanelRow::new("next", "run `ctx traits check`"))
     }
 
+    #[test]
+    fn header_text_omits_separator_for_an_empty_headline() {
+        assert_eq!(header_text("demo", ""), "demo");
+        assert_eq!(header_text("ctx", "doctor"), "ctx · doctor");
+    }
+
     fn plain_texts(lines: &[Line]) -> Vec<String> {
         lines
             .iter()
@@ -827,7 +839,7 @@ mod tests {
         // `│   ` rows, the `next` row with no separator before or after it,
         // and the closing line with no separator before it.
         let expected = vec![
-            "╭─ ctx ─ doctor".to_string(),
+            "┌── ctx · doctor".to_string(),
             "│   trait:    guarded-change".to_string(),
             "│   status:   ok".to_string(),
             "│".to_string(),
@@ -835,15 +847,15 @@ mod tests {
             "│   resolved: harness.toml".to_string(),
             "│   tier:     project".to_string(),
             "│   next:     run `ctx traits check`".to_string(),
-            "╰─ passed".to_string(),
+            "└── passed".to_string(),
         ];
         assert_eq!(
             plain, expected,
             "line sequence must match the locked grammar exactly"
         );
 
-        // No square glyphs anywhere, and the closing line has no right wall.
-        for glyph in ["┌", "┐", "└", "┘"] {
+        // No rounded glyphs anywhere, and the closing line has no right wall.
+        for glyph in ["╭", "╮", "╰", "╯"] {
             assert!(
                 !plain.join("\n").contains(glyph),
                 "must not contain {glyph:?}"
@@ -892,7 +904,7 @@ mod tests {
             ));
 
         let styled = plain_texts(&panel.styled_lines()).join("\n");
-        assert!(styled.contains("╭─ CTX ─ Doctor"));
+        assert!(styled.contains("┌── CTX · Doctor"));
         assert!(styled.contains("Approval commands"));
         assert!(styled.contains("GuardedChange"));
         assert!(styled.contains("Project"));
@@ -902,7 +914,7 @@ mod tests {
         assert!(!styled.contains("Trait:"));
 
         let plain = panel.plain_lines().join("\n");
-        assert!(plain.starts_with("CTX Doctor"));
+        assert!(plain.starts_with("CTX · Doctor"));
         assert!(plain.contains("Approval commands"));
         assert!(plain.contains("GuardedChange"));
         assert!(plain.contains("Project"));
@@ -1038,7 +1050,7 @@ mod tests {
         let plain = panel.plain_lines();
         let joined = plain.join("\n");
 
-        for glyph in ["╭", "╰", "│", "─", "\x1b["] {
+        for glyph in ["╭", "╰", "┌", "└", "│", "─", "\x1b["] {
             assert!(
                 !joined.contains(glyph),
                 "plain output must not contain {glyph:?}"
@@ -1060,7 +1072,7 @@ mod tests {
         // Every label/value row — top-level, section-nested, and the
         // explicit next row alike — carries the same body indent; only the
         // section title and blank separators are exempt from it.
-        assert_eq!(plain[0], "ctx doctor");
+        assert_eq!(plain[0], "ctx · doctor");
         assert_eq!(plain[1], format!("{BODY_INDENT}trait: guarded-change"));
         assert_eq!(plain[2], format!("{BODY_INDENT}status: ok"));
         assert_eq!(plain[3], "");
@@ -1141,12 +1153,12 @@ mod tests {
         );
         let styled = panel.one_row_styled_line();
         let plain = plain_texts(std::slice::from_ref(&styled)).join("");
-        assert_eq!(plain, "ctx traits state --active trait-a · activated");
+        assert_eq!(plain, "ctx traits state --active · trait-a · activated");
         assert!(tones(std::slice::from_ref(&styled)).contains(&Tone::Pass));
 
         assert_eq!(
             panel.one_row_plain_line(),
-            "ctx traits state --active trait-a · activated"
+            "ctx traits state --active · trait-a · activated"
         );
     }
 

@@ -106,7 +106,7 @@ fn compact_output_leads_with_counts_and_omits_healthy() {
     );
 
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines[0], "ctx doctor", "{stdout}");
+    assert_eq!(lines[0], "ctx · doctor", "{stdout}");
     assert!(lines[1].contains("checks: 4"), "{stdout}");
     assert!(stdout.contains("passed: 1"), "{stdout}");
     assert!(stdout.contains("warnings: 1"), "{stdout}");

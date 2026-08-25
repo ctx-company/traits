@@ -858,27 +858,6 @@ pub(crate) fn handle_export(inputs: ExportInputs<'_>) -> crate::Result<CommandOu
             RowTone::Default,
         ))
         .row(PanelRow::toned(
-            "lock-evidence",
-            format!(
-                "target={export_target} path={lock_path} digest={}",
-                result.content_digest.as_str()
-            ),
-            RowTone::Default,
-        ))
-        .row(PanelRow::toned(
-            "lock-update",
-            lock_update_text(&lock_update),
-            RowTone::Default,
-        ))
-        .row(PanelRow::toned(
-            "projection-lock-update",
-            projection_update
-                .as_ref()
-                .map(projection_lock_update_text)
-                .unwrap_or_else(|| "skipped (pass --update-skill-lock)".to_string()),
-            RowTone::Default,
-        ))
-        .row(PanelRow::toned(
             "gitignore-update",
             gitignore_update
                 .as_ref()
@@ -886,32 +865,6 @@ pub(crate) fn handle_export(inputs: ExportInputs<'_>) -> crate::Result<CommandOu
                 .unwrap_or_else(|| "skipped (pass --update-gitignore)".to_string()),
             RowTone::Default,
         ));
-
-    fn lock_update_text(update: &ctx_traits_io::lockfile::LockUpdateResult) -> String {
-        match update {
-            ctx_traits_io::lockfile::LockUpdateResult::Updated { path } => {
-                format!("updated {path}")
-            }
-            ctx_traits_io::lockfile::LockUpdateResult::SkippedMissingLock { path } => {
-                format!("skipped (missing lockfile {path})")
-            }
-            ctx_traits_io::lockfile::LockUpdateResult::SkippedMissingEntry { path, trait_id } => {
-                format!("skipped (missing trait {trait_id} in {path})")
-            }
-        }
-    }
-
-    fn projection_lock_update_text(update: &ctx_traits_io::lockfile::LockUpdateResult) -> String {
-        match update {
-            ctx_traits_io::lockfile::LockUpdateResult::Updated { path } => {
-                format!("updated {path}")
-            }
-            ctx_traits_io::lockfile::LockUpdateResult::SkippedMissingLock { path }
-            | ctx_traits_io::lockfile::LockUpdateResult::SkippedMissingEntry { path, .. } => {
-                format!("skipped {path}")
-            }
-        }
-    }
 
     fn gitignore_update_text(update: &ctx_traits_io::write::GitignoreUpdateResult) -> String {
         match update {

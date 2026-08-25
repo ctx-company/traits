@@ -2274,7 +2274,7 @@ fn sessions_from_inventory_tagged(
                     class,
                     Some(session.status.clone()),
                     outcome,
-                    persisted_session_title(session, &row.ledger_path),
+                    crate::app::run::persisted_session_title(session, &row.ledger_path),
                     session.provenance.task_key.clone(),
                     super::task_proposals::merged_landed_sha(session),
                     crate::app::run::unmerged_fact(session),
@@ -3400,7 +3400,7 @@ fn build_attached_view(
         Ok(session) => {
             let state_digest = session.state_digest.to_string();
             let run_id = session.run_id.as_str().to_string();
-            let title = persisted_session_title(&session, ledger_path);
+            let title = crate::app::run::persisted_session_title(&session, ledger_path);
             let terminal = session_is_terminal(&session, ledger_path);
             let reconstruction = reconstruct_panes(&session, ledger_path);
             let history_available = !reconstruction.history.is_empty();
@@ -3465,7 +3465,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
     match ctx_traits_io::run_session::read_run_session(&view.ledger_path) {
         Ok(session) => {
             let state_digest = session.state_digest.to_string();
-            view.title = persisted_session_title(&session, &view.ledger_path);
+            view.title = crate::app::run::persisted_session_title(&session, &view.ledger_path);
             view.title_state = session.provenance.session_title.clone();
             view.terminal = session_is_terminal(&session, &view.ledger_path);
             if state_digest == view.state_digest {
@@ -3628,26 +3628,6 @@ fn fallback_lines(
         )));
     }
     lines
-}
-
-/// The session's display title: the ledger's resolved title when it exists,
-/// else the one the title worker parked in the activity sidecar. The ledger
-/// resolves only at a frame boundary — after the whole first step — while
-/// the sidecar record lands the moment the narrator answers, so the fallback
-/// is what makes a fresh run's title visible in seconds instead of minutes.
-/// The sidecar read happens only on the not-yet-resolved path, so a settled
-/// session costs no extra IO.
-fn persisted_session_title(
-    session: &ctx_traits_core::procedure::session::Session,
-    ledger_path: &camino::Utf8Path,
-) -> Option<String> {
-    session
-        .provenance
-        .session_title
-        .as_ref()
-        .and_then(ctx_traits_core::procedure::session::SessionTitleState::resolved_title)
-        .map(str::to_string)
-        .or_else(|| ctx_traits_io::activity_sidecar::read_session_title(ledger_path))
 }
 
 fn mark_view_unreadable(view: &mut AttachedView, error: String) {
@@ -5379,6 +5359,7 @@ fn apply_merge_action(
                 no_wait: false,
                 force_wait: false,
                 json: false,
+                verbose: false,
                 force_merger: false,
                 park_on_overlap: false,
                 force_land_on_overlap: false,

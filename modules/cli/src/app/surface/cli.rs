@@ -850,6 +850,10 @@ pub enum TraitsCommand {
         /// Emit structured JSON.
         #[arg(long)]
         json: bool,
+
+        /// Include merge diagnostics such as lock and overlap evidence.
+        #[arg(long)]
+        verbose: bool,
     },
     /// Check a trait for validation, audit, and drift.
     Check {

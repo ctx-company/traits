@@ -263,11 +263,6 @@ fn new_report_panel(report: &NewReport) -> Panel {
             RowTone::Default,
         ))
         .row(PanelRow::toned(
-            "lock",
-            report.lock.as_str(),
-            RowTone::Default,
-        ))
-        .row(PanelRow::toned(
             "status",
             report.package_status.as_str(),
             RowTone::Default,

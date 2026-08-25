@@ -290,16 +290,6 @@ pub(crate) fn handle_sync(
                     "project-manifest",
                     report.project_manifest.as_deref().unwrap_or("not found"),
                     RowTone::Default,
-                ))
-                .row(PanelRow::toned(
-                    "lockfile",
-                    report.lockfile.as_str(),
-                    RowTone::Default,
-                ))
-                .row(PanelRow::toned(
-                    "locked",
-                    report.locked.to_string(),
-                    RowTone::Default,
                 ));
             for warning in &report.warnings {
                 panel = panel.row(PanelRow::toned("warning", warning, RowTone::Fail));
@@ -1985,11 +1975,7 @@ fn compact_list_panel(report: &ListReport) -> Panel {
         }
         panel = panel.section(PanelSection::new("unreadable", rows));
     }
-    panel.next(PanelRow::toned(
-        "next",
-        "run `ctx traits list --verbose` for the full per-package narrative",
-        RowTone::Default,
-    ))
+    panel
 }
 
 /// Partition readable trait rows with declared `metadata.family` into

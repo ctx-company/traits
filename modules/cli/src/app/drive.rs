@@ -4116,7 +4116,7 @@ pub fn print_report(
         print_budget_pause(pause, report.tokens_by_model.as_ref(), &report.session)?;
     }
     if let Some(merge) = &report.merge {
-        crate::app::merge::print_report(merge)?;
+        crate::app::merge::print_report(merge, crate::app::presentation::HumanOutputMode::Compact)?;
     }
     Ok(())
 }

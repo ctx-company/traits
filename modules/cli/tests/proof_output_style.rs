@@ -73,8 +73,8 @@ fn write_healthy_skill(dir: &std::path::Path, relative: &str) {
 
 /// Parses `stdout` as a P465 panel's plain projection (`Panel::plain_lines`)
 /// and asserts its required structural shape, without comparing against any
-/// stored expected string: the first non-empty line is `"{product}
-/// {headline}"`, every indented `"  label: value"` row (section titles and
+/// stored expected string: the first non-empty line is `"{product} ·
+/// {headline}"` (or just `{product}`), every indented `"  label: value"` row (section titles and
 /// blank separators aside) carries a non-empty label before its first
 /// `": "`, and the last non-empty line — the closing state — is a single
 /// bare word with no punctuation, matching `PanelStatus`'s closing-text
@@ -82,7 +82,7 @@ fn write_healthy_skill(dir: &std::path::Path, relative: &str) {
 /// test; add a call site here rather than re-deriving this parse per
 /// command.
 fn assert_plain_panel_structure(product: &str, headline: &str, stdout: &str) {
-    for glyph in ["╭", "╰", "│", "─", "\x1b["] {
+    for glyph in ["╭", "╰", "┌", "└", "│", "─", "\x1b["] {
         assert!(
             !stdout.contains(glyph),
             "plain-degraded panel output must carry no styled-panel glyph {glyph:?}: {stdout}"
@@ -93,7 +93,11 @@ fn assert_plain_panel_structure(product: &str, headline: &str, stdout: &str) {
     assert!(!lines.is_empty(), "panel output must not be empty");
     assert_eq!(
         lines[0],
-        format!("{product} {headline}"),
+        if headline.is_empty() {
+            product.to_string()
+        } else {
+            format!("{product} · {headline}")
+        },
         "first line must be the panel's product/headline pair: {stdout}"
     );
 
@@ -113,10 +117,16 @@ fn assert_plain_panel_structure(product: &str, headline: &str, stdout: &str) {
             line.contains(':'),
             "body line must be a labelled row or section title: {line:?} in {stdout}"
         );
+        if let Some((label, _)) = line.strip_prefix("  ").and_then(|row| row.split_once(": ")) {
+            assert!(
+                label != "ledger" && label != "worktree" && !label.contains("lock"),
+                "default panel must not expose internal row {label:?}: {stdout}"
+            );
+        }
     }
 }
 
-/// Drops any lines before the panel's own `"{product} {headline}"` line.
+/// Drops any lines before the panel's own `"{product} · {headline}"` line.
 /// `run`'s non-panel command-started narration (P427, `drive.rs`'s
 /// `command_started_event`) is unconditional on a non-TTY stdout and
 /// precedes the panel — a pre-existing, out-of-scope live-narration line
@@ -124,7 +134,11 @@ fn assert_plain_panel_structure(product: &str, headline: &str, stdout: &str) {
 /// vocabulary, so callers whose command narrates before its panel strip it
 /// here rather than have `assert_plain_panel_structure` special-case it.
 fn strip_pre_panel_narration(stdout: &str, product: &str, headline: &str) -> String {
-    let marker = format!("{product} {headline}");
+    let marker = if headline.is_empty() {
+        product.to_string()
+    } else {
+        format!("{product} · {headline}")
+    };
     match stdout.find(&marker) {
         Some(index) => stdout[index..].to_string(),
         None => stdout.to_string(),
@@ -332,6 +346,35 @@ fn diff_default_output_matches_the_panel_registry_shape() {
     );
 
     assert_matches_registry_claim("diff", "ctx", "diff", &stdout);
+}
+
+#[test]
+fn diff_from_lock_hides_lock_rows_in_compact_output() {
+    let fixture = build_trait_fixture("p467-diff-from-lock-panel-shape", "fixture-diff-lock-panel");
+    let compact = require_success(
+        "`ctx traits diff --from-lock` over a freshly-init'd trait",
+        &["traits", "diff", &fixture.trait_id, "--from-lock"],
+        &fixture.repo,
+        &fixture.home,
+    );
+    assert_matches_registry_claim("diff", "ctx", "diff", &compact);
+
+    let verbose = require_success(
+        "`ctx traits diff --from-lock --verbose` retains lock evidence",
+        &[
+            "traits",
+            "diff",
+            &fixture.trait_id,
+            "--from-lock",
+            "--verbose",
+        ],
+        &fixture.repo,
+        &fixture.home,
+    );
+    assert!(
+        verbose.contains("projection-lock") || panel_row_labels(&verbose).contains(&"lock"),
+        "verbose diff must retain lock evidence: {verbose}"
+    );
 }
 
 #[test]
@@ -589,6 +632,10 @@ fn trust_approve_default_output_matches_the_panel_registry_shape() {
 /// uses to drive `run`/`merge` end to end without a script harness or a
 /// model provider.
 fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
+    command_trait_fixture_with_command(label, "true")
+}
+
+fn command_trait_fixture_with_command(label: &str, command: &str) -> BuiltTraitFixture {
     let scratch = ScratchRoot::new(label);
     let home = scratch.home();
     let repo = home.join("repo");
@@ -597,7 +644,8 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
     fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
-        "id = \"demo\"\n\
+        format!(
+            "id = \"demo\"\n\
          schema-version = \"0.4\"\n\
          version = \"0.1.0\"\n\
          name = \"Demo\"\n\
@@ -613,9 +661,10 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
          [[procedure.sequence]]\n\
          id = \"command\"\n\
          title = \"Run command\"\n\
-         kind = \"command\"\n\
-         cmd = \"true\"\n\
-         output = [\"slot:notified\"]\n",
+          kind = \"command\"\n\
+          cmd = \"{command}\"\n\
+          output = [\"slot:notified\"]\n",
+        ),
     )
     .unwrap();
     fs::write(
@@ -666,6 +715,57 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
     }
 }
 
+fn panel_row_labels(stdout: &str) -> Vec<&str> {
+    stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("  "))
+        .filter_map(|line| line.split_once(": ").map(|(label, _)| label))
+        .collect()
+}
+
+fn stable_json_envelope(stdout: &str) -> Vec<u8> {
+    let start = stdout
+        .find('{')
+        .unwrap_or_else(|| panic!("run must emit a JSON object: {stdout}"));
+    let mut envelope: serde_json::Value = serde_json::from_str(&stdout[start..])
+        .unwrap_or_else(|error| panic!("run did not emit valid JSON: {error}\n{stdout}"));
+    remove_per_run_json_values(&mut envelope);
+    serde_json::to_vec(&envelope).expect("JSON value serializes")
+}
+
+// Separate invocations intentionally mint distinct session IDs and derived
+// state digests. Remove only those per-run values before byte-comparing the
+// envelope generated with and without `--verbose`.
+fn remove_per_run_json_values(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for key in [
+                "session-id",
+                "run-id",
+                "session-path",
+                "final-session-digest",
+                "state-digest",
+                "started-at-epoch",
+                "approved-at",
+            ] {
+                object.remove(key);
+            }
+            if object.contains_key("frames-attempted") {
+                object.remove("session");
+            }
+            for value in object.values_mut() {
+                remove_per_run_json_values(value);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                remove_per_run_json_values(value);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[test]
 fn run_default_output_matches_the_panel_registry_shape() {
     let fixture = command_trait_fixture("p467-run-panel-shape");
@@ -682,9 +782,260 @@ fn run_default_output_matches_the_panel_registry_shape() {
         &fixture.repo,
         &fixture.home,
     );
-    let stdout = strip_pre_panel_narration(&stdout, "ctx", "run");
+    let stdout = strip_pre_panel_narration(&stdout, "demo", "");
 
-    assert_matches_registry_claim("run", "ctx", "run", &stdout);
+    assert_matches_registry_claim("run", "demo", "", &stdout);
+    assert_eq!(
+        panel_row_labels(&stdout),
+        ["session"],
+        "a clean-tree default run exposes only its session fact: {stdout}"
+    );
+}
+
+#[test]
+fn run_failed_default_output_is_exact() {
+    let fixture = command_trait_fixture_with_command("p467-run-failed", "false");
+    let args = [
+        "traits",
+        "run",
+        "--file",
+        ".ctx/traits/demo/generated/index.toml",
+        "--progress",
+        "none",
+    ];
+    let output = controlled_command(&ctx_bin(), &args, &fixture.repo, &fixture.home)
+        .output()
+        .unwrap_or_else(|error| panic!("cannot run {args:?}: {error}"));
+    assert!(
+        !output.status.success(),
+        "a false command fixture must fail its run: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stdout = String::from_utf8(output.stdout).expect("run stdout is UTF-8");
+    let stdout = strip_pre_panel_narration(&stdout, "demo", "");
+    assert_eq!(
+        panel_row_labels(&stdout),
+        ["session", "error"],
+        "a failed default run exposes exactly session and error facts: {stdout}"
+    );
+    assert!(stdout.lines().last().is_some_and(|line| line == "Failure"));
+    for omitted in [
+        "frames-attempted",
+        "ledger",
+        "lock-",
+        "worktree",
+        "landing",
+        "next",
+    ] {
+        assert!(
+            !stdout.contains(omitted),
+            "failed default output leaked {omitted:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn run_verbose_output_retains_default_facts_and_restores_detail() {
+    let fixture = command_trait_fixture("p467-run-verbose");
+    let default_stdout = require_success(
+        "default provider-free run",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--progress",
+            "none",
+        ],
+        &fixture.repo,
+        &fixture.home,
+    );
+    let verbose_stdout = require_success(
+        "verbose provider-free run",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--progress",
+            "none",
+            "--verbose",
+        ],
+        &fixture.repo,
+        &fixture.home,
+    );
+    let default_stdout = strip_pre_panel_narration(&default_stdout, "demo", "");
+    let verbose_stdout = strip_pre_panel_narration(&verbose_stdout, "demo", "");
+    for label in panel_row_labels(&default_stdout) {
+        assert!(
+            panel_row_labels(&verbose_stdout).contains(&label),
+            "verbose run lost default row {label:?}: {verbose_stdout}"
+        );
+    }
+    assert!(
+        verbose_stdout.contains("completed:") || verbose_stdout.contains("status:"),
+        "verbose output must restore output detail: {verbose_stdout}"
+    );
+}
+
+#[test]
+fn run_merge_facts_are_exact() {
+    let landed_fixture = command_trait_fixture("p467-run-merged-fact-landed");
+    let landed = require_success(
+        "a landable command run with automatic merge",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--merge",
+            "--progress",
+            "none",
+        ],
+        &landed_fixture.repo,
+        &landed_fixture.home,
+    );
+    let landed = strip_pre_panel_narration(&landed, "demo", "");
+    assert_eq!(
+        panel_row_labels(&landed),
+        ["session", "merged"],
+        "a landed run exposes exactly its session and qualified merge fact: {landed}"
+    );
+    assert!(
+        landed.contains("merged: yes ("),
+        "a landed run must include its landed revision: {landed}"
+    );
+    assert!(
+        landed.lines().last().is_some_and(|line| line == "Success"),
+        "a landed run must close Success: {landed}"
+    );
+
+    let parked_fixture = command_trait_fixture("p467-run-merged-fact-parked");
+    fs::write(
+        parked_fixture.repo.join(".ctx/traits/runtime.toml"),
+        "[merge]\ngate = [[\"false\"]]\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", ".ctx/traits/runtime.toml"])
+        .current_dir(&parked_fixture.repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "add failing merge gate"])
+        .current_dir(&parked_fixture.repo)
+        .status()
+        .unwrap();
+    let args = [
+        "traits",
+        "run",
+        "--file",
+        ".ctx/traits/demo/generated/index.toml",
+        "--worktree",
+        "--merge",
+        "--progress",
+        "none",
+    ];
+    let parked = controlled_command(
+        &ctx_bin(),
+        &args,
+        &parked_fixture.repo,
+        &parked_fixture.home,
+    )
+    .output()
+    .unwrap_or_else(|error| panic!("cannot run {args:?}: {error}"));
+    assert!(
+        !parked.status.success(),
+        "a failed merge gate must park its run: stdout={} stderr={}",
+        String::from_utf8_lossy(&parked.stdout),
+        String::from_utf8_lossy(&parked.stderr),
+    );
+    let parked = String::from_utf8(parked.stdout).expect("parked run stdout is UTF-8");
+    let parked = strip_pre_panel_narration(&parked, "demo", "");
+    assert_eq!(
+        panel_row_labels(&parked),
+        ["session", "merged"],
+        "a parked run exposes exactly its session and qualified merge fact: {parked}"
+    );
+    assert!(
+        parked.contains("merged: no (ctx traits merge "),
+        "a parked run must include its actionable merge command: {parked}"
+    );
+    assert!(
+        parked.lines().last().is_some_and(|line| line == "Success"),
+        "a parked merge must not change the completed run's Success close: {parked}"
+    );
+}
+
+#[test]
+fn run_verbose_landing_detail_uses_stable_human_text() {
+    let fixture = command_trait_fixture("p467-run-verbose-landing-detail");
+    let stdout = require_success(
+        "a verbose landable command run with automatic merge",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--merge",
+            "--progress",
+            "none",
+            "--verbose",
+        ],
+        &fixture.repo,
+        &fixture.home,
+    );
+    let stdout = strip_pre_panel_narration(&stdout, "demo", "");
+    assert!(
+        stdout.contains("landing: merged to main ("),
+        "verbose landing detail must remain stable human text: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Landed {"),
+        "verbose landing detail must not expose LandingState debug text: {stdout}"
+    );
+}
+
+#[test]
+fn run_json_output_is_unchanged_by_verbose() {
+    let fixture = command_trait_fixture("p467-run-json-verbose");
+    let default = require_success(
+        "a JSON provider-free run",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--progress",
+            "none",
+            "--json",
+        ],
+        &fixture.repo,
+        &fixture.home,
+    );
+    let verbose = require_success(
+        "a verbose JSON provider-free run",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--progress",
+            "none",
+            "--json",
+            "--verbose",
+        ],
+        &fixture.repo,
+        &fixture.home,
+    );
+    assert_eq!(
+        stable_json_envelope(&default),
+        stable_json_envelope(&verbose),
+        "--verbose must not change the stable bytes of a run's JSON envelope"
+    );
 }
 
 #[test]
@@ -704,13 +1055,13 @@ fn run_without_progress_flag_defaults_to_status_under_piped_stdio() {
         &fixture.repo,
         &fixture.home,
     );
-    let stdout = strip_pre_panel_narration(&stdout, "ctx", "run");
+    let stdout = strip_pre_panel_narration(&stdout, "demo", "");
 
     assert!(
         !stdout.contains("\x1b[?1049h"),
         "no --progress under piped stdio must not open the TUI alternate screen: {stdout}"
     );
-    assert_matches_registry_claim("run", "ctx", "run", &stdout);
+    assert_matches_registry_claim("run", "demo", "", &stdout);
 }
 
 #[test]

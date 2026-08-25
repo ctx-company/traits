@@ -585,6 +585,9 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
         merge_live,
         merger_stdout_observer,
     )?;
+    let completion = completion
+        .with_drive_report(&drive)
+        .with_human_terminal_failure(!json, &drive);
     // Close (or no-op, if this run never got a panel) the merge span's live
     // surface BEFORE any of the plain-text reporting below, matching
     // `drive_loop`'s own guard-drops-before-caller-prints ordering.
@@ -612,26 +615,21 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
             );
             crate::app::drive::print_report(&drive, Some(&completion.session))?;
         }
-        // A landed auto-merge folds into the run panel as its final state
-        // (`landed` + one landing row) instead of printing a second panel —
-        // one run, one state. The separate merge panel remains for every
-        // non-landed outcome (parked/failed carry reason + next-action rows
-        // the user must see) and under `--verbose`.
-        let landed = completion
-            .merge
-            .as_ref()
-            .is_some_and(|report| report.status == "merged");
         print_final_output(
             &completion.session,
             &drive,
+            &merge_session_path,
             loaded_trait.as_ref().map(|loaded| &loaded.trait_ref),
+            completion.failure_reason.as_deref(),
             input.verbose,
-            landed,
         )?;
-        if let Some(report) = &completion.merge
-            && (input.verbose || !landed)
+        if input.verbose
+            && let Some(report) = &completion.merge
         {
-            crate::app::merge::print_report(report)?;
+            crate::app::merge::print_report(
+                report,
+                crate::app::presentation::HumanOutputMode::Verbose,
+            )?;
         }
         // P550: the story pane opens AFTER the merge report above, so the
         // story it renders covers the landing — and after every disposition
@@ -1097,6 +1095,110 @@ pub(crate) fn unmerged_fact(
     .flatten()
 }
 
+/// The single failure explanation used by terminal human output and the
+/// command error mapping, ordered from durable session intent to drive-local
+/// observations.
+pub(crate) fn failure_reason(
+    session: &ctx_traits_core::procedure::session::Session,
+    drive: &crate::app::drive::DriveReport,
+) -> Option<String> {
+    let stop_message = session
+        .stop_reason
+        .as_ref()
+        .and_then(|stop| stop.message.clone());
+    failure_reason_from_values(
+        stop_message.as_deref(),
+        session
+            .stop_reason
+            .as_ref()
+            .map(|stop| stop.reason.as_str()),
+        drive.bound_fired.as_deref(),
+        drive.warnings.first().map(String::as_str),
+        Some(drive.status.as_str()),
+    )
+}
+
+fn failure_reason_from_values(
+    stop_message: Option<&str>,
+    stop_reason: Option<&str>,
+    bound_fired: Option<&str>,
+    warning: Option<&str>,
+    drive_status: Option<&str>,
+) -> Option<String> {
+    stop_message
+        .or(stop_reason)
+        .or(bound_fired)
+        .or(warning)
+        .or(drive_status)
+        .map(str::to_string)
+}
+
+/// A terminal run succeeds only when the persisted session and this drive
+/// invocation both reached completion.
+fn run_completed(
+    session: &ctx_traits_core::procedure::session::Session,
+    drive: &crate::app::drive::DriveReport,
+) -> bool {
+    run_completed_status(session.status.clone(), drive.final_session_status.clone())
+}
+
+fn run_completed_status(
+    session_status: ctx_traits_core::procedure::session::Status,
+    drive_status: Option<ctx_traits_core::procedure::session::Status>,
+) -> bool {
+    session_status == ctx_traits_core::procedure::session::Status::Completed
+        && drive_status == Some(ctx_traits_core::procedure::session::Status::Completed)
+}
+
+/// The compact panel's landing fact comes exclusively from terminal merge
+/// evidence. Post-merge cleanup failure still means main advanced.
+fn merged_fact(session: &ctx_traits_core::procedure::session::Session) -> Option<String> {
+    let terminal = session
+        .provenance
+        .merge_frames
+        .iter()
+        .rev()
+        .find(|frame| frame.status.is_terminal());
+    merged_fact_from_terminal(
+        terminal.map(|frame| {
+            (
+                frame.status,
+                frame
+                    .evidence
+                    .iter()
+                    .find_map(|entry| entry.strip_prefix("landed=")),
+            )
+        }),
+        unmerged_fact(session).map(|fact| fact.merge_command),
+        not_merged_fact(session).map(|fact| fact.merge_command),
+    )
+}
+
+fn merged_fact_from_terminal(
+    terminal: Option<(
+        ctx_traits_core::procedure::session::MergeStatus,
+        Option<&str>,
+    )>,
+    unmerged_command: Option<String>,
+    terminal_unmerged_command: Option<String>,
+) -> Option<String> {
+    use ctx_traits_core::procedure::session::MergeStatus;
+
+    match terminal {
+        Some((MergeStatus::Merged | MergeStatus::PostMergeCleanupFailure, revision)) => {
+            revision.map(|revision| format!("yes ({revision})"))
+        }
+        Some((MergeStatus::Parked | MergeStatus::RecoveryFailure, _)) => {
+            terminal_unmerged_command.map(|command| format!("no ({command})"))
+        }
+        None => unmerged_command.map(|command| format!("no ({command})")),
+        Some((
+            MergeStatus::LockAcquired | MergeStatus::GatesPassed | MergeStatus::Reconciled,
+            _,
+        )) => None,
+    }
+}
+
 pub(crate) fn disposition_for_report_status(status: &str) -> CompletionDisposition {
     match status {
         "merged" => CompletionDisposition::Merged,
@@ -1151,10 +1253,33 @@ pub(crate) fn disposition_for_merge_status(
 pub(crate) struct CompletionOutcome {
     pub(crate) session: ctx_traits_core::procedure::session::Session,
     pub(crate) merge: Option<crate::app::merge::MergeReport>,
+    failure_reason: Option<String>,
+    human_terminal_failure: bool,
     disposition: CompletionDisposition,
 }
 
 impl CompletionOutcome {
+    /// Attach the drive-local part of a terminal failure explanation before
+    /// the outcome is converted into the command's established exit mapping.
+    pub(crate) fn with_drive_report(mut self, drive: &crate::app::drive::DriveReport) -> Self {
+        self.failure_reason = failure_reason(&self.session, drive);
+        self
+    }
+
+    /// Human `run` output reports every terminal non-completion as Failure,
+    /// without changing JSON or hidden-drive exit semantics.
+    fn with_human_terminal_failure(
+        mut self,
+        human_output: bool,
+        drive: &crate::app::drive::DriveReport,
+    ) -> Self {
+        self.human_terminal_failure = human_output
+            && drive.credits_pause.is_none()
+            && drive.budget_pause.is_none()
+            && !run_completed(&self.session, drive);
+        self
+    }
+
     /// Centralized P460 exit-status mapping, driven by the typed disposition
     /// rather than re-inferring it from `(intent, report)` optionality: no
     /// intent or a landed merge exits 0; a merge intent present on a run
@@ -1179,16 +1304,22 @@ impl CompletionOutcome {
                 // no-exit-reached past every success exit). With no merge in
                 // play nothing downstream would surface that — the process
                 // exit must.
-                if self.session.status == ctx_traits_core::procedure::session::Status::Failed {
+                if self.session.status == ctx_traits_core::procedure::session::Status::Failed
+                    || self.human_terminal_failure
+                {
                     let reason = self
-                        .session
-                        .stop_reason
-                        .as_ref()
-                        .and_then(|stop| stop.message.clone().or_else(|| Some(stop.reason.clone())))
+                        .failure_reason
                         .map(|reason| format!(": {reason}"))
                         .unwrap_or_default();
+                    let message = if self.session.status
+                        == ctx_traits_core::procedure::session::Status::Failed
+                    {
+                        format!("run {run_id:?} failed{reason}")
+                    } else {
+                        format!("run {run_id:?} did not reach a completed drive{reason}")
+                    };
                     return Err(crate::Error::AlreadyReported {
-                        message: format!("run {run_id:?} failed{reason}"),
+                        message,
                         exit_code: crate::app::error::EXIT_RUN_FAILED,
                     });
                 }
@@ -1414,6 +1545,8 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            failure_reason: None,
+            human_terminal_failure: false,
             disposition: CompletionDisposition::NoIntent,
         });
     };
@@ -1421,6 +1554,8 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            failure_reason: None,
+            human_terminal_failure: false,
             disposition: CompletionDisposition::DriveNotCompleted,
         });
     }
@@ -1440,6 +1575,8 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            failure_reason: None,
+            human_terminal_failure: false,
             disposition: CompletionDisposition::DriveNotCompleted,
         });
     }
@@ -1462,6 +1599,8 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            failure_reason: None,
+            human_terminal_failure: false,
             disposition: disposition_for_merge_status(status),
         });
     }
@@ -1475,6 +1614,7 @@ pub(crate) fn complete_after_drive(
         no_wait: false,
         force_wait: false,
         json: false,
+        verbose: false,
         force_merger: false,
         park_on_overlap: false,
         force_land_on_overlap: false,
@@ -1494,6 +1634,8 @@ pub(crate) fn complete_after_drive(
     Ok(CompletionOutcome {
         session,
         merge: Some(report),
+        failure_reason: None,
+        human_terminal_failure: false,
         disposition,
     })
 }
@@ -1501,25 +1643,15 @@ pub(crate) fn complete_after_drive(
 fn print_final_output(
     session: &ctx_traits_core::procedure::session::Session,
     drive: &crate::app::drive::DriveReport,
+    ledger_path: &camino::Utf8Path,
     trait_ref: Option<&ctx_traits_core::Trait>,
+    failure_reason: Option<&str>,
     verbose: bool,
-    landed: bool,
 ) -> crate::Result<()> {
     use crate::app::presentation::{
         HumanOutputMode, Panel, PanelRow, PanelSection, RowTone, emit_human,
     };
 
-    // P427: surface an automatic built-in harness selection even in the
-    // default (non-`--verbose`) plain output — `--verbose` already prints
-    // every warning via `print_report`, so only print these here to avoid a
-    // duplicate line.
-    if !verbose {
-        for warning in &drive.warnings {
-            if warning.starts_with("automatic harness selection: ") {
-                println!("{warning}");
-            }
-        }
-    }
     if let Some(pause) = &drive.credits_pause {
         crate::app::drive::print_credits_pause(pause, &drive.session)?;
         return Ok(());
@@ -1539,63 +1671,69 @@ fn print_final_output(
         HumanOutputMode::Compact
     };
 
-    // A completed run whose auto-merge landed reports ONE terminal state:
-    // `landed` subsumes `completed` (a run cannot land without completing),
-    // and the landing revision becomes a row of this panel rather than a
-    // second panel's worth of output.
-    let status = if landed {
-        crate::app::presentation::PanelStatus::Passed("landed".to_string())
+    let (product, headline) = run_header(session, ledger_path);
+    let failed = !run_completed(session, drive);
+    let status = if failed {
+        crate::app::presentation::PanelStatus::Blocked("Failure".to_string())
     } else {
-        drive.panel_status()
+        crate::app::presentation::PanelStatus::Passed("Success".to_string())
     };
-    let mut panel = Panel::new("ctx", "run", status);
-    if landed {
-        use ctx_traits_core::procedure::session::{LandingState, landing_state};
-        let landing = match landing_state(session) {
-            Some(LandingState::Landed {
-                revision: Some(revision),
-            }) => format!("merged to main ({revision})"),
-            _ => "merged to main".to_string(),
-        };
-        panel = panel.row(PanelRow::toned("landing", landing, RowTone::Default));
+    let mut panel = Panel::new(product, headline, status).row(PanelRow::toned(
+        "session",
+        session.session_id.as_str(),
+        RowTone::Default,
+    ));
+    if failed {
+        panel = panel.row(PanelRow::toned(
+            "error",
+            failure_reason.unwrap_or("run failed"),
+            RowTone::Fail,
+        ));
+    } else if let Some(landing) = ctx_traits_core::procedure::session::landing_state(session) {
+        if let Some(merged) = merged_fact(session) {
+            panel = panel.row(PanelRow::toned("merged", merged, RowTone::Default));
+        }
+        if verbose {
+            panel = panel.row(PanelRow::toned(
+                "landing",
+                landing_detail(&landing),
+                RowTone::Default,
+            ));
+        }
     }
-    match &session.completion {
-        Some(completion) if !completion.final_outputs.is_empty() => {
-            for output in &completion.final_outputs {
-                if let Some(rendered) = trait_ref.and_then(|trait_ref| {
-                    structured_output::resolve(trait_ref, output.port_ref.id(), &output.value)
-                }) {
-                    let verdict = structured_output::producer_verdict_for_output(session, output);
-                    // Every line `compact_lines` returns — the count header,
-                    // every item row, and the receipt line — becomes its own
-                    // panel row; none are truncated, so `--verbose` (which
-                    // prints this panel and then the full per-field stanzas
-                    // as additional detail) stays a strict superset of the
-                    // default rendering rather than replacing it.
-                    let rows = rendered
-                        .compact_lines("completed", verdict.as_deref(), Some(&drive.session))
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, line)| compact_line_to_row(index, &line))
-                        .collect();
-                    panel = panel.section(PanelSection::new(output.port_ref.id(), rows));
-                } else {
-                    panel = panel.row(PanelRow::toned(
-                        output.port_ref.id(),
-                        structured_output::clean_value(&output.value),
-                        RowTone::Default,
-                    ));
+    if verbose {
+        match &session.completion {
+            Some(completion) if !completion.final_outputs.is_empty() => {
+                for output in &completion.final_outputs {
+                    if let Some(rendered) = trait_ref.and_then(|trait_ref| {
+                        structured_output::resolve(trait_ref, output.port_ref.id(), &output.value)
+                    }) {
+                        let verdict =
+                            structured_output::producer_verdict_for_output(session, output);
+                        // Every line `compact_lines` returns — the count header,
+                        // every item row, and the receipt line — becomes its own
+                        // panel row; none are truncated, so `--verbose` (which
+                        // prints this panel and then the full per-field stanzas
+                        // as additional detail) stays a strict superset of the
+                        // default rendering rather than replacing it.
+                        let rows = rendered
+                            .compact_lines("completed", verdict.as_deref(), Some(&drive.session))
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, line)| compact_line_to_row(index, &line))
+                            .collect();
+                        panel = panel.section(PanelSection::new(output.port_ref.id(), rows));
+                    } else {
+                        panel = panel.row(PanelRow::toned(
+                            output.port_ref.id(),
+                            structured_output::clean_value(&output.value),
+                            RowTone::Default,
+                        ));
+                    }
                 }
             }
+            _ => {}
         }
-        _ => {}
-    }
-    if mode == HumanOutputMode::Compact {
-        panel = panel.next(PanelRow::toned(
-            "next",
-            "ctx traits run --verbose for the full output detail",
-            RowTone::Default,
-        ));
     }
 
     emit_human(false, &panel, mode, || {
@@ -1625,6 +1763,51 @@ fn print_final_output(
         }
         Ok(())
     })
+}
+
+fn landing_detail(landing: &ctx_traits_core::procedure::session::LandingState) -> String {
+    use ctx_traits_core::procedure::session::LandingState;
+
+    match landing {
+        LandingState::Landed {
+            revision: Some(revision),
+        } => format!("merged to main ({revision})"),
+        LandingState::Landed { revision: None } => "merged to main".to_string(),
+        LandingState::NotMerged => "committed but not merged".to_string(),
+        LandingState::Parked => "merge parked".to_string(),
+        LandingState::MergeFailed => "merge failed after landing attempt".to_string(),
+    }
+}
+
+fn run_header(
+    session: &ctx_traits_core::procedure::session::Session,
+    ledger_path: &camino::Utf8Path,
+) -> (String, String) {
+    run_header_from_title(
+        &session.trait_id,
+        persisted_session_title(session, ledger_path),
+    )
+}
+
+fn run_header_from_title(trait_id: &str, title: Option<String>) -> (String, String) {
+    title
+        .map(|title| (title, trait_id.to_string()))
+        .unwrap_or_else(|| (trait_id.to_string(), String::new()))
+}
+
+/// Reads the resolved title, falling back to the narrator sidecar before the
+/// ledger reaches a frame boundary.
+pub(crate) fn persisted_session_title(
+    session: &ctx_traits_core::procedure::session::Session,
+    ledger_path: &camino::Utf8Path,
+) -> Option<String> {
+    session
+        .provenance
+        .session_title
+        .as_ref()
+        .and_then(ctx_traits_core::procedure::session::SessionTitleState::resolved_title)
+        .map(str::to_string)
+        .or_else(|| ctx_traits_io::activity_sidecar::read_session_title(ledger_path))
 }
 
 /// Maps one `StructuredOutput::compact_lines` line to a panel row without
@@ -2103,8 +2286,108 @@ pub(crate) fn run_envelope<T: serde::Serialize>(
 mod completion_disposition_tests {
     use super::{
         CompletionDisposition, disposition_for_merge_status, disposition_for_report_status,
+        failure_reason_from_values, merged_fact_from_terminal, run_completed_status,
+        run_header_from_title,
     };
-    use ctx_traits_core::procedure::session::MergeStatus;
+    use ctx_traits_core::procedure::session::{MergeStatus, Status};
+
+    #[test]
+    fn run_header_uses_title_or_trait_only_fallback() {
+        assert_eq!(
+            run_header_from_title("demo-variant", Some("Demo run".to_string())),
+            ("Demo run".to_string(), "demo-variant".to_string())
+        );
+        assert_eq!(
+            run_header_from_title("demo-variant", None),
+            ("demo-variant".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn failure_reason_uses_documented_precedence() {
+        assert_eq!(
+            failure_reason_from_values(
+                Some("stop message"),
+                Some("stop reason"),
+                Some("bound"),
+                Some("warning"),
+                Some("status"),
+            ),
+            Some("stop message".to_string())
+        );
+        for (message, reason, bound, warning, status, expected) in [
+            (
+                None,
+                Some("stop reason"),
+                Some("bound"),
+                Some("warning"),
+                Some("status"),
+                "stop reason",
+            ),
+            (
+                None,
+                None,
+                Some("bound"),
+                Some("warning"),
+                Some("status"),
+                "bound",
+            ),
+            (None, None, None, Some("warning"), Some("status"), "warning"),
+            (None, None, None, None, Some("status"), "status"),
+        ] {
+            assert_eq!(
+                failure_reason_from_values(message, reason, bound, warning, status),
+                Some(expected.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn completion_requires_both_session_and_drive_to_complete() {
+        assert!(run_completed_status(
+            Status::Completed,
+            Some(Status::Completed)
+        ));
+        assert!(!run_completed_status(
+            Status::Failed,
+            Some(Status::Completed)
+        ));
+        assert!(!run_completed_status(
+            Status::Completed,
+            Some(Status::Blocked)
+        ));
+        assert!(!run_completed_status(Status::Completed, None));
+    }
+
+    #[test]
+    fn merged_facts_preserve_terminal_landing_truth() {
+        assert_eq!(
+            merged_fact_from_terminal(Some((MergeStatus::Merged, Some("abc123"))), None, None),
+            Some("yes (abc123)".to_string())
+        );
+        assert_eq!(
+            merged_fact_from_terminal(None, Some("ctx traits merge run-1".to_string()), None),
+            Some("no (ctx traits merge run-1)".to_string())
+        );
+        for status in [MergeStatus::Parked, MergeStatus::RecoveryFailure] {
+            assert_eq!(
+                merged_fact_from_terminal(
+                    Some((status, None)),
+                    None,
+                    Some("ctx traits merge run-1".to_string())
+                ),
+                Some("no (ctx traits merge run-1)".to_string())
+            );
+        }
+        assert_eq!(
+            merged_fact_from_terminal(
+                Some((MergeStatus::PostMergeCleanupFailure, Some("abc123"))),
+                None,
+                None
+            ),
+            Some("yes (abc123)".to_string())
+        );
+    }
 
     #[test]
     fn report_status_merged_and_parked_map_distinctly() {

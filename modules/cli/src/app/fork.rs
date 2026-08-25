@@ -515,11 +515,6 @@ fn fork_report_panel(report: &ForkReport) -> Panel {
             RowTone::Default,
         ))
         .row(PanelRow::toned(
-            "lock",
-            report.lock.as_str(),
-            RowTone::Default,
-        ))
-        .row(PanelRow::toned(
             "detached",
             format!(
                 "declaration, lock entry, and vendored tree removed for {} ({})",

@@ -68,9 +68,7 @@ pub(crate) fn handle_explain(input: ExplainInputs<'_>) -> crate::Result<CommandO
         report.candidates.retain(|candidate| candidate.active);
     }
 
-    use crate::app::presentation::{
-        HumanOutputMode, OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human,
-    };
+    use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 
     match OutputMode::select(input.json, input.verbose) {
         OutputMode::Json => {
@@ -97,13 +95,6 @@ pub(crate) fn handle_explain(input: ExplainInputs<'_>) -> crate::Result<CommandO
                     } else {
                         RowTone::Default
                     },
-                ));
-            }
-            if mode == HumanOutputMode::Compact {
-                panel = panel.next(PanelRow::toned(
-                    "next",
-                    "ctx traits internal explain --verbose for the full activation report",
-                    RowTone::Default,
                 ));
             }
             emit_human(false, &panel, mode, || {
@@ -244,9 +235,7 @@ fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOut
         candidate
     };
 
-    use crate::app::presentation::{
-        HumanOutputMode, OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human,
-    };
+    use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 
     match OutputMode::select(input.json, input.verbose) {
         OutputMode::Json => {
@@ -281,15 +270,6 @@ fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOut
                         RowTone::Fail
                     },
                 ));
-                let panel = if mode == HumanOutputMode::Compact {
-                    panel.next(PanelRow::toned(
-                        "next",
-                        "ctx traits internal explain --scaffold --verbose for the full scaffold report",
-                        RowTone::Default,
-                    ))
-                } else {
-                    panel
-                };
                 emit_human(false, &panel, mode, || {
                     emit_report(
                         false,

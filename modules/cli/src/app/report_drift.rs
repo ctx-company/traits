@@ -693,7 +693,11 @@ pub(crate) fn handle_diff(
                 }),
             )
             .row(PanelRow::toned("trait", &report.trait_id, RowTone::Default));
-            for entry in &report.entries {
+            for entry in report
+                .entries
+                .iter()
+                .filter(|entry| mode == HumanOutputMode::Verbose || !is_lock_layer(&entry.layer))
+            {
                 let status = diff_entry_status(entry);
                 panel = panel.row(PanelRow::toned(
                     layer_label(&entry.layer),
@@ -703,13 +707,6 @@ pub(crate) fn handle_diff(
                     } else {
                         RowTone::Pass
                     },
-                ));
-            }
-            if mode == HumanOutputMode::Compact {
-                panel = panel.next(PanelRow::toned(
-                    "next",
-                    "ctx traits diff --verbose for full hunk detail",
-                    RowTone::Default,
                 ));
             }
             emit_human(false, &panel, mode, || {
@@ -733,6 +730,14 @@ fn diff_entry_status(entry: &ctx_traits_core::diff::DiffEntry) -> &'static str {
     } else {
         "no change"
     }
+}
+
+fn is_lock_layer(layer: &ctx_traits_core::check::DriftLayer) -> bool {
+    matches!(
+        layer,
+        ctx_traits_core::check::DriftLayer::Lock
+            | ctx_traits_core::check::DriftLayer::ProjectionLock
+    )
 }
 
 fn emit_plain_diff_report(report: &ctx_traits_core::diff::DiffReport) -> crate::Result<()> {

@@ -36,7 +36,9 @@ use crate::app::agent_dispatch::RunOneShotObservers;
 use crate::app::entry::print_json_report;
 use crate::app::harness_stream;
 use crate::app::merge_story::{self, MergeProgress, reasons};
-use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
+use crate::app::presentation::{
+    HumanOutputMode, OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human,
+};
 use crate::app::run::run_envelope;
 
 /// P549: a cheap, cloneable live-activity sink threaded optionally through
@@ -262,6 +264,7 @@ pub(crate) struct MergeInputs<'a> {
     pub(crate) no_wait: bool,
     pub(crate) force_wait: bool,
     pub(crate) json: bool,
+    pub(crate) verbose: bool,
     /// Send this merge through the standing merger agent's confirmation path
     /// even when `main` is a true clean fast-forward for the run branch
     /// (which would otherwise skip merger resolution/probing/dispatch
@@ -407,13 +410,21 @@ pub(crate) fn handle_merge(
     input: MergeInputs<'_>,
 ) -> crate::Result<ctx_traits_core::response::CommandOutput<()>> {
     let json = input.json;
+    let verbose = input.verbose;
     let report = merge(input)?;
     match OutputMode::select(json, false) {
         OutputMode::Json => {
             print_json_report(&run_envelope(report.clone(), false, false, false), "merge")?;
         }
         OutputMode::Human(_) => {
-            print_report(&report)?;
+            print_report(
+                &report,
+                if verbose {
+                    HumanOutputMode::Verbose
+                } else {
+                    HumanOutputMode::Compact
+                },
+            )?;
         }
     }
     let disposition = crate::app::run::disposition_for_report_status(&report.status);
@@ -439,7 +450,7 @@ pub(crate) fn handle_merge(
 /// `handle_merge` and P460's combined run/drive completion report (so a
 /// merge attempted as part of `run --merge`/`session start --merge`/`drive`
 /// resume prints identically to an explicit `ctx traits merge`).
-pub(crate) fn print_report(report: &MergeReport) -> crate::Result<()> {
+pub(crate) fn print_report(report: &MergeReport, mode: HumanOutputMode) -> crate::Result<()> {
     let status = if report.status == "merged" {
         PanelStatus::Passed("passed".to_string())
     } else {
@@ -452,53 +463,50 @@ pub(crate) fn print_report(report: &MergeReport) -> crate::Result<()> {
     ));
     if report.status != "merged" {
         let explanation = merge_story::explain_report(report);
-        panel = panel.next(PanelRow::toned(
+        panel = panel.row(PanelRow::toned(
             "reason",
             explanation.sentence.clone(),
             RowTone::Default,
         ));
-        panel = panel.row(PanelRow::toned(
+        panel = panel.next(PanelRow::toned(
             "next",
             explanation.next_action.clone(),
-            RowTone::Default,
-        ));
-    }
-    if let Some(reason) = report.reason.as_deref() {
-        panel = panel.row(PanelRow::toned("raw-reason", reason, RowTone::Default));
-    }
-    if let Some(wait_ms) = report.lock_wait_ms {
-        panel = panel.row(PanelRow::toned(
-            "lock-wait-ms",
-            wait_ms.to_string(),
-            RowTone::Default,
-        ));
-    }
-    if let Some(holder) = report.lock_holder.as_deref() {
-        panel = panel.row(PanelRow::toned("lock-holder", holder, RowTone::Default));
-    }
-    if let Some(stale) = report.lock_stale_holder_reclaimed.as_deref() {
-        panel = panel.row(PanelRow::toned(
-            "lock-stale-holder-reclaimed",
-            stale,
             RowTone::Default,
         ));
     }
     for warning in &report.warnings {
         panel = panel.row(PanelRow::toned("warning", warning, RowTone::Warn));
     }
-    for overlap in &report.stale_base_overlap {
-        panel = panel.row(PanelRow::toned(
-            "stale-base-overlap",
-            overlap,
-            RowTone::Default,
-        ));
+    if mode == HumanOutputMode::Verbose {
+        if let Some(reason) = report.reason.as_deref() {
+            panel = panel.row(PanelRow::toned("raw-reason", reason, RowTone::Default));
+        }
+        if let Some(wait_ms) = report.lock_wait_ms {
+            panel = panel.row(PanelRow::toned(
+                "lock-wait-ms",
+                wait_ms.to_string(),
+                RowTone::Default,
+            ));
+        }
+        if let Some(holder) = report.lock_holder.as_deref() {
+            panel = panel.row(PanelRow::toned("lock-holder", holder, RowTone::Default));
+        }
+        if let Some(stale) = report.lock_stale_holder_reclaimed.as_deref() {
+            panel = panel.row(PanelRow::toned(
+                "lock-stale-holder-reclaimed",
+                stale,
+                RowTone::Default,
+            ));
+        }
+        for overlap in &report.stale_base_overlap {
+            panel = panel.row(PanelRow::toned(
+                "stale-base-overlap",
+                overlap,
+                RowTone::Default,
+            ));
+        }
     }
-    emit_human(
-        false,
-        &panel,
-        crate::app::presentation::HumanOutputMode::Compact,
-        || Ok(()),
-    )
+    emit_human(false, &panel, mode, || Ok(()))
 }
 
 /// Report-returning merge operation, split out from [`handle_merge`] so the

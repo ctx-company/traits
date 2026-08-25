@@ -2490,9 +2490,7 @@ fn emit_check_report(
     disable_presentation: bool,
     verbose: bool,
 ) -> crate::Result<CommandOutput<()>> {
-    use crate::app::presentation::{
-        HumanOutputMode, OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human,
-    };
+    use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 
     match OutputMode::select(json, verbose) {
         OutputMode::Json => {
@@ -2541,13 +2539,6 @@ fn emit_check_report(
                 panel = panel.row(PanelRow::toned(
                     "drift",
                     format!("{} comparison(s)", report.drift.len()),
-                    RowTone::Default,
-                ));
-            }
-            if mode == HumanOutputMode::Compact {
-                panel = panel.next(PanelRow::toned(
-                    "next",
-                    "ctx traits check --verbose for the full report",
                     RowTone::Default,
                 ));
             }

@@ -761,6 +761,77 @@ fn no_gate_declared_lands_with_one_advisory_and_removes_worktree() {
         plain_advisory_lines, 1,
         "the plain report must print exactly one matching advisory line: {plain_stdout}"
     );
+
+    // Standalone compact merge has its own dispatch path. Keep this separate
+    // from the verbose run-completion rendering above so warnings cannot
+    // accidentally become verbose-only again.
+    let compact_scratch = ScratchRoot::new("p477-no-gate-compact-merge");
+    let compact_repo = compact_scratch.home().join("repo");
+    init_fixture_repo_without_gate(&compact_repo, &compact_scratch.home(), "true");
+    let pending = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &compact_repo,
+        &compact_scratch.home(),
+    );
+    assert_exit_code(&pending, 0);
+    let run_id = value_json(&pending)["value"]["session"]["run-id"]
+        .as_str()
+        .expect("worktree run reports its run id")
+        .to_string();
+    let compact = run_ctx(
+        &["traits", "merge", &run_id],
+        &compact_repo,
+        &compact_scratch.home(),
+    );
+    assert_exit_code(&compact, 0);
+    let (compact_stdout, _) = utf8(&compact);
+    assert_eq!(
+        compact_stdout
+            .lines()
+            .filter(|line| line.trim() == format!("warning: {EMPTY_GATE_ADVISORY}"))
+            .count(),
+        1,
+        "a standalone compact merge must print its advisory exactly once: {compact_stdout}"
+    );
+
+    // The default run surface owns the terminal landing fact. A successful
+    // landing remains a successful run, not a second merge-panel status.
+    let landed_scratch = ScratchRoot::new("p477-no-gate-run-merged-fact");
+    let landed_repo = landed_scratch.home().join("repo");
+    init_fixture_repo_without_gate(&landed_repo, &landed_scratch.home(), "true");
+    let landed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--merge",
+            "--progress",
+            "none",
+        ],
+        &landed_repo,
+        &landed_scratch.home(),
+    );
+    assert_exit_code(&landed, 0);
+    let (landed_stdout, _) = utf8(&landed);
+    assert!(
+        landed_stdout.contains("merged: yes ("),
+        "a landed default run must qualify its merge fact with the revision: {landed_stdout}"
+    );
+    assert!(
+        landed_stdout.lines().any(|line| line == "Success"),
+        "a landed default run must close Success: {landed_stdout}"
+    );
 }
 
 /// P477: a declared failing gate must park before the

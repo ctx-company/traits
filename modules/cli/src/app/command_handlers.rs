@@ -755,6 +755,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 allow_stale_overlap,
                 deep,
                 json,
+                verbose,
             }) => crate::app::merge::handle_merge(crate::app::merge::MergeInputs {
                 run_id: &run_id,
                 session_store: session_store.as_deref(),
@@ -763,6 +764,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 no_wait,
                 force_wait: wait_override,
                 json,
+                verbose,
                 force_merger,
                 park_on_overlap: park_on_overlap && !land_on_overlap,
                 force_land_on_overlap: land_on_overlap,
@@ -1387,7 +1389,8 @@ fn handle_internal(
                 final_session,
                 merge_live,
                 merger_stdout_observer,
-            )?;
+            )?
+            .with_drive_report(&report);
             drop(merge_span_guard);
             report.merge = completion.merge.clone();
             if json {
