@@ -90,15 +90,19 @@ validation = """
 
 Run verification strictly as `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core prompt_behavior`, `just sdk-generate`, `pnpm --dir packages/cdk run test`, then `CARGO_TARGET_DIR=target just test`. No baseline check result is claimed. Perform at most two targeted repair-and-rerun rounds; after a repair rerun the affected command and every later command. Success requires all four commands, drift-free generated definitions, and a clean substantive review; otherwise stop with the concrete blocker.
 """
+
 [relations]
+depends-on = [
+    "0255.3",
+    "0255.5",
+]
 parent = "0255"
-depends-on = ["0255.3", "0255.5"]
 
 [[checks]]
 name = "prompt behavior focused canonical and static tests pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core prompt_behavior"
-expect = "test result: ok\\. 8 passed; 0 failed"
 timeout-ms = 600000
+expect = 'test result: ok\. 8 passed; 0 failed'
 
 [[checks]]
 name = "prompt behavior SDK generation succeeds"
