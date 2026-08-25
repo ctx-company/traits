@@ -2080,7 +2080,10 @@ output = ["slot:answer"]
             }
         }
         for marker in all_markers {
-            if *marker == own_marker || *marker == own_tone_marker {
+            if *marker == own_marker
+                || *marker == own_tone_marker
+                || own_verbosity_marker == Some(*marker)
+            {
                 continue;
             }
             assert!(
@@ -2674,6 +2677,7 @@ output = ["slot:answer"]
         "loop-pre-marker",
         "loop-a-marker",
         "loop-a-tone-marker",
+        "loop-a-verbosity-marker",
         "loop-nested-marker",
         "loop-nested-tone-marker",
         "loop-later-marker",
@@ -2912,7 +2916,11 @@ output = ["slot:answer"]
         (
             "preview A",
             loop_preview_a.as_str(),
-            &["loop-a-marker", "loop-a-tone-marker"][..],
+            &[
+                "loop-a-marker",
+                "loop-a-tone-marker",
+                "loop-a-verbosity-marker",
+            ][..],
         ),
         (
             "preview nested",
@@ -2971,10 +2979,18 @@ output = ["slot:answer"]
     for frames in [&loop_cli_frames, &loop_mcp_frames] {
         for (index, own_markers) in [
             &["loop-pre-marker"][..],
-            &["loop-a-marker", "loop-a-tone-marker"][..],
+            &[
+                "loop-a-marker",
+                "loop-a-tone-marker",
+                "loop-a-verbosity-marker",
+            ][..],
             &["loop-nested-marker", "loop-nested-tone-marker"][..],
             &[][..],
-            &["loop-a-marker", "loop-a-tone-marker"][..],
+            &[
+                "loop-a-marker",
+                "loop-a-tone-marker",
+                "loop-a-verbosity-marker",
+            ][..],
             &["loop-nested-marker", "loop-nested-tone-marker"][..],
             &[][..],
             &["loop-later-marker"][..],
@@ -2982,12 +2998,20 @@ output = ["slot:answer"]
         .iter()
         .enumerate()
         {
-            for marker in *own_markers {
-                assert_eq!(
-                    frames[index].matches(marker).count(),
-                    1,
-                    "loop frame {index}"
-                );
+            for marker in all_loop_markers {
+                if own_markers.contains(&marker) {
+                    assert_eq!(
+                        frames[index].matches(marker).count(),
+                        1,
+                        "loop frame {index}"
+                    );
+                } else {
+                    assert!(
+                        !frames[index].contains(marker),
+                        "loop frame {index} leaked {marker}: {}",
+                        frames[index]
+                    );
+                }
             }
         }
     }
@@ -3211,49 +3235,92 @@ output = ["slot:answer"]
     assert_exit_code(&loop_export, 0);
     let loop_skill =
         fs::read_to_string(loop_export_dir.join("agent-intent").join("SKILL.md")).unwrap();
-    for (source, text, tone) in [
+    let loop_static_declarations = [
         (
             "sequence:loop-body/loop-a",
+            "shared",
             "Loop A replacement text.",
+            "</intent>",
+        ),
+        (
+            "sequence:loop-body/loop-a",
+            "loop-a-marker",
+            "Loop A marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:loop-body/loop-a",
+            "shared-tone",
             "Loop A tone.",
+            "</behavior>",
+        ),
+        (
+            "sequence:loop-body/loop-a",
+            "loop-a-tone-marker",
+            "Loop A tone marker.",
+            "</behavior>",
+        ),
+        (
+            "sequence:loop-body/loop-a",
+            "loop-a-verbosity-marker",
+            "Loop A verbosity marker.",
+            "</behavior>",
         ),
         (
             "sequence:loop-branch-then/loop-nested-leaf",
+            "shared",
             "Loop nested replacement text.",
-            "Loop nested tone.",
+            "</intent>",
         ),
-    ] {
-        for (id, own_text) in [("shared", text), ("shared-tone", tone)] {
-            let own_tag = format!("id=\"{id}\" source=\"{source}\">");
-            assert_eq!(loop_skill.matches(&own_tag).count(), 1, "{loop_skill}");
-            let block_start = loop_skill
-                .find(&own_tag)
-                .unwrap_or_else(|| panic!("static export missing {own_tag}: {loop_skill}"));
-            let block_end = loop_skill[block_start..]
-                .find(if id == "shared" {
-                    "</intent>"
-                } else {
-                    "</behavior>"
-                })
-                .map(|offset| block_start + offset)
-                .unwrap_or(loop_skill.len());
-            assert!(
-                loop_skill[block_start..block_end].contains(own_text),
-                "static export source block for {own_tag} leaked or omitted its own text: {loop_skill}"
-            );
+        (
+            "sequence:loop-branch-then/loop-nested-leaf",
+            "loop-nested-marker",
+            "Loop nested marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:loop-branch-then/loop-nested-leaf",
+            "shared-tone",
+            "Loop nested tone.",
+            "</behavior>",
+        ),
+        (
+            "sequence:loop-branch-then/loop-nested-leaf",
+            "loop-nested-tone-marker",
+            "Loop nested tone marker.",
+            "</behavior>",
+        ),
+        (
+            "sequence:loop-body/step-3",
+            "loop-verdict-marker",
+            "Loop verdict static marker.",
+            "</intent>",
+        ),
+    ];
+    for (source, id, own_text, closing_tag) in loop_static_declarations {
+        let own_tag = format!("id=\"{id}\" source=\"{source}\">");
+        assert_eq!(loop_skill.matches(&own_tag).count(), 1, "{loop_skill}");
+        let block_start = loop_skill
+            .find(&own_tag)
+            .unwrap_or_else(|| panic!("static export missing {own_tag}: {loop_skill}"));
+        let block_end = loop_skill[block_start..]
+            .find(closing_tag)
+            .map(|offset| block_start + offset)
+            .unwrap_or(loop_skill.len());
+        let block = &loop_skill[block_start..block_end];
+        assert!(
+            block.contains(own_text),
+            "static export source block for {own_tag} omitted its own text: {loop_skill}"
+        );
+        for (_, _, foreign_text, _) in loop_static_declarations {
+            if foreign_text != own_text {
+                assert!(
+                    !block.contains(foreign_text),
+                    "static export source block for {own_tag} leaked {foreign_text}: {loop_skill}"
+                );
+            }
         }
     }
-    let verdict_tag = "id=\"loop-verdict-marker\" source=\"sequence:loop-body/step-3\">";
-    assert_eq!(loop_skill.matches(verdict_tag).count(), 1, "{loop_skill}");
-    let verdict_start = loop_skill.find(verdict_tag).unwrap();
-    let verdict_end = loop_skill[verdict_start..]
-        .find("</intent>")
-        .map(|offset| verdict_start + offset)
-        .unwrap_or(loop_skill.len());
-    assert!(
-        loop_skill[verdict_start..verdict_end].contains("Loop verdict static marker."),
-        "{loop_skill}"
-    );
     assert!(
         loop_skill.contains("Static render advisory") && loop_skill.contains("Static host note"),
         "loop static export must remain explicitly labeled static: {loop_skill}"
