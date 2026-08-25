@@ -78,21 +78,25 @@ validation = """
 
 Run verification strictly as `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_intent`, then `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch`, then `CARGO_TARGET_DIR=target just test-full`, followed by the substantive diff review. Permit at most two targeted repair-and-rerun rounds; after a repair rerun the affected command and every later command. Completion requires both focused commands, the landing gate, and review to pass; otherwise report the concrete remaining blocker instead of completing the task.
 """
+
 [relations]
+depends-on = [
+    "0255.2",
+    "0255.5",
+]
 parent = "0255"
-depends-on = ["0255.2", "0255.5"]
 
 [[checks]]
 name = "top-level ready prompt intent resolver tests pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_ready_prompt_intent"
-expect = "test result: ok\\. 5 passed; 0 failed"
 timeout-ms = 600000
+expect = 'test result: ok\. 5 passed; 0 failed'
 
 [[checks]]
 name = "top-level ready prompt intent public dispatch proof passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
-expect = "test result: ok\\. 1 passed; 0 failed"
 timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
 
 [[checks]]
 name = "top-level prompt intent dispatch passes the landing gate"
