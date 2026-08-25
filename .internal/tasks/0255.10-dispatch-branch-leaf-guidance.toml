@@ -71,15 +71,16 @@ validation = """
 
 Run verification strictly in the order above. Permit at most two targeted repair-and-rerun rounds; after each repair rerun the affected command and every later step. Mark complete only when both commands pass, the implementation diff stays within `modules/cli/src/app/frame_prompt.rs` and `modules/cli/tests/proof_agent_intent_dispatch.rs`, and substantive review has no finding. Otherwise report the concrete blocker instead of completing the task.
 """
+
 [relations]
-parent = "0255"
 depends-on = ["0255.9"]
+parent = "0255"
 
 [[checks]]
 name = "branch ready prompt dispatch proof passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
-expect = "test result: ok\\. 1 passed; 0 failed"
 timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
 
 [[checks]]
 name = "branch leaf guidance passes the landing gate"
