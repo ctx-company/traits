@@ -802,11 +802,11 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     expect(JSON.stringify(seatDraft)).toBe(JSON.stringify(handDraft));
   });
 
-  it("an agent guided through .prompt is normalized and infers schema 0.6", () => {
+  it("an intent-guided agent collected through .prompt is normalized and infers schema 0.6", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("guided-prompt-agent", { description: "Review a diff." });
+      defineTrait("intent-guided-prompt-agent", { description: "Review a diff." });
       const review = slot.text("review");
-      agent.reviewer("reviewer", { behavior: { tone: behavior.tone.Direct } }).prompt("Review", {
+      agent.reviewer("reviewer", { intent: { avoid: intent.ScopeCreep } }).prompt("Review", {
         input: input.prompt`Review the diff.`,
         output: review,
       });
@@ -814,8 +814,27 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     });
     expect(envelope.draft).toMatchObject({
       "schema-version": "0.6",
+      agent: [{ id: "reviewer", intent: { avoid: [{ id: "scope-creep" }] } }],
+    });
+  });
+
+  it("a behavior-guided agent collected through .prompt is normalized and infers schema 0.6", () => {
+    const build = (guided: boolean) =>
+      evaluateTraitFunction(() => {
+        defineTrait("behavior-guided-prompt-agent", { description: "Review a diff." });
+        const review = slot.text("review");
+        agent
+          .reviewer("reviewer", guided ? { behavior: { tone: behavior.tone.Direct } } : undefined)
+          .prompt("Review", { input: input.prompt`Review the diff.`, output: review });
+        return { review };
+      }).draft;
+    const guided = build(true);
+    const ordinary = build(false) as Record<string, unknown>;
+    expect(guided).toMatchObject({
+      "schema-version": "0.6",
       agent: [{ id: "reviewer", behavior: { tone: [{ id: "direct" }] } }],
     });
+    expect(ordinary["schema-version"]).toBe("0.5");
   });
 });
 

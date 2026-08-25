@@ -558,8 +558,8 @@ export type CustomSlug = string & { readonly __customSlugBrand: never };
 export type Slug = Lowercase<string>;
 /**
  * The canonical trait document schema version. `"0.5"` is the default and
- * native-variant baseline; agent-local intent infers `"0.6"` when no
- * explicit version is authored.
+ * native-variant baseline; agent-local intent or behavior infers `"0.6"`
+ * when no explicit version is authored.
  */
 export type SchemaVersion = "0.2" | "0.3" | "0.4" | "0.5" | "0.6";
 /** A three-component semantic version for trait releases. */

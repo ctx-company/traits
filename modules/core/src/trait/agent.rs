@@ -470,14 +470,32 @@ mod tests {
 
     #[test]
     fn agent_behavior_reports_shared_validation_failures_at_indexed_paths() {
-        let mut guided = agent(None);
-        guided.behavior = Some(
-            serde_json::from_value(serde_json::json!({ "tone": ["direct", "direct"] }))
-                .expect("behavior fixture"),
-        );
-        let error =
-            validate_agents(&[guided], "0.6").expect_err("duplicate additive guidance rejects");
-        assert!(error.to_string().contains("agent[0].behavior.tone[1].id"));
+        for (behavior, path) in [
+            (
+                serde_json::json!({ "tone": ["Not A Slug"] }),
+                "agent[0].behavior.tone[0].id",
+            ),
+            (
+                serde_json::json!({ "method": [{ "id": "blank", "summary": "  " }] }),
+                "agent[0].behavior.method[0].summary",
+            ),
+            (
+                serde_json::json!({ "verbosity": { "id": "second-person", "description": "You must verify evidence." } }),
+                "agent[0].behavior.verbosity.description",
+            ),
+            (
+                serde_json::json!({ "format": ["same", "same"] }),
+                "agent[0].behavior.format[1].id",
+            ),
+        ] {
+            let mut guided = agent(None);
+            guided.behavior = Some(serde_json::from_value(behavior).expect("behavior fixture"));
+            let error = validate_agents(&[guided], "0.6").expect_err("invalid scoped guidance");
+            assert!(
+                error.to_string().contains(path),
+                "expected {path}, got {error}"
+            );
+        }
     }
 
     #[test]

@@ -5,6 +5,8 @@ import {
   condition,
   dependency,
   diagnostics,
+  defineTrait,
+  evaluateTraitFunction,
   input,
   intent,
   isTraitFamilyHandle,
@@ -2556,7 +2558,7 @@ describe("agent.* role templates", () => {
     });
   });
 
-  it("normalizes direct agent guidance and infers schema 0.6 only when it is present", () => {
+  it("normalizes direct agent intent and infers schema 0.6 only when it is present", () => {
     const guided = trait("guided-agent", {
       description: "A guided agent.",
       agent: agent("worker", { description: "Works.", intent: { avoid: [{ id: "scope-creep" }] } }),
@@ -2565,18 +2567,12 @@ describe("agent.* role templates", () => {
       description: "An ordinary agent.",
       agent: agent("worker", { description: "Works." }),
     });
-    const behaviorGuided = trait("behavior-guided-agent", {
-      description: "A behavior-guided agent.",
-      agent: agent("worker", { description: "Works.", behavior: {} }),
-    });
     expect(toDraftJson(guided)["schema-version"]).toBe("0.6");
     expect(toDraftJson(guided).agent?.[0]?.intent).toEqual({ avoid: [{ id: "scope-creep" }] });
     expect(toDraftJson(ordinary)["schema-version"]).toBe("0.5");
-    expect(toDraftJson(behaviorGuided)["schema-version"]).toBe("0.6");
-    expect(toDraftJson(behaviorGuided).agent?.[0]?.behavior).toEqual({});
   });
 
-  it("normalizes scalar, array, and rich guidance forms on direct and seated agents", () => {
+  it("normalizes scalar, array, and rich intent guidance forms on direct and seated agents", () => {
     const direct = toDraftJson(
       agent("guided", {
         description: "Works.",
@@ -2599,6 +2595,9 @@ describe("agent.* role templates", () => {
       { require: [{ id: "correctness" }] },
       { require: [{ id: "correctness" }] },
     ]);
+  });
+
+  it("normalizes every behavior axis and guidance form on direct agents", () => {
     const behaviorGuided = toDraftJson(
       agent("behavior-guided", {
         description: "Works.",
@@ -2624,14 +2623,53 @@ describe("agent.* role templates", () => {
       initiative: { id: "proactively-execute-safe-steps" },
       uncertainty: { id: "state-assumptions" },
     });
-    expect(
-      seats(agent.reviewer, "behavior-guided", 2, { behavior: { tone: behavior.tone.Direct } }).map(
-        (handle) => toDraftJson(handle).behavior,
-      ),
-    ).toEqual([{ tone: [{ id: "direct" }] }, { tone: [{ id: "direct" }] }]);
   });
 
-  it("an explicit schema version takes precedence over agent guidance inference", () => {
+  it("normalizes agent behavior through seats without losing AgentHandle prompt usability", () => {
+    const minted = seats(agent.reviewer, "behavior-guided", 2, { behavior: { tone: behavior.tone.Direct } });
+    expect(minted.map((handle) => toDraftJson(handle).behavior)).toEqual([
+      { tone: [{ id: "direct" }] },
+      { tone: [{ id: "direct" }] },
+    ]);
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("seated-behavior", { description: "Review a diff." });
+      const [reviewer] = minted;
+      if (reviewer === undefined) throw new Error("seats(2) must mint a first handle");
+      const review = slot.text("review");
+      reviewer.prompt("Review", { input: input.prompt`Review the diff.`, output: review });
+      return { review };
+    });
+    expect((envelope.draft as { agent?: unknown }).agent).toEqual([
+      expect.objectContaining({ id: "behavior-guided-1", behavior: { tone: [{ id: "direct" }] } }),
+    ]);
+  });
+
+  it("normalizes direct agent behavior and infers schema 0.6 only when it is present", () => {
+    const guided = trait("behavior-guided-agent", {
+      description: "A behavior-guided agent.",
+      agent: agent("worker", { description: "Works.", behavior: {} }),
+    });
+    const ordinary = trait("ordinary-agent", {
+      description: "An ordinary agent.",
+      agent: agent("worker", { description: "Works." }),
+    });
+    expect(toDraftJson(guided)["schema-version"]).toBe("0.6");
+    expect(toDraftJson(guided).agent?.[0]?.behavior).toEqual({});
+    expect(toDraftJson(ordinary)["schema-version"]).toBe("0.5");
+  });
+
+  it("an explicit schema version takes precedence over agent-intent inference", () => {
+    const draft = toDraftJson(
+      trait("explicit-agent-intent-version", {
+        "schema-version": "0.5",
+        description: "Explicit authoring wins.",
+        agent: agent("worker", { description: "Works.", intent: { require: "correctness" } }),
+      }),
+    );
+    expect(draft["schema-version"]).toBe("0.5");
+  });
+
+  it("an explicit schema version takes precedence over agent-behavior inference", () => {
     const draft = toDraftJson(
       trait("explicit-agent-version", {
         "schema-version": "0.5",
