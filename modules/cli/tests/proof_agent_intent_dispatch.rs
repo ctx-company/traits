@@ -3348,4 +3348,213 @@ output = ["slot:answer"]
             assert!(!prompt.contains("source=\""));
         }
     }
+
+    // A for-each body has the same declaration lookup contract as the other
+    // nested controls. Its repeated bindings must not change the leaf guidance.
+    let for_each_header = nested_header.replace(
+        "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n",
+        "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n\n[[slot]]\nid = \"fe-items\"\nschema = \"[schema:text]\"\ndescription = \"For-each items.\"\n\n[[slot]]\nid = \"fe-item\"\nschema = \"schema:text\"\ndescription = \"Current for-each item.\"\n\n[[slot]]\nid = \"fe-choice\"\nschema = \"schema:text\"\ndescription = \"For-each branch choice.\"\n\n[[slot]]\nid = \"fe-answer-a\"\nschema = \"schema:text\"\ndescription = \"For-each A answer.\"\n\n[[slot]]\nid = \"fe-answer-b\"\nschema = \"schema:text\"\ndescription = \"For-each B answer.\"\n",
+    );
+    assert_ne!(
+        for_each_header, nested_header,
+        "for-each slot insertion point moved"
+    );
+    let for_each_fixture = format!(
+        r#"{for_each_header}[[sequence.fe-body.sequence]]
+id = "fe-a"
+title = "For-each A"
+agent = "agent:worker"
+prompt = "Produce for-each A answer."
+input = ["slot:fe-item"]
+intent = {{ require = [{{ id = "shared", summary = "For-each A replacement text." }}, {{ id = "fe-a-marker", summary = "For-each A marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "For-each A tone." }}, {{ id = "fe-a-tone-marker", summary = "For-each A tone marker." }}], verbosity = {{ id = "fe-a-verbosity-marker", summary = "For-each A verbosity marker." }} }}
+output = ["slot:fe-answer-a"]
+
+[[sequence.fe-body.sequence]]
+id = "fe-branch"
+title = "For-each branch"
+kind = "branch"
+sequence = "sequence:fe-branch-then"
+when = {{ slot = "slot:fe-choice", equals = "ok" }}
+
+[[sequence.fe-branch-then.sequence]]
+id = "fe-nested"
+title = "For-each nested"
+agent = "agent:worker"
+prompt = "Produce for-each nested answer."
+input = ["slot:fe-item"]
+intent = {{ require = [{{ id = "shared", summary = "For-each nested replacement text." }}, {{ id = "fe-nested-marker", summary = "For-each nested marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "For-each nested tone." }}, {{ id = "fe-nested-tone-marker", summary = "For-each nested tone marker." }}] }}
+output = ["slot:fe-answer-b"]
+
+[procedure]
+description = "For-each leaf guidance."
+
+[[procedure.sequence]]
+id = "fe-seed"
+title = "Seed for-each elements"
+kind = "project"
+output = ["slot:fe-items"]
+
+[[procedure.sequence.projection]]
+source = {{ literal = ["alpha", "beta"] }}
+destination = "slot:fe-items"
+
+[[procedure.sequence]]
+id = "fe-pre"
+title = "Choose for-each branch"
+agent = "agent:worker"
+prompt = "Choose for-each branch."
+intent = {{ require = [{{ id = "fe-pre-marker", summary = "For-each pre marker." }}] }}
+output = ["slot:fe-choice"]
+
+[[procedure.sequence]]
+id = "fe-loop"
+title = "For each element"
+kind = "for-each"
+over = "slot:fe-items"
+item = "slot:fe-item"
+max-items = 2
+sequence = "sequence:fe-body"
+
+[[procedure.sequence]]
+id = "fe-later"
+title = "For-each later"
+agent = "agent:worker"
+prompt = "Produce for-each later answer."
+intent = {{ require = [{{ id = "fe-later-marker", summary = "For-each later marker." }}] }}
+output = ["slot:answer"]
+"#
+    );
+    fs::write(&generated, &for_each_fixture).unwrap();
+    require_success(
+        "approve for-each fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let for_each_preview = preview_all("for-each");
+    assert_eq!(
+        for_each_preview.len(),
+        4,
+        "for-each preview: {for_each_preview:?}"
+    );
+    let (_, for_each_cli_args) = run_with_env("cli", "for-each-cli.json", &[]);
+    assert_system(&for_each_cli_args, "--cli-system");
+    let for_each_cli_frames = read_frames(6);
+    let (_, for_each_mcp_args) = run_with_env("mcp", "for-each-mcp.json", &[]);
+    assert_system(&for_each_mcp_args, "--mcp-system");
+    let for_each_mcp_frames = read_frames(6);
+    let for_each_markers = [
+        "fe-pre-marker",
+        "fe-a-marker",
+        "fe-a-tone-marker",
+        "fe-a-verbosity-marker",
+        "fe-nested-marker",
+        "fe-nested-tone-marker",
+        "fe-later-marker",
+    ];
+    for (frames, transport) in [(&for_each_cli_frames, "CLI"), (&for_each_mcp_frames, "MCP")] {
+        for (index, prompt) in frames.iter().enumerate() {
+            assert_unassigned_absent(prompt);
+            assert!(
+                !prompt.contains("source=\""),
+                "{transport} frame {index}: {prompt}"
+            );
+            let guidance = format!("{}{}", extract_intent(prompt), extract_behavior(prompt));
+            for container in [
+                "fe-loop",
+                "fe-branch",
+                "sequence:fe-body",
+                "sequence:fe-branch-then",
+            ] {
+                assert!(
+                    !guidance.contains(container),
+                    "{transport} frame {index}: {guidance}"
+                );
+            }
+        }
+        for (index, own) in [
+            "fe-pre-marker",
+            "fe-a-marker",
+            "fe-nested-marker",
+            "fe-a-marker",
+            "fe-nested-marker",
+            "fe-later-marker",
+        ]
+        .iter()
+        .enumerate()
+        {
+            for marker in for_each_markers {
+                if marker == *own
+                    || (*own == "fe-a-marker"
+                        && (marker == "fe-a-tone-marker" || marker == "fe-a-verbosity-marker"))
+                    || (*own == "fe-nested-marker" && marker == "fe-nested-tone-marker")
+                {
+                    assert_eq!(
+                        frames[index].matches(marker).count(),
+                        1,
+                        "{transport} frame {index}: {}",
+                        frames[index]
+                    );
+                } else {
+                    assert!(
+                        !frames[index].contains(marker),
+                        "{transport} frame {index} leaked {marker}: {}",
+                        frames[index]
+                    );
+                }
+            }
+        }
+    }
+    assert!(for_each_cli_frames[1].contains("alpha") && !for_each_cli_frames[1].contains("beta"));
+    assert!(for_each_cli_frames[3].contains("beta") && !for_each_cli_frames[3].contains("alpha"));
+    assert_eq!(
+        extract_intent(&for_each_cli_frames[1]),
+        extract_intent(&for_each_cli_frames[3])
+    );
+    assert_eq!(
+        extract_behavior(&for_each_cli_frames[1]),
+        extract_behavior(&for_each_cli_frames[3])
+    );
+    assert_eq!(
+        extract_intent(&for_each_cli_frames[2]),
+        extract_intent(&for_each_cli_frames[4])
+    );
+    assert_eq!(
+        extract_behavior(&for_each_cli_frames[2]),
+        extract_behavior(&for_each_cli_frames[4])
+    );
+    assert_ne!(
+        extract_intent(&for_each_cli_frames[1]),
+        extract_intent(&for_each_cli_frames[2])
+    );
+    for (cli, mcp) in for_each_cli_frames.iter().zip(&for_each_mcp_frames) {
+        assert_eq!(extract_intent(cli), extract_intent(mcp));
+        assert_eq!(extract_behavior(cli), extract_behavior(mcp));
+    }
+    for (preview, live, label) in [
+        (&for_each_preview[0], &for_each_cli_frames[0], "pre"),
+        (&for_each_preview[1], &for_each_cli_frames[1], "A"),
+        (&for_each_preview[2], &for_each_cli_frames[2], "nested"),
+        (&for_each_preview[3], &for_each_cli_frames[5], "later"),
+    ] {
+        assert_eq!(
+            extract_intent(preview),
+            extract_intent(live),
+            "for-each {label}"
+        );
+        assert_eq!(
+            extract_behavior(preview),
+            extract_behavior(live),
+            "for-each {label}"
+        );
+    }
 }

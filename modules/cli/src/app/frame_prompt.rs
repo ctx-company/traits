@@ -615,7 +615,7 @@ pub(crate) fn resolve_declared_item<'a>(
 /// - Empty: a top-level item, addressed via `frame.sequence_index`.
 /// - Live/historical: `path_for_nested_item` always opens with a `procedure`
 ///   segment, closes with a trailing `item` leaf segment, and every segment
-///   in between is a `sequence`, `branch`, or `loop` container. Other control
+///   in between is a `sequence`, `branch`, `loop`, or `for-each` container. Other control
 ///   kinds are not yet addressable by this selector.
 /// - No-session static preview: `expand_nested_preview` never emits a
 ///   `procedure` or trailing `item` segment, so a non-empty path made from
@@ -632,12 +632,18 @@ fn ready_prompt<'a>(
         let is_live_shape = path.len() >= 3
             && path[0].kind == "procedure"
             && path[path.len() - 1].kind == "item"
-            && path[1..path.len() - 1]
-                .iter()
-                .all(|segment| matches!(segment.kind.as_str(), "sequence" | "branch" | "loop"));
-        let is_static_shape = path
-            .iter()
-            .all(|segment| matches!(segment.kind.as_str(), "sequence" | "branch" | "loop"));
+            && path[1..path.len() - 1].iter().all(|segment| {
+                matches!(
+                    segment.kind.as_str(),
+                    "sequence" | "branch" | "loop" | "for-each"
+                )
+            });
+        let is_static_shape = path.iter().all(|segment| {
+            matches!(
+                segment.kind.as_str(),
+                "sequence" | "branch" | "loop" | "for-each"
+            )
+        });
         is_live_shape || is_static_shape
     };
     if frame.kind != SequenceFrameKind::Step || !is_admitted {
