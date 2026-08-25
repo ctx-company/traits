@@ -4678,17 +4678,6 @@ fn local_sequence_id(ref_text: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn prompt_intent_trait(version: &str) -> Trait {
-        serde_json::from_value(serde_json::json!({
-            "id": "prompt-intent-fixture",
-            "schema-version": version,
-            "version": "0.1.0",
-            "name": "Prompt intent fixture",
-            "description": "Validates prompt intent."
-        }))
-        .expect("fixture trait decodes")
-    }
-
     fn prompt_intent_item(kind: Option<&str>, intent: serde_json::Value) -> SequenceItem {
         let mut item = serde_json::json!({ "id": "prompt-step", "prompt": "Do the work.", "intent": intent });
         if let Some(kind) = kind {
@@ -4697,22 +4686,40 @@ mod tests {
         serde_json::from_value(item).expect("fixture item decodes")
     }
 
+    fn prompt_intent_declaration(version: &str, item: SequenceItem, named: bool) -> Trait {
+        let item = serde_json::to_value(item).expect("fixture item encodes");
+        let mut value = serde_json::json!({
+            "id": "prompt-intent-fixture",
+            "schema-version": version,
+            "version": "0.1.0",
+            "name": "Prompt intent fixture",
+            "description": "Validates prompt intent."
+        });
+        if named {
+            value["sequence"] = serde_json::json!({ "work": { "sequence": [item] } });
+        } else {
+            value["procedure"] = serde_json::json!({
+                "description": "Validates prompt intent.",
+                "sequence": [item]
+            });
+        }
+        serde_json::from_value(value).expect("fixture trait decodes")
+    }
+
     #[test]
     fn prompt_intent_top_level_and_named_accept() {
-        let trait_ref = prompt_intent_trait("0.6");
         let item = prompt_intent_item(None, serde_json::json!({ "require": "correctness" }));
-        validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+        validate(&prompt_intent_declaration("0.6", item.clone(), false))
             .expect("top-level prompt intent is valid");
-        validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "sequence.work.sequence[0]")
+        validate(&prompt_intent_declaration("0.6", item, true))
             .expect("named prompt intent is valid");
     }
 
     #[test]
     fn prompt_intent_rejects_all_non_prompt_kinds() {
-        let trait_ref = prompt_intent_trait("0.6");
         for kind in ["ask", "command", "check", "project", "sequence", "branch", "loop", "for-each", "parallel", "terminal"] {
             let item = prompt_intent_item(Some(kind), serde_json::json!({}));
-            let error = validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+            let error = validate(&prompt_intent_declaration("0.6", item, false))
                 .expect_err("intent is prompt-only");
             assert!(error.to_string().contains("procedure.sequence[0].intent"));
         }
@@ -4720,9 +4727,8 @@ mod tests {
 
     #[test]
     fn prompt_intent_rejects_pre_06_schema() {
-        let trait_ref = prompt_intent_trait("0.5");
         let item = prompt_intent_item(None, serde_json::json!({}));
-        assert!(validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+        assert!(validate(&prompt_intent_declaration("0.5", item, false))
             .expect_err("0.6 is required")
             .to_string()
             .contains("schema-version \"0.6\""));
@@ -4730,9 +4736,8 @@ mod tests {
 
     #[test]
     fn prompt_intent_reuses_guidance_list_validation() {
-        let trait_ref = prompt_intent_trait("0.6");
         let item = prompt_intent_item(None, serde_json::json!({ "focus": [{ "id": "Bad Id" }] }));
-        assert!(validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+        assert!(validate(&prompt_intent_declaration("0.6", item, false))
             .expect_err("shared guidance validation rejects bad ids")
             .to_string()
             .contains("procedure.sequence[0].intent.focus[0].id"));
@@ -4740,9 +4745,8 @@ mod tests {
 
     #[test]
     fn prompt_intent_reuses_scoped_collision_validation() {
-        let trait_ref = prompt_intent_trait("0.6");
         let item = prompt_intent_item(None, serde_json::json!({ "require": "correctness", "avoid": "correctness" }));
-        assert!(validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+        assert!(validate(&prompt_intent_declaration("0.6", item, false))
             .expect_err("scoped collision is rejected")
             .to_string()
             .contains("procedure.sequence[0].intent.avoid[0].id"));
@@ -4752,23 +4756,25 @@ mod tests {
     fn prompt_intent_participates_in_deterministic_digest() {
         let without = prompt_intent_item(None, serde_json::json!({}));
         let with = prompt_intent_item(None, serde_json::json!({ "focus": "correctness" }));
+        let canonical = crate::digest::canonical_json(&with).expect("canonical json");
+        assert_eq!(canonical, r#"{"id":"prompt-step","intent":{"focus":[{"id":"correctness"}]},"prompt":"Do the work."}"#);
         assert_ne!(crate::digest::canonical_digest(&without).unwrap(), crate::digest::canonical_digest(&with).unwrap());
-        assert_eq!(crate::digest::canonical_digest(&with).unwrap(), crate::digest::canonical_digest(&with).unwrap());
     }
 
     #[test]
     fn prompt_intent_absence_preserves_canonical_bytes() {
         let absent: SequenceItem = serde_json::from_value(serde_json::json!({ "id": "prompt-step", "prompt": "Do the work." }))
             .expect("absent fixture decodes");
-        let explicit = prompt_intent_item(None, serde_json::json!(null));
-        assert_eq!(toml::to_string(&absent).unwrap(), toml::to_string(&explicit).unwrap());
+        assert_eq!(
+            crate::digest::canonical_json(&absent).expect("canonical json"),
+            r#"{"id":"prompt-step","prompt":"Do the work."}"#,
+        );
     }
 
     #[test]
     fn prompt_intent_accepts_each_guidance_group() {
-        let trait_ref = prompt_intent_trait("0.6");
         let item = prompt_intent_item(None, serde_json::json!({ "require": "correctness", "focus": "robustness", "avoid": "scope-creep", "block": "over-engineering" }));
-        validate_prompt_intent(&trait_ref, &item, item.effective_kind(), "procedure.sequence[0]")
+        validate(&prompt_intent_declaration("0.6", item, false))
             .expect("all intent groups are accepted");
     }
 

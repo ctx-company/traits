@@ -1313,6 +1313,52 @@ mod agent_intent_tests {
     use super::*;
 
     #[test]
+    fn prompt_sequence_intent_is_static_declaration_guidance_outside_procedure_body() {
+        let trait_ref: Trait = serde_json::from_value(serde_json::json!({
+            "id": "prompt-intent-static-fixture",
+            "schema-version": "0.6",
+            "version": "1.0.0",
+            "name": "Prompt intent static fixture",
+            "description": "Inspects prompt guidance.",
+            "behavior": { "tone": "direct" },
+            "procedure": {
+                "description": "Review the changes.",
+                "sequence": [
+                    { "id": "top", "prompt": "Top.", "intent": { "require": [{ "id": "correctness", "summary": "Keep </intent> safe." }] } },
+                    { "prompt": "Fallback.", "intent": { "focus": "robustness" } }
+                ]
+            },
+            "sequence": {
+                "nested": {
+                    "sequence": [{ "id": "named", "prompt": "Named.", "intent": { "avoid": "scope-creep" } }]
+                }
+            }
+        }))
+        .expect("fixture trait");
+        let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
+        let procedure = report
+            .sections
+            .iter()
+            .find(|section| section.heading == "Procedure")
+            .expect("Procedure section");
+        assert!(procedure.content.contains("source=\"sequence:procedure/top\""));
+        assert!(procedure.content.contains("source=\"sequence:procedure/step-2\""));
+        assert!(procedure.content.contains("source=\"sequence:nested/named\""));
+        assert!(procedure.content.contains("Keep &lt;/intent> safe."));
+        let procedure_end = procedure.content.find("</procedure>").expect("procedure leaf closes");
+        assert!(
+            !procedure.content[..procedure_end].contains("<intent"),
+            "declaration guidance must not be escaped into the procedure body"
+        );
+        assert!(!report.behavior_text.contains("sequence:procedure/top"));
+        let frame = frame_guidance(&trait_ref, None)
+            .expect("root guidance resolves")
+            .expect("root behavior has frame guidance");
+        assert!(!frame.intent.contains("sequence:procedure/top"));
+        assert!(frame.behavior.contains("tone"));
+    }
+
+    #[test]
     fn agent_intent_is_static_agents_only_and_keeps_system_separate() {
         let trait_ref: Trait = serde_json::from_value(serde_json::json!({
             "id": "agent-intent-static-fixture",

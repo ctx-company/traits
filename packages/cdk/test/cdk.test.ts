@@ -382,8 +382,15 @@ describe("prompt sequence intent", () => {
     if (false) {
       // @ts-expect-error intent is prompt-only.
       sequence.command("typed-illegal-intent", { cmd: "true", intent: {} });
+      // @ts-expect-error intent is prompt-only.
+      sequence.check("typed-illegal-intent", { cmd: "true", output: slot.text("intent-check"), intent: {} });
+      // @ts-expect-error intent is prompt-only.
+      sequence.parallel("typed-illegal-intent", [], { intent: {} });
     }
     expect(() => sequence.command("runtime-illegal-intent", { cmd: "true", intent: {} } as never)).toThrow(
+      /intent is valid only on prompt items/,
+    );
+    expect(() => sequence.parallel("runtime-illegal-intent", [], { intent: {} } as never)).toThrow(
       /intent is valid only on prompt items/,
     );
   });

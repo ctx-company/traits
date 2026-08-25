@@ -485,6 +485,7 @@ function sequenceContainerHasPromptIntent(value: unknown): boolean {
       typeof item === "object" &&
       !Array.isArray(item) &&
       Object.hasOwn(item, "intent") &&
+      Object.hasOwn(item, "prompt") &&
       (!Object.hasOwn(item, "kind") || (item as { readonly kind?: unknown }).kind === "prompt"),
   );
 }

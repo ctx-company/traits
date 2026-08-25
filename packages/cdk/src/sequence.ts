@@ -374,6 +374,7 @@ export type GateOptions = {
  * `until` guard against the latest verdict.
  */
 export type CheckSequenceFields = Omit<SequenceCommonFields, "format" | "output" | "onFailure" | "input"> & {
+  readonly intent?: never;
   readonly kind: "check";
   readonly prompt?: never;
   readonly text?: never;
@@ -503,6 +504,7 @@ export type ParallelBranchFailureEntry = {
   readonly onFailure: ParallelBranchFailurePolicy;
 };
 export type ParallelOptions = {
+  readonly intent?: never;
   readonly join?: ParallelJoinOption;
   readonly branchFailure?: readonly ParallelBranchFailureEntry[];
   readonly onFailure?: FailureTargetValue;
@@ -1142,6 +1144,7 @@ export const sequence: SequenceFunction = {
       ...(options?.branchFailure === undefined ? {} : { branchFailure: options.branchFailure }),
       ...(options?.onFailure === undefined ? {} : { onFailure: options.onFailure }),
       ...(options?.include === undefined ? {} : { include: options.include }),
+      ...(options !== undefined && Object.hasOwn(options, "intent") ? { intent: options.intent } : {}),
     }),
 };
 
