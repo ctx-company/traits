@@ -615,12 +615,11 @@ pub(crate) fn resolve_declared_item<'a>(
 /// - Empty: a top-level item, addressed via `frame.sequence_index`.
 /// - Live/historical: `path_for_nested_item` always opens with a `procedure`
 ///   segment, closes with a trailing `item` leaf segment, and every segment
-///   in between is a plain `sequence` container — a `branch`/`loop`/
-///   `for-each`/`parallel` segment anywhere in between means the frame sits
-///   under runtime-decided control flow, not a fixed named-sequence chain.
+///   in between is a `sequence`, `branch`, or `loop` container. Other control
+///   kinds are not yet addressable by this selector.
 /// - No-session static preview: `expand_nested_preview` never emits a
-///   `procedure` or trailing `item` segment, so a non-empty all-`sequence`
-///   path is the static shape of the same fixed chain.
+///   `procedure` or trailing `item` segment, so a non-empty path made from
+///   those same container kinds is the static shape of the same chain.
 fn ready_prompt<'a>(
     loaded: &'a ctx_traits_io::run::LoadedTrait,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
@@ -635,10 +634,10 @@ fn ready_prompt<'a>(
             && path[path.len() - 1].kind == "item"
             && path[1..path.len() - 1]
                 .iter()
-                .all(|segment| segment.kind == "sequence" || segment.kind == "branch");
+                .all(|segment| matches!(segment.kind.as_str(), "sequence" | "branch" | "loop"));
         let is_static_shape = path
             .iter()
-            .all(|segment| segment.kind == "sequence" || segment.kind == "branch");
+            .all(|segment| matches!(segment.kind.as_str(), "sequence" | "branch" | "loop"));
         is_live_shape || is_static_shape
     };
     if frame.kind != SequenceFrameKind::Step || !is_admitted {

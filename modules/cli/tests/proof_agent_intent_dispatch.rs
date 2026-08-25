@@ -116,7 +116,14 @@ if [ -z "$key" ]; then
 fi
 case "$key" in
   choice) value=${CTX_TEST_CHOICE:-ok} ;;
-  nested-choice) value=${CTX_TEST_NESTED_CHOICE:-ok} ;;
+   nested-choice) value=${CTX_TEST_NESTED_CHOICE:-ok} ;;
+   loop-choice) value=${CTX_TEST_LOOP_CHOICE:-ok} ;;
+   loop-verdict)
+     if [ -f __CAPTURE__.verdict-calls ]; then n=$(cat __CAPTURE__.verdict-calls); else n=0; fi
+     n=$((n + 1))
+     printf '%s' "$n" > __CAPTURE__.verdict-calls
+     if [ "$n" -eq 1 ]; then value=continue; else value=done; fi
+     ;;
   *) value=ok ;;
 esac
 session=$(printf '%s\n' "$last" | sed -n 's/^Run session: //p')
@@ -287,10 +294,11 @@ output = ["slot:answer"]
     let run_with_env = |transport: &str, output: &str, extra_env: &[(&str, &str)]| {
         let _ = fs::remove_file(&capture);
         let _ = fs::remove_file(capture.with_extension("txt.args"));
-        for index in 0..8 {
+        for index in 0..12 {
             let _ = fs::remove_file(capture.with_extension(format!("txt.{index}")));
         }
         let _ = fs::remove_file(capture.with_extension("txt.calls"));
+        let _ = fs::remove_file(capture.with_extension("txt.verdict-calls"));
         let _ = fs::remove_file(&marker);
         fs::write(repo.join(".ctx/traits/runtime.toml"), runtime(transport)).unwrap();
         require_success(
@@ -2532,6 +2540,223 @@ output = ["slot:answer"]
         !branch_prompt_only_behavior.contains("agent-tone"),
         "{branch_prompt_only_behavior}"
     );
+
+    // A loop body uses the same declaration lookup as named sequences, but a
+    // live leaf has a `loop` owner segment and may activate more than once.
+    // The nested branch makes the path mixed (`loop`, then `branch`).
+    let loop_header = nested_header.replace(
+        "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n",
+        "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n\n[[slot]]\nid = \"loop-choice\"\nschema = \"schema:text\"\ndescription = \"Loop branch choice.\"\n\n[[slot]]\nid = \"loop-verdict\"\nschema = \"schema:text\"\ndescription = \"Loop verdict.\"\n",
+    );
+    assert_ne!(
+        loop_header, nested_header,
+        "loop slot insertion point moved"
+    );
+    let loop_fixture = format!(
+        r#"{loop_header}[[sequence.loop-body.sequence]]
+id = "loop-a"
+title = "Loop A"
+agent = "agent:worker"
+prompt = "Produce loop-a answer."
+intent = {{ require = [{{ id = "shared", summary = "Loop A replacement text." }}, {{ id = "loop-a-marker", summary = "Loop A marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Loop A tone." }}, {{ id = "loop-a-tone-marker", summary = "Loop A tone marker." }}], verbosity = {{ id = "loop-a-verbosity-marker", summary = "Loop A verbosity marker." }} }}
+output = ["slot:answer"]
+
+[[sequence.loop-body.sequence]]
+id = "loop-branch"
+title = "Loop branch"
+kind = "branch"
+sequence = "sequence:loop-branch-then"
+when = {{ slot = "slot:loop-choice", equals = "ok" }}
+
+[[sequence.loop-body.sequence]]
+id = "loop-verdict"
+title = "Loop verdict"
+agent = "agent:worker"
+prompt = "Produce loop verdict."
+output = ["slot:loop-verdict"]
+
+[[sequence.loop-branch-then.sequence]]
+id = "loop-nested-leaf"
+title = "Loop nested leaf"
+agent = "agent:worker"
+prompt = "Produce loop-nested answer."
+intent = {{ require = [{{ id = "shared", summary = "Loop nested replacement text." }}, {{ id = "loop-nested-marker", summary = "Loop nested marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Loop nested tone." }}, {{ id = "loop-nested-tone-marker", summary = "Loop nested tone marker." }}] }}
+output = ["slot:answer"]
+
+[procedure]
+description = "Loop leaf guidance."
+
+[[procedure.sequence]]
+id = "decide"
+title = "Decide"
+agent = "agent:worker"
+prompt = "Decide the loop branch."
+intent = {{ require = [{{ id = "loop-pre-marker", summary = "Loop pre marker." }}] }}
+output = ["slot:loop-choice"]
+
+[[procedure.sequence]]
+id = "the-loop"
+title = "The loop"
+kind = "loop"
+sequence = "sequence:loop-body"
+max-iterations = 3
+
+[procedure.sequence.until]
+slot = "slot:loop-verdict"
+equals = "done"
+
+[[procedure.sequence]]
+id = "loop-later"
+title = "Loop later"
+agent = "agent:worker"
+prompt = "Produce loop-later answer."
+intent = {{ require = [{{ id = "loop-later-marker", summary = "Loop later marker." }}] }}
+output = ["slot:answer"]
+"#
+    );
+    fs::write(&generated, &loop_fixture).unwrap();
+    require_success(
+        "approve loop fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let loop_preview = preview_all("loop");
+    assert_eq!(loop_preview.len(), 5, "loop preview: {loop_preview:?}");
+    let loop_preview_a = &loop_preview[1];
+    let loop_preview_nested = &loop_preview[2];
+    assert!(loop_preview_a.contains("loop-a-marker"), "{loop_preview_a}");
+    assert!(
+        loop_preview_nested.contains("loop-nested-marker"),
+        "{loop_preview_nested}"
+    );
+
+    let (_, loop_cli_args) =
+        run_with_env("cli", "loop-cli.json", &[("CTX_TEST_LOOP_CHOICE", "ok")]);
+    assert_system(&loop_cli_args, "--cli-system");
+    let loop_cli_frames = read_frames(8);
+    let loop_a0 = &loop_cli_frames[1];
+    let loop_nested0 = &loop_cli_frames[2];
+    let loop_a1 = &loop_cli_frames[4];
+    let loop_nested1 = &loop_cli_frames[5];
+    assert_eq!(
+        fs::read_to_string(capture.with_extension("txt.calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        8,
+        "loop must run twice before its verdict exits"
+    );
+    for (label, prompt, marker, foreign) in [
+        ("loop A0", loop_a0, "loop-a-marker", "loop-nested-marker"),
+        (
+            "loop nested0",
+            loop_nested0,
+            "loop-nested-marker",
+            "loop-a-marker",
+        ),
+        ("loop A1", loop_a1, "loop-a-marker", "loop-nested-marker"),
+        (
+            "loop nested1",
+            loop_nested1,
+            "loop-nested-marker",
+            "loop-a-marker",
+        ),
+    ] {
+        assert_eq!(prompt.matches(marker).count(), 1, "{label}: {prompt}");
+        assert!(!prompt.contains(foreign), "{label}: {prompt}");
+        assert!(
+            !prompt.contains("the-loop") && !prompt.contains("loop-branch"),
+            "{label}: {prompt}"
+        );
+        assert!(!prompt.contains("source=\""), "{label}: {prompt}");
+        assert_unassigned_absent(prompt);
+    }
+    assert_eq!(extract_intent(loop_a0), extract_intent(loop_a1));
+    assert_eq!(extract_behavior(loop_a0), extract_behavior(loop_a1));
+    assert_eq!(extract_intent(loop_nested0), extract_intent(loop_nested1));
+    assert_eq!(
+        extract_behavior(loop_nested0),
+        extract_behavior(loop_nested1)
+    );
+    assert_ne!(extract_intent(loop_a0), extract_intent(loop_nested0));
+    assert!(loop_a0.find("root-only").unwrap() < loop_a0.find("agent-only").unwrap());
+    assert!(loop_a0.find("agent-only").unwrap() < loop_a0.find("shared").unwrap());
+    assert_eq!(loop_a0.matches("id=\"shared\"").count(), 1, "{loop_a0}");
+    assert!(
+        loop_a0.contains("Loop A replacement text.")
+            && !loop_a0.contains("Assigned replacement text.")
+    );
+    assert!(loop_a0.contains("loop-a-verbosity-marker") && !loop_a0.contains("agent-verbosity"));
+    assert_eq!(extract_intent(loop_a0), extract_intent(loop_preview_a));
+    assert_eq!(extract_behavior(loop_a0), extract_behavior(loop_preview_a));
+    assert_eq!(
+        extract_intent(loop_nested0),
+        extract_intent(loop_preview_nested)
+    );
+    assert_eq!(
+        extract_behavior(loop_nested0),
+        extract_behavior(loop_preview_nested)
+    );
+
+    let (_, loop_mcp_args) =
+        run_with_env("mcp", "loop-mcp.json", &[("CTX_TEST_LOOP_CHOICE", "ok")]);
+    assert_system(&loop_mcp_args, "--mcp-system");
+    let loop_mcp_frames = read_frames(8);
+    for (cli, mcp) in [
+        (loop_a0, &loop_mcp_frames[1]),
+        (loop_nested0, &loop_mcp_frames[2]),
+    ] {
+        assert_eq!(extract_intent(cli), extract_intent(mcp));
+        assert_eq!(extract_behavior(cli), extract_behavior(mcp));
+    }
+
+    let loop_export_dir = home.join("loop-static-export");
+    let loop_export = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "export",
+            "--file",
+            generated.to_str().unwrap(),
+            "--profile",
+            "agent-skills",
+            "--format",
+            "compat",
+            "--out",
+            loop_export_dir.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&loop_export, 0);
+    let loop_skill =
+        fs::read_to_string(loop_export_dir.join("agent-intent").join("SKILL.md")).unwrap();
+    for (source, text) in [
+        ("sequence:loop-body/loop-a", "Loop A replacement text."),
+        (
+            "sequence:loop-branch-then/loop-nested-leaf",
+            "Loop nested replacement text.",
+        ),
+    ] {
+        assert_eq!(
+            loop_skill
+                .matches(&format!("id=\"shared\" source=\"{source}\""))
+                .count(),
+            1,
+            "{loop_skill}"
+        );
+        assert!(loop_skill.contains(text), "{loop_skill}");
+    }
 
     for frames in [
         &tt_frames,
