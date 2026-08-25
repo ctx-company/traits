@@ -108,6 +108,7 @@ for last; do :; done
 printf '%s' "$last" > __CAPTURE__
 if [ -f __CAPTURE__.calls ]; then n=$(($(wc -l < __CAPTURE__.calls))); else n=0; fi
 printf '%s' "$last" > __CAPTURE__.$n
+printf '%s\n' "$@" > __CAPTURE__.args.$n
 printf 'x\n' >> __CAPTURE__.calls
 touch __MARKER__
 key=$(printf '%s\n' "$last" | sed -n 's/.*<format>{"\([a-zA-Z0-9_-]*\)".*/\1/p')
@@ -296,6 +297,7 @@ output = ["slot:answer"]
         let _ = fs::remove_file(capture.with_extension("txt.args"));
         for index in 0..12 {
             let _ = fs::remove_file(capture.with_extension(format!("txt.{index}")));
+            let _ = fs::remove_file(capture.with_extension(format!("txt.args.{index}")));
         }
         let _ = fs::remove_file(capture.with_extension("txt.calls"));
         let _ = fs::remove_file(capture.with_extension("txt.verdict-calls"));
@@ -1966,22 +1968,25 @@ output = ["slot:answer"]
         "Produce nested-then-leaf answer.",
         "Produce otherwise-leaf answer.",
     ];
-    let assert_branch_leaf = |label: &str,
-                              prompt: &str,
-                              own_marker: &str,
-                              own_tone_marker: &str,
-                              own_text: &str,
-                              own_tone_text: &str,
-                              own_prompt_text: &str,
-                              own_verbosity_marker: Option<&str>| {
+    let assert_leaf = |label: &str,
+                       prompt: &str,
+                       all_markers: &[&str],
+                       all_prompt_texts: &[&str],
+                       own_marker: &str,
+                       own_tone_marker: &str,
+                       own_text: &str,
+                       own_tone_text: &str,
+                       own_prompt_text: &str,
+                       own_verbosity_marker: Option<&str>,
+                       foreign_verbosity_marker: &str| {
         let intent = extract_intent(prompt);
         let behavior = extract_behavior(prompt);
         assert!(
             prompt.contains(own_prompt_text),
             "{label} missing its own declared prompt text: {prompt}"
         );
-        for prompt_text in all_branch_prompt_texts {
-            if prompt_text == own_prompt_text {
+        for prompt_text in all_prompt_texts {
+            if *prompt_text == own_prompt_text {
                 continue;
             }
             assert!(
@@ -2035,12 +2040,12 @@ output = ["slot:answer"]
             behavior.contains(own_tone_text),
             "{label} tone scalar precedence: {behavior}"
         );
-        // Branch leaves declare `tone` on every arm, and `then-leaf` alone
-        // additionally declares its own `verbosity` scalar. Every other
+        // Guided leaves declare `tone`, while only selected leaves additionally
+        // declare their own `verbosity` scalar. Every other
         // behavior axis must still fall back through agent to root exactly
         // as the plain named-sequence leaf proof (`inner_guided`)
         // established, proving the shared composer's fallback and
-        // prompt-over-agent scalar precedence are unaffected by branch
+        // prompt-over-agent scalar precedence are unaffected by nested-control
         // admission.
         assert!(
             behavior.contains("root-initiative"),
@@ -2069,13 +2074,13 @@ output = ["slot:answer"]
                     "{label} verbosity agent-scalar fallback: {behavior}"
                 );
                 assert!(
-                    !behavior.contains("then-arm-verbosity-marker"),
-                    "{label} leaked then-leaf's own verbosity scalar: {behavior}"
+                    !behavior.contains(foreign_verbosity_marker),
+                    "{label} leaked another leaf's own verbosity scalar: {behavior}"
                 );
             }
         }
-        for marker in all_branch_markers {
-            if marker == own_marker || marker == own_tone_marker {
+        for marker in all_markers {
+            if *marker == own_marker || *marker == own_tone_marker {
                 continue;
             }
             assert!(
@@ -2084,80 +2089,102 @@ output = ["slot:answer"]
             );
         }
         assert_unassigned_absent(prompt);
+        assert!(!prompt.contains("source=\""), "{label}: {prompt}");
         assert!(
             !prompt.contains("unassigned-tone"),
             "{label} leaked unassigned behavior: {prompt}"
         );
     };
-    assert_branch_leaf(
+    assert_leaf(
         "true/true then (CLI)",
         tt_then,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "then-arm-marker",
         "then-arm-tone-marker",
         "Then leaf replacement text.",
         "Then leaf tone.",
         "Produce then-leaf answer.",
         Some("then-arm-verbosity-marker"),
+        "then-arm-verbosity-marker",
     );
-    assert_branch_leaf(
+    assert_leaf(
         "true/true nested-then (CLI)",
         tt_nested_then,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "nested-arm-marker",
         "nested-arm-tone-marker",
         "Nested then leaf replacement text.",
         "Nested then leaf tone.",
         "Produce nested-then-leaf answer.",
         None,
+        "then-arm-verbosity-marker",
     );
-    assert_branch_leaf(
+    assert_leaf(
         "true/false then (MCP)",
         tf_then,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "then-arm-marker",
         "then-arm-tone-marker",
         "Then leaf replacement text.",
         "Then leaf tone.",
         "Produce then-leaf answer.",
         Some("then-arm-verbosity-marker"),
+        "then-arm-verbosity-marker",
     );
-    assert_branch_leaf(
+    assert_leaf(
         "false otherwise (CLI)",
         f_otherwise,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "otherwise-arm-marker",
         "otherwise-arm-tone-marker",
         "Otherwise leaf replacement text.",
         "Otherwise leaf tone.",
         "Produce otherwise-leaf answer.",
         None,
+        "then-arm-verbosity-marker",
     );
-    assert_branch_leaf(
+    assert_leaf(
         "true/true then (MCP)",
         tt_mcp_then,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "then-arm-marker",
         "then-arm-tone-marker",
         "Then leaf replacement text.",
         "Then leaf tone.",
         "Produce then-leaf answer.",
         Some("then-arm-verbosity-marker"),
+        "then-arm-verbosity-marker",
     );
-    assert_branch_leaf(
+    assert_leaf(
         "true/true nested-then (MCP)",
         tt_mcp_nested_then,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "nested-arm-marker",
         "nested-arm-tone-marker",
         "Nested then leaf replacement text.",
         "Nested then leaf tone.",
         "Produce nested-then-leaf answer.",
         None,
+        "then-arm-verbosity-marker",
     );
-    assert_branch_leaf(
+    assert_leaf(
         "false otherwise (MCP)",
         f_mcp_otherwise,
+        &all_branch_markers,
+        &all_branch_prompt_texts,
         "otherwise-arm-marker",
         "otherwise-arm-tone-marker",
         "Otherwise leaf replacement text.",
         "Otherwise leaf tone.",
         "Produce otherwise-leaf answer.",
         None,
+        "then-arm-verbosity-marker",
     );
     assert_ne!(
         extract_intent(tt_then),
@@ -2570,7 +2597,6 @@ sequence = "sequence:loop-branch-then"
 when = {{ slot = "slot:loop-choice", equals = "ok" }}
 
 [[sequence.loop-body.sequence]]
-id = "loop-verdict"
 title = "Loop verdict"
 agent = "agent:worker"
 prompt = "Produce loop verdict."
@@ -2634,11 +2660,23 @@ output = ["slot:answer"]
     assert_eq!(loop_preview.len(), 5, "loop preview: {loop_preview:?}");
     let loop_preview_a = &loop_preview[1];
     let loop_preview_nested = &loop_preview[2];
+    let loop_preview_verdict = &loop_preview[3];
     assert!(loop_preview_a.contains("loop-a-marker"), "{loop_preview_a}");
     assert!(
         loop_preview_nested.contains("loop-nested-marker"),
         "{loop_preview_nested}"
     );
+    assert!(!loop_preview_verdict.contains("loop-a-marker"));
+
+    let all_loop_markers = [
+        "loop-pre-marker",
+        "loop-a-marker",
+        "loop-a-tone-marker",
+        "loop-nested-marker",
+        "loop-nested-tone-marker",
+        "loop-later-marker",
+    ];
+    let all_loop_prompt_texts = ["Produce loop-a answer.", "Produce loop-nested answer."];
 
     let (_, loop_cli_args) =
         run_with_env("cli", "loop-cli.json", &[("CTX_TEST_LOOP_CHOICE", "ok")]);
@@ -2648,6 +2686,8 @@ output = ["slot:answer"]
     let loop_nested0 = &loop_cli_frames[2];
     let loop_a1 = &loop_cli_frames[4];
     let loop_nested1 = &loop_cli_frames[5];
+    let loop_verdict0 = &loop_cli_frames[3];
+    let loop_verdict1 = &loop_cli_frames[6];
     assert_eq!(
         fs::read_to_string(capture.with_extension("txt.calls"))
             .unwrap()
@@ -2656,30 +2696,97 @@ output = ["slot:answer"]
         8,
         "loop must run twice before its verdict exits"
     );
-    for (label, prompt, marker, foreign) in [
-        ("loop A0", loop_a0, "loop-a-marker", "loop-nested-marker"),
+    for (index, prompt) in loop_cli_frames.iter().enumerate() {
+        assert_system(
+            &fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap(),
+            "--cli-system",
+        );
+        assert!(
+            !prompt.contains("the-loop")
+                && !prompt.contains("loop-branch")
+                && !prompt.contains("sequence:loop-body")
+                && !prompt.contains("sequence:loop-branch-then"),
+            "loop CLI frame {index}: {prompt}"
+        );
+        assert_unassigned_absent(prompt);
+    }
+    for (label, prompt, marker, tone_marker, text, tone, declared, verbosity) in [
+        (
+            "loop A0",
+            loop_a0,
+            "loop-a-marker",
+            "loop-a-tone-marker",
+            "Loop A replacement text.",
+            "Loop A tone.",
+            "Produce loop-a answer.",
+            Some("loop-a-verbosity-marker"),
+        ),
         (
             "loop nested0",
             loop_nested0,
             "loop-nested-marker",
-            "loop-a-marker",
+            "loop-nested-tone-marker",
+            "Loop nested replacement text.",
+            "Loop nested tone.",
+            "Produce loop-nested answer.",
+            None,
         ),
-        ("loop A1", loop_a1, "loop-a-marker", "loop-nested-marker"),
+        (
+            "loop A1",
+            loop_a1,
+            "loop-a-marker",
+            "loop-a-tone-marker",
+            "Loop A replacement text.",
+            "Loop A tone.",
+            "Produce loop-a answer.",
+            Some("loop-a-verbosity-marker"),
+        ),
         (
             "loop nested1",
             loop_nested1,
             "loop-nested-marker",
-            "loop-a-marker",
+            "loop-nested-tone-marker",
+            "Loop nested replacement text.",
+            "Loop nested tone.",
+            "Produce loop-nested answer.",
+            None,
         ),
     ] {
-        assert_eq!(prompt.matches(marker).count(), 1, "{label}: {prompt}");
-        assert!(!prompt.contains(foreign), "{label}: {prompt}");
-        assert!(
-            !prompt.contains("the-loop") && !prompt.contains("loop-branch"),
-            "{label}: {prompt}"
+        assert_leaf(
+            label,
+            prompt,
+            &all_loop_markers,
+            &all_loop_prompt_texts,
+            marker,
+            tone_marker,
+            text,
+            tone,
+            declared,
+            verbosity,
+            "loop-a-verbosity-marker",
         );
+        assert_eq!(prompt.matches(marker).count(), 1, "{label}: {prompt}");
+    }
+    for (label, prompt, own_marker) in [
+        ("decide", &loop_cli_frames[0], "loop-pre-marker"),
+        ("verdict0", loop_verdict0, ""),
+        ("verdict1", loop_verdict1, ""),
+        ("later", &loop_cli_frames[7], "loop-later-marker"),
+    ] {
+        if own_marker.is_empty() {
+            assert!(!prompt.contains("loop-a-marker"), "{label}: {prompt}");
+        } else {
+            assert_eq!(prompt.matches(own_marker).count(), 1, "{label}: {prompt}");
+        }
+        for marker in all_loop_markers {
+            if marker != own_marker {
+                assert!(
+                    !prompt.contains(marker),
+                    "{label} leaked {marker}: {prompt}"
+                );
+            }
+        }
         assert!(!prompt.contains("source=\""), "{label}: {prompt}");
-        assert_unassigned_absent(prompt);
     }
     assert_eq!(extract_intent(loop_a0), extract_intent(loop_a1));
     assert_eq!(extract_behavior(loop_a0), extract_behavior(loop_a1));
@@ -2689,14 +2796,6 @@ output = ["slot:answer"]
         extract_behavior(loop_nested1)
     );
     assert_ne!(extract_intent(loop_a0), extract_intent(loop_nested0));
-    assert!(loop_a0.find("root-only").unwrap() < loop_a0.find("agent-only").unwrap());
-    assert!(loop_a0.find("agent-only").unwrap() < loop_a0.find("shared").unwrap());
-    assert_eq!(loop_a0.matches("id=\"shared\"").count(), 1, "{loop_a0}");
-    assert!(
-        loop_a0.contains("Loop A replacement text.")
-            && !loop_a0.contains("Assigned replacement text.")
-    );
-    assert!(loop_a0.contains("loop-a-verbosity-marker") && !loop_a0.contains("agent-verbosity"));
     assert_eq!(extract_intent(loop_a0), extract_intent(loop_preview_a));
     assert_eq!(extract_behavior(loop_a0), extract_behavior(loop_preview_a));
     assert_eq!(
@@ -2712,14 +2811,216 @@ output = ["slot:answer"]
         run_with_env("mcp", "loop-mcp.json", &[("CTX_TEST_LOOP_CHOICE", "ok")]);
     assert_system(&loop_mcp_args, "--mcp-system");
     let loop_mcp_frames = read_frames(8);
-    for (cli, mcp) in [
-        (loop_a0, &loop_mcp_frames[1]),
-        (loop_nested0, &loop_mcp_frames[2]),
-    ] {
+    for (index, mcp) in loop_mcp_frames.iter().enumerate() {
+        assert_system(
+            &fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap(),
+            "--mcp-system",
+        );
+        assert_unassigned_absent(mcp);
+    }
+    for (cli, mcp) in loop_cli_frames.iter().zip(&loop_mcp_frames) {
         assert_eq!(extract_intent(cli), extract_intent(mcp));
         assert_eq!(extract_behavior(cli), extract_behavior(mcp));
     }
 
+    let loop_session = home.join("loop-cli.json");
+    for (label, prompt, step) in [
+        ("loop A historical", loop_a1, "loop-a"),
+        ("loop nested historical", loop_nested1, "loop-nested-leaf"),
+    ] {
+        let historical = session_preview(label, &loop_session, Some(step));
+        assert_eq!(
+            extract_intent(&historical),
+            extract_intent(prompt),
+            "{label}"
+        );
+        assert_eq!(
+            extract_behavior(&historical),
+            extract_behavior(prompt),
+            "{label}"
+        );
+    }
+
+    // After four accepted frames the next ready frame is the second loop-A
+    // activation. Clearing the verdict ledger keeps this direct drive isolated
+    // from the completed dispatches above.
+    let loop_active_session = home.join("loop-active-cli.json");
+    fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("cli")).unwrap();
+    let seed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            loop_active_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&seed, 0);
+    let _ = fs::remove_file(capture.with_extension("txt.verdict-calls"));
+    let drive = support::run_ctx_with_env(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            loop_active_session.to_str().unwrap(),
+            "--max-frames",
+            "4",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[("CTX_TEST_LOOP_CHOICE", "ok")],
+    );
+    assert_exit_code(&drive, 0);
+    let loop_active = session_preview("loop A active", &loop_active_session, None);
+    assert_eq!(extract_intent(&loop_active), extract_intent(loop_a1));
+    assert_eq!(extract_behavior(&loop_active), extract_behavior(loop_a1));
+
+    // Omitted and explicitly empty prompt guidance are participation-equivalent
+    // to the id-less verdict declaration: only root and assigned guidance is
+    // rendered for that leaf on preview and CLI dispatch.
+    let verdict_anchor =
+        "title = \"Loop verdict\"\nagent = \"agent:worker\"\nprompt = \"Produce loop verdict.\"\n";
+    for (label, addition) in [
+        ("absent", ""),
+        ("empty-intent", "intent = {}\n"),
+        ("empty-behavior", "behavior = {}\n"),
+    ] {
+        let fixture = loop_fixture.replace(verdict_anchor, &format!("{verdict_anchor}{addition}"));
+        fs::write(&generated, &fixture).unwrap();
+        let variant_preview = preview_all(label);
+        let _ = run_with_env(
+            "cli",
+            &format!("loop-{label}.json"),
+            &[("CTX_TEST_LOOP_CHOICE", "ok")],
+        );
+        let variant_frames = read_frames(8);
+        assert_eq!(
+            extract_intent(&variant_preview[3]),
+            extract_intent(&variant_frames[3]),
+            "{label}"
+        );
+        assert_eq!(
+            extract_behavior(&variant_preview[3]),
+            extract_behavior(&variant_frames[3]),
+            "{label}"
+        );
+        assert_eq!(
+            extract_intent(&variant_frames[3]),
+            extract_intent(loop_verdict0),
+            "{label}"
+        );
+        assert_eq!(
+            extract_behavior(&variant_frames[3]),
+            extract_behavior(loop_verdict0),
+            "{label}"
+        );
+    }
+    fs::write(&generated, &loop_fixture).unwrap();
+
+    let loop_conflict_fixture = loop_fixture.replace(
+        "intent = { require = [{ id = \"shared\", summary = \"Loop A replacement text.\" }, { id = \"loop-a-marker\", summary = \"Loop A marker.\" }] }",
+        "intent = { avoid = [{ id = \"shared\", summary = \"Loop A conflict.\" }] }",
+    );
+    fs::write(&generated, &loop_conflict_fixture).unwrap();
+    require_success(
+        "approve loop conflict fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let _ = fs::remove_file(capture.with_extension("txt.calls"));
+    let conflict = support::run_ctx_with_env(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            home.join("loop-conflict.json").to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[("CTX_TEST_LOOP_CHOICE", "ok")],
+    );
+    assert!(!conflict.status.success());
+    let (_, stderr) = utf8(&conflict);
+    assert!(
+        stderr.contains(
+            "effective guidance id \"shared\" cannot appear in both require and avoid when ready-prompt intent participates"
+        ),
+        "{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(capture.with_extension("txt.calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+
+    let loop_prompt_only_fixture = loop_fixture
+        .replace(worker_intent, "")
+        .replace(worker_behavior, "");
+    fs::write(&generated, &loop_prompt_only_fixture).unwrap();
+    let _ = run_with_env(
+        "mcp",
+        "loop-prompt-only-mcp.json",
+        &[("CTX_TEST_LOOP_CHOICE", "ok")],
+    );
+    let loop_prompt_only_a = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+    assert!(
+        loop_prompt_only_a.contains("loop-a-marker")
+            && loop_prompt_only_a.contains("loop-a-tone-marker")
+    );
+    assert!(
+        !loop_prompt_only_a.contains("agent-only") && !loop_prompt_only_a.contains("agent-tone")
+    );
+    fs::write(&generated, &loop_fixture).unwrap();
+
+    // The absent/empty runtime variants above intentionally emit no leaf
+    // guidance. Add a static-only marker to make the id-less source fallback
+    // observable without changing their participation contract.
+    let loop_static_fixture = loop_fixture.replace(
+        verdict_anchor,
+        &format!(
+            "{verdict_anchor}intent = {{ require = [{{ id = \"loop-verdict-marker\", summary = \"Loop verdict static marker.\" }}] }}\n"
+        ),
+    );
+    fs::write(&generated, &loop_static_fixture).unwrap();
+    require_success(
+        "approve loop static fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
     let loop_export_dir = home.join("loop-static-export");
     let loop_export = run_ctx(
         &[
@@ -2757,6 +3058,20 @@ output = ["slot:answer"]
         );
         assert!(loop_skill.contains(text), "{loop_skill}");
     }
+    assert!(
+        loop_skill.contains("source=\"sequence:loop-body/step-3\""),
+        "{loop_skill}"
+    );
+    for claim in ["active", "ready", "selected"] {
+        assert!(
+            !loop_skill.to_ascii_lowercase().contains(claim),
+            "loop static export claimed {claim}: {loop_skill}"
+        );
+    }
+    assert!(
+        !loop_skill.contains("Loop 1/") && !loop_skill.contains("Loop 2/"),
+        "loop static export synthesized runtime iteration metadata: {loop_skill}"
+    );
 
     for frames in [
         &tt_frames,
