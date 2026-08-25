@@ -66,6 +66,8 @@ pub(crate) struct ResolvedFramePrompt {
     pub(crate) intent_items: String,
     /// Whether the assigned agent contributed non-empty intent guidance.
     pub(crate) assigned_agent_intent_participated: bool,
+    /// Whether the assigned agent contributed non-empty behavior guidance.
+    pub(crate) assigned_agent_behavior_participated: bool,
     pub(crate) behavior_items: String,
 }
 
@@ -119,14 +121,21 @@ pub(crate) fn mcp_frame_prompt(
     } else {
         "\n".to_string()
     };
+    let behavior =
+        if context.assigned_agent_behavior_participated && !context.behavior_items.is_empty() {
+            behavior_block(&context.behavior_items)
+        } else {
+            String::new()
+        };
     format!(
-        "Serve this ctx.traits frame via MCP.\nAgent role: {role}\nHarness id: {harness_id}\nRun session: {}\nSession store: {}\n\nRequired steps:\n1. Call ctx_traits_run_next with agent={role}, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent={role} and harness={harness_id}.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: {}\n\n{}\n{}Resolved prompt instructions:\n{}\nResolved input values:\n{}\n",
+        "Serve this ctx.traits frame via MCP.\nAgent role: {role}\nHarness id: {harness_id}\nRun session: {}\nSession store: {}\n\nRequired steps:\n1. Call ctx_traits_run_next with agent={role}, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent={role} and harness={harness_id}.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: {}\n\n{}\n{}{}Resolved prompt instructions:\n{}\nResolved input values:\n{}\n",
         session,
         session_store.unwrap_or(""),
         session,
         frame.title,
         frame_summary_text(frame),
         intent,
+        behavior,
         context.prompt_section,
         context.input_section
     )
@@ -186,11 +195,7 @@ pub(crate) fn frame_prompt(
         envelope.push_str(&intent_block(&context.intent_items));
     }
     if !context.behavior_items.is_empty() {
-        envelope.push_str(&format!(
-            "<behavior>\n  <info>How to work and how to write, as distinct from what to produce. Each item carries the axis it sets.</info>\n{}{}\n</behavior>\n\n",
-            behavior_spec_block(&context.behavior_items),
-            indent_block(&context.behavior_items, 2)
-        ));
+        envelope.push_str(&behavior_block(&context.behavior_items));
     }
     if !context.agent_identity.is_empty() {
         envelope.push_str(&format!(
@@ -216,6 +221,14 @@ fn intent_block(intent_items: &str) -> String {
         "<intent>\n  <info>What the finished work is judged against. Each item below carries the group it belongs to; the group says how much it weighs.</info>\n{}{}\n</intent>\n\n",
         intent_spec_block(),
         indent_block(intent_items, 2)
+    )
+}
+
+fn behavior_block(behavior_items: &str) -> String {
+    format!(
+        "<behavior>\n  <info>How to work and how to write, as distinct from what to produce. Each item carries the axis it sets.</info>\n{}{}\n</behavior>\n\n",
+        behavior_spec_block(behavior_items),
+        indent_block(behavior_items, 2)
     )
 }
 
@@ -492,6 +505,18 @@ pub(crate) fn resolved_frame_prompt(
                 || !intent.avoid.is_empty()
                 || !intent.block.is_empty()
         });
+    let assigned_agent_behavior_participated = assigned_agent
+        .and_then(|agent| agent.behavior.as_ref())
+        .is_some_and(|behavior| {
+            !behavior.tone.is_empty()
+                || !behavior.method.is_empty()
+                || !behavior.format.is_empty()
+                || behavior.verbosity.is_some()
+                || behavior.directness.is_some()
+                || behavior.scope_control.is_some()
+                || behavior.initiative.is_some()
+                || behavior.uncertainty.is_some()
+        });
     let guidance = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref, assigned_agent)?;
     Ok(ResolvedFramePrompt {
         prompt_section,
@@ -507,6 +532,7 @@ pub(crate) fn resolved_frame_prompt(
             .map(|guidance| guidance.intent.clone())
             .unwrap_or_default(),
         assigned_agent_intent_participated,
+        assigned_agent_behavior_participated,
         behavior_items: guidance
             .map(|guidance| guidance.behavior)
             .unwrap_or_default(),

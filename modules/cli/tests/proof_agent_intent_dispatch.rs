@@ -213,6 +213,15 @@ output = ["slot:answer"]
             + "</intent>\n".len();
         text[start..end].to_string()
     };
+    let extract_behavior = |text: &str| {
+        let start = text.find("<behavior>\n").expect("behavior opening");
+        let end = text[start..]
+            .find("</behavior>\n")
+            .expect("behavior closing")
+            + start
+            + "</behavior>\n".len();
+        text[start..end].to_string()
+    };
     let assert_system = |args: &str, flag: &str| {
         let values: Vec<_> = args.lines().collect();
         assert_eq!(
@@ -291,6 +300,156 @@ output = ["slot:answer"]
     assert_eq!(extract_intent(&mcp_prompt), happy_intent);
     assert_system(&mcp_args, "--mcp-system");
     assert_unassigned_absent(&mcp_prompt);
+
+    let root_behavior = r#"
+[behavior]
+tone = [{ id = "shared-tone", summary = "Root tone." }, { id = "root-tone", summary = "Root tone remains." }]
+method = [{ id = "shared-method", summary = "Root method." }, { id = "root-method", summary = "Root method remains." }]
+format = [{ id = "shared-format", summary = "Root format." }, { id = "root-format", summary = "Root format remains." }]
+verbosity = { id = "root-verbosity", summary = "Root verbosity." }
+directness = { id = "root-directness", summary = "Root directness." }
+scope-control = { id = "root-scope", summary = "Root scope." }
+initiative = { id = "root-initiative", summary = "Root initiative." }
+uncertainty = { id = "root-uncertainty", summary = "Root uncertainty." }
+"#;
+    let worker_behavior = r#"[agent.behavior]
+tone = [{ id = "shared-tone", summary = "Agent tone." }, { id = "agent-tone", summary = "Agent tone added." }]
+method = [{ id = "shared-method", summary = "Agent method." }, { id = "agent-method", summary = "Agent method added." }]
+format = [{ id = "shared-format", summary = "Agent format." }, { id = "agent-format", summary = "Agent format added." }]
+verbosity = { id = "agent-verbosity", summary = "Agent verbosity." }
+directness = { id = "agent-directness", summary = "Agent directness." }
+scope-control = { id = "agent-scope", summary = "Agent scope." }
+uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
+    let behavior_canonical = canonical
+        .replacen("\n[[agent]]", &format!("{root_behavior}\n[[agent]]"), 1)
+        .replace(worker_intent, worker_behavior)
+        .replace(
+            "[agent.intent]\nrequire = [{ id = \"unassigned-only\", summary = \"Unassigned guidance.\" }]",
+            "[agent.intent]\nrequire = [{ id = \"unassigned-only\", summary = \"Unassigned guidance.\" }]\n[agent.behavior]\ntone = [{ id = \"unassigned-tone\", summary = \"Unassigned behavior.\" }]",
+        );
+    fs::write(&generated, &behavior_canonical).unwrap();
+    let behavior_preview = preview("behavior-only assigned");
+    let behavior_block = extract_behavior(&behavior_preview);
+    for (root, agent) in [
+        ("root-tone", "shared-tone"),
+        ("root-method", "shared-method"),
+        ("root-format", "shared-format"),
+    ] {
+        assert!(
+            behavior_block.find(root).unwrap() < behavior_block.find(agent).unwrap(),
+            "{behavior_block}"
+        );
+    }
+    for (id, text) in [
+        ("shared-tone", "Agent tone."),
+        ("shared-method", "Agent method."),
+        ("shared-format", "Agent format."),
+    ] {
+        assert_eq!(
+            behavior_block.matches(&format!("id=\"{id}\"")).count(),
+            1,
+            "{behavior_block}"
+        );
+        assert!(behavior_block.contains(text), "{behavior_block}");
+    }
+    for expected in [
+        "agent-verbosity",
+        "agent-directness",
+        "agent-scope",
+        "root-initiative",
+        "agent-uncertainty",
+    ] {
+        assert!(behavior_block.contains(expected), "{behavior_block}");
+    }
+    assert!(!behavior_block.contains("unassigned-tone"));
+    assert!(!behavior_block.contains("ASSIGNED SYSTEM"));
+    assert!(!behavior_block.contains("UNASSIGNED SYSTEM"));
+    let (behavior_cli, cli_args) = run("cli", "behavior-cli.json");
+    assert_eq!(extract_behavior(&behavior_cli), behavior_block);
+    assert_system(&cli_args, "--cli-system");
+    let (behavior_mcp, mcp_args) = run("mcp", "behavior-mcp.json");
+    assert_eq!(extract_behavior(&behavior_mcp), behavior_block);
+    assert_system(&mcp_args, "--mcp-system");
+    assert_unassigned_absent(&behavior_preview);
+    assert_unassigned_absent(&behavior_cli);
+    assert_unassigned_absent(&behavior_mcp);
+
+    let root_behavior_block = r#"<behavior>
+  <info>How to work and how to write, as distinct from what to produce. Each item carries the axis it sets.</info>
+  <spec>
+    <tone>How the writing sounds.</tone>
+    <method>How the work is approached before it is reported.</method>
+    <format>How the answer is laid out.</format>
+    <verbosity>How much is said.</verbosity>
+    <directness>How much is stated outright rather than hedged.</directness>
+    <scope-control>How strictly the answer stays inside what was asked.</scope-control>
+    <initiative>How much is done without being asked.</initiative>
+    <uncertainty>What happens when the agent does not know.</uncertainty>
+  </spec>
+  <tone id="shared-tone">
+    Root tone.
+  </tone>
+  <tone id="root-tone">
+    Root tone remains.
+  </tone>
+  <method id="shared-method">
+    Root method.
+  </method>
+  <method id="root-method">
+    Root method remains.
+  </method>
+  <format id="shared-format">
+    Root format.
+  </format>
+  <format id="root-format">
+    Root format remains.
+  </format>
+  <verbosity id="root-verbosity">
+    Root verbosity.
+  </verbosity>
+  <directness id="root-directness">
+    Root directness.
+  </directness>
+  <scope-control id="root-scope">
+    Root scope.
+  </scope-control>
+  <initiative id="root-initiative">
+    Root initiative.
+  </initiative>
+  <uncertainty id="root-uncertainty">
+    Root uncertainty.
+  </uncertainty>
+</behavior>
+"#;
+    for (name, behavior) in [
+        ("behavior-absent", ""),
+        ("behavior-empty", "[agent.behavior]\n"),
+    ] {
+        fs::write(
+            &generated,
+            behavior_canonical.replace(worker_behavior, behavior),
+        )
+        .unwrap();
+        let preview = preview(name);
+        assert_eq!(
+            extract_behavior(&preview),
+            root_behavior_block,
+            "{name} preview behavior changed"
+        );
+        let (cli, cli_args) = run("cli", &format!("{name}-cli.json"));
+        assert_eq!(
+            extract_behavior(&cli),
+            root_behavior_block,
+            "{name} CLI behavior changed"
+        );
+        assert_system(&cli_args, "--cli-system");
+        let (mcp, mcp_args) = run("mcp", &format!("{name}-mcp.json"));
+        assert!(
+            !mcp.contains("<behavior>\n"),
+            "{name} MCP gained root-only behavior"
+        );
+        assert_system(&mcp_args, "--mcp-system");
+    }
 
     for (name, intent) in [("absent", ""), ("default-empty", "[agent.intent]\n")] {
         fs::write(&generated, canonical.replace(worker_intent, intent)).unwrap();
