@@ -32,7 +32,10 @@ Add these exact tests to the existing test module in `modules/core/src/model_vie
 
 In `modules/cli/src/app/frame_prompt.rs`, edit exact type `pub(crate) struct ResolvedFramePrompt` by adding field `pub(crate) assigned_agent_behavior_participated: bool`. Edit unchanged-signature resolver `pub(crate) fn resolved_frame_prompt(loaded: &ctx_traits_io::run::LoadedTrait, session: &ctx_traits_core::procedure::session::Session, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, pending_inputs: &[PendingInput]) -> crate::Result<ResolvedFramePrompt>` to derive this flag from the same canonical declaration returned by dependency-owned `fn assigned_agent<'a>(loaded: &'a ctx_traits_io::run::LoadedTrait, frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> crate::Result<Option<&'a ctx_traits_core::r#trait::Agent>>`. Resolve that declaration once; do not perform a behavior-specific lookup. The flag is true exactly when selected `Agent.behavior` has a non-empty `tone`, `method`, or `format` list or a present `verbosity`, `directness`, `scope_control`, `initiative`, or `uncertainty` value. `None`, `Some(Behavior::default())`, and no selected agent set it false. Pass the same declaration to `frame_guidance` and preserve dependency-owned intent participation and identity behavior.
 
-Add exact helper `fn behavior_block(behavior_items: &str) -> String`. Move the existing `frame_prompt` byte shape from `<behavior>\n` through `</behavior>\n\n` into this helper, retaining the exact info text, unchanged `fn behavior_spec_block(items: &str) -> String`, one indentation pass, and every byte. Edit unchanged-signature `pub(crate) fn frame_prompt(context: &ResolvedFramePrompt, schema: &Value, correction: Option<&str>) -> String` only to replace its inline non-empty behavior construction with `behavior_block(&context.behavior_items)` in the same position.
+Add exact helper `fn behavior_block(behavior_items: &str) -> String`. Move the existing `frame_prompt` byte shape from `<behavior>
+` through `</behavior>
+
+` into this helper, retaining the exact info text, unchanged `fn behavior_spec_block(items: &str) -> String`, one indentation pass, and every byte. Edit unchanged-signature `pub(crate) fn frame_prompt(context: &ResolvedFramePrompt, schema: &Value, correction: Option<&str>) -> String` only to replace its inline non-empty behavior construction with `behavior_block(&context.behavior_items)` in the same position.
 
 Edit unchanged-signature `pub(crate) fn mcp_frame_prompt(session: &str, session_store: Option<&str>, frame: &ctx_traits_core::procedure::runtime::SequenceFrame, context: &ResolvedFramePrompt, role: &str, harness_id: &str) -> String` so dependency-owned categorized intent is followed by `behavior_block(&context.behavior_items)` only when `context.assigned_agent_behavior_participated` is true and `context.behavior_items` is non-empty. The behavior block must precede `Resolved prompt instructions:` to match ordinary intent-before-behavior ordering. Structure the false branch as an empty insertion so MCP bytes are exactly pre-task bytes when behavior does not participate.
 
@@ -74,21 +77,25 @@ validation = """
 
 Run verification in this strict order: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_assigned_agent_behavior`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch`, then `CARGO_TARGET_DIR=target just test-full`, followed by the stated diff review. Permit no more than two targeted repair-and-rerun rounds. Success requires both focused commands, the landing gate, and final review to pass; otherwise report the concrete remaining blocker instead of marking the task complete.
 """
+
 [relations]
+depends-on = [
+    "0255.2",
+    "0255.3",
+]
 parent = "0255"
-depends-on = ["0255.2", "0255.3"]
 
 [[checks]]
 name = "assigned agent behavior resolver tests pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core frame_guidance_assigned_agent_behavior"
-expect = "test result: ok\\. 5 passed; 0 failed"
 timeout-ms = 600000
+expect = 'test result: ok\. 5 passed; 0 failed'
 
 [[checks]]
 name = "assigned agent behavior public dispatch proof passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
-expect = "test result: ok\\. 1 passed; 0 failed"
 timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
 
 [[checks]]
 name = "assigned agent behavior dispatch passes the landing gate"
