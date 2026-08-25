@@ -9,7 +9,7 @@ use serde_json::Value as JsonValue;
 
 use crate::reference::{Kind, Reference};
 use crate::r#trait::prompt::{PromptClassification, classify_prompt, scan_interpolations};
-use crate::r#trait::{GuardExpr, Intent, PromptMap, Trait};
+use crate::r#trait::{Behavior, GuardExpr, Intent, PromptMap, Trait};
 
 /// Kinds valid in procedure boundary input refs: input-direction ports only.
 const PROCEDURE_INPUT_KINDS: &[Kind] = &[Kind::Port];
@@ -936,6 +936,10 @@ pub struct SequenceItem {
     /// Declaration-only guidance for a prompt sequence item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<Intent>,
+
+    /// Declaration-only behavior for a prompt sequence item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<Behavior>,
 
     /// Simple no-shell command shorthand for a command-backed sequence item.
     #[serde(default, skip_serializing_if = "Option::is_none")]

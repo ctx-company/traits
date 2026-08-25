@@ -260,6 +260,7 @@ fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> cr
                 agent: None,
                 prompt: String::new(),
                 intent: None,
+                behavior: None,
                 cmd: None,
                 command: Some(plan),
                 projection: Vec::new(),

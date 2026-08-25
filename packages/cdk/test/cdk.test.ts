@@ -461,7 +461,175 @@ describe("prompt sequence intent", () => {
         } as never),
       () => sequence.parallel("runtime-parallel", [], { intent: {} } as never),
     ];
-    for (const build of invalid) expect(build).toThrow(/intent is valid only on prompt items/);
+    for (const build of invalid) expect(build).toThrow(/intent and behavior are valid only on prompt items/);
+  });
+});
+
+describe("prompt sequence behavior", () => {
+  it("normalizes every prompt-behavior axis and guidance form across top-level, named, and inline-nested prompts", () => {
+    const named = sequence.linear("behavior-named", [
+      sequence.prompt("named-behavior", { prompt: input.prompt`Named.`, behavior: { tone: behavior.tone.Direct } }),
+    ]);
+    const nested = sequence.branch("behavior-branch", {
+      check: condition.empty(slot.text("behavior-branch-check")),
+      success: [
+        sequence.prompt("nested-behavior", {
+          input: input.prompt`Nested.`,
+          behavior: { method: behavior.method.EvidenceFirst },
+        }),
+      ],
+    });
+    const draft = toDraftJson(
+      trait("prompt-sequence-behavior", {
+        name: "Prompt Sequence Behavior",
+        description: "Prompt behavior lowering fixture.",
+        procedure: procedure({
+          description: "Exercise prompt behavior.",
+          sequence: [
+            sequence.prompt("top-behavior", {
+              text: input.prompt`Top.`,
+              behavior: {
+                tone: [behavior.tone.Direct, { id: "custom-tone", summary: "State conclusions plainly." }],
+                method: behavior.method.EvidenceFirst,
+                format: { id: "custom-format", description: "Use concise bullets." },
+                verbosity: behavior.verbosity.Brief,
+                directness: behavior.directness.High,
+                scopeControl: behavior.scopeControl.Strict,
+                initiative: behavior.initiative.ProactivelyExecuteSafeSteps,
+                uncertainty: behavior.uncertainty.StateAssumptions,
+              },
+            }),
+            nested,
+            sequence.prompt("empty-behavior", { input: input.prompt`Empty.`, behavior: {} }),
+          ],
+        }),
+        sequence: named,
+      }),
+    ) as {
+      readonly "schema-version": string;
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+      readonly sequence?: Record<string, { readonly sequence: readonly Record<string, unknown>[] }>;
+    };
+
+    expect(draft["schema-version"]).toBe("0.6");
+    expect(draft.procedure?.sequence?.[0]?.behavior).toEqual({
+      tone: [{ id: "direct" }, { id: "custom-tone", summary: "State conclusions plainly." }],
+      method: [{ id: "evidence-first" }],
+      format: [{ id: "custom-format", description: "Use concise bullets." }],
+      verbosity: { id: "brief" },
+      directness: { id: "high" },
+      "scope-control": { id: "strict" },
+      initiative: { id: "proactively-execute-safe-steps" },
+      uncertainty: { id: "state-assumptions" },
+    });
+    expect(draft.procedure?.sequence?.[2]?.behavior).toEqual({});
+    expect(draft.sequence?.["behavior-named"]?.sequence[0]?.behavior).toEqual({ tone: [{ id: "direct" }] });
+    const nestedSequence = Object.values(draft.sequence ?? {}).find(
+      (entry) => entry.sequence[0]?.id === "nested-behavior",
+    );
+    expect(nestedSequence?.sequence[0]?.behavior).toEqual({ method: [{ id: "evidence-first" }] });
+  });
+
+  it("prompt behavior infers schema 0.6 while explicit versions and behavior-free 0.5 bytes remain stable", () => {
+    const ordinary = toDraftJson(
+      trait("ordinary-prompt-sequence-behavior", {
+        name: "Ordinary Prompt Sequence Behavior",
+        description: "No behavior.",
+        procedure: procedure({
+          description: "No behavior.",
+          sequence: [sequence.prompt("ordinary-behavior", { input: input.prompt`Do work.` })],
+        }),
+      }),
+    ) as {
+      readonly "schema-version": string;
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+    };
+    const explicit = toDraftJson(
+      trait("explicit-prompt-sequence-behavior", {
+        name: "Explicit Prompt Sequence Behavior",
+        description: "Explicit version wins.",
+        "schema-version": "0.5",
+        procedure: procedure({
+          description: "Behavior.",
+          sequence: [sequence.prompt("explicit-behavior", { input: input.prompt`Do work.`, behavior: {} })],
+        }),
+      }),
+    ) as { readonly "schema-version": string };
+    expect(ordinary["schema-version"]).toBe("0.5");
+    expect(explicit["schema-version"]).toBe("0.5");
+    const ordinaryItem = ordinary.procedure?.sequence?.[0];
+    expect(ordinaryItem).toBeDefined();
+    expect(Object.hasOwn(ordinaryItem as object, "behavior")).toBe(false);
+  });
+
+  it("non-prompt sequence builders reject behavior at typecheck and evaluated runtime", () => {
+    if (false) {
+      // @ts-expect-error behavior is prompt-only.
+      sequence.command("typed-illegal-behavior", { cmd: "true", behavior: {} });
+      // @ts-expect-error behavior is prompt-only.
+      sequence.check("typed-illegal-behavior", { cmd: "true", output: slot.text("behavior-check"), behavior: {} });
+      sequence.ask("typed-illegal-behavior", {
+        prompt: input.prompt`Ask.`,
+        when: signal({ id: "typed-behavior-ready", description: "Ready." }),
+        output: slot.text("behavior-ask"),
+        // @ts-expect-error behavior is prompt-only.
+        behavior: {},
+      });
+      // @ts-expect-error behavior is prompt-only.
+      sequence.project("typed-illegal-behavior", { projections: [], behavior: {} });
+      // @ts-expect-error behavior is prompt-only.
+      sequence.terminal("typed-illegal-behavior", { outcome: "error", behavior: {} });
+      // @ts-expect-error behavior is prompt-only.
+      sequence.loop("typed-illegal-behavior", { sequence: sequence.linear("typed-loop-behavior", []), behavior: {} });
+      // @ts-expect-error behavior is prompt-only.
+      sequence.forEach("typed-illegal-behavior", { over: "slot:items", item: "slot:item", body: [], behavior: {} });
+      sequence.branch("typed-illegal-behavior", {
+        check: condition.empty(slot.text("behavior-branch")),
+        success: sequence.linear("typed-behavior-branch", []),
+        // @ts-expect-error behavior is prompt-only.
+        behavior: {},
+      });
+      // @ts-expect-error behavior is prompt-only.
+      sequence.parallel("typed-illegal-behavior", [], { behavior: {} });
+    }
+    const invalid = [
+      () => sequence.command("runtime-command-behavior", { cmd: "true", behavior: {} } as never),
+      () =>
+        sequence.check("runtime-check-behavior", {
+          cmd: "true",
+          output: slot.text("runtime-check-behavior-output"),
+          behavior: {},
+        } as never),
+      () =>
+        sequence.ask("runtime-ask-behavior", {
+          prompt: input.prompt`Ask.`,
+          when: "signal:ready",
+          output: slot.text("runtime-ask-behavior-output"),
+          behavior: {},
+        } as never),
+      () => sequence.project("runtime-project-behavior", { projections: [], behavior: {} } as never),
+      () => sequence.terminal("runtime-terminal-behavior", { outcome: "error", behavior: {} } as never),
+      () =>
+        sequence.loop("runtime-loop-behavior", {
+          sequence: sequence.linear("runtime-loop-behavior-body", []),
+          behavior: {},
+        } as never),
+      () =>
+        sequence.forEach("runtime-for-each-behavior", {
+          over: "slot:items",
+          item: "slot:item",
+          body: [],
+          behavior: {},
+        } as never),
+      () =>
+        sequence.branch("runtime-branch-behavior", {
+          check: condition.empty(slot.text("runtime-branch-behavior-check")),
+          success: [],
+          behavior: {},
+        } as never),
+      () => sequence.parallel("runtime-parallel-behavior", [], { behavior: {} } as never),
+    ];
+    for (const build of invalid) expect(build).toThrow(/intent and behavior are valid only on prompt items/);
   });
 });
 

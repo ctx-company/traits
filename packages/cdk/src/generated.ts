@@ -1528,6 +1528,10 @@ export type CanonicalSequenceItem = {
    */
   readonly "agent"?: string | undefined;
   /**
+   * Declaration-only behavior for a prompt sequence item.
+   */
+  readonly "behavior"?: CanonicalBehavior | undefined;
+  /**
    * `parallel` ordered per-branch terminal failure policy. A branch with
    * no entry defaults to `panel-fail`.
    */

@@ -367,6 +367,45 @@ describe("functional layer build rules (0106)", () => {
     ]);
   });
 
+  it("agent.prompt, step.prompt, and defineStep.prompt preserve prompt behavior through nested lowering and infer schema 0.6", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("functional-prompt-behavior", { description: "Prompt behavior paths." });
+      const worker = agent.worker("behavior-worker");
+      const first = slot.text("behavior-first");
+      const second = slot.text("behavior-second");
+      const third = slot.text("behavior-third");
+      const declared = defineStep.prompt({
+        agent: worker,
+        input: input.prompt`Declared.`,
+        output: third,
+        behavior: { scopeControl: behavior.scopeControl.Strict },
+      });
+      worker.prompt("Agent Prompt", {
+        input: input.prompt`Agent.`,
+        output: first,
+        behavior: { tone: behavior.tone.Direct },
+      });
+      step.prompt("Inline Prompt", {
+        agent: worker,
+        input: input.prompt`Inline.`,
+        output: second,
+        behavior: { method: behavior.method.EvidenceFirst },
+      });
+      declared("Declared Prompt");
+      return { first, second, third };
+    });
+    const draft = envelope.draft as {
+      readonly "schema-version": string;
+      readonly procedure?: { readonly sequence?: readonly { readonly behavior?: unknown }[] };
+    };
+    expect(draft["schema-version"]).toBe("0.6");
+    expect(draft.procedure?.sequence?.map((item) => item.behavior)).toEqual([
+      { tone: [{ id: "direct" }] },
+      { method: [{ id: "evidence-first" }] },
+      { "scope-control": { id: "strict" } },
+    ]);
+  });
+
   it("an `id:` override wins over idFromTitle(title) on every step.*/agent.prompt/flow.when/flow.loop registrar (0109 F2)", () => {
     const worker = agent.worker("id-override-worker");
     const out = slot.text("id-override-out");

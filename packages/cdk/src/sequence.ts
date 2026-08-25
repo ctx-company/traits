@@ -57,6 +57,7 @@ import {
   compactAs,
   normalizeValue,
   normalizeIntent,
+  normalizeBehavior,
   REF_TOKEN_PATTERN,
   sourceMapForSequenceItems,
   tokenizeShellLiteral,
@@ -65,7 +66,7 @@ import {
   validateSlug,
 } from "./normalize.js";
 import type { Mutable } from "./normalize.js";
-import type { Intent } from "./trait.js";
+import type { Behavior, Intent } from "./trait.js";
 import { OUTPUT_RENDER_V1 } from "./output.js";
 import { refText } from "./ref.js";
 import { schema } from "./schema.js";
@@ -139,8 +140,13 @@ type PromptIntentFields = {
   /** Declaration-only guidance for this prompt step. */
   readonly intent?: Intent;
 };
+type PromptBehaviorFields = {
+  /** Declaration-only behavior for this prompt step. */
+  readonly behavior?: Behavior;
+};
 type PromptSequenceFields = Omit<SequenceCommonFields, "input"> &
-  PromptIntentFields & {
+  PromptIntentFields &
+  PromptBehaviorFields & {
     readonly kind?: "prompt";
     readonly prompt: PromptHandle | PromptTemplate;
     /** See {@link CommandSequenceFields.include}. */
@@ -153,7 +159,8 @@ type PromptSequenceFields = Omit<SequenceCommonFields, "input"> &
     readonly sequence?: never;
   };
 type TextPromptSequenceFields = Omit<SequenceCommonFields, "input"> &
-  PromptIntentFields & {
+  PromptIntentFields &
+  PromptBehaviorFields & {
     readonly kind?: "prompt";
     /** @deprecated Use the `input:` field with `input.prompt` instead. */
     readonly text: PromptTemplate;
@@ -173,7 +180,8 @@ type TextPromptSequenceFields = Omit<SequenceCommonFields, "input"> &
  * `input.command`/`include:` command-step surface.
  */
 type InputPromptSequenceFields = Omit<SequenceCommonFields, "input"> &
-  PromptIntentFields & {
+  PromptIntentFields &
+  PromptBehaviorFields & {
     readonly kind?: "prompt";
     readonly input: PromptTemplate;
     /** See {@link CommandSequenceFields.include}. */
@@ -202,6 +210,7 @@ type AskSequenceFields = Omit<
   "agent" | "format" | "onComplete" | "onFailure" | "input" | "when"
 > & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "ask";
   readonly when: RefHandle<"signal">;
   readonly output: SlotHandle;
@@ -228,6 +237,7 @@ type AskSequenceFields = Omit<
   );
 export type CommandSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind?: "command";
   readonly executableDigestFrom?: PortHandle<string> | SlotHandle<string>;
   /** Non-interpolated dependencies for this step — including
@@ -283,6 +293,7 @@ export type ProjectProjection = {
 };
 export type ProjectSequenceFields = {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "project";
   readonly id: string;
   readonly title?: string;
@@ -328,6 +339,7 @@ export type TerminalBinding = {
  */
 export type TerminalSequenceFields = {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "terminal";
   readonly id: string;
   readonly title?: string;
@@ -375,6 +387,7 @@ export type GateOptions = {
  */
 export type CheckSequenceFields = Omit<SequenceCommonFields, "format" | "output" | "onFailure" | "input"> & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "check";
   readonly prompt?: never;
   readonly text?: never;
@@ -403,6 +416,7 @@ export type CheckSequenceFields = Omit<SequenceCommonFields, "format" | "output"
   );
 type LinearSequenceFields = SequenceCommonFields & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "sequence";
   readonly sequence: SequenceRefValue;
   /** See {@link CommandSequenceFields.include}. */
@@ -415,6 +429,7 @@ type LinearSequenceFields = SequenceCommonFields & {
 };
 export type LoopSequenceFields = SequenceCommonFields & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "loop";
   /** The loop body as a named-reusable ref. Exactly one of `sequence`/`body` is required. */
   readonly sequence?: SequenceRefValue;
@@ -464,6 +479,7 @@ export type LoopSequenceFields = SequenceCommonFields & {
 };
 export type ForEachSequenceFields = SequenceCommonFields & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "for-each";
   /** The per-item body as a named-reusable ref. Exactly one of `sequence`/`body` is required. */
   readonly sequence?: SequenceRefValue;
@@ -505,6 +521,7 @@ export type ParallelBranchFailureEntry = {
 };
 export type ParallelOptions = {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly join?: ParallelJoinOption;
   readonly branchFailure?: readonly ParallelBranchFailureEntry[];
   readonly onFailure?: FailureTargetValue;
@@ -526,6 +543,7 @@ export type ParallelSequenceFields = Omit<
   | "when"
 > & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "parallel";
   readonly branches: readonly SequenceRefValue[];
   readonly join?: ParallelJoinOption;
@@ -563,6 +581,7 @@ export type BranchSequenceFields = Omit<
   | "when"
 > & {
   readonly intent?: never;
+  readonly behavior?: never;
   readonly kind: "branch";
   readonly if: GuardValue;
   readonly then: BranchArmValue;
@@ -1145,6 +1164,7 @@ export const sequence: SequenceFunction = {
       ...(options?.onFailure === undefined ? {} : { onFailure: options.onFailure }),
       ...(options?.include === undefined ? {} : { include: options.include }),
       ...(options !== undefined && Object.hasOwn(options, "intent") ? { intent: options.intent } : {}),
+      ...(options !== undefined && Object.hasOwn(options, "behavior") ? { behavior: options.behavior } : {}),
     }),
 };
 
@@ -1184,6 +1204,7 @@ interface SequenceFieldsProbe {
   readonly input?: SequenceInputValue | readonly SequenceInputValue[] | PromptTemplate | CommandTemplateValue;
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
   readonly intent?: Intent;
+  readonly behavior?: Behavior;
 }
 
 function sequenceOf(fields: SequenceFields): SequenceHandle {
@@ -1227,10 +1248,12 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
       `procedure.sequence ${fields.id}: expected prompt, ask, command, check, project, sequence, branch, loop, for-each, or parallel kind`,
     );
   }
-  if (kind !== "prompt" && Object.hasOwn(fields, "intent")) {
-    throw new Error(`procedure.sequence ${fields.id}: intent is valid only on prompt items`);
+  if (kind !== "prompt" && (Object.hasOwn(fields, "intent") || Object.hasOwn(fields, "behavior"))) {
+    throw new Error(`procedure.sequence ${fields.id}: intent and behavior are valid only on prompt items`);
   }
   const promptIntent = kind === "prompt" ? normalizeIntent(rawFields.intent) : undefined;
+  const promptBehavior =
+    kind === "prompt" && rawFields.behavior !== undefined ? normalizeBehavior(rawFields.behavior) : undefined;
   if (
     kind !== "branch" &&
     (rawFields.if !== undefined || rawFields.then !== undefined || rawFields.otherwise !== undefined)
@@ -1380,6 +1403,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     kind: kind === "prompt" || kind === "command" ? undefined : kind,
     agent: agentRef,
     intent: promptIntent,
+    behavior: promptBehavior,
     input,
     output,
     format: fields.format === undefined || typeof fields.format === "string" ? fields.format : [...fields.format],

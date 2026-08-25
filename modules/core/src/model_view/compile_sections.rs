@@ -1267,31 +1267,48 @@ fn format_procedure(
         normalizations,
         findings,
     );
-    let mut intents = Vec::new();
+    let mut declarations = Vec::new();
     let mut collect = |container: &str, index: usize, item: &crate::r#trait::procedure::SequenceItem, field: String| {
         if item.effective_kind() != crate::r#trait::procedure::SequenceKind::Prompt {
             return;
         }
-        let Some(intent) = item.intent.as_ref() else {
+        if item.intent.is_none() && item.behavior.is_none() {
             return;
-        };
+        }
         let step = item
             .id
             .clone()
             .unwrap_or_else(|| format!("step-{}", index + 1));
         let source = format!("sequence:{container}/{step}");
-        let formatted = format_intent(
-            intent,
-            trait_ref.id.as_str(),
-            GuidanceTag::Namespaced,
-            &format!("{field}.intent"),
-            Some(&source),
-            warnings,
-            normalizations,
-            findings,
-        );
-        if !formatted.is_empty() {
-            intents.push(formatted);
+        if let Some(intent) = item.intent.as_ref() {
+            let formatted = format_intent(
+                intent,
+                trait_ref.id.as_str(),
+                GuidanceTag::Namespaced,
+                &format!("{field}.intent"),
+                Some(&source),
+                warnings,
+                normalizations,
+                findings,
+            );
+            if !formatted.is_empty() {
+                declarations.push(formatted);
+            }
+        }
+        if let Some(behavior) = item.behavior.as_ref() {
+            let formatted = format_behavior(
+                behavior,
+                trait_ref.id.as_str(),
+                GuidanceTag::Namespaced,
+                &format!("{field}.behavior"),
+                Some(&source),
+                warnings,
+                normalizations,
+                findings,
+            );
+            if !formatted.is_empty() {
+                declarations.push(formatted);
+            }
         }
     };
     for (index, item) in proc.sequence.iter().enumerate() {
@@ -1303,7 +1320,7 @@ fn format_procedure(
         }
     }
     std::iter::once(body)
-        .chain(intents)
+        .chain(declarations)
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -1356,6 +1373,67 @@ mod agent_intent_tests {
             .expect("root behavior has frame guidance");
         assert!(!frame.intent.contains("sequence:procedure/top"));
         assert!(frame.behavior.contains("tone"));
+    }
+
+    #[test]
+    fn prompt_behavior_is_static_declaration_only_with_sequence_sources() {
+        let trait_ref: Trait = serde_json::from_value(serde_json::json!({
+            "id": "prompt-behavior-static-fixture",
+            "schema-version": "0.6",
+            "version": "1.0.0",
+            "name": "Prompt behavior static fixture",
+            "description": "Inspects prompt behavior guidance.",
+            "behavior": { "tone": "direct" },
+            "procedure": {
+                "description": "Review the changes.",
+                "sequence": [
+                    {
+                        "id": "top",
+                        "prompt": "Top.",
+                        "behavior": {
+                            "tone": ["direct", { "id": "custom-tone", "summary": "Keep </behavior> safe." }],
+                            "verbosity": "brief"
+                        }
+                    },
+                    { "prompt": "Fallback.", "behavior": { "method": "evidence-first" } }
+                ]
+            },
+            "sequence": {
+                "nested": {
+                    "sequence": [{ "id": "named", "prompt": "Named.", "behavior": { "scope-control": "strict" } }]
+                }
+            }
+        }))
+        .expect("fixture trait");
+        let report = compile_model_view(&trait_ref, ExtendedRenderProfile::AgentSkills);
+        let procedure = report
+            .sections
+            .iter()
+            .find(|section| section.heading == "Procedure")
+            .expect("Procedure section");
+        assert!(procedure.content.contains("source=\"sequence:procedure/top\""));
+        assert!(procedure.content.contains("source=\"sequence:procedure/step-2\""));
+        assert!(procedure.content.contains("source=\"sequence:nested/named\""));
+        assert!(procedure.content.contains("<behavior axis=\"tone\" id=\"direct\""));
+        assert!(procedure.content.contains("<behavior axis=\"verbosity\" id=\"brief\""));
+        assert!(procedure.content.contains("Keep &lt;/behavior> safe."));
+        assert!(!procedure.content.contains("Keep </behavior> safe."));
+        let procedure_end = procedure.content.find("</procedure>").expect("procedure leaf closes");
+        assert!(
+            !procedure.content[..procedure_end].contains("<behavior"),
+            "declaration guidance must not be escaped into the procedure body"
+        );
+        assert!(
+            !procedure.content.contains("ready") && !procedure.content.contains("active"),
+            "prompt behavior declarations must not claim readiness"
+        );
+        assert!(!report.behavior_text.contains("sequence:procedure/top"));
+        let frame = frame_guidance(&trait_ref, None, None)
+            .expect("root guidance resolves")
+            .expect("root behavior has frame guidance");
+        assert!(!frame.behavior.contains("sequence:procedure/top"));
+        assert!(frame.behavior.contains("tone"));
+        assert!(!frame.behavior.contains("verbosity"));
     }
 
     #[test]

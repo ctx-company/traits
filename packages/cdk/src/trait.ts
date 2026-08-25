@@ -437,8 +437,8 @@ export function assembleSingleTraitDraft(
     "schema-version":
       fields["schema-version"] ??
       (merged.agent?.some((agent) => Object.hasOwn(agent, "intent") || Object.hasOwn(agent, "behavior")) ||
-      sequenceContainerHasPromptIntent(procedureValue) ||
-      (merged.sequence ?? []).some(sequenceContainerHasPromptIntent)
+      sequenceContainerHasPromptGuidance(procedureValue) ||
+      (merged.sequence ?? []).some(sequenceContainerHasPromptGuidance)
         ? "0.6"
         : baselineSchemaVersion),
     version: fields.version ?? "0.1.0",
@@ -475,7 +475,7 @@ export function assembleSingleTraitDraft(
   };
 }
 
-function sequenceContainerHasPromptIntent(value: unknown): boolean {
+function sequenceContainerHasPromptGuidance(value: unknown): boolean {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const sequence = (value as { readonly sequence?: unknown }).sequence;
   if (!Array.isArray(sequence)) return false;
@@ -484,7 +484,7 @@ function sequenceContainerHasPromptIntent(value: unknown): boolean {
       item !== null &&
       typeof item === "object" &&
       !Array.isArray(item) &&
-      Object.hasOwn(item, "intent") &&
+      (Object.hasOwn(item, "intent") || Object.hasOwn(item, "behavior")) &&
       Object.hasOwn(item, "prompt") &&
       (!Object.hasOwn(item, "kind") || (item as { readonly kind?: unknown }).kind === "prompt"),
   );
@@ -575,8 +575,9 @@ export type CustomSlug = string & { readonly __customSlugBrand: never };
 export type Slug = Lowercase<string>;
 /**
  * The canonical trait document schema version. `"0.5"` is the default and
- * native-variant baseline; agent-local intent or behavior infers `"0.6"`
- * when no explicit version is authored.
+ * native-variant baseline; agent-local intent or behavior, or a canonical
+ * prompt sequence item's intent or behavior, infers `"0.6"` when no explicit
+ * version is authored.
  */
 export type SchemaVersion = "0.2" | "0.3" | "0.4" | "0.5" | "0.6";
 /** A three-component semantic version for trait releases. */
