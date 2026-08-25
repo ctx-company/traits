@@ -1430,8 +1430,11 @@ sequence = "sequence:outer"
     // collide across every owner (index 0 in `branch-outer`, `branch-then`,
     // `branch-otherwise`, and `nested-branch-then` alike), and `then-leaf`/
     // `nested-then-leaf`/`otherwise-leaf` all reuse the "shared" id to prove
-    // the same root->agent->leaf scalar precedence the earlier named-leaf
-    // proof established, now across sibling branch arms.
+    // the same root->agent->leaf replacement precedence the earlier
+    // named-leaf proof established, now across sibling branch arms.
+    // `then-leaf` additionally declares its own `verbosity` scalar, proving
+    // a branch leaf's own scalar wins over the agent's scalar exactly as
+    // `inner_guided`'s verbosity override did for a plain named leaf.
     let branch_header = nested_header.replace(
         "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n",
         "[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Answer.\"\n\n[[slot]]\nid = \"choice\"\nschema = \"schema:text\"\ndescription = \"Outer branch choice.\"\n\n[[slot]]\nid = \"nested-choice\"\nschema = \"schema:text\"\ndescription = \"Nested branch choice.\"\n",
@@ -1444,7 +1447,7 @@ title = "Then leaf"
 agent = "agent:worker"
 prompt = "Produce then-leaf answer."
 intent = {{ require = [{{ id = "shared", summary = "Then leaf replacement text." }}, {{ id = "then-arm-marker", summary = "Then leaf marker." }}] }}
-behavior = {{ tone = [{{ id = "shared-tone", summary = "Then leaf tone." }}, {{ id = "then-arm-tone-marker", summary = "Then leaf tone marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Then leaf tone." }}, {{ id = "then-arm-tone-marker", summary = "Then leaf tone marker." }}], verbosity = {{ id = "then-arm-verbosity-marker", summary = "Then leaf verbosity marker." }} }}
 output = ["slot:answer"]
 
 [[sequence.branch-then.sequence]]
@@ -1576,6 +1579,85 @@ output = ["slot:answer"]
         );
     }
 
+    // Static declaration rendering (`traits internal export`) attributes
+    // every branch arm's own declared guidance to its own structural
+    // source — `sequence:<owner>/<item>` — with a source-tagged block that
+    // carries only that declaration's own text, never a merged/composed
+    // ready-frame view. The render is explicitly labeled static throughout
+    // and makes no active/ready/selected claim about any one arm.
+    let branch_export_dir = home.join("branch-static-export");
+    let branch_export = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "export",
+            "--file",
+            generated.to_str().unwrap(),
+            "--profile",
+            "agent-skills",
+            "--format",
+            "compat",
+            "--out",
+            branch_export_dir.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&branch_export, 0);
+    let branch_skill =
+        fs::read_to_string(branch_export_dir.join("agent-intent").join("SKILL.md")).unwrap();
+    for (source, own_text) in [
+        (
+            "sequence:branch-then/then-leaf",
+            "Then leaf replacement text.",
+        ),
+        (
+            "sequence:branch-otherwise/otherwise-leaf",
+            "Otherwise leaf replacement text.",
+        ),
+        (
+            "sequence:nested-branch-then/nested-then-leaf",
+            "Nested then leaf replacement text.",
+        ),
+    ] {
+        assert!(
+            branch_skill.contains(&format!("source=\"{source}\"")),
+            "static export missing branch-arm source attribution source=\"{source}\": {branch_skill}"
+        );
+        // The `id="shared"` declaration is the one every arm collides on, so
+        // its own-source block is the one that proves attribution names the
+        // owning leaf rather than a merged view: search from that specific
+        // tag (not the bare `source="..."` above, which also matches the
+        // group-info line that carries no text) to the tag's own closing
+        // `</intent>`.
+        let own_tag = format!("id=\"shared\" source=\"{source}\">");
+        let block_start = branch_skill
+            .find(&own_tag)
+            .unwrap_or_else(|| panic!("static export missing {own_tag}: {branch_skill}"));
+        let block_end = branch_skill[block_start..]
+            .find("</intent>")
+            .map(|offset| block_start + offset)
+            .unwrap_or(branch_skill.len());
+        assert!(
+            branch_skill[block_start..block_end].contains(own_text),
+            "static export source block for {own_tag} missing its own text: {branch_skill}"
+        );
+    }
+    // Static export never selects a branch outcome, so it must carry no
+    // claim that any one arm is the active/ready one — every arm's own
+    // declaration renders side by side instead, explicitly labeled static.
+    assert!(
+        branch_skill.contains("Static render advisory")
+            && branch_skill.contains("Static host note"),
+        "static export must remain explicitly labeled static, not an active/ready claim: {branch_skill}"
+    );
+    for claim in ["active", "ready", "selected", "not-yet-accepted"] {
+        assert!(
+            !branch_skill.to_ascii_lowercase().contains(claim),
+            "static export must not claim any arm is {claim}: {branch_skill}"
+        );
+    }
+
     let read_frames = |count: usize| -> Vec<String> {
         (0..count)
             .map(|index| {
@@ -1681,6 +1763,16 @@ output = ["slot:answer"]
         extract_behavior(tt_nested_then),
         extract_behavior(branch_preview_nested_then),
         "true/true nested-then behavior differs between preview and CLI"
+    );
+    assert_eq!(
+        extract_intent(tt_then),
+        extract_intent(branch_preview_then),
+        "true/true then (direct leaf) intent differs between preview and CLI"
+    );
+    assert_eq!(
+        extract_behavior(tt_then),
+        extract_behavior(branch_preview_then),
+        "true/true then (direct leaf) behavior differs between preview and CLI"
     );
     let tt_session = home.join("branch-tt-cli.json");
 
@@ -1833,6 +1925,16 @@ output = ["slot:answer"]
         extract_behavior(f_otherwise),
         "false otherwise behavior differs between CLI and MCP"
     );
+    assert_eq!(
+        extract_intent(f_mcp_otherwise),
+        extract_intent(branch_preview_otherwise),
+        "false otherwise intent differs between preview and MCP"
+    );
+    assert_eq!(
+        extract_behavior(f_mcp_otherwise),
+        extract_behavior(branch_preview_otherwise),
+        "false otherwise behavior differs between preview and MCP"
+    );
     let f_mcp_session = home.join("branch-f-mcp.json");
 
     // Every recorded leaf across the three real dispatches must show the
@@ -1862,7 +1964,8 @@ output = ["slot:answer"]
                               own_tone_marker: &str,
                               own_text: &str,
                               own_tone_text: &str,
-                              own_prompt_text: &str| {
+                              own_prompt_text: &str,
+                              own_verbosity_marker: Option<&str>| {
         let intent = extract_intent(prompt);
         let behavior = extract_behavior(prompt);
         assert!(
@@ -1924,10 +2027,13 @@ output = ["slot:answer"]
             behavior.contains(own_tone_text),
             "{label} tone scalar precedence: {behavior}"
         );
-        // Branch leaves declare only `tone`; every other behavior axis must
-        // still fall back through agent to root exactly as the plain
-        // named-sequence leaf proof (`inner_guided`) established, proving
-        // the shared composer's fallback is unaffected by branch admission.
+        // Branch leaves declare `tone` on every arm, and `then-leaf` alone
+        // additionally declares its own `verbosity` scalar. Every other
+        // behavior axis must still fall back through agent to root exactly
+        // as the plain named-sequence leaf proof (`inner_guided`)
+        // established, proving the shared composer's fallback and
+        // prompt-over-agent scalar precedence are unaffected by branch
+        // admission.
         assert!(
             behavior.contains("root-initiative"),
             "{label} broader-axis fallback to root: {behavior}"
@@ -1937,6 +2043,28 @@ output = ["slot:answer"]
                 behavior.contains(unchanged),
                 "{label} agent-scalar fallback: {behavior}"
             );
+        }
+        match own_verbosity_marker {
+            Some(marker) => {
+                assert!(
+                    behavior.contains(marker),
+                    "{label} own verbosity scalar precedence: {behavior}"
+                );
+                assert!(
+                    !behavior.contains("agent-verbosity"),
+                    "{label} stale agent verbosity leaked: {behavior}"
+                );
+            }
+            None => {
+                assert!(
+                    behavior.contains("agent-verbosity"),
+                    "{label} verbosity agent-scalar fallback: {behavior}"
+                );
+                assert!(
+                    !behavior.contains("then-arm-verbosity-marker"),
+                    "{label} leaked then-leaf's own verbosity scalar: {behavior}"
+                );
+            }
         }
         for marker in all_branch_markers {
             if marker == own_marker || marker == own_tone_marker {
@@ -1961,6 +2089,7 @@ output = ["slot:answer"]
         "Then leaf replacement text.",
         "Then leaf tone.",
         "Produce then-leaf answer.",
+        Some("then-arm-verbosity-marker"),
     );
     assert_branch_leaf(
         "true/true nested-then (CLI)",
@@ -1970,6 +2099,7 @@ output = ["slot:answer"]
         "Nested then leaf replacement text.",
         "Nested then leaf tone.",
         "Produce nested-then-leaf answer.",
+        None,
     );
     assert_branch_leaf(
         "true/false then (MCP)",
@@ -1979,6 +2109,7 @@ output = ["slot:answer"]
         "Then leaf replacement text.",
         "Then leaf tone.",
         "Produce then-leaf answer.",
+        Some("then-arm-verbosity-marker"),
     );
     assert_branch_leaf(
         "false otherwise (CLI)",
@@ -1988,6 +2119,7 @@ output = ["slot:answer"]
         "Otherwise leaf replacement text.",
         "Otherwise leaf tone.",
         "Produce otherwise-leaf answer.",
+        None,
     );
     assert_branch_leaf(
         "true/true then (MCP)",
@@ -1997,6 +2129,7 @@ output = ["slot:answer"]
         "Then leaf replacement text.",
         "Then leaf tone.",
         "Produce then-leaf answer.",
+        Some("then-arm-verbosity-marker"),
     );
     assert_branch_leaf(
         "true/true nested-then (MCP)",
@@ -2006,6 +2139,7 @@ output = ["slot:answer"]
         "Nested then leaf replacement text.",
         "Nested then leaf tone.",
         "Produce nested-then-leaf answer.",
+        None,
     );
     assert_branch_leaf(
         "false otherwise (MCP)",
@@ -2015,6 +2149,7 @@ output = ["slot:answer"]
         "Otherwise leaf replacement text.",
         "Otherwise leaf tone.",
         "Produce otherwise-leaf answer.",
+        None,
     );
     assert_ne!(
         extract_intent(tt_then),
