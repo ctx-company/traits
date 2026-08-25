@@ -378,21 +378,90 @@ describe("prompt sequence intent", () => {
     expect(explicit["schema-version"]).toBe("0.5");
   });
 
-  it("rejects intent on non-prompt items at typecheck and runtime", () => {
+  it("infers only canonical prompt intent without walking arbitrary nested data", () => {
+    const noPrompt = toDraftJson(
+      trait("non-prompt-shaped-intent", {
+        name: "Non-prompt-shaped intent",
+        description: "Intent alone is not prompt intent.",
+        procedure: procedure({
+          description: "No prompt intent.",
+          sequence: [{ id: "command-shaped", kind: "command", intent: {} } as never],
+        }),
+      }),
+    );
+    const arbitraryNested = toDraftJson(
+      trait("arbitrary-nested-intent", {
+        name: "Arbitrary nested intent",
+        description: "Only sequence items count.",
+        procedure: procedure({
+          description: "No prompt intent.",
+          sequence: [{ id: "nested-data", kind: "command", metadata: { prompt: "x", intent: {} } } as never],
+        }),
+      }),
+    );
+    expect(noPrompt["schema-version"]).toBe("0.5");
+    expect(arbitraryNested["schema-version"]).toBe("0.5");
+  });
+
+  it("rejects intent on every non-prompt builder at typecheck and runtime", () => {
     if (false) {
       // @ts-expect-error intent is prompt-only.
       sequence.command("typed-illegal-intent", { cmd: "true", intent: {} });
       // @ts-expect-error intent is prompt-only.
       sequence.check("typed-illegal-intent", { cmd: "true", output: slot.text("intent-check"), intent: {} });
+      sequence.ask("typed-illegal-intent", {
+        prompt: input.prompt`Ask.`,
+        when: signal({ id: "typed-intent-ready", description: "Ready." }),
+        output: slot.text("intent-ask"),
+        // @ts-expect-error intent is prompt-only.
+        intent: {},
+      });
+      // @ts-expect-error intent is prompt-only.
+      sequence.project("typed-illegal-intent", { projections: [], intent: {} });
+      // @ts-expect-error intent is prompt-only.
+      sequence.terminal("typed-illegal-intent", { outcome: "error", intent: {} });
+      // @ts-expect-error intent is prompt-only.
+      sequence.loop("typed-illegal-intent", { sequence: sequence.linear("typed-loop", []), intent: {} });
+      // @ts-expect-error intent is prompt-only.
+      sequence.forEach("typed-illegal-intent", { over: "slot:items", item: "slot:item", body: [], intent: {} });
+      sequence.branch("typed-illegal-intent", {
+        check: condition.empty(slot.text("intent-branch")),
+        success: sequence.linear("typed-intent-branch", []),
+        // @ts-expect-error intent is prompt-only.
+        intent: {},
+      });
       // @ts-expect-error intent is prompt-only.
       sequence.parallel("typed-illegal-intent", [], { intent: {} });
     }
-    expect(() => sequence.command("runtime-illegal-intent", { cmd: "true", intent: {} } as never)).toThrow(
-      /intent is valid only on prompt items/,
-    );
-    expect(() => sequence.parallel("runtime-illegal-intent", [], { intent: {} } as never)).toThrow(
-      /intent is valid only on prompt items/,
-    );
+    const invalid = [
+      () => sequence.command("runtime-command", { cmd: "true", intent: {} } as never),
+      () =>
+        sequence.check("runtime-check", {
+          cmd: "true",
+          output: slot.text("runtime-check-output"),
+          intent: {},
+        } as never),
+      () =>
+        sequence.ask("runtime-ask", {
+          prompt: input.prompt`Ask.`,
+          when: "signal:ready",
+          output: slot.text("runtime-ask-output"),
+          intent: {},
+        } as never),
+      () => sequence.project("runtime-project", { projections: [], intent: {} } as never),
+      () => sequence.terminal("runtime-terminal", { outcome: "error", intent: {} } as never),
+      () => sequence.loop("runtime-loop", { sequence: sequence.linear("runtime-loop-body", []), intent: {} } as never),
+      () =>
+        sequence.forEach("runtime-for-each", { over: "slot:items", item: "slot:item", body: [], intent: {} } as never),
+      () =>
+        sequence.branch("runtime-branch", {
+          check: condition.empty(slot.text("runtime-branch-check")),
+          success: [],
+          intent: {},
+        } as never),
+      () => sequence.parallel("runtime-parallel", [], { intent: {} } as never),
+    ];
+    for (const build of invalid) expect(build).toThrow(/intent is valid only on prompt items/);
   });
 });
 

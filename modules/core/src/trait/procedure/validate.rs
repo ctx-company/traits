@@ -4728,10 +4728,11 @@ mod tests {
     #[test]
     fn prompt_intent_rejects_pre_06_schema() {
         let item = prompt_intent_item(None, serde_json::json!({}));
-        assert!(validate(&prompt_intent_declaration("0.5", item, false))
+        let error = validate(&prompt_intent_declaration("0.5", item, false))
             .expect_err("0.6 is required")
-            .to_string()
-            .contains("schema-version \"0.6\""));
+            .to_string();
+        assert!(error.contains("procedure.sequence[0].intent"));
+        assert!(error.contains("schema-version \"0.6\""));
     }
 
     #[test]
@@ -4758,7 +4759,10 @@ mod tests {
         let with = prompt_intent_item(None, serde_json::json!({ "focus": "correctness" }));
         let canonical = crate::digest::canonical_json(&with).expect("canonical json");
         assert_eq!(canonical, r#"{"id":"prompt-step","intent":{"focus":[{"id":"correctness"}]},"prompt":"Do the work."}"#);
-        assert_ne!(crate::digest::canonical_digest(&without).unwrap(), crate::digest::canonical_digest(&with).unwrap());
+        assert_ne!(
+            crate::digest::canonical_digest(&without).expect("absent digest"),
+            crate::digest::canonical_digest(&with).expect("intent digest")
+        );
     }
 
     #[test]
