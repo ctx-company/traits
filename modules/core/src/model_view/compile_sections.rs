@@ -1330,7 +1330,8 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:assigned-reviewer"));
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
-        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves").expect("root guidance has a frame render");
+        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves");
+        let frame = frame.expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));
         assert!(!frame.behavior.contains("agent:unassigned-reviewer"));
@@ -1397,7 +1398,8 @@ mod agent_intent_tests {
         assert!(!report.behavior_text.contains("agent:unassigned-reviewer"));
         assert!(!report.behavior_text.contains("Preserve"));
         assert!(!report.behavior_text.contains("State conclusions plainly."));
-        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves").expect("root guidance has a frame render");
+        let frame = frame_guidance(&trait_ref, None).expect("root guidance resolves");
+        let frame = frame.expect("root guidance has a frame render");
         assert!(frame.intent.contains("root-focus"));
         assert!(!frame.intent.contains("agent:unassigned-reviewer"));
         assert!(!frame.behavior.contains("agent:unassigned-reviewer"));
