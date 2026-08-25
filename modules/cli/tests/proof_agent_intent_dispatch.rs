@@ -245,6 +245,13 @@ output = ["slot:answer"]
         assert!(!prompt.contains("ASSIGNED SYSTEM"));
         assert!(!prompt.contains("UNASSIGNED SYSTEM"));
     };
+    let expected_mcp_prompt = |session: &std::path::Path| {
+        format!(
+            "Serve this ctx.traits frame via MCP.\nAgent role: worker\nHarness id: capture\nRun session: {}\nSession store: \n\nRequired steps:\n1. Call ctx_traits_run_next with agent=worker, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent=worker and harness=capture.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: Work\n\nStep [run 0 / source 0]: Work\nAssigned agent: agent:worker (Assigned worker.)\nAvailable inputs:\nRequested outputs:\n- slot:answer (replace)\n\nResolved prompt instructions:\nProduce an answer.\nResolved input values:\n\n",
+            session.display(),
+            session.display(),
+        )
+    };
     let run = |transport: &str, output: &str| {
         let _ = fs::remove_file(&capture);
         let _ = fs::remove_file(capture.with_extension("txt.args"));
@@ -353,6 +360,9 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         assert!(behavior_block.contains(text), "{behavior_block}");
     }
     for expected in [
+        "agent-tone",
+        "agent-method",
+        "agent-format",
         "agent-verbosity",
         "agent-directness",
         "agent-scope",
@@ -360,6 +370,17 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         "agent-uncertainty",
     ] {
         assert!(behavior_block.contains(expected), "{behavior_block}");
+    }
+    for overridden_root in [
+        "root-verbosity",
+        "root-directness",
+        "root-scope",
+        "root-uncertainty",
+    ] {
+        assert!(
+            !behavior_block.contains(overridden_root),
+            "{behavior_block}"
+        );
     }
     assert!(!behavior_block.contains("unassigned-tone"));
     assert!(!behavior_block.contains("ASSIGNED SYSTEM"));
@@ -444,9 +465,11 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         );
         assert_system(&cli_args, "--cli-system");
         let (mcp, mcp_args) = run("mcp", &format!("{name}-mcp.json"));
-        assert!(
-            !mcp.contains("<behavior>\n"),
-            "{name} MCP gained root-only behavior"
+        let session = home.join(format!("{name}-mcp.json"));
+        assert_eq!(
+            mcp,
+            expected_mcp_prompt(&session),
+            "{name} MCP prompt changed from its frozen legacy bytes"
         );
         assert_system(&mcp_args, "--mcp-system");
     }
@@ -468,13 +491,9 @@ uncertainty = { id = "agent-uncertainty", summary = "Agent uncertainty." }"#;
         let mcp_output = format!("{name}-mcp.json");
         let (legacy_mcp, mcp_args) = run("mcp", &mcp_output);
         let session = home.join(&mcp_output);
-        let expected_mcp = format!(
-            "Serve this ctx.traits frame via MCP.\nAgent role: worker\nHarness id: capture\nRun session: {}\nSession store: \n\nRequired steps:\n1. Call ctx_traits_run_next with agent=worker, session={}, and the session-store above when present.\n2. Use the authoritative frame refs/digests from ctx, and use the resolved content below for the actual goal, inputs, and instructions.\n3. Complete only the returned frame.\n4. Submit with ctx_traits_run_set or ctx_traits_run_call, including agent=worker and harness=capture.\n5. Stop after the submit succeeds; do not continue the procedure loop.\n\nFrame title: Work\n\nStep [run 0 / source 0]: Work\nAssigned agent: agent:worker (Assigned worker.)\nAvailable inputs:\nRequested outputs:\n- slot:answer (replace)\n\nResolved prompt instructions:\nProduce an answer.\nResolved input values:\n\n",
-            session.display(),
-            session.display(),
-        );
         assert_eq!(
-            legacy_mcp, expected_mcp,
+            legacy_mcp,
+            expected_mcp_prompt(&session),
             "{name} MCP prompt changed from its frozen legacy bytes"
         );
         assert_system(&mcp_args, "--mcp-system");
