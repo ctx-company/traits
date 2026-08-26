@@ -1075,10 +1075,26 @@ pub(crate) struct NotMergedFact {
 pub(crate) fn not_merged_fact(
     session: &ctx_traits_core::procedure::session::Session,
 ) -> Option<NotMergedFact> {
-    let worktree = session.provenance.worktree.as_ref()?;
+    not_merged_fact_from_parts(
+        session
+            .provenance
+            .worktree
+            .as_ref()
+            .map(|worktree| worktree.branch.as_str()),
+        session.run_id.as_str(),
+    )
+}
+
+/// Row-shaped counterpart of [`not_merged_fact`]. Center clients retain only
+/// the branch and run id required to render this fact.
+pub(crate) fn not_merged_fact_from_parts(
+    branch: Option<&str>,
+    run_id: &str,
+) -> Option<NotMergedFact> {
+    let branch = branch?;
     Some(NotMergedFact {
-        branch: worktree.branch.clone(),
-        merge_command: format!("ctx traits merge {}", session.run_id.as_str()),
+        branch: branch.to_string(),
+        merge_command: format!("ctx traits merge {run_id}"),
     })
 }
 

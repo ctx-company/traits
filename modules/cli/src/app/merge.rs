@@ -511,7 +511,7 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
             path.to_path_buf(),
             ctx_traits_io::run_session::read_run_session(path)?,
         ),
-        None => {
+        None if input.session_store.is_some() => {
             let Some(resolved) = ctx_traits_io::run_session::find_session_by_run_id(
                 input.session_store,
                 input.run_id,
@@ -526,7 +526,28 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
             };
             resolved
         }
+        None => {
+            let repo_key = ctx_traits_io::state::current_repo_key()?;
+            let rows = ctx_traits_io::center::find_by_run_id(input.run_id, Some(&repo_key))
+                .map_err(|error| crate::Error::Command {
+                    message: format!("merge unresolvable: center unavailable: {error}"),
+                })?;
+            let Some(row) = rows.into_iter().next() else {
+                return Err(crate::Error::Command {
+                    message: format!(
+                        "merge unresolvable: center records no run-session ledger for run-id {:?}",
+                        input.run_id
+                    ),
+                });
+            };
+            let session_path = Utf8PathBuf::from(row.ledger_path);
+            // The center resolves the one ledger path; this mutation validates
+            // authoritative current state before it can touch Git.
+            let session = ctx_traits_io::run_session::read_run_session(&session_path)?;
+            (session_path, session)
+        }
     };
+    validate_selected_run_id(&session, input.run_id)?;
     if session.status != ctx_traits_core::procedure::session::Status::Completed
         || session
             .last_drive_outcome
@@ -936,6 +957,23 @@ struct MergeLockedInputs<'a> {
     attempt: u64,
     mechanical_only: bool,
     merger_path_entered: &'a mut bool,
+}
+
+/// A path override is only a selection optimization. Its current ledger must
+/// still be authoritative for the run requested by the merge command.
+fn validate_selected_run_id(
+    session: &ctx_traits_core::procedure::session::Session,
+    requested_run_id: &str,
+) -> crate::Result<()> {
+    if session.run_id.as_str() == requested_run_id {
+        return Ok(());
+    }
+    Err(crate::Error::Command {
+        message: format!(
+            "merge unresolvable: selected ledger no longer records run-id {:?}",
+            requested_run_id
+        ),
+    })
 }
 
 /// Decorate a `merge_locked` result with the operational lock evidence
@@ -4788,16 +4826,19 @@ fn deep_decision_trailer_value(decision: &DeepMergeDecision) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MergeLive, ParkTarget, bounded_retry_jitter_ms, deep_hunk_id, gate_command_label,
-        generated_artifact_index_for_path, park, park_with_detail, path_is_under_seed_root,
-        trimmed_stderr_tail,
+        MergeInputs, MergeLive, ParkTarget, bounded_retry_jitter_ms, deep_hunk_id,
+        gate_command_label, generated_artifact_index_for_path, merge, park, park_with_detail,
+        path_is_under_seed_root, trimmed_stderr_tail, validate_selected_run_id,
     };
     use ctx_traits_core::digest::Digest;
     use ctx_traits_core::procedure::activity::ActivityEvent;
     use ctx_traits_core::procedure::runtime::FinalState;
     use ctx_traits_core::procedure::session::MergeStage;
     use ctx_traits_io::harness_config::GeneratedArtifact;
+    use std::process::Command;
     use std::sync::{Arc, Mutex};
+
+    use crate::app::test_support::{CenterPeer, read_center_request, write_center_response};
 
     #[test]
     fn retry_jitter_is_bounded_by_the_exponential_base_delay() {
@@ -4805,6 +4846,113 @@ mod tests {
         for _ in 0..32 {
             assert!(bounded_retry_jitter_ms(100) <= 100);
         }
+    }
+
+    #[test]
+    fn session_path_override_rejects_a_replaced_run_id_before_git() {
+        let path = camino::Utf8PathBuf::from(format!(
+            "/tmp/ctx-traits-replaced-run-{}.json",
+            std::process::id()
+        ));
+        write_test_session(&path, "replacement-run");
+        let session = ctx_traits_io::run_session::read_run_session(&path).expect("read session");
+        let error = validate_selected_run_id(&session, "requested-run")
+            .expect_err("replacement must be rejected before merge setup");
+        assert!(
+            error
+                .to_string()
+                .contains("selected ledger no longer records")
+        );
+        let _ = std::fs::remove_file(path.as_std_path());
+    }
+
+    #[test]
+    fn merge_revalidates_stale_center_selection_without_git_mutation() {
+        let peer_server = CenterPeer::install("stale-center");
+        let root = peer_server.root().to_path_buf();
+        let ledger = camino::Utf8PathBuf::from_path_buf(root.join("session.json"))
+            .expect("UTF-8 ledger path");
+        write_test_session(&ledger, "requested-run");
+        let listener = peer_server.listener();
+        let peer_ledger = ledger.clone();
+        let peer = std::thread::spawn(move || {
+            let mut stream = crate::app::test_support::accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            assert_eq!(request["kind"], "find-by-run-id");
+            write_test_session(&peer_ledger, "replacement-run");
+            let row = serde_json::json!({
+                "summary": {
+                    "session_id": "session-requested-run",
+                    "run_id": "requested-run",
+                    "trait_id": "test-trait",
+                    "status": "completed",
+                    "has_merge_frames": false,
+                },
+                "repo_key": "unused",
+                "repo_path": "/unused",
+                "ledger_path": peer_ledger.as_str(),
+                "live": false,
+                "modified_epoch_secs": 0,
+            });
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({"type": "find-by-run-id", "data": [row]}),
+            );
+        });
+
+        let git_before = git_state_snapshot();
+        let result = merge(MergeInputs {
+            run_id: "requested-run",
+            session_store: None,
+            session_path_override: None,
+            assignments: &[],
+            no_wait: false,
+            force_wait: false,
+            json: false,
+            force_merger: false,
+            park_on_overlap: false,
+            force_land_on_overlap: false,
+            allow_stale_overlap: false,
+            deep: false,
+            live: None,
+            merger_stdout_observer: None,
+        });
+        peer.join().expect("join center peer");
+
+        let error = result.expect_err("replaced center-selected ledger must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("selected ledger no longer records"),
+            "the authoritative replacement must stop merge before Git setup: {error}"
+        );
+        assert_eq!(
+            git_state_snapshot(),
+            git_before,
+            "rejected stale selection must leave HEAD, index, and worktree unchanged"
+        );
+    }
+
+    fn git_state_snapshot() -> (String, String, String) {
+        let run = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .args(arguments)
+                .output()
+                .expect("run git snapshot command");
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                arguments.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).expect("git output is UTF-8")
+        };
+        (
+            run(&["rev-parse", "HEAD"]),
+            run(&["diff", "--cached", "--binary"]),
+            run(&["diff", "--binary"]),
+        )
     }
 
     /// Minimal-but-valid [`Session`] for the park-helper tests below — every

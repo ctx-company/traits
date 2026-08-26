@@ -13,6 +13,7 @@
 //! was — a helper only some proof suites call no longer needs suppressing or
 //! deleting to keep every individual test binary's compilation warning-free.
 
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -321,6 +322,16 @@ impl Drop for ScratchRoot {
 /// shims and `ctx traits build`'s `node` shell-out); no provider/network
 /// credentials ever passed through.
 pub fn controlled_command(binary: &Path, args: &[&str], cwd: &Path, home: &Path) -> Command {
+    // Every scratch HOME needs its own complete center endpoint tuple. The
+    // production socket is UID/version scoped, so HOME isolation alone would
+    // otherwise allow one proof to query another proof's runs root.
+    let center_root = home.join("ctx/traits/runs");
+    // Darwin limits Unix-domain socket paths to 104 bytes. Scratch homes use
+    // descriptive temp names, so put the endpoint under /tmp while retaining a
+    // deterministic per-home identity for commands that share this harness.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    home.hash(&mut hasher);
+    let center_socket = std::env::temp_dir().join(format!("ctx-{:016x}.sock", hasher.finish()));
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -333,6 +344,10 @@ pub fn controlled_command(binary: &Path, args: &[&str], cwd: &Path, home: &Path)
         .env("XDG_CACHE_HOME", home)
         .env("TMPDIR", home)
         .env("NO_COLOR", "1")
+        .env("CTX_CENTER_SOCKET", center_socket)
+        .env("CTX_CENTER_SPAWN_LOCK", home.join("l"))
+        .env("CTX_CENTER_RUNS_ROOT", &center_root)
+        .env("CTX_CENTER_INDEX", center_root.join("index.sqlite3"))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Ok(path) = std::env::var("PATH") {

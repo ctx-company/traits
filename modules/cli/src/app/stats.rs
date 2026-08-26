@@ -1,11 +1,9 @@
 //! `ctx traits internal stats` (P442): deterministic, read-only aggregation over this
-//! repository's run session ledgers. Loads the inventory and resolves the
-//! `--since` cutoff at this IO boundary, then hands everything to the pure
-//! `ctx_traits_core::procedure::stats` aggregator.
+//! repository's run sessions. The center owns ledger reconstruction and
+//! hands this edge an already-aggregated report.
 
-use ctx_traits_core::procedure::stats::{self, OutcomeValueCount, RunRecord, StatsReport};
+use ctx_traits_core::procedure::stats::{OutcomeValueCount, StatsReport};
 use ctx_traits_core::response::CommandOutput;
-use ctx_traits_io::run_session::{InventoryOutcome, current_repo_run_inventory};
 
 use crate::app::command_handlers::print_json_report;
 use crate::app::tui::write_plain_line as w;
@@ -15,20 +13,8 @@ pub(crate) fn handle_stats(
     trait_id: Option<&str>,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
-    let inventory = current_repo_run_inventory()?;
-    let total_runs = inventory.len() as u64;
-    let mut unreadable_runs = 0u64;
-    let mut records = Vec::with_capacity(inventory.len());
-    for row in inventory {
-        match row.status {
-            InventoryOutcome::Readable { session, .. } => {
-                records.push(RunRecord::from_session(&session));
-            }
-            InventoryOutcome::Unreadable { .. } => unreadable_runs += 1,
-        }
-    }
-
-    let report = stats::aggregate(&records, total_runs, unreadable_runs, since, trait_id);
+    let repo_key = ctx_traits_io::state::current_repo_key()?;
+    let report = ctx_traits_io::center::stats(since, trait_id, Some(&repo_key))?;
 
     if json {
         print_json_report(&report, "stats report")?;

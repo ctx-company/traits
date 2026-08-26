@@ -96,11 +96,19 @@ pub(crate) fn stop_reason_summary(
 }
 
 pub(crate) fn phase_text(session: &ctx_traits_core::procedure::session::Session) -> String {
-    match session.current_sequence_title.as_deref() {
+    phase_text_from_parts(&session.status, session.current_sequence_title.as_deref())
+}
+
+/// Session phase text from the facts retained in a center row.
+pub(crate) fn phase_text_from_parts(
+    status: &ctx_traits_core::procedure::session::Status,
+    current_sequence_title: Option<&str>,
+) -> String {
+    match current_sequence_title {
         Some(title) if !title.trim().is_empty() => {
-            format!("{} · {}", session_status(&session.status), title)
+            format!("{} · {}", session_status(status), title)
         }
-        _ => session_status(&session.status).to_string(),
+        _ => session_status(status).to_string(),
     }
 }
 

@@ -3923,10 +3923,28 @@ pub fn trait_source_drift_from(
     session: &ctx_traits_core::procedure::session::Session,
     repository_root: Option<&Utf8Path>,
 ) -> TraitSourceDrift {
-    let Some(source) = session.provenance.trait_source.as_ref() else {
+    trait_source_drift_from_parts(
+        &session.trait_id,
+        session.source_digest.as_deref(),
+        session.canonical_digest.as_deref(),
+        session.provenance.trait_source.as_ref(),
+        repository_root,
+    )
+}
+
+/// As [`trait_source_drift_from`], but from the compact facts held by a center
+/// row. This keeps list projections from reopening every cached session.
+pub fn trait_source_drift_from_parts(
+    trait_id: &str,
+    recorded_source_digest: Option<&str>,
+    recorded_canonical_digest: Option<&str>,
+    trait_source: Option<&ctx_traits_core::procedure::session::TraitSource>,
+    repository_root: Option<&Utf8Path>,
+) -> TraitSourceDrift {
+    let Some(source) = trait_source else {
         return TraitSourceDrift::UnrecoverableLegacy {
             current_source_digest: None,
-            recorded_source_digest: session.source_digest.as_ref().map(ToString::to_string),
+            recorded_source_digest: recorded_source_digest.map(str::to_string),
         };
     };
     let source_path = Utf8Path::new(&source.path);
@@ -3944,23 +3962,20 @@ pub fn trait_source_drift_from(
     let current = crate::read::read_text(&path)
         .ok()
         .map(|text| ctx_traits_core::digest::Digest::source(&text).to_string());
-    let expected = session.source_digest.as_ref().map(ToString::to_string);
+    let expected = recorded_source_digest.map(str::to_string);
     let pin_present = source.document.is_some();
     let valid_pin = source.document.as_deref().is_some_and(|document| {
         // `path` is rooted at the repository that owns this session. Keep the
         // ledger path only for selecting its original encoding.
         load_trait_text_with_context(source_path, &path, document, false)
-            .map(|(trait_ref, _, source_digest, canonical_digest)| {
-                trait_ref.id.as_str() == session.trait_id
-                    && session
-                        .source_digest
-                        .as_ref()
-                        .is_some_and(|expected| source_digest.as_str() == expected.as_str())
-                    && session
-                        .canonical_digest
-                        .as_ref()
-                        .is_some_and(|expected| canonical_digest.as_str() == expected.as_str())
-            })
+            .map(
+                |(trait_ref, _, loaded_source_digest, loaded_canonical_digest)| {
+                    trait_ref.id.as_str() == trait_id
+                        && loaded_source_digest.as_str() == expected.as_deref().unwrap_or_default()
+                        && loaded_canonical_digest.as_str()
+                            == recorded_canonical_digest.unwrap_or_default()
+                },
+            )
             .unwrap_or(false)
     });
     let recorded_source_digest = expected.clone();

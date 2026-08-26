@@ -145,6 +145,19 @@ fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
             "started-by": {"surface": "test", "caller": "proof-center"},
             "state-source": "test",
             "started-at-epoch": 1000,
+            "task-key": "center-task",
+            "task-digest": "sha256:center-task-digest",
+            "session-title": {"state": "resolved", "attempts": 1, "title": "Center proof title"},
+            "worktree": {
+                "id": "center-proof-worktree",
+                "branch": "ctx/run/center-proof-run",
+                "path": "/tmp/center-proof-worktree",
+            },
+            "merge-frames": [{
+                "stage": "landing",
+                "status": "merged",
+                "evidence": ["center-proof-commit"],
+            }],
         },
         "ledger": {
             "run-id": "center-proof-run",
@@ -700,6 +713,28 @@ fn private_sentinel_exits_after_its_bounded_idle_period() {
 }
 
 #[test]
+fn private_sentinel_with_only_a_corrupt_ledger_still_idle_exits() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("corrupt-idle");
+    let ledger = root.join("repository/session-corrupt.json");
+    std::fs::create_dir_all(ledger.parent().expect("corrupt ledger parent"))
+        .expect("create corrupt ledger parent");
+    std::fs::write(&ledger, "not valid json").expect("write corrupt ledger");
+
+    let mut child = spawn_sentinel(
+        &root,
+        &root.join("center.sock"),
+        &root.join("index.sqlite3"),
+        "100",
+    );
+    let status = await_exit(&mut child.0);
+    assert!(status.success(), "corrupt ledger must not keep center busy");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn held_driver_lock_survives_center_idle_period() {
     let _serial = SENTINEL_TEST_LOCK
         .lock()
@@ -1039,18 +1074,118 @@ fn independent_socket_versions_share_the_disposable_sqlite_index() {
     let index = root.join("index.sqlite3");
     let first_socket = root.join("center-v1.sock");
     let second_socket = root.join("center-v2.sock");
+    write_running_ledger(&root);
     let mut first = spawn_sentinel(&root, &first_socket, &index, "5000");
-    let mut second = spawn_sentinel(&root, &second_socket, &index, "5000");
     drop(await_socket(&first_socket));
-    drop(await_socket(&second_socket));
     assert!(
         index.exists(),
-        "both centers must use the same derived index"
+        "the first center must write the shared derived index"
     );
     first.0.kill().expect("stop first center");
-    second.0.kill().expect("stop second center");
     first.0.wait().expect("reap first center");
+
+    // Simulate the preceding v1 projection. It had flattened worktree facts
+    // and none of the current nested or task/title/terminal additions. The next
+    // process reprojects it from cached sessions without changing the legacy
+    // marker that an installed v1 center still requires.
+    let db = rusqlite::Connection::open(&index).expect("open first center index");
+    let summary: String = db
+        .query_row("SELECT summary FROM center_rows LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .expect("read persisted summary");
+    let mut preceding: serde_json::Value =
+        serde_json::from_str(&summary).expect("decode persisted summary");
+    let object = preceding
+        .as_object_mut()
+        .expect("persisted summary is an object");
+    object.remove("task_key");
+    object.remove("task_digest");
+    object.remove("title");
+    object.remove("worktree");
+    object.remove("last_terminal_merge_frame");
+    db.execute(
+        "UPDATE center_rows SET summary = ?1",
+        [serde_json::to_string(&preceding).expect("encode preceding summary")],
+    )
+    .expect("write preceding summary shape");
+    db.execute("DELETE FROM center_projection_meta", [])
+        .expect("remove marker absent from the preceding center");
+    drop(db);
+
+    let mut second = spawn_sentinel(&root, &second_socket, &index, "5000");
+    drop(await_socket(&second_socket));
+    std::thread::sleep(Duration::from_millis(100));
+    let db = rusqlite::Connection::open(&index).expect("open shared index metadata");
+    let version: i64 = db
+        .query_row("SELECT version FROM center_projection_meta", [], |row| {
+            row.get(0)
+        })
+        .expect("read shared index metadata");
+    assert_eq!(
+        version, 2,
+        "the current center must mark the widened projection"
+    );
+    let legacy_version: i64 = db
+        .query_row("SELECT version FROM center_meta", [], |row| row.get(0))
+        .expect("read v1-compatible index marker");
+    assert_eq!(
+        legacy_version, 1,
+        "the shared marker remains readable by an installed v1 center"
+    );
+    let summary: String = db
+        .query_row("SELECT summary FROM center_rows LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .expect("read reprojected summary");
+    let summary: serde_json::Value =
+        serde_json::from_str(&summary).expect("decode reprojected summary");
+    assert_eq!(summary["task_key"], "center-task");
+    assert_eq!(summary["task_digest"], "sha256:center-task-digest");
+    assert_eq!(summary["title"], "Center proof title");
+    assert_eq!(summary["worktree"]["branch"], "ctx/run/center-proof-run");
+    assert_eq!(summary["worktree_id"], "center-proof-worktree");
+    assert_eq!(summary["worktree_branch"], "ctx/run/center-proof-run");
+    assert_eq!(summary["worktree_path"], "/tmp/center-proof-worktree");
+    assert_eq!(summary["last_terminal_merge_frame"]["status"], "merged");
+    drop(db);
+    second.0.kill().expect("stop second center");
     second.0.wait().expect("reap second center");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn warm_center_queries_discover_an_unnotified_ledger_immediately() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("warm-unnotified-query");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let _environment = CenterEnvironment::install(&root);
+    let mut child = spawn_sentinel(&root, &socket, &index, "5000");
+    drop(await_socket(&socket));
+
+    assert!(
+        ctx_traits_io::center::list(None)
+            .expect("empty warm snapshot")
+            .is_empty()
+    );
+    let ledger = write_running_ledger(&root);
+
+    let rows = ctx_traits_io::center::list(None).expect("fresh list snapshot");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].ledger_path, ledger);
+    assert_eq!(
+        ctx_traits_io::center::stats(None, None, None)
+            .expect("fresh stats snapshot")
+            .total_runs,
+        1
+    );
+
+    child.0.kill().expect("stop center");
+    child.0.wait().expect("reap center");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1148,6 +1283,58 @@ fn one_driver_frame_notification_reaches_two_subscribers() {
     drop(driver_lock);
     drop(first);
     drop(second);
+    child.0.kill().expect("stop private sentinel");
+    child.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Client requests must be served from the center's accepted model rather than
+/// reopening a ledger after discovery. Removing read permission after the
+/// initial snapshot makes an accidental client-side read fail deterministically
+/// while preserving the center's `(mtime, size)` fingerprint.
+#[test]
+fn cached_center_queries_do_not_reopen_a_discovered_ledger() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("cached-queries-no-ledger-read");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let ledger = write_running_ledger(&root);
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let _environment = CenterEnvironment::install(&root);
+    let mut child = spawn_sentinel(&root, &socket, &index, "5000");
+    drop(await_socket(&socket));
+
+    let rows = ctx_traits_io::center::list(None).expect("initial center snapshot");
+    assert_eq!(rows.len(), 1);
+    let stats = ctx_traits_io::center::stats(None, None, None).expect("initial stats");
+    assert_eq!(stats.total_runs, 1);
+
+    let original_mode = std::fs::metadata(ledger.as_std_path())
+        .expect("ledger metadata")
+        .permissions()
+        .mode();
+    std::fs::set_permissions(ledger.as_std_path(), std::fs::Permissions::from_mode(0o000))
+        .expect("deny ledger reads after center snapshot");
+
+    let cached_rows = ctx_traits_io::center::list(None).expect("cached list");
+    assert_eq!(cached_rows, rows);
+    let cached_stats = ctx_traits_io::center::stats(None, None, None).expect("cached stats");
+    assert_eq!(cached_stats.total_runs, stats.total_runs);
+    let by_run =
+        ctx_traits_io::center::find_by_run_id("center-proof-run", None).expect("cached run lookup");
+    assert_eq!(by_run.len(), 1);
+    assert!(matches!(
+        ctx_traits_io::center::get("center-proof-session", None).expect("cached session lookup"),
+        ctx_traits_io::center::GetResult::Session(_)
+    ));
+
+    std::fs::set_permissions(
+        ledger.as_std_path(),
+        std::fs::Permissions::from_mode(original_mode),
+    )
+    .expect("restore ledger permissions");
     child.0.kill().expect("stop private sentinel");
     child.0.wait().expect("reap private sentinel");
     let _ = std::fs::remove_dir_all(root);

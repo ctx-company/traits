@@ -6,7 +6,7 @@
 //!
 //! Deliberately a `.jsonl` suffix, not `.json`: `run_session.rs`'s
 //! `session_ledger_names` filters `*.json` files directly under the store and
-//! already skips the `.summary.json` sidecar by an explicit suffix check —
+//! treats activity records as distinct from session ledgers —
 //! `.activity.jsonl` does not end in `.json` at all, so it needs no such
 //! clause.
 //!
@@ -217,7 +217,7 @@ pub fn read_session_title(ledger_path: &Utf8Path) -> Option<String> {
 }
 
 /// Best-effort removal of a ledger's activity sidecar, sibling to
-/// `run_summary::remove_summary_for_ledger` — called wherever a ledger
+/// ledger deletion — called wherever a ledger
 /// itself is deleted (P512).
 pub fn remove_activity_for_ledger(ledger_path: &Utf8Path) {
     let _ = std::fs::remove_file(activity_path(ledger_path).as_std_path());

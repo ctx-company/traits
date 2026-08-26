@@ -82,14 +82,6 @@ const RELOAD_INTERVAL: Duration = Duration::from_secs(2);
 /// still yields back to a draw periodically instead of draining forever.
 const MAX_KEY_BATCH: usize = 128;
 
-/// Cadence of the periodic full liveness sweep, in reload ticks
-/// (`RELOAD_INTERVAL` apart). Every 10th tick at the default 2s interval is
-/// 20s — bounded cost (still far fewer probes than an every-row,
-/// every-tick baseline) against an honest worst case: a row-less held lock
-/// (adoption) becomes visible within one sweep interval, never instantly and
-/// never never.
-const FULL_SWEEP_EVERY_TICKS: u64 = 10;
-
 /// `State::reload()` durations at or above this are surfaced in the
 /// SESSIONS pane border title; below it, nothing is shown. Zero during
 /// development to read the real number; kept as a named threshold (not
@@ -263,11 +255,22 @@ struct SessionRow {
     /// `WaitingOnHuman`, outcome `Interrupted`) classifies `Cancelled` rather
     /// than staying grouped as an open ask.
     outcome: Option<ctx_traits_core::procedure::session::DriveOutcomeKind>,
+    next_frame_kind: Option<ctx_traits_core::procedure::runtime::SequenceFrameKind>,
+    interrupted: bool,
+    /// Compact source facts let the list render drift warnings without a
+    /// per-row center detail request.
+    trait_id: String,
+    source_digest: Option<String>,
+    canonical_digest: Option<String>,
+    trait_source: Option<ctx_traits_core::procedure::session::TraitSource>,
     /// P552 persisted narrator session title, when one resolved — the
     /// dashboard row's primary run label; `None` for an unreadable ledger, a
     /// pre-P552 ledger, or a title attempt that never resolved (missing
     /// narrator, failed call).
     title: Option<String>,
+    /// Worktree provenance needed by resume and delete planning. It is carried
+    /// from the center projection so those list actions do not reopen ledgers.
+    worktree: Option<ctx_traits_core::procedure::session::WorktreeProvenance>,
     /// The ledger's `provenance.task_key` (0063): which board task, if any,
     /// this run was dispatched against. `None` for an unreadable ledger or a
     /// run never keyed to a task — the TASKS screen's only join key onto
@@ -904,7 +907,11 @@ fn parse_task_edit_input(text: &str) -> Result<TaskUpdate, String> {
 enum SessionAction {
     Kill(String),
     Resume(String),
-    Delete(String, DeletePlan),
+    Delete {
+        session_id: String,
+        plan: DeletePlan,
+        eligibility: DeleteEligibility,
+    },
     Answer {
         session_id: String,
         state_digest: String,
@@ -951,6 +958,7 @@ enum MergeAction {
     Drop {
         session_id: String,
         plan: DeletePlan,
+        eligibility: DeleteEligibility,
     },
 }
 
@@ -1127,23 +1135,13 @@ struct State {
     trait_explanation: Option<(String, String, Result<String, String>, std::time::Instant)>,
     merge_preview: Option<MergePreview>,
     trust_preview: Option<TrustPreview>,
-    /// Current repository's run inventory, projected to the cheap identity/
-    /// digest/recency facts [`run_sighting`] needs (§4.4) — captured once per
-    /// reload, before [`merges_from_inventory`] consumes the owning scan by
-    /// value, so a TRUST preview rebuild never re-scans the ledger store.
+    /// Current repository's center projection, reduced to the cheap identity/
+    /// digest/recency facts [`run_sighting`] needs.
     run_sightings: Vec<RunSightingRow>,
     modal_host: ModalHost<Action>,
     /// TRUST's block-approve mark set (P506 §3.6), keyed by trait id — never
     /// by list index, since TRUST reloads and re-sorts every 2s.
     trust_marks: MarkSet<String>,
-    /// Parse cache, held across ticks so an unchanged ledger is a
-    /// refcount bump instead of a full re-parse. One-shot callers elsewhere
-    /// (`stats`, `dispatch_preflight`, `run_queue`) allocate their own
-    /// throwaway cache instead — this is the one long-lived instance.
-    inventory_cache: ctx_traits_io::run_session::InventoryCache,
-    /// Count of [`State::reload`] calls, used only to pace the periodic full
-    /// liveness sweep (§3.3) — never displayed.
-    reload_ticks: u64,
     /// Most recent [`State::reload`] wall-clock duration (§5), surfaced in
     /// the SESSIONS border title only above [`RELOAD_WARN_THRESHOLD`].
     reload_duration: Option<Duration>,
@@ -1221,6 +1219,11 @@ struct DashboardSnapshot {
     trust: Vec<TrustRow>,
     run_sightings: Vec<RunSightingRow>,
     reload_duration: Option<Duration>,
+    /// Only a fresh center subscription snapshot may clear an outage footer.
+    clear_refresh_error: bool,
+    /// A center event changed session state, so the retained by-path preview
+    /// must be refreshed even when its selected identity did not change.
+    refresh_selected_preview: bool,
 }
 
 impl DashboardSnapshot {
@@ -1232,6 +1235,8 @@ impl DashboardSnapshot {
             trust: state.trust.clone(),
             run_sightings: state.run_sightings.clone(),
             reload_duration: state.reload_duration,
+            clear_refresh_error: true,
+            refresh_selected_preview: false,
         }
     }
 }
@@ -1326,8 +1331,6 @@ impl State {
             run_sightings: Vec::new(),
             modal_host: ModalHost::new(),
             trust_marks: MarkSet::new(),
-            inventory_cache: ctx_traits_io::run_session::InventoryCache::new(),
-            reload_ticks: 0,
             reload_duration: None,
             worker: None,
             has_snapshot: false,
@@ -1420,12 +1423,19 @@ impl State {
     }
 
     fn reload(&mut self) {
-        if self.worker.is_some() {
-            self.dispatch_session_preview();
-            self.worker
-                .as_ref()
-                .expect("worker was present")
-                .refresh(self.all_repos, self.screen);
+        if self.worker.is_none() {
+            return;
+        }
+        self.dispatch_session_preview();
+        if let Some(worker) = &self.worker {
+            worker.refresh(self.all_repos, self.screen);
+            self.loading = true;
+        }
+    }
+
+    fn reload_non_session(&mut self) {
+        if let Some(worker) = &self.worker {
+            worker.refresh_non_session();
             self.loading = true;
         }
     }
@@ -1514,24 +1524,14 @@ impl State {
     }
 
     fn apply_refresh_results(&mut self, results: impl IntoIterator<Item = worker::RefreshResult>) {
-        let mut latest_snapshot = None;
-        let mut trailing_error = None;
         for result in results {
             match result {
-                Ok(snapshot) => {
-                    latest_snapshot = Some(snapshot);
-                    // A newer complete snapshot recovers from older errors.
-                    trailing_error = None;
+                Ok(snapshot) => self.apply_snapshot(&snapshot),
+                Err(error) => {
+                    self.loading = false;
+                    self.refresh_error = Some(error);
                 }
-                Err(error) => trailing_error = Some(error),
             }
-        }
-        if let Some(snapshot) = latest_snapshot {
-            self.apply_snapshot(&snapshot);
-        }
-        if let Some(error) = trailing_error {
-            self.loading = false;
-            self.refresh_error = Some(error);
         }
     }
 
@@ -1547,7 +1547,9 @@ impl State {
         self.reload_duration = snapshot.reload_duration;
         self.loading = false;
         self.has_snapshot = true;
-        self.refresh_error = None;
+        if snapshot.clear_refresh_error {
+            self.refresh_error = None;
+        }
         rebuild_visible_sessions(self);
         restore_visible_selection(self, selected);
         resolve_initial_session(self);
@@ -1574,7 +1576,7 @@ impl State {
         // list-visible preview always tracks the current selection.
         if self.screen == Screen::Sessions {
             let current_preview = self.session_preview_request();
-            if current_preview != previous_preview {
+            if current_preview != previous_preview || snapshot.refresh_selected_preview {
                 self.session_preview = None;
                 self.set_session_follow_all(false);
                 self.dispatch_session_preview();
@@ -1596,79 +1598,54 @@ impl State {
         }
     }
 
-    /// Worker-only inventory refresh. It is intentionally separate from
-    /// [`State::reload`], whose render-side contract is channel-only.
-    fn reload_sync(&mut self) -> crate::Result<()> {
+    fn reload_from_center_rows(
+        &mut self,
+        rows: &[ctx_traits_io::center::CenterPublicRow],
+        enrich_session_presentations: bool,
+    ) -> crate::Result<()> {
         let reload_started = std::time::Instant::now();
-        // Bound this tick's driver-lock probes to the local
-        // liveness index's own rows (typically a handful), except on a
-        // periodic full sweep, which also probes every other row to catch a
-        // row-less held lock (adoption: an externally started driver, or one
-        // predating this index). `reload_ticks` is bumped once per call
-        // regardless of scope, so the cadence is wall-clock-uniform whether
-        // or not `all_repos` is toggled mid-session.
-        self.reload_ticks = self.reload_ticks.wrapping_add(1);
-        let full_sweep = self.reload_ticks.is_multiple_of(FULL_SWEEP_EVERY_TICKS);
-        let indexed_ids = ctx_traits_io::run_liveness::indexed_session_ids(
-            &ctx_traits_io::run_control::runtime_root(),
-        );
-        // `None` means the liveness index itself is unavailable this tick:
-        // fail OPEN (probe every row, exactly like a full sweep) rather than
-        // fail closed on an empty probe set, which would silently render
-        // every live session as not-live (unknown, never
-        // a fabricated dead/not-live answer).
-        let probe_budget = match &indexed_ids {
-            Some(ids) if !full_sweep => ProbeBudget::IndexOnly(ids),
-            _ => ProbeBudget::Sweep,
-        };
-        if self.all_repos {
-            let machine_wide = ctx_traits_io::run_session::machine_wide_run_inventory_cached(
-                &mut self.inventory_cache,
-            )?;
-            let mut sessions = Vec::new();
-            let mut merges = Vec::new();
-            for entry in machine_wide {
-                sessions.extend(sessions_from_inventory_tagged(
-                    &entry.rows,
-                    Some(&entry.repo_key),
-                    Some(&entry.repo_path),
-                    &probe_budget,
-                ));
-                merges.extend(merges_from_inventory(entry.rows, Some(&entry.repo_path)));
-            }
-            // Each block above is already Live-first internally; a stable
-            // sort over the concatenation makes "active first" hold
-            // machine-wide rather than only within each repo's own block,
-            // without disturbing the most-recently-modified order within
-            // either class.
-            sessions.sort_by_key(|row| {
-                if row.class == SessionClass::Live {
-                    0
-                } else {
-                    1
-                }
-            });
-            self.sessions = sessions;
-            self.merges = merges;
-            // TRUST is machine-local (§5: no `all_repos` semantics), so its
-            // run-sighting projection always comes from THIS repository's
-            // inventory regardless of the `v` toggle — a second, separate
-            // scan only in ALL mode. Shares the same cache: this repository's
-            // rows were very likely already touched by the machine-wide scan
-            // above, so this is typically all cache hits.
-            let sighting_inventory = ctx_traits_io::run_session::current_repo_run_inventory_cached(
-                &mut self.inventory_cache,
-            )?;
-            self.run_sightings = run_sighting_rows(&sighting_inventory);
-        } else {
-            let inventory = ctx_traits_io::run_session::current_repo_run_inventory_cached(
-                &mut self.inventory_cache,
-            )?;
-            self.run_sightings = run_sighting_rows(&inventory);
-            self.sessions = sessions_from_inventory_tagged(&inventory, None, None, &probe_budget);
-            self.merges = merges_from_inventory(inventory, None);
+        let (sessions, merges, run_sightings) = Self::center_row_projections(rows, self.all_repos)?;
+        // A render can occur while the center is reconnecting. Preserve an
+        // already-resolved parked question rather than replacing it with the
+        // lossy row projection when that bounded lookup is unavailable.
+        let previous_phases: std::collections::HashMap<_, _> = self
+            .sessions
+            .iter()
+            .filter(|row| {
+                row.status == Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman)
+                    && row.next_frame_kind
+                        == Some(ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask)
+                    && !row.interrupted
+            })
+            .map(|row| (row.session_id.clone(), row.phase.clone()))
+            .collect();
+        // Complete every fallible operation before replacing a visible session
+        // model. A failed center projection must leave the accepted snapshot
+        // intact for command refreshes and outage rendering.
+        self.reload_non_session_state()?;
+        self.sessions = sessions;
+        self.merges = merges;
+        self.run_sightings = run_sightings;
+        // Only subscription snapshots and deltas may query the center for the
+        // few full-session presentations. The periodic refresh never enters
+        // this session-model path, so it cannot turn into session polling.
+        if enrich_session_presentations {
+            self.enrich_session_presentations(&previous_phases);
         }
         rebuild_visible_sessions(self);
+        // Measurement recorded unconditionally (cheap — one
+        // `Instant::now()` diff) but only surfaced in the SESSIONS border
+        // title above `RELOAD_WARN_THRESHOLD`, so a healthy steady state
+        // shows nothing and a future regression has a permanent, honest
+        // signal to page off of.
+        self.reload_duration = Some(reload_started.elapsed());
+        Ok(())
+    }
+
+    /// Refresh projections that do not depend on session rows. This is used by
+    /// the periodic dashboard command while the subscription remains the sole
+    /// owner of the session model.
+    fn reload_non_session_state(&mut self) -> crate::Result<()> {
         if matches!(self.screen, Screen::Traits | Screen::Trust) {
             let (traits, trust) = load_traits_and_trust()?;
             self.traits = traits;
@@ -1692,13 +1669,82 @@ impl State {
         if self.screen == Screen::Trust {
             refresh_trust_preview_for_selection(self);
         }
-        // Measurement recorded unconditionally (cheap — one
-        // `Instant::now()` diff) but only surfaced in the SESSIONS border
-        // title above `RELOAD_WARN_THRESHOLD`, so a healthy steady state
-        // shows nothing and a future regression has a permanent, honest
-        // signal to page off of.
-        self.reload_duration = Some(reload_started.elapsed());
         Ok(())
+    }
+
+    fn center_row_projections(
+        rows: &[ctx_traits_io::center::CenterPublicRow],
+        all_repos: bool,
+    ) -> crate::Result<(Vec<SessionRow>, Vec<MergeRow>, Vec<RunSightingRow>)> {
+        // Repository identity is part of the scope contract. In particular,
+        // ad-hoc directories use an `adhoc-` key, which `repo_key(root)` alone
+        // cannot reproduce.
+        let current_repo = ctx_traits_io::state::current_repo_key()?;
+        let visible: Vec<_> = rows
+            .iter()
+            .filter(|row| all_repos || current_repo == row.repo_key)
+            .cloned()
+            .collect();
+        Ok((
+            sessions_from_center_rows(&visible),
+            merges_from_center_rows(&visible),
+            run_sighting_rows(rows.iter().filter(|row| current_repo == row.repo_key)),
+        ))
+    }
+
+    /// Ask text needs the resolved procedure, which is intentionally not part
+    /// of every public row. Fetch only parked Ask sessions from the center's
+    /// cached full-session model after the otherwise pure row projection.
+    fn enrich_session_presentations(
+        &mut self,
+        previous_phases: &std::collections::HashMap<String, String>,
+    ) {
+        for row in &mut self.sessions {
+            if row.class == SessionClass::Unreadable {
+                continue;
+            }
+            if row.status == Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman)
+                && row.next_frame_kind
+                    == Some(ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask)
+                && !row.interrupted
+            {
+                match ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref()) {
+                    Ok(ctx_traits_io::center::GetResult::Session(session)) => {
+                        if let Some(presentation) =
+                            parked_ask_presentation(&session, row.repo_path.as_deref())
+                        {
+                            row.phase = presentation;
+                        }
+                    }
+                    Ok(ctx_traits_io::center::GetResult::Missing)
+                    | Ok(ctx_traits_io::center::GetResult::Ambiguous(_))
+                    | Err(_) => {
+                        if let Some(phase) = previous_phases.get(&row.session_id) {
+                            row.phase.clone_from(phase);
+                        }
+                    }
+                }
+            }
+            if let Some(warning) = ctx_traits_io::run::trait_source_drift_from_parts(
+                &row.trait_id,
+                row.source_digest.as_deref(),
+                row.canonical_digest.as_deref(),
+                row.trait_source.as_ref(),
+                row.repo_path.as_deref().map(camino::Utf8Path::new),
+            )
+            .warning()
+            {
+                append_phase_warning(&mut row.phase, &warning);
+            }
+        }
+    }
+}
+
+/// A failed parked-Ask enrichment restores the previously rendered phase. That
+/// phase may already carry this suffix, so keep repeated stale renders stable.
+fn append_phase_warning(phase: &mut String, warning: &str) {
+    if !phase.split("; ").any(|part| part == warning) {
+        phase.push_str(&format!("; {warning}"));
     }
 }
 
@@ -1736,9 +1782,8 @@ fn resolve_initial_session(state: &mut State) {
     }
 }
 
-/// SESSIONS-screen rows, projected from one shared run inventory scan (also
-/// consumed by [`merges_from_inventory`]) rather than each screen
-/// re-scanning the session stores independently. `repo_key`/`repo_path` tag
+/// SESSIONS-screen rows, projected from the center's shared model.
+/// `repo_key`/`repo_path` tag
 /// every produced row with its repository/ad-hoc identity for ALL-mode
 /// display and cwd-anchored git gating (P439); both `None` in the default
 /// current-repository-only scope. Rows are ordered `Live` first, preserving
@@ -2073,7 +2118,7 @@ fn open_story_view(state: &mut State) {
         state.message = Some("story: no run-id recorded for this session".to_string());
         return;
     }
-    match build_story_view_from_ledger(&row.ledger_path.clone()) {
+    match build_story_view_from_center(row) {
         Ok(view) => state.story_view = Some(view),
         Err(err) => state.message = Some(format!("story: {err}")),
     }
@@ -2088,8 +2133,24 @@ fn open_story_view(state: &mut State) {
 /// default session store, which a foreign-repository attachment (or a
 /// same-run-id collision within the current store) can resolve to the wrong
 /// session entirely.
-fn build_story_view_from_ledger(ledger_path: &camino::Utf8Path) -> crate::Result<StoryView> {
-    let session = ctx_traits_io::run_session::read_run_session(ledger_path)?;
+fn build_story_view_from_center(row: &SessionRow) -> crate::Result<StoryView> {
+    let session = match ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref())? {
+        ctx_traits_io::center::GetResult::Session(session) => *session,
+        ctx_traits_io::center::GetResult::Missing
+        | ctx_traits_io::center::GetResult::Ambiguous(_) => {
+            return Err(crate::app::error::Error::Command {
+                message: "selected session is no longer uniquely available from the center"
+                    .to_string(),
+            });
+        }
+    };
+    build_story_view(session, &row.ledger_path)
+}
+
+fn build_story_view(
+    session: ctx_traits_core::procedure::session::Session,
+    ledger_path: &camino::Utf8Path,
+) -> crate::Result<StoryView> {
     let plan = super::story::load_plan(&session);
     let activity = super::story::load_activity(ledger_path);
     let report =
@@ -2105,6 +2166,14 @@ fn build_story_view_from_ledger(ledger_path: &camino::Utf8Path) -> crate::Result
         title,
         scroll: tui_kit::ViewportScroll::new(),
     })
+}
+
+#[cfg(test)]
+fn build_story_view_from_ledger(ledger_path: &camino::Utf8Path) -> crate::Result<StoryView> {
+    build_story_view(
+        ctx_traits_io::run_session::read_run_session(ledger_path)?,
+        ledger_path,
+    )
 }
 
 /// Every key while [`State::story_view`] is set: `q`/`Esc`/`S` closes and
@@ -2143,86 +2212,15 @@ fn toggle_selected_group(state: &mut State) {
     rebuild_visible_sessions(state);
 }
 
-/// Probe budget: which rows this tick's [`sessions_from_inventory_tagged`]
-/// call is allowed to spend a `flock` probe on. Bounding the per-tick probe
-/// set to the liveness index's own rows (typically a handful) is what gets
-/// `State::reload()` from O(every ledger) down to O(live drivers); a
-/// row-less held lock (adoption — an externally started driver, or one from
-/// before this index existed) is instead caught by [`ProbeBudget::Sweep`] on
-/// a slower cadence, never by probing every ledger every tick.
-enum ProbeBudget<'a> {
-    /// Probe only sessions the local liveness index has a row for.
-    IndexOnly(&'a std::collections::HashSet<String>),
-    /// Probe every row this call sees (the periodic full sweep).
-    Sweep,
-}
-
-impl ProbeBudget<'_> {
-    fn allows(&self, session_id: &str) -> bool {
-        match self {
-            ProbeBudget::IndexOnly(ids) => ids.contains(session_id),
-            ProbeBudget::Sweep => true,
-        }
-    }
-}
-
-fn sessions_from_inventory_tagged(
-    inventory: &[ctx_traits_io::run_session::RunInventoryRow],
-    repo_key: Option<&str>,
-    repo_path: Option<&str>,
-    probe_budget: &ProbeBudget<'_>,
-) -> Vec<SessionRow> {
-    let mut rows = Vec::new();
-    for row in inventory {
-        let probe = if probe_budget.allows(&row.session_id) {
-            ctx_traits_io::run_control::probe(&row.ledger_path).unwrap_or(
-                ctx_traits_io::run_control::DriverProbe::Unheld {
-                    stale_metadata: None,
-                },
-            )
-        } else {
-            ctx_traits_io::run_control::DriverProbe::Unheld {
-                stale_metadata: None,
-            }
-        };
-        let (live, holder_pid) = match &probe {
-            ctx_traits_io::run_control::DriverProbe::Held(holder) => {
-                (true, holder.as_ref().map(|holder| holder.pid).unwrap_or(0))
-            }
-            ctx_traits_io::run_control::DriverProbe::Unheld { .. } => (false, 0),
-        };
-        // A slower full sweep discovers pre-index drivers and publishes the
-        // same pointer evidence ordinary machine-wide reporting consumes.
-        if live
-            && matches!(probe_budget, ProbeBudget::Sweep)
-            && let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } =
-                &row.status
-        {
-            let facts = ctx_traits_io::run_liveness::LiveRunFacts {
-                session_id: row.session_id.clone(),
-                run_id: session.run_id.as_str().to_string(),
-                repo_key: repo_key.unwrap_or_default().to_string(),
-                repo_path: repo_path.unwrap_or_default().to_string(),
-                ledger_path: row.ledger_path.clone(),
-                worktree_path: session
-                    .provenance
-                    .worktree
-                    .as_ref()
-                    .and_then(|worktree| worktree.path.clone()),
-                branch: session
-                    .provenance
-                    .worktree
-                    .as_ref()
-                    .map(|worktree| worktree.branch.clone()),
-                log_path: None,
-            };
-            let _ = ctx_traits_io::run_liveness::upsert_row(
-                &ctx_traits_io::run_control::runtime_root(),
-                &facts,
-                holder_pid,
-                session.provenance.started_at_epoch.unwrap_or(0),
-            );
-        }
+/// SESSIONS rows are a pure projection of the center's public snapshot.
+fn sessions_from_center_rows(rows: &[ctx_traits_io::center::CenterPublicRow]) -> Vec<SessionRow> {
+    let modified_by_ledger: HashMap<_, _> = rows
+        .iter()
+        .map(|row| (row.ledger_path.as_str(), row.modified_epoch_secs))
+        .collect();
+    let mut session_rows = Vec::new();
+    for row in rows {
+        let summary = &row.summary;
         let (
             state_text,
             phase,
@@ -2236,51 +2234,57 @@ fn sessions_from_inventory_tagged(
             task_key,
             merged_landed,
             not_merged,
-        ) = match &row.status {
-            ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => {
-                let outcome = session
-                    .last_drive_outcome
-                    .as_ref()
-                    .map(|outcome| outcome.outcome.clone());
-                let class = classify_session(live, &session.status, outcome.as_ref());
-                let state_text = if live {
+            worktree,
+            next_frame_kind,
+            interrupted,
+        ) = match &summary.parse_error {
+            None => {
+                let outcome = summary.last_drive_outcome.as_ref().and_then(|outcome| {
+                    serde_json::from_value(serde_json::Value::String(outcome.clone())).ok()
+                });
+                let class = classify_session(row.live, &summary.status, outcome.as_ref());
+                let state_text = if row.live {
                     "live".to_string()
                 } else {
-                    run_view::session_status(&session.status).to_string()
+                    run_view::session_status(&summary.status).to_string()
                 };
-                let mut phase = parked_ask_presentation(session, repo_path)
-                    .unwrap_or_else(|| run_view::phase_text(session));
-                if let Some(warning) = ctx_traits_io::run::trait_source_drift_from(
-                    session,
-                    repo_path.map(camino::Utf8Path::new),
-                )
-                .warning()
-                {
-                    phase.push_str(&format!("; {warning}"));
-                }
-                let elapsed_text =
-                    tui::elapsed_text(Duration::from_secs(session.ledger.elapsed_seconds));
-                let token_usage = session
-                    .last_drive_outcome
-                    .as_ref()
-                    .and_then(|outcome| outcome.token_usage.as_ref());
-                let tokens_text = dashboard_tokens_text(token_usage);
+                let phase = run_view::session_text::phase_text_from_parts(
+                    &summary.status,
+                    summary.current_sequence_title.as_deref(),
+                );
+                let elapsed_text = tui::elapsed_text(Duration::from_secs(summary.elapsed_seconds));
+                let tokens_text = dashboard_tokens_text_from_summary(summary);
                 (
                     state_text,
                     phase,
                     elapsed_text,
                     tokens_text,
-                    session.run_id.as_str().to_string(),
+                    summary.run_id.clone(),
                     class,
-                    Some(session.status.clone()),
+                    Some(summary.status.clone()),
                     outcome,
-                    persisted_session_title(session, &row.ledger_path),
-                    session.provenance.task_key.clone(),
-                    super::task_proposals::merged_landed_sha(session),
-                    crate::app::run::unmerged_fact(session),
+                    summary.title.clone(),
+                    summary.task_key.clone(),
+                    super::task_proposals::merged_landed_sha_from_terminal_frame(
+                        summary.last_terminal_merge_frame.as_ref(),
+                    ),
+                    (summary.landing.as_deref() == Some("not-merged"))
+                        .then(|| {
+                            crate::app::run::not_merged_fact_from_parts(
+                                summary
+                                    .worktree
+                                    .as_ref()
+                                    .map(|worktree| worktree.branch.as_str()),
+                                &summary.run_id,
+                            )
+                        })
+                        .flatten(),
+                    summary.worktree.clone(),
+                    summary.next_frame_kind.clone(),
+                    summary.interrupted,
                 )
             }
-            ctx_traits_io::run_session::InventoryOutcome::Unreadable { error } => (
+            Some(error) => (
                 "unreadable".to_string(),
                 error.clone(),
                 "-".to_string(),
@@ -2293,18 +2297,21 @@ fn sessions_from_inventory_tagged(
                 None,
                 None,
                 None,
+                None,
+                None,
+                false,
             ),
         };
-        rows.push(SessionRow {
-            session_id: row.session_id.clone(),
-            ledger_path: row.ledger_path.clone(),
+        session_rows.push(SessionRow {
+            session_id: summary.session_id.clone(),
+            ledger_path: camino::Utf8PathBuf::from(&row.ledger_path),
             run_id,
             state_text,
             phase,
             elapsed_text,
             tokens_text,
-            repo_key: repo_key.map(str::to_string),
-            repo_path: repo_path.map(str::to_string),
+            repo_key: Some(row.repo_key.clone()),
+            repo_path: Some(row.repo_path.clone()),
             class,
             status,
             outcome,
@@ -2312,18 +2319,40 @@ fn sessions_from_inventory_tagged(
             task_key,
             merged_landed,
             not_merged,
+            worktree,
+            next_frame_kind,
+            interrupted,
+            trait_id: summary.trait_id.clone(),
+            source_digest: summary.source_digest.clone(),
+            canonical_digest: summary.canonical_digest.clone(),
+            trait_source: summary.trait_source.clone(),
         });
     }
-    rows.sort_by_key(|row| {
-        if row.class == SessionClass::Live {
-            0
-        } else {
-            1
-        }
+    // Match the inventory's prior ordering: live rows first, then newest
+    // ledger modification within each class. Include the path to make equal
+    // mtimes deterministic.
+    session_rows.sort_by(|left, right| {
+        let left_live = left.class == SessionClass::Live;
+        let right_live = right.class == SessionClass::Live;
+        right_live
+            .cmp(&left_live)
+            .then_with(|| {
+                let left_modified = modified_by_ledger
+                    .get(left.ledger_path.as_str())
+                    .copied()
+                    .unwrap_or_default();
+                let right_modified = modified_by_ledger
+                    .get(right.ledger_path.as_str())
+                    .copied()
+                    .unwrap_or_default();
+                right_modified.cmp(&left_modified)
+            })
+            .then_with(|| left.ledger_path.cmp(&right.ledger_path))
     });
-    rows
+    session_rows
 }
 
+#[cfg(test)]
 fn dashboard_tokens_text(
     usage: Option<&ctx_traits_core::procedure::session::TokenUsageEvidence>,
 ) -> String {
@@ -2339,6 +2368,21 @@ fn dashboard_tokens_text(
         dashboard_token_value(usage.work_tokens),
         dashboard_token_value(usage.narrator_tokens),
         dashboard_token_value(usage.guide_tokens),
+    )
+}
+
+fn dashboard_tokens_text_from_summary(summary: &ctx_traits_io::run_summary::RunSummary) -> String {
+    if summary.work_tokens.is_none()
+        && summary.narrator_tokens.is_none()
+        && summary.guide_tokens.is_none()
+    {
+        return "-".to_string();
+    }
+    format!(
+        "W:{} N:{} G:{}",
+        dashboard_token_value(summary.work_tokens),
+        dashboard_token_value(summary.narrator_tokens),
+        dashboard_token_value(summary.guide_tokens),
     )
 }
 
@@ -2385,27 +2429,24 @@ fn load_traits_and_trust() -> crate::Result<(Vec<TraitRow>, Vec<TrustRow>)> {
 /// Projects a run inventory scan to the cheap owned facts [`run_sighting`]
 /// needs (§4.4) — called before [`merges_from_inventory`] consumes the same
 /// scan by value.
-fn run_sighting_rows(
-    inventory: &[ctx_traits_io::run_session::RunInventoryRow],
+fn run_sighting_rows<'a>(
+    rows: impl Iterator<Item = &'a ctx_traits_io::center::CenterPublicRow>,
 ) -> Vec<RunSightingRow> {
-    inventory
-        .iter()
-        .filter_map(|row| {
-            let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } =
-                &row.status
-            else {
-                return None;
-            };
-            let canonical_digest = session.canonical_digest.as_ref()?.as_str().to_string();
-            Some(RunSightingRow {
-                trait_id: session.trait_id.clone(),
-                canonical_digest,
-                run_id: session.run_id.as_str().to_string(),
-                session_id: row.session_id.clone(),
-                modified_epoch_secs: row.modified_epoch_secs,
-            })
+    rows.filter_map(|row| {
+        let summary = &row.summary;
+        if summary.parse_error.is_some() {
+            return None;
+        }
+        let canonical_digest = summary.canonical_digest.clone()?;
+        Some(RunSightingRow {
+            trait_id: summary.trait_id.clone(),
+            canonical_digest,
+            run_id: summary.run_id.clone(),
+            session_id: summary.session_id.clone(),
+            modified_epoch_secs: row.modified_epoch_secs,
         })
-        .collect()
+    })
+    .collect()
 }
 
 /// The most recent readable run-ledger sighting (§4.4) whose `trait_id` and
@@ -2487,61 +2528,67 @@ fn merge_row_headline(
     }
 }
 
-/// MERGES-screen rows, projected from the same inventory scan
-/// [`sessions_from_inventory_tagged`] uses. Consumes `inventory` by value
-/// since each row's merge-frame history is owned data. Widened from P468's
+/// MERGES-screen rows, projected from the same center snapshot as
+/// [`sessions_from_center_rows`]. Widened from P468's
 /// "latest frame is Parked" to every readable ledger whose last *terminal*
 /// merge frame (or completed-drive-with-no-attempt) classifies as
 /// mergeable/parked/failed/landed (§3.3) — an unreadable ledger, or a
 /// non-terminal in-progress row, produces no row. `repo_path` tags every
 /// produced row for ALL-mode git-fact gating (§3.4), mirroring
 /// `sessions_from_inventory_tagged`.
-fn merges_from_inventory(
-    inventory: Vec<ctx_traits_io::run_session::RunInventoryRow>,
-    repo_path: Option<&str>,
-) -> Vec<MergeRow> {
-    let mut rows = Vec::new();
-    for row in inventory {
-        let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } = row.status
-        else {
+fn merges_from_center_rows(rows: &[ctx_traits_io::center::CenterPublicRow]) -> Vec<MergeRow> {
+    let mut merged_rows = Vec::new();
+    // Worker snapshots originate in a HashMap. Preserve the previous most-
+    // recently-modified ordering and make ties stable across map iteration.
+    let mut ordered: Vec<_> = rows.iter().collect();
+    ordered.sort_by(|left, right| {
+        right
+            .modified_epoch_secs
+            .cmp(&left.modified_epoch_secs)
+            .then_with(|| left.ledger_path.cmp(&right.ledger_path))
+    });
+    for row in ordered {
+        let summary = &row.summary;
+        if summary.parse_error.is_some() {
             continue;
-        };
-        let last_terminal_frame = session
-            .provenance
-            .merge_frames
-            .iter()
-            .rev()
-            .find(|frame| frame.status.is_terminal());
-        let drive_completed = session.status
+        }
+        let last_terminal_frame = summary.last_terminal_merge_frame.as_ref();
+        let drive_completed = summary.status
             == ctx_traits_core::procedure::session::Status::Completed
-            && session
-                .last_drive_outcome
-                .as_ref()
-                .is_some_and(|outcome| outcome.outcome.is_completed());
+            && summary.last_drive_outcome.as_deref() == Some("completed");
         let Some(class) = classify_merge(last_terminal_frame, drive_completed) else {
             continue;
         };
         let stage = last_terminal_frame.map(|frame| frame.stage);
-        let committed =
-            ctx_traits_core::procedure::session::commit_receipt(&session.ledger).is_some();
+        let committed = summary.has_commit_receipt;
         let headline = merge_row_headline(class, last_terminal_frame, committed);
-        let not_merged = crate::app::run::unmerged_fact(&session);
-        rows.push(MergeRow {
-            session_id: row.session_id,
-            run_id: session.run_id.as_str().to_string(),
-            ledger_path: row.ledger_path,
+        let not_merged = (summary.landing.as_deref() == Some("not-merged"))
+            .then(|| {
+                crate::app::run::not_merged_fact_from_parts(
+                    summary
+                        .worktree
+                        .as_ref()
+                        .map(|worktree| worktree.branch.as_str()),
+                    &summary.run_id,
+                )
+            })
+            .flatten();
+        merged_rows.push(MergeRow {
+            session_id: summary.session_id.clone(),
+            run_id: summary.run_id.clone(),
+            ledger_path: camino::Utf8PathBuf::from(&row.ledger_path),
             class,
             stage,
             headline,
-            phase: ctx_traits_io::run_session::session_task(&session),
-            trait_id: session.trait_id.clone(),
+            phase: summary.task_value.clone(),
+            trait_id: summary.trait_id.clone(),
             last_frame: last_terminal_frame.cloned(),
-            worktree: session.provenance.worktree.clone(),
-            repo_path: repo_path.map(str::to_string),
+            worktree: summary.worktree.clone(),
+            repo_path: Some(row.repo_path.clone()),
             not_merged,
         });
     }
-    rows
+    merged_rows
 }
 
 /// Builds TRUST's trait-centric rows (P473 §4.2): joins each visible trait
@@ -2772,19 +2819,13 @@ fn run_with_initial_session(
                 guide_chat.poll_results();
             }
             state.apply_snapshots();
-            // Timed out waiting for a key: on a bounded interval, reload the
-            // list screens' stores so an externally started/completed drive
-            // (or one spawned by `n`, or a run that finished while listed)
-            // appears without the user having to press `r`. `State::reload`
-            // also refreshes the SESSIONS preview/attach pane at this same
-            // cadence — never per-draw. The TASKS board's own stat-sweep
-            // (0063.7) rides the same cadence, regardless of which screen is
-            // active — a continuous run of keypresses resets `last_reload`
-            // and delays both alike, same as the pre-existing session poll;
-            // read-your-writes (every provider write re-syncs immediately)
-            // covers the interactive case.
+            // Timed out waiting for a key: session changes arrive through the
+            // subscription. The bounded cadence refreshes only TRAITS/TRUST
+            // and the TASKS board's stat sweep (0063.7), regardless of the
+            // active screen. It never opens a session ledger or asks the
+            // center for a session.
             if last_reload.elapsed() >= RELOAD_INTERVAL {
-                state.reload();
+                state.reload_non_session();
                 refresh_tasks_board_if_stale(&mut state);
                 last_reload = std::time::Instant::now();
             }
@@ -4567,11 +4608,23 @@ fn open_answer_modal(state: &mut State) {
         return;
     };
     let display_id = state_short_session(state, &row.session_id);
-    let session = match ctx_traits_io::run_session::read_run_session(&row.ledger_path) {
-        Ok(session) => session,
+    let session = match ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref()) {
+        Ok(ctx_traits_io::center::GetResult::Session(session)) => session,
+        Ok(ctx_traits_io::center::GetResult::Missing) => {
+            state.message = Some(format!(
+                "answer refused: {display_id} is no longer available from the center"
+            ));
+            return;
+        }
+        Ok(ctx_traits_io::center::GetResult::Ambiguous(_)) => {
+            state.message = Some(format!(
+                "answer refused: {display_id} is ambiguous in the center"
+            ));
+            return;
+        }
         Err(error) => {
             state.message = Some(format!(
-                "answer refused: could not read {display_id}: {error}"
+                "answer refused: center could not load {display_id}: {error}"
             ));
             return;
         }
@@ -4640,12 +4693,7 @@ fn open_answer_modal(state: &mut State) {
 }
 
 fn has_running_evidence(row: &SessionRow) -> bool {
-    ctx_traits_io::run_session::read_run_session(&row.ledger_path)
-        .ok()
-        .and_then(|session| session.last_drive_outcome)
-        .is_some_and(|outcome| {
-            outcome.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::Running
-        })
+    row.outcome == Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Running)
 }
 
 /// `s`: opens the RESUME confirm modal for the selected row. Refuses outright
@@ -4658,16 +4706,15 @@ fn open_resume_modal(state: &mut State) {
     let can_resume = row.class.can_resume();
     let session_id = row.session_id.clone();
     let display_id = state_short_session(state, &session_id);
-    let ledger_path = row.ledger_path.clone();
     if !can_resume {
         state.message = Some(format!(
             "resume refused: session {display_id} cannot be resumed from its current state"
         ));
         return;
     }
-    let worktree_line = ctx_traits_io::run_session::read_run_session(&ledger_path)
-        .ok()
-        .and_then(|session| session.provenance.worktree)
+    let worktree_line = row
+        .worktree
+        .clone()
         .map(|worktree| format!(" (worktree {}, branch {})", worktree.id, worktree.branch))
         .unwrap_or_default();
     let body = format!(
@@ -4706,7 +4753,7 @@ fn open_delete_modal(state: &mut State) {
             return;
         }
     }
-    let plan = plan_delete_for_ledger(&ledger_path, repo_path.as_deref());
+    let plan = plan_delete_for_ledger(&ledger_path, repo_path.as_deref(), row.worktree.as_ref());
     let warning = if row.class == SessionClass::Resumable {
         "Deleting discards resumable state.\n\n"
     } else if row.class == SessionClass::Unreadable {
@@ -4719,7 +4766,11 @@ fn open_delete_modal(state: &mut State) {
         plan.artifact_lines().join("\n")
     );
     state.modal_host.open(
-        Action::Session(SessionAction::Delete(session_id, plan)),
+        Action::Session(SessionAction::Delete {
+            session_id,
+            plan,
+            eligibility: DeleteEligibility::Session(row.class),
+        }),
         Modal::confirm("delete session", body),
     );
 }
@@ -4733,14 +4784,15 @@ fn open_delete_modal(state: &mut State) {
 /// artifact list. Narrowed to `(ledger_path, repo_path)` rather than
 /// `&SessionRow` (P472 §3.5) so both SESSIONS' DELETE and MERGES' DROP call
 /// it — a genuine extraction, not a copy.
-fn plan_delete_for_ledger(ledger_path: &camino::Utf8Path, repo_path: Option<&str>) -> DeletePlan {
+fn plan_delete_for_ledger(
+    ledger_path: &camino::Utf8Path,
+    repo_path: Option<&str>,
+    worktree: Option<&ctx_traits_core::procedure::session::WorktreeProvenance>,
+) -> DeletePlan {
     let driver_lock = ctx_traits_io::run_control::driver_lock_path(ledger_path);
     let driver_lock_path = driver_lock.as_std_path().exists().then_some(driver_lock);
     let sidecars = ctx_traits_io::run_branch::sidecars_root(ledger_path);
     let sidecars_root = sidecars.as_std_path().exists().then_some(sidecars);
-    let worktree = ctx_traits_io::run_session::read_run_session(ledger_path)
-        .ok()
-        .and_then(|session| session.provenance.worktree);
     let Some(worktree) = worktree else {
         return plan_delete(
             ledger_path,
@@ -4864,9 +4916,107 @@ fn execute_delete(plan: &DeletePlan) -> String {
             Err(error) => messages.push(format!("sidecars left in place: {error}")),
         }
     }
-    ctx_traits_io::run_summary::remove_summary_for_ledger(&plan.ledger_path);
     ctx_traits_io::activity_sidecar::remove_activity_for_ledger(&plan.ledger_path);
     messages.join("; ")
+}
+
+/// Rebuild a destructive plan while maintenance ownership prevents a driver
+/// from replacing its ledger. The modal's plan must still describe the same
+/// artifacts; otherwise the user must review the newly authoritative plan.
+fn execute_confirmed_delete(
+    ledger_path: &camino::Utf8Path,
+    repo_path: Option<&str>,
+    session_id: &str,
+    expected_eligibility: DeleteEligibility,
+    confirmed: &DeletePlan,
+) -> crate::Result<String> {
+    let Some(mut maintenance) = ctx_traits_io::run_control::try_acquire_maintenance(ledger_path)?
+    else {
+        return Ok("delete refused: driver lock is now held".to_string());
+    };
+    let current = match ctx_traits_io::run_session::read_run_session(ledger_path) {
+        Ok(session) => session,
+        // Only a modal opened on an unreadable SESSIONS row may use the
+        // known-artifacts-only branch. A later center projection must not
+        // relax the readable modal's identity and eligibility checks.
+        Err(_) if expected_eligibility.allows_unreadable_ledger() => {
+            let mut refreshed = plan_delete_for_ledger(ledger_path, repo_path, None);
+            // Acquiring maintenance may have created the otherwise absent lock
+            // file. It is our own stable inode, not a newly discovered user
+            // artifact, in this known-artifacts-only branch as well.
+            if confirmed.driver_lock_path.is_none() {
+                refreshed.driver_lock_path = None;
+            }
+            // An unreadable ledger cannot verify identity or reconstruct
+            // provenance. It may only delete the exact artifacts the user saw
+            // when confirming; newly discovered paths require a new review.
+            if refreshed.artifact_lines() != confirmed.artifact_lines() {
+                return Ok("delete plan changed; review the refreshed artifact list".to_string());
+            }
+            maintenance.clear_stale_metadata()?;
+            return Ok(execute_delete(&refreshed));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if current.session_id.as_str() != session_id {
+        return Ok("delete refused: session changed; reopen it".to_string());
+    }
+    if !expected_eligibility.matches(&current) {
+        return Ok("delete refused: session eligibility changed; reopen it".to_string());
+    }
+    let mut refreshed =
+        plan_delete_for_ledger(ledger_path, repo_path, current.provenance.worktree.as_ref());
+    // Acquiring maintenance may have created the otherwise absent lock file.
+    // It is our own stable inode, not a newly discovered user artifact.
+    if confirmed.driver_lock_path.is_none() {
+        refreshed.driver_lock_path = None;
+    }
+    if refreshed.artifact_lines() != confirmed.artifact_lines() {
+        return Ok("delete plan changed; review the refreshed artifact list".to_string());
+    }
+    maintenance.clear_stale_metadata()?;
+    Ok(execute_delete(&refreshed))
+}
+
+/// The modal's action eligibility is a reviewed fact. Recompute it from the
+/// authoritative ledger while maintenance ownership is held before deletion.
+#[derive(Clone, Copy)]
+enum DeleteEligibility {
+    Session(SessionClass),
+    Merge(MergeClass),
+}
+
+impl DeleteEligibility {
+    fn allows_unreadable_ledger(self) -> bool {
+        matches!(self, Self::Session(SessionClass::Unreadable))
+    }
+
+    fn matches(self, session: &ctx_traits_core::procedure::session::Session) -> bool {
+        match self {
+            Self::Session(expected) => {
+                let outcome = session
+                    .last_drive_outcome
+                    .as_ref()
+                    .map(|outcome| &outcome.outcome);
+                classify_session(false, &session.status, outcome) == expected
+            }
+            Self::Merge(expected) => {
+                let last_terminal_frame = session
+                    .provenance
+                    .merge_frames
+                    .iter()
+                    .rev()
+                    .find(|frame| frame.status.is_terminal());
+                let drive_completed = session.status
+                    == ctx_traits_core::procedure::session::Status::Completed
+                    && session
+                        .last_drive_outcome
+                        .as_ref()
+                        .is_some_and(|outcome| outcome.outcome.is_completed());
+                classify_merge(last_terminal_frame, drive_completed) == Some(expected)
+            }
+        }
+    }
 }
 
 /// Resolve the current executable path as UTF-8 and the session-keyed log
@@ -5145,8 +5295,36 @@ fn apply_session_action(
             };
             let ledger_path = row.ledger_path.clone();
             state.message = Some(match ctx_traits_io::run_control::probe(&ledger_path)? {
-                ctx_traits_io::run_control::DriverProbe::Held(_) => {
-                    if ctx_traits_io::run_control::request_interrupt(&ledger_path)? {
+                ctx_traits_io::run_control::DriverProbe::Held(Some(holder))
+                    if holder.session_id == session_id =>
+                {
+                    // The probe's holder identity and token must travel together:
+                    // re-probing here could target a replacement driver after a handoff.
+                    let current = match ctx_traits_io::run_session::read_run_session(&ledger_path) {
+                        Ok(session) if session.session_id.as_str() == session_id => session,
+                        Ok(_) => {
+                            state.message = Some(format!(
+                                "stop refused: {display_id}'s session changed; reopen it"
+                            ));
+                            state.reload();
+                            return Ok(());
+                        }
+                        Err(_) => {
+                            state.message = Some(format!(
+                                "stop refused: could not verify {display_id}'s current session"
+                            ));
+                            state.reload();
+                            return Ok(());
+                        }
+                    };
+                    if current.session_id.as_str() != holder.session_id {
+                        state.message = Some(format!(
+                            "stop refused: {display_id}'s driver changed; reopen it"
+                        ));
+                        state.reload();
+                        return Ok(());
+                    }
+                    if ctx_traits_io::run_control::request_interrupt(&ledger_path, &holder)? {
                         format!("stop requested for {display_id}")
                     } else {
                         format!(
@@ -5154,6 +5332,9 @@ fn apply_session_action(
                         )
                     }
                 }
+                ctx_traits_io::run_control::DriverProbe::Held(_) => format!(
+                    "stop refused: {display_id}'s current driver cannot be verified; reopen it"
+                ),
                 ctx_traits_io::run_control::DriverProbe::Unheld { .. }
                     if has_running_evidence(row)
                         || row.status
@@ -5167,7 +5348,32 @@ fn apply_session_action(
                         state.reload();
                         return Ok(());
                     };
-                    ctx_traits_io::run_session::record_interrupted_outcome(&ledger_path)?;
+                    let mut current = ctx_traits_io::run_session::read_run_session(&ledger_path)?;
+                    let current_outcome = current
+                        .last_drive_outcome
+                        .as_ref()
+                        .map(|outcome| &outcome.outcome);
+                    let current_state = ctx_traits_core::procedure::activity::SessionState::derive(
+                        &current.status,
+                        current_outcome,
+                        false,
+                    );
+                    if current.session_id.as_str() != session_id
+                        || !(current_outcome
+                            == Some(&ctx_traits_core::procedure::session::DriveOutcomeKind::Running)
+                            || current_state
+                                == ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman)
+                    {
+                        state.message = Some(format!(
+                            "stop refused: {display_id}'s session changed; reopen it"
+                        ));
+                        state.reload();
+                        return Ok(());
+                    }
+                    ctx_traits_io::run_session::record_interrupted_outcome_in_session(
+                        &ledger_path,
+                        &mut current,
+                    )?;
                     maintenance.clear_stale_metadata()?;
                     let _ = ctx_traits_io::run_liveness::remove_row(
                         &ctx_traits_io::run_control::runtime_root(),
@@ -5214,7 +5420,11 @@ fn apply_session_action(
                 }
             }
         }
-        SessionAction::Delete(session_id, plan) => {
+        SessionAction::Delete {
+            session_id,
+            plan,
+            eligibility,
+        } => {
             let display_id = state_short_session(state, &session_id);
             let Some(row) = state
                 .sessions
@@ -5226,24 +5436,13 @@ fn apply_session_action(
                 ));
                 return Ok(());
             };
-            let Some(mut maintenance) =
-                ctx_traits_io::run_control::try_acquire_maintenance(&row.ledger_path)?
-            else {
-                state.message = Some(format!(
-                    "delete refused: {display_id}'s driver lock is now held"
-                ));
-                state.reload();
-                return Ok(());
-            };
-            let refreshed = plan_delete_for_ledger(&row.ledger_path, row.repo_path.as_deref());
-            if refreshed.artifact_lines() != plan.artifact_lines() {
-                state.message =
-                    Some("delete plan changed; review the refreshed artifact list".to_string());
-                state.reload();
-                return Ok(());
-            }
-            maintenance.clear_stale_metadata()?;
-            state.message = Some(execute_delete(&refreshed));
+            state.message = Some(execute_confirmed_delete(
+                &row.ledger_path,
+                row.repo_path.as_deref(),
+                &session_id,
+                eligibility,
+                &plan,
+            )?);
             state.reload();
         }
     }
@@ -5333,7 +5532,11 @@ fn open_merge_drop_modal(state: &mut State) {
         ));
         return;
     }
-    let plan = plan_delete_for_ledger(&row.ledger_path, row.repo_path.as_deref());
+    let plan = plan_delete_for_ledger(
+        &row.ledger_path,
+        row.repo_path.as_deref(),
+        row.worktree.as_ref(),
+    );
     let body = format!(
         "Drop the following from the merge queue?\n\n{}",
         plan.artifact_lines().join("\n")
@@ -5342,6 +5545,7 @@ fn open_merge_drop_modal(state: &mut State) {
         Action::Merge(MergeAction::Drop {
             session_id: row.session_id.clone(),
             plan,
+            eligibility: DeleteEligibility::Merge(row.class),
         }),
         Modal::confirm("drop from queue", body),
     );
@@ -5374,7 +5578,7 @@ fn apply_merge_action(
             let report = merge(MergeInputs {
                 run_id: &run_id,
                 session_store: None,
-                session_path_override: None,
+                session_path_override: Some(&row.ledger_path),
                 assignments: &[],
                 no_wait: false,
                 force_wait: false,
@@ -5395,7 +5599,11 @@ fn apply_merge_action(
             });
             state.reload();
         }
-        MergeAction::Drop { session_id, plan } => {
+        MergeAction::Drop {
+            session_id,
+            plan,
+            eligibility,
+        } => {
             let display_id = state_short_session(state, &session_id);
             let Some(row) = state.merges.iter().find(|row| row.session_id == session_id) else {
                 state.message = Some(format!(
@@ -5409,7 +5617,13 @@ fn apply_merge_action(
                 ));
                 return Ok(());
             }
-            state.message = Some(execute_delete(&plan));
+            state.message = Some(execute_confirmed_delete(
+                &row.ledger_path,
+                row.repo_path.as_deref(),
+                &session_id,
+                eligibility,
+                &plan,
+            )?);
             state.reload();
         }
     }
@@ -6861,14 +7075,21 @@ fn open_task_reconcile(state: &mut State) {
             resolved.insert(summary.key.clone(), task);
         }
     }
-    let inventory = match ctx_traits_io::run_session::current_repo_run_inventory() {
-        Ok(inventory) => inventory,
+    let repo_key = match ctx_traits_io::state::current_repo_key() {
+        Ok(repo_key) => repo_key,
         Err(error) => {
             state.message = Some(format!("reconcile failed: {error}"));
             return;
         }
     };
-    let facts = super::tasks::session_facts_from_inventory(&inventory);
+    let rows = match ctx_traits_io::center::list(Some(&repo_key)) {
+        Ok(rows) => rows,
+        Err(error) => {
+            state.message = Some(format!("reconcile failed: {error}"));
+            return;
+        }
+    };
+    let facts = super::tasks::session_facts_from_center(&rows);
     let report = super::task_proposals::derive_reconcile_report(
         &facts,
         &summaries,
@@ -7084,7 +7305,9 @@ fn latest_blocked_split_source(state: &State, task_key: &str) -> Option<SplitSou
         .filter_map(|idx| state.sessions.get(*idx))
         .filter(|row| row.status == Some(ctx_traits_core::procedure::session::Status::Blocked))
     {
-        let Ok(session) = ctx_traits_io::run_session::read_run_session(&row.ledger_path) else {
+        let Ok(ctx_traits_io::center::GetResult::Session(session)) =
+            ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref())
+        else {
             continue;
         };
         // No trait-id filter: the join above already scopes rows to sessions
@@ -8086,7 +8309,7 @@ fn render_sessions_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state:
         inner,
         &state.sessions_visible,
         &state.list_sessions,
-        |row| session_visible_row_label(row, &state.sessions, &all_ids),
+        |row| session_visible_row_label(row, &state.sessions, &all_ids, state.all_repos),
         |_| false,
     );
 }
@@ -8116,13 +8339,17 @@ fn list_field(text: &str, width: usize) -> String {
     format!("{text}{}", " ".repeat(padding))
 }
 
-fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
+fn session_row_label(row: &SessionRow, all_ids: &[String], show_repo: bool) -> String {
     let short_id = short_session(&row.session_id, all_ids);
     let id_width = tui::display_width(&short_id);
     // Session identity is never clipped: steal cells from descriptive columns.
-    let remaining = LIST_LABEL_WIDTH.saturating_sub(id_width + 5);
+    let remaining = LIST_LABEL_WIDTH.saturating_sub(id_width + if show_repo { 5 } else { 4 });
     let mut phase_width = remaining.saturating_sub(32).min(19);
-    let repo_width = remaining.saturating_sub(19 + phase_width).min(12);
+    let repo_width = if show_repo {
+        remaining.saturating_sub(19 + phase_width).min(12)
+    } else {
+        0
+    };
     let state_width = remaining
         .saturating_sub(repo_width + phase_width + 10)
         .min(9);
@@ -8175,14 +8402,24 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
         tokens_width -= borrow_tokens;
         detail_width += borrow_repo + borrow_elapsed + borrow_tokens;
     }
-    let label = format!(
-        "{} {} {} {} {}",
-        list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),
-        short_id,
-        list_field(&state_and_detail, detail_width),
-        list_field(&row.elapsed_text, elapsed_width),
-        list_field(&row.tokens_text, tokens_width),
-    );
+    let label = if show_repo {
+        format!(
+            "{} {} {} {} {}",
+            list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),
+            short_id,
+            list_field(&state_and_detail, detail_width),
+            list_field(&row.elapsed_text, elapsed_width),
+            list_field(&row.tokens_text, tokens_width),
+        )
+    } else {
+        format!(
+            "{} {} {} {}",
+            short_id,
+            list_field(&state_and_detail, detail_width),
+            list_field(&row.elapsed_text, elapsed_width),
+            list_field(&row.tokens_text, tokens_width),
+        )
+    };
     debug_assert!(tui::display_width(&label) <= LIST_LABEL_WIDTH);
     label
 }
@@ -8228,6 +8465,7 @@ fn session_visible_row_label(
     row: &VisibleRow,
     sessions: &[SessionRow],
     all_ids: &[String],
+    show_repo: bool,
 ) -> String {
     match row {
         VisibleRow::GroupHeader {
@@ -8242,7 +8480,7 @@ fn session_visible_row_label(
             let Some(row) = sessions.get(*idx) else {
                 return String::new();
             };
-            session_row_label(row, all_ids)
+            session_row_label(row, all_ids, show_repo)
         }
     }
 }
@@ -8591,6 +8829,36 @@ mod tests {
         assert!(!session_driver_live(&ledger_path));
     }
 
+    #[test]
+    fn stale_parked_ask_phase_does_not_duplicate_its_trait_warning() {
+        let mut phase = "ask: approve the change (wait 1m); trait source differs".to_string();
+
+        // A failed center enrichment restores the previous rendered phase,
+        // then re-applies the row's drift warning.
+        append_phase_warning(&mut phase, "trait source differs");
+        append_phase_warning(&mut phase, "trait source differs");
+
+        assert_eq!(
+            phase,
+            "ask: approve the change (wait 1m); trait source differs"
+        );
+    }
+
+    #[test]
+    fn center_session_phase_projection_matches_shared_phase_text() {
+        use ctx_traits_core::procedure::session::Status;
+
+        for title in [None, Some(""), Some("deploy changes")] {
+            assert_eq!(
+                run_view::session_text::phase_text_from_parts(&Status::AwaitingAgentOutput, title),
+                match title {
+                    Some(title) if !title.trim().is_empty() => format!("in-progress · {title}"),
+                    _ => "in-progress".to_string(),
+                }
+            );
+        }
+    }
+
     fn row(class: SessionClass) -> SessionRow {
         row_with_id("s1", class)
     }
@@ -8615,10 +8883,17 @@ mod tests {
             class,
             status,
             outcome: None,
+            next_frame_kind: None,
+            interrupted: false,
             title: None,
+            worktree: None,
             task_key: None,
             merged_landed: None,
             not_merged: None,
+            trait_id: String::new(),
+            source_digest: None,
+            canonical_digest: None,
+            trait_source: None,
         }
     }
 
@@ -8639,6 +8914,28 @@ mod tests {
         }
     }
 
+    fn center_merge_row(
+        id: &str,
+        modified_epoch_secs: u64,
+    ) -> ctx_traits_io::center::CenterPublicRow {
+        serde_json::from_value(serde_json::json!({
+            "summary": {
+                "session_id": format!("session-{id}"),
+                "run_id": format!("run-{id}"),
+                "trait_id": "trait",
+                "status": "completed",
+                "last_drive_outcome": "completed",
+                "has_merge_frames": false,
+            },
+            "repo_key": "repo",
+            "repo_path": "/repo",
+            "ledger_path": format!("/runs/repo/{id}.json"),
+            "live": false,
+            "modified_epoch_secs": modified_epoch_secs,
+        }))
+        .expect("center merge row")
+    }
+
     fn snapshot_with_sessions(sessions: Vec<SessionRow>) -> DashboardSnapshot {
         let mut state = State::new_without_worker();
         state.sessions = sessions;
@@ -8649,13 +8946,13 @@ mod tests {
     fn dashboard_guide_tokens_standard_session_row_keeps_all_labels() {
         let mut session = row_with_id("session-1234", SessionClass::Terminal);
         session.tokens_text = "W:1k N:1k G:1k".to_string();
-        let label = session_row_label(&session, std::slice::from_ref(&session.session_id));
+        let label = session_row_label(&session, std::slice::from_ref(&session.session_id), false);
         assert!(label.contains("W:1k"));
         assert!(label.contains("N:1k"));
         assert!(label.contains("G:1k"));
 
         session.tokens_text = "W:1m N:1m G:1m".to_string();
-        let label = session_row_label(&session, std::slice::from_ref(&session.session_id));
+        let label = session_row_label(&session, std::slice::from_ref(&session.session_id), false);
         assert!(label.contains("W:1m"));
         assert!(label.contains("N:1m"));
         assert!(label.contains("G:1m"));
@@ -8941,6 +9238,21 @@ mod tests {
         state.apply_snapshot(&snapshot);
         assert!(state.refresh_error.is_none());
         assert!(!format!("{:?}", footer_line(&state)).contains("stale:"));
+    }
+
+    #[test]
+    fn retained_snapshot_during_center_outage_keeps_the_stale_footer() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("retained", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.refresh_error = Some("center unreachable".to_string());
+        let mut retained = DashboardSnapshot::from_state(&state);
+        retained.clear_refresh_error = false;
+
+        state.apply_snapshot(&retained);
+
+        assert_eq!(state.sessions[0].session_id, "retained");
+        assert_eq!(state.refresh_error.as_deref(), Some("center unreachable"));
     }
 
     #[test]
@@ -9434,6 +9746,75 @@ mod tests {
         dir.join("session-fixture.json")
     }
 
+    /// Create an independent registered worktree for stale-confirmation tests.
+    /// The destructive actions must refuse before they can remove either this
+    /// worktree or its branch when the selected ledger has been replaced.
+    fn scratch_git_worktree(name: &str) -> (camino::Utf8PathBuf, camino::Utf8PathBuf, String) {
+        let root = scratch_ledger_path(&format!("{name}-git"))
+            .parent()
+            .expect("scratch ledger parent")
+            .to_path_buf();
+        let repo = root.join("repo");
+        std::fs::create_dir_all(repo.as_std_path()).expect("create scratch repository");
+        let run_git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.as_std_path())
+                .status()
+                .expect("run git")
+        };
+        assert!(run_git(&["init", "-q"]).success());
+        assert!(run_git(&["config", "user.email", "t@example.com"]).success());
+        assert!(run_git(&["config", "user.name", "t"]).success());
+        std::fs::write(repo.join("fixture.txt").as_std_path(), "fixture\n")
+            .expect("write scratch fixture");
+        assert!(run_git(&["add", "."]).success());
+        assert!(run_git(&["commit", "-q", "-m", "init"]).success());
+
+        let worktree = root.join("worktree");
+        let branch = format!("ctx/test-{name}-{}", std::process::id());
+        assert!(
+            run_git(&[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                branch.as_str(),
+                worktree.as_str(),
+            ])
+            .success(),
+            "create scratch worktree"
+        );
+        (repo, worktree, branch)
+    }
+
+    fn git_ref_exists(repo: &camino::Utf8Path, branch: &str) -> bool {
+        std::process::Command::new("git")
+            .args([
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ])
+            .current_dir(repo.as_std_path())
+            .status()
+            .expect("check scratch branch")
+            .success()
+    }
+
+    fn git_head(repo: &camino::Utf8Path) -> String {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo.as_std_path())
+            .output()
+            .expect("read scratch HEAD");
+        assert!(output.status.success(), "read scratch HEAD");
+        String::from_utf8(output.stdout)
+            .expect("HEAD is UTF-8")
+            .trim()
+            .to_string()
+    }
+
     /// Minimal-but-valid [`ctx_traits_core::procedure::session::Session`]
     /// whose `provenance.trait_source` is `None` — the deterministic,
     /// filesystem-free failure `ctx_traits_io::run::load_trait_for_session`
@@ -9875,6 +10256,899 @@ argv = ["git", "commit", "-m", "fixture"]
         assert!(
             view.trait_degraded.is_some(),
             "refresh did not reconstruct trait"
+        );
+    }
+
+    #[test]
+    fn confirmed_delete_refuses_a_replacement_session() {
+        let ledger_path = scratch_ledger_path("delete-replacement-session");
+        let session = unresolvable_trait_session_fixture("run-delete-original", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let confirmed =
+            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+
+        let mut replacement = unresolvable_trait_session_fixture("run-delete-replacement", Some(0));
+        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
+            "session-delete-replacement".to_string(),
+        )
+        .expect("replacement session id");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
+            .expect("replace ledger after confirmation");
+
+        let message = execute_confirmed_delete(
+            &ledger_path,
+            None,
+            session.session_id.as_str(),
+            DeleteEligibility::Session(classify_session(
+                false,
+                &session.status,
+                session
+                    .last_drive_outcome
+                    .as_ref()
+                    .map(|outcome| &outcome.outcome),
+            )),
+            &confirmed,
+        )
+        .expect("replacement refusal");
+
+        assert_eq!(message, "delete refused: session changed; reopen it");
+        let retained = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("replacement must remain");
+        assert_eq!(retained.session_id, replacement.session_id);
+    }
+
+    #[test]
+    fn confirmed_delete_removes_an_unchanged_session() {
+        let ledger_path = scratch_ledger_path("delete-unchanged-session");
+        let session = unresolvable_trait_session_fixture("run-delete-unchanged", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write session");
+        let confirmed =
+            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+
+        let message = execute_confirmed_delete(
+            &ledger_path,
+            None,
+            session.session_id.as_str(),
+            DeleteEligibility::Session(classify_session(
+                false,
+                &session.status,
+                session
+                    .last_drive_outcome
+                    .as_ref()
+                    .map(|outcome| &outcome.outcome),
+            )),
+            &confirmed,
+        )
+        .expect("unchanged confirmation succeeds");
+
+        assert!(message.contains("ledger deleted"), "{message}");
+        assert!(
+            !ledger_path.exists(),
+            "an unchanged confirmed plan must delete its ledger"
+        );
+    }
+
+    #[test]
+    fn confirmed_delete_refuses_same_session_with_changed_eligibility() {
+        let ledger_path = scratch_ledger_path("delete-eligibility-change");
+        let session = unresolvable_trait_session_fixture("run-delete-eligibility", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let confirmed =
+            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let expected = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+
+        let mut changed = session.clone();
+        changed.status = ctx_traits_core::procedure::session::Status::Completed;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &changed)
+            .expect("change eligibility after confirmation");
+
+        let message = execute_confirmed_delete(
+            &ledger_path,
+            None,
+            session.session_id.as_str(),
+            expected,
+            &confirmed,
+        )
+        .expect("eligibility refusal");
+
+        assert_eq!(
+            message,
+            "delete refused: session eligibility changed; reopen it"
+        );
+        assert!(ledger_path.exists(), "refusal must retain the ledger");
+    }
+
+    #[test]
+    fn delete_modal_tag_keeps_the_eligibility_reviewed_when_the_modal_opened() {
+        let plan = DeletePlan {
+            ledger_path: camino::Utf8PathBuf::from("/runs/repo/session.json"),
+            driver_lock_path: None,
+            sidecars_root: None,
+            worktree: None,
+            worktree_note: None,
+        };
+        let mut host: ModalHost<SessionAction> = ModalHost::new();
+        host.open(
+            SessionAction::Delete {
+                session_id: "session".to_string(),
+                plan,
+                eligibility: DeleteEligibility::Session(SessionClass::Resumable),
+            },
+            Modal::confirm("delete", "body"),
+        );
+        let Some((SessionAction::Delete { eligibility, .. }, ModalOutcome::Confirmed)) = host
+            .handle_key(&crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::NONE,
+            ))
+        else {
+            panic!("expected confirmed delete action");
+        };
+        assert!(matches!(
+            eligibility,
+            DeleteEligibility::Session(SessionClass::Resumable)
+        ));
+    }
+
+    #[test]
+    fn drop_modal_tag_keeps_the_eligibility_reviewed_when_the_modal_opened() {
+        let plan = DeletePlan {
+            ledger_path: camino::Utf8PathBuf::from("/runs/repo/session.json"),
+            driver_lock_path: None,
+            sidecars_root: None,
+            worktree: None,
+            worktree_note: None,
+        };
+        let mut host: ModalHost<MergeAction> = ModalHost::new();
+        host.open(
+            MergeAction::Drop {
+                session_id: "session".to_string(),
+                plan,
+                eligibility: DeleteEligibility::Merge(MergeClass::Parked),
+            },
+            Modal::confirm("drop", "body"),
+        );
+        let Some((MergeAction::Drop { eligibility, .. }, ModalOutcome::Confirmed)) = host
+            .handle_key(&crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::NONE,
+            ))
+        else {
+            panic!("expected confirmed drop action");
+        };
+        assert!(matches!(
+            eligibility,
+            DeleteEligibility::Merge(MergeClass::Parked)
+        ));
+    }
+
+    #[test]
+    fn unreadable_confirmed_delete_refuses_newly_discovered_artifacts() {
+        let ledger_path = scratch_ledger_path("unreadable-delete-plan-change");
+        let session = unresolvable_trait_session_fixture("run-unreadable-delete", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write session");
+        let confirmed =
+            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let sidecars = ctx_traits_io::run_branch::sidecars_root(&ledger_path);
+        std::fs::create_dir_all(sidecars.as_std_path()).expect("add sidecars after confirmation");
+        std::fs::write(ledger_path.as_std_path(), "not a session ledger")
+            .expect("make ledger unreadable");
+
+        let message = execute_confirmed_delete(
+            &ledger_path,
+            None,
+            session.session_id.as_str(),
+            DeleteEligibility::Session(SessionClass::Unreadable),
+            &confirmed,
+        )
+        .expect("unreadable confirmation returns refusal");
+
+        assert_eq!(
+            message,
+            "delete plan changed; review the refreshed artifact list"
+        );
+        assert!(
+            ledger_path.exists(),
+            "refusal must leave the replacement ledger"
+        );
+        assert!(sidecars.exists(), "refusal must leave unconfirmed sidecars");
+    }
+
+    #[test]
+    fn unchanged_unreadable_confirmed_delete_ignores_its_maintenance_lock() {
+        let ledger_path = scratch_ledger_path("unreadable-delete-unchanged");
+        let session = unresolvable_trait_session_fixture("run-unreadable-unchanged", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write session");
+        let confirmed = plan_delete_for_ledger(&ledger_path, None, None);
+        assert!(confirmed.driver_lock_path.is_none(), "no pre-existing lock");
+        std::fs::write(ledger_path.as_std_path(), "not a session ledger")
+            .expect("make ledger unreadable");
+
+        let message = execute_confirmed_delete(
+            &ledger_path,
+            None,
+            session.session_id.as_str(),
+            DeleteEligibility::Session(SessionClass::Unreadable),
+            &confirmed,
+        )
+        .expect("unchanged unreadable confirmation succeeds");
+
+        assert!(message.contains("ledger deleted"), "{message}");
+        assert!(
+            !ledger_path.exists(),
+            "the maintenance lock must not make the reviewed plan look changed"
+        );
+    }
+
+    #[test]
+    fn session_delete_action_removes_an_unchanged_unreadable_ledger() {
+        let ledger_path = scratch_ledger_path("unreadable-delete-action");
+        let session = unresolvable_trait_session_fixture("run-unreadable-action", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write session");
+        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        std::fs::write(ledger_path.as_std_path(), "not a session ledger")
+            .expect("make ledger unreadable");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Unreadable,
+            ..row_with_id("unreadable-action", SessionClass::Unreadable)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Delete {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility: DeleteEligibility::Session(SessionClass::Unreadable),
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("delete action succeeds");
+
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("ledger deleted")),
+            "{:#?}",
+            state.message
+        );
+        assert!(
+            !ledger_path.exists(),
+            "action must delete the reviewed ledger"
+        );
+    }
+
+    #[test]
+    fn session_delete_action_refuses_a_replacement_ledger() {
+        let ledger_path = scratch_ledger_path("delete-action-replacement");
+        let session = unresolvable_trait_session_fixture("run-delete-action", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let (repo, worktree, branch) = scratch_git_worktree("delete-action-replacement");
+        let head = git_head(&repo);
+        let plan = DeletePlan {
+            ledger_path: ledger_path.clone(),
+            driver_lock_path: None,
+            sidecars_root: None,
+            worktree: Some((repo.clone(), worktree.clone(), branch.clone())),
+            worktree_note: None,
+        };
+        let mut replacement = unresolvable_trait_session_fixture("run-delete-action-new", Some(0));
+        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
+            "session-delete-action-new".to_string(),
+        )
+        .expect("replacement session id");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
+            .expect("replace ledger after modal open");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Live,
+            ..row_with_id("delete-action", SessionClass::Live)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Delete {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility: DeleteEligibility::Session(SessionClass::Live),
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("replacement refusal");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("delete refused: session changed; reopen it")
+        );
+        assert_eq!(
+            ctx_traits_io::run_session::read_run_session(&ledger_path)
+                .expect("replacement retained")
+                .session_id,
+            replacement.session_id
+        );
+        assert!(worktree.exists(), "replacement must retain its worktree");
+        assert!(
+            git_ref_exists(&repo, &branch),
+            "replacement must retain its branch"
+        );
+        assert_eq!(
+            git_head(&repo),
+            head,
+            "replacement must not mutate Git state"
+        );
+    }
+
+    #[test]
+    fn merge_drop_action_refuses_a_replacement_ledger() {
+        let ledger_path = scratch_ledger_path("drop-action-replacement");
+        let session = unresolvable_trait_session_fixture("run-drop-action", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let (repo, worktree, branch) = scratch_git_worktree("drop-action-replacement");
+        let head = git_head(&repo);
+        let plan = DeletePlan {
+            ledger_path: ledger_path.clone(),
+            driver_lock_path: None,
+            sidecars_root: None,
+            worktree: Some((repo.clone(), worktree.clone(), branch.clone())),
+            worktree_note: None,
+        };
+        let mut replacement = unresolvable_trait_session_fixture("run-drop-action-new", Some(0));
+        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
+            "session-drop-action-new".to_string(),
+        )
+        .expect("replacement session id");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
+            .expect("replace ledger after modal open");
+        let mut state = State::new_without_worker();
+        state.merges = vec![MergeRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: MergeClass::Parked,
+            ..merges_test_row("drop-action", MergeClass::Parked)
+        }];
+
+        apply_merge_action(
+            &mut state,
+            MergeAction::Drop {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility: DeleteEligibility::Merge(MergeClass::Parked),
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("replacement refusal");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("delete refused: session changed; reopen it")
+        );
+        assert_eq!(
+            ctx_traits_io::run_session::read_run_session(&ledger_path)
+                .expect("replacement retained")
+                .session_id,
+            replacement.session_id
+        );
+        assert!(worktree.exists(), "replacement must retain its worktree");
+        assert!(
+            git_ref_exists(&repo, &branch),
+            "replacement must retain its branch"
+        );
+        assert_eq!(
+            git_head(&repo),
+            head,
+            "replacement must not mutate Git state"
+        );
+    }
+
+    #[test]
+    fn readable_confirmed_delete_refuses_when_the_ledger_becomes_unreadable() {
+        let ledger_path = scratch_ledger_path("readable-delete-becomes-unreadable");
+        let session = unresolvable_trait_session_fixture("run-readable-delete", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write session");
+        let confirmed =
+            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let eligibility = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+        std::fs::write(ledger_path.as_std_path(), "not a session ledger")
+            .expect("make ledger unreadable after modal open");
+
+        assert!(
+            execute_confirmed_delete(
+                &ledger_path,
+                None,
+                session.session_id.as_str(),
+                eligibility,
+                &confirmed,
+            )
+            .is_err(),
+            "a readable modal must not adopt a later unreadable center row"
+        );
+        assert!(
+            ledger_path.exists(),
+            "refusal must retain the unreadable ledger"
+        );
+    }
+
+    #[test]
+    fn session_delete_action_refuses_when_a_readable_modal_becomes_unreadable() {
+        let ledger_path = scratch_ledger_path("delete-action-becomes-unreadable");
+        let session = unresolvable_trait_session_fixture("run-delete-action-readable", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write readable session");
+        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let eligibility = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+        std::fs::write(ledger_path.as_std_path(), "not a session ledger")
+            .expect("make ledger unreadable after modal open");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Resumable,
+            ..row_with_id("delete-action-readable", SessionClass::Resumable)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        let error = apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Delete {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility,
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect_err("a readable modal must refuse a later unreadable ledger");
+
+        assert!(
+            error.to_string().contains("parse run-session JSON"),
+            "{error}"
+        );
+        assert!(ledger_path.exists(), "the unreadable ledger must remain");
+    }
+
+    #[test]
+    fn session_delete_action_refuses_a_same_session_eligibility_change() {
+        let ledger_path = scratch_ledger_path("delete-action-eligibility-change");
+        let session = unresolvable_trait_session_fixture("run-delete-action-eligibility", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let eligibility = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+        let mut changed = session.clone();
+        changed.status = ctx_traits_core::procedure::session::Status::Completed;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &changed)
+            .expect("change eligibility after modal open");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Resumable,
+            ..row_with_id("delete-action-eligibility", SessionClass::Resumable)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Delete {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility,
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("eligibility refusal is a successful action result");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("delete refused: session eligibility changed; reopen it")
+        );
+        assert!(ledger_path.exists(), "the changed session must remain");
+    }
+
+    #[test]
+    fn merge_drop_action_refuses_a_same_session_merge_frame_change() {
+        use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus};
+
+        let ledger_path = scratch_ledger_path("drop-action-merge-frame-change");
+        let mut session = unresolvable_trait_session_fixture("run-drop-action-frame", Some(0));
+        session.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Gates,
+            status: MergeStatus::Parked,
+            reason: Some("review required".to_string()),
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write parked merge session");
+        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let mut changed = session.clone();
+        changed
+            .provenance
+            .merge_frames
+            .last_mut()
+            .expect("merge frame")
+            .status = MergeStatus::Merged;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &changed)
+            .expect("change merge frame after modal open");
+        let mut state = State::new_without_worker();
+        state.merges = vec![MergeRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: MergeClass::Parked,
+            ..merges_test_row("drop-action-frame", MergeClass::Parked)
+        }];
+
+        apply_merge_action(
+            &mut state,
+            MergeAction::Drop {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility: DeleteEligibility::Merge(MergeClass::Parked),
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("merge eligibility refusal is a successful action result");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("delete refused: session eligibility changed; reopen it")
+        );
+        assert!(
+            ledger_path.exists(),
+            "the changed merge session must remain"
+        );
+    }
+
+    #[test]
+    fn session_delete_action_removes_an_unchanged_readable_ledger() {
+        let ledger_path = scratch_ledger_path("delete-action-unchanged-readable");
+        let session = unresolvable_trait_session_fixture("run-delete-action-unchanged", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write readable session");
+        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let eligibility = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Resumable,
+            ..row_with_id("delete-action-unchanged", SessionClass::Resumable)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Delete {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility,
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("unchanged action succeeds");
+
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("ledger deleted")),
+            "{:#?}",
+            state.message
+        );
+        assert!(!ledger_path.exists(), "the reviewed ledger must be deleted");
+    }
+
+    #[test]
+    fn merge_drop_action_removes_an_unchanged_ledger() {
+        use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus};
+
+        let ledger_path = scratch_ledger_path("drop-action-unchanged");
+        let mut session = unresolvable_trait_session_fixture("run-drop-action-unchanged", Some(0));
+        session.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Gates,
+            status: MergeStatus::Parked,
+            reason: Some("review required".to_string()),
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write parked merge session");
+        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let mut state = State::new_without_worker();
+        state.merges = vec![MergeRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: MergeClass::Parked,
+            ..merges_test_row("drop-action-unchanged", MergeClass::Parked)
+        }];
+
+        apply_merge_action(
+            &mut state,
+            MergeAction::Drop {
+                session_id: session.session_id.as_str().to_string(),
+                plan,
+                eligibility: DeleteEligibility::Merge(MergeClass::Parked),
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("unchanged drop succeeds");
+
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("ledger deleted")),
+            "{:#?}",
+            state.message
+        );
+        assert!(!ledger_path.exists(), "the reviewed ledger must be deleted");
+    }
+
+    #[test]
+    fn kill_action_refuses_an_unheld_replacement_session() {
+        let ledger_path = scratch_ledger_path("kill-action-replacement");
+        let mut session = unresolvable_trait_session_fixture("run-kill-action", Some(0));
+        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let mut replacement = unresolvable_trait_session_fixture("run-kill-action-new", Some(0));
+        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
+            "session-kill-action-new".to_string(),
+        )
+        .expect("replacement session id");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
+            .expect("replace ledger after modal open");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Live,
+            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
+            ..row_with_id("kill-action", SessionClass::Live)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Kill(session.session_id.as_str().to_string()),
+            ModalOutcome::Confirmed,
+        )
+        .expect("replacement refusal");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("stop refused: session-run-kill-action's session changed; reopen it")
+        );
+        assert_eq!(
+            ctx_traits_io::run_session::read_run_session(&ledger_path)
+                .expect("replacement retained")
+                .session_id,
+            replacement.session_id
+        );
+    }
+
+    #[test]
+    fn kill_action_marks_an_unchanged_unheld_waiting_session_interrupted() {
+        let ledger_path = scratch_ledger_path("kill-action-unchanged");
+        let mut session = unresolvable_trait_session_fixture("run-kill-action-unchanged", Some(0));
+        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write waiting session");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Live,
+            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
+            ..row_with_id("kill-action-unchanged", SessionClass::Live)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Kill(session.session_id.as_str().to_string()),
+            ModalOutcome::Confirmed,
+        )
+        .expect("unchanged kill succeeds");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("recorded interrupted outcome for session-run-kill-action-unchanged")
+        );
+        assert!(matches!(
+            ctx_traits_io::run_session::read_run_session(&ledger_path)
+                .expect("read interrupted session")
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+            Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
+        ));
+    }
+
+    #[test]
+    fn kill_action_refuses_a_held_replacement_session_without_interrupting_it() {
+        let ledger_path = scratch_ledger_path("kill-held-replacement");
+        let mut session = unresolvable_trait_session_fixture("run-kill-held", Some(0));
+        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write original session");
+        let interrupted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed_interrupt = std::sync::Arc::clone(&interrupted);
+        let _driver = ctx_traits_io::run_control::try_acquire(
+            &ctx_traits_io::run_liveness::LiveRunFacts {
+                session_id: session.session_id.as_str().to_string(),
+                run_id: session.run_id.as_str().to_string(),
+                repo_key: "test".to_string(),
+                repo_path: "/test".to_string(),
+                ledger_path: ledger_path.clone(),
+                worktree_path: None,
+                branch: None,
+                log_path: None,
+            },
+            std::sync::Arc::new(move || {
+                observed_interrupt.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("acquire held driver")
+        .expect("driver lock acquired");
+
+        let mut replacement = unresolvable_trait_session_fixture("run-kill-held-new", Some(0));
+        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
+            "session-kill-held-new".to_string(),
+        )
+        .expect("replacement session id");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
+            .expect("replace ledger after modal open");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Live,
+            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
+            ..row_with_id("kill-held", SessionClass::Live)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Kill(session.session_id.as_str().to_string()),
+            ModalOutcome::Confirmed,
+        )
+        .expect("replacement refusal");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("stop refused: session-run-kill-held's session changed; reopen it")
+        );
+        assert_eq!(
+            ctx_traits_io::run_session::read_run_session(&ledger_path)
+                .expect("replacement retained")
+                .session_id,
+            replacement.session_id
+        );
+        assert!(
+            !interrupted.load(std::sync::atomic::Ordering::SeqCst),
+            "a replacement session must not receive the original driver's interrupt"
+        );
+    }
+
+    #[test]
+    fn kill_action_requests_interrupt_for_an_unchanged_held_session() {
+        let ledger_path = scratch_ledger_path("kill-held-unchanged");
+        let mut session = unresolvable_trait_session_fixture("run-kill-held-unchanged", Some(0));
+        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write waiting session");
+        let interrupted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed_interrupt = std::sync::Arc::clone(&interrupted);
+        let _driver = ctx_traits_io::run_control::try_acquire(
+            &ctx_traits_io::run_liveness::LiveRunFacts {
+                session_id: session.session_id.as_str().to_string(),
+                run_id: session.run_id.as_str().to_string(),
+                repo_key: "test".to_string(),
+                repo_path: "/test".to_string(),
+                ledger_path: ledger_path.clone(),
+                worktree_path: None,
+                branch: None,
+                log_path: None,
+            },
+            std::sync::Arc::new(move || {
+                observed_interrupt.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("acquire held driver")
+        .expect("driver lock acquired");
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Live,
+            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
+            ..row_with_id("kill-held-unchanged", SessionClass::Live)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::Kill(session.session_id.as_str().to_string()),
+            ModalOutcome::Confirmed,
+        )
+        .expect("held kill succeeds");
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("stop requested for session-run-kill-held-unchanged")
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !interrupted.load(std::sync::atomic::Ordering::SeqCst)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            interrupted.load(std::sync::atomic::Ordering::SeqCst),
+            "the validated held driver must receive the authenticated interrupt"
         );
     }
 
@@ -10444,6 +11718,18 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
+    fn center_merge_projection_is_recency_ordered_independent_of_input_order() {
+        let older = center_merge_row("older", 10);
+        let newer = center_merge_row("newer", 20);
+        let forward = merges_from_center_rows(&[older.clone(), newer.clone()]);
+        let reverse = merges_from_center_rows(&[newer, older]);
+        let ids = |rows: Vec<MergeRow>| rows.into_iter().map(|row| row.run_id).collect::<Vec<_>>();
+
+        assert_eq!(ids(forward), vec!["run-newer", "run-older"]);
+        assert_eq!(ids(reverse), vec!["run-newer", "run-older"]);
+    }
+
+    #[test]
     fn merge_class_retry_and_drop_eligibility() {
         assert!(MergeClass::Mergeable.can_retry());
         assert!(MergeClass::Parked.can_retry());
@@ -10620,6 +11906,7 @@ argv = ["git", "commit", "-m", "fixture"]
             &VisibleRow::Session(0),
             std::slice::from_ref(&session),
             &[id.clone(), other.clone()],
+            true,
         );
         assert_eq!(tui::display_width(&session_label), LIST_LABEL_WIDTH);
         assert!(!session_label.contains(&id));
@@ -10627,7 +11914,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
         session.repo_key = Some("界\u{0301}".repeat(20));
         session.phase = "界\u{0301}".repeat(40);
-        let wide_label = session_row_label(&session, std::slice::from_ref(&id));
+        let wide_label = session_row_label(&session, std::slice::from_ref(&id), true);
         assert!(tui::display_width(&wide_label) <= LIST_LABEL_WIDTH);
 
         let trait_row = TraitRow {
@@ -10708,9 +11995,29 @@ argv = ["git", "commit", "-m", "fixture"]
             "in-progress · persisted title"
         );
         assert!(
-            tui::display_width(&session_row_label(&session, &[session.session_id.clone()]))
-                <= LIST_LABEL_WIDTH
+            tui::display_width(&session_row_label(
+                &session,
+                &[session.session_id.clone()],
+                false
+            )) <= LIST_LABEL_WIDTH
         );
+    }
+
+    #[test]
+    fn session_repository_identity_is_rendered_only_in_all_mode() {
+        let mut session = row_with_id("session-1", SessionClass::Resumable);
+        session.repo_key = Some("other-repository".to_string());
+        session.state_text = "in-progress".to_string();
+        session.phase = "in-progress · details".to_string();
+
+        let default_label = session_row_label(&session, &[session.session_id.clone()], false);
+        let all_label = session_row_label(&session, &[session.session_id.clone()], true);
+
+        assert_eq!(tui::display_width(&default_label), LIST_LABEL_WIDTH);
+        assert_eq!(tui::display_width(&all_label), LIST_LABEL_WIDTH);
+        assert!(!default_label.contains("other-rep"));
+        assert!(all_label.contains("other-rep"));
+        assert!(default_label.contains("in-progress · details"));
     }
 
     #[test]
@@ -10726,7 +12033,7 @@ argv = ["git", "commit", "-m", "fixture"]
             session.phase = "building".to_string();
             session.elapsed_text = elapsed_text.to_string();
             session.tokens_text = "12 tok".to_string();
-            session_row_label(&session, &["session-1".to_string()])
+            session_row_label(&session, &["session-1".to_string()], false)
         });
 
         let clock_start = labels[0].find(durations[0]).expect("clock duration");
@@ -11973,7 +13280,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let mut session_row = row_with_id("s1", SessionClass::Terminal);
         session_row.not_merged = Some(fact.clone());
         assert!(session_state_label(&session_row).contains(&fact.branch));
-        let session_label = session_row_label(&session_row, &["s1".to_string()]);
+        let session_label = session_row_label(&session_row, &["s1".to_string()], false);
         assert!(
             session_label.contains(&fact.branch),
             "final session row label {session_label:?} dropped the branch"
