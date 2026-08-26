@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
+use support::{ScratchRoot, assert_exit_code, ctx_bin, git_init, require_success, run_ctx, utf8};
 
 #[test]
 fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
@@ -109,9 +109,14 @@ printf '%s' "$last" > __CAPTURE__
 if [ -f __CAPTURE__.calls ]; then n=$(($(wc -l < __CAPTURE__.calls))); else n=0; fi
 printf '%s' "$last" > __CAPTURE__.$n
 printf '%s\n' "$@" > __CAPTURE__.args.$n
-printf '%s' "$last" > __CAPTURE__.pid.$$
-printf 'x\n' >> __CAPTURE__.calls
-touch __MARKER__
+ printf '%s' "$last" > __CAPTURE__.pid.$$
+ printf 'x\n' >> __CAPTURE__.calls
+ touch __MARKER__
+if [ "$n" -eq 0 ] && [ -n "$CTX_TEST_RETRY_SESSION" ]; then
+  "$CTX_TEST_CTX" traits internal set port:retry-input refreshed --session "$CTX_TEST_RETRY_SESSION" > __CAPTURE__.set 2>&1 || { mv __CAPTURE__.set __CAPTURE__; exit 0; }
+  if [ "$CTX_TEST_CLI_FAIL_FIRST" = 1 ]; then printf 'not json'; exit 0; fi
+  if [ "$CTX_TEST_MCP_NO_ADVANCE" = 1 ]; then exit 0; fi
+fi
 key=$(printf '%s\n' "$last" | sed -n 's/.*<format>{"\([a-zA-Z0-9_-]*\)".*/\1/p')
 if [ -z "$key" ]; then
   key=$(printf '%s\n' "$last" | sed -n 's/^- slot:\([a-zA-Z0-9_-]*\) (replace)$/\1/p' | head -n1)
@@ -329,22 +334,19 @@ output = ["slot:answer"]
             &repo,
             &home,
         );
-        let outcome = support::run_ctx_with_env(
-            &[
-                "traits",
-                "run",
-                "--file",
-                generated.to_str().unwrap(),
-                "--out",
-                home.join(output).to_str().unwrap(),
-                "--json",
-                "--progress",
-                "none",
-            ],
-            &repo,
-            &home,
-            extra_env,
-        );
+        let session_path = home.join(output);
+        let args = vec![
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            session_path.to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ];
+        let outcome = support::run_ctx_with_env(&args, &repo, &home, extra_env);
         assert_exit_code(&outcome, 0);
         (
             fs::read_to_string(&capture).expect("prompt capture"),
@@ -5225,5 +5227,79 @@ output = ["slot:answer"]
             extract_behavior(&for_each_cli_frames[1])
         );
     }
+
+    // A first retry mutates an input port after capture. The second capture
+    // can only contain `refreshed` when drive recomposes from the ledger.
+    let retry_fixture = behavior_canonical
+        .replacen(
+            "\n[[slot]]",
+            "\n[[port]]\nid = \"retry-input\"\ndirection = \"input\"\nschema = \"schema:text\"\nvalue = \"original\"\ndescription = \"Changes between retry attempts.\"\n\n[[slot]]",
+            1,
+        )
+        .replace(
+            "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
+            "prompt = \"Produce an answer.\"\ninput = [\"port:retry-input\"]\noutput = [\"slot:answer\"]",
+        );
+    fs::write(&generated, &retry_fixture).unwrap();
+    let retry_preview = preview("retry guidance");
+    let retry_intent = extract_intent(&retry_preview);
+    let retry_behavior = extract_behavior(&retry_preview);
+    let ctx = ctx_bin();
+    let assert_retry_captures = |transport: &str, failure: &str, system_flag: &str| {
+        let output = format!("retry-{transport}.json");
+        let session = home.join(&output);
+        let (_, _) = run_with_env(
+            transport,
+            &output,
+            &[
+                (failure, "1"),
+                ("CTX_TEST_RETRY_SESSION", session.to_str().unwrap()),
+                ("CTX_TEST_CTX", ctx.to_str().unwrap()),
+            ],
+        );
+        let first = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
+        let second = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+        let args = fs::read_to_string(capture.with_extension("txt.args.1")).unwrap();
+        assert_eq!(
+            extract_intent(&first),
+            retry_intent,
+            "{transport} first intent"
+        );
+        assert_eq!(
+            extract_intent(&second),
+            retry_intent,
+            "{transport} retry intent"
+        );
+        assert_eq!(
+            extract_behavior(&first),
+            retry_behavior,
+            "{transport} first behavior"
+        );
+        assert_eq!(
+            extract_behavior(&second),
+            retry_behavior,
+            "{transport} retry behavior"
+        );
+        for prompt in [&first, &second] {
+            let include = prompt.find("<include>").unwrap_or(0);
+            let intent = prompt.find("<intent>").unwrap();
+            let behavior = prompt.find("<behavior>").unwrap();
+            let agent = prompt.find("<agent>").unwrap();
+            let input = prompt.find("<input>").unwrap();
+            assert!(
+                include <= intent && intent < behavior && behavior < agent && agent < input,
+                "{prompt}"
+            );
+            assert!(prompt.contains("<data>"), "{prompt}");
+            assert_eq!(prompt.matches("id=\"shared\"").count(), 1, "{prompt}");
+            assert_eq!(prompt.matches("id=\"shared-tone\"").count(), 1, "{prompt}");
+            assert_unassigned_absent(prompt);
+        }
+        assert!(!first.contains("refreshed"), "{first}");
+        assert!(second.contains("refreshed"), "{second}");
+        assert_system(&args, system_flag);
+    };
+    assert_retry_captures("cli", "CTX_TEST_CLI_FAIL_FIRST", "--cli-system");
+    assert_retry_captures("mcp", "CTX_TEST_MCP_NO_ADVANCE", "--mcp-system");
     fs::write(&generated, &for_each_fixture).unwrap();
 }

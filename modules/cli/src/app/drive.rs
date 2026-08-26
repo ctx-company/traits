@@ -2687,6 +2687,7 @@ fn drive_loop(
         let mut requested = requested_outputs(&frame)?;
         let mut schema = requested_output_schema(&requested, &loaded_trait);
         let mut prompt = frame_prompt(&prompt_context, &schema, None);
+        let mut pending_delivery_is_complete_frame = true;
         // Standing instructions declared on the trait's `[[agent]]`. Delivered
         // through the harness system channel when the convention has one, and
         // folded into the prompt body when it does not (see below). Owned for
@@ -3318,6 +3319,54 @@ fn drive_loop(
                     );
                     return Ok(report);
                 }
+                let Some((refreshed_session, refreshed_frame)) =
+                    refresh_frame_for_retry(&input, None)?
+                else {
+                    continue 'frames;
+                };
+                if !same_frame_position(&frame, &refreshed_frame) {
+                    refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
+                    continue 'frames;
+                }
+                frame = refreshed_frame;
+                prompt_context =
+                    resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
+                requested = requested_outputs(&frame)?;
+                schema = requested_output_schema(&requested, &loaded_trait);
+                refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
+                if pending_delivery_is_complete_frame {
+                    argv = harness_argv(
+                        &harness,
+                        cli,
+                        &plan,
+                        agent_system,
+                        HarnessArgvAttempt {
+                            schema: Some(&schema),
+                            harness_session_id: harness_sessions.get(&session_key),
+                            exec_dir: input.execution_dir,
+                            confinement: confinement_payloads.as_ref(),
+                        },
+                    );
+                    warm_argv = (session.mode
+                        == ctx_traits_io::harness_config::RunSessionMode::Persistent)
+                        .then(|| {
+                            warm_harness_argv(
+                                &harness,
+                                cli,
+                                &plan,
+                                agent_system,
+                                WarmPromptKind::Frame,
+                                confinement_payloads.as_ref(),
+                                harness_sessions.get(&session_key),
+                            )
+                        })
+                        .flatten();
+                    prompt = frame_prompt(&prompt_context, &schema, None);
+                    if let Some(system) = agent_system.filter(|_| cli.system_prompt_flag.is_none())
+                    {
+                        prompt = format!("{system}\n\n{prompt}");
+                    }
+                }
                 continue;
             }
 
@@ -3334,6 +3383,21 @@ fn drive_loop(
                     );
                     return Ok(report);
                 }
+                let Some((refreshed_session, refreshed_frame)) =
+                    refresh_frame_for_retry(&input, None)?
+                else {
+                    continue 'frames;
+                };
+                if !same_frame_position(&frame, &refreshed_frame) {
+                    refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
+                    continue 'frames;
+                }
+                frame = refreshed_frame;
+                prompt_context =
+                    resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
+                requested = requested_outputs(&frame)?;
+                schema = requested_output_schema(&requested, &loaded_trait);
+                refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                 let correction = RejectionClass::OutputTruncated.format_correction(
                     &requested,
                     &schema,
@@ -3366,6 +3430,8 @@ fn drive_loop(
                         return Ok(report);
                     }
                 };
+                pending_delivery_is_complete_frame =
+                    matches!(preparation.rung, CorrectionRung::CompleteFrame);
                 warm_harness_sessions.remove(&session_key);
                 warm_harness_respawn_used.remove(&session_key);
                 warm_harness_disabled.remove(&session_key);
@@ -3461,6 +3527,21 @@ fn drive_loop(
                         );
                         return Ok(report);
                     }
+                    let Some((refreshed_session, refreshed_frame)) =
+                        refresh_frame_for_retry(&input, None)?
+                    else {
+                        continue 'frames;
+                    };
+                    if !same_frame_position(&frame, &refreshed_frame) {
+                        refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
+                        continue 'frames;
+                    }
+                    frame = refreshed_frame;
+                    prompt_context =
+                        resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
+                    requested = requested_outputs(&frame)?;
+                    schema = requested_output_schema(&requested, &loaded_trait);
+                    refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                     let correction = RejectionClass::MissingSlot.format_correction(
                         &requested,
                         &schema,
@@ -3494,6 +3575,8 @@ fn drive_loop(
                             return Ok(report);
                         }
                     };
+                    pending_delivery_is_complete_frame =
+                        matches!(preparation.rung, CorrectionRung::CompleteFrame);
                     argv = preparation.argv.clone();
                     prompt = preparation.prompt.clone();
                     push_correction_retry_event(
@@ -3533,6 +3616,21 @@ fn drive_loop(
                         );
                         return Ok(report);
                     }
+                    let Some((refreshed_session, refreshed_frame)) =
+                        refresh_frame_for_retry(&input, None)?
+                    else {
+                        continue 'frames;
+                    };
+                    if !same_frame_position(&frame, &refreshed_frame) {
+                        refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
+                        continue 'frames;
+                    }
+                    frame = refreshed_frame;
+                    prompt_context =
+                        resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
+                    requested = requested_outputs(&frame)?;
+                    schema = requested_output_schema(&requested, &loaded_trait);
+                    refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                     let correction = RejectionClass::UnparseableOutput.format_correction(
                         &requested,
                         &schema,
@@ -3565,6 +3663,8 @@ fn drive_loop(
                             return Ok(report);
                         }
                     };
+                    pending_delivery_is_complete_frame =
+                        matches!(preparation.rung, CorrectionRung::CompleteFrame);
                     argv = preparation.argv.clone();
                     prompt = preparation.prompt.clone();
                     push_correction_retry_event(
@@ -3912,6 +4012,7 @@ fn drive_loop(
                 if let Some(system) = agent_system.filter(|_| cli.system_prompt_flag.is_none()) {
                     prompt = format!("{system}\n\n{prompt}");
                 }
+                pending_delivery_is_complete_frame = true;
                 if report.frames_attempted < budget.max_frames || !pending_wave_cache.is_empty() {
                     push_runtime_redispatch_event(
                         &mut report,
@@ -3975,6 +4076,8 @@ fn drive_loop(
                     return Ok(report);
                 }
             };
+            pending_delivery_is_complete_frame =
+                matches!(preparation.rung, CorrectionRung::CompleteFrame);
             argv = preparation.argv.clone();
             prompt = preparation.prompt.clone();
             push_correction_retry_event(
@@ -8605,7 +8708,7 @@ fn drive_mcp_frame(
             input.session_store.map(ToString::to_string),
         )
     };
-    let prompt = mcp_frame_prompt(
+    let mut prompt = mcp_frame_prompt(
         &session_arg,
         session_store_arg.as_deref(),
         current.frame,
@@ -8840,6 +8943,30 @@ fn drive_mcp_frame(
             );
             return Ok(false);
         }
+        let Some((refreshed_session, refreshed_frame)) =
+            refresh_frame_for_retry(input, current.elapsed_seconds)?
+        else {
+            return Ok(false);
+        };
+        if !same_frame_position(current.frame, &refreshed_frame) {
+            return Ok(false);
+        }
+        let loaded_trait = ctx_traits_io::run::load_trait_for_session(
+            input.file,
+            None,
+            &refreshed_session,
+            "mcp retry",
+        )?;
+        let refreshed_context =
+            resolved_frame_prompt(&loaded_trait, &refreshed_session, &refreshed_frame, &[])?;
+        prompt = mcp_frame_prompt(
+            &session_arg,
+            session_store_arg.as_deref(),
+            &refreshed_frame,
+            &refreshed_context,
+            current.role,
+            &plan.harness_id,
+        );
     }
 }
 
