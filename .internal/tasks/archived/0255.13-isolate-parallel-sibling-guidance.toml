@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.13"
 title = "Isolate parallel sibling guidance"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-26"
+origin = "run run-5bd3c359ea2adc27955a08dfc658bd1d26102ca3c37db6660619c2322869b612 merged as e84fb47da25ec9fbefc2da81295ad919530964de"
 content = """
 ## Dependency gate
 Before any implementation edit, require the complete joined landed state of ready dependency `0255.12` and every transitive dependency. Grounding was read-only at clean HEAD `a8eda02ec7fb9c4faf4c67d11adeecee526746fe`; `git status --porcelain=v1` was empty, no file was edited, and no validation command ran. That baseline is not implementation-ready: `SequenceItem` has no prompt-scoped `intent` or `behavior` in `modules/core/src/trait/procedure/model.rs:914-1019`; `modules/core/src/model_view/compile.rs::frame_guidance` is root-only and infallible at lines 511-544; `modules/cli/src/app/frame_prompt.rs::resolved_frame_prompt` supplies only root guidance at lines 463-489; `resolve_declared_item` remains private in `modules/cli/src/app/preview.rs:216-262`; and `modules/cli/tests/proof_agent_intent_dispatch.rs` does not exist. Stop before edits and report the first absent or materially different joined contract. Missing dependency work is a blocker, not permission to recreate, rename, repair, or partially substitute dependency-owned work in this task.
@@ -93,3 +95,19 @@ expect = 'test result: ok\. 1 passed; 0 failed'
 name = "parallel sibling guidance isolation passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "e84fb47da25ec9fbefc2da81295ad919530964de"
+
+[[closure.checks]]
+name = "parallel sibling guidance dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "parallel sibling guidance isolation passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.11"
 title = "Refresh loop prompt guidance"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-4e207362d525ee71ec8b2d1daf3ff4c95ad033df2fc2da583f3719be623493ab merged as c9782ef039e75b7d1307a4d2311a81940021ec03"
 content = """
 ## Dependency gate
 Before any implementation edit, require the complete joined landed state of `0255.10` and every transitive dependency. Grounding was read-only at clean HEAD `fe94de9c`; no validation command ran and no file was edited. That baseline is not implementation-ready: `SequenceItem` has no prompt-scoped `intent` or `behavior`; `modules/core/src/model_view/compile.rs::frame_guidance` is root-only and infallible; `modules/cli/src/app/frame_prompt.rs::resolved_frame_prompt` supplies only root guidance; `resolve_declared_item` remains private in `modules/cli/src/app/preview.rs`; and `modules/cli/tests/proof_agent_intent_dispatch.rs` does not exist. Stop before edits and report the first absent or materially different joined contract. Missing dependency work is a blocker, not permission to recreate it in this task.
@@ -90,3 +92,19 @@ expect = 'test result: ok\. 1 passed; 0 failed'
 name = "loop leaf guidance passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "c9782ef039e75b7d1307a4d2311a81940021ec03"
+
+[[closure.checks]]
+name = "loop ready prompt dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "loop leaf guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

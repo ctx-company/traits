@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0252.1"
 title = "One output grammar: every command ends in a panel"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-6aafbdfc5111423fecca460479e653bb656bd3db702f00b8e5994f9655886eb3 merged as f3bc4f55038f7507c2e4176df97945f9b38201cc"
 content = """
 The vehicle already exists: the P465 panel kit
 (modules/cli/src/app/presentation.rs) — header line, `│` gutter, aligned
@@ -50,3 +52,7 @@ or worktree rows outside `--verbose`.
 
 [relations]
 parent = "0252"
+
+[closure]
+mode = "merge"
+commit = "f3bc4f55038f7507c2e4176df97945f9b38201cc"

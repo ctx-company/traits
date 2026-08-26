@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0255.10"
 title = "Dispatch branch leaf guidance"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-25"
+origin = "run run-d53b00d767a914f8464c3301f3978786b1bc72231d137ac1a36becf39bbd2d88 merged as 11a804c8cf05d18281d268c1f69057b9f86e36f8"
 content = """
 ## Dependency gate
 Before any implementation edit, require the complete joined landed state of `0255.9` and every transitive dependency. Grounding was read-only at clean HEAD `7ee3d86e`; no validation command ran and no file was edited. That baseline is not implementation-ready: `SequenceItem` has no prompt `intent` or `behavior` in `modules/core/src/trait/procedure/model.rs:914-1019`; `frame_guidance` is root-only and infallible in `modules/core/src/model_view/compile.rs:511-544`; `resolved_frame_prompt` resolves root-only guidance in `modules/cli/src/app/frame_prompt.rs:463-489`; `resolve_declared_item` remains private in `modules/cli/src/app/preview.rs:216-262`; and `modules/cli/tests/proof_agent_intent_dispatch.rs` does not exist. Stop before edits and report the first absent or mismatched joined contract. Every contract absence or mismatch is a blocker, not permission to recreate dependency work in this task.
@@ -86,3 +88,19 @@ expect = 'test result: ok\. 1 passed; 0 failed'
 name = "branch leaf guidance passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "11a804c8cf05d18281d268c1f69057b9f86e36f8"
+
+[[closure.checks]]
+name = "branch ready prompt dispatch proof passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "branch leaf guidance passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"
