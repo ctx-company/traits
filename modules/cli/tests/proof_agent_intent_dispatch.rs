@@ -97,6 +97,22 @@ fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
         &script,
         r#"#!/bin/sh
 if [ "$1" = "--probe" ]; then printf 'capture-1.0\n'; exit 0; fi
+if [ "$1" = "--fixture-warm" ]; then
+  printf '%s\n' "$@" > __CAPTURE__.warm.args.$$
+  printf '%s\n' "$$" >> __CAPTURE__.warm.pids
+  OFFSET=0
+  for arg; do
+    case "$arg" in *'SHARED A SYSTEM'*) OFFSET=2 ;; esac
+  done
+  COUNT=0
+  while IFS= read -r MESSAGE; do
+    printf '%s\n' "$MESSAGE" > __CAPTURE__.warm.$$.message-$COUNT.json
+    key=refresh-$((COUNT + OFFSET + 1))
+    printf '{"type":"result","session_id":"fixture-warm-session","result":"{\\"%s\\":\\"ok\\"}"}\n' "$key"
+    COUNT=$((COUNT + 1))
+  done
+  exit 0
+fi
 printf '%s\n' "$@" > __CAPTURE__.args
 ctx=
 for arg; do
@@ -197,7 +213,8 @@ output = ["slot:answer"]
 
     let runtime = |transport: &str| {
         format!(
-            "schema-version = \"0.4\"\n\n[harness.capture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\", \"mcp\"]\nversion-probe = [\"--probe\"]\n\n[harness.capture.cli]\nargv = []\nprompt-via = \"arg\"\noutput = \"raw-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[harness.capture.mcp]\nmcp-config-flag = \"--mcp-config\"\nsystem-prompt-flag = \"--mcp-system\"\n\n[agent.role.worker]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.parallel-direct-agent]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.parallel-nested-agent]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n",
+            "schema-version = \"0.4\"\n\n[harness.capture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\", \"mcp\"]\nversion-probe = [\"--probe\"]\n\n[harness.capture.cli]\nargv = []\nprompt-via = \"arg\"\noutput = \"raw-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[harness.capture.mcp]\nmcp-config-flag = \"--mcp-config\"\nsystem-prompt-flag = \"--mcp-system\"\n\n[harness.resident]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\"]\nversion-probe = [\"--probe\"]\n\n[harness.resident.cli]\nargv = []\nwarm-argv = [\"--fixture-warm\"]\nsession-flag = \"--session\"\nprompt-via = \"stdin\"\noutput = \"claude-stream-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[agent.role.worker]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.parallel-direct-agent]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.parallel-nested-agent]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.local-a]\nharness = \"resident\"\ntransport = \"cli\"\n\n[agent.role.shared-a]\nharness = \"resident\"\ntransport = \"cli\"\n\n[agent.role.shared-b]\nharness = \"resident\"\ntransport = \"cli\"\n\n[agent.role.mcp-a]\nharness = \"capture\"\ntransport = \"{transport}\"\n\n[agent.role.mcp-b]\nharness = \"capture\"\ntransport = \"{transport}\"\n",
+            script.to_string_lossy(),
             script.to_string_lossy(),
         )
     };
@@ -5313,5 +5330,402 @@ output = ["slot:answer"]
     };
     assert_retry_captures("cli", "CTX_TEST_CLI_FAIL_FIRST", "--cli-system");
     assert_retry_captures("mcp", "CTX_TEST_MCP_NO_ADVANCE", "--mcp-system");
+
+    // A resident CLI process receives a new complete prompt on each turn. The
+    // shared pair deliberately changes both role and prompt scope while
+    // retaining one declared session, whereas the final pair uses ordinary
+    // MCP dispatch so the two transport paths are covered in one drive.
+    let refresh_header = nested_canonical_base.split_once("[procedure]").unwrap().0;
+    let refresh_fixture = format!(
+        r#"{refresh_header}[[session]]
+id = "pair"
+
+[[agent]]
+id = "local-a"
+description = "Local resident A."
+system = "LOCAL A SYSTEM"
+session = "persistent"
+[agent.intent]
+require = [{{ id = "local-a-agent", summary = "Local A agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "local-a-agent-tone", summary = "Local A agent tone." }}]
+
+[[agent]]
+id = "shared-a"
+description = "Shared resident A."
+system = "SHARED A SYSTEM"
+session = "session:pair"
+[agent.intent]
+require = [{{ id = "shared", summary = "Shared A replacement." }}, {{ id = "shared-a-agent", summary = "Shared A agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "shared-tone", summary = "Shared A tone." }}, {{ id = "shared-a-agent-tone", summary = "Shared A agent tone." }}]
+
+[[agent]]
+id = "shared-b"
+description = "Shared resident B."
+system = "SHARED B SYSTEM"
+session = "session:pair"
+[agent.intent]
+require = [{{ id = "shared", summary = "Shared B replacement." }}, {{ id = "shared-b-agent", summary = "Shared B agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "shared-tone", summary = "Shared B tone." }}, {{ id = "shared-b-agent-tone", summary = "Shared B agent tone." }}]
+
+[[agent]]
+id = "mcp-a"
+description = "MCP A."
+system = "MCP A SYSTEM"
+[agent.intent]
+require = [{{ id = "mcp-a-agent", summary = "MCP A agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "mcp-a-agent-tone", summary = "MCP A agent tone." }}]
+
+[[agent]]
+id = "mcp-b"
+description = "MCP B."
+system = "MCP B SYSTEM"
+[agent.intent]
+require = [{{ id = "mcp-b-agent", summary = "MCP B agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "mcp-b-agent-tone", summary = "MCP B agent tone." }}]
+
+[[slot]]
+id = "refresh-1"
+schema = "schema:text"
+description = "Refresh one."
+[[slot]]
+id = "refresh-2"
+schema = "schema:text"
+description = "Refresh two."
+[[slot]]
+id = "refresh-3"
+schema = "schema:text"
+description = "Refresh three."
+[[slot]]
+id = "refresh-4"
+schema = "schema:text"
+description = "Refresh four."
+[[slot]]
+id = "refresh-5"
+schema = "schema:text"
+description = "Refresh five."
+[[slot]]
+id = "refresh-6"
+schema = "schema:text"
+description = "Refresh six."
+
+[procedure]
+description = "Refresh resident guidance."
+[[procedure.sequence]]
+id = "refresh-local-1"
+title = "Refresh local one"
+agent = "agent:local-a"
+prompt = "Refresh local one."
+intent = {{ require = [{{ id = "local-1-prompt", summary = "Local one prompt guidance." }}] }}
+behavior = {{ tone = [{{ id = "local-1-prompt-tone", summary = "Local one prompt tone." }}] }}
+output = ["slot:refresh-1"]
+[[procedure.sequence]]
+id = "refresh-local-2"
+title = "Refresh local two"
+agent = "agent:local-a"
+prompt = "Refresh local two."
+intent = {{ require = [{{ id = "local-2-prompt", summary = "Local two prompt guidance." }}] }}
+behavior = {{ tone = [{{ id = "local-2-prompt-tone", summary = "Local two prompt tone." }}] }}
+output = ["slot:refresh-2"]
+[[procedure.sequence]]
+id = "refresh-shared-a"
+title = "Refresh shared A"
+agent = "agent:shared-a"
+prompt = "Refresh shared A."
+intent = {{ require = [{{ id = "shared", summary = "Shared A prompt replacement." }}, {{ id = "shared-a-prompt", summary = "Shared A prompt guidance." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Shared A prompt tone." }}, {{ id = "shared-a-prompt-tone", summary = "Shared A prompt tone marker." }}] }}
+output = ["slot:refresh-3"]
+[[procedure.sequence]]
+id = "refresh-shared-b"
+title = "Refresh shared B"
+agent = "agent:shared-b"
+prompt = "Refresh shared B."
+intent = {{ require = [{{ id = "shared", summary = "Shared B prompt replacement." }}, {{ id = "shared-b-prompt", summary = "Shared B prompt guidance." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Shared B prompt tone." }}, {{ id = "shared-b-prompt-tone", summary = "Shared B prompt tone marker." }}] }}
+output = ["slot:refresh-4"]
+[[procedure.sequence]]
+id = "refresh-mcp-a"
+title = "Refresh MCP A"
+agent = "agent:mcp-a"
+prompt = "Refresh MCP A."
+intent = {{ require = [{{ id = "mcp-a-prompt", summary = "MCP A prompt guidance." }}] }}
+behavior = {{ tone = [{{ id = "mcp-a-prompt-tone", summary = "MCP A prompt tone." }}] }}
+output = ["slot:refresh-5"]
+[[procedure.sequence]]
+id = "refresh-mcp-b"
+title = "Refresh MCP B"
+agent = "agent:mcp-b"
+prompt = "Refresh MCP B."
+intent = {{ require = [{{ id = "mcp-b-prompt", summary = "MCP B prompt guidance." }}] }}
+behavior = {{ tone = [{{ id = "mcp-b-prompt-tone", summary = "MCP B prompt tone." }}] }}
+output = ["slot:refresh-6"]
+"#
+    );
+    fs::write(&generated, &refresh_fixture).unwrap();
+    fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("mcp")).unwrap();
+    require_success(
+        "approve refresh fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let refresh_previews = preview_all("resident refresh");
+    assert_eq!(refresh_previews.len(), 6);
+    for suffix in ["", ".args", ".calls", ".warm.pids"] {
+        let _ = fs::remove_file(format!("{}{}", capture.display(), suffix));
+    }
+    for entry in fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.warm."))
+        {
+            let _ = fs::remove_file(path);
+        }
+    }
+    let refresh_session = home.join("refresh-resident.json");
+    let refresh_run = support::run_ctx_with_env(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            refresh_session.to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+            "--max-retries",
+            "1",
+            "--frame-seconds",
+            "2",
+        ],
+        &repo,
+        &home,
+        &[],
+    );
+    assert_exit_code(&refresh_run, 0);
+    let (refresh_stdout, refresh_stderr) = utf8(&refresh_run);
+    let refresh_report: serde_json::Value = serde_json::from_str(
+        &refresh_stdout
+            .lines()
+            .skip_while(|line| !line.trim_start().starts_with('{'))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap_or_else(|error| {
+        panic!("refresh drive was not JSON: {error}\n{refresh_stdout}\n{refresh_stderr}")
+    });
+    let refresh_drive = &refresh_report["value"]["drive"];
+    assert_eq!(refresh_drive["status"], "completed", "{refresh_drive}");
+    for event in refresh_drive["events"].as_array().unwrap() {
+        assert!(
+            !matches!(
+                event["event"].as_str(),
+                Some("harness-warm-fallback" | "harness-warm-respawn" | "harness-warm-disabled")
+            ),
+            "{refresh_drive}"
+        );
+    }
+    let warm_pids = fs::read_to_string(capture.with_extension("txt.warm.pids")).unwrap();
+    assert_eq!(
+        warm_pids.lines().count(),
+        2,
+        "resident sessions respawned: {warm_pids}"
+    );
+    let mut warm_prompts = Vec::new();
+    let mut warm_args = Vec::new();
+    for entry in fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy();
+        if name.starts_with("capture.txt.warm.") && name.contains(".message-") {
+            let message: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            warm_prompts.push(
+                message["message"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            );
+        } else if name.starts_with("capture.txt.warm.args.") {
+            warm_args.push(fs::read_to_string(path).unwrap());
+        }
+    }
+    assert_eq!(warm_prompts.len(), 4, "resident turns: {warm_prompts:?}");
+    assert_eq!(warm_args.len(), 2);
+    for (index, marker) in [
+        "local-1-prompt",
+        "local-2-prompt",
+        "shared-a-prompt",
+        "shared-b-prompt",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let prompt = warm_prompts
+            .iter()
+            .find(|prompt| prompt.contains(*marker))
+            .unwrap_or_else(|| panic!("missing {marker}: {warm_prompts:?}"));
+        assert_eq!(
+            extract_intent(prompt),
+            extract_intent(&refresh_previews[index]),
+            "{marker}"
+        );
+        assert_eq!(
+            extract_behavior(prompt),
+            extract_behavior(&refresh_previews[index]),
+            "{marker}"
+        );
+        let intent = prompt.find("<intent>").unwrap();
+        if let Some(include) = prompt.find("<include>") {
+            assert!(include < intent, "{prompt}");
+        }
+        assert!(
+            intent < prompt.find("<behavior>").unwrap()
+                && prompt.find("<behavior>").unwrap() < prompt.find("<agent>").unwrap()
+                && prompt.find("<agent>").unwrap() < prompt.find("<input>").unwrap(),
+            "{prompt}"
+        );
+        assert_eq!(
+            extract_intent(prompt).matches("id=\"shared\"").count(),
+            1,
+            "{prompt}"
+        );
+        assert_eq!(
+            extract_behavior(prompt)
+                .matches("id=\"shared-tone\"")
+                .count(),
+            1,
+            "{prompt}"
+        );
+        assert!(
+            !extract_intent(prompt).contains("SYSTEM")
+                && !extract_behavior(prompt).contains("SYSTEM"),
+            "{prompt}"
+        );
+    }
+    let local_args = warm_args
+        .iter()
+        .find(|args| args.contains("LOCAL A SYSTEM"))
+        .unwrap();
+    let shared_args = warm_args
+        .iter()
+        .find(|args| args.contains("SHARED A SYSTEM"))
+        .unwrap();
+    assert!(
+        local_args
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair == ["--cli-system", "LOCAL A SYSTEM"])
+    );
+    assert!(
+        shared_args
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair == ["--cli-system", "SHARED A SYSTEM"])
+    );
+    assert!(!shared_args.contains("SHARED B SYSTEM"));
+    let mcp_prompts = read_frames(2);
+    for (index, marker) in ["mcp-a-prompt", "mcp-b-prompt"].iter().enumerate() {
+        assert!(
+            mcp_prompts[index].contains(marker),
+            "{}",
+            mcp_prompts[index]
+        );
+        assert_eq!(
+            extract_intent(&mcp_prompts[index]),
+            extract_intent(&refresh_previews[index + 4])
+        );
+        assert_eq!(
+            extract_behavior(&mcp_prompts[index]),
+            extract_behavior(&refresh_previews[index + 4])
+        );
+        assert!(!mcp_prompts[index].contains(if index == 0 {
+            "mcp-b-prompt"
+        } else {
+            "mcp-a-prompt"
+        }));
+    }
+    let refresh_active = home.join("refresh-active.json");
+    assert_exit_code(
+        &run_ctx(
+            &[
+                "traits",
+                "run",
+                "--file",
+                generated.to_str().unwrap(),
+                "--no-drive",
+                "--out",
+                refresh_active.to_str().unwrap(),
+            ],
+            &repo,
+            &home,
+        ),
+        0,
+    );
+    assert_exit_code(
+        &support::run_ctx_with_env(
+            &[
+                "traits",
+                "internal",
+                "drive",
+                "--file",
+                generated.to_str().unwrap(),
+                "--session",
+                refresh_active.to_str().unwrap(),
+                "--max-frames",
+                "1",
+                "--no-worktree",
+                "--no-wait",
+                "--progress",
+                "none",
+            ],
+            &repo,
+            &home,
+            &[],
+        ),
+        0,
+    );
+    let active_refresh = session_preview("refresh active", &refresh_active, None);
+    assert_eq!(
+        extract_intent(&active_refresh),
+        extract_intent(&refresh_previews[1])
+    );
+    assert_eq!(
+        extract_behavior(&active_refresh),
+        extract_behavior(&refresh_previews[1])
+    );
+    for (index, step) in [
+        "refresh-local-1",
+        "refresh-local-2",
+        "refresh-shared-a",
+        "refresh-shared-b",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let historical = session_preview("refresh historical", &refresh_session, Some(step));
+        assert_eq!(
+            extract_intent(&historical),
+            extract_intent(&refresh_previews[index])
+        );
+        assert_eq!(
+            extract_behavior(&historical),
+            extract_behavior(&refresh_previews[index])
+        );
+    }
     fs::write(&generated, &for_each_fixture).unwrap();
 }
