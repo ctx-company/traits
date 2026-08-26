@@ -4,27 +4,617 @@ title = "Delete sessions by group"
 status = "ready"
 raised = "2026-08-24"
 content = """
-## Shape
+Parent ruling 7: `ctx traits sessions delete --failed`. Plus the dashboard
+counterpart — deleting a group header deletes that group behind ONE confirm
+naming the count.
 
-- CLI: `ctx traits sessions delete --failed` (owner-specified spelling)
-  deletes every failed session in the current repo's store. Never a live
-  run: probe the driver lock first — the same kernel-backed liveness the
-  dashboard uses — and skip holders. The flag family is extensible
-  (--interrupted and friends later); only `--failed` is in scope now.
-- Output through 0252.1's grammar: a panel reporting `deleted: <n>` (and
-  `skipped: <n> live` only when nonzero).
-- Dashboard: deleting a group header deletes the group's sessions behind
-  ONE confirm naming the count. Uses whatever confirm exists today;
-  0252.3 converts it to buttons when it lands — no dependency.
+There is one robust artifact-deletion path in this codebase and it is
+private inside `dashboard.rs`. This task adds a second and a third CONSUMER
+of it, never a second implementation.
+
+## Decisions this plan fixes (the code does not decide them today)
+
+1. **`--failed` means exact coarse `Status::Failed`** on the persisted
+   ledger (`modules/core/src/procedure/session.rs:95-108`) — nothing else.
+   NOT the dashboard's `SessionGroup::Failed`, which also folds `Rejected`,
+   `Blocked`, `BlockedCommandPermissionRequired`, `BlockedAgentUnassigned`,
+   unreadable, interrupted, and killed (`dashboard.rs:1884-1955`). The
+   target names `--interrupted` as the next sibling selector; folding
+   interrupted into `--failed` now would leave that flag nothing to select.
+   `DriveOutcomeKind` is deliberately NOT consulted: `drive.rs:1492-1525`
+   persists `command-step-failed` / `harness-failed` / … as the outcome for
+   sessions whose coarse status is `Failed`, so matching on the outcome kind
+   would UNDER-select ordinary failed runs. The coarse status is the one
+   ledger fact that already groups every terminal failure reason.
+2. **An unreadable ledger is never selected by `--failed`.** A parse failure
+   is not evidence of `Status::Failed`. Unreadable rows stay visible in the
+   dashboard's failed group and stay deletable there, row by row and through
+   the group verb, on the existing known-artifacts-only branch.
+3. **`skipped: <n> live` counts `--failed` candidates only** — a candidate
+   whose driver lock is `DriverProbe::Held` at probe time, plus one whose
+   `try_acquire_maintenance` returns `None` (the TOCTOU close). Live rows
+   that are not `--failed` candidates are never counted; the panel would
+   otherwise report a number about sessions the command never proposed to
+   touch. A probe ERROR is neither deleted nor live-skipped: it fails closed
+   as a per-item refusal.
+4. **`deleted` counts actually-removed ledgers.** `execute_delete` today
+   returns a joined string and may remove sidecars even when the ledger
+   removal failed, so a count cannot be parsed out of it — hence the typed
+   `DeleteReport` in Step 1. A residual artifact (worktree or branch left in
+   place, sidecar removal failure) does not change `deleted`; it is printed
+   to STDERR, one line per item, and flips the panel's closing state to
+   `blocked` with exit 1. Panel ROWS stay exactly the two the target fixes.
+5. **The dashboard's live header is not special-cased.** Group delete probes
+   every row of the selected group and skips held ones. For `live` that
+   normally means every row is skipped and no modal opens. A live-group row
+   whose driver has since died is unheld, and deleting it is correct — one
+   code path, and the refusal is derived from probe evidence rather than
+   from a hardcoded group identity.
+6. **Deleted rows disappear on the center's next discovery scan (≤2s), not
+   synchronously.** `state.reload()` reprojects the worker's cached center
+   rows (`dashboard.rs:1425-1433`, `dashboard/worker.rs:398-449`); the
+   center's scan emits `CenterDelta::Ended` for a vanished ledger
+   (`center.rs:1564-1633`). This task does NOT add local row surgery — that
+   would violate subscription ownership. No test asserts immediate removal.
+7. **Group eligibility is rechecked as a GROUP.**
+   `DeleteEligibility::Session(SessionClass)` is not sufficient:
+   `AwaitingAgentOutput` (group `resumable`) and `AwaitingInput` (group
+   `pending`) are both `SessionClass::Resumable`, so a row can leave its
+   group between confirm and execution while passing today's recheck. Step 3
+   adds a group-valued eligibility rechecked under maintenance ownership.
+
+## Files touched (repo-relative, nothing else)
+
+- `modules/cli/src/app.rs`
+- `modules/cli/src/app/session_delete.rs` (NEW)
+- `modules/cli/src/app/dashboard.rs`
+- `modules/cli/src/app/surface/cli.rs`
+- `modules/cli/src/app/command_handlers.rs`
+- `modules/cli/src/app/help_surface.rs`
+- `modules/cli/src/app/presentation.rs`
+- `modules/cli/tests/support/src/lib.rs`
+- `modules/cli/tests/proof_repo_qualifier.rs`
+- `modules/cli/tests/proof_output_style.rs`
+- `modules/cli/tests/proof_sessions_delete.rs` (NEW)
+
+Explicitly NOT touched: `modules/io/*` (every primitive this task needs is
+already public), `modules/cli/src/app/dashboard/keymap.rs` (SESSIONS already
+advertises `d delete`; 0252.6 owns that registry), `tui_kit.rs` (0252.3 owns
+it; this task uses `Modal::confirm` as it exists today), `run.rs`,
+`drive.rs`, `run_view.rs`.
+
+## Step 0 — read before editing (no edits)
+
+Re-read `dashboard.rs:965-1003` (`DeletePlan`/`artifact_lines`),
+`:4758-4958` (`plan_delete_for_ledger`, `plan_delete`, `execute_delete`,
+`execute_confirmed_delete`), `:4961-4999` (`DeleteEligibility`), and the
+delete tests at `:10244-10923`. Everything moved in Step 1 moves VERBATIM;
+only the return types change.
+
+## Step 1 — extract the one destructive path (`session_delete.rs`, `app.rs`)
+
+Add `mod session_delete;` to `modules/cli/src/app.rs`, in the existing
+alphabetical block (between `search` and `stats`).
+
+MOVED out of `dashboard.rs` into `modules/cli/src/app/session_delete.rs`,
+bodies unchanged unless stated, every item `pub(crate)` and every
+`DeletePlan` field `pub(crate)` (dashboard tests build the literal):
+
+- `pub(crate) struct DeletePlan { ledger_path, driver_lock_path,
+  sidecars_root, worktree, worktree_note }` and
+  `pub(crate) fn artifact_lines(&self) -> Vec<String>` — byte-identical.
+- `pub(crate) fn plan_delete_for_ledger(ledger_path: &camino::Utf8Path,
+  repo_path: Option<&str>, worktree:
+  Option<&ctx_traits_core::procedure::session::WorktreeProvenance>) ->
+  DeletePlan` — byte-identical.
+- `pub(crate) fn plan_delete(ledger_path: &camino::Utf8Path,
+  driver_lock_path: Option<camino::Utf8PathBuf>, sidecars_root:
+  Option<camino::Utf8PathBuf>, worktree_provenance: Option<(&str, &str)>,
+  same_repo: bool, verified: Option<(camino::Utf8PathBuf,
+  camino::Utf8PathBuf)>) -> DeletePlan` — byte-identical.
+
+NEW typed results, so a batch can count without parsing prose:
+
+- `pub(crate) struct DeleteReport { pub(crate) ledger_removed: bool,
+  pub(crate) left_behind: Vec<String>, messages: Vec<String> }` with
+  `pub(crate) fn message(&self) -> String` returning
+  `self.messages.join("; ")`.
+- `pub(crate) enum ConfirmedDeleteOutcome { DriverHeld, SessionChanged,
+  EligibilityChanged, PlanChanged, Executed(DeleteReport) }` with
+  `pub(crate) fn message(&self) -> String` returning EXACTLY today's
+  strings: `"delete refused: driver lock is now held"`, `"delete refused:
+  session changed; reopen it"`, `"delete refused: session eligibility
+  changed; reopen it"`, `"delete plan changed; review the refreshed
+  artifact list"`, and `report.message()` for `Executed`. The dashboard's
+  footer text is therefore unchanged, which is why the existing
+  `apply_session_action` tests keep asserting the same strings.
+
+CHANGED signatures:
+
+- `pub(crate) fn execute_delete(plan: &DeletePlan) -> DeleteReport` — same
+  body and same pushed strings, in the same order; additionally sets
+  `ledger_removed = true` only on `Ok(())` from
+  `std::fs::remove_file(plan.ledger_path…)`, and pushes into `left_behind`
+  exactly the lines it already builds for a failure: `worktree … left in
+  place: …`, `branch … left in place…`, `ledger left in place: …`,
+  `sidecars left in place: …`. `driver lock retained (stable lock inode)`
+  is NOT a failure and does not enter `left_behind` — the retained inode is
+  the deliberate anti-race behavior at `dashboard.rs:4888-4891`.
+- `pub(crate) fn execute_confirmed_delete<F>(ledger_path:
+  &camino::Utf8Path, repo_path: Option<&str>, session_id: &str,
+  allows_unreadable_ledger: bool, eligible: F, confirmed: &DeletePlan) ->
+  crate::Result<ConfirmedDeleteOutcome> where F:
+  Fn(&ctx_traits_core::procedure::session::Session) -> bool` — the body is
+  today's, with `expected_eligibility.allows_unreadable_ledger()` replaced
+  by the `allows_unreadable_ledger` parameter and
+  `expected_eligibility.matches(&current)` by `eligible(&current)`.
+  Generic over the predicate rather than over a moved eligibility type:
+  `DeleteEligibility` reads `SessionClass`/`MergeClass`/`classify_session`/
+  `classify_merge`, all dashboard-private, and moving that classifier
+  family is a blast radius this task has no reason to pay for.
+  Preserved exactly: `try_acquire_maintenance` first, authoritative reread,
+  identity check, eligibility check, plan rebuilt under the lock, the
+  `confirmed.driver_lock_path.is_none()` suppression of the lock file
+  maintenance may itself have created, `artifact_lines()` drift refusal,
+  `clear_stale_metadata()` before execution.
+
+REMOVED from `dashboard.rs`: `struct DeletePlan`, `impl DeletePlan`,
+`fn plan_delete_for_ledger`, `fn plan_delete`, `fn execute_delete`,
+`fn execute_confirmed_delete`. `dashboard.rs` gains
+`use crate::app::session_delete::{ConfirmedDeleteOutcome, DeletePlan,
+execute_confirmed_delete, plan_delete, plan_delete_for_ledger};` so every
+existing call site — including all of `mod tests` — compiles unchanged.
+
+Call sites that DO change, all mechanical:
+
+- `dashboard.rs:5419` (SESSIONS delete) and `:5601` (MERGES drop):
+  `state.message = Some(execute_confirmed_delete(…,
+  eligibility.allows_unreadable_ledger(), |session|
+  eligibility.matches(session), &plan)?.message());`
+- the direct `execute_confirmed_delete` assertions in `mod tests`
+  (`:10260`, `:10291`, `:10336`, `:10429`, `:10668`): append `.message()`
+  and pass the two new arguments the same way. Their assertions do not
+  change — that is the point: the extraction is proved by the SAME
+  replacement-session, eligibility-change, plan-drift,
+  readable-to-unreadable, unchanged-readable, unchanged-unreadable, and
+  worktree/branch-preservation tests still passing, routed through the
+  shared implementation.
+
+Build before continuing:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 2 — bulk selection and the CLI handler (`session_delete.rs`)
+
+NEW symbols in the same module:
+
+- `#[derive(Default)] pub(crate) struct BulkDeleteOutcome { pub(crate)
+  deleted: usize, pub(crate) skipped_live: usize, pub(crate) refusals:
+  Vec<String> }`
+- `pub(crate) fn delete_failed_sessions_in(store: &camino::Utf8Path) ->
+  crate::Result<BulkDeleteOutcome>` — the whole scan, testable against a
+  scratch directory:
+  1. `ctx_traits_io::run_session::session_store_paths(Some(store.as_str()))?`
+     — regular `*.json` files directly under that ONE store, sorted,
+     empty for a missing store. `read_dir`'s `file_type()` does not follow
+     symlinks, so a symlinked entry is already excluded.
+  2. `read_run_session(&path)`; `Err(_) => continue` (decision 2). That
+     call also rejects symlink ancestors and a symlink leaf before
+     parsing, so the fail-closed boundary is preserved rather than
+     re-implemented with a raw read.
+  3. `if session.status != Status::Failed { continue }` (decision 1).
+  4. `run_control::probe(&path)`: `Held(_)` → `skipped_live += 1`,
+     continue; `Err(error)` → push `format!("{session_id}: could not probe
+     the driver lock: {error}")` into `refusals`, continue (decision 3);
+     `Unheld { .. }` → fall through.
+  5. `plan_delete_for_ledger(&path, None,
+     session.provenance.worktree.as_ref())`. `repo_path: None` is correct
+     and not a shortcut: this store IS the current repository's store, and
+     `plan_delete_for_ledger` reads `repo_path.is_none()` as
+     same-repository.
+  6. `execute_confirmed_delete(&path, None, session.session_id.as_str(),
+     false, |current| current.status == Status::Failed, &plan)`. The
+     recheck under maintenance ownership is what closes the window in
+     which a stale `Failed` ledger is re-driven — liveness overrides
+     persisted state, so classification alone is never sufficient.
+     `allows_unreadable_ledger: false` per decision 2.
+  7. Fold the result: `DriverHeld` → `skipped_live += 1` (decision 3);
+     `Executed(report)` → `deleted += report.ledger_removed as usize` and
+     one `refusals` line per `report.left_behind` entry; any other
+     `Ok(refused)` → one `refusals` line carrying `refused.message()`;
+     `Err(error)` → one `refusals` line. A single unreadable or
+     unprobeable ledger never aborts the sweep.
+- `pub(crate) fn delete_failed_sessions() -> crate::Result<BulkDeleteOutcome>`
+  — `delete_failed_sessions_in(&ctx_traits_io::run_session::default_session_store()?)`.
+  The ONLY production entry point, and the only place the
+  current-repository scope is chosen. No `--session-store` flag is added;
+  the parameterized form exists so the selection rules are unit testable
+  against a scratch store.
+- `pub(crate) fn handle_sessions_delete(failed: bool) ->
+  crate::Result<ctx_traits_core::response::CommandOutput<()>>`:
+  - `if !failed { return Err(crate::Error::Command { message: "sessions
+    delete: choose what to delete, e.g. `--failed`".to_string() }); }` —
+    the Clap group in Step 4 already guarantees this; the guard keeps the
+    handler honest if a later selector changes the parser shape.
+  - run `delete_failed_sessions()?`;
+  - print each `refusals` line to STDERR with `eprintln!`, before the panel;
+  - build the panel through the landed grammar and nothing else:
+    `Panel::new("ctx", "sessions delete", status)` with
+    `status = PanelStatus::Passed("passed".to_string())` when `refusals` is
+    empty, else `PanelStatus::Blocked("blocked".to_string())`;
+    `.row(PanelRow::toned("deleted", outcome.deleted.to_string(),
+    RowTone::Default))`; and, only when `outcome.skipped_live > 0`,
+    `.row(PanelRow::toned("skipped", format!("{} live",
+    outcome.skipped_live), RowTone::Default))`. No third row exists on any
+    path — no ledger, lock, worktree, selector, or `next:` row. `passed`
+    matches the surrounding command convention (`state`, `doctor`); only
+    run-end uses a capitalized closing word.
+  - `emit_human(false, &panel, HumanOutputMode::Compact, || Ok(()))?` —
+    `--json`/`--verbose` are out of scope, so the compact human branch is
+    the only branch.
+  - when `refusals` is non-empty, return
+    `Err(crate::Error::AlreadyReported { message: format!("sessions
+    delete: {} session(s) refused", outcome.refusals.len()), exit_code: 1 })`
+    so the dispatcher exits 1 without printing a second error line
+    (`command_handlers.rs:179-183`); otherwise `Ok(CommandOutput::new(()))`.
+
+## Step 3 — the dashboard group verb (`dashboard.rs`)
+
+NEW symbols:
+
+- `#[derive(Clone)] struct GroupDeleteTarget { session_id: String, plan:
+  DeletePlan, eligibility: DeleteEligibility }`
+- `SessionAction` gains `DeleteGroup { group: SessionGroup, targets:
+  Vec<GroupDeleteTarget> }`. ONE tag, one modal, applied once — the
+  existing `ModalHost` focus trap dispatches a resolved modal exactly once
+  through `apply_action` (`:2952-2965`, `:5087-5126`), and nothing here
+  opens or chains a per-child confirmation.
+- `DeleteEligibility` gains `SessionGroup(SessionGroup)`:
+  - `allows_unreadable_ledger()` → `false` for the new variant (unchanged
+    for the existing two).
+  - `matches()` → recompute the group from the authoritative ledger while
+    maintenance ownership is held, which means the session is definitively
+    not being driven, so `live = false` is a fact and not an assumption:
+    `let outcome = session.last_drive_outcome.as_ref().map(|o|
+    &o.outcome); session_group(classify_session(false, &session.status,
+    outcome), Some(&session.status), outcome) == expected`.
+    Consequence, stated deliberately: for `SessionGroup::Live` this can
+    never match, so the rare row that is confirmed unheld and then
+    re-driven refuses with today's eligibility message instead of being
+    deleted under a stale premise.
+- `fn open_group_delete_modal(state: &mut State, group: SessionGroup)`:
+  1. Walk `state.sessions`, keeping rows whose `session_group(row.class,
+     row.status.as_ref(), row.outcome.as_ref())` equals `group` — the same
+     function `rebuild_visible_sessions` buckets with. The header's cached
+     `count` is display state and is NOT the selection source.
+  2. Per kept row: `run_control::probe(&row.ledger_path)`. `Held(_)` →
+     `skipped_live += 1`; `Err(_)` → `unprobeable += 1`; `Unheld { .. }` →
+     build `plan_delete_for_ledger(&row.ledger_path,
+     row.repo_path.as_deref(), row.worktree.as_ref())` and push a target
+     with `eligibility =
+     DeleteEligibility::Session(SessionClass::Unreadable)` when
+     `row.class == SessionClass::Unreadable` (reusing the landed
+     known-artifacts-only branch, which is the only branch that can delete
+     a row whose ledger cannot prove anything), else
+     `DeleteEligibility::SessionGroup(group)`.
+  3. Empty targets → `state.message = Some(format!("delete refused:
+     nothing deletable in the {} group ({skipped_live} live,
+     {unprobeable} unprobeable)", group.label()));` and return with no
+     modal. This is the ordinary outcome of pressing `d` on the `live`
+     header (decision 5) and on an empty header.
+  4. Otherwise open exactly one `Modal::confirm("delete group", body)`
+     where `body` NAMES THE COUNT: `"Delete {n} session(s) in the {label}
+     group?"`, plus a `"{skipped_live} live session(s) are skipped."` line
+     when nonzero and a matching unprobeable line when nonzero. The target
+     requires only that the confirm name the count; a group modal does not
+     enumerate every artifact the way single-row delete does.
+  5. ALL-mode (`state.all_repos`) is unchanged: a foreign-repository row's
+     plan already records its worktree/branch as left behind
+     (`plan_delete`'s `same_repo` arm), because git operations are
+     repository-anchored. This task adds no override.
+
+CHANGED symbols:
+
+- `fn open_delete_modal(state: &mut State)` becomes the two-way seam and
+  nothing else:
+  ```
+  match state.sessions_visible.get(state.list_sessions.selected()) {
+      Some(VisibleRow::GroupHeader { group, .. }) => {
+          let group = *group;
+          open_group_delete_modal(state, group)
+      }
+      Some(VisibleRow::Session(_)) => open_session_delete_modal(state),
+      None => {}
+  }
+  ```
+  Today's entire body moves verbatim into
+  `fn open_session_delete_modal(state: &mut State)`, still entered through
+  `selected_session(state)`, so the per-row probe/refusal/warning/artifact
+  modal is unchanged. `selected_session` itself is NOT changed — it must
+  keep returning `None` on a header for `x`/`s`/`S`/`a`/Enter.
+- `fn apply_session_action(...)` gains the `SessionAction::DeleteGroup`
+  arm. For each target, re-resolve the row BY SESSION ID from
+  `state.sessions` (never by index — the standing doctrine the single-row
+  arm already follows), then call
+  `execute_confirmed_delete(&row.ledger_path, row.repo_path.as_deref(),
+  &target.session_id, target.eligibility.allows_unreadable_ledger(), |s|
+  target.eligibility.matches(s), &target.plan)`. Count `Executed(report)`
+  with `report.ledger_removed` as deleted; collect every other outcome, and
+  every `Err`, as a refusal string — a group delete must NOT abort the
+  remaining targets with `?` on one unprobeable ledger. Then:
+  ```
+  let mut message = format!("{}: deleted {deleted} of {total}", group.label());
+  if let Some(first) = refused.first() {
+      message.push_str(&format!("; {first}"));
+      if refused.len() > 1 {
+          message.push_str(&format!(" (+{} more)", refused.len() - 1));
+      }
+  }
+  state.message = Some(message);
+  state.reload();
+  ```
+  Bounded footer text, and `state.reload()` exactly as the single-row arm
+  does (decision 6).
+
+Build again:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 4 — the public command surface
+
+`modules/cli/src/app/surface/cli.rs`:
+
+- `TraitsCommand` gains, with a doc comment (Clap's `about` for the
+  generated tree and `internal help --json`):
+  ```
+  /// Bulk run-session maintenance for this repository's run-session store.
+  Sessions {
+      #[command(subcommand)]
+      subcommand: SessionsCommand,
+  },
+  ```
+  Visible — no `#[command(hide = true)]`. Distinct from the existing
+  hidden singular `ctx traits internal session …` (`:1467`, `:2179-2191`),
+  which is untouched.
+- ```
+  /// `ctx traits sessions ...` subcommands.
+  #[derive(Subcommand, Debug)]
+  pub enum SessionsCommand {
+      /// Delete run sessions selected by outcome.
+      Delete(SessionsDeleteArgs),
+  }
+
+  #[derive(Args, Debug)]
+  #[command(group(clap::ArgGroup::new("selector").required(true).multiple(true)))]
+  pub struct SessionsDeleteArgs {
+      /// Delete every failed session in this repository's run-session store.
+      #[arg(long, group = "selector")]
+      pub failed: bool,
+  }
+  ```
+  The required group is what makes a bare `ctx traits sessions delete`
+  fail instead of silently selecting everything, and `multiple(true)` is
+  what lets `--interrupted` join the family later as one added field. Only
+  `--failed` is implemented now; no `--json`, `--verbose`,
+  `--session-store`, or dry-run flag is added.
+- `traits_help_text()` (`:35-67`) gains one line in the `Manage:` block,
+  after `diff`, matching the variant's doc comment:
+  `  sessions    Bulk run-session maintenance: delete --failed`.
+  The help body is hand-authored, so a visible command without this line
+  would make the parser and the displayed release surface disagree. The
+  screen stays under its 40-row ceiling.
+
+`modules/cli/src/app/command_handlers.rs`: one arm in the exhaustive
+`TraitsCommand` match (`:287-879`), placed with the other manage commands:
+```
+Some(cli::TraitsCommand::Sessions { subcommand }) => match subcommand {
+    cli::SessionsCommand::Delete(args) => {
+        crate::app::session_delete::handle_sessions_delete(args.failed)
+    }
+},
+```
+
+`modules/cli/src/app/help_surface.rs`: add `"sessions"` to the `"manage"`
+arm of `classify` (`:58-97`). `classify` refuses to generate a report for
+an unclassified TOP-LEVEL name, so omitting this makes `ctx traits internal
+help --json` fail outright. Nested `delete` needs nothing —
+`build_command(.., false)` reports subcommands without classifying them.
+
+`modules/cli/src/app/presentation.rs`: add `"sessions"` to
+`REGISTERED_COMMAND_NAMES` and to `presentation_for`'s `Panel` arm. The
+unit gate `every_visible_traits_command_has_a_registry_entry` (`:1221-1259`)
+walks the real Clap tree in both directions and fails without both edits.
+
+## Step 5 — tests
+
+`modules/cli/tests/support/src/lib.rs` — one shared helper, moved rather
+than copied: `pub fn active_repo_key(repo: &Path, home: &Path) -> String`,
+the body currently private at
+`modules/cli/tests/proof_repo_qualifier.rs:156` (run `traits doctor
+--config`, read the `repo.active-key:` row). The new proof needs the same
+answer to locate the scratch store
+(`$XDG_CONFIG_HOME/ctx/traits/runs/<key>/`, per `state.rs:304-355,435-438`),
+and a second private copy is exactly the duplication this task is otherwise
+avoiding.
+
+`modules/cli/tests/proof_repo_qualifier.rs` — delete the private
+`active_repo_key` and import `support::active_repo_key`. Nothing else
+changes; its assertions are untouched.
+
+`modules/cli/src/app/session_delete.rs`, new `mod tests`:
+
+- `failed_selection_is_exact_status_failed` — write five ledgers into a
+  scratch store using the JSON-literal fixture shape already proven in
+  `modules/cli/tests/proof_center.rs:134-197` (`serde_json::from_value` →
+  `write_run_session`), with statuses `failed`, `failed`, `completed`,
+  `awaiting-agent-output`, `rejected`, plus one file that is not valid
+  JSON. Call `delete_failed_sessions_in(&store)`; assert `deleted == 2`,
+  `skipped_live == 0`, `refusals.is_empty()`, exactly the two `failed`
+  ledgers are gone, and the corrupt file and the other three ledgers
+  survive. This pins decisions 1 and 2 together: `rejected` is inside the
+  dashboard's failed GROUP and must not be selected, and an unreadable
+  ledger must not be selected.
+
+`modules/cli/src/app/dashboard.rs`, in the existing `mod tests`, reusing
+`scratch_ledger_path`, `unresolvable_trait_session_fixture`, `row_with_id`,
+`State::new_without_worker`, and `RatatuiPane::new_detached_for_test` — no
+committed repo content is read by any of them:
+
+- `group_delete_selects_only_the_captured_group` — populate
+  `state.sessions` with rows in at least two groups, select the `failed`
+  header, call `open_delete_modal`, and assert the opened tag is a single
+  `SessionAction::DeleteGroup` whose targets are exactly the failed rows'
+  session ids. (`probe` returns `Unheld` when no lock file exists, so this
+  test needs no lock fixtures; rows carry no worktree provenance, so
+  `plan_delete_for_ledger` does no git work.)
+- `group_delete_refuses_an_empty_group` — select a header whose group has
+  no rows; assert no modal opened and `state.message` names the group.
+- `group_delete_eligibility_refuses_a_row_that_left_its_group` — write a
+  `Status::Failed` ledger, capture
+  `DeleteEligibility::SessionGroup(SessionGroup::Failed)`, rewrite the
+  ledger with `Status::AwaitingInput`, then call
+  `session_delete::execute_confirmed_delete` with that eligibility; assert
+  `ConfirmedDeleteOutcome::EligibilityChanged` and that the ledger
+  survives. This is exactly the case today's `SessionClass`-only recheck
+  misses (both statuses are `SessionClass::Resumable`).
+- `group_delete_applies_every_target_behind_one_confirm` — two `failed`
+  ledgers, one `DeleteGroup` tag, one `apply_session_action` call; assert
+  both ledgers are gone and the message reads `failed: deleted 2 of 2`.
+
+`modules/cli/tests/proof_sessions_delete.rs` (NEW) — real process, built on
+`ScratchRoot`, `controlled_command`/`run_ctx`, `git_init`, and
+`active_repo_key`; ledgers written with the `proof_center.rs` JSON-literal
+shape through `ctx_traits_io::run_session::write_run_session`:
+
+- `sessions_delete_failed_removes_only_failed_sessions` — store holds two
+  `failed`, one `completed`, one `awaiting-agent-output`, and one corrupt
+  file. Run `["traits", "sessions", "delete", "--failed"]`; assert exit 0,
+  stdout contains a `deleted: 2` row and NO `skipped:` row, the two failed
+  ledgers are gone, and the other three files remain.
+- `sessions_delete_failed_skips_a_live_driver` — two `failed` ledgers. The
+  test process holds the real kernel lock on one of them:
+  `ctx_traits_io::file_lock::open_lock_file_no_follow(&ctx_traits_io::run_control::driver_lock_path(&ledger))`
+  then `ctx_traits_io::file_lock::try_lock_exclusive(&file)`, keeping the
+  `File` alive across the child invocation. No sleep, no timing
+  assumption, and no liveness-index row is written (unlike
+  `run_control::try_acquire`, which would upsert into the TEST process's
+  real runtime root rather than the scratch home). Assert exit 0, stdout
+  has `deleted: 1` and `skipped: 1 live`, the held ledger still exists,
+  and the other is gone.
+- `sessions_delete_requires_a_selector` — `["traits", "sessions",
+  "delete"]` exits non-zero and its stderr names `--failed`.
+
+`modules/cli/tests/proof_output_style.rs` — one added test,
+`sessions_delete_default_output_matches_the_panel_registry_shape`, reusing
+the file's own `scratch_repo`, `require_success`, and
+`assert_matches_registry_claim("sessions", "ctx", "sessions delete",
+&stdout)`. Against an empty store the command prints the `deleted: 0`
+panel and exits 0. Added HERE rather than in the new proof so the panel
+parse and the registry binding are not duplicated: that helper compares
+real stdout against `presentation_for`'s own answer, which is what makes
+the Step 4 registry row a claim rather than a decoration.
+
+## Out of scope
+
+`--interrupted` and every other selector; `--json`, `--verbose`,
+`--session-store`, and dry-run for this command; machine-wide (`[ALL]`)
+CLI scope; any new confirm/button widget (0252.3 owns `tui_kit.rs`); the
+action registry and footer (0252.6); center-side deletion or synchronous
+row removal; moving `SessionClass`/`SessionGroup`/`classify_session` out of
+`dashboard.rs`; changing the `git branch -d` non-forcing behavior, the
+retained lock inode, or the foreign-repository worktree safeguard.
 """
 validation = """
 ## Done when
 
-Against a scratch store with mixed outcomes: the verb deletes exactly the
-failed sessions, a live driver (proof holds its flock) is untouched and
-reported skipped, and the panel names the count. The dashboard group
-delete removes the group's rows behind one confirm showing the count.
+1. Selection, liveness, and the panel hold end to end against a scratch
+   store with mixed outcomes: `--failed` deletes exactly the
+   `Status::Failed` sessions and leaves completed, resumable, rejected, and
+   unreadable ledgers alone; a session whose real driver lock is held by the
+   test process is untouched and reported `skipped: 1 live`; the panel names
+   `deleted: <n>`; and a bare `sessions delete` is refused.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_sessions_delete`
+2. The new command's real output matches the shape its presentation-registry
+   entry claims, and no existing command's output grammar moved.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style`
+3. The crate's unit suite is green: the extracted destructive path still
+   satisfies every landed refusal invariant (replacement session,
+   eligibility change, plan drift, readable-to-unreadable, unchanged
+   readable and unreadable deletion, worktree/branch preservation on
+   refusal), the new group verb selects only its captured group, refuses an
+   empty group, refuses a row that left the group, and applies every target
+   behind one confirm, the bulk selector takes exact `Status::Failed` only,
+   and the visible-command registry gate accepts `sessions` in both
+   directions.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib`
+4. There is still exactly ONE destructive implementation: `dashboard.rs`
+   defines no planner or executor of its own, the shared module owns them,
+   the bulk selector and the handler exist, and both surface registries name
+   `sessions`. A source inspection, deliberately not a Rust test — no test
+   may read committed repo content. It fails on the pre-implementation tree,
+   so a green run is real evidence rather than a vacuous match.
+   `S=modules/cli/src/app; ! grep -qE 'fn (execute_delete|execute_confirmed_delete|plan_delete)\\(' "$S/dashboard.rs" && grep -qE 'fn execute_confirmed_delete<' "$S/session_delete.rs" && grep -qE 'fn delete_failed_sessions_in\\(' "$S/session_delete.rs" && grep -qE 'fn handle_sessions_delete\\(' "$S/session_delete.rs" && [ "$(grep -cE '"sessions"' "$S/presentation.rs")" -ge 2 ] && grep -qE '"sessions"' "$S/help_surface.rs"`
+5. The landing gate is green.
+   `CARGO_TARGET_DIR=target just test-full`
+6. The diff touches only `modules/cli/src/app.rs`,
+   `modules/cli/src/app/session_delete.rs`,
+   `modules/cli/src/app/dashboard.rs`,
+   `modules/cli/src/app/surface/cli.rs`,
+   `modules/cli/src/app/command_handlers.rs`,
+   `modules/cli/src/app/help_surface.rs`,
+   `modules/cli/src/app/presentation.rs`,
+   `modules/cli/tests/support/src/lib.rs`,
+   `modules/cli/tests/proof_repo_qualifier.rs`,
+   `modules/cli/tests/proof_output_style.rs`, and
+   `modules/cli/tests/proof_sessions_delete.rs`.
+   `git status --short` names nothing else.
+
+Criteria 1-5 each carry a runnable command and a `[[checks]]` entry.
+Criterion 6 is the one read-and-compare verdict — `git status --short`
+carries its answer in output, not in an exit code — so it deliberately
+carries no `[[checks]]` entry.
+
+Run the steps in order, starting with Step 0's read. Run the incremental
+build command declared at the end of Step 1 and again at the end of Step 3
+rather than building only at the end, so an extraction or borrow error
+surfaces next to the edit that caused it. Then run the criterion commands
+1, 2, 3, 4, 5 in that order. Permit at most two targeted repair-and-rerun
+rounds in total; after each repair, rerun the failing command and every
+later one. Complete only when all five criterion commands exit 0 and the
+diff stays inside the Criterion 6 allowlist.
+
+Stop rather than complete if any of these is true: `--failed` selects
+anything other than exact `Status::Failed`; a session whose driver lock is
+held is deleted; `deleted` counts a ledger that still exists; a second copy
+of the plan/execute path exists; the panel grows a third row; the group
+confirm opens more than once per group action; or the diff leaves the
+Criterion 6 allowlist.
 """
 
 [relations]
 parent = "0252"
+
+[[checks]]
+name = "sessions delete --failed selects, skips live, and reports counts"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_sessions_delete"
+timeout-ms = 1800000
+expect = 'test result: ok\. 3 passed; 0 failed'
+
+[[checks]]
+name = "the new panel matches its registry claim and no grammar moved"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "extraction keeps every delete invariant and the group verb holds"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "one destructive implementation, and both surface registries know sessions"
+command = '''S=modules/cli/src/app; ! grep -qE 'fn (execute_delete|execute_confirmed_delete|plan_delete)\(' "$S/dashboard.rs" && grep -qE 'fn execute_confirmed_delete<' "$S/session_delete.rs" && grep -qE 'fn delete_failed_sessions_in\(' "$S/session_delete.rs" && grep -qE 'fn handle_sessions_delete\(' "$S/session_delete.rs" && [ "$(grep -cE '"sessions"' "$S/presentation.rs")" -ge 2 ] && grep -qE '"sessions"' "$S/help_surface.rs"'''
+
+[[checks]]
+name = "group delete passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
