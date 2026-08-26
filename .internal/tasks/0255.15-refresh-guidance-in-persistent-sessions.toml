@@ -74,21 +74,22 @@ validation = """
 
 Run verification strictly in the order above. Permit at most two targeted repair-and-rerun rounds total; after each repair rerun the affected command and every later verification step. Mark complete only when all three commands pass, the implementation diff remains limited to the one allowed test body, and substantive review has no finding. Otherwise report the first concrete dependency, test, scope, or review blocker.
 """
+
 [relations]
-parent = "0255"
 depends-on = ["0255.14"]
+parent = "0255"
 
 [[checks]]
 name = "continuing guidance dispatch proof passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_agent_intent_dispatch"
-expect = "test result: ok\\. 1 passed; 0 failed"
 timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
 
 [[checks]]
 name = "existing resident process contract remains green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_drive_persistent_contract"
-expect = "test result: ok\\. 1 passed; 0 failed"
 timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
 
 [[checks]]
 name = "continuing guidance refresh passes the landing gate"
