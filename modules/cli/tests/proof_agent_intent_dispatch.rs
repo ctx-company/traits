@@ -3606,31 +3606,56 @@ output = ["slot:answer"]
         5,
         "parallel preview: {parallel_preview:?}"
     );
-    for (prompt, own, foreign, identity) in [
+    let parallel_markers = [
+        "pl-pre-marker",
+        "pl-a-marker",
+        "pl-a-tone-marker",
+        "pl-a-verbosity-marker",
+        "pl-a-next-marker",
+        "pl-b-marker",
+        "pl-b-tone-marker",
+        "pl-post-marker",
+    ];
+    for (index, (own_markers, identity)) in [
+        (&["pl-pre-marker"][..], "Assigned worker."),
         (
-            &parallel_preview[1],
-            "pl-a-marker",
-            "pl-b-marker",
+            &["pl-a-marker", "pl-a-tone-marker", "pl-a-verbosity-marker"][..],
             "Direct parallel worker.",
         ),
+        (&["pl-a-next-marker"][..], "Assigned worker."),
         (
-            &parallel_preview[3],
-            "pl-b-marker",
-            "pl-a-marker",
+            &["pl-b-marker", "pl-b-tone-marker"][..],
             "Nested parallel worker.",
         ),
-    ] {
+        (&["pl-post-marker"][..], "Assigned worker."),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let prompt = &parallel_preview[index];
         assert!(
-            prompt.contains(own) && prompt.contains(identity),
-            "{prompt}"
+            prompt.contains(identity),
+            "parallel preview {index}: {prompt}"
         );
+        assert_unassigned_absent(prompt);
         assert!(
-            !prompt.contains(foreign)
-                && !prompt.contains("pl-pre-marker")
-                && !prompt.contains("pl-post-marker"),
-            "{prompt}"
+            !prompt.contains("source=\""),
+            "parallel preview {index}: {prompt}"
         );
-        assert!(!prompt.contains("source=\""), "{prompt}");
+        for marker in parallel_markers {
+            if own_markers.contains(&marker) {
+                assert_eq!(
+                    prompt.matches(marker).count(),
+                    1,
+                    "parallel preview {index}: {prompt}"
+                );
+            } else {
+                assert!(
+                    !prompt.contains(marker),
+                    "parallel preview {index} leaked {marker}: {prompt}"
+                );
+            }
+        }
     }
     let _ = run_with_env("cli", "parallel-cli.json", &[]);
     let parallel_cli_frames = read_frames(5);
@@ -3640,8 +3665,8 @@ output = ["slot:answer"]
         })
         .collect();
     let _ = run_with_env("mcp", "parallel-mcp.json", &[]);
-    let parallel_mcp_frames = read_frames(4);
-    let parallel_mcp_args: Vec<_> = (0..4)
+    let parallel_mcp_frames = read_frames(5);
+    let parallel_mcp_args: Vec<_> = (0..5)
         .map(|index| {
             fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap()
         })
@@ -3650,12 +3675,26 @@ output = ["slot:answer"]
         (&parallel_cli_frames, &parallel_cli_args, "--cli-system"),
         (&parallel_mcp_frames, &parallel_mcp_args, "--mcp-system"),
     ] {
-        for (index, system, own, foreign) in [
-            (1, "DIRECT SYSTEM", "pl-a-marker", "pl-b-marker"),
-            (3, "NESTED SYSTEM", "pl-b-marker", "pl-a-marker"),
+        for (index, system, own, foreign, identity) in [
+            (
+                1,
+                "DIRECT SYSTEM",
+                "pl-a-marker",
+                "pl-b-marker",
+                "Direct parallel worker.",
+            ),
+            (
+                3,
+                "NESTED SYSTEM",
+                "pl-b-marker",
+                "pl-a-marker",
+                "Nested parallel worker.",
+            ),
         ] {
             assert!(
-                frames[index].contains(own) && !frames[index].contains(foreign),
+                frames[index].contains(own)
+                    && frames[index].contains(identity)
+                    && !frames[index].contains(foreign),
                 "{}",
                 frames[index]
             );
@@ -3665,6 +3704,40 @@ output = ["slot:answer"]
                 "{}",
                 args[index]
             );
+        }
+        for (index, prompt) in frames.iter().enumerate() {
+            assert_unassigned_absent(prompt);
+            assert!(
+                !prompt.contains("source=\""),
+                "parallel frame {index}: {prompt}"
+            );
+            for marker in parallel_markers {
+                let own = match index {
+                    0 | 4 => {
+                        marker == "pl-pre-marker" && index == 0
+                            || marker == "pl-post-marker" && index == 4
+                    }
+                    1 => matches!(
+                        marker,
+                        "pl-a-marker" | "pl-a-tone-marker" | "pl-a-verbosity-marker"
+                    ),
+                    2 => marker == "pl-a-next-marker",
+                    3 => matches!(marker, "pl-b-marker" | "pl-b-tone-marker"),
+                    _ => false,
+                };
+                if own {
+                    assert_eq!(
+                        prompt.matches(marker).count(),
+                        1,
+                        "parallel frame {index}: {prompt}"
+                    );
+                } else {
+                    assert!(
+                        !prompt.contains(marker),
+                        "parallel frame {index} leaked {marker}: {prompt}"
+                    );
+                }
+            }
         }
     }
     for (preview, cli, mcp) in [
@@ -3693,6 +3766,386 @@ output = ["slot:answer"]
         assert_eq!(extract_intent(&historical), extract_intent(live));
         assert_eq!(extract_behavior(&historical), extract_behavior(live));
     }
+    // Bounded dispatches leave each parallel leaf as the final captured frame,
+    // proving the same composition path for each transport without relying on a
+    // completed sibling branch.
+    for (transport, output, max_frames, target, preview_prompt, system, flag) in [
+        (
+            "cli",
+            "parallel-direct-bounded-cli.json",
+            "2",
+            "pl-a",
+            &parallel_preview[1],
+            "DIRECT SYSTEM",
+            "--cli-system",
+        ),
+        (
+            "mcp",
+            "parallel-direct-bounded-mcp.json",
+            "2",
+            "pl-a",
+            &parallel_preview[1],
+            "DIRECT SYSTEM",
+            "--mcp-system",
+        ),
+        (
+            "cli",
+            "parallel-nested-bounded-cli.json",
+            "4",
+            "pl-b",
+            &parallel_preview[3],
+            "NESTED SYSTEM",
+            "--cli-system",
+        ),
+        (
+            "mcp",
+            "parallel-nested-bounded-mcp.json",
+            "4",
+            "pl-b",
+            &parallel_preview[3],
+            "NESTED SYSTEM",
+            "--mcp-system",
+        ),
+    ] {
+        let _ = fs::remove_file(&capture);
+        let _ = fs::remove_file(capture.with_extension("txt.args"));
+        let _ = fs::remove_file(capture.with_extension("txt.calls"));
+        fs::write(repo.join(".ctx/traits/runtime.toml"), runtime(transport)).unwrap();
+        let session = home.join(output);
+        let seed = run_ctx(
+            &[
+                "traits",
+                "run",
+                "--file",
+                generated.to_str().unwrap(),
+                "--no-drive",
+                "--out",
+                session.to_str().unwrap(),
+            ],
+            &repo,
+            &home,
+        );
+        assert_exit_code(&seed, 0);
+        let drive = run_ctx(
+            &[
+                "traits",
+                "internal",
+                "drive",
+                "--file",
+                generated.to_str().unwrap(),
+                "--session",
+                session.to_str().unwrap(),
+                "--max-frames",
+                max_frames,
+                "--no-worktree",
+                "--no-wait",
+                "--progress",
+                "none",
+            ],
+            &repo,
+            &home,
+        );
+        assert_exit_code(&drive, 0);
+        let prompt = fs::read_to_string(&capture).unwrap();
+        let args = fs::read_to_string(capture.with_extension("txt.args")).unwrap();
+        assert_eq!(
+            extract_intent(&prompt),
+            extract_intent(preview_prompt),
+            "{target} {transport}"
+        );
+        assert_eq!(
+            extract_behavior(&prompt),
+            extract_behavior(preview_prompt),
+            "{target} {transport}"
+        );
+        assert!(!prompt.contains(system), "{target} {transport}: {prompt}");
+        assert!(
+            args.contains(flag) && args.contains(system),
+            "{target} {transport}: {args}"
+        );
+    }
+    for (output, max_frames, live) in [
+        ("parallel-active-a.json", "1", &parallel_cli_frames[1]),
+        ("parallel-active-b.json", "3", &parallel_cli_frames[3]),
+    ] {
+        fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("cli")).unwrap();
+        let session = home.join(output);
+        let seed = run_ctx(
+            &[
+                "traits",
+                "run",
+                "--file",
+                generated.to_str().unwrap(),
+                "--no-drive",
+                "--out",
+                session.to_str().unwrap(),
+            ],
+            &repo,
+            &home,
+        );
+        assert_exit_code(&seed, 0);
+        let drive = run_ctx(
+            &[
+                "traits",
+                "internal",
+                "drive",
+                "--file",
+                generated.to_str().unwrap(),
+                "--session",
+                session.to_str().unwrap(),
+                "--max-frames",
+                max_frames,
+                "--no-worktree",
+                "--no-wait",
+                "--progress",
+                "none",
+            ],
+            &repo,
+            &home,
+        );
+        assert_exit_code(&drive, 0);
+        let active = session_preview("parallel active", &session, None);
+        assert_eq!(extract_intent(&active), extract_intent(live));
+        assert_eq!(extract_behavior(&active), extract_behavior(live));
+    }
+    let parallel_conflict_fixture = parallel_fixture.replace(
+        "intent = { require = [{ id = \"shared\", summary = \"Parallel direct replacement text.\" }, { id = \"cross\", summary = \"Parallel direct cross marker.\" }, { id = \"pl-a-marker\", summary = \"Parallel direct marker.\" }] }",
+        "intent = { avoid = [{ id = \"shared\", summary = \"Parallel direct conflict.\" }] }",
+    );
+    fs::write(&generated, &parallel_conflict_fixture).unwrap();
+    require_success(
+        "approve parallel conflict fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let _ = fs::remove_file(capture.with_extension("txt.calls"));
+    let conflict = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            home.join("parallel-conflict.json").to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert!(!conflict.status.success());
+    let (_, stderr) = utf8(&conflict);
+    assert!(stderr.contains("effective guidance id \"shared\" cannot appear in both require and avoid when ready-prompt intent participates"), "{stderr}");
+    assert_eq!(
+        fs::read_to_string(capture.with_extension("txt.calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    fs::write(&generated, &parallel_fixture).unwrap();
+    require_success(
+        "approve restored parallel fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+
+    // The wave uses one common role because concurrent dispatch requires
+    // sibling role equality. Its nested branch starts with a prompt so both
+    // siblings are cold-dispatched, while the direct branch retains a later
+    // leaf to make cached sibling completion observable after the wave.
+    let parallel_wave_fixture = parallel_fixture
+        .replace("agent = \"agent:parallel-direct-agent\"", "agent = \"agent:worker\"")
+        .replace(
+            "[[sequence.pl-nested.sequence]]\nid = \"pl-fe\"\ntitle = \"Parallel nested for-each\"\nkind = \"for-each\"\nover = \"slot:pl-items\"\nitem = \"slot:pl-item-b\"\nmax-items = 1\nsequence = \"sequence:pl-nested-body\"",
+            "[[sequence.pl-nested.sequence]]\nid = \"pl-b-wave\"\ntitle = \"Parallel wave nested\"\nagent = \"agent:worker\"\nprompt = \"Produce parallel wave nested answer.\"\nintent = { require = [{ id = \"pl-b-marker\", summary = \"Parallel nested marker.\" }] }\nbehavior = { tone = [{ id = \"pl-b-tone-marker\", summary = \"Parallel nested tone marker.\" }] }\noutput = [\"slot:pl-answer-b\"]",
+        );
+    fs::write(&generated, &parallel_wave_fixture).unwrap();
+    fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("cli")).unwrap();
+    require_success(
+        "approve parallel wave fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    for entry in fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+        {
+            let _ = fs::remove_file(path);
+        }
+    }
+    let _ = fs::remove_file(capture.with_extension("txt.calls"));
+    let wave_session = home.join("parallel-wave.json");
+    let seed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            wave_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&seed, 0);
+    let prepare = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            wave_session.to_str().unwrap(),
+            "--max-frames",
+            "1",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&prepare, 0);
+    for entry in fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+        {
+            let _ = fs::remove_file(path);
+        }
+    }
+    let wave = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            wave_session.to_str().unwrap(),
+            "--max-in-flight",
+            "2",
+            "--max-frames",
+            "2",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&wave, 0);
+    let wave_prompts: Vec<_> = fs::read_dir(&home)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+        })
+        .map(|path| fs::read_to_string(path).unwrap())
+        .filter(|prompt| prompt.contains("pl-a-marker") || prompt.contains("pl-b-marker"))
+        .collect();
+    assert_eq!(
+        wave_prompts.len(),
+        2,
+        "parallel wave did not cold-dispatch both siblings: {wave_prompts:?}"
+    );
+    assert!(
+        wave_prompts
+            .iter()
+            .any(|prompt| prompt.contains("pl-a-marker") && !prompt.contains("pl-b-marker"))
+    );
+    assert!(
+        wave_prompts
+            .iter()
+            .any(|prompt| prompt.contains("pl-b-marker") && !prompt.contains("pl-a-marker"))
+    );
+    for prompt in &wave_prompts {
+        assert_eq!(
+            prompt.matches("pl-a-marker").count() + prompt.matches("pl-b-marker").count(),
+            1,
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("pl-pre-marker") && !prompt.contains("pl-post-marker"),
+            "{prompt}"
+        );
+    }
+    let after_wave = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            wave_session.to_str().unwrap(),
+            "--max-frames",
+            "2",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&after_wave, 0);
+    let physical_calls = fs::read_to_string(capture.with_extension("txt.calls"))
+        .unwrap()
+        .lines()
+        .count();
+    assert_eq!(
+        physical_calls, 5,
+        "parallel sibling outcome was redispatched instead of consumed from the wave cache"
+    );
+    fs::write(&generated, &parallel_fixture).unwrap();
+    require_success(
+        "approve restored parallel fixture after wave",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
     let export_dir = home.join("parallel-static-export");
     let export = run_ctx(
         &[
@@ -3713,27 +4166,99 @@ output = ["slot:answer"]
     );
     assert_exit_code(&export, 0);
     let skill = fs::read_to_string(export_dir.join("agent-intent").join("SKILL.md")).unwrap();
-    for (source, own, foreign) in [
+    let parallel_static_declarations = [
         (
             "sequence:pl-direct/pl-a",
+            "shared",
             "Parallel direct replacement text.",
-            "Parallel nested replacement text.",
+            "</intent>",
+        ),
+        (
+            "sequence:pl-direct/pl-a",
+            "cross",
+            "Parallel direct cross marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:pl-direct/pl-a",
+            "pl-a-marker",
+            "Parallel direct marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:pl-direct/pl-a",
+            "shared-tone",
+            "Parallel direct tone.",
+            "</behavior>",
+        ),
+        (
+            "sequence:pl-direct/pl-a",
+            "pl-a-tone-marker",
+            "Parallel direct tone marker.",
+            "</behavior>",
+        ),
+        (
+            "sequence:pl-direct/pl-a",
+            "pl-a-verbosity-marker",
+            "Parallel direct verbosity marker.",
+            "</behavior>",
         ),
         (
             "sequence:pl-nested-body/pl-b",
+            "shared",
             "Parallel nested replacement text.",
-            "Parallel direct replacement text.",
+            "</intent>",
         ),
-    ] {
-        let tag = format!("id=\"shared\" source=\"{source}\">");
+        (
+            "sequence:pl-nested-body/pl-b",
+            "cross",
+            "Parallel nested cross marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:pl-nested-body/pl-b",
+            "pl-b-marker",
+            "Parallel nested marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:pl-nested-body/pl-b",
+            "shared-tone",
+            "Parallel nested tone.",
+            "</behavior>",
+        ),
+        (
+            "sequence:pl-nested-body/pl-b",
+            "pl-b-tone-marker",
+            "Parallel nested tone marker.",
+            "</behavior>",
+        ),
+    ];
+    for (source, id, own_text, closing_tag) in parallel_static_declarations {
+        let tag = format!("id=\"{id}\" source=\"{source}\">");
         assert_eq!(skill.matches(&tag).count(), 1, "{skill}");
         let start = skill.find(&tag).unwrap();
-        let end = start + skill[start..].find("</intent>").unwrap();
-        assert!(
-            skill[start..end].contains(own) && !skill[start..end].contains(foreign),
-            "{skill}"
-        );
+        let end = start + skill[start..].find(closing_tag).unwrap();
+        let block = &skill[start..end];
+        assert!(block.contains(own_text), "{tag}: {skill}");
+        for (_, _, foreign_text, _) in parallel_static_declarations {
+            if foreign_text != own_text {
+                assert!(!block.contains(foreign_text), "{tag}: {skill}");
+            }
+        }
     }
+    assert_eq!(
+        skill.matches("source=\"sequence:pl-direct/pl-a\"").count(),
+        7,
+        "{skill}"
+    );
+    assert_eq!(
+        skill
+            .matches("source=\"sequence:pl-nested-body/pl-b\"")
+            .count(),
+        7,
+        "{skill}"
+    );
     fs::write(&generated, &for_each_fixture).unwrap();
     require_success(
         "approve for-each fixture",
