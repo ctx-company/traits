@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0243.4"
 title = "Everyone asks the center"
-status = "draft"
+status = "ready"
 raised = "2026-08-24"
 content = """
 Owner ruling (2026-08-26). The bulk of this task landed on main in merge
@@ -17,61 +17,293 @@ A prior session's reviewer kept this task at closure/discovery
 equilibrium for 20+ rounds by unrolling depth past the landed state.
 The remainder is a closed list. Anything discovered beyond it is board
 material for a follow-up task, not additional cells for this one.
+
+Grounded at HEAD 89c772d4 (clean worktree). Reading the landed code shows
+most remainder bullets are already IMPLEMENTED and missing only their
+named regression; exactly two need a production edit (event-scoped
+preview refresh, and a test-only failure seam that makes the transactional
+projection provable). Apply production steps 1-3 exactly as written, then add
+the regressions and proofs of steps 4-8 exactly as written. Do not reimplement
+landed behavior and do not add steps beyond this list.
 """
 scope = """
-## Decisions — the closed remainder
+## Files touched — no others
+- modules/cli/src/app/dashboard.rs
+- modules/cli/src/app/dashboard/worker.rs
+- modules/cli/src/app/tasks.rs
+- modules/io/src/center.rs
+- modules/cli/tests/proof_center.rs
 
-Dashboard subscription hardening:
-- Make `SnapshotEnd` and delta projection transactional: retain the
-  accepted row map and worker session state until `reload_from_center_rows`
-  succeeds; a failed projection must never leave a wiped or partial view.
-- On a failed `SnapshotEnd` or delta projection, discard the subscription
-  and reconnect for a fresh complete snapshot (or retain and retry the
-  complete candidate); update `last_snapshot_at` only after an `Ok`
-  snapshot.
-- Preserve parked-Ask presentation and trait-source drift warnings when
-  `Command::Render` reprojects accepted rows, and retain the last accepted
-  parked-Ask presentation while `center::get` is unavailable.
-- Split periodic `Command::Refresh` from center-row application so the
-  periodic tick refreshes only non-session state and never calls
-  `center::get`.
-- Replace the hand-rolled `repo_key(state_repo_root)` filter with fallible
-  `state::current_repo_key()`.
-- Refresh the currently selected by-path session preview after relevant
-  subscription deltas or activity events; an unchanged selection must not
-  re-request.
+## Already satisfied by landed code — assert, do not redo
+- Transactional projection: worker.rs:212-266 stages snapshot rows, projects
+  the candidate first, and commits `rows` only on `Ok`; a rejection breaks the
+  stream so the center resends a complete snapshot. dashboard.rs:1601-1642
+  completes every fallible step (`center_row_projections`,
+  `reload_non_session_state`) before assigning `sessions`/`merges`/
+  `run_sightings`. Missing: the regression (step 4).
+- `last_snapshot_at` only advances on an accepted projection
+  (worker.rs:343-350), already covered by
+  `failed_subscription_projection_does_not_advance_outage_timestamp`
+  (worker.rs:777-789). No new cell.
+- Periodic/session split: `Command::Refresh` -> `reload_non_session_state`
+  only (worker.rs:412, 425-439), already covered by
+  `worker_run_refresh_command_does_not_query_the_center` (worker.rs:1196) and
+  `command_refresh_preserves_the_subscription_owned_session_model`
+  (worker.rs:664). No new cell.
+- Fallible `state::current_repo_key()` replaced the hand-rolled filter
+  (dashboard.rs:1682); the hand-rolled `repo_key(state_repo_root)` call site is
+  already gone. Scope behavior covered by
+  `worker_run_render_reprojects_the_accepted_rows_without_resubscribing`
+  (worker.rs:1237). No new cell.
+- Unchanged-row predicate already reuses a fingerprint match with either a
+  cached session or an explicit `summary.parse_error` (center.rs:1455-1464),
+  with `unchanged_unreadable_fingerprint_does_not_parse` (center.rs:3885-3920,
+  includes a List and a Stats request after the initial discovery),
+  `corrupt_only_store_still_idle_exits` (center.rs:3923), and the real-process
+  idle exit in proof_center.rs:715-735. No new cell.
+- Tasks fail-loud: both handlers use `?` before report construction, proved by
+  `assert_center_request_failure_is_not_partial` +
+  `proposals_fail_loudly_when_the_center_request_fails` /
+  `reconcile_fails_loudly_when_the_center_request_fails` (tasks.rs:886-929).
+  Retain that helper unchanged.
 
-Center cache correctness:
-- Change the unchanged-row predicate so a fingerprint-matching row is
-  reusable when it has either a cached session or an explicit
-  `parse_error`, so unchanged corrupt ledgers stop bypassing the cache.
-- Replace the same-version narrower-summary simulation with a version-1
-  index fixture carrying the preceding summary shape, and assert the
-  current center rebuilds it.
+## Edit order — strict
 
-Tasks surface:
-- Parity tests for readable and corrupt rows, and a failure test proving a
-  center request error can never produce a successful partial proposal or
-  reconcile report.
+### 1. dashboard.rs — event-scoped selected-preview refresh
+Removed symbol: field `DashboardSnapshot::refresh_selected_preview: bool`
+(dashboard.rs:1226).
+New field in its place, on `struct DashboardSnapshot` (dashboard.rs:1215):
+  `changed_ledger_path: Option<String>`
+documented as: the ledger path a center delta changed; `None` for a complete
+snapshot and for a local render, both of which fall back to identity change.
+Edit `DashboardSnapshot::from_state(state: &State) -> Self` (dashboard.rs:1230)
+to set `changed_ledger_path: None`.
+Edit `State::apply_snapshot(&mut self, snapshot: &DashboardSnapshot)`
+(dashboard.rs:1538), `Screen::Sessions` branch (dashboard.rs:1577-1587): compute
+  `let changed_selection = snapshot.changed_ledger_path.as_deref().is_some_and(|changed| current_preview.as_ref().is_some_and(|request| request.ledger_path.as_str() == changed));`
+and dispatch when `current_preview != previous_preview || changed_selection`.
+`SessionPreviewRequest::ledger_path` is `camino::Utf8PathBuf`, hence `as_str()`.
+The renderer stays the only selection owner; do not add one in the worker.
 
-Proofs and gates (one regression per behavior above, then):
-- chmod-after-snapshot proofs covering stats, tasks proposals/reconcile,
-  merge lookup, and a dashboard snapshot with zero client ledger reads
-  (cold and warm).
-- Dashboard subscription proofs for delta-only appearance and center
-  kill/restart degraded-mode recovery.
-- Ledger-read-count and real-process idle-exit regressions for an
-  unchanged corrupt ledger, including a list/stats request after the
-  initial snapshot.
-- Rerun `CTX_BIN="$CARGO_TARGET_DIR/debug/ctx" just test` and the focused
-  suites, then fold this task's work into one task-scoped commit.
+### 2. dashboard.rs — test-only projection-failure seam
+A failed `reload_from_center_rows` cannot be provoked deterministically from
+the environment (`current_repo_key`, `InventoryContext::discover`), so add a
+`#[cfg(test)]` counter beside `State::reload_from_center_rows`
+(dashboard.rs:1601), mirroring center.rs's `LEDGER_READS` test-counter
+precedent. New symbol:
+  `#[cfg(test)] static FAIL_CENTER_PROJECTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);`
+(module-private in `app::dashboard`; the `worker` child module reaches it as
+`super::FAIL_CENTER_PROJECTIONS`). At the very top of
+`State::reload_from_center_rows(&mut self, rows: &[ctx_traits_io::center::CenterPublicRow], enrich_session_presentations: bool) -> crate::Result<()>`,
+before `let reload_started`, add a `#[cfg(test)]` guard that consumes one count
+with `fetch_update(SeqCst, SeqCst, |remaining| remaining.checked_sub(1))` and,
+when it consumed one, returns
+`Err(crate::Error::Command { message: "injected center projection failure".to_string() })`
+before mutating anything. No production behavior changes.
 
-## Explicitly excluded (spilled to 0261, not cells here)
-- Reconnect-delay parity after rejected projections.
-- Simultaneous two-version center process coverage.
-- Symmetric shared-index versioning redesign (legacy table version vs v2
-  projection marker).
-- Regression coverage beyond the behaviors named above.
+### 3. worker.rs — carry the changed ledger path
+Changed signatures (same file, same order):
+- `fn apply_delta(rows: &mut HashMap<String, ctx_traits_io::center::CenterPublicRow>, delta: ctx_traits_io::center::CenterDelta) -> Option<String>`
+  (was `-> bool`, worker.rs:306): return `Some(row.ledger_path.clone())` for
+  Appeared, RowChanged, Ended, and ActivityLine — clone the path before the row
+  is moved into the map. Keep the Ended-vs-RowChanged distinction exactly as is.
+- `fn emit_snapshot(snapshots: &mpsc::Sender<RefreshResult>, state: &mut State, rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>, clear_refresh_error: bool, enrich_session_presentations: bool, changed_ledger_path: Option<String>) -> Result<bool, ()>`
+  (worker.rs:452): assigns `snapshot.changed_ledger_path`.
+- `fn emit_subscription_snapshot(snapshots: &mpsc::Sender<RefreshResult>, state: &mut State, rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>, changed_ledger_path: Option<String>) -> Result<bool, ()>`
+  (worker.rs:416).
+- `fn emit_cached_rows_snapshot(snapshots: &mpsc::Sender<RefreshResult>, state: &mut State, rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>, clear_refresh_error: bool) -> Result<bool, ()>`
+  (worker.rs:441) keeps that signature unchanged and passes `None` as
+  `emit_snapshot`'s new last argument (it passes `false` today).
+Call-site edits in
+`fn run(commands: mpsc::Receiver<Command>, snapshots: mpsc::Sender<RefreshResult>, previews: mpsc::Sender<PreviewResult>, explanations: mpsc::Sender<ExplanationResult>)`
+(worker.rs:140), whose signature is unchanged:
+- `SnapshotEnd` (worker.rs:215) passes `None` — an ordinary completed snapshot
+  must no longer re-request an unchanged selection.
+- the delta arm (worker.rs:241-265) passes the `Option<String>` returned by
+  `apply_delta`; the mid-snapshot branch (worker.rs:243) discards it with
+  `let _ = apply_delta(&mut staged_rows, delta);`.
+Client-side rollback and reconnect stay exactly as landed; do not add a second
+buffering protocol — server-side snapshot/delta ordering already exists
+(center.rs:1191-1197, 1636-1697).
+
+### 4. worker.rs tests — the missing dashboard regressions
+Reuse `CenterPeer`, `accept_center_subscription`, `accept_center_client`,
+`read_center_request`, `write_center_response`, `complete_center_hello`
+(app/test_support.rs), plus the file's own `WorkerLoop`, `finish_snapshot`,
+`row`, `current_repo_row`. Add one helper
+`fn parked_ask_row(title: &str) -> ctx_traits_io::center::CenterPublicRow`
+(a `current_repo_row` whose summary carries `"status": "waiting-on-human"`,
+`"next_frame_kind": "ask"`, `"interrupted": false`). New tests:
+- `failed_complete_snapshot_projection_keeps_the_accepted_rows_and_reconnects`:
+  set `FAIL_CENTER_PROJECTIONS` to 1 before `WorkerLoop::start`; the peer's
+  first stream sends one snapshot row plus `snapshot-end`; assert the worker
+  emits `Err`, that
+  `worker.send(Command::Render { all_repos: true, screen: Screen::Sessions })`
+  serviced afterwards reprojects the accepted row map and reports no sessions
+  (nothing partial was committed), and that the peer's second `accept`
+  (reconnect) then delivers a snapshot the worker accepts.
+- `failed_delta_projection_keeps_the_accepted_rows_and_reconnects`: first
+  stream sends row A + `snapshot-end` (accepted, title "before"); the test
+  gates the peer with an `mpsc` channel, sets `FAIL_CENTER_PROJECTIONS` to 1,
+  then lets the peer send a `row-changed` delta carrying title "after"; assert
+  the worker emits `Err`, that
+  `worker.send(Command::Render { all_repos: true, screen: Screen::Sessions })`
+  still projects title "before" (accepted map intact), and
+  that the peer's second stream is accepted and its snapshot lands "after".
+  Both tests store 0 back into `FAIL_CENTER_PROJECTIONS` before returning; the
+  `CenterPeer` environment lock serializes them.
+- `parked_ask_presentation_survives_a_render_with_an_unavailable_center_get`:
+  seed one accepted projection with
+  `state.reload_from_center_rows(&rows, false)` (enrichment off), overwrite
+  `state.sessions[0].phase` with `"ask: approve the change (wait 1m)"` to stand
+  for the last accepted parked-Ask presentation, then run
+  `handle_one_command(Command::Render { all_repos: true, screen: Screen::Sessions }, &snapshots, &previews, &explanations, &mut state, &rows, false)`
+  — the same seven-argument shape the file's existing `Command::Refresh` tests
+  use (worker.rs:642, 681), with `snapshots`/`previews`/`explanations` the
+  `mpsc::Sender` halves created in the test and `rows` a
+  `HashMap<String, ctx_traits_io::center::CenterPublicRow>` holding the seeded
+  row keyed by its ledger path — against a peer
+  that answers the single `get` request with
+  `{"type": "error", "data": {"message": "center unavailable"}}`; assert the
+  emitted phase still starts with `"ask: approve the change (wait 1m); "` and
+  contains `"legacy session has no pinned document"` — the drift warning
+  `run::trait_source_drift_from_parts` appends for a row without a pinned
+  trait source, deduplicated by `append_phase_warning` (dashboard.rs:1745).
+- edit `activity_delta_requests_an_unchanged_selected_preview_refresh`
+  (worker.rs:838) to the new type: `apply_delta` returns
+  `Some(<row ledger path>)` and the emitted snapshot's `changed_ledger_path`
+  equals it.
+
+### 5. dashboard.rs tests — preview scoping
+Reuse `row_with_id`, `attached_view_for`, `snapshot_with_sessions` and the
+selection setup of `refresh_snapshot_cannot_clobber_applied_preview`
+(dashboard.rs:9184). New tests:
+- `an_unrelated_center_event_leaves_an_unchanged_selected_preview_alone`:
+  snapshot with `changed_ledger_path = Some("/tmp/other.json")`, and a second
+  case with `None` (an ordinary completed snapshot); assert
+  `state.session_preview` is retained in both.
+- `a_center_event_on_the_selected_ledger_refreshes_the_retained_preview`:
+  `changed_ledger_path = Some("/tmp/selected.json")`; assert
+  `state.session_preview` is cleared for re-request.
+
+### 6. center.rs — genuine version-1 index fixture
+Removed symbol: test
+`legacy_summary_defaults_are_reprojected_from_cached_session`
+(center.rs:3786-3816) — it opens a CURRENT index and only rewrites the summary
+JSON, the same-version simulation the owner rejected.
+Replacement test `a_version_one_index_is_reprojected_by_the_current_center`,
+built without `CenterModel::open` first: write a real ledger with
+`fixture_session("completed")` (+ `provenance.task_key = Some("0243.4")`), read
+its `(mtime, size)`, then create the index directly with
+`rusqlite::Connection::open` and the v1 DDL — `center_meta`, `center_rows`,
+`center_sessions` only, `center_meta` version 1, NO `center_projection_meta`
+table — inserting a `center_rows` row whose summary is the preceding shape
+`cached_summary()` (retained as the reuse point) and a `center_sessions` row
+holding the full session at the matching fingerprint. Then assert current
+`CenterModel::open(&paths)`: reprojects `summary.run_id == "run-fixture"` and
+`summary.task_key == Some("0243.4")` with `parse_error` none, retains
+`row.session`, leaves `center_meta` at `CENTER_SCHEMA_VERSION` (a shipped v1
+center must still accept the shared file), and writes
+`CENTER_PROJECTION_VERSION` into the created `center_projection_meta`.
+Keep `projection_marker`/`prior_projection_marker` tests as they are.
+
+### 7. tasks.rs — report-level parity without a second mapping
+New symbol, beside `session_facts_from_center` (tasks.rs:343):
+  `pub(crate) fn proposals_from_center(rows: &[ctx_traits_io::center::CenterPublicRow], summaries: &[ctx_traits_core::task::provider::TaskSummary], duplicate_keys: &[ctx_traits_core::task::provider::DuplicateKey]) -> Vec<super::task_proposals::DoneProposal>`
+holding exactly the triple mapping currently inlined in
+`handle_tasks_proposals` (tasks.rs:152-172) over `readable_center_rows`, ending
+in `super::task_proposals::derive_proposals`. Edit `handle_tasks_proposals` to
+call it, so the command and its regression assert one assembled report rather
+than two copies of the mapping. `handle_tasks_reconcile` is unchanged: it
+already composes `session_facts_from_center` with
+`task_proposals::derive_reconcile_report`.
+New tests (both build one readable row — task key, run id, and
+`"last_terminal_merge_frame": {"stage": "landing", "status": "merged",
+"evidence": ["landed=0123456789abcdef0123456789abcdef01234567"]}` — plus one
+`parse_error` row that would add a
+second proposal if it leaked through; the row's task key is `"0001"` and its
+run id `"readable-run"`). Each test seeds its board exactly as the handlers
+read it: `write_task(&dir, "0001-t.toml", <task toml with key "0001">)`, then
+`let provider = FilesTaskBoard::open_read(dir.clone());` and
+`let summaries = provider.list(false).unwrap();` for the proposals test
+(`provider.list(true).unwrap()` for the reconcile test, matching
+`handle_tasks_reconcile` at tasks.rs:217). Pass `&[]` for `duplicate_keys` on
+both sides — no `sync()` call, so no duplicates exist:
+- `proposals_from_center_rows_match_the_shared_derivation`: assert
+  `proposals_from_center(&rows, &summaries, &[])` equals
+  `task_proposals::derive_proposals(&[(Some("0001"), "readable-run", Some("0123456789abcdef0123456789abcdef01234567"))], &summaries, &[])`
+  (`DoneProposal` is `PartialEq`), and has exactly one proposal.
+- `reconcile_report_from_center_rows_matches_the_shared_derivation`: build
+  `let resolved: std::collections::BTreeMap<String, ctx_traits_core::task::provider::ResolvedTask> = summaries.iter().filter_map(|summary| provider.get(&summary.key).ok().flatten().map(|task| (summary.key.clone(), task))).collect();`
+  the way `handle_tasks_reconcile` does (tasks.rs:222-227), then assert
+  `task_proposals::derive_reconcile_report(&session_facts_from_center(&rows), &summaries, &resolved, &[])`
+  equals
+  `task_proposals::derive_reconcile_report(&[literal_fact], &summaries, &resolved, &[])`
+  where `literal_fact` is the `SessionFact` for the readable row only —
+  `SessionFact { run_id: "readable-run".to_string(), task_key: Some("0001".to_string()), task_digest: None, landed_sha: Some("0123456789abcdef0123456789abcdef01234567".to_string()), landed_is_ancestor: Some(false), blocked_with_park_report: false, terminal_epoch: None }`
+  (`ReconcileReport` is `PartialEq`); that sha cannot be an ancestor, so
+  `landed_is_ancestor` is `Some(false)` on both sides.
+Keep `center_task_facts_exclude_only_explicitly_unreadable_rows` and
+`readable_center_rows_preserve_newest_ledger_first_order` as they are.
+
+### 8. proof_center.rs — the two missing process proofs
+Reuse `SENTINEL_TEST_LOCK`, `scratch`, `CenterEnvironment`, `spawn_sentinel`,
+`await_socket`, `await_socket_removal`, `ChildGuard`, `PROCESS_DEADLINE`,
+`controlled_command`, `git_init`. Add one fixture helper
+`fn write_repo_scoped_completed_ledger(root: &std::path::Path, repo_key: &str) -> Utf8PathBuf`
+writing a completed, task-bound session (merged terminal merge frame with
+`landed=<sha>` evidence) at `<runs_root>/<repo_key>/session.json`, because the
+CLI readers scope by `ctx_traits_io::state::current_repo_key()`; the test
+derives that key with
+`ctx_traits_io::state::repo_key(&ctx_traits_io::state::canonical_repo_root(<repo>)?)`.
+- `center_backed_readers_serve_an_unreadable_ledger_warm_and_after_restart`:
+  git_init a scratch repo, write a board task under it, spawn the sentinel,
+  take one warm `center::list` snapshot, then `chmod 000` the ledger. A
+  top-level `fn` in this file (not a closure), placed beside the two proofs —
+  `fn assert_center_backed_readers_serve(socket: &std::path::Path, index: &std::path::Path, runs_root: &std::path::Path, repo: &std::path::Path, home: &std::path::Path, board: &std::path::Path, task_key: &str, run_id: &str, ledger_path: &camino::Utf8Path)`
+  returning `()` and panicking on any failure — then runs, with
+  `controlled_command(std::path::Path::new(env!("CARGO_BIN_EXE_ctx")), &args, repo, home)`
+  overridden by `.env` onto this sentinel's `socket`/`index`/`runs_root` (and
+  `CTX_CENTER_EXECUTABLE` pointed at a non-existent path so nothing can spawn
+  a second center): `ctx traits internal stats --json` (exit 0, total-runs 1),
+  `ctx tasks proposals --board <board> --json` (exit 0, ok envelope naming
+  `task_key`), `ctx tasks reconcile --board <board> --json` (exit 0, ok
+  envelope), an in-process `center::subscribe(None)` drained
+  SnapshotStart..SnapshotEnd carrying the row with a readable summary (the
+  dashboard's only session source), and `ctx traits merge <run_id>` asserted to
+  fail NAMING `ledger_path` rather than with "center records no run-session
+  ledger" —
+  isolating the center lookup from the deliberate post-lookup authoritative
+  reopen. Then SIGKILL the sentinel, restart one against the same persisted
+  index with the ledger still at mode 000, and call the same helper again
+  (cold client). Restore permissions, reap the child, remove the scratch root.
+- `center_kill_and_restart_recovers_a_subscription_without_a_client_request`:
+  subscribe first, drain the empty snapshot, THEN write the ledger and assert
+  an `Appeared` delta arrives with no client request (real-process delta-only
+  appearance); SIGKILL the center and assert the subscription reports its
+  disconnect (degraded mode); resubscribe so arbitration restarts a center from
+  the persisted index and assert the fresh snapshot again carries the row.
+
+### 9. Gates and delivery
+Run the commands in `## Done when`, then fold every edit above into ONE
+task-scoped commit with a clean worktree. Existing merge/fixup/rescope commits
+are baseline history — never rewrite them.
+
+## Explicitly excluded — advisory board material, not cells here
+- Reconnect-delay parity after rejected projections (worker.rs:353-383 already
+  applies the bounded 500 ms delay; parity work is 0261's).
+- Simultaneous two-version center process coverage, and any redesign of the
+  `center_meta` / `center_projection_meta` two-marker scheme — including
+  rebuilding `independent_socket_versions_share_the_disposable_sqlite_index`
+  (proof_center.rs:1067-1155) into a from-scratch v1 fixture. Its comments
+  overstate what it constructs; that is 0261's symmetric-versioning cell.
+- Subscription or dashboard coverage beyond the behaviors named above.
+- Center-mediated spawn/interrupt/pause (0243.5).
+- Any grep-driven deletion of the bounded, declared one-ledger reopens
+  (.internal/briefs/0243.4-ledger-read-call-sites.md) — in particular
+  merge.rs:551, the pre-mutation TOCTOU validation, must stay.
+- Any direct-reader fallback when a center request fails: stats, tasks, merge
+  lookup, and the dashboard inventory stay fail-loud.
 """
 validation = """
 ## Watch
@@ -79,14 +311,59 @@ validation = """
   is already landed; do not re-derive or re-demand it.
 - The excluded list is an owner ceiling. A finding in an excluded area is
   advisory board material, never a blocker cell.
+- Only steps 1-3 of the plan change production code, and step 2 is
+  `#[cfg(test)]` only. Everything else is regressions and proofs over behavior
+  that already landed.
+- `just test` compiles no integration proof binary, so proof_center.rs changes
+  must be run with their own command below.
 
 ## Done when
-- Every behavior in the closed remainder has its named regression green.
-- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard`,
-  `cargo test -p ctx-traits-io center`, and
-  `CTX_BIN="$CARGO_TARGET_DIR/debug/ctx" just test` exit 0.
-- One task-scoped commit holds the remainder; worktree clean.
+- Dashboard subscription regressions (transactional rollback + reconnect,
+  parked-Ask retention across `Command::Render` with `center::get`
+  unavailable, event-scoped preview refresh) are green:
+  `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard`
+  exits 0.
+- Center cache regressions, including the version-1 index fixture and the
+  unchanged corrupt-ledger read count, are green:
+  `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center` exits 0.
+- Tasks proposal/reconcile parity and fail-loud regressions are green:
+  `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks` exits 0.
+- The chmod-after-snapshot and kill/restart subscription proofs are green:
+  `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`
+  exits 0.
+- The per-round workspace gate is green:
+  `CTX_BIN="$CARGO_TARGET_DIR/debug/ctx" just test` exits 0.
+- One task-scoped commit holds the remainder; `git status --short` is empty.
 """
 
 [relations]
 parent = "0243"
+
+[[checks]]
+name = "dashboard subscription regressions pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "center cache and corrupt-ledger regressions pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 600000
+
+[[checks]]
+name = "tasks proposal and reconcile parity regressions pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "center process proofs pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "per-round workspace gate passes"
+command = "CTX_BIN=\"$CARGO_TARGET_DIR/debug/ctx\" just test"
+timeout-ms = 900000
