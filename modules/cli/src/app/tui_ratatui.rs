@@ -67,6 +67,15 @@ pub(crate) fn signal_safe_pane_active() -> bool {
     ACTIVE_GENERATION.load(Ordering::SeqCst) != 0
 }
 
+/// Returns the active generation only while it owns an inline pane.
+pub(crate) fn signal_safe_inline_generation() -> u64 {
+    if ACTIVE_SCREEN.load(Ordering::SeqCst) == PaneScreen::Inline as u8 {
+        ACTIVE_GENERATION.load(Ordering::SeqCst)
+    } else {
+        0
+    }
+}
+
 /// The canonical "leave every mode a pane can enter" escape sequence:
 /// disable mouse reporting (`?1006l ?1003l ?1002l ?1000l`, reverse of
 /// crossterm's `EnableMouseCapture` enable order), disable focus reporting
@@ -83,6 +92,12 @@ pub(crate) fn signal_safe_pane_active() -> bool {
 /// the invariant.
 pub(crate) const FULL_RESTORE_ESCAPE: &[u8] =
     b"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1004l\x1b[?1049l\x1b[?25h\r\n";
+
+/// Erases the inline viewport without erasing scrollback above it. `ESC[3J` is
+/// deliberately absent: the viewport uses every row while prior scrollback
+/// must survive. This spelling differs from ratatui's `ESC[J` clear and
+/// crossterm's `ESC[1;1H` cursor move, so PTY proofs can identify this clear.
+pub(crate) const CLEAR_VIEWPORT_ESCAPE: &[u8] = b"\x1b[H\x1b[2J";
 
 /// Which terminal mode a [`RatatuiPane`] owns: the historical full alternate
 /// screen (dashboard, demo, trait editor), or P244's inline viewport (the
@@ -155,7 +170,12 @@ fn install_panic_hook() {
             let active = ACTIVE_GENERATION.load(Ordering::SeqCst);
             if active != 0 {
                 TORN_DOWN_GENERATION.store(active, Ordering::SeqCst);
-                restore_terminal(PaneScreen::from_u8(ACTIVE_SCREEN.load(Ordering::SeqCst)));
+                let screen = PaneScreen::from_u8(ACTIVE_SCREEN.load(Ordering::SeqCst));
+                restore_terminal(screen);
+                if screen == PaneScreen::Inline {
+                    let _ =
+                        std::io::Write::write_all(&mut std::io::stderr(), CLEAR_VIEWPORT_ESCAPE);
+                }
             }
             previous(info);
         }));
@@ -587,8 +607,8 @@ impl RatatuiPane {
             }
         };
         let generation = PANE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-        ACTIVE_GENERATION.store(generation, Ordering::SeqCst);
         ACTIVE_SCREEN.store(screen as u8, Ordering::SeqCst);
+        ACTIVE_GENERATION.store(generation, Ordering::SeqCst);
         if screen == PaneScreen::Inline {
             // P244 fix (`inline-pane-stderr-interleave`): route every decode
             // warning reachable on the drive loop's per-frame path (§
@@ -858,6 +878,11 @@ impl RatatuiPane {
         self.detached || TORN_DOWN_GENERATION.load(Ordering::SeqCst) == self.generation
     }
 
+    /// Generation eligible for a signal-safe inline rescue panel.
+    pub(crate) fn rescue_generation(&self) -> Option<u64> {
+        (self.screen == PaneScreen::Inline && !self.detached()).then_some(self.generation)
+    }
+
     /// Non-blocking drain of key presses forwarded by the pump thread. P470:
     /// the live-run pane binds scroll (↑/↓/j/k/PgUp/PgDn) and focus-cycle
     /// (Tab); P551 adds `q` (routed by the caller into its own confirm-quit
@@ -1033,6 +1058,17 @@ impl RatatuiPane {
             self.detached = true;
             self.leave();
         }
+    }
+
+    /// Clears a still-live inline viewport after scrollback commit failure.
+    pub(crate) fn clear_viewport(&mut self) -> std::io::Result<()> {
+        if self.screen != PaneScreen::Inline || self.detached() {
+            return Ok(());
+        }
+        let Some(terminal) = self.terminal.as_mut() else {
+            return Ok(());
+        };
+        terminal.clear()
     }
 
     /// P244 §3.2 point 6: on a clean teardown of an inline pane, commits
@@ -1347,6 +1383,16 @@ mod tests {
                 "FULL_RESTORE_ESCAPE missing {mode}: {escape:?}"
             );
         }
+    }
+
+    #[test]
+    fn clear_viewport_escape_erases_the_screen_but_never_the_scrollback() {
+        assert_eq!(CLEAR_VIEWPORT_ESCAPE, b"\x1b[H\x1b[2J");
+        assert!(
+            !CLEAR_VIEWPORT_ESCAPE
+                .windows(4)
+                .any(|bytes| bytes == b"\x1b[3J")
+        );
     }
 
     #[test]

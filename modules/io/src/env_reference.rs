@@ -69,6 +69,11 @@ pub const TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL: &str =
 pub const TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE: &str =
     "CTX_INTERNAL_TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE";
 
+/// Panics after `test_only_panic_after_render` paints a live run-view frame.
+#[cfg(debug_assertions)]
+pub const TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER: &str =
+    "CTX_INTERNAL_TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER";
+
 /// Every environment variable product code reads, with its contract. Kept
 /// complete by `modules/cli/tests/proof_env_reference.rs`, which walks
 /// `modules/*/src/**/*.rs` for quoted `CTX_`-prefixed literals and asserts
@@ -115,7 +120,7 @@ pub const TESTHOOK_TRUST_TEST_CONFIG_HOME: &str = "CTX_TRAITS_TRUST_TEST_CONFIG_
 pub const TESTHOOK_API_TRANSPORT_MISSING_KEY: &str = "CTX_TEST_NONEXISTENT_API_KEY_0079";
 
 #[cfg(debug_assertions)]
-fn testhook_env_reference() -> [EnvVarDoc; 8] {
+fn testhook_env_reference() -> [EnvVarDoc; 9] {
     [
         EnvVarDoc {
             name: TESTHOOK_CHECKPOINT_WAVE_PERSISTED,
@@ -140,6 +145,11 @@ fn testhook_env_reference() -> [EnvVarDoc; 8] {
         EnvVarDoc {
             name: TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE,
             contract: "Center transport proof fault injection: forces the final drive-outcome ledger write to fail before persistence. A no-op unless set. Absent from release builds.",
+            kind: EnvVarKind::DebugOnlyTestHook,
+        },
+        EnvVarDoc {
+            name: TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER,
+            contract: "Panic-hook proof injection: panics after a live run-view frame has rendered. A no-op unless set. Absent from release builds.",
             kind: EnvVarKind::DebugOnlyTestHook,
         },
         EnvVarDoc {

@@ -18,6 +18,7 @@ use crate::app::tui;
 use crate::app::tui_kit;
 use crate::app::tui_panes::{self, FocusRing, PaneScrolls};
 use crate::app::tui_ratatui::RatatuiPane;
+use crate::app::{interrupt, run};
 #[cfg(test)]
 use ratatui::layout::Rect;
 
@@ -62,6 +63,8 @@ pub(crate) struct RunPanel {
     cadence: Arc<PanelCadence>,
     handoff: Arc<DashboardHandoff>,
 }
+
+const RESCUE_ERROR_TEXT: &str = "interrupted (signal)";
 
 /// The request, spawned dashboard, and teardown state are one lifecycle. This
 /// prevents `close` from observing an empty handle while a launcher is between
@@ -514,6 +517,7 @@ impl RunPanel {
             state.repaint.install_input_wake(Arc::new(move || {
                 tick_weak(&weak_state, &wake_cadence, &wake_handoff);
             }));
+            arm_rescue_panel_locked(&state);
         }
         panel.render();
         panel.cadence.painted();
@@ -582,6 +586,7 @@ impl RunPanel {
             &mut state.title_state,
             session.provenance.session_title.clone(),
         );
+        arm_rescue_panel_locked(&state);
         state.title_generation_live = generation_live;
         apply_ledger_seed(&mut state, ledger_path);
         if terminal && !state.observer_finished {
@@ -634,10 +639,7 @@ impl RunPanel {
     /// late render from a lingering clone no-ops on the detached pane.
     pub(crate) fn close(&self) {
         if let Ok(mut state) = self.state.lock() {
-            let tree_lines = state.last_tree_lines.clone();
-            let _ = state.repaint.commit_inline_scrollback(&tree_lines);
-            state.repaint.quit();
-            state.cadence.inactive();
+            close_pane_locked(&mut state);
         }
         self.handoff.close();
     }
@@ -711,6 +713,7 @@ impl RunPanel {
             &mut state.title_state,
             session.provenance.session_title.clone(),
         );
+        arm_rescue_panel_locked(&state);
         let display = state.live.current_display();
         let mut narration = narration_for(&state.session, display.clone());
         if display.finished
@@ -974,6 +977,7 @@ impl RunPanel {
             return;
         };
         merge_title_state(&mut state.title_state, title_state);
+        arm_rescue_panel_locked(&state);
         render_locked(&mut state);
     }
 
@@ -993,6 +997,46 @@ impl RunPanel {
         let panel = self.clone();
         std::sync::Arc::new(move || panel.tick())
     }
+}
+
+fn resolved_title(
+    title_state: Option<&ctx_traits_core::procedure::session::SessionTitleState>,
+) -> Option<String> {
+    title_state
+        .and_then(ctx_traits_core::procedure::session::SessionTitleState::resolved_title)
+        .map(str::to_string)
+}
+
+fn rescue_panel_parts(
+    trait_id: &str,
+    title_state: Option<&ctx_traits_core::procedure::session::SessionTitleState>,
+    session_id: &str,
+) -> crate::app::presentation::Panel {
+    let (product, headline) = run::run_header_from_title(trait_id, resolved_title(title_state));
+    run::failure_panel(&product, &headline, session_id, RESCUE_ERROR_TEXT)
+}
+
+fn rescue_panel(state: &RunPanelState) -> crate::app::presentation::Panel {
+    rescue_panel_parts(
+        state.session.trait_id.as_str(),
+        state.title_state.as_ref(),
+        state.session.session_id.as_str(),
+    )
+}
+
+fn arm_rescue_panel_locked(state: &RunPanelState) {
+    if let Some(generation) = state.repaint.rescue_generation() {
+        interrupt::arm_rescue_panel(generation, &rescue_panel(state));
+    }
+}
+
+fn close_pane_locked(state: &mut RunPanelState) {
+    let lines = state.last_tree_lines.clone();
+    if state.repaint.commit_inline_scrollback(&lines).is_err() {
+        let _ = state.repaint.clear_viewport();
+    }
+    state.repaint.quit();
+    state.cadence.inactive();
 }
 
 /// Cadence for the live pane's own ledger re-read below — matches the
@@ -1282,7 +1326,7 @@ fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
     match modal.handle_key(key) {
         tui_kit::ModalOutcome::Confirmed => {
             state.modal = None;
-            state.repaint.quit();
+            close_pane_locked(state);
             // P081: an observer's `q` returns to the dashboard
             // automatically — this message is only accurate for the
             // live view's own quit, which leaves no dashboard to
@@ -1353,8 +1397,7 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
         // `q` are text, not commands.
         match live_view_key_action(&key) {
             Some(LiveViewKeyAction::OpenDashboard) => {
-                state.repaint.quit();
-                state.cadence.inactive();
+                close_pane_locked(state);
                 state.handoff.request(
                     state.session.session_id.as_str().to_string(),
                     state.guide.clone(),
@@ -1499,6 +1542,27 @@ fn entered_step_text(view: &RunView, phase: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rescue_panel_reuses_the_shared_failure_grammar_and_title_fallback() {
+        use ctx_traits_core::procedure::session::{SessionTitleSource, SessionTitleState};
+
+        let resolved = SessionTitleState::Resolved {
+            attempts: 1,
+            title: "Demo title".to_string(),
+            source: SessionTitleSource::NarratorDefault,
+        };
+        let expected = run::failure_panel("Demo title", "demo", "session", RESCUE_ERROR_TEXT);
+        assert_eq!(
+            rescue_panel_parts("demo", Some(&resolved), "session").styled_lines(),
+            expected.styled_lines()
+        );
+        let expected = run::failure_panel("demo", "", "session", RESCUE_ERROR_TEXT);
+        assert_eq!(
+            rescue_panel_parts("demo", None, "session").styled_lines(),
+            expected.styled_lines()
+        );
+    }
 
     #[test]
     fn a_resolved_title_never_regresses_to_a_pending_ledger_state() {

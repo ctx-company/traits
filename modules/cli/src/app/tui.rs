@@ -376,15 +376,21 @@ pub(crate) fn labeled_line(label: &str, value: &str) -> Line {
 /// Print the styled lines to stdout, painting each segment by its tone.
 pub(crate) fn emit_lines(lines: &[Line]) -> crate::Result<()> {
     let mut stdout = std::io::stdout().lock();
+    write!(stdout, "{}", render_lines_ansi(lines)).map_err(write_error)?;
+    stdout.flush().map_err(write_error)?;
+    Ok(())
+}
+
+/// Render styled lines as ANSI text, with exactly one trailing newline per line.
+pub(crate) fn render_lines_ansi(lines: &[Line]) -> String {
+    let mut rendered = String::new();
     for line in lines {
-        let mut rendered = String::new();
         for segment in &line.segments {
             rendered.push_str(&paint(segment.tone, &segment.text));
         }
-        writeln!(stdout, "{rendered}").map_err(write_error)?;
+        rendered.push('\n');
     }
-    stdout.flush().map_err(write_error)?;
-    Ok(())
+    rendered
 }
 
 /// Named-ANSI two-tone a plain stderr progress line (never a `Panel`), gated

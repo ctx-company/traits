@@ -110,7 +110,20 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
     state
         .handled_generation
         .fetch_max(input_generation, Ordering::Release);
+    test_only_panic_after_render();
 }
+
+#[cfg(debug_assertions)]
+fn test_only_panic_after_render() {
+    if std::env::var_os(ctx_traits_io::env_reference::TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER)
+        .is_some()
+    {
+        panic!("test hook: panic after run-view render");
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn test_only_panic_after_render() {}
 
 /// One visible title row for every live or attached lifecycle state.
 ///

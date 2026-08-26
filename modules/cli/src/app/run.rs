@@ -1673,34 +1673,38 @@ fn print_final_output(
 
     let (product, headline) = run_header(session, ledger_path);
     let failed = !run_completed(session, drive);
-    let status = if failed {
-        crate::app::presentation::PanelStatus::Blocked("Failure".to_string())
-    } else {
-        crate::app::presentation::PanelStatus::Passed("Success".to_string())
-    };
-    let mut panel = Panel::new(product, headline, status).row(PanelRow::toned(
-        "session",
-        session.session_id.as_str(),
-        RowTone::Default,
-    ));
-    if failed {
-        panel = panel.row(PanelRow::toned(
-            "error",
+    let mut panel = if failed {
+        failure_panel(
+            &product,
+            &headline,
+            session.session_id.as_str(),
             failure_reason.unwrap_or("run failed"),
-            RowTone::Fail,
+        )
+    } else {
+        let mut panel = Panel::new(
+            product,
+            headline,
+            crate::app::presentation::PanelStatus::Passed("Success".to_string()),
+        )
+        .row(PanelRow::toned(
+            "session",
+            session.session_id.as_str(),
+            RowTone::Default,
         ));
-    } else if let Some(landing) = ctx_traits_core::procedure::session::landing_state(session) {
-        if let Some(merged) = merged_fact(session) {
-            panel = panel.row(PanelRow::toned("merged", merged, RowTone::Default));
+        if let Some(landing) = ctx_traits_core::procedure::session::landing_state(session) {
+            if let Some(merged) = merged_fact(session) {
+                panel = panel.row(PanelRow::toned("merged", merged, RowTone::Default));
+            }
+            if verbose {
+                panel = panel.row(PanelRow::toned(
+                    "landing",
+                    landing_detail(&landing),
+                    RowTone::Default,
+                ));
+            }
         }
-        if verbose {
-            panel = panel.row(PanelRow::toned(
-                "landing",
-                landing_detail(&landing),
-                RowTone::Default,
-            ));
-        }
-    }
+        panel
+    };
     if verbose {
         match &session.completion {
             Some(completion) if !completion.final_outputs.is_empty() => {
@@ -1789,10 +1793,27 @@ fn run_header(
     )
 }
 
-fn run_header_from_title(trait_id: &str, title: Option<String>) -> (String, String) {
+pub(crate) fn run_header_from_title(trait_id: &str, title: Option<String>) -> (String, String) {
     title
         .map(|title| (title, trait_id.to_string()))
         .unwrap_or_else(|| (trait_id.to_string(), String::new()))
+}
+
+pub(crate) fn failure_panel(
+    product: &str,
+    headline: &str,
+    session_id: &str,
+    error: &str,
+) -> crate::app::presentation::Panel {
+    use crate::app::presentation::{Panel, PanelRow, PanelStatus, RowTone};
+
+    Panel::new(
+        product,
+        headline,
+        PanelStatus::Blocked("Failure".to_string()),
+    )
+    .row(PanelRow::toned("session", session_id, RowTone::Default))
+    .row(PanelRow::toned("error", error, RowTone::Fail))
 }
 
 /// Reads the resolved title, falling back to the narrator sidecar before the

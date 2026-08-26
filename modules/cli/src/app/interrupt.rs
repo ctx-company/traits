@@ -15,7 +15,7 @@
 //! does nothing but store `true` into an `AtomicBool`.
 
 use std::sync::Once;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 /// `SIGINT` deliveries observed since install (or the last [`reset`]) —
@@ -31,6 +31,62 @@ static INSTALL_ONCE: Once = Once::new();
 /// both async-signal-safe, unlike anything crossterm offers.
 static mut SAVED_TERMIOS: std::mem::MaybeUninit<libc::termios> = std::mem::MaybeUninit::uninit();
 static TERMIOS_SAVED: AtomicBool = AtomicBool::new(false);
+const RESCUE_PANEL_CAPACITY: usize = 4096;
+static mut RESCUE_PANEL: [u8; RESCUE_PANEL_CAPACITY] = [0; RESCUE_PANEL_CAPACITY];
+static RESCUE_PANEL_LEN: AtomicUsize = AtomicUsize::new(0);
+static RESCUE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Leaf lock: callers may hold the run-panel lock; this lock never takes another.
+static RESCUE_PANEL_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Arms the inline signal rescue panel. A handler racing a title refresh may
+/// observe a partially replaced old buffer; eliminating that window requires a
+/// second buffer, so the signal path instead keeps this bounded best effort.
+pub(crate) fn arm_rescue_panel(generation: u64, panel: &crate::app::presentation::Panel) {
+    let mut bytes = super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE.to_vec();
+    bytes.extend(
+        crate::app::tui::render_lines_ansi(&panel.styled_lines())
+            .replace('\n', "\r\n")
+            .bytes(),
+    );
+    let _guard = RESCUE_PANEL_WRITE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    RESCUE_PANEL_LEN.store(0, Ordering::SeqCst);
+    if bytes.len() > RESCUE_PANEL_CAPACITY {
+        return;
+    }
+    // SAFETY: the writer lock serializes writers; handlers only read bytes
+    // after observing a nonzero published length.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            std::ptr::addr_of_mut!(RESCUE_PANEL).cast::<u8>(),
+            bytes.len(),
+        );
+    }
+    RESCUE_PANEL_GENERATION.store(generation, Ordering::SeqCst);
+    RESCUE_PANEL_LEN.store(bytes.len(), Ordering::SeqCst);
+}
+
+fn write_rescue_panel_signal_safe() {
+    let len = RESCUE_PANEL_LEN.load(Ordering::SeqCst);
+    let generation = RESCUE_PANEL_GENERATION.load(Ordering::SeqCst);
+    if len == 0
+        || generation == 0
+        || generation != super::tui_ratatui::signal_safe_inline_generation()
+    {
+        return;
+    }
+    // SAFETY: the buffer is static and `len` is published only after its bytes
+    // are copied. `write` is async-signal-safe.
+    unsafe {
+        let _ = libc::write(
+            libc::STDERR_FILENO,
+            std::ptr::addr_of!(RESCUE_PANEL).cast(),
+            len,
+        );
+    }
+}
 
 /// Install the process-wide `SIGINT` handler, if not already installed.
 /// Idempotent and cheap to call at the top of every drive invocation.
@@ -98,6 +154,7 @@ fn rescue_terminal_signal_safe() {
         if super::tui_ratatui::signal_safe_pane_active() {
             let escape = super::tui_ratatui::FULL_RESTORE_ESCAPE;
             let _ = libc::write(libc::STDERR_FILENO, escape.as_ptr().cast(), escape.len());
+            write_rescue_panel_signal_safe();
         }
         if TERMIOS_SAVED.load(Ordering::SeqCst) {
             let saved = std::ptr::addr_of!(SAVED_TERMIOS);
@@ -171,4 +228,44 @@ pub fn request_stop() {
 pub fn request_kill() {
     INTERRUPTED.store(true, Ordering::SeqCst);
     ctx_traits_io::run_kill::request_kill();
+}
+
+#[cfg(test)]
+fn armed_rescue_panel_snapshot() -> Vec<u8> {
+    let len = RESCUE_PANEL_LEN.load(Ordering::SeqCst);
+    // SAFETY: tests read only the initialized prefix published by the armer.
+    unsafe {
+        std::slice::from_raw_parts(std::ptr::addr_of!(RESCUE_PANEL).cast::<u8>(), len).to_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::presentation::{Panel, PanelRow, PanelStatus, RowTone};
+
+    #[test]
+    fn arming_publishes_the_panel_bytes_under_generation_and_capacity_rules() {
+        let panel = Panel::new("demo", "run", PanelStatus::Blocked("Failure".to_string()))
+            .row(PanelRow::toned("session", "one", RowTone::Default));
+        arm_rescue_panel(42, &panel);
+        let bytes = armed_rescue_panel_snapshot();
+        assert!(bytes.starts_with(super::super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE));
+        let rendered = String::from_utf8(
+            bytes[super::super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE.len()..].to_vec(),
+        )
+        .unwrap()
+        .replace("\r\n", "\n");
+        assert_eq!(
+            rendered,
+            crate::app::tui::render_lines_ansi(&panel.styled_lines())
+        );
+        assert_eq!(RESCUE_PANEL_GENERATION.load(Ordering::SeqCst), 42);
+
+        let oversized = Panel::new("demo", "run", PanelStatus::Blocked("Failure".to_string())).row(
+            PanelRow::toned("error", "x".repeat(RESCUE_PANEL_CAPACITY), RowTone::Fail),
+        );
+        arm_rescue_panel(43, &oversized);
+        assert_eq!(RESCUE_PANEL_LEN.load(Ordering::SeqCst), 0);
+    }
 }
