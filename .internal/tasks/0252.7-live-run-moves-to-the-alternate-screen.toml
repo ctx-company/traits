@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.7"
 title = "Live run moves to the alternate screen"
-status = "draft"
+status = "ready"
 raised = "2026-08-26"
 content = """
 Ctrl-C during a live run still leaves garbage on screen. Observed on a real
@@ -12,14 +12,16 @@ remnants like `Failureribe→opencode` (the panel's short bottom-border line
 over a longer stale seat-mapping row) and `task queue:/6`.
 
 Why 0252.2 did not cover this: in raw mode Ctrl-C never becomes a SIGINT —
-it is a keystroke handled by `poll_detach` (tui_ratatui.rs), which kills the
-child, calls `leave()`, and prints the note. `restore_terminal`'s
-`PaneScreen::Inline` arm only disables raw mode and shows the cursor; it
-never clears the inline viewport or moves the cursor to a fresh line, so
-every subsequent cooked print lands on top of the last drawn frame. The
-0252.2 rescue panel (which begins with a full home+clear escape) lives on
-the signal path and is additionally gated to `PaneScreen::Inline` via
-`rescue_generation()`, so it never fires here.
+it is a keystroke handled by `poll_detach` (`tui_ratatui.rs:906-913`), which
+kills the child, calls `leave()`, and prints the note. `restore_terminal`'s
+`PaneScreen::Inline` arm (`tui_ratatui.rs:216-220`) only ends decode capture
+and shows the cursor; it never clears the inline viewport or moves the cursor
+to a fresh line, so every subsequent cooked print lands on top of the last
+drawn frame. The 0252.2 rescue panel (which begins with a full home+clear
+escape) lives on the signal path and is additionally gated to
+`PaneScreen::Inline` via `rescue_generation()` (`tui_ratatui.rs:882-884`) and
+`signal_safe_inline_generation()` (`tui_ratatui.rs:71-77`), so it never fires
+here.
 
 ## Owner ruling (2026-08-26)
 
@@ -31,56 +33,478 @@ construction and this entire class of teardown-hygiene bugs disappears.
 scope = """
 ## Decisions
 
-- The live-run pane renders on the alternate screen (the `PaneScreen::Alt`
-  machinery already exists and is used by other surfaces; the live view
-  currently chooses Inline). All exit paths — completion, `q` quit, Ctrl-C
-  kill (`poll_detach`), SIGTERM/SIGHUP/panic via the signal rescue, failed
-  construction rollback — go through the existing Alt restore
-  (`DisableMouseCapture`, `LeaveAlternateScreen`, `Show`), landing the user
-  back on their untouched shell.
-- Post-run output (final outcome panel, queue-runner lines, the
-  "run killed; terminal restored" note) prints to the normal screen after
-  the alternate screen is left — at column 0 on a clean shell, which is the
-  whole point. What lands in scrollback after a run is exactly that cooked
-  output, not the live frames.
-- Reconcile the 0252.2 signal-path rescue with Alt: `rescue_generation()`
-  currently gates the armed panel to `PaneScreen::Inline`. On Alt the
-  correct semantics are: FULL_RESTORE_ESCAPE (which already carries the
-  leave-alternate-screen sequence) restores the shell, then the armed panel
-  prints into the normal screen. The panel must not be lost by the gate
-  simply because the screen mode changed.
-- P551 key-path semantics stay: Ctrl-C in the live view is still an instant
-  kill + detach, `q` still routes to the confirm-quit modal. Only the
-  screen the pane draws on changes.
+1. **One run/live constructor, always Alt.** `RatatuiPane::new_inline()` is
+   replaced by `new_run_pane()`, which is
+   `new_with_options(PaneScreen::Alt, CtrlCPolicy::RequestStop)` — same
+   ctrl-c policy, no screen negotiation. Its three production callers
+   (`run_view::RunPanel::new`, `run_startup_view::StartupView::new`,
+   `dashboard::run_attached_observer`) are exactly the run presentation
+   surfaces, so live runs, the startup-to-live handoff, and attached
+   observers move together through one seam rather than three copies of a
+   mode choice. Startup comes along mechanically, which the task's Out of
+   scope explicitly permits: `create_run_panel` (`drive.rs:4854-4861`) hands
+   the SAME pane into `RunPanel::new_with_pane` with no terminal
+   reconstruction, so an Inline startup could not become an Alt run without
+   inventing a teardown/rebuild transition.
+2. **Teardown reuses the existing Alt restore, unchanged.** `close_pane_locked`
+   (`run_view.rs:1031-1038`) keeps calling `commit_inline_scrollback` then
+   `quit`; both inline operations are already no-ops for an Alt pane
+   (`tui_ratatui.rs:1096-1099`, `:1058-1061`), so the shared close path
+   becomes "discard the frame, leave the alternate screen" with no second
+   teardown implementation and no change to `q`, `d`, completion, or early
+   error ordering.
+3. **P551 key semantics stay exactly as they are.** Raw Ctrl-C is still an
+   instant `request_kill` + detach + note in `poll_detach`; `q` still opens
+   the confirm modal; `d` still closes the pane before publishing the
+   dashboard handoff. Only the screen changes. This task does NOT absorb
+   0252.4's proposed three-choice failure modal; that sibling re-grounds
+   after this lands.
+4. **The signal rescue panel loses its screen gate, keeps its generation
+   gate.** Stale-panel safety is generation equality (`leave` returns
+   `ACTIVE_GENERATION` to 0; a rebuilt pane gets a fresh generation), not
+   screen mode, so `rescue_generation()` becomes "not detached" and
+   `signal_safe_inline_generation()` becomes `signal_safe_rescue_generation()`
+   returning the active generation regardless of screen.
+   `signal_safe_pane_active()` — the headless guard that keeps escapes off a
+   piped stderr — is NOT touched and NOT widened.
+5. **The armed rescue bytes drop their clear prefix.** `CLEAR_VIEWPORT_ESCAPE`
+   (`ESC[H ESC[2J`) erased the inline live frame; emitted after
+   `FULL_RESTORE_ESCAPE` has already left the alternate screen it would erase
+   the user's restored shell, which is the opposite of this task's ruling. The
+   panel serialization (`render_lines_ansi` + CR/LF conversion), the 4096-byte
+   cap, the writer lock, and the async-signal-safe read path all stay
+   byte-identical.
+6. **Alt panes consume resize events.** `apply_resize` returns early for Alt
+   today (`tui_ratatui.rs:798-800`), and `StartupView::service_input`
+   (`run_startup_view.rs:170`) redraws only when it returns `true`. An Alt arm
+   that consumes `pump.resize_size` and reports a changed size keeps
+   `startup_pty_redraws_after_resize_while_configuration_is_delayed` honest;
+   no terminal reconstruction is needed, because ratatui's own `autoresize`
+   re-anchors and clears a fullscreen buffer on the next draw. The inline
+   throttle/reconstruct branch is untouched.
+7. **Decode-warning capture becomes a pane-lifetime property, drained after
+   restore.** Capture is armed today only for Inline
+   (`tui_ratatui.rs:616-620`) and drained by `commit_inline_scrollback`. On
+   Alt, raw stderr writes disturb the ratatui screen just as badly — the
+   dashboard already proves the invariant with its own
+   `DecodeWarningCapture` (`dashboard.rs:2766-2781`). So: arm for every
+   screen at construction, and drain-and-print at the points that already own
+   teardown (`close_pane_locked` for a live run, `StartupView`'s interrupt and
+   failure paths), always AFTER the terminal is restored. The print loop is
+   extracted once into `decode_diagnostics::flush_capture` and reused by the
+   dashboard guard instead of being written a third time.
+8. **Observer teardown no longer disarms the dashboard's capture.** With Alt
+   restore never ending capture and `close_pane_locked` skipping the flush for
+   an observer panel, the dashboard's lifetime capture stays continuously
+   armed across an attach, so its re-arm workaround (`dashboard.rs:2815-2817`)
+   is deleted rather than kept as a comment that no longer describes reality.
+9. **The panic hook keeps its existing mode-correct behavior** (restore Alt
+   without clearing; restore Inline with a clear) and gains one defensive
+   `end_capture()` discard so a panic mid-run can never leave capture armed
+   for the rest of the process — the Alt equivalent of the guard
+   `restore_terminal`'s Inline arm already has.
+
+## Files touched (repo-relative, nothing else)
+
+- `modules/io/src/decode_diagnostics.rs`
+- `modules/cli/src/app/tui_ratatui.rs`
+- `modules/cli/src/app/interrupt.rs`
+- `modules/cli/src/app/run_view.rs`
+- `modules/cli/src/app/run_startup_view.rs`
+- `modules/cli/src/app/dashboard.rs`
+- `modules/cli/tests/support/src/lib.rs`
+- `modules/cli/tests/proof_run_view_exit_teardown.rs`
+- `modules/cli/tests/proof_run_startup_progress.rs`
+- `modules/cli/tests/proof_task_queue_pane_handoff.rs`
+- `modules/cli/tests/proof_task_queue_refusal_teardown.rs` (module doc line 2
+  only: its "inline startup pane" wording)
+- this task file, if the board rewrites it
+
+## Step 0 — reread
+
+Read `tui_ratatui.rs` (`PaneScreen`, `install_panic_hook`, `restore_terminal`,
+`new_with_options`, `apply_resize`, `rescue_generation`, `poll_detach`,
+`leave`), `interrupt.rs` (`arm_rescue_panel`,
+`write_rescue_panel_signal_safe`, `rescue_terminal_signal_safe`),
+`run_view.rs:1025-1038`, `run_startup_view.rs:162-212, 250-281`,
+`dashboard.rs:2766-2830, 2920-2945`, and the four proof files named above.
+Line numbers in this plan are from HEAD `fbb09a19`; find symbols by name.
+
+## Step 1 — `modules/io/src/decode_diagnostics.rs`
+
+- **Add** `pub fn flush_capture()`: `for line in end_capture() { eprintln!("{line}"); }`.
+  Doc: ends capture and prints every buffered line to stderr, for a caller
+  that has already restored the terminal; the one place the "drain then
+  print" loop lives, so a pane surface never writes its own.
+- Nothing else in this file changes; `begin_capture`, `end_capture` (still
+  the discard-only drain), `print_decode_warnings`, and the dedup rules stay.
+
+Build: `CARGO_TARGET_DIR=target cargo build -p ctx-traits-io`
+
+## Step 2 — `modules/cli/src/app/tui_ratatui.rs`
+
+- **Add** `pub(crate) fn new_run_pane() -> std::io::Result<Self>` on
+  `RatatuiPane`, body `Self::new_with_options(PaneScreen::Alt, CtrlCPolicy::RequestStop)`.
+  Its doc replaces `new_inline`'s P244 scrollback rationale with the 2026-08-26
+  ruling: the run pane owns the alternate screen, `LeaveAlternateScreen`
+  restores the shell by construction, and the live frame is deliberately not
+  preserved.
+- **Remove** `pub(crate) fn new_inline() -> std::io::Result<Self>`.
+- **Remove** `fn inline_capable_screen() -> PaneScreen` (its only caller was
+  `new_inline`).
+- **Remove** `pub(crate) fn stdin_was_adopted() -> bool` and
+  `static STDIN_ADOPTED: AtomicBool` (only `inline_capable_screen` read them);
+  in `adopt_controlling_terminal`, the `dup2` success branch becomes
+  `let _ = libc::dup2(source_fd, libc::STDIN_FILENO);`. The adoption itself
+  stays — the input pump still needs a real terminal on stdin.
+- **Edit** `fn new_with_options(screen: PaneScreen, ctrl_c_policy: CtrlCPolicy) -> std::io::Result<Self>`:
+  hoist `ctx_traits_io::decode_diagnostics::begin_capture();` out of the
+  `if screen == PaneScreen::Inline` guard so every pane arms it (decision 7),
+  keeping its position right after the generation/`ACTIVE_SCREEN` stores.
+  Delete the now-empty `if screen == PaneScreen::Inline` block. Its doc gains
+  one sentence: no production caller passes `PaneScreen::Inline` after this
+  task; the inline viewport implementation is retained but unreachable from
+  the CLI's own surfaces.
+- **Edit** `pub(crate) fn rescue_generation(&self) -> Option<u64>` to
+  `(!self.detached()).then_some(self.generation)`; doc: ownership is
+  generation equality, not screen mode.
+- **Rename + edit** `pub(crate) fn signal_safe_inline_generation() -> u64` to
+  `pub(crate) fn signal_safe_rescue_generation() -> u64`, body
+  `ACTIVE_GENERATION.load(Ordering::SeqCst)`. Leave
+  `pub(crate) fn signal_safe_pane_active() -> bool` untouched.
+- **Rename** the field `inline_size: Option<(u16, u16)>` to
+  `last_terminal_size: Option<(u16, u16)>` and update its four
+  initializer/assignment sites (struct decl, the local in `new_with_options`,
+  the Inline construction assignment, the two struct literals including
+  `new_detached_for_test`). `last_inline_resize` keeps its name — it throttles
+  the inline reconstruction only.
+- **Edit** `pub(crate) fn apply_resize(&mut self) -> bool` to:
+  ```
+  if self.detached() { return false; }
+  let size = self.pump.resize_size.swap(0, Ordering::SeqCst);
+  let (columns, rows) = unpack_terminal_size(size);
+  if size == 0 || self.last_terminal_size == Some((columns, rows)) { return false; }
+  if self.screen == PaneScreen::Alt {
+      self.last_terminal_size = Some((columns, rows));
+      return true;
+  }
+  // ... existing inline throttle / clear / inline_terminal rebuild, verbatim
+  ```
+  The Alt arm records the size and reports "redraw worthy"; ratatui's
+  `autoresize` performs the actual buffer resize on the next draw, so no
+  terminal is rebuilt and `requeue_resize`/`INLINE_RESIZE_INTERVAL` stay
+  inline-only.
+- **Edit** `fn install_panic_hook()`: after `restore_terminal(screen);` add
+  `let _ = ctx_traits_io::decode_diagnostics::end_capture();` (discarded — a
+  panic path prints no advisories), leaving the existing
+  `if screen == PaneScreen::Inline { ... CLEAR_VIEWPORT_ESCAPE ... }` branch
+  exactly as it is.
+- `restore_terminal`, `leave`, `quit`, `Drop`, `FULL_RESTORE_ESCAPE`,
+  `CLEAR_VIEWPORT_ESCAPE`, `poll_detach`, `poll_and_apply_keys`, `draw`,
+  mouse/focus handling, and every pump/handoff invariant are NOT edited.
+
+## Step 3 — `modules/cli/src/app/interrupt.rs`
+
+- **Edit** `pub(crate) fn arm_rescue_panel(generation: u64, panel: &crate::app::presentation::Panel)`:
+  the buffer is now the panel alone —
+  `let bytes = crate::app::tui::render_lines_ansi(&panel.styled_lines()).replace('\\n', "\\r\\n").into_bytes();`
+  — with the `CLEAR_VIEWPORT_ESCAPE` prefix removed (decision 5). Lock order,
+  the `RESCUE_PANEL_LEN` store-0-first sequence, the capacity refusal, and the
+  generation/length publish order are unchanged. Its doc drops "inline" and
+  states the Alt contract: `FULL_RESTORE_ESCAPE` restores the shell, then
+  these bytes print onto the untouched normal screen.
+- **Edit** `fn write_rescue_panel_signal_safe()`: compare against
+  `super::tui_ratatui::signal_safe_rescue_generation()`. The `len == 0`,
+  `generation == 0`, and single-`libc::write` shape stay.
+- `rescue_terminal_signal_safe`, `install`, `handle_sigterm`, `handle_sigint`,
+  the SIGINT count ladder, exit codes 130/128+signo, and
+  `kill_active_process_group` are NOT edited.
+- **Edit** the unit test
+  `arming_publishes_the_panel_bytes_under_generation_and_capacity_rules`:
+  assert `!bytes.starts_with(CLEAR_VIEWPORT_ESCAPE)`, that the whole buffer
+  (CR/LF normalized back to LF) equals
+  `crate::app::tui::render_lines_ansi(&panel.styled_lines())`, and keep the
+  generation and oversized-refusal assertions verbatim.
+
+## Step 4 — call sites and capture lifecycle
+
+`modules/cli/src/app/run_view.rs`:
+- `RunPanel::new` constructs `RatatuiPane::new_run_pane()?`.
+- `fn close_pane_locked(state: &mut RunPanelState)` keeps its
+  `commit_inline_scrollback`/`clear_viewport`/`quit` sequence and gains, after
+  `quit()`:
+  `if !state.observer { ctx_traits_io::decode_diagnostics::flush_capture(); }`
+  then the existing `state.cadence.inactive();`. An observer leaves the buffer
+  to the dashboard's own lifetime guard (decision 8).
+
+`modules/cli/src/app/run_startup_view.rs`:
+- `StartupView::new` constructs `RatatuiPane::new_run_pane()?`.
+- `fn service_input(shared: &Arc<Mutex<Inner>>)`, interrupt arm: drop the
+  `let lines = Self::lines(&inner.rows);` binding and the
+  `pane.commit_inline_scrollback(&lines)` call; keep `pane.quit();`, then
+  `let _ = ctx_traits_io::decode_diagnostics::end_capture();` (discarded — an
+  interrupted startup may not have completed the trust row, and its advisories
+  are noise), then the unchanged
+  `eprintln!("run startup interrupted; terminal restored");` and
+  `std::process::exit(130)`.
+- `impl Drop for StartupView`: drop the `lines` binding, the
+  `commit_inline_scrollback` call, and the now-unobservable
+  "startup did not complete" row mutation (nothing renders `inner.rows` after
+  this point once the frame is discarded). The body becomes: compute
+  `trust_done` from the rows exactly as today, and inside the existing
+  `if let Some(mut pane) = inner.pane.take()` block —
+  `if !trust_done { let _ = ctx_traits_io::decode_diagnostics::end_capture(); }`
+  (the untouched secrecy rule: never project trait-document warnings before
+  the trust row completes), then `pane.quit();`, then
+  `ctx_traits_io::decode_diagnostics::flush_capture();`. The flush stays
+  INSIDE the block: on the successful handoff the pane has already moved out
+  via `into_pane`, and capture must remain armed for the live run that
+  inherits it.
+- `observer`, `fail`, `apply`/`apply_inner`, `interrupted`, `into_pane`, the
+  resize retry, and `poll_startup_interrupt` are NOT edited.
+
+`modules/cli/src/app/dashboard.rs`:
+- `run_attached_observer` constructs `RatatuiPane::new_run_pane()`.
+- `impl Drop for DecodeWarningCapture` body becomes
+  `ctx_traits_io::decode_diagnostics::flush_capture();` (same behavior, one
+  implementation).
+- Delete the post-attach re-arm `ctx_traits_io::decode_diagnostics::begin_capture();`
+  and its two-line comment: an Alt observer never disarms the shared toggle
+  (decision 8).
+- No dashboard key, screen, modal, attach ordering, or `new_forwarding_ctrl_c`
+  change.
+
+Build: `CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 5 — `modules/cli/tests/support/src/lib.rs`
+
+- **Add** `pub fn raw_after_terminal_restore(raw: &str) -> &str` — the current
+  body of `text_after_terminal_restore` minus the strip: slice after the LAST
+  `ESC[?25h`, panicking with the same message when absent.
+- **Edit** `pub fn text_after_terminal_restore(raw: &str) -> String` to
+  `strip_escapes(raw_after_terminal_restore(raw))`; its doc drops "inline" and
+  says the cursor-show boundary is emitted by both screen modes' restore.
+- **Edit** `run_pty_with_cursor_reply`'s doc: the reply arm now fires only for
+  a surface that still issues `ESC[6n`; run panes no longer do, and the
+  helper is kept because it is the shared marker/exit-code driver.
+- No behavior change to any driver script.
+
+## Step 6 — `modules/cli/tests/proof_run_view_exit_teardown.rs`
+
+Module doc: PTY coverage for alternate-screen run-view teardown paths. Add
+`const ENTER_ALT: &str = "\\x1b[?1049h";` and
+`const LEAVE_ALT: &str = "\\x1b[?1049l";`, keep `CLEAR_VIEWPORT` for the
+negative assertions, delete `fn surviving_screen_text`.
+
+- `fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str)`
+  now reads `text_after_terminal_restore(raw)` (the rescue panel is written
+  immediately after `FULL_RESTORE_ESCAPE`, whose last byte pair before the
+  panel is the cursor-show), keeps the exact four-line equality
+  (`┌── {trait_id}`, `│   session: {session_id}`,
+  `│   error:   interrupted (signal)`, `└── Failure`) and the
+  `__CHILD_EXIT__` filter, and adds
+  `assert!(!raw_after_terminal_restore(raw).contains(CLEAR_VIEWPORT))` — the
+  restored shell is never cleared.
+- `sigterm_leaves_only_the_interrupted_failure_panel`: unchanged fixture and
+  driver; keeps exit 143; keeps the `ESC[?1049l` + `ESC[?25h` assertion; adds
+  `assert!(raw.contains(ENTER_ALT))`.
+- `repeated_sigint_leaves_only_the_interrupted_failure_panel`: unchanged
+  fixture/driver, exit 130, plus the same `ENTER_ALT` assertion.
+- `panic_mid_run_leaves_no_frame_rows`: replace the `CLEAR_VIEWPORT`-anchored
+  slicing with — `raw` contains `ENTER_ALT` and `LEAVE_ALT`; the painted
+  `STEP_ID` occurs before `raw.rfind(LEAVE_ALT)`;
+  `text_after_terminal_restore(&raw)` contains
+  `"test hook: panic after run-view render"` and NOT `STEP_ID`;
+  `!raw.contains(RESCUE_ERROR_TEXT)`; and
+  `!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT)`.
+- `dashboard_attach_then_exit_leaves_no_run_frame`: unchanged.
+- `clean_run_teardown_commits_scrollback_without_an_extra_clear` is **renamed**
+  to `clean_run_teardown_discards_the_live_frame_and_prints_the_final_panel`
+  and rewritten: exit 0; `raw` contains `ENTER_ALT` and `LEAVE_ALT`; the
+  painted `STEP_ID` occurs before `raw.rfind(LEAVE_ALT)`;
+  `text_after_terminal_restore(&raw)` contains `┌── `,
+  `session: {ledger_session_id}`, and `└── Success`, and does NOT contain
+  `STEP_ID` (the live frame is discarded, per the owner ruling) or
+  `RESCUE_ERROR_TEXT`; `!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT)`.
+  The trailing killed-run sub-case (which asserted an inline clear) is
+  deleted — the SIGTERM test above owns that shape.
+- **New** `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
+  — the reported defect, previously untested. `command_trait_fixture("ctrl-c", "sleep 30")`,
+  driven by the shared `run_pty_keys_after_markers(&ctx_bin(), "traits --session .ctx/runs/ctrl-c.json run --progress tui --file .ctx/traits/demo/generated/index.toml", ..., &[(STEP_ID, "\\u{3}")])`
+  (a real 0x03 byte, sent once the step row is painted). Assert: exit code is
+  nonzero (classification is owned by the queue/refusal proofs, not here);
+  `raw` contains `ENTER_ALT` and `LEAVE_ALT`; in
+  `text_after_terminal_restore(&raw)` some line, trimmed, is EXACTLY
+  `run killed; terminal restored` — the old defect glued that note onto the
+  live title row, so an exact-line match is the regression trap; no line after
+  restore contains `STEP_ID` or `│`; and
+  `!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT)`.
+
+File ends at six `#[test]` functions.
+
+## Step 7 — `modules/cli/tests/proof_run_startup_progress.rs`
+
+Stays at eight tests. Add the same `ENTER_ALT` constant.
+
+- `fn failed_startup_pty(fixture, command, label, reason, check_termios)`
+  keeps its signature and expect script; its assertions become: the raw stream
+  contains `ENTER_ALT`; `label` appears in `&output[..output.rfind("\\x1b[?1049l").expect(...)]`
+  (the stage really painted before teardown); `text_after_terminal_restore(&output)`
+  contains `reason` — the cooked error the CLI prints after the screen is
+  handed back (verified at HEAD: `invalid manifest at run.trait-source: trait
+  authorization was refused`) — and does NOT contain `label` (no startup row
+  survives); the termios check is unchanged. Both existing call sites keep
+  their arguments.
+- `startup_pty_falls_back_to_the_existing_initialization_line_when_unavailable`
+  is **replaced** by `startup_pty_needs_no_cursor_query_on_the_alternate_screen`,
+  keeping the same expect invocation that deliberately answers nothing:
+  assert the child succeeded, `saw_startup_pane(&output)`,
+  `!output.contains("ctx run · initialization")`, `output.contains(ENTER_ALT)`,
+  and `!output.contains("\\x1b[6n")`. The unanswered-cursor-query fallback it
+  used to prove is unreachable once no run surface issues the query; the
+  line-narration fallback for an ineligible environment stays covered by
+  `startup_pty_uses_status_narration_when_live_tui_is_environment_ineligible`.
+- `startup_pty_uses_the_inline_pane_when_the_pty_has_a_size` is **renamed** to
+  `startup_pty_uses_the_alternate_screen_and_hands_off_to_the_live_run`: same
+  driver and exit code; keeps `saw_startup_pane`, the no-line-narration
+  assertion, `"information"`, the completion marker, the startup-before-live
+  ordering, and the termios check; adds `output.contains(ENTER_ALT)` and
+  `assert!(!saw_startup_pane(&text_after_terminal_restore(&output)))`.
+- `startup_pty_redraws_after_resize_while_configuration_is_delayed`:
+  unchanged — it is the proof that decision 6's Alt resize arm works.
+- `startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff` is
+  **renamed** to `startup_pty_ctrl_c_restores_the_terminal_before_the_interrupt_note`:
+  same expect script (Ctrl-C at the first painted frame, exit 130, termios
+  check verbatim); replace the `output.contains("interrupted")` scrollback
+  assertion with — `text_after_terminal_restore(&output)` has a line whose
+  trim is exactly `run startup interrupted; terminal restored`, and
+  `!saw_startup_pane(&text_after_terminal_restore(&output))`; keep the
+  `!output.contains("Run Panel")` and `ESC[?25h` assertions.
+- `startup_pty_query_refusal_never_commits_untrusted_trait_details`,
+  `startup_pty_is_visible_before_delayed_config_resolution`, and
+  `startup_pty_uses_status_narration_when_live_tui_is_environment_ineligible`
+  are unchanged and must stay green as-is.
+
+## Step 8 — queue proofs
+
+`modules/cli/tests/proof_task_queue_pane_handoff.rs`:
+- Replace `fn cursor_query_count(raw: &str) -> usize` with
+  `fn alternate_screen_entries(raw: &str) -> usize { raw.matches("\\x1b[?1049h").count() }`
+  and rewrite its doc: Alt construction issues no cursor query, so the
+  per-pane signal is the enter-alternate-screen escape, one per construction.
+- Rename the test to `task_queue_brings_up_the_live_pane_for_every_member`;
+  keep exit code 7, the `!raw.contains("falling back to status progress")`
+  assertion, the `>= 2` count (now over `alternate_screen_entries`), the
+  after-restore `task queue:` / `0002: ` / `0003: ` report assertions, and the
+  cooked-termios check, all verbatim.
+
+`modules/cli/tests/proof_task_queue_refusal_teardown.rs`: module doc line 2
+only — "inline startup pane" becomes "run startup pane". No assertion changes;
+both tests must stay green untouched.
 
 ## Out of scope
 
-- Any new panic/exotic-exit coverage beyond what 0252.2 already shipped
-  (owner: "I don't care about every single panic for now" still stands).
-- Scrollback preservation or replay of live frames after the run.
-- Startup view (`run_startup_view.rs`) unless it shares the same pane
-  construction and comes along mechanically.
-
-## Watch
-
-- The live pane's scroll keys (P470: arrows/j/k/PgUp/PgDn, Tab focus) must
-  keep working on the alternate screen — scrolling is pane-internal state,
-  not terminal scrollback, so nothing should change, but prove it.
-- Detach-to-headless (`d`/detach flows, dashboard Resume spawning detached
-  drives) must not inherit an alternate screen it never leaves.
-- A headless drive (no pane constructed) must still never write terminal
-  escapes to a piped stderr — the existing `signal_safe_pane_active` gate
-  keeps that property; do not widen it.
-
-## Done when (sketch — architect refines)
-
-- PTY proof: Ctrl-C during a live run leaves the shell prompt clean — no
-  interleaved remnants, the note and the subsequent blocked/outcome panel
-  print from column 0 on fresh lines.
-- PTY proof: normal completion restores the shell and prints the final
-  panel cleanly below the pre-run prompt line.
-- PTY proof: kill/SIGTERM during a live run restores the shell and the
-  armed rescue panel prints intact on the normal screen (0252.2's proof
-  updated for Alt, not deleted).
-- Existing pane proofs (scroll, focus, q-modal, detach) stay green.
+- Deleting the inline viewport implementation (`PaneScreen::Inline`,
+  `inline_terminal`, `inline_viewport_height`, `commit_inline_scrollback`,
+  `clear_viewport`, `CLEAR_VIEWPORT_ESCAPE`, the panic hook's Inline clear,
+  the inline resize rebuild). It stays compiled and unit-tested but is no
+  longer selected by any CLI surface; removing it is its own task.
+- 0252.4's three-choice Ctrl-C failure modal, and any change to what Ctrl-C,
+  `q`, or `d` MEAN.
+- New panic/exotic-exit coverage beyond updating 0252.2's existing panic proof
+  for Alt (owner: "I don't care about every single panic for now").
+- Scrollback preservation or replay of live/startup frames.
+- Final panel grammar, row content, outcome classification, exit codes, SIGINT
+  escalation counts, child-group kill behavior, headless progress selection,
+  the live-view footer/guide/scroll bindings, and dashboard key behavior.
+- Widening `signal_safe_pane_active`, adding a second rescue buffer, or making
+  the signal path allocate.
 """
+validation = """
+## Done when
+
+1. Live-run teardown is clean on every exit path the pane owns: SIGTERM and
+   the third SIGINT leave exactly the four-line interrupted panel on a
+   restored, uncleared shell; a panic restores the alternate screen and leaves
+   no frame row; a dashboard attach/`q` leaves no run frame; a clean
+   completion discards the live frame and prints the ordinary success panel
+   after restore; and raw Ctrl-C prints `run killed; terminal restored` as its
+   own line after the alternate screen is left, with no live-frame fragment
+   after it — the reported defect, now covered.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+2. The startup pane comes up on the alternate screen with no cursor query at
+   all, still redraws on resize while configuration is delayed, still refuses
+   to project untrusted trait details, still narrates in line mode when the
+   environment is ineligible, hands off into the live run, and on
+   failure/Ctrl-C restores the terminal and reports cooked with no surviving
+   startup row.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_startup_progress`
+3. A task queue still brings up one live pane per member — counted by
+   enter-alternate-screen escapes now that no construction issues `ESC[6n` —
+   with no status-progress fallback, both members reported after the final
+   restore, and a cooked terminal at exit.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_task_queue_pane_handoff`
+4. Pane state, the restore/rescue constants' lockstep invariant, the pump
+   handoff guards, and the rescue-panel arming rules (no clear prefix, panel
+   bytes verbatim, generation published, oversized refused) all hold.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib`
+5. Queue refusal teardown and headless/piped output are unchanged: an
+   ineligible or piped run still emits no terminal escapes and the cooked
+   outcome reporting is byte-identical.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_task_queue_refusal_teardown --test proof_output_style`
+6. The landing gate is green.
+   `CARGO_TARGET_DIR=target just test-full`
+7. The diff touches only the files Step 1-8 name. The verdict is in the exit
+   code, not in the eye:
+   `test -z "$(git status --short | cut -c4- | rg -v '^(\\.internal/tasks/0252\\.7-live-run-moves-to-the-alternate-screen\\.toml|modules/io/src/decode_diagnostics\\.rs|modules/cli/src/app/(tui_ratatui|interrupt|run_view|run_startup_view|dashboard)\\.rs|modules/cli/tests/support/src/lib\\.rs|modules/cli/tests/proof_(run_view_exit_teardown|run_startup_progress|task_queue_pane_handoff|task_queue_refusal_teardown)\\.rs)$')"`
+
+Criteria 1-4 and 6 each carry a `[[checks]]` entry. Criterion 5 does not: its
+two suites also run inside `just test-full`, and a sixth entry would spend a
+check slot on a subset of criterion 6. Criterion 7 deliberately carries no
+entry either — checks execute in a clean detached worktree of the merged sha,
+where `git status --short` is empty by construction, so the entry could never
+fail; it stays an implementer-run command in the working tree, where it can.
+
+## How to run this
+
+Run Step 0's reread, then Steps 1-8 in order, running each step's declared
+build command (`cargo build -p ctx-traits-io` after Step 1,
+`cargo build -p ctx-traits-cli` after Steps 2, 3, and 4) rather than building
+once at the end, so a rename/borrow/exhaustiveness error surfaces next to the
+edit that caused it. Then run the criterion commands 1, 2, 3, 4, 5, 6, 7 in
+that order. Permit at most two targeted repair-and-rerun rounds in total;
+after each repair, rerun the failing command and every later one. Complete
+only when all seven criterion commands exit 0.
+"""
+
+[relations]
+parent = "0252"
+
+[[checks]]
+name = "alternate-screen run-view teardown is clean on every exit path"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+expect = 'test result: ok\. 6 passed; 0 failed'
+
+[[checks]]
+name = "startup pane runs on the alternate screen without regressing its invariants"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_startup_progress"
+timeout-ms = 1800000
+expect = 'test result: ok\. 8 passed; 0 failed'
+
+[[checks]]
+name = "a task queue still brings up one live pane per member"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_task_queue_pane_handoff"
+timeout-ms = 1800000
+expect = 'test result: ok\. 1 passed; 0 failed'
+
+[[checks]]
+name = "pane, restore-constant, and rescue-arming unit invariants hold"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "the alternate-screen run pane passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
