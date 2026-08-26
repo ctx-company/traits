@@ -6,7 +6,9 @@
 
 use std::collections::BTreeMap;
 
-use ctx_traits_core::procedure::session::{MergeStatus, Session};
+#[cfg(test)]
+use ctx_traits_core::procedure::session::Session;
+use ctx_traits_core::procedure::session::{MergeFrame, MergeStatus};
 use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{DuplicateKey, ResolvedTask, TaskSummary};
 use ctx_traits_core::task::{AutoClosePolicy, Check, CheckOutcome, CheckRecord};
@@ -36,13 +38,21 @@ pub struct DoneProposal {
 /// the last terminal frame parked or failed instead of landing, or (should
 /// never happen, but) a `Merged` frame carries no parseable `landed=`
 /// entry — a proposal that cannot cite its sha is not made.
-pub fn merged_landed_sha(session: &Session) -> Option<String> {
+#[cfg(test)]
+pub fn merged_landed_sha(session: &ctx_traits_core::procedure::session::Session) -> Option<String> {
     let last_terminal = session
         .provenance
         .merge_frames
         .iter()
         .rev()
         .find(|frame| frame.status.is_terminal())?;
+    merged_landed_sha_from_terminal_frame(Some(last_terminal))
+}
+
+/// Row-oriented form of [`merged_landed_sha`]. The center stores exactly the
+/// terminal frame this decision needs, so task surfaces do not reopen ledgers.
+pub fn merged_landed_sha_from_terminal_frame(last_terminal: Option<&MergeFrame>) -> Option<String> {
+    let last_terminal = last_terminal?;
     if last_terminal.status != MergeStatus::Merged {
         return None;
     }

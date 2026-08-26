@@ -127,7 +127,7 @@ pub(crate) fn handle_tasks_sync(
 /// derivation the dashboard TASKS screen surfaces, non-interactively and
 /// list-only — accepting one stays `ctx tasks update <task> --status done`,
 /// no new write surface here. Read-only: the current-repository run
-/// inventory plus a fresh board `list`/`sync`, folded through the same pure
+/// center snapshot plus a fresh board `list`/`sync`, folded through the same pure
 /// [`super::task_proposals::derive_proposals`] both consumers share.
 pub(crate) fn handle_tasks_proposals(
     board: Option<&str>,
@@ -142,20 +142,22 @@ pub(crate) fn handle_tasks_proposals(
         message: e.to_string(),
     })?;
 
-    let inventory = ctx_traits_io::run_session::current_repo_run_inventory().map_err(|e| {
-        crate::Error::Command {
-            message: e.to_string(),
-        }
+    let repo_key = ctx_traits_io::state::current_repo_key().map_err(|e| crate::Error::Command {
+        message: e.to_string(),
     })?;
-    let triples: Vec<(Option<String>, String, Option<String>)> = inventory
-        .iter()
-        .filter_map(|row| match &row.status {
-            ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => Some((
-                session.provenance.task_key.clone(),
-                session.run_id.as_str().to_string(),
-                super::task_proposals::merged_landed_sha(session),
-            )),
-            ctx_traits_io::run_session::InventoryOutcome::Unreadable { .. } => None,
+    let rows = ctx_traits_io::center::list(Some(&repo_key)).map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+    let triples: Vec<(Option<String>, String, Option<String>)> = readable_center_rows(&rows)
+        .into_iter()
+        .map(|row| {
+            (
+                row.summary.task_key.clone(),
+                row.summary.run_id.clone(),
+                super::task_proposals::merged_landed_sha_from_terminal_frame(
+                    row.summary.last_terminal_merge_frame.as_ref(),
+                ),
+            )
         })
         .collect();
     let runs: Vec<(Option<&str>, &str, Option<&str>)> = triples
@@ -225,12 +227,13 @@ pub(crate) fn handle_tasks_reconcile(
         }
     }
 
-    let inventory = ctx_traits_io::run_session::current_repo_run_inventory().map_err(|e| {
-        crate::Error::Command {
-            message: e.to_string(),
-        }
+    let repo_key = ctx_traits_io::state::current_repo_key().map_err(|e| crate::Error::Command {
+        message: e.to_string(),
     })?;
-    let facts = session_facts_from_inventory(&inventory);
+    let rows = ctx_traits_io::center::list(Some(&repo_key)).map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+    let facts = session_facts_from_center(&rows);
     let report = super::task_proposals::derive_reconcile_report(
         &facts,
         &summaries,
@@ -331,50 +334,58 @@ fn mark_done_checks_annotation(
     }
 }
 
-/// [`super::task_proposals::SessionFact`] rows from a ledger inventory scan:
+/// [`super::task_proposals::SessionFact`] rows from the center snapshot:
 /// the shared assembly `handle_tasks_proposals` and `handle_tasks_reconcile`
 /// both build on, extended here with the ancestry, digest, and park-report
 /// facts reconcile alone needs. One `git merge-base --is-ancestor` per
 /// distinct landed sha — never per session — so a task cited by several
 /// merged runs against the same sha checks ancestry once.
-pub(crate) fn session_facts_from_inventory(
-    inventory: &[ctx_traits_io::run_session::RunInventoryRow],
+pub(crate) fn session_facts_from_center(
+    rows: &[ctx_traits_io::center::CenterPublicRow],
 ) -> Vec<super::task_proposals::SessionFact> {
     let mut ancestry_cache: std::collections::HashMap<String, bool> =
         std::collections::HashMap::new();
     let mut facts = Vec::new();
-    for row in inventory {
-        let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } = &row.status
-        else {
-            continue;
-        };
-        let landed_sha = super::task_proposals::merged_landed_sha(session);
+    for row in readable_center_rows(rows) {
+        let summary = &row.summary;
+        let landed_sha = super::task_proposals::merged_landed_sha_from_terminal_frame(
+            summary.last_terminal_merge_frame.as_ref(),
+        );
         let landed_is_ancestor = landed_sha.as_ref().map(|sha| {
             *ancestry_cache.entry(sha.clone()).or_insert_with(|| {
                 ctx_traits_io::git_process::is_ancestor(sha, "HEAD").unwrap_or(false)
             })
         });
-        let blocked_with_park_report = session.status
-            == ctx_traits_core::procedure::session::Status::Blocked
-            && ctx_traits_io::run_session::session_park_report(session).is_some();
         facts.push(super::task_proposals::SessionFact {
-            run_id: session.run_id.as_str().to_string(),
-            task_key: session.provenance.task_key.clone(),
-            task_digest: session
-                .provenance
-                .task_digest
-                .as_ref()
-                .map(|d| d.to_string()),
+            run_id: summary.run_id.clone(),
+            task_key: summary.task_key.clone(),
+            task_digest: summary.task_digest.clone(),
             landed_sha,
             landed_is_ancestor,
-            blocked_with_park_report,
-            terminal_epoch: session
-                .last_drive_outcome
-                .as_ref()
-                .map(|outcome| outcome.recorded_at_epoch),
+            blocked_with_park_report: summary.blocked_with_park_report,
+            terminal_epoch: summary.terminal_epoch,
         });
     }
     facts
+}
+
+/// Preserve the inventory's observable newest-ledger-first order while sharing
+/// the center's one request between proposals and reconcile. Parse failures are
+/// represented by the center but never contain facts for either report.
+fn readable_center_rows(
+    rows: &[ctx_traits_io::center::CenterPublicRow],
+) -> Vec<&ctx_traits_io::center::CenterPublicRow> {
+    let mut readable: Vec<_> = rows
+        .iter()
+        .filter(|row| row.summary.parse_error.is_none())
+        .collect();
+    readable.sort_by(|left, right| {
+        right
+            .modified_epoch_secs
+            .cmp(&left.modified_epoch_secs)
+            .then_with(|| left.ledger_path.cmp(&right.ledger_path))
+    });
+    readable
 }
 
 pub(crate) fn handle_tasks_list(
@@ -664,6 +675,7 @@ pub(crate) fn handle_tasks_show(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::test_support::{CenterPeer, read_center_request, write_center_response};
 
     fn tempdir() -> Utf8PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -679,7 +691,14 @@ mod tests {
             ));
             match std::fs::create_dir(&dir) {
                 Ok(()) => return Utf8PathBuf::from_path_buf(dir).unwrap(),
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error)
+                    if {
+                        let error_kind = error.kind();
+                        error_kind == std::io::ErrorKind::AlreadyExists
+                    } =>
+                {
+                    continue;
+                }
                 Err(err) => panic!("creating scratch dir {}: {err}", dir.display()),
             }
         }
@@ -782,25 +801,130 @@ mod tests {
         assert!(dependent.document.relations.depends_on.is_empty());
     }
 
-    /// `ctx tasks proposals` (0063.8) is a thin edge: it never crashes
-    /// against a board with no session inventory bound to it, and its
-    /// `--json` envelope shape is exercised through the pure derivation
-    /// (`derive_proposals`, tested exhaustively in `task_proposals.rs`)
-    /// rather than a live inventory this test cannot control.
     #[test]
-    fn tasks_proposals_against_an_unbound_board_lists_nothing() {
-        let board = tempdir();
+    fn center_task_facts_exclude_only_explicitly_unreadable_rows() {
+        let readable: ctx_traits_io::center::CenterPublicRow =
+            serde_json::from_value(serde_json::json!({
+                "summary": {
+                    "session_id": "readable-session",
+                    "run_id": "readable-run",
+                    "trait_id": "test",
+                    "status": "completed",
+                    "has_merge_frames": false,
+                },
+                "repo_key": "repo",
+                "repo_path": "/repo",
+                "ledger_path": "/runs/repo/readable.json",
+                "live": false,
+                "modified_epoch_secs": 0,
+            }))
+            .expect("readable center row");
+        let corrupt: ctx_traits_io::center::CenterPublicRow =
+            serde_json::from_value(serde_json::json!({
+                "summary": {
+                    "session_id": "corrupt-session",
+                    "run_id": "corrupt-run",
+                    "trait_id": "test",
+                    "status": "completed",
+                    "has_merge_frames": false,
+                    "parse_error": "invalid JSON",
+                },
+                "repo_key": "repo",
+                "repo_path": "/repo",
+                "ledger_path": "/runs/repo/corrupt.json",
+                "live": false,
+                "modified_epoch_secs": 0,
+            }))
+            .expect("unreadable center row");
+
+        let facts = session_facts_from_center(&[readable, corrupt]);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].run_id, "readable-run");
+    }
+
+    #[test]
+    fn readable_center_rows_preserve_newest_ledger_first_order() {
+        let older: ctx_traits_io::center::CenterPublicRow =
+            serde_json::from_value(serde_json::json!({
+                "summary": {
+                    "session_id": "older-session",
+                    "run_id": "older-run",
+                    "trait_id": "test",
+                    "status": "completed",
+                    "has_merge_frames": false,
+                },
+                "repo_key": "repo",
+                "repo_path": "/repo",
+                "ledger_path": "/runs/repo/z-older.json",
+                "live": false,
+                "modified_epoch_secs": 10,
+            }))
+            .expect("older center row");
+        let newer: ctx_traits_io::center::CenterPublicRow =
+            serde_json::from_value(serde_json::json!({
+                "summary": {
+                    "session_id": "newer-session",
+                    "run_id": "newer-run",
+                    "trait_id": "test",
+                    "status": "completed",
+                    "has_merge_frames": false,
+                },
+                "repo_key": "repo",
+                "repo_path": "/repo",
+                "ledger_path": "/runs/repo/a-newer.json",
+                "live": false,
+                "modified_epoch_secs": 20,
+            }))
+            .expect("newer center row");
+
+        let rows = [older, newer];
+        let ordered = readable_center_rows(&rows);
+        assert_eq!(ordered[0].summary.run_id, "newer-run");
+        assert_eq!(ordered[1].summary.run_id, "older-run");
+    }
+
+    fn assert_center_request_failure_is_not_partial(
+        handler: fn(Option<&str>, bool) -> crate::Result<CommandOutput<()>>,
+    ) {
+        let peer_server = CenterPeer::install("tasks-request-failure");
+        let root = Utf8PathBuf::from_path_buf(peer_server.root().to_path_buf())
+            .expect("UTF-8 center peer root");
+        let board = root.join("board");
+        std::fs::create_dir(&board).expect("create board");
         write_task(
             &board,
-            "0001-a.toml",
-            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+            "0001-task.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Task\"\nstatus = \"ready\"\n",
         );
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut stream = crate::app::test_support::accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            assert_eq!(request["kind"], "list");
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({"type": "error", "data": {"message": "test center failure"}}),
+            );
+        });
+        let result = handler(Some(board.as_str()), true);
+        peer.join().expect("join center peer");
 
-        // `CommandOutput<()>` carries nothing to assert on directly — this
-        // handler prints its envelope rather than returning it. The board's
-        // own task carries no bound run, so completing without error over a
-        // real (if empty) session inventory is the thin-edge contract this
-        // test protects.
-        handle_tasks_proposals(Some(board.as_str()), true).unwrap();
+        assert!(
+            result
+                .expect_err("center failure must not produce a partial report")
+                .to_string()
+                .contains("test center failure")
+        );
+    }
+
+    #[test]
+    fn proposals_fail_loudly_when_the_center_request_fails() {
+        assert_center_request_failure_is_not_partial(handle_tasks_proposals);
+    }
+
+    #[test]
+    fn reconcile_fails_loudly_when_the_center_request_fails() {
+        assert_center_request_failure_is_not_partial(handle_tasks_reconcile);
     }
 }

@@ -69,6 +69,8 @@ mod task_checks;
 mod task_proposals;
 mod task_queue;
 mod tasks;
+#[cfg(test)]
+mod test_support;
 mod trait_editor;
 mod trust_story;
 mod tui;

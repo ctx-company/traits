@@ -26,6 +26,7 @@
 use std::collections::BTreeMap;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use serde::{Deserialize, Serialize};
 
 use ctx_traits_core::procedure::session::{Session, Status};
 use ctx_traits_core::task::graph::DerivedStatus;
@@ -41,7 +42,7 @@ fn provider_error(error: ctx_traits_core::task::provider::ProviderError) -> crat
 
 /// A standing wall found among this repository's ledgers: the wall id, the
 /// task that originally recorded it, and the run that blocked on it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StandingWall {
     pub wall_id: String,
     pub origin_task: String,
@@ -319,7 +320,7 @@ pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> 
     )
 }
 
-/// Scan this repository's session ledgers for a BLOCKED run whose park
+/// Query the center for a BLOCKED run whose park
 /// report cites `wall_id`, and that has not since been cleared by
 /// a later completed run of the same originating task. Ledgers with no
 /// typed park report (legacy blocked runs, or runs blocked for unrelated
@@ -328,42 +329,12 @@ pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> 
 /// originally recorded it — that self-retry is the only way a wall is ever
 /// cleared, so treating it as a "sibling" would make every park permanent.
 ///
-/// Every dispatch calls this fresh (no cache reuse across calls, unlike the
-/// dashboard's ticking `InventoryCache`), so it deep-parses this
-/// repository's whole ledger store on every single invocation unless
-/// something cheaper filters first. Per P510 §3.6's resolution order, each
-/// ledger is first resolved to a [`crate::run_summary::RunSummary`] (a fresh
-/// sidecar answers in two `stat`s plus a small JSON read; a missing or
-/// stale one falls back to a full parse, so behavior is identical whether
-/// or not a sidecar exists) and only rows whose summary is
-/// Completed-or-Blocked — the only two states this preflight ever inspects
-/// — are deep-parsed a second time for the frame history (`session_task`,
-/// park report, terminal epoch) a summary cannot carry. A summary carries
-/// no task evidence, so status is the only cheap filter; a deep-parsed
-/// session that never carried a `port:task` value simply matches no wall in
-/// [`standing_wall_in_sessions`].
 pub fn find_standing_wall(
     wall_id: &str,
     dispatched_task: &str,
 ) -> crate::Result<Option<StandingWall>> {
-    let mut sessions = Vec::new();
-    for path in crate::run_session::session_store_paths(None)? {
-        let Ok(summary) = crate::run_summary::read_summary_or_ledger(&path) else {
-            continue;
-        };
-        if !matches!(summary.status, Status::Completed | Status::Blocked) {
-            continue;
-        }
-        let Ok(session) = crate::run_session::read_run_session(&path) else {
-            continue;
-        };
-        sessions.push(session);
-    }
-    Ok(standing_wall_in_sessions(
-        &sessions,
-        wall_id,
-        dispatched_task,
-    ))
+    let repo_key = crate::state::current_repo_key()?;
+    crate::center::find_standing_wall(wall_id, dispatched_task, Some(&repo_key))
 }
 
 /// The persisted terminal timestamp for a ledger's last drive outcome, if
@@ -380,11 +351,9 @@ fn terminal_epoch(session: &Session) -> Option<u64> {
         .map(|outcome| outcome.recorded_at_epoch)
 }
 
-/// `sessions` is already filtered to Completed-or-Blocked by
-/// [`find_standing_wall`]'s summary-first scan; this function does not
-/// re-check that condition, since every element it receives already
-/// satisfies it.
-fn standing_wall_in_sessions(
+/// `sessions` is the center's cached session model. This function filters the
+/// relevant completed and blocked states while preserving its input order.
+pub(crate) fn standing_wall_in_sessions(
     sessions: &[Session],
     wall_id: &str,
     dispatched_task: &str,

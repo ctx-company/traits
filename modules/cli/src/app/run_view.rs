@@ -53,9 +53,7 @@ pub(crate) use model::{CompletedStepContext, JourneyRow, PaneData, PaneIds, jour
 
 use planned::active_loop_container_keys;
 use session_text::active_key;
-pub(crate) use session_text::{
-    phase_text, session_status, stop_reason_summary, title_prompt_context_for,
-};
+pub(crate) use session_text::{session_status, stop_reason_summary, title_prompt_context_for};
 
 #[derive(Clone)]
 pub(crate) struct RunPanel {

@@ -1,4 +1,4 @@
-//! 0151: a completed `--worktree` run's report/summary must state whether the
+//! 0151: a completed `--worktree` run's report must state whether the
 //! commit it made actually landed. Reuses [`support::init_fixture_repo`]-style
 //! fixture construction (mirroring `proof_merge_on_completion.rs`), but with a
 //! two-variant fixture trait: a commit-tail trait (three plain `command`
@@ -214,19 +214,47 @@ output = ["slot:notified"]
 }
 
 fn summary_json(ledger_path: &Path) -> serde_json::Value {
-    let summary_path = Path::new(&format!("{}.summary.json", ledger_path.display())).to_path_buf();
-    let text = fs::read_to_string(&summary_path).unwrap_or_else(|error| {
-        panic!(
-            "cannot read summary sidecar {}: {error}",
-            summary_path.display()
-        )
-    });
-    serde_json::from_str(&text)
-        .unwrap_or_else(|error| panic!("summary sidecar was not valid JSON: {error}\n{text}"))
+    let text = fs::read_to_string(ledger_path)
+        .unwrap_or_else(|error| panic!("cannot read ledger {}: {error}", ledger_path.display()));
+    let session = serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("ledger was not valid JSON: {error}\n{text}"));
+    serde_json::to_value(ctx_traits_io::run_summary::RunSummary::from_session(
+        &session,
+    ))
+    .expect("serialize center projection")
+}
+
+/// Summary sidecars were derived cache files from the old inventory path.
+/// A completed drive must now leave only its authoritative ledger and activity
+/// sidecar, regardless of where the scratch store is rooted.
+fn legacy_summary_sidecars(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut directories = vec![root.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        let entries = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|error| {
+                    panic!("cannot read entry in {}: {error}", directory.display())
+                })
+                .path();
+            if path.is_dir() {
+                directories.push(path);
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".summary.json"))
+            {
+                found.push(path);
+            }
+        }
+    }
+    found
 }
 
 /// (a) A `--worktree` run dispatched without `--merge` that committed must
-/// have its story and summary sidecar say, in one line, that it is NOT
+/// have its story and center projection say, in one line, that it is NOT
 /// merged — and name the exact `ctx traits merge <run-id>` command.
 #[test]
 fn worktree_run_without_merge_intent_reports_not_merged() {
@@ -261,10 +289,15 @@ fn worktree_run_without_merge_intent_reports_not_merged() {
         .to_string();
     let ledger_path = Path::new(run["value"]["session-path"].as_str().unwrap()).to_path_buf();
 
+    assert!(
+        legacy_summary_sidecars(&scratch.home()).is_empty(),
+        "a completed drive must not create obsolete summary sidecars"
+    );
+
     let summary = summary_json(&ledger_path);
     assert_eq!(
         summary["landing"], "not-merged",
-        "summary sidecar must classify a completed, uncommitted-to-main worktree run as not-merged: {summary}"
+        "center projection must classify a completed, uncommitted-to-main worktree run as not-merged: {summary}"
     );
 
     let story = run_ctx(
@@ -286,7 +319,7 @@ fn worktree_run_without_merge_intent_reports_not_merged() {
 
 /// (b) A completed `--worktree` run whose command produced nothing to commit
 /// (clean tree) must render no landing line at all and carry no `landing`
-/// field in its summary sidecar — Watch clause 2.
+/// field in its center projection — Watch clause 2.
 #[test]
 fn clean_tree_completed_run_has_no_landing_line() {
     let scratch = ScratchRoot::new("p0151-clean-tree");
@@ -336,7 +369,7 @@ fn clean_tree_completed_run_has_no_landing_line() {
 }
 
 /// (c) A `--merge` run that lands reports `landing == "landed"` in its
-/// summary sidecar and states the landed revision in its story disposition.
+/// center projection and states the landed revision in its story disposition.
 #[test]
 fn merged_run_reports_landed_with_revision() {
     let scratch = ScratchRoot::new("p0151-landed");
@@ -371,7 +404,7 @@ fn merged_run_reports_landed_with_revision() {
     let summary = summary_json(&ledger_path);
     assert_eq!(
         summary["landing"], "landed",
-        "summary sidecar must classify a merged run as landed: {summary}"
+        "center projection must classify a merged run as landed: {summary}"
     );
 
     let story = run_ctx(

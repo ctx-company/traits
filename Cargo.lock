@@ -333,6 +333,7 @@ dependencies = [
  "miette",
  "ratatui",
  "regex-lite",
+ "rusqlite",
  "schemars",
  "serde",
  "serde_json",

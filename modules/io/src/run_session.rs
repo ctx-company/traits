@@ -7,8 +7,6 @@
 //! unless a session store is supplied.
 
 use camino::{Utf8Path, Utf8PathBuf};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 pub const EXPLICIT_RUN_SESSION_PATH_MESSAGE: &str =
     "run-session out must be an explicit ledger path; use ./ledger or ledger.json";
@@ -192,10 +190,6 @@ pub fn write_run_session(
     })?;
     reject_symlink_leaf(path)?;
     write_text_atomically(path, &format!("{text}\n"))?;
-    // Projected sidecar written after the ledger's own atomic rename
-    // has landed, itself atomically renamed. Best-effort — a write failure
-    // here is derived-evidence loss, never a ledger-write failure.
-    let _ = crate::run_summary::write_summary(path, session);
     Ok(())
 }
 
@@ -255,15 +249,6 @@ fn session_ledger_names(root: &Utf8Path) -> crate::Result<Vec<String>> {
             continue;
         };
         if !name.ends_with(".json") {
-            continue;
-        }
-        // `<ledger>.json.summary.json` sidecars also end in `.json`
-        // and live directly under this same root — without this skip they
-        // become phantom sessions everywhere this list feeds (the dashboard,
-        // `stats`, `run_queue`'s candidate scan, `find_session_by_run_id`,
-        // and worst of all `resolve_session_prefix_in_stores`, where every
-        // real session id would instantly gain an "ambiguous prefix" twin).
-        if name.ends_with(".summary.json") {
             continue;
         }
         names.push(name);
@@ -667,8 +652,7 @@ pub fn record_drive_outcome(
 
 /// Record a typed interrupted outcome for an orphaned drive by its already
 /// resolved ledger path. This deliberately shares the ordinary atomic ledger
-/// writer, so the derived summary sidecar stays in sync without another status
-/// model or a dashboard-owned serialization path.
+/// writer so the center can reconcile one authoritative state model.
 pub fn record_interrupted_outcome(path: &Utf8Path) -> crate::Result<()> {
     let mut loaded = read_run_session(path)?;
     record_interrupted_outcome_in_session(path, &mut loaded)
@@ -842,212 +826,6 @@ pub fn session_task(session: &ctx_traits_core::procedure::session::Session) -> O
             .iter()
             .map(|value| (value.ref_text.as_str(), &value.value)),
     )
-}
-
-/// One row of the P423 dashboard SESSIONS-screen inventory: a ledger this
-/// repository's default global store actually contains, resolved enough to
-/// display and act on without re-parsing it a second time per screen
-/// refresh.
-pub struct RunInventoryRow {
-    pub session_id: String,
-    pub ledger_path: Utf8PathBuf,
-    pub status: InventoryOutcome,
-    pub modified_epoch_secs: u64,
-}
-
-/// Either a readable ledger's session state, or the reason it could not be
-/// read — kept as a typed alternative rather than a `Result` so a scan of
-/// many ledgers can report one unreadable row without aborting the rest.
-#[derive(Clone)]
-pub enum InventoryOutcome {
-    Readable {
-        session: Arc<ctx_traits_core::procedure::session::Session>,
-        /// The latest `Parked` merge-frame entry, if the ledger's most recent
-        /// merge attempt ended there (a later non-parked frame — e.g. a
-        /// subsequent successful merge — supersedes it, so this is always the
-        /// *last* frame, checked for `Parked`, not merely *any* parked frame).
-        latest_parked_merge: Option<ctx_traits_core::procedure::session::MergeFrame>,
-    },
-    Unreadable {
-        error: String,
-    },
-}
-
-/// In-process, mtime+size-gated memo over parsed
-/// ledgers, so a dashboard tick that finds nothing changed re-reads two
-/// `stat`s per row instead of deep-parsing a ~190 KB ledger. No disk, no
-/// invalidation protocol, no second store — purely a refcount-bump-on-hit
-/// optimization over [`run_inventory_from_paths`]. Corrupt/zero-byte ledgers
-/// are cached as `Unreadable` too, so a known-bad ledger is not re-read and
-/// re-failed on every tick.
-#[derive(Default)]
-pub struct InventoryCache {
-    entries: HashMap<Utf8PathBuf, CacheEntry>,
-}
-
-struct CacheEntry {
-    modified: std::time::SystemTime,
-    size: u64,
-    outcome: InventoryOutcome,
-}
-
-impl InventoryCache {
-    pub fn new() -> InventoryCache {
-        InventoryCache::default()
-    }
-
-    fn hit(&self, path: &Utf8Path, modified: std::time::SystemTime, size: u64) -> bool {
-        self.entries
-            .get(path)
-            .is_some_and(|entry| entry.modified == modified && entry.size == size)
-    }
-}
-
-/// Build the SESSIONS-screen inventory for this repository's default session
-/// store. Every ledger under that store is included — reading failures become
-/// `InventoryOutcome::Unreadable` rows rather than aborting the scan, so one
-/// corrupt ledger never hides every other session from the dashboard.
-pub fn current_repo_run_inventory() -> crate::Result<Vec<RunInventoryRow>> {
-    let mut cache = InventoryCache::new();
-    current_repo_run_inventory_cached(&mut cache)
-}
-
-/// [`current_repo_run_inventory`], threading a caller-owned [`InventoryCache`]
-/// instead of allocating a throwaway one — the dashboard's entry point, so a
-/// tick over an unchanged ledger store is cache hits, not full re-parses.
-pub fn current_repo_run_inventory_cached(
-    cache: &mut InventoryCache,
-) -> crate::Result<Vec<RunInventoryRow>> {
-    let root = default_session_store()?;
-    run_inventory_from_paths(&root, session_store_paths(Some(root.as_str()))?, cache)
-}
-
-/// Build inventory rows from an already-resolved set of ledger paths —
-/// shared by [`current_repo_run_inventory`] (the current repository's global
-/// store) and [`machine_wide_run_inventory`] (one indexed repository's
-/// global store, P439). One-shot callers pass a
-/// throwaway cache (`InventoryCache::new()`); a caller ticking repeatedly
-/// (the dashboard) owns and reuses one across calls so a cache hit is a
-/// refcount bump instead of a full re-parse.
-pub fn run_inventory_from_paths(
-    root: &Utf8Path,
-    paths: Vec<Utf8PathBuf>,
-    cache: &mut InventoryCache,
-) -> crate::Result<Vec<RunInventoryRow>> {
-    run_inventory_from_paths_with_reader(root, paths, cache, |path| match read_run_session(path) {
-        Ok(session) => {
-            let latest_parked_merge = session
-                .provenance
-                .merge_frames
-                .last()
-                .filter(|frame| {
-                    frame.status == ctx_traits_core::procedure::session::MergeStatus::Parked
-                })
-                .cloned();
-            InventoryOutcome::Readable {
-                session: Arc::new(session),
-                latest_parked_merge,
-            }
-        }
-        Err(error) => InventoryOutcome::Unreadable {
-            error: error.to_string(),
-        },
-    })
-}
-
-fn run_inventory_from_paths_with_reader(
-    root: &Utf8Path,
-    paths: Vec<Utf8PathBuf>,
-    cache: &mut InventoryCache,
-    mut read: impl FnMut(&Utf8Path) -> InventoryOutcome,
-) -> crate::Result<Vec<RunInventoryRow>> {
-    let present: std::collections::HashSet<_> = paths.iter().cloned().collect();
-    cache
-        .entries
-        .retain(|path, _| !path.starts_with(root) || present.contains(path));
-    let mut rows = Vec::new();
-    for path in paths {
-        let session_id = path
-            .file_stem()
-            .map(str::to_string)
-            .unwrap_or_else(|| path.to_string());
-        let metadata = std::fs::metadata(path.as_std_path()).ok();
-        let modified = metadata.as_ref().and_then(|m| m.modified().ok());
-        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified_epoch_secs = modified
-            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
-
-        let status = match modified {
-            Some(modified) if cache.hit(&path, modified, size) => {
-                cache.entries.get(&path).expect("cache hit").outcome.clone()
-            }
-            _ => {
-                let status = read(&path);
-                if let Some(modified) = modified {
-                    cache.entries.insert(
-                        path.clone(),
-                        CacheEntry {
-                            modified,
-                            size,
-                            outcome: status.clone(),
-                        },
-                    );
-                }
-                status
-            }
-        };
-        rows.push(RunInventoryRow {
-            session_id,
-            ledger_path: path,
-            status,
-            modified_epoch_secs,
-        });
-    }
-    rows.sort_by_key(|row| std::cmp::Reverse(row.modified_epoch_secs));
-    Ok(rows)
-}
-
-/// One repository's rows in the machine-wide run inventory (P439): its
-/// indexed identity (`repo.toml` key/path — an `adhoc-`-prefixed key for a
-/// non-repository invocation identity) plus every run under its global run
-/// root.
-pub struct MachineRunInventoryEntry {
-    pub repo_key: String,
-    pub repo_path: String,
-    pub rows: Vec<RunInventoryRow>,
-}
-
-/// Build the machine-wide run inventory (P439): every repository or ad-hoc
-/// invocation identity recorded in [`crate::state::read_repo_index`], each
-/// with its runs scanned from its own [`crate::state::global_runs_root`] —
-/// the consumer half of P426/P439's ad-hoc-run producer, and the dashboard
-/// ALL mode's data source. Every indexed entry, including the current
-/// repository, is read from its global root alone.
-pub fn machine_wide_run_inventory() -> crate::Result<Vec<MachineRunInventoryEntry>> {
-    let mut cache = InventoryCache::new();
-    machine_wide_run_inventory_cached(&mut cache)
-}
-
-/// [`machine_wide_run_inventory`], threading a caller-owned [`InventoryCache`]
-/// — see [`current_repo_run_inventory_cached`].
-pub fn machine_wide_run_inventory_cached(
-    cache: &mut InventoryCache,
-) -> crate::Result<Vec<MachineRunInventoryEntry>> {
-    let mut entries = Vec::new();
-    for repo in crate::state::read_repo_index()? {
-        let root = crate::state::global_runs_root(&repo.key)?;
-        let rows =
-            run_inventory_from_paths(&root, session_store_paths(Some(root.as_str()))?, cache)?;
-        entries.push(MachineRunInventoryEntry {
-            repo_key: repo.key,
-            repo_path: repo.path,
-            rows,
-        });
-    }
-    entries.sort_by(|a, b| a.repo_key.cmp(&b.repo_key));
-    Ok(entries)
 }
 
 fn epoch_seconds() -> u64 {
@@ -1525,61 +1303,6 @@ mod session_title_tests {
 }
 
 #[cfg(test)]
-mod summary_sidecar_landmine_tests {
-    use super::*;
-
-    fn scratch_dir(name: &str) -> Utf8PathBuf {
-        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-            .expect("temp dir is UTF-8")
-            .join(format!(
-                "ctx-summary-sidecar-landmine-{name}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
-        dir
-    }
-
-    // `<ledger>.json.summary.json` also ends in `.json`, so an
-    // unfiltered `session_ledger_names` would list it as a second, phantom
-    // session — and, worse, give every real id an "ambiguous prefix" twin in
-    // `resolve_session_prefix_in_stores`.
-    #[test]
-    fn session_ledger_names_ignores_summary_sidecars_but_keeps_real_ledgers() {
-        let store = scratch_dir("names");
-        let id = format!("session-{}", "a".repeat(64));
-        std::fs::write(store.join(format!("{id}.json")).as_std_path(), "{}").expect("write ledger");
-        std::fs::write(
-            store.join(format!("{id}.json.summary.json")).as_std_path(),
-            "{}",
-        )
-        .expect("write sidecar");
-
-        let names = session_ledger_names(&store).expect("list ledger names");
-        assert_eq!(names, vec![format!("{id}.json")]);
-    }
-
-    #[test]
-    fn resolve_session_path_prefix_stays_unambiguous_with_a_sidecar_present() {
-        let store = scratch_dir("resolve");
-        let id = format!("session-{}", "a".repeat(64));
-        std::fs::write(store.join(format!("{id}.json")).as_std_path(), "{}").expect("write ledger");
-        std::fs::write(
-            store.join(format!("{id}.json.summary.json")).as_std_path(),
-            "{}",
-        )
-        .expect("write sidecar");
-
-        // A prefix of the ledger id must resolve uniquely, not error with
-        // "ambiguous prefix" against the sidecar's own name.
-        let prefix = &id[.."session-".len() + 12];
-        let resolved =
-            resolve_session_path(prefix, Some(store.as_str())).expect("resolves uniquely");
-        assert_eq!(resolved, store.join(format!("{id}.json")));
-    }
-}
-
-#[cfg(test)]
 mod short_session_display_tests {
     use super::*;
 
@@ -1651,71 +1374,6 @@ mod short_session_display_tests {
         let resolved =
             resolve_session_path(&short, Some(store.as_str())).expect("resolves uniquely");
         assert_eq!(resolved, store.join(format!("{id}.json")));
-    }
-}
-
-#[cfg(test)]
-mod inventory_cache_tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-
-    fn scratch_root(name: &str) -> Utf8PathBuf {
-        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-            .expect("temp dir is UTF-8")
-            .join(format!(
-                "ctx-run-inventory-cache-{name}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-        let _ = std::fs::remove_dir_all(root.as_std_path());
-        std::fs::create_dir_all(root.as_std_path()).expect("create scratch root");
-        root
-    }
-
-    fn scan(
-        root: &Utf8Path,
-        paths: Vec<Utf8PathBuf>,
-        cache: &mut InventoryCache,
-        reads: &Arc<Mutex<Vec<Utf8PathBuf>>>,
-    ) {
-        let reads = Arc::clone(reads);
-        run_inventory_from_paths_with_reader(root, paths, cache, move |path| {
-            reads.lock().expect("reads lock").push(path.to_path_buf());
-            InventoryOutcome::Unreadable {
-                error: "fixture".to_string(),
-            }
-        })
-        .expect("scan inventory");
-    }
-
-    #[test]
-    fn inventory_cache_evicts_only_the_scanned_root() {
-        let root_a = scratch_root("a");
-        let root_b = scratch_root("b");
-        let ledger_a = root_a.join("a.json");
-        let ledger_b = root_b.join("b.json");
-        std::fs::write(ledger_a.as_std_path(), "a").expect("write ledger a");
-        std::fs::write(ledger_b.as_std_path(), "b").expect("write ledger b");
-        let reads = Arc::new(Mutex::new(Vec::new()));
-        let mut cache = InventoryCache::new();
-
-        scan(&root_a, vec![ledger_a.clone()], &mut cache, &reads);
-        scan(&root_b, vec![ledger_b.clone()], &mut cache, &reads);
-        scan(&root_a, vec![ledger_a.clone()], &mut cache, &reads);
-        scan(&root_b, vec![ledger_b.clone()], &mut cache, &reads);
-        assert_eq!(reads.lock().expect("reads lock").len(), 2);
-
-        scan(&root_a, Vec::new(), &mut cache, &reads);
-        assert!(
-            !cache.entries.contains_key(&ledger_a),
-            "the deleted ledger under the scanned root is evicted"
-        );
-        assert!(
-            cache.entries.contains_key(&ledger_b),
-            "a ledger from another root remains cached"
-        );
-        scan(&root_b, vec![ledger_b], &mut cache, &reads);
-        assert_eq!(reads.lock().expect("reads lock").len(), 2);
     }
 }
 

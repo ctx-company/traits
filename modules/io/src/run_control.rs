@@ -23,10 +23,9 @@
 //! metadata is missing, malformed, or stale (e.g. read during a new
 //! holder's acquire-to-write window) — only a genuinely *uncontended* lock
 //! is `Unheld`. Holder metadata (pid/session/run id/start time) is display
-//! evidence ONLY and is never used to authorize [`request_interrupt`]: a pid
-//! read from a file can be stale, forged, or reused by an unrelated process
-//! between the moment it is read and the moment it would be signaled, and no
-//! number of re-checks around that read closes the window structurally.
+//! evidence ONLY; callers may compare its session id with the action they are
+//! about to take, but never authorize an OS signal from its pid. A pid read
+//! from a file can be stale, forged, or reused by an unrelated process.
 //!
 //! Interruption is instead authenticated by a Unix domain control socket
 //! bound by [`try_acquire`] only while the caller genuinely holds the driver
@@ -535,9 +534,8 @@ pub fn probe(ledger_path: &Utf8Path) -> crate::Result<DriverProbe> {
     Ok(DriverProbe::Unheld { stale_metadata })
 }
 
-/// Cooperatively interrupt the driver currently holding a ledger's lock by
-/// probing for the current holder's `control_token` (see [`DriverHolder`])
-/// and connecting to its control socket — the same graceful-stop path
+/// Cooperatively interrupt the driver described by an already-probed holder's
+/// `control_token` (see [`DriverHolder`]) by connecting to its control socket — the same graceful-stop path
 /// `drive` already treats a `SIGINT` as requesting (P402), now requested
 /// through an authenticated handshake instead of a raw pid signal (see the
 /// module doc). Returns `true` only once a connection was accepted AND the
@@ -545,7 +543,7 @@ pub fn probe(ledger_path: &Utf8Path) -> crate::Result<DriverProbe> {
 /// ran `on_interrupt` — `false` for every other outcome: no driver holds the
 /// lock, the holder's metadata does not carry a token (pre-token or
 /// mid-write), the holder crashed leaving a stale socket file, the lock
-/// changed hands before the new holder finished binding, or the connection
+/// changed hands, or the connection
 /// was accepted but the acknowledgement round trip did not complete within
 /// [`CONTROL_CONNECT_TIMEOUT`]/[`CONTROL_STREAM_TIMEOUT`]. Never removes the
 /// socket file itself — only the owning [`ControlListener`]'s `Drop` ever
@@ -553,12 +551,11 @@ pub fn probe(ledger_path: &Utf8Path) -> crate::Result<DriverProbe> {
 /// never delete a *different*, freshly bound listener's socket out from
 /// under it. Never escalates to `SIGKILL`: an unresponsive driver simply
 /// stays `stopping` until it exits on its own.
-pub fn request_interrupt(ledger_path: &Utf8Path) -> crate::Result<bool> {
-    let control_token = match probe(ledger_path)? {
-        DriverProbe::Held(Some(holder)) if !holder.control_token.is_empty() => holder.control_token,
-        _ => return Ok(false),
-    };
-    let socket_path = control_socket_path(ledger_path, &control_token);
+pub fn request_interrupt(ledger_path: &Utf8Path, holder: &DriverHolder) -> crate::Result<bool> {
+    if holder.control_token.is_empty() {
+        return Ok(false);
+    }
+    let socket_path = control_socket_path(ledger_path, &holder.control_token);
     let (tx, rx) = std::sync::mpsc::channel();
     let connect_path = socket_path.clone();
     std::thread::spawn(move || {
@@ -606,4 +603,45 @@ fn epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_interrupt_uses_the_validated_holders_token_without_reprobing() {
+        let ledger_path = Utf8Path::new("/tmp/ctx-run-control-token-test.json");
+        let validated = DriverHolder {
+            pid: 1,
+            session_id: "selected".to_string(),
+            run_id: "run-selected".to_string(),
+            started_at_epoch_secs: 0,
+            control_token: "validated-token".to_string(),
+        };
+        let replacement = DriverHolder {
+            control_token: "replacement-token".to_string(),
+            ..validated.clone()
+        };
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let observed = interrupted.clone();
+        let replacement_socket = control_socket_path(ledger_path, &replacement.control_token);
+        let listener = bind_control_listener(
+            replacement_socket,
+            Arc::new(move || {
+                observed.store(true, Ordering::SeqCst);
+            }),
+        )
+        .expect("bind replacement listener");
+
+        assert!(
+            !request_interrupt(ledger_path, &validated).expect("request interrupt"),
+            "a replacement token must not be selected after validation"
+        );
+        assert!(
+            !interrupted.load(Ordering::SeqCst),
+            "the replacement listener must not receive the selected action"
+        );
+        drop(listener);
+    }
 }
