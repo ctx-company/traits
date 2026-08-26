@@ -109,6 +109,7 @@ printf '%s' "$last" > __CAPTURE__
 if [ -f __CAPTURE__.calls ]; then n=$(($(wc -l < __CAPTURE__.calls))); else n=0; fi
 printf '%s' "$last" > __CAPTURE__.$n
 printf '%s\n' "$@" > __CAPTURE__.args.$n
+printf '%s' "$last" > __CAPTURE__.pid.$$
 printf 'x\n' >> __CAPTURE__.calls
 touch __MARKER__
 key=$(printf '%s\n' "$last" | sed -n 's/.*<format>{"\([a-zA-Z0-9_-]*\)".*/\1/p')
@@ -298,6 +299,15 @@ output = ["slot:answer"]
         for index in 0..12 {
             let _ = fs::remove_file(capture.with_extension(format!("txt.{index}")));
             let _ = fs::remove_file(capture.with_extension(format!("txt.args.{index}")));
+        }
+        for entry in fs::read_dir(&home).unwrap() {
+            let path = entry.unwrap().path();
+            if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+            {
+                let _ = fs::remove_file(path);
+            }
         }
         let _ = fs::remove_file(capture.with_extension("txt.calls"));
         let _ = fs::remove_file(capture.with_extension("txt.verdict-calls"));
@@ -3387,6 +3397,15 @@ intent = {{ require = [{{ id = "shared", summary = "For-each nested replacement 
 behavior = {{ tone = [{{ id = "shared-tone", summary = "For-each nested tone." }}, {{ id = "fe-nested-tone-marker", summary = "For-each nested tone marker." }}] }}
 output = ["slot:fe-answer-b"]
 
+[[sequence.fe-neighbor.sequence]]
+id = "fe-neighbor-leaf"
+title = "For-each neighbor"
+agent = "agent:worker"
+prompt = "Produce for-each neighbor answer."
+intent = {{ require = [{{ id = "shared", summary = "For-each neighbor replacement text." }}, {{ id = "fe-neighbor-marker", summary = "For-each neighbor marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "For-each neighbor tone." }}, {{ id = "fe-neighbor-tone-marker", summary = "For-each neighbor tone marker." }}] }}
+output = ["slot:answer"]
+
 [procedure]
 description = "For-each leaf guidance."
 
@@ -3418,6 +3437,12 @@ max-items = 2
 sequence = "sequence:fe-body"
 
 [[procedure.sequence]]
+id = "fe-neighbor-control"
+title = "Visit for-each neighbor"
+kind = "sequence"
+sequence = "sequence:fe-neighbor"
+
+[[procedure.sequence]]
 id = "fe-later"
 title = "For-each later"
 agent = "agent:worker"
@@ -3443,15 +3468,25 @@ output = ["slot:answer"]
     let for_each_preview = preview_all("for-each");
     assert_eq!(
         for_each_preview.len(),
-        4,
+        5,
         "for-each preview: {for_each_preview:?}"
     );
     let (_, for_each_cli_args) = run_with_env("cli", "for-each-cli.json", &[]);
     assert_system(&for_each_cli_args, "--cli-system");
-    let for_each_cli_frames = read_frames(6);
+    let for_each_cli_frames = read_frames(7);
+    let for_each_cli_args_by_frame: Vec<_> = (0..7)
+        .map(|index| {
+            fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap()
+        })
+        .collect();
     let (_, for_each_mcp_args) = run_with_env("mcp", "for-each-mcp.json", &[]);
     assert_system(&for_each_mcp_args, "--mcp-system");
-    let for_each_mcp_frames = read_frames(6);
+    let for_each_mcp_frames = read_frames(7);
+    let for_each_mcp_args_by_frame: Vec<_> = (0..7)
+        .map(|index| {
+            fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap()
+        })
+        .collect();
     let for_each_markers = [
         "fe-pre-marker",
         "fe-a-marker",
@@ -3459,6 +3494,8 @@ output = ["slot:answer"]
         "fe-a-verbosity-marker",
         "fe-nested-marker",
         "fe-nested-tone-marker",
+        "fe-neighbor-marker",
+        "fe-neighbor-tone-marker",
         "fe-later-marker",
     ];
     for (frames, transport) in [(&for_each_cli_frames, "CLI"), (&for_each_mcp_frames, "MCP")] {
@@ -3487,6 +3524,7 @@ output = ["slot:answer"]
             "fe-nested-marker",
             "fe-a-marker",
             "fe-nested-marker",
+            "fe-neighbor-marker",
             "fe-later-marker",
         ]
         .iter()
@@ -3497,6 +3535,7 @@ output = ["slot:answer"]
                     || (*own == "fe-a-marker"
                         && (marker == "fe-a-tone-marker" || marker == "fe-a-verbosity-marker"))
                     || (*own == "fe-nested-marker" && marker == "fe-nested-tone-marker")
+                    || (*own == "fe-neighbor-marker" && marker == "fe-neighbor-tone-marker")
                 {
                     assert_eq!(
                         frames[index].matches(marker).count(),
@@ -3544,7 +3583,8 @@ output = ["slot:answer"]
         (&for_each_preview[0], &for_each_cli_frames[0], "pre"),
         (&for_each_preview[1], &for_each_cli_frames[1], "A"),
         (&for_each_preview[2], &for_each_cli_frames[2], "nested"),
-        (&for_each_preview[3], &for_each_cli_frames[5], "later"),
+        (&for_each_preview[3], &for_each_cli_frames[5], "neighbor"),
+        (&for_each_preview[4], &for_each_cli_frames[6], "later"),
     ] {
         assert_eq!(
             extract_intent(preview),
@@ -3557,4 +3597,495 @@ output = ["slot:answer"]
             "for-each {label}"
         );
     }
+
+    let all_for_each_prompt_texts = [
+        "Produce for-each A answer.",
+        "Produce for-each nested answer.",
+        "Produce for-each neighbor answer.",
+    ];
+    for (label, prompt, marker, tone_marker, text, tone, declared, verbosity) in [
+        (
+            "for-each A0",
+            &for_each_cli_frames[1],
+            "fe-a-marker",
+            "fe-a-tone-marker",
+            "For-each A replacement text.",
+            "For-each A tone.",
+            "Produce for-each A answer.",
+            Some("fe-a-verbosity-marker"),
+        ),
+        (
+            "for-each nested0",
+            &for_each_cli_frames[2],
+            "fe-nested-marker",
+            "fe-nested-tone-marker",
+            "For-each nested replacement text.",
+            "For-each nested tone.",
+            "Produce for-each nested answer.",
+            None,
+        ),
+        (
+            "for-each A1",
+            &for_each_cli_frames[3],
+            "fe-a-marker",
+            "fe-a-tone-marker",
+            "For-each A replacement text.",
+            "For-each A tone.",
+            "Produce for-each A answer.",
+            Some("fe-a-verbosity-marker"),
+        ),
+        (
+            "for-each nested1",
+            &for_each_cli_frames[4],
+            "fe-nested-marker",
+            "fe-nested-tone-marker",
+            "For-each nested replacement text.",
+            "For-each nested tone.",
+            "Produce for-each nested answer.",
+            None,
+        ),
+        (
+            "for-each neighbor",
+            &for_each_cli_frames[5],
+            "fe-neighbor-marker",
+            "fe-neighbor-tone-marker",
+            "For-each neighbor replacement text.",
+            "For-each neighbor tone.",
+            "Produce for-each neighbor answer.",
+            None,
+        ),
+    ] {
+        assert_leaf(
+            label,
+            prompt,
+            &for_each_markers,
+            &all_for_each_prompt_texts,
+            marker,
+            tone_marker,
+            text,
+            tone,
+            declared,
+            verbosity,
+            "fe-a-verbosity-marker",
+        );
+    }
+    for (index, prompt) in for_each_cli_frames.iter().enumerate() {
+        assert_system(&for_each_cli_args_by_frame[index], "--cli-system");
+        assert_unassigned_absent(prompt);
+    }
+    for (index, prompt) in for_each_mcp_frames.iter().enumerate() {
+        assert_system(&for_each_mcp_args_by_frame[index], "--mcp-system");
+        assert_unassigned_absent(prompt);
+    }
+
+    // Historical reconstruction must use the declaration selected for each
+    // bound element, not a top-level item with the same local position.
+    let for_each_session = home.join("for-each-cli.json");
+    for (label, live, step) in [
+        ("for-each A historical", &for_each_cli_frames[3], "fe-a"),
+        (
+            "for-each nested historical",
+            &for_each_cli_frames[4],
+            "fe-nested",
+        ),
+    ] {
+        let historical = session_preview(label, &for_each_session, Some(step));
+        assert_eq!(extract_intent(&historical), extract_intent(live), "{label}");
+        assert_eq!(
+            extract_behavior(&historical),
+            extract_behavior(live),
+            "{label}"
+        );
+    }
+
+    let for_each_active_session = home.join("for-each-active.json");
+    fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("cli")).unwrap();
+    let seed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            for_each_active_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&seed, 0);
+    let active_drive = support::run_ctx_with_env(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            for_each_active_session.to_str().unwrap(),
+            "--max-frames",
+            "3",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[],
+    );
+    assert_exit_code(&active_drive, 0);
+    let active = session_preview("for-each A active", &for_each_active_session, None);
+    assert_eq!(
+        extract_intent(&active),
+        extract_intent(&for_each_cli_frames[3])
+    );
+    assert_eq!(
+        extract_behavior(&active),
+        extract_behavior(&for_each_cli_frames[3])
+    );
+
+    // Empty declarations are intentionally participation-equivalent to absent
+    // guidance for an otherwise unguided body leaf.
+    let unguided_anchor = "id = \"fe-nested\"\ntitle = \"For-each nested\"\nagent = \"agent:worker\"\nprompt = \"Produce for-each nested answer.\"\ninput = [\"slot:fe-item\"]\nintent = {{ require = [{{ id = \"shared\", summary = \"For-each nested replacement text.\" }}, {{ id = \"fe-nested-marker\", summary = \"For-each nested marker.\" }}] }}\nbehavior = {{ tone = [{{ id = \"shared-tone\", summary = \"For-each nested tone.\" }}, {{ id = \"fe-nested-tone-marker\", summary = \"For-each nested tone marker.\" }}] }}\n";
+    let unguided_replacement = "id = \"fe-nested\"\ntitle = \"For-each nested\"\nagent = \"agent:worker\"\nprompt = \"Produce for-each nested answer.\"\ninput = [\"slot:fe-item\"]\n";
+    for (label, addition) in [
+        ("absent", ""),
+        ("empty-intent", "intent = {}\n"),
+        ("empty-behavior", "behavior = {}\n"),
+    ] {
+        let fixture = for_each_fixture.replace(
+            unguided_anchor,
+            &format!("{unguided_replacement}{addition}"),
+        );
+        fs::write(&generated, &fixture).unwrap();
+        let variant_preview = preview_all(label);
+        let _ = run_with_env("cli", &format!("for-each-{label}.json"), &[]);
+        let variant = read_frames(7);
+        assert_eq!(
+            extract_intent(&variant_preview[2]),
+            extract_intent(&variant[2]),
+            "{label}"
+        );
+        assert_eq!(
+            extract_behavior(&variant_preview[2]),
+            extract_behavior(&variant[2]),
+            "{label}"
+        );
+        assert_eq!(
+            extract_intent(&variant[2]),
+            extract_intent(&variant[4]),
+            "{label}"
+        );
+        assert_eq!(
+            extract_behavior(&variant[2]),
+            extract_behavior(&variant[4]),
+            "{label}"
+        );
+    }
+    fs::write(&generated, &for_each_fixture).unwrap();
+
+    let prompt_only = for_each_fixture
+        .replace(worker_intent, "")
+        .replace(worker_behavior, "");
+    fs::write(&generated, &prompt_only).unwrap();
+    let _ = run_with_env("mcp", "for-each-prompt-only-mcp.json", &[]);
+    let prompt_only_a = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+    assert!(prompt_only_a.contains("fe-a-marker") && prompt_only_a.contains("fe-a-tone-marker"));
+    assert!(!prompt_only_a.contains("agent-only") && !prompt_only_a.contains("agent-tone"));
+    fs::write(&generated, &for_each_fixture).unwrap();
+
+    let conflict_fixture = for_each_fixture.replace(
+        "intent = { require = [{ id = \"shared\", summary = \"For-each A replacement text.\" }, { id = \"fe-a-marker\", summary = \"For-each A marker.\" }] }",
+        "intent = { avoid = [{ id = \"shared\", summary = \"For-each conflict.\" }] }",
+    );
+    fs::write(&generated, &conflict_fixture).unwrap();
+    require_success(
+        "approve for-each conflict fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let _ = fs::remove_file(capture.with_extension("txt.calls"));
+    let conflict = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--out",
+            home.join("for-each-conflict.json").to_str().unwrap(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert!(!conflict.status.success());
+    let (_, stderr) = utf8(&conflict);
+    assert!(stderr.contains("effective guidance id \"shared\" cannot appear in both require and avoid when ready-prompt intent participates"), "{stderr}");
+    assert_eq!(
+        fs::read_to_string(capture.with_extension("txt.calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    fs::write(&generated, &for_each_fixture).unwrap();
+
+    require_success(
+        "approve restored for-each fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+
+    let export_dir = home.join("for-each-static-export");
+    let export = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "export",
+            "--file",
+            generated.to_str().unwrap(),
+            "--profile",
+            "agent-skills",
+            "--format",
+            "compat",
+            "--out",
+            export_dir.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&export, 0);
+    let skill = fs::read_to_string(export_dir.join("agent-intent").join("SKILL.md")).unwrap();
+    let static_declarations = [
+        (
+            "sequence:fe-body/fe-a",
+            "shared",
+            "For-each A replacement text.",
+            "</intent>",
+        ),
+        (
+            "sequence:fe-body/fe-a",
+            "fe-a-marker",
+            "For-each A marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:fe-body/fe-a",
+            "shared-tone",
+            "For-each A tone.",
+            "</behavior>",
+        ),
+        (
+            "sequence:fe-body/fe-a",
+            "fe-a-tone-marker",
+            "For-each A tone marker.",
+            "</behavior>",
+        ),
+        (
+            "sequence:fe-body/fe-a",
+            "fe-a-verbosity-marker",
+            "For-each A verbosity marker.",
+            "</behavior>",
+        ),
+        (
+            "sequence:fe-branch-then/fe-nested",
+            "shared",
+            "For-each nested replacement text.",
+            "</intent>",
+        ),
+        (
+            "sequence:fe-branch-then/fe-nested",
+            "fe-nested-marker",
+            "For-each nested marker.",
+            "</intent>",
+        ),
+        (
+            "sequence:fe-branch-then/fe-nested",
+            "shared-tone",
+            "For-each nested tone.",
+            "</behavior>",
+        ),
+        (
+            "sequence:fe-branch-then/fe-nested",
+            "fe-nested-tone-marker",
+            "For-each nested tone marker.",
+            "</behavior>",
+        ),
+    ];
+    for (source, id, own_text, closing_tag) in static_declarations {
+        let tag = format!("id=\"{id}\" source=\"{source}\">");
+        assert_eq!(skill.matches(&tag).count(), 1, "{skill}");
+        let start = skill.find(&tag).unwrap();
+        let end = skill[start..]
+            .find(closing_tag)
+            .map(|offset| start + offset)
+            .unwrap();
+        let block = &skill[start..end];
+        assert!(block.contains(own_text), "{tag}: {skill}");
+        for (_, _, foreign_text, _) in static_declarations {
+            if foreign_text != own_text {
+                assert!(!block.contains(foreign_text), "{tag}: {skill}");
+            }
+        }
+    }
+    assert_eq!(skill.matches("sequence:fe-body/fe-a").count(), 6, "{skill}");
+    assert_eq!(
+        skill.matches("sequence:fe-branch-then/fe-nested").count(),
+        5,
+        "{skill}"
+    );
+
+    // Concurrent for-each dispatches share the declaration but not the bound
+    // element state. PID captures avoid the intentionally sequential index
+    // capture race in the harness script.
+    let concurrent_fixture = for_each_fixture.replace(
+        "max-items = 2\nsequence = \"sequence:fe-body\"",
+        "max-items = 2\nconcurrent = true\nsequence = \"sequence:fe-body\"",
+    );
+    fs::write(&generated, &concurrent_fixture).unwrap();
+    fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("cli")).unwrap();
+    require_success(
+        "approve concurrent for-each fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    for entry in fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+        {
+            let _ = fs::remove_file(path);
+        }
+    }
+    let concurrent_session = home.join("for-each-concurrent.json");
+    let concurrent_seed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            concurrent_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&concurrent_seed, 0);
+    let prepare_wave = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            concurrent_session.to_str().unwrap(),
+            "--max-frames",
+            "1",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&prepare_wave, 0);
+    for entry in fs::read_dir(&home).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+        {
+            let _ = fs::remove_file(path);
+        }
+    }
+    let concurrent_drive = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            concurrent_session.to_str().unwrap(),
+            "--max-in-flight",
+            "2",
+            "--max-frames",
+            "2",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&concurrent_drive, 0);
+    let wave_prompts: Vec<_> = fs::read_dir(&home)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("capture.txt.pid."))
+        })
+        .map(|path| fs::read_to_string(path).unwrap())
+        .filter(|prompt| prompt.contains("fe-a-marker"))
+        .collect();
+    assert_eq!(
+        wave_prompts.len(),
+        2,
+        "concurrent wave did not cold-dispatch both items: {wave_prompts:?}"
+    );
+    assert!(
+        wave_prompts
+            .iter()
+            .any(|prompt| prompt.contains("alpha") && !prompt.contains("beta"))
+    );
+    assert!(
+        wave_prompts
+            .iter()
+            .any(|prompt| prompt.contains("beta") && !prompt.contains("alpha"))
+    );
+    for prompt in &wave_prompts {
+        assert_eq!(prompt.matches("fe-a-marker").count(), 1, "{prompt}");
+        assert_eq!(
+            extract_intent(prompt),
+            extract_intent(&for_each_cli_frames[1])
+        );
+        assert_eq!(
+            extract_behavior(prompt),
+            extract_behavior(&for_each_cli_frames[1])
+        );
+    }
+    fs::write(&generated, &for_each_fixture).unwrap();
 }
