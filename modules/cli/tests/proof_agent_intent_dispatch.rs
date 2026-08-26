@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
-use support::{ScratchRoot, assert_exit_code, ctx_bin, git_init, require_success, run_ctx, utf8};
+use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
 
 #[test]
 fn assigned_agent_intent_dispatch_is_shared_and_legacy_compatible() {
@@ -112,10 +112,10 @@ printf '%s\n' "$@" > __CAPTURE__.args.$n
  printf '%s' "$last" > __CAPTURE__.pid.$$
  printf 'x\n' >> __CAPTURE__.calls
  touch __MARKER__
-if [ "$n" -eq 0 ] && [ -n "$CTX_TEST_RETRY_SESSION" ]; then
-  "$CTX_TEST_CTX" traits internal set port:retry-input refreshed --session "$CTX_TEST_RETRY_SESSION" > __CAPTURE__.set 2>&1 || { mv __CAPTURE__.set __CAPTURE__; exit 0; }
-  if [ "$CTX_TEST_CLI_FAIL_FIRST" = 1 ]; then printf 'not json'; exit 0; fi
-  if [ "$CTX_TEST_MCP_NO_ADVANCE" = 1 ]; then exit 0; fi
+ if [ "$n" -eq 0 ] && [ -n "$CTX_TEST_RETRY_RESOURCE" ]; then
+   rm -f "$CTX_TEST_RETRY_RESOURCE"
+   if [ "$CTX_TEST_CLI_FAIL_FIRST" = 1 ]; then printf 'not json'; exit 0; fi
+   if [ "$CTX_TEST_MCP_NO_ADVANCE" = 1 ]; then exit 0; fi
 fi
 key=$(printf '%s\n' "$last" | sed -n 's/.*<format>{"\([a-zA-Z0-9_-]*\)".*/\1/p')
 if [ -z "$key" ]; then
@@ -5228,38 +5228,47 @@ output = ["slot:answer"]
         );
     }
 
-    // A first retry mutates an input port after capture. The second capture
-    // can only contain `refreshed` when drive recomposes from the ledger.
+    // A first retry removes a resource after capture. The second capture can
+    // only show it unavailable when drive recomposes the prompt.
+    let retry_resource = repo.join("retry-resource.txt");
+    fs::write(&retry_resource, "RETRY RESOURCE AVAILABLE").unwrap();
     let retry_fixture = behavior_canonical
+        .replace(
+            worker_behavior,
+            &format!(
+                "{worker_behavior}\n[agent.intent]\nrequire = [{{ id = \"retry-intent\", summary = \"Retry guidance.\" }}]"
+            ),
+        )
         .replacen(
             "\n[[slot]]",
-            "\n[[port]]\nid = \"retry-input\"\ndirection = \"input\"\nschema = \"schema:text\"\nvalue = \"original\"\ndescription = \"Changes between retry attempts.\"\n\n[[slot]]",
+            "\n[[resource]]\nid = \"retry-resource\"\npath = \"retry-resource.txt\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n\n[prompt.retry-prompt]\nsource = \"resource:retry-resource\"\ninput = [\"resource:retry-resource\"]\n\n[[slot]]",
             1,
         )
         .replace(
             "prompt = \"Produce an answer.\"\noutput = [\"slot:answer\"]",
-            "prompt = \"Produce an answer.\"\ninput = [\"port:retry-input\"]\noutput = [\"slot:answer\"]",
+            "prompt = \"prompt:retry-prompt\"\ninput = [\"resource:retry-resource\"]\noutput = [\"slot:answer\"]",
         );
     fs::write(&generated, &retry_fixture).unwrap();
     let retry_preview = preview("retry guidance");
     let retry_intent = extract_intent(&retry_preview);
     let retry_behavior = extract_behavior(&retry_preview);
-    let ctx = ctx_bin();
     let assert_retry_captures = |transport: &str, failure: &str, system_flag: &str| {
         let output = format!("retry-{transport}.json");
-        let session = home.join(&output);
+        fs::write(&retry_resource, "RETRY RESOURCE AVAILABLE").unwrap();
         let (_, _) = run_with_env(
             transport,
             &output,
             &[
                 (failure, "1"),
-                ("CTX_TEST_RETRY_SESSION", session.to_str().unwrap()),
-                ("CTX_TEST_CTX", ctx.to_str().unwrap()),
+                ("CTX_TEST_RETRY_RESOURCE", retry_resource.to_str().unwrap()),
             ],
         );
         let first = fs::read_to_string(capture.with_extension("txt.0")).unwrap();
         let second = fs::read_to_string(capture.with_extension("txt.1")).unwrap();
+        let first_args = fs::read_to_string(capture.with_extension("txt.args.0")).unwrap();
         let args = fs::read_to_string(capture.with_extension("txt.args.1")).unwrap();
+        assert!(first.contains("<intent>"), "{transport} first: {first}");
+        assert!(second.contains("<intent>"), "{transport} retry: {second}");
         assert_eq!(
             extract_intent(&first),
             retry_intent,
@@ -5281,22 +5290,25 @@ output = ["slot:answer"]
             "{transport} retry behavior"
         );
         for prompt in [&first, &second] {
-            let include = prompt.find("<include>").unwrap_or(0);
             let intent = prompt.find("<intent>").unwrap();
             let behavior = prompt.find("<behavior>").unwrap();
-            let agent = prompt.find("<agent>").unwrap();
-            let input = prompt.find("<input>").unwrap();
-            assert!(
-                include <= intent && intent < behavior && behavior < agent && agent < input,
-                "{prompt}"
-            );
-            assert!(prompt.contains("<data>"), "{prompt}");
+            if transport == "cli" {
+                let include = prompt.find("<include>").expect("include opening");
+                let agent = prompt.find("<agent>").unwrap();
+                let input = prompt.find("<input>").unwrap();
+                assert!(
+                    include < intent && intent < behavior && behavior < agent && agent < input,
+                    "{prompt}"
+                );
+                assert!(prompt.contains("<data>"), "{prompt}");
+            }
             assert_eq!(prompt.matches("id=\"shared\"").count(), 1, "{prompt}");
             assert_eq!(prompt.matches("id=\"shared-tone\"").count(), 1, "{prompt}");
             assert_unassigned_absent(prompt);
         }
-        assert!(!first.contains("refreshed"), "{first}");
-        assert!(second.contains("refreshed"), "{second}");
+        assert!(first.contains("RETRY RESOURCE AVAILABLE"), "{first}");
+        assert!(second.contains("(prompt body unavailable:"), "{second}");
+        assert_system(&first_args, system_flag);
         assert_system(&args, system_flag);
     };
     assert_retry_captures("cli", "CTX_TEST_CLI_FAIL_FIRST", "--cli-system");

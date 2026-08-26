@@ -8946,10 +8946,10 @@ fn drive_mcp_frame(
         let Some((refreshed_session, refreshed_frame)) =
             refresh_frame_for_retry(input, current.elapsed_seconds)?
         else {
-            return Ok(false);
+            return Ok(true);
         };
         if !same_frame_position(current.frame, &refreshed_frame) {
-            return Ok(false);
+            return Ok(true);
         }
         let loaded_trait = ctx_traits_io::run::load_trait_for_session(
             input.file,
