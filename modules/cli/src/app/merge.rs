@@ -4912,6 +4912,7 @@ mod tests {
         let git_before = git_state_snapshot();
         let result = merge(MergeInputs {
             run_id: "requested-run",
+            verbose: false,
             session_store: None,
             session_path_override: None,
             assignments: &[],
