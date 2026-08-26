@@ -18,6 +18,7 @@ use std::sync::Once;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+static PAUSED: AtomicBool = AtomicBool::new(false);
 /// `SIGINT` deliveries observed since install (or the last [`reset`]) —
 /// drives the escalation ladder in [`handle_sigint`]. Only actual signals
 /// count; [`request_stop`] stays a pure graceful request.
@@ -198,23 +199,36 @@ pub fn is_interrupted() -> bool {
     INTERRUPTED.load(Ordering::SeqCst)
 }
 
+pub fn is_paused() -> bool {
+    PAUSED.load(Ordering::SeqCst)
+}
+
 /// Clear the flag (and the escalation count). Only used by the drive loop
 /// after it has finished recording an interrupted outcome and returned
 /// control to the caller, so a long-lived host process (tests, a future
 /// daemon mode) can drive again without carrying a stale interrupt forward.
 pub fn reset() {
     INTERRUPTED.store(false, Ordering::SeqCst);
+    PAUSED.store(false, Ordering::SeqCst);
     SIGINT_COUNT.store(0, Ordering::SeqCst);
     ctx_traits_io::run_kill::reset();
 }
 
 /// Set the same flag [`handle_sigint`] sets, but from a same-process
 /// callback rather than an actual signal — the target of
-/// `ctx_traits_io::run_control::try_acquire`'s `on_interrupt` callback for
-/// every drive registered under the P423 driver control lock. A request
+/// `ctx_traits_io::run_control::try_acquire`'s control-command callback for
+/// every drive registered under the P423 driver control lock. An interrupt request
 /// arriving through the authenticated control socket and a real `SIGINT` are
 /// treated identically by the drive loop from this point on.
 pub fn request_stop() {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+}
+
+/// Pause is a cooperative stop with a distinct durable outcome. Publish its
+/// discriminant before the shared stop flag so observers cannot see a pause as
+/// an interrupt.
+pub fn request_pause() {
+    PAUSED.store(true, Ordering::SeqCst);
     INTERRUPTED.store(true, Ordering::SeqCst);
 }
 

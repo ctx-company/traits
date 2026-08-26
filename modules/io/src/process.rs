@@ -4,9 +4,9 @@
 //! dashboard's editor-backed text operations (spawn request, trust
 //! approve/block reason).
 //!
-//! Neither helper here decides *what* to run — argv construction/validation
-//! (rejecting dashboard-breaking flags, injecting `--progress none`) is the
-//! dashboard's own responsibility. This module only owns how the child is
+//! Neither helper here decides *what* to run. Dashboard validation remains
+//! dashboard-owned, while center-owned starts construct their own argv. This
+//! module only owns how the child is
 //! detached and how the terminal is handed to/reclaimed from an editor.
 
 use camino::Utf8Path;
@@ -45,6 +45,27 @@ pub fn spawn_detached(
             source: e,
         })?;
 
+    spawn_detached_with(
+        exe,
+        args,
+        cwd,
+        Stdio::from(log_file),
+        Stdio::from(log_file_err),
+        envs,
+    )
+}
+
+/// Spawn a detached child with independently supplied standard-output and
+/// standard-error destinations. The center uses this for pre-registration
+/// failures, where stderr is part of the start response.
+fn spawn_detached_with(
+    exe: &Utf8Path,
+    args: &[String],
+    cwd: &Utf8Path,
+    stdout: Stdio,
+    stderr: Stdio,
+    envs: &[(&str, &str)],
+) -> crate::Result<Child> {
     // Session detach via the fork-free sentinel shim where possible (see
     // `command::SETSID_EXEC_SENTINEL`): a `pre_exec` hook forces fork()+exec()
     // and forking the multithreaded dashboard crashed spawned children on
@@ -69,8 +90,8 @@ pub fn spawn_detached(
         .args(args)
         .current_dir(cwd.as_std_path())
         .stdin(Stdio::null())
-        .stdout(Stdio::from(log_file))
-        .stderr(Stdio::from(log_file_err));
+        .stdout(stdout)
+        .stderr(stderr);
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -101,6 +122,38 @@ pub fn spawn_detached(
             message: format!("failed to spawn detached process: {e}"),
         })
         .map_err(Into::into)
+}
+
+/// Like [`spawn_detached`], but preserves stdout and stderr in separate
+/// truncated files so a launch failure can report genuine stderr.
+pub fn spawn_detached_split(
+    exe: &Utf8Path,
+    args: &[String],
+    cwd: &Utf8Path,
+    stdout_path: &Utf8Path,
+    stderr_path: &Utf8Path,
+    envs: &[(&str, &str)],
+) -> crate::Result<Child> {
+    let stdout = std::fs::File::create(stdout_path.as_std_path()).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: stdout_path.to_string(),
+            source,
+        }
+    })?;
+    let stderr = std::fs::File::create(stderr_path.as_std_path()).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: stderr_path.to_string(),
+            source,
+        }
+    })?;
+    spawn_detached_with(
+        exe,
+        args,
+        cwd,
+        Stdio::from(stdout),
+        Stdio::from(stderr),
+        envs,
+    )
 }
 
 /// Resolve `$EDITOR` (falling back to `vi`, matching common shell/git

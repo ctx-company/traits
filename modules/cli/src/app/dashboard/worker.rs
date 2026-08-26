@@ -9,6 +9,8 @@ use super::{
     refresh_attached_view,
 };
 
+use ctx_traits_io::center::{ControlAction, StartResult};
+
 pub(super) type RefreshResult = Result<Arc<DashboardSnapshot>, String>;
 pub(super) type PreviewResult = AttachedView;
 
@@ -17,6 +19,8 @@ pub(super) struct Handle {
     snapshots: mpsc::Receiver<RefreshResult>,
     previews: mpsc::Receiver<PreviewResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
+    actions: mpsc::Receiver<ActionResult>,
+    action_sender: mpsc::Sender<ActionResult>,
 }
 
 #[derive(Clone)]
@@ -30,6 +34,12 @@ pub(super) struct ExplanationResult {
     pub(super) trait_id: String,
     pub(super) canonical_digest: String,
     pub(super) result: Result<String, String>,
+}
+
+pub(super) struct ActionResult {
+    pub(super) message: String,
+    pub(super) session_id: Option<String>,
+    pub(super) task_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -52,12 +62,15 @@ impl Handle {
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (preview_tx, previews) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
+        let (action_sender, actions) = mpsc::channel();
         std::thread::spawn(move || run(command_rx, snapshot_tx, preview_tx, explanation_tx));
         Self {
             commands,
             snapshots,
             previews,
             explanations,
+            actions,
+            action_sender,
         }
     }
 
@@ -71,6 +84,62 @@ impl Handle {
             results.push(result);
         }
         results
+    }
+
+    pub(super) fn action_results(&self) -> Vec<ActionResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.actions.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_action_sender(&self) -> mpsc::Sender<ActionResult> {
+        self.action_sender.clone()
+    }
+
+    pub(super) fn start_trait(&self, args: Vec<String>, cwd: String, task_key: Option<String>) {
+        let sender = self.action_sender.clone();
+        std::thread::spawn(move || {
+            let result = ctx_traits_io::center::start_trait(&args, camino::Utf8Path::new(&cwd));
+            let _ = sender.send(start_action_result(result, task_key, None));
+        });
+    }
+
+    pub(super) fn start_session(
+        &self,
+        session_id: String,
+        display_id: String,
+        repo_key: Option<String>,
+    ) {
+        let sender = self.action_sender.clone();
+        std::thread::spawn(move || {
+            let result = ctx_traits_io::center::start_session(&session_id, repo_key.as_deref());
+            let _ = sender.send(start_action_result(result, None, Some(display_id)));
+        });
+    }
+
+    pub(super) fn control(
+        &self,
+        session_id: String,
+        display_id: String,
+        repo_key: Option<String>,
+        action: ControlAction,
+    ) {
+        let sender = self.action_sender.clone();
+        std::thread::spawn(move || {
+            let message =
+                match ctx_traits_io::center::control(&session_id, repo_key.as_deref(), action) {
+                    Ok(result) => super::control_message(&result, &display_id),
+                    Err(error) => format!("stop failed for {display_id}: {error}"),
+                };
+            let _ = sender.send(ActionResult {
+                message,
+                session_id: None,
+                task_key: None,
+            });
+        });
     }
 
     pub(super) fn refresh(&self, all_repos: bool, screen: Screen) {
@@ -134,6 +203,34 @@ impl Handle {
         results.extend(latest_snapshot.into_iter().map(Ok));
         results.extend(outage_error.into_iter().map(Err));
         results
+    }
+}
+
+fn start_action_result(
+    result: ctx_traits_io::Result<StartResult>,
+    task_key: Option<String>,
+    display_id: Option<String>,
+) -> ActionResult {
+    let label = display_id.unwrap_or_else(|| "run".to_string());
+    match result {
+        Ok(StartResult::Started { session_id }) => ActionResult {
+            message: format!("started {label} as {session_id}"),
+            session_id: Some(session_id),
+            task_key,
+        },
+        Ok(StartResult::Exited { code, stderr }) => ActionResult {
+            message: format!(
+                "start failed for {label} (exit {}): {stderr}",
+                code.map_or_else(|| "unknown".to_string(), |code| code.to_string())
+            ),
+            session_id: None,
+            task_key,
+        },
+        Err(error) => ActionResult {
+            message: format!("start failed for {label}: {error}"),
+            session_id: None,
+            task_key,
+        },
     }
 }
 
@@ -559,6 +656,32 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
 
+    #[test]
+    fn start_action_result_reports_pre_registration_stderr() {
+        let result = start_action_result(
+            Ok(StartResult::Exited {
+                code: Some(17),
+                stderr: "first line\nsecond line\n".to_string(),
+            }),
+            Some("task".to_string()),
+            None,
+        );
+        assert!(result.message.contains("exit 17"));
+        assert!(result.message.contains("first line\nsecond line\n"));
+        assert!(result.session_id.is_none());
+        assert_eq!(result.task_key.as_deref(), Some("task"));
+
+        let result = start_action_result(
+            Err(ctx_traits_io::Error::Usage {
+                message: "unavailable".to_string(),
+            }),
+            Some("task".to_string()),
+            None,
+        );
+        assert!(result.session_id.is_none());
+        assert_eq!(result.task_key.as_deref(), Some("task"));
+    }
+
     /// Own the worker channels and join its thread after dropping the command
     /// sender, so live protocol tests cannot leave a reconnecting worker behind.
     struct WorkerLoop {
@@ -754,11 +877,14 @@ mod tests {
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
+        let (action_sender, actions) = mpsc::channel();
         let handle = Handle {
             commands,
             snapshots,
             previews,
             explanations,
+            actions,
+            action_sender,
         };
         let state = State::new_without_worker();
         let mut recovered = DashboardSnapshot::from_state(&state);

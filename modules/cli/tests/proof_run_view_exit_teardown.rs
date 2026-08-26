@@ -225,7 +225,9 @@ fn dashboard_attach_then_exit_leaves_no_run_frame() {
         &fixture.repo,
         &fixture.home,
         &[
-            ("session-", "\x1b[B\r"),
+            // The first live session is selected when the center publishes
+            // its snapshot, so Enter attaches directly.
+            ("session-", "\r"),
             (r"(?s)only-step.*\[d\] dash", "q"),
             ("Quit live view?", "\r"),
             ("SESSIONS", "q"),

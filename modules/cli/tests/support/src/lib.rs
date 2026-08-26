@@ -733,11 +733,8 @@ pub fn run_pty_keys_after_markers(
             "#
         ));
     }
-    let output = Command::new("expect")
-        .args([
-            "-c",
-            &format!(
-                r#"
+    let script = format!(
+        r#"
                 set timeout 30
                 set child_status {{}}
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) {args}"
@@ -749,14 +746,8 @@ pub fn run_pty_keys_after_markers(
                 }}
                 puts "__CHILD_EXIT__[lindex $child_status 3]__"
             "#
-            ),
-        ])
-        .current_dir(cwd)
-        .env_clear()
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", home)
-        .env("XDG_CACHE_HOME", home)
-        .env("PATH", std::env::var("PATH").unwrap())
+    );
+    let output = controlled_command(Path::new("expect"), &["-c", script.as_str()], cwd, home)
         .env("TERM", "xterm-256color")
         .env("CTX_STARTUP_BIN", binary)
         .output()

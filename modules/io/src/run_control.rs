@@ -13,8 +13,8 @@
 //! trusted by leaving it in place.
 //!
 //! This module never inspects or mutates ledger/session content; it only
-//! answers "is a driver attached, and if so, ask it to stop." Cooperative
-//! interruption reuses the existing `SIGINT` semantics that
+//! answers "is a driver attached, and if so, ask it to stop." The authenticated
+//! control byte selects either interruption or pause; cooperative interruption reuses the existing `SIGINT` semantics that
 //! `crate::app::interrupt`/`drive` already honor (see P402) — this module
 //! never sends `SIGKILL` and never introduces a permanent canceled status.
 //!
@@ -47,6 +47,30 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+/// Cooperative command selected by the authenticated control socket byte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlCommand {
+    Interrupt,
+    Pause,
+}
+
+impl ControlCommand {
+    pub fn from_wire(byte: u8) -> Option<Self> {
+        match byte {
+            b'i' => Some(Self::Interrupt),
+            b'p' => Some(Self::Pause),
+            _ => None,
+        }
+    }
+
+    pub fn wire(self) -> u8 {
+        match self {
+            Self::Interrupt => b'i',
+            Self::Pause => b'p',
+        }
+    }
+}
+
 /// How often the control-socket accept loop wakes to check whether it has
 /// been asked to stop (on [`DriverLockGuard`] drop). Bounds both the delay
 /// before a released lock's socket disappears and the CPU cost of the idle
@@ -65,7 +89,7 @@ const CONTROL_STREAM_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Exact acknowledgement bytes a live holder writes back once it has invoked
-/// `on_interrupt`. [`request_interrupt`] treats anything else — including a
+/// its interrupt or pause callback. Control requests treat anything else — including a
 /// partial or missing read — as "not confirmed".
 const CONTROL_ACK: &[u8] = b"ok";
 
@@ -160,9 +184,9 @@ impl Drop for DriverLockGuard {
 
 /// A control-socket listener bound only while its owning [`DriverLockGuard`]
 /// holds the driver `flock`. Its accept loop runs on a dedicated thread and
-/// invokes the caller-supplied `on_interrupt` callback for every connection
-/// (each connection is itself already an authenticated interrupt request —
-/// see the module doc — so no message content needs parsing).
+/// invokes the caller-supplied callback for every recognized command. The
+/// connection authenticates the requester; its byte selects the cooperative
+/// stop to make.
 struct ControlListener {
     socket_path: Utf8PathBuf,
     stop: Arc<AtomicBool>,
@@ -223,7 +247,7 @@ pub fn ensure_runtime_root(root: &Utf8Path) -> crate::Result<()> {
 
 fn bind_control_listener(
     socket_path: Utf8PathBuf,
-    on_interrupt: Arc<dyn Fn() + Send + Sync>,
+    on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>,
 ) -> crate::Result<ControlListener> {
     if let Some(parent) = socket_path.parent() {
         ensure_runtime_root(parent)?;
@@ -257,15 +281,21 @@ fn bind_control_listener(
                     let _ = stream.set_read_timeout(Some(CONTROL_STREAM_TIMEOUT));
                     let _ = stream.set_write_timeout(Some(CONTROL_STREAM_TIMEOUT));
                     let mut byte = [0u8; 1];
-                    // Content is irrelevant: the connection itself is the
-                    // authenticated request (see module doc). A read/write
-                    // that never completes is bounded by the timeouts above
+                    // Authentication comes from the socket; the byte selects
+                    // the command. A read/write that never completes is bounded by the timeouts above
                     // rather than blocking this thread indefinitely; an idle
                     // or malicious client can only cost this thread up to
                     // `CONTROL_STREAM_TIMEOUT`, never wedge it forever.
-                    let _ = stream.read(&mut byte);
-                    on_interrupt();
-                    let _ = stream.write_all(CONTROL_ACK);
+                    if stream
+                        .read(&mut byte)
+                        .ok()
+                        .filter(|count| *count == 1)
+                        .is_some()
+                        && let Some(command) = ControlCommand::from_wire(byte[0])
+                    {
+                        on_command(command);
+                        let _ = stream.write_all(CONTROL_ACK);
+                    }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(CONTROL_POLL_INTERVAL);
@@ -366,8 +396,8 @@ fn random_token() -> String {
 /// means this process is now the sole driver of that ledger for as long as
 /// the guard is held; `Ok(None)` means another driver already holds it (a
 /// caller sizing `--wait` polls this on its own bounded interval rather than
-/// treating a miss as fatal). `on_interrupt` is invoked (on a background
-/// thread) once per authenticated [`request_interrupt`] connection for as
+/// treating a miss as fatal). `on_command` is invoked (on a background
+/// thread) once per authenticated control connection for as
 /// long as the guard lives; callers pass a closure that sets their own
 /// cooperative-stop flag (e.g. `crate::app::interrupt::request_stop` in the
 /// CLI crate — this module never depends on that flag directly).
@@ -382,7 +412,7 @@ fn random_token() -> String {
 /// index write) rather than surfaced as an error here.
 pub fn try_acquire(
     facts: &crate::run_liveness::LiveRunFacts,
-    on_interrupt: Arc<dyn Fn() + Send + Sync>,
+    on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>,
 ) -> crate::Result<Option<DriverLockGuard>> {
     let ledger_path = facts.ledger_path.as_path();
     let session_id = facts.session_id.as_str();
@@ -427,11 +457,8 @@ pub fn try_acquire(
     // The ledger flock remains authoritative even when the disposable local
     // control root cannot be used. A driver must keep progressing in that
     // case; only machine-local interrupt and liveness visibility are absent.
-    let control = bind_control_listener(
-        control_socket_path(ledger_path, &control_token),
-        on_interrupt,
-    )
-    .ok();
+    let control =
+        bind_control_listener(control_socket_path(ledger_path, &control_token), on_command).ok();
     let pid = std::process::id();
     let started_at_epoch = epoch_secs();
     // Best-effort, matching every other liveness-index write policy: an
@@ -552,6 +579,19 @@ pub fn probe(ledger_path: &Utf8Path) -> crate::Result<DriverProbe> {
 /// under it. Never escalates to `SIGKILL`: an unresponsive driver simply
 /// stays `stopping` until it exits on its own.
 pub fn request_interrupt(ledger_path: &Utf8Path, holder: &DriverHolder) -> crate::Result<bool> {
+    request_control(ledger_path, holder, ControlCommand::Interrupt)
+}
+
+/// Cooperatively pause the holder at its next frame boundary.
+pub fn request_pause(ledger_path: &Utf8Path, holder: &DriverHolder) -> crate::Result<bool> {
+    request_control(ledger_path, holder, ControlCommand::Pause)
+}
+
+fn request_control(
+    ledger_path: &Utf8Path,
+    holder: &DriverHolder,
+    command: ControlCommand,
+) -> crate::Result<bool> {
     if holder.control_token.is_empty() {
         return Ok(false);
     }
@@ -586,9 +626,7 @@ pub fn request_interrupt(ledger_path: &Utf8Path, holder: &DriverHolder) -> crate
     let mut stream = stream;
     let _ = stream.set_read_timeout(Some(CONTROL_STREAM_TIMEOUT));
     let _ = stream.set_write_timeout(Some(CONTROL_STREAM_TIMEOUT));
-    // The connection itself, plus this exact byte, is the authenticated
-    // request; the listener discards its content after reading it.
-    if stream.write_all(b"i").is_err() {
+    if stream.write_all(&[command.wire()]).is_err() {
         return Ok(false);
     }
     let mut ack = [0u8; CONTROL_ACK.len()];
@@ -628,7 +666,7 @@ mod tests {
         let replacement_socket = control_socket_path(ledger_path, &replacement.control_token);
         let listener = bind_control_listener(
             replacement_socket,
-            Arc::new(move || {
+            Arc::new(move |_| {
                 observed.store(true, Ordering::SeqCst);
             }),
         )
@@ -642,6 +680,80 @@ mod tests {
             !interrupted.load(Ordering::SeqCst),
             "the replacement listener must not receive the selected action"
         );
+        drop(listener);
+    }
+
+    #[test]
+    fn control_command_parses_only_the_known_wire_bytes() {
+        assert_eq!(
+            ControlCommand::from_wire(b'i'),
+            Some(ControlCommand::Interrupt)
+        );
+        assert_eq!(ControlCommand::from_wire(b'p'), Some(ControlCommand::Pause));
+        assert_eq!(ControlCommand::from_wire(b'x'), None);
+        assert_eq!(ControlCommand::Interrupt.wire(), b'i');
+        assert_eq!(ControlCommand::Pause.wire(), b'p');
+    }
+
+    #[test]
+    fn unrecognized_control_byte_invokes_no_callback_and_is_not_acknowledged() {
+        let path = control_socket_path(
+            Utf8Path::new("/tmp/ctx-control-invalid.json"),
+            &format!("invalid-{}", std::process::id()),
+        );
+        let called = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&called);
+        let listener = bind_control_listener(
+            path.clone(),
+            Arc::new(move |_| {
+                observed.store(true, Ordering::SeqCst);
+            }),
+        )
+        .expect("bind listener");
+        std::thread::sleep(CONTROL_POLL_INTERVAL);
+        let mut stream = UnixStream::connect(path.as_std_path()).expect("connect listener");
+        stream.write_all(b"x").expect("write invalid command");
+        let _ = stream.set_read_timeout(Some(CONTROL_STREAM_TIMEOUT));
+        let mut ack = [0; 2];
+        assert!(stream.read_exact(&mut ack).is_err());
+        assert!(!called.load(Ordering::SeqCst));
+        drop(listener);
+    }
+
+    #[test]
+    fn pause_request_delivers_the_pause_command_to_the_lock_holder() {
+        let ledger_path = Utf8PathBuf::from(format!(
+            "/tmp/ctx-control-pause-{}.json",
+            std::process::id()
+        ));
+        let holder = DriverHolder {
+            pid: std::process::id(),
+            session_id: "session".to_string(),
+            run_id: "run".to_string(),
+            started_at_epoch_secs: 0,
+            control_token: format!("pause-{}", std::process::id()),
+        };
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let observed = Arc::clone(&seen);
+        let listener = bind_control_listener(
+            control_socket_path(&ledger_path, &holder.control_token),
+            Arc::new(move |command| *observed.lock().expect("lock") = Some(command)),
+        )
+        .expect("bind listener");
+        let deadline = std::time::Instant::now() + CONTROL_STREAM_TIMEOUT;
+        let mut accepted = false;
+        while std::time::Instant::now() < deadline {
+            if request_pause(&ledger_path, &holder).expect("request pause") {
+                accepted = true;
+                break;
+            }
+            std::thread::sleep(CONTROL_POLL_INTERVAL);
+        }
+        assert!(
+            accepted,
+            "listener did not acknowledge pause before its deadline"
+        );
+        assert_eq!(*seen.lock().expect("lock"), Some(ControlCommand::Pause));
         drop(listener);
     }
 }

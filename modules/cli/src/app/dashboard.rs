@@ -67,10 +67,6 @@ mod keymap;
 mod worker;
 
 const TICK: Duration = Duration::from_millis(250);
-/// How long a dashboard-spawned child is watched for an early (dispatch-time)
-/// failure before the pending-spawn record is dropped and the regular
-/// SESSIONS/TASKS sync takes over (P0193 §Part A).
-const SPAWN_GRACE_WINDOW: Duration = Duration::from_secs(5);
 /// Bound on how long a list screen (SESSIONS/TRAITS/MERGES/TRUST) can go
 /// without an automatic reload while idle, so externally started, dashboard-
 /// spawned, or externally completed runs surface without a keypress. Also
@@ -1190,29 +1186,10 @@ struct State {
     /// Retaining this across detach permits an explicit reattach, but never
     /// leaks the originating run's context into the list or another session.
     guide_chat_session_id: Option<String>,
-    /// Monotonic counter behind each dashboard spawn's log key (`pid-<pid>-<seq>`),
-    /// so consecutive spawns from one dashboard never overwrite the previous
-    /// spawn's log before [`poll_pending_spawns`] has read it (P0193 §Part A).
-    spawn_seq: u64,
-    /// Children detached by [`apply_spawn_request`] still inside their
-    /// [`SPAWN_GRACE_WINDOW`], watched non-blockingly every tick by
-    /// [`poll_pending_spawns`] for an early failure.
-    pending_spawns: Vec<PendingSpawn>,
     /// Task keys dispatched this session whose TASKS row should read
-    /// "dispatched" ahead of the next board/session sync, keyed to when the
-    /// entry was inserted so a silently-lost child can't pin the row forever.
-    optimistic_dispatched: HashMap<String, std::time::Instant>,
-}
-
-/// A detached dashboard-spawned child still inside its watch window
-/// (P0193 §Part A). Dropping `child` never terminates the process
-/// ([`ctx_traits_io::process::spawn_detached`]'s documented contract) —
-/// holding it here only lets [`poll_pending_spawns`] call `try_wait`.
-struct PendingSpawn {
-    child: std::process::Child,
-    log_path: camino::Utf8PathBuf,
-    task_key: Option<String>,
-    deadline: std::time::Instant,
+    /// "dispatched" ahead of the next board/session sync, correlated to the
+    /// registered session id until that normal join appears.
+    optimistic_dispatched: HashMap<String, String>,
 }
 
 /// P550 dashboard `S`-key state: a snapshot of one session's story, built
@@ -1361,8 +1338,6 @@ impl State {
             pending_keys: Vec::new(),
             guide_chat,
             guide_chat_session_id,
-            spawn_seq: 0,
-            pending_spawns: Vec::new(),
             optimistic_dispatched: HashMap::new(),
         }
     }
@@ -2844,7 +2819,7 @@ fn run_with_initial_session(
             guide_chat.poll_results();
         }
         state.apply_snapshots();
-        poll_pending_spawns(&mut state);
+        apply_action_results(&mut state);
         draw_screen(&mut pane, &mut state).map_err(|source| {
             ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
                 path: "<tty>".to_string(),
@@ -5049,66 +5024,28 @@ impl DeleteEligibility {
     }
 }
 
-/// Resolve the current executable path as UTF-8 and the session-keyed log
-/// path both dashboard spawn call sites share, rather than each
-/// hand-rolling its own exe/log-path construction. `log_key` is the session
-/// id when known ahead of spawn (RESUME); a spawn-request `ctx traits run`
-/// mints its session id only after the child starts, so that call site
-/// passes its own pid-keyed fallback instead.
-fn resolve_spawn_exe_and_log(
-    log_key: &str,
-) -> crate::Result<(camino::Utf8PathBuf, camino::Utf8PathBuf)> {
-    let exe = std::env::current_exe().map_err(|source| {
-        ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
-            path: "<current-exe>".to_string(),
-            source,
-        })
-    })?;
-    let exe = camino::Utf8PathBuf::from_path_buf(exe).map_err(|_| crate::Error::Command {
-        message: "current executable path is not UTF-8".to_string(),
-    })?;
-    let log_dir = ctx_traits_io::state::current_global_debug_root()?;
-    std::fs::create_dir_all(log_dir.as_std_path()).ok();
-    let log_path = log_dir.join(format!("dashboard-spawn-{log_key}.log"));
-    Ok((exe, log_path))
-}
-
-/// `s` confirmed: spawns `ctx traits internal drive --session <id> --progress none`
-/// detached (never `--worktree` — the drive's own `resolve_resume_worktree`
-/// reuses the ledger's recorded provenance by construction), with `cwd` set
-/// to the row's own repository path so ALL-mode resume is correct
-/// cross-repo (§3.6).
-fn spawn_resume(row: &SessionRow) -> crate::Result<()> {
-    let (exe, log_path) = resolve_spawn_exe_and_log(&row.session_id)?;
-    let cwd = match &row.repo_path {
-        Some(path) => camino::Utf8PathBuf::from(path.clone()),
-        None => super::lifecycle_reporting::current_utf8_dir()?,
-    };
-    let args = resume_argv(&row.session_id);
-    ctx_traits_io::process::spawn_detached(
-        &exe,
-        &args,
-        &cwd,
-        &log_path,
-        &[(
-            ctx_traits_io::run_liveness::SPAWNED_LOG_PATH_ENV,
-            log_path.as_str(),
-        )],
-    )?;
-    Ok(())
-}
-
-/// The exact argv RESUME spawns: `traits drive --session <id> --progress
-/// none`, deliberately with no `--worktree` (§3.5).
-fn resume_argv(session_id: &str) -> Vec<String> {
-    vec![
-        "traits".to_string(),
-        "drive".to_string(),
-        "--session".to_string(),
-        session_id.to_string(),
-        "--progress".to_string(),
-        "none".to_string(),
-    ]
+/// Render a center-owned control result for the dashboard footer.
+fn control_message(result: &ctx_traits_io::center::ControlResult, display_id: &str) -> String {
+    match result {
+        ctx_traits_io::center::ControlResult::Acknowledged => {
+            format!("stop requested for {display_id}")
+        }
+        ctx_traits_io::center::ControlResult::Missing => {
+            format!("stop refused: {display_id} is no longer listed")
+        }
+        ctx_traits_io::center::ControlResult::Ambiguous(_) => {
+            format!("stop refused: {display_id} is ambiguous")
+        }
+        ctx_traits_io::center::ControlResult::NotLive => {
+            format!("stop not sent for {display_id}; center will settle it")
+        }
+        ctx_traits_io::center::ControlResult::Unverifiable => {
+            format!("stop refused: {display_id}'s live driver cannot be verified")
+        }
+        ctx_traits_io::center::ControlResult::Refused => {
+            format!("stop refused: {display_id}'s driver did not acknowledge the request")
+        }
+    }
 }
 
 /// Applies a resolved SESSIONS modal outcome (§3.3): a `Cancelled` outcome
@@ -5300,10 +5237,12 @@ fn apply_session_action(
                     if response.session.status == ctx_traits_core::procedure::session::Status::Completed => {
                     state.message = Some(format!("answer accepted; {display_id} completed"));
                 }
-                Ok(ctx_traits_io::run::SetOutcome::Call { .. }) => match spawn_resume(row) {
-                    Ok(()) => state.message = Some(format!("answer accepted; resume started for {display_id}")),
-                    Err(error) => state.message = Some(format!("answer accepted, but resume failed: {error}")),
-                },
+                Ok(ctx_traits_io::run::SetOutcome::Call { .. }) => {
+                    if let Some(worker) = state.worker.as_ref() {
+                        worker.start_session(row.session_id.clone(), display_id.clone(), row.repo_key.clone());
+                    }
+                    state.message = Some(format!("answer accepted; resume started for {display_id}"));
+                }
                 Ok(ctx_traits_io::run::SetOutcome::Session { .. }) => {
                     state.message = Some("answer refused: question did not route to its current frame".to_string());
                 }
@@ -5323,98 +5262,17 @@ fn apply_session_action(
                 ));
                 return Ok(());
             };
-            let ledger_path = row.ledger_path.clone();
-            state.message = Some(match ctx_traits_io::run_control::probe(&ledger_path)? {
-                ctx_traits_io::run_control::DriverProbe::Held(Some(holder))
-                    if holder.session_id == session_id =>
-                {
-                    // The probe's holder identity and token must travel together:
-                    // re-probing here could target a replacement driver after a handoff.
-                    let current = match ctx_traits_io::run_session::read_run_session(&ledger_path) {
-                        Ok(session) if session.session_id.as_str() == session_id => session,
-                        Ok(_) => {
-                            state.message = Some(format!(
-                                "stop refused: {display_id}'s session changed; reopen it"
-                            ));
-                            state.reload();
-                            return Ok(());
-                        }
-                        Err(_) => {
-                            state.message = Some(format!(
-                                "stop refused: could not verify {display_id}'s current session"
-                            ));
-                            state.reload();
-                            return Ok(());
-                        }
-                    };
-                    if current.session_id.as_str() != holder.session_id {
-                        state.message = Some(format!(
-                            "stop refused: {display_id}'s driver changed; reopen it"
-                        ));
-                        state.reload();
-                        return Ok(());
-                    }
-                    if ctx_traits_io::run_control::request_interrupt(&ledger_path, &holder)? {
-                        format!("stop requested for {display_id}")
-                    } else {
-                        format!(
-                            "stop refused: {display_id}'s driver did not acknowledge the request"
-                        )
-                    }
-                }
-                ctx_traits_io::run_control::DriverProbe::Held(_) => format!(
-                    "stop refused: {display_id}'s current driver cannot be verified; reopen it"
-                ),
-                ctx_traits_io::run_control::DriverProbe::Unheld { .. }
-                    if has_running_evidence(row)
-                        || row.status
-                            == Some(
-                                ctx_traits_core::procedure::session::Status::WaitingOnHuman,
-                            ) =>
-                {
-                    let Some(mut maintenance) =
-                        ctx_traits_io::run_control::try_acquire_maintenance(&ledger_path)?
-                    else {
-                        state.reload();
-                        return Ok(());
-                    };
-                    let mut current = ctx_traits_io::run_session::read_run_session(&ledger_path)?;
-                    let current_outcome = current
-                        .last_drive_outcome
-                        .as_ref()
-                        .map(|outcome| &outcome.outcome);
-                    let current_state = ctx_traits_core::procedure::activity::SessionState::derive(
-                        &current.status,
-                        current_outcome,
-                        false,
-                    );
-                    if current.session_id.as_str() != session_id
-                        || !(current_outcome
-                            == Some(&ctx_traits_core::procedure::session::DriveOutcomeKind::Running)
-                            || current_state
-                                == ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman)
-                    {
-                        state.message = Some(format!(
-                            "stop refused: {display_id}'s session changed; reopen it"
-                        ));
-                        state.reload();
-                        return Ok(());
-                    }
-                    ctx_traits_io::run_session::record_interrupted_outcome_in_session(
-                        &ledger_path,
-                        &mut current,
-                    )?;
-                    maintenance.clear_stale_metadata()?;
-                    let _ = ctx_traits_io::run_liveness::remove_row(
-                        &ctx_traits_io::run_control::runtime_root(),
-                        &session_id,
-                    );
-                    format!("recorded interrupted outcome for {display_id}")
-                }
-                ctx_traits_io::run_control::DriverProbe::Unheld { .. } => {
-                    format!("stop refused: {display_id} has no driver; resume or delete it instead")
-                }
-            });
+            let repo_key = row.repo_key.clone();
+            let session_id = row.session_id.clone();
+            if let Some(worker) = state.worker.as_ref() {
+                worker.control(
+                    session_id,
+                    display_id,
+                    repo_key,
+                    ctx_traits_io::center::ControlAction::Interrupt,
+                );
+                state.message = Some("stop request sent to center".to_string());
+            }
             state.reload();
         }
         SessionAction::Resume(session_id) => {
@@ -5435,20 +5293,18 @@ fn apply_session_action(
                 ));
                 return Ok(());
             }
-            match spawn_resume(row) {
-                Ok(()) => {
-                    state.message = Some(format!("resume started for {display_id}"));
-                    state.session_preview = None;
-                    state.attach_request = Some(AttachRequest {
-                        session_id: row.session_id.clone(),
-                        ledger_path: row.ledger_path.clone(),
-                    });
-                    state.reload();
-                }
-                Err(error) => {
-                    state.message = Some(format!("resume failed: {error}"));
-                }
+            let repo_key = row.repo_key.clone();
+            let ledger_path = row.ledger_path.clone();
+            if let Some(worker) = state.worker.as_ref() {
+                worker.start_session(row.session_id.clone(), display_id.clone(), repo_key);
             }
+            state.message = Some(format!("resume started for {display_id}"));
+            state.session_preview = None;
+            state.attach_request = Some(AttachRequest {
+                session_id,
+                ledger_path,
+            });
+            state.reload();
         }
         SessionAction::Delete {
             session_id,
@@ -5987,11 +5843,26 @@ fn open_spawn_modal(state: &mut State) {
     );
 }
 
-/// Validates a submitted spawn request through the real clap parser, injects
-/// `--progress none`, and detaches a `ctx traits run` child. Never runs
-/// anything the parser itself would not accept as a plain `ctx traits run`
-/// invocation.
+/// Validates a submitted spawn request through the real clap parser. The
+/// center injects `--progress none` and owns detached process/log setup.
 fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
+    let (user_args, task_key) = match spawn_start_request(&text) {
+        Ok(request) => request,
+        Err(error) => {
+            state.message = Some(error);
+            return Ok(());
+        }
+    };
+    let cwd = super::lifecycle_reporting::current_utf8_dir()?;
+    if let Some(worker) = state.worker.as_ref() {
+        worker.start_trait(user_args, cwd.to_string(), task_key);
+        state.message = Some("start requested".to_string());
+    }
+    state.reload();
+    Ok(())
+}
+
+fn spawn_start_request(text: &str) -> Result<(Vec<String>, Option<String>), String> {
     let user_args: Vec<String> = text
         .lines()
         .map(str::trim)
@@ -5999,8 +5870,7 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
         .map(str::to_string)
         .collect();
     if user_args.is_empty() {
-        state.message = Some("spawn request was empty".to_string());
-        return Ok(());
+        return Err("spawn request was empty".to_string());
     }
     const FORBIDDEN: &[&str] = &[
         "--no-drive",
@@ -6013,10 +5883,9 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
     for arg in &user_args {
         let flag = arg.split('=').next().unwrap_or(arg);
         if FORBIDDEN.contains(&flag) {
-            state.message = Some(format!(
+            return Err(format!(
                 "{flag} is not permitted in a dashboard spawn request"
             ));
-            return Ok(());
         }
     }
     let mut full_argv: Vec<std::ffi::OsString> = vec!["ctx".into(), "traits".into(), "run".into()];
@@ -6029,55 +5898,35 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
             ..
         })) => {}
         Ok(_) => {
-            state.message = Some("spawn request did not parse as `ctx traits run`".to_string());
-            return Ok(());
+            return Err("spawn request did not parse as `ctx traits run`".to_string());
         }
         Err(error) => {
-            state.message = Some(format!("spawn request rejected: {error}"));
-            return Ok(());
+            return Err(format!("spawn request rejected: {error}"));
         }
     }
-    // No session id exists yet (minted by the child once it starts), so this
-    // call site keys its log by pid instead of session id — the one place
-    // the shared `resolve_spawn_exe_and_log` helper's session-keyed naming
-    // (§3.8) cannot apply. A monotonic per-dashboard sequence number is
-    // appended so consecutive spawns never overwrite each other's log
-    // before `poll_pending_spawns` has read it (P0193 §Part A).
-    state.spawn_seq += 1;
-    let log_key = format!("pid-{}-{}", std::process::id(), state.spawn_seq);
-    let (exe, log_path) = resolve_spawn_exe_and_log(&log_key)?;
-    let cwd = super::lifecycle_reporting::current_utf8_dir()?;
     let task_key = task_dispatch_key(&user_args);
-    let mut args: Vec<String> = vec!["traits".to_string(), "run".to_string()];
-    args.extend(user_args);
-    args.push("--progress".to_string());
-    args.push("none".to_string());
-    let child = ctx_traits_io::process::spawn_detached(
-        &exe,
-        &args,
-        &cwd,
-        &log_path,
-        &[(
-            ctx_traits_io::run_liveness::SPAWNED_LOG_PATH_ENV,
-            log_path.as_str(),
-        )],
-    )?;
-    if let Some(key) = &task_key {
-        state
-            .optimistic_dispatched
-            .insert(key.clone(), std::time::Instant::now());
-        state.message = Some(format!("dispatched {key}"));
-    } else {
-        state.message = Some("spawn started".to_string());
+    Ok((user_args, task_key))
+}
+
+fn apply_action_results(state: &mut State) {
+    let joined_keys: HashSet<String> = task_session_join(state).into_keys().collect();
+    let Some(worker) = state.worker.as_ref() else {
+        return;
+    };
+    let results = worker.action_results();
+    for result in results {
+        state.message = Some(result.message);
+        if let Some(key) = result.task_key {
+            if let Some(session_id) = result.session_id {
+                state.optimistic_dispatched.insert(key, session_id);
+            } else {
+                state.optimistic_dispatched.remove(&key);
+            }
+        }
     }
-    state.pending_spawns.push(PendingSpawn {
-        child,
-        log_path,
-        task_key,
-        deadline: std::time::Instant::now() + SPAWN_GRACE_WINDOW,
-    });
-    state.reload();
-    Ok(())
+    state
+        .optimistic_dispatched
+        .retain(|key, _| !joined_keys.contains(key));
 }
 
 /// Extracts the `task=<key>` value out of a spawn request's own `--set`
@@ -6098,78 +5947,6 @@ fn task_dispatch_key(user_args: &[String]) -> Option<String> {
             .and_then(|value| value.strip_prefix("task="))
             .map(str::to_string)
     })
-}
-
-/// Non-blocking `try_wait` sweep over every pending dashboard spawn
-/// (P0193 §Part A), called on every tick — cheap enough at 250ms cadence
-/// since `pending_spawns` is normally empty or single-element and
-/// `try_wait` never blocks.
-fn poll_pending_spawns(state: &mut State) {
-    if state.pending_spawns.is_empty() && state.optimistic_dispatched.is_empty() {
-        return;
-    }
-    let now = std::time::Instant::now();
-    // A joined session row for a still-pending task key means the regular
-    // sync already picked up the dispatch — the optimistic marker and any
-    // matching pending-spawn record are both stale.
-    let joined_keys: HashSet<String> = task_session_join(state).into_keys().collect();
-    state.optimistic_dispatched.retain(|key, inserted_at| {
-        !joined_keys.contains(key) && now < *inserted_at + SPAWN_GRACE_WINDOW
-    });
-    let mut remaining = Vec::with_capacity(state.pending_spawns.len());
-    for mut pending in std::mem::take(&mut state.pending_spawns) {
-        let joined = pending
-            .task_key
-            .as_ref()
-            .is_some_and(|key| joined_keys.contains(key));
-        if joined {
-            continue;
-        }
-        match pending.child.try_wait() {
-            Ok(Some(status)) if !status.success() => {
-                let line = first_error_line(&pending.log_path);
-                state.message = Some(match line {
-                    Some(line) => format!("dispatch failed: {line}"),
-                    None => "dispatch failed".to_string(),
-                });
-                if let Some(key) = &pending.task_key {
-                    state.optimistic_dispatched.remove(key);
-                }
-            }
-            Ok(Some(_)) => {
-                // Exited zero before any session joined — nothing ran; treat
-                // like any other early exit rather than a silent success.
-                if let Some(key) = &pending.task_key {
-                    state.optimistic_dispatched.remove(key);
-                }
-            }
-            Ok(None) => {
-                if now < pending.deadline {
-                    remaining.push(pending);
-                }
-                // Still running past the deadline: drop the record and let
-                // the regular sync take over; the row keeps showing
-                // "dispatched" only until it expires or a session joins.
-            }
-            Err(_) => {
-                // Already reaped or otherwise unobservable — nothing more to
-                // learn from this record.
-            }
-        }
-    }
-    state.pending_spawns = remaining;
-}
-
-/// The log's first non-empty line that isn't the shared `ctx run · <phase>`
-/// header — a heuristic over human-oriented output, acceptable since it
-/// only feeds a status message, never control flow.
-fn first_error_line(log_path: &camino::Utf8Path) -> Option<String> {
-    let contents = std::fs::read_to_string(log_path.as_std_path()).ok()?;
-    contents
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("ctx run"))
-        .map(str::to_string)
 }
 
 // ---------------------------------------------------------------------------
@@ -8689,7 +8466,7 @@ fn task_visible_row_label(
     row: &TaskVisibleRow,
     summaries: &[TaskSummary],
     proposals: &HashMap<String, super::task_proposals::DoneProposal>,
-    optimistic_dispatched: &HashMap<String, std::time::Instant>,
+    optimistic_dispatched: &HashMap<String, String>,
     awaiting_merge: &HashMap<String, crate::app::run::NotMergedFact>,
     has_snapshot: bool,
 ) -> String {
@@ -8722,7 +8499,7 @@ fn task_visible_row_label(
 /// dashboard (0063.8: the marker column is fixed-width, so the title field
 /// is trimmed to compensate rather than growing the row). `dispatched`
 /// overrides the derived status text until a joined session row lands or
-/// the pending spawn fails/expires (P0193 §Part A) — presentation only,
+/// the pending spawn fails or a joined session row lands — presentation only,
 /// [`task_group`]'s own group precedence is untouched. `fact`, when present,
 /// means [`task_group`] placed this task in `AwaitingMerge` — the row shows
 /// that instead of the board's derived status so a done-looking board never
@@ -8835,6 +8612,148 @@ fn explanation_task_text(message: &str, elapsed: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_start_request_returns_only_user_arguments_and_the_task_key() {
+        // Clap's derived parser exceeds the default two-megabyte test thread
+        // stack in this workspace; exercise the real parser on a normal stack.
+        let (args, task_key) = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| spawn_start_request("fixture\n--set\nanswer=true"))
+            .expect("spawn parser thread")
+            .join()
+            .expect("parser thread completes")
+            .expect("valid dashboard request");
+        assert_eq!(args, ["fixture", "--set", "answer=true"]);
+        assert!(task_key.is_none());
+        assert_ne!(args.first().map(String::as_str), Some("traits"));
+        assert_ne!(args.first().map(String::as_str), Some("run"));
+        assert!(!args.iter().any(|arg| arg == "--progress"));
+        assert_eq!(
+            task_dispatch_key(&[
+                "fixture".to_string(),
+                "--task-dispatch".to_string(),
+                "--set".to_string(),
+                "task=0243.5".to_string(),
+            ])
+            .as_deref(),
+            Some("0243.5")
+        );
+    }
+
+    #[test]
+    fn spawn_start_request_rejects_each_forbidden_flag_by_name() {
+        for flag in [
+            "--no-drive",
+            "--ephemeral",
+            "--out",
+            "--session-store",
+            "--json",
+            "--progress",
+        ] {
+            let error = spawn_start_request(&format!("fixture\n{flag}"))
+                .expect_err("forbidden flag must be rejected");
+            assert!(error.contains(flag), "refusal must name {flag}: {error}");
+        }
+    }
+
+    #[test]
+    fn control_message_renders_each_control_result_distinctly() {
+        let messages = [
+            ctx_traits_io::center::ControlResult::Acknowledged,
+            ctx_traits_io::center::ControlResult::Missing,
+            ctx_traits_io::center::ControlResult::Ambiguous(vec!["one".to_string()]),
+            ctx_traits_io::center::ControlResult::NotLive,
+            ctx_traits_io::center::ControlResult::Unverifiable,
+            ctx_traits_io::center::ControlResult::Refused,
+        ]
+        .iter()
+        .map(|result| control_message(result, "session"))
+        .collect::<HashSet<_>>();
+        assert_eq!(messages.len(), 6);
+        assert!(messages.iter().all(|message| !message.is_empty()));
+    }
+
+    #[test]
+    fn spawn_start_request_rejects_text_that_is_not_a_traits_run_command() {
+        let error = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| spawn_start_request("--definitely-not-a-run-flag"))
+            .expect("spawn parser thread")
+            .join()
+            .expect("parser thread completes")
+            .expect_err("invalid run arguments must be refused");
+        assert!(error.contains("spawn request"));
+    }
+
+    fn action_worker() -> (
+        worker::Handle,
+        std::sync::mpsc::Sender<worker::ActionResult>,
+    ) {
+        let worker = worker::Handle::new();
+        let actions = worker.test_action_sender();
+        (worker, actions)
+    }
+
+    #[test]
+    fn apply_action_results_records_the_registered_session_for_a_dispatched_task() {
+        let (worker, actions) = action_worker();
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker);
+        actions
+            .send(worker::ActionResult {
+                message: "started".to_string(),
+                session_id: Some("session".to_string()),
+                task_key: Some("0243.5".to_string()),
+            })
+            .expect("send completed start");
+        apply_action_results(&mut state);
+        assert_eq!(
+            state.optimistic_dispatched.get("0243.5"),
+            Some(&"session".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_action_results_clears_an_optimistic_entry_once_the_join_carries_it() {
+        let (worker, actions) = action_worker();
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker);
+        state
+            .optimistic_dispatched
+            .insert("0243.5".to_string(), "session".to_string());
+        let mut row = row_with_id("session", SessionClass::Live);
+        row.task_key = Some("0243.5".to_string());
+        state.sessions = vec![row];
+        actions
+            .send(worker::ActionResult {
+                message: "joined".to_string(),
+                session_id: None,
+                task_key: None,
+            })
+            .expect("send action result");
+        apply_action_results(&mut state);
+        assert!(!state.optimistic_dispatched.contains_key("0243.5"));
+    }
+
+    #[test]
+    fn apply_action_results_clears_an_optimistic_entry_when_a_task_start_fails() {
+        let (worker, actions) = action_worker();
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker);
+        state
+            .optimistic_dispatched
+            .insert("0243.5".to_string(), "previous-session".to_string());
+        actions
+            .send(worker::ActionResult {
+                message: "start failed".to_string(),
+                session_id: None,
+                task_key: Some("0243.5".to_string()),
+            })
+            .expect("send failed start");
+        apply_action_results(&mut state);
+        assert!(!state.optimistic_dispatched.contains_key("0243.5"));
+    }
 
     // P081: guide-chat routing while attached moved into
     // `run_view::RunPanel`'s own observer (`install_guide_handle`/the
@@ -11015,217 +10934,6 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
-    fn kill_action_refuses_an_unheld_replacement_session() {
-        let ledger_path = scratch_ledger_path("kill-action-replacement");
-        let mut session = unresolvable_trait_session_fixture("run-kill-action", Some(0));
-        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
-        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
-            .expect("write original session");
-        let mut replacement = unresolvable_trait_session_fixture("run-kill-action-new", Some(0));
-        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
-            "session-kill-action-new".to_string(),
-        )
-        .expect("replacement session id");
-        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
-            .expect("replace ledger after modal open");
-        let mut state = State::new_without_worker();
-        state.sessions = vec![SessionRow {
-            session_id: session.session_id.as_str().to_string(),
-            ledger_path: ledger_path.clone(),
-            class: SessionClass::Live,
-            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
-            ..row_with_id("kill-action", SessionClass::Live)
-        }];
-        let mut pane = RatatuiPane::new_detached_for_test();
-
-        apply_session_action(
-            &mut pane,
-            &mut state,
-            SessionAction::Kill(session.session_id.as_str().to_string()),
-            ModalOutcome::Confirmed,
-        )
-        .expect("replacement refusal");
-
-        assert_eq!(
-            state.message.as_deref(),
-            Some("stop refused: session-run-kill-action's session changed; reopen it")
-        );
-        assert_eq!(
-            ctx_traits_io::run_session::read_run_session(&ledger_path)
-                .expect("replacement retained")
-                .session_id,
-            replacement.session_id
-        );
-    }
-
-    #[test]
-    fn kill_action_marks_an_unchanged_unheld_waiting_session_interrupted() {
-        let ledger_path = scratch_ledger_path("kill-action-unchanged");
-        let mut session = unresolvable_trait_session_fixture("run-kill-action-unchanged", Some(0));
-        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
-        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
-            .expect("write waiting session");
-        let mut state = State::new_without_worker();
-        state.sessions = vec![SessionRow {
-            session_id: session.session_id.as_str().to_string(),
-            ledger_path: ledger_path.clone(),
-            class: SessionClass::Live,
-            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
-            ..row_with_id("kill-action-unchanged", SessionClass::Live)
-        }];
-        let mut pane = RatatuiPane::new_detached_for_test();
-
-        apply_session_action(
-            &mut pane,
-            &mut state,
-            SessionAction::Kill(session.session_id.as_str().to_string()),
-            ModalOutcome::Confirmed,
-        )
-        .expect("unchanged kill succeeds");
-
-        assert_eq!(
-            state.message.as_deref(),
-            Some("recorded interrupted outcome for session-run-kill-action-unchanged")
-        );
-        assert!(matches!(
-            ctx_traits_io::run_session::read_run_session(&ledger_path)
-                .expect("read interrupted session")
-                .last_drive_outcome
-                .as_ref()
-                .map(|outcome| &outcome.outcome),
-            Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
-        ));
-    }
-
-    #[test]
-    fn kill_action_refuses_a_held_replacement_session_without_interrupting_it() {
-        let ledger_path = scratch_ledger_path("kill-held-replacement");
-        let mut session = unresolvable_trait_session_fixture("run-kill-held", Some(0));
-        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
-        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
-            .expect("write original session");
-        let interrupted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let observed_interrupt = std::sync::Arc::clone(&interrupted);
-        let _driver = ctx_traits_io::run_control::try_acquire(
-            &ctx_traits_io::run_liveness::LiveRunFacts {
-                session_id: session.session_id.as_str().to_string(),
-                run_id: session.run_id.as_str().to_string(),
-                repo_key: "test".to_string(),
-                repo_path: "/test".to_string(),
-                ledger_path: ledger_path.clone(),
-                worktree_path: None,
-                branch: None,
-                log_path: None,
-            },
-            std::sync::Arc::new(move || {
-                observed_interrupt.store(true, std::sync::atomic::Ordering::SeqCst);
-            }),
-        )
-        .expect("acquire held driver")
-        .expect("driver lock acquired");
-
-        let mut replacement = unresolvable_trait_session_fixture("run-kill-held-new", Some(0));
-        replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
-            "session-kill-held-new".to_string(),
-        )
-        .expect("replacement session id");
-        ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
-            .expect("replace ledger after modal open");
-        let mut state = State::new_without_worker();
-        state.sessions = vec![SessionRow {
-            session_id: session.session_id.as_str().to_string(),
-            ledger_path: ledger_path.clone(),
-            class: SessionClass::Live,
-            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
-            ..row_with_id("kill-held", SessionClass::Live)
-        }];
-        let mut pane = RatatuiPane::new_detached_for_test();
-
-        apply_session_action(
-            &mut pane,
-            &mut state,
-            SessionAction::Kill(session.session_id.as_str().to_string()),
-            ModalOutcome::Confirmed,
-        )
-        .expect("replacement refusal");
-
-        assert_eq!(
-            state.message.as_deref(),
-            Some("stop refused: session-run-kill-held's session changed; reopen it")
-        );
-        assert_eq!(
-            ctx_traits_io::run_session::read_run_session(&ledger_path)
-                .expect("replacement retained")
-                .session_id,
-            replacement.session_id
-        );
-        assert!(
-            !interrupted.load(std::sync::atomic::Ordering::SeqCst),
-            "a replacement session must not receive the original driver's interrupt"
-        );
-    }
-
-    #[test]
-    fn kill_action_requests_interrupt_for_an_unchanged_held_session() {
-        let ledger_path = scratch_ledger_path("kill-held-unchanged");
-        let mut session = unresolvable_trait_session_fixture("run-kill-held-unchanged", Some(0));
-        session.status = ctx_traits_core::procedure::session::Status::WaitingOnHuman;
-        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
-            .expect("write waiting session");
-        let interrupted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let observed_interrupt = std::sync::Arc::clone(&interrupted);
-        let _driver = ctx_traits_io::run_control::try_acquire(
-            &ctx_traits_io::run_liveness::LiveRunFacts {
-                session_id: session.session_id.as_str().to_string(),
-                run_id: session.run_id.as_str().to_string(),
-                repo_key: "test".to_string(),
-                repo_path: "/test".to_string(),
-                ledger_path: ledger_path.clone(),
-                worktree_path: None,
-                branch: None,
-                log_path: None,
-            },
-            std::sync::Arc::new(move || {
-                observed_interrupt.store(true, std::sync::atomic::Ordering::SeqCst);
-            }),
-        )
-        .expect("acquire held driver")
-        .expect("driver lock acquired");
-        let mut state = State::new_without_worker();
-        state.sessions = vec![SessionRow {
-            session_id: session.session_id.as_str().to_string(),
-            ledger_path: ledger_path.clone(),
-            class: SessionClass::Live,
-            status: Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman),
-            ..row_with_id("kill-held-unchanged", SessionClass::Live)
-        }];
-        let mut pane = RatatuiPane::new_detached_for_test();
-
-        apply_session_action(
-            &mut pane,
-            &mut state,
-            SessionAction::Kill(session.session_id.as_str().to_string()),
-            ModalOutcome::Confirmed,
-        )
-        .expect("held kill succeeds");
-
-        assert_eq!(
-            state.message.as_deref(),
-            Some("stop requested for session-run-kill-held-unchanged")
-        );
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
-        while !interrupted.load(std::sync::atomic::Ordering::SeqCst)
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(
-            interrupted.load(std::sync::atomic::Ordering::SeqCst),
-            "the validated held driver must receive the authenticated interrupt"
-        );
-    }
-
-    #[test]
     fn trait_reconstruction_failure_keeps_persisted_landing_frames() {
         use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus, Status};
 
@@ -11878,24 +11586,6 @@ argv = ["git", "commit", "-m", "fixture"]
 
         assert!(!SessionClass::Unreadable.can_attach());
         assert!(!SessionClass::Unreadable.can_resume());
-    }
-
-    // Test 8 (resume argv): exact argv, no `--worktree`.
-    #[test]
-    fn resume_argv_is_exact_and_never_carries_worktree() {
-        let argv = resume_argv("abc123");
-        assert_eq!(
-            argv,
-            vec![
-                "traits",
-                "drive",
-                "--session",
-                "abc123",
-                "--progress",
-                "none"
-            ]
-        );
-        assert!(!argv.iter().any(|arg| arg == "--worktree"));
     }
 
     // Test 7 (delete plan enumeration): the pure planner's three cases.

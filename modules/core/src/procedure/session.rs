@@ -1102,6 +1102,7 @@ pub enum DriveOutcomeKind {
     /// work, never a graceful stop.
     Killed,
     Blocked,
+    Paused,
     PausedProviderCredits,
     /// P130: a declared run/seat token or estimated-cost ceiling was reached
     /// at the frame-dispatch boundary. See [`BudgetExhaustedPause`].
@@ -1142,6 +1143,7 @@ impl DriveOutcomeKind {
             "interrupted" => Self::Interrupted,
             "killed" => Self::Killed,
             "blocked" => Self::Blocked,
+            "paused" => Self::Paused,
             "paused-provider-credits" => Self::PausedProviderCredits,
             "paused-budget-exhausted" => Self::PausedBudgetExhausted,
             "driver-lock-busy" => Self::DriverLockBusy,
@@ -1178,6 +1180,7 @@ impl DriveOutcomeKind {
             Self::Interrupted => "interrupted",
             Self::Killed => "killed",
             Self::Blocked => "blocked",
+            Self::Paused => "paused",
             Self::PausedProviderCredits => "paused-provider-credits",
             Self::PausedBudgetExhausted => "paused-budget-exhausted",
             Self::DriverLockBusy => "driver-lock-busy",
@@ -1206,6 +1209,15 @@ impl DriveOutcomeKind {
 
     pub fn is_completed(&self) -> bool {
         matches!(self, Self::Completed)
+    }
+
+    /// A persisted pause leaves the session resumable and must not be repaired
+    /// into an interrupted outcome when its driver lock is later observed idle.
+    pub fn is_settled_pause(&self) -> bool {
+        matches!(
+            self,
+            Self::Paused | Self::PausedProviderCredits | Self::PausedBudgetExhausted
+        )
     }
 }
 
@@ -6408,5 +6420,20 @@ output = ["slot:first", "slot:second"]
             vec![1, 2],
             "each accepted output needs its own append position, not one shared per activation"
         );
+    }
+
+    #[test]
+    fn paused_drive_outcome_kind_round_trips_the_wire_value() {
+        let paused = DriveOutcomeKind::from_wire("paused");
+        assert_eq!(paused, DriveOutcomeKind::Paused);
+        assert_eq!(paused.as_str(), "paused");
+    }
+
+    #[test]
+    fn settled_pause_covers_every_durable_resumable_pause() {
+        assert!(DriveOutcomeKind::Paused.is_settled_pause());
+        assert!(DriveOutcomeKind::PausedProviderCredits.is_settled_pause());
+        assert!(DriveOutcomeKind::PausedBudgetExhausted.is_settled_pause());
+        assert!(!DriveOutcomeKind::Other("paused-ish".to_string()).is_settled_pause());
     }
 }

@@ -569,7 +569,7 @@ fn no_merge_clear_waits_for_the_driver_lock_before_mutating_the_ledger() {
             branch: None,
             log_path: None,
         },
-        std::sync::Arc::new(|| {}),
+        std::sync::Arc::new(|_| {}),
     )
     .unwrap()
     .expect("test process acquires the driver lock uncontended");

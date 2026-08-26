@@ -1183,7 +1183,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // key/path rather than failing the drive itself.
     let (repo_key, repo_path) = current_repo_key_and_path().unwrap_or_default();
     let live_facts = ctx_traits_io::run_liveness::LiveRunFacts {
-        session_id: session.to_string(),
+        session_id: session_for_lock.session_id.as_str().to_string(),
         run_id: session_for_lock.run_id.as_str().to_string(),
         repo_key,
         repo_path,
@@ -1204,7 +1204,14 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     };
     let driver_lock = ctx_traits_io::run_control::try_acquire(
         &live_facts,
-        std::sync::Arc::new(crate::app::interrupt::request_stop),
+        std::sync::Arc::new(|command| match command {
+            ctx_traits_io::run_control::ControlCommand::Interrupt => {
+                crate::app::interrupt::request_stop()
+            }
+            ctx_traits_io::run_control::ControlCommand::Pause => {
+                crate::app::interrupt::request_pause()
+            }
+        }),
     )?;
     let Some(driver_lock) = driver_lock else {
         let mut report = DriveReport {
@@ -1244,6 +1251,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         ctx_traits_io::center::DriverNotifier::new(ctx_traits_io::center::DriverRegistration {
             ledger_path: ledger_path.to_string(),
             holder: driver_lock.holder().clone(),
+            spawn_token: ctx_traits_io::center::spawn_token_from_env(),
         });
     // P460 `--no-merge`: only now, having actually acquired the driver
     // lock above (never on the `Busy` early return), clear a persisted
@@ -1502,7 +1510,10 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         report.budget_pause.clone(),
         evidence,
     ) {
-        if report.credits_pause.is_some() || report.budget_pause.is_some() {
+        if report.credits_pause.is_some()
+            || report.budget_pause.is_some()
+            || report.status == "paused"
+        {
             report.status = "harness-failed".to_string();
             report.credits_pause = None;
             report.budget_pause = None;
@@ -1549,6 +1560,22 @@ fn drive_report_exit_code(status: &str) -> u8 {
         130
     } else {
         1
+    }
+}
+
+fn cooperative_stop_status() -> &'static str {
+    if crate::app::interrupt::is_paused() {
+        "paused"
+    } else {
+        "interrupted"
+    }
+}
+
+fn cooperative_stop_detail() -> &'static str {
+    if crate::app::interrupt::is_paused() {
+        "drive paused at a frame boundary; resume with the same --session to continue from the parent cursor"
+    } else {
+        "drive stopped after a graceful SIGINT; resume with the same --session to continue from the parent cursor"
     }
 }
 
@@ -1624,12 +1651,12 @@ fn acquire_conductor_lease_if_needed(
         // remainder of the poll.
         if crate::app::interrupt::is_interrupted() {
             let mut report = busy_report(input);
-            report.status = "interrupted".to_string();
+            report.status = cooperative_stop_status().to_string();
             push_capability(
                 &mut report,
                 ctx_traits_core::response::CapabilityReport::unsupported(
                     "runtime.harness-execution",
-                    "drive stopped after a graceful SIGINT while waiting for the P402 conductor lease; resume with the same --session to continue",
+                    cooperative_stop_detail(),
                 ),
             );
             return Ok(ConductorLeaseOutcome::Interrupted(Box::new(report)));
@@ -2157,12 +2184,12 @@ fn drive_loop(
         // through the ordinary sequential path below before this loop exits,
         // so a call that was already made and paid for is never stranded.
         if crate::app::interrupt::is_interrupted() && pending_wave_cache.is_empty() {
-            report.status = "interrupted".to_string();
+            report.status = cooperative_stop_status().to_string();
             push_capability(
                 &mut report,
                 ctx_traits_core::response::CapabilityReport::unsupported(
                     "runtime.harness-execution",
-                    "drive stopped after a graceful SIGINT; resume with the same --session to continue from the parent cursor",
+                    cooperative_stop_detail(),
                 ),
             );
             return Ok(report);
@@ -4778,7 +4805,7 @@ fn wait_for_attach_advance(
     // work and must not count toward `elapsed-seconds-at-least`.
     loop {
         if crate::app::interrupt::is_interrupted() {
-            report.status = "interrupted".to_string();
+            report.status = cooperative_stop_status().to_string();
             attach_wait_paused.set(attach_wait_paused.get() + started.elapsed());
             return Ok(false);
         }

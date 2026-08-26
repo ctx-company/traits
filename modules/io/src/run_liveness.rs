@@ -477,7 +477,7 @@ mod tests {
             &facts("session-a", ledger_path.clone()),
             std::sync::Arc::new({
                 let held = held.clone();
-                move || held.store(true, std::sync::atomic::Ordering::SeqCst)
+                move |_| held.store(true, std::sync::atomic::Ordering::SeqCst)
             }),
         )
         .expect("acquire driver lock")

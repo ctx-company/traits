@@ -50,6 +50,9 @@ pub const CENTER_PROCESS_SENTINEL: &str = "__ctx-center";
 // while still bounding memory consumed by any peer line.
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const STREAM_TIMEOUT: Duration = Duration::from_secs(2);
+const ACTION_TIMEOUT: Duration = Duration::from_secs(600);
+const START_STDERR_BYTES: usize = 8 * 1024;
+const SPAWN_TOKEN_ENV: &str = "CTX_CENTER_SPAWN_TOKEN";
 // This covers the complete bounded spawn-readiness lease as well as normal
 // connection retries. A caller that lost arbitration must not give up while
 // the winner is still exclusively bringing its child online.
@@ -103,6 +106,16 @@ enum Request {
         id: String,
         repo_key: Option<String>,
     },
+    Start {
+        id: String,
+        target: StartTarget,
+    },
+    Control {
+        id: String,
+        session_id: String,
+        repo_key: Option<String>,
+        command: ControlAction,
+    },
     List {
         id: String,
         repo_key: Option<String>,
@@ -144,6 +157,8 @@ impl Request {
             | Self::ActivityLine { id, .. }
             | Self::Ended { id, .. }
             | Self::Subscribe { id, .. }
+            | Self::Start { id, .. }
+            | Self::Control { id, .. }
             | Self::List { id, .. }
             | Self::Get { id, .. }
             | Self::Resolve { id, .. }
@@ -185,6 +200,8 @@ enum ResponseResult {
     FindByRunId(Vec<CenterPublicRow>),
     Stats(Box<ctx_traits_core::procedure::stats::StatsReport>),
     StandingWall(Option<crate::dispatch_preflight::StandingWall>),
+    Start(StartWireResult),
+    Control(ControlWireResult),
     Error { message: String },
 }
 
@@ -202,6 +219,44 @@ enum ResolveWireResult {
     Missing,
     Row(Box<CenterPublicRow>),
     Ambiguous(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+pub enum StartTarget {
+    Trait {
+        args: Vec<String>,
+        repo_path: String,
+    },
+    Session {
+        session_id: String,
+        repo_key: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ControlAction {
+    Interrupt,
+    Pause,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum StartWireResult {
+    Started { session_id: String },
+    Exited { code: Option<i32>, stderr: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+enum ControlWireResult {
+    Acknowledged,
+    Missing,
+    Ambiguous(Vec<String>),
+    NotLive,
+    Unverifiable,
+    Refused,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -227,6 +282,14 @@ pub enum CenterDelta {
 pub struct DriverRegistration {
     pub ledger_path: String,
     pub holder: crate::run_control::DriverHolder,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_token: Option<String>,
+}
+
+/// Read the center-generated start correlation token, if this driver was
+/// launched through the center.
+pub fn spawn_token_from_env() -> Option<String> {
+    std::env::var(SPAWN_TOKEN_ENV).ok()
 }
 
 #[derive(Debug, Clone)]
@@ -644,16 +707,20 @@ pub fn ensure_connected() -> crate::Result<UnixStream> {
 /// Send one correlated request to the center. Queries use this path; it never
 /// opens a ledger in the calling process.
 fn request(request: Request) -> crate::Result<ResponseResult> {
+    request_with_timeout(request, STREAM_TIMEOUT)
+}
+
+fn request_with_timeout(request: Request, timeout: Duration) -> crate::Result<ResponseResult> {
     let id = request.id().to_owned();
     let mut stream = ensure_connected()?;
     write_line(&mut stream, &request)?;
     let reply: WireMessage =
-        serde_json::from_slice(&read_line(&mut stream)?).map_err(|source| {
-            crate::parse::Error::JsonDeserialize {
+        serde_json::from_slice(&read_line_with_deadline(&mut stream, false, timeout)?).map_err(
+            |source| crate::parse::Error::JsonDeserialize {
                 context: "decode center response".to_string(),
                 source,
-            }
-        })?;
+            },
+        )?;
     match reply {
         WireMessage::Response {
             id: reply_id,
@@ -663,6 +730,90 @@ fn request(request: Request) -> crate::Result<ResponseResult> {
             result => Ok(result),
         },
         _ => Err(protocol_error("uncorrelated response")),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StartResult {
+    Started { session_id: String },
+    Exited { code: Option<i32>, stderr: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlResult {
+    Acknowledged,
+    Missing,
+    Ambiguous(Vec<String>),
+    NotLive,
+    Unverifiable,
+    Refused,
+}
+
+pub fn start_trait(args: &[String], repo_path: &Utf8Path) -> crate::Result<StartResult> {
+    match request_with_timeout(
+        Request::Start {
+            id: next_id("start"),
+            target: StartTarget::Trait {
+                args: args.to_vec(),
+                repo_path: repo_path.to_string(),
+            },
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Start(StartWireResult::Started { session_id }) => {
+            Ok(StartResult::Started { session_id })
+        }
+        ResponseResult::Start(StartWireResult::Exited { code, stderr }) => {
+            Ok(StartResult::Exited { code, stderr })
+        }
+        _ => Err(protocol_error("unexpected start response")),
+    }
+}
+
+pub fn start_session(session_id: &str, repo_key: Option<&str>) -> crate::Result<StartResult> {
+    match request_with_timeout(
+        Request::Start {
+            id: next_id("start"),
+            target: StartTarget::Session {
+                session_id: session_id.to_owned(),
+                repo_key: repo_key.map(str::to_owned),
+            },
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Start(StartWireResult::Started { session_id }) => {
+            Ok(StartResult::Started { session_id })
+        }
+        ResponseResult::Start(StartWireResult::Exited { code, stderr }) => {
+            Ok(StartResult::Exited { code, stderr })
+        }
+        _ => Err(protocol_error("unexpected start response")),
+    }
+}
+
+pub fn control(
+    session_id: &str,
+    repo_key: Option<&str>,
+    command: ControlAction,
+) -> crate::Result<ControlResult> {
+    match request_with_timeout(
+        Request::Control {
+            id: next_id("control"),
+            session_id: session_id.to_owned(),
+            repo_key: repo_key.map(str::to_owned),
+            command,
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Control(ControlWireResult::Acknowledged) => Ok(ControlResult::Acknowledged),
+        ResponseResult::Control(ControlWireResult::Missing) => Ok(ControlResult::Missing),
+        ResponseResult::Control(ControlWireResult::Ambiguous(ids)) => {
+            Ok(ControlResult::Ambiguous(ids))
+        }
+        ResponseResult::Control(ControlWireResult::NotLive) => Ok(ControlResult::NotLive),
+        ResponseResult::Control(ControlWireResult::Unverifiable) => Ok(ControlResult::Unverifiable),
+        ResponseResult::Control(ControlWireResult::Refused) => Ok(ControlResult::Refused),
+        _ => Err(protocol_error("unexpected control response")),
     }
 }
 
@@ -1183,6 +1334,27 @@ struct CenterModel {
     // An unverified row is deliberately treated as live for idle purposes:
     // cache data is derived, while an unprobeable driver lock is authoritative.
     uncertain: bool,
+    pending_starts: HashMap<String, PendingStart>,
+}
+
+struct PendingStart {
+    notify: mpsc::SyncSender<String>,
+    since: Instant,
+}
+
+#[derive(Clone)]
+struct ResolvedRow {
+    session_id: String,
+    ledger_path: Utf8PathBuf,
+    repo_path: String,
+    live: bool,
+    holder: Option<crate::run_control::DriverHolder>,
+}
+
+enum RowResolution {
+    Missing,
+    One(ResolvedRow),
+    Ambiguous(Vec<String>),
 }
 
 struct Subscriber {
@@ -1355,6 +1527,7 @@ impl CenterModel {
             db,
             subscribers: HashMap::new(),
             uncertain: false,
+            pending_starts: HashMap::new(),
         })
     }
 
@@ -1380,7 +1553,26 @@ impl CenterModel {
                 None
             }
         };
-        self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref())
+        self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref(), None)
+    }
+
+    /// Registration has already authenticated the holder through its lock
+    /// guard. Carry it through the refresh transaction so the first persisted
+    /// and published row is authoritative rather than being corrected later.
+    fn refresh_registered_ledger(
+        &mut self,
+        paths: &CenterPaths,
+        ledger: &Utf8Path,
+        holder: &crate::run_control::DriverHolder,
+    ) -> crate::Result<()> {
+        let repo_paths = match crate::state::read_repo_index() {
+            Ok(repos) => Some(repo_paths(repos)),
+            Err(_) => {
+                self.uncertain = true;
+                None
+            }
+        };
+        self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref(), Some(holder))
     }
 
     /// A final outcome refresh changes a retained row. `Ended` is reserved for
@@ -1399,7 +1591,7 @@ impl CenterModel {
                 None
             }
         };
-        self.refresh_ledger_inner(paths, ledger, false, repo_paths.as_ref())?;
+        self.refresh_ledger_inner(paths, ledger, false, repo_paths.as_ref(), None)?;
         let after = self.rows.get(ledger).map(public_row);
         if before != after {
             match (before, after) {
@@ -1420,10 +1612,14 @@ impl CenterModel {
         ledger: &Utf8Path,
         emit: bool,
         repo_paths: Option<&HashMap<String, String>>,
+        registered_holder: Option<&crate::run_control::DriverHolder>,
     ) -> crate::Result<()> {
-        if !ledger.starts_with(&paths.runs_root) {
+        // Driver notifications may name a repository-local `.ctx/runs` ledger.
+        // The center's flat runs root is one discovery source, not an ownership
+        // boundary for an authenticated registered driver.
+        if !ledger.starts_with(&paths.runs_root) && ledger_repository_path(ledger).is_none() {
             return Err(protocol_error(
-                "driver ledger is outside the center runs root",
+                "driver ledger is outside known center storage",
             ));
         }
         let before = self.rows.get(ledger).map(public_row);
@@ -1462,16 +1658,28 @@ impl CenterModel {
                 // rehydrated from the authoritative ledger.
                 && (row.session.is_some() || row.summary.parse_error.is_some())
         });
-        let repo_key = ledger
-            .parent()
-            .and_then(Utf8Path::file_name)
-            .unwrap_or_default()
-            .to_string();
+        let repository = ledger_repository_path(ledger)
+            .map(|repo| {
+                let canonical = crate::state::canonical_repo_root(&repo)?;
+                Ok::<_, crate::Error>((crate::state::repo_key(&canonical), canonical.to_string()))
+            })
+            .transpose()?;
+        let repo_key = repository
+            .as_ref()
+            .map(|(key, _)| key.clone())
+            .unwrap_or_else(|| {
+                ledger
+                    .parent()
+                    .and_then(Utf8Path::file_name)
+                    .unwrap_or_default()
+                    .to_string()
+            });
         // Repository discovery is independent of ledger bytes. A scan supplies
         // one index snapshot for all ledgers, while an unavailable index retains
         // the last verified path rather than publishing a false empty value.
-        let repo_path = repo_paths
-            .and_then(|paths| paths.get(&repo_key).cloned())
+        let repo_path = repository
+            .map(|(_, path)| path)
+            .or_else(|| repo_paths.and_then(|paths| paths.get(&repo_key).cloned()))
             .or_else(|| previous.as_ref().map(|row| row.repo_path.clone()))
             .unwrap_or_default();
         if !unchanged {
@@ -1528,6 +1736,12 @@ impl CenterModel {
         if let Err(error) = self.refresh_liveness(ledger, unchanged) {
             self.restore_verified_row(ledger, previous);
             return Err(error);
+        }
+        if let Some(holder) = registered_holder
+            && let Some(row) = self.rows.get_mut(ledger)
+        {
+            row.live = true;
+            row.live_holder = Some(holder.clone());
         }
         if let Err(error) = self.persist() {
             self.restore_verified_row(ledger, previous);
@@ -1617,11 +1831,36 @@ impl CenterModel {
                 // row reconstruction is centralized here. A failed refresh
                 // leaves the last verified projection in place for retry.
                 if self
-                    .refresh_ledger_inner(paths, &ledger, false, repo_paths.as_ref())
+                    .refresh_ledger_inner(paths, &ledger, false, repo_paths.as_ref(), None)
                     .is_err()
                 {
                     self.uncertain = true;
                 }
+            }
+        }
+        // Registration can add a repository-local ledger which is not part of
+        // the flat store enumeration above. Reconcile every known ledger that
+        // was not enumerated: a local ledger can be settled and still must
+        // remain queryable, while a deleted one must be removed.
+        let unscanned_ledgers: Vec<_> = self
+            .rows
+            .iter()
+            .filter(|(ledger, row)| {
+                !present.contains(*ledger)
+                    && !unscanned_roots.contains(&row.repo_key)
+                    && (ledger.starts_with(&paths.runs_root)
+                        || ledger_repository_path(ledger).is_some())
+            })
+            .map(|(ledger, _)| ledger.clone())
+            .collect();
+        for ledger in unscanned_ledgers {
+            if self
+                .refresh_ledger_inner(paths, &ledger, false, repo_paths.as_ref(), None)
+                .is_err()
+            {
+                self.uncertain = true;
+            } else if self.rows.contains_key(&ledger) {
+                present.insert(ledger);
             }
         }
         if !incomplete_directory_listing {
@@ -1885,7 +2124,7 @@ impl CenterModel {
                             return Ok(());
                         };
                         let summary = crate::run_summary::RunSummary::from_session(&session);
-                        if !terminal(&summary) {
+                        if !terminal(&summary) && !settled_pause(&summary) {
                             crate::run_session::record_interrupted_outcome_in_session(
                                 ledger,
                                 &mut session,
@@ -1990,8 +2229,21 @@ impl CenterModel {
     }
 
     fn has_live(&self) -> bool {
-        self.uncertain || !self.subscribers.is_empty() || self.rows.values().any(|row| row.live)
+        self.uncertain
+            || !self.subscribers.is_empty()
+            || !self.pending_starts.is_empty()
+            || self.rows.values().any(|row| row.live)
     }
+}
+
+fn settled_pause(summary: &crate::run_summary::RunSummary) -> bool {
+    summary
+        .last_drive_outcome
+        .as_deref()
+        .is_some_and(|outcome| {
+            ctx_traits_core::procedure::session::DriveOutcomeKind::from_wire(outcome)
+                .is_settled_pause()
+        })
 }
 
 fn terminal(summary: &crate::run_summary::RunSummary) -> bool {
@@ -2100,7 +2352,8 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
         match listener.accept() {
             Ok((stream, _)) => {
                 let jobs = jobs.clone();
-                std::thread::spawn(move || serve_connection_worker(stream, jobs));
+                let worker_paths = paths.clone();
+                std::thread::spawn(move || serve_connection_worker(stream, jobs, worker_paths));
                 last_work = Instant::now();
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -2132,6 +2385,45 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                     model.subscribers.remove(&id);
                 }
                 ModelCommand::SnapshotNext { id } => model.advance_snapshot(id),
+                ModelCommand::WatchStart {
+                    token,
+                    notify,
+                    reply,
+                } => {
+                    model.pending_starts.insert(
+                        token,
+                        PendingStart {
+                            notify,
+                            since: Instant::now(),
+                        },
+                    );
+                    let _ = reply.send(Ok(()));
+                }
+                ModelCommand::ForgetStart { token } => {
+                    model.pending_starts.remove(&token);
+                }
+                ModelCommand::ResolveRow {
+                    session_id,
+                    repo_key,
+                    reply,
+                } => {
+                    let resolution = match select_row(&model, &session_id, repo_key.as_deref()) {
+                        RowSelection::Missing => RowResolution::Missing,
+                        RowSelection::One(row) => RowResolution::One(ResolvedRow {
+                            session_id: row.summary.session_id.clone(),
+                            ledger_path: row.ledger_path.clone(),
+                            repo_path: row.repo_path.clone(),
+                            live: row.live,
+                            holder: row.live_holder.clone(),
+                        }),
+                        RowSelection::Ambiguous(rows) => RowResolution::Ambiguous(
+                            rows.into_iter()
+                                .map(|row| row.summary.session_id.clone())
+                                .collect(),
+                        ),
+                    };
+                    let _ = reply.send(Ok(resolution));
+                }
             }
             last_work = Instant::now();
         }
@@ -2142,6 +2434,7 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             last_scan = Instant::now();
         }
         if last_work.elapsed() >= idle {
+            prune_pending_starts(&mut model);
             if model.discover(&paths).is_err() {
                 model.uncertain = true;
             }
@@ -2172,6 +2465,19 @@ enum ModelCommand {
     SnapshotNext {
         id: u64,
     },
+    WatchStart {
+        token: String,
+        notify: mpsc::SyncSender<String>,
+        reply: mpsc::SyncSender<crate::Result<()>>,
+    },
+    ForgetStart {
+        token: String,
+    },
+    ResolveRow {
+        session_id: String,
+        repo_key: Option<String>,
+        reply: mpsc::SyncSender<crate::Result<RowResolution>>,
+    },
 }
 
 fn serve_handshake(stream: &mut UnixStream) -> crate::Result<()> {
@@ -2200,7 +2506,11 @@ fn response(stream: &mut UnixStream, id: String, result: ResponseResult) -> crat
 /// Serve a bounded request stream. All state changes use the existing single
 /// model refresh path (`discover`), so a dropped driver event is repaired by
 /// the periodic scan rather than creating a second interpretation of ledgers.
-fn serve_connection_worker(mut stream: UnixStream, jobs: mpsc::SyncSender<ModelCommand>) {
+fn serve_connection_worker(
+    mut stream: UnixStream,
+    jobs: mpsc::SyncSender<ModelCommand>,
+    paths: CenterPaths,
+) {
     if serve_handshake(&mut stream).is_err() {
         return;
     }
@@ -2355,6 +2665,44 @@ fn serve_connection_worker(mut stream: UnixStream, jobs: mpsc::SyncSender<ModelC
             drop(writer);
             return;
         }
+        if let Request::Start { target, .. } = request {
+            // A detached child is intentionally independent of its requester,
+            // but an abandoned requester must not leave its correlation watch
+            // installed until the child eventually registers or times out.
+            let (disconnected, requester) = mpsc::sync_channel(1);
+            let mut watcher = match stream.try_clone() {
+                Ok(stream) => stream,
+                Err(_) => return,
+            };
+            let _ = watcher.set_read_timeout(None);
+            std::thread::spawn(move || {
+                let mut byte = [0_u8; 1];
+                let _ = watcher.read(&mut byte);
+                let _ = disconnected.try_send(());
+            });
+            let result = run_start(&paths, &jobs, target, &requester)
+                .map(ResponseResult::Start)
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
+        if let Request::Control {
+            session_id,
+            repo_key,
+            command,
+            ..
+        } = request
+        {
+            let result = run_control_request(&jobs, session_id, repo_key, command)
+                .map(ResponseResult::Control)
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
         let (reply_sender, reply_receiver) = mpsc::sync_channel::<crate::Result<ResponseResult>>(1);
         let registered_path = match &request {
             Request::Register { registration, .. } => Some(registration.ledger_path.clone()),
@@ -2390,6 +2738,247 @@ fn serve_connection_worker(mut stream: UnixStream, jobs: mpsc::SyncSender<ModelC
     }
 }
 
+struct StartWatch {
+    jobs: mpsc::SyncSender<ModelCommand>,
+    token: String,
+}
+
+impl Drop for StartWatch {
+    fn drop(&mut self) {
+        // Cleanup must outlive transient owner backpressure. The request worker
+        // cannot keep a pending start alive merely because its response peer left.
+        let jobs = self.jobs.clone();
+        let token = self.token.clone();
+        std::thread::spawn(move || {
+            loop {
+                match jobs.try_send(ModelCommand::ForgetStart {
+                    token: token.clone(),
+                }) {
+                    Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => return,
+                    Err(mpsc::TrySendError::Full(_)) => {
+                        std::thread::sleep(Duration::from_millis(10))
+                    }
+                }
+            }
+        });
+    }
+}
+
+fn resolve_row(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    session_id: String,
+    repo_key: Option<String>,
+) -> crate::Result<RowResolution> {
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRow {
+        session_id,
+        repo_key,
+        reply,
+    })
+    .map_err(|_| protocol_error("model queue unavailable"))?;
+    receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("model resolution timed out"))?
+}
+
+fn run_control_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    session_id: String,
+    repo_key: Option<String>,
+    action: ControlAction,
+) -> crate::Result<ControlWireResult> {
+    match resolve_row(jobs, session_id, repo_key)? {
+        RowResolution::Missing => Ok(ControlWireResult::Missing),
+        RowResolution::Ambiguous(ids) => Ok(ControlWireResult::Ambiguous(ids)),
+        RowResolution::One(row) if !row.live => Ok(ControlWireResult::NotLive),
+        RowResolution::One(row) => {
+            let Some(holder) = row.holder else {
+                return Ok(ControlWireResult::Unverifiable);
+            };
+            if holder.session_id != row.session_id {
+                return Ok(ControlWireResult::Unverifiable);
+            }
+            let accepted = match action {
+                ControlAction::Interrupt => {
+                    crate::run_control::request_interrupt(&row.ledger_path, &holder)?
+                }
+                ControlAction::Pause => {
+                    crate::run_control::request_pause(&row.ledger_path, &holder)?
+                }
+            };
+            Ok(if accepted {
+                ControlWireResult::Acknowledged
+            } else {
+                ControlWireResult::Refused
+            })
+        }
+    }
+}
+
+fn resume_argv(session_id: &str) -> Vec<String> {
+    vec![
+        "traits".to_string(),
+        "internal".to_string(),
+        "drive".to_string(),
+        "--session".to_string(),
+        session_id.to_string(),
+        "--progress".to_string(),
+        "none".to_string(),
+    ]
+}
+
+fn start_log_paths(paths: &CenterPaths, token: &str) -> crate::Result<(Utf8PathBuf, Utf8PathBuf)> {
+    let root = paths.runs_root.join("start-logs");
+    std::fs::create_dir_all(root.as_std_path()).map_err(|source| io_error(&root, source))?;
+    Ok((
+        root.join(format!("{token}.stdout.log")),
+        root.join(format!("{token}.stderr.log")),
+    ))
+}
+
+fn truncate_stderr(path: &Utf8Path) -> String {
+    let Ok(file) = std::fs::File::open(path.as_std_path()) else {
+        return String::new();
+    };
+    let mut bytes = Vec::with_capacity(START_STDERR_BYTES);
+    let mut reader = file.take(START_STDERR_BYTES as u64);
+    if reader.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    // Do not emit a partial UTF-8 scalar in the JSON response. A malformed
+    // stderr stream is still bounded at its first malformed sequence.
+    match std::str::from_utf8(&bytes) {
+        Ok(text) => text.to_string(),
+        Err(error) => std::str::from_utf8(&bytes[..error.valid_up_to()])
+            .expect("a UTF-8 error's valid prefix is valid UTF-8")
+            .to_string(),
+    }
+}
+
+fn run_start(
+    paths: &CenterPaths,
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    target: StartTarget,
+    requester: &mpsc::Receiver<()>,
+) -> crate::Result<StartWireResult> {
+    let token = format!("{}-{}", std::process::id(), next_id("start"));
+    let (args, cwd) = match target {
+        StartTarget::Trait { args, repo_path } => {
+            if repo_path.is_empty() {
+                return Err(protocol_error("start requires a repository path"));
+            }
+            let mut argv = vec!["traits".to_string(), "run".to_string()];
+            argv.extend(args);
+            argv.extend(["--progress".to_string(), "none".to_string()]);
+            (argv, Utf8PathBuf::from(repo_path))
+        }
+        StartTarget::Session {
+            session_id,
+            repo_key,
+        } => match resolve_row(jobs, session_id, repo_key)? {
+            RowResolution::One(row) => {
+                let repo_path = if row.repo_path.is_empty() {
+                    ledger_repository_path(&row.ledger_path)
+                        .ok_or_else(|| protocol_error("session has no repository path"))?
+                } else {
+                    Utf8PathBuf::from(row.repo_path)
+                };
+                (
+                    // A bare ID resolves through the driver's default store. A
+                    // center row can originate in any repository-local store,
+                    // so preserve the resolved ledger identity explicitly.
+                    resume_argv(row.ledger_path.as_str()),
+                    repo_path,
+                )
+            }
+            RowResolution::Missing => return Err(protocol_error("session is missing")),
+            RowResolution::Ambiguous(_) => return Err(protocol_error("session is ambiguous")),
+        },
+    };
+    // A relative path would make Command resolve against the center's own cwd,
+    // not the viewer-selected repository. Both start targets share this guard.
+    if cwd.as_str().is_empty() || !cwd.is_absolute() {
+        return Err(protocol_error("start requires an absolute repository path"));
+    }
+    let (notify, registered) = mpsc::sync_channel(1);
+    let (reply, ready) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::WatchStart {
+        token: token.clone(),
+        notify,
+        reply,
+    })
+    .map_err(|_| protocol_error("model queue unavailable"))?;
+    let _watch = StartWatch {
+        jobs: jobs.clone(),
+        token: token.clone(),
+    };
+    ready
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("start watch timed out"))??;
+    let (stdout, stderr) = start_log_paths(paths, &token)?;
+    let executable = center_executable()?;
+    let stdout_text = stdout.to_string();
+    let token_text = token.clone();
+    let mut child = crate::process::spawn_detached_split(
+        Utf8Path::from_path(executable.as_path())
+            .ok_or_else(|| protocol_error("center executable is not UTF-8"))?,
+        &args,
+        &cwd,
+        &stdout,
+        &stderr,
+        &[
+            (crate::run_liveness::SPAWNED_LOG_PATH_ENV, &stdout_text),
+            (SPAWN_TOKEN_ENV, &token_text),
+        ],
+    )?;
+    let deadline = Instant::now() + ACTION_TIMEOUT;
+    loop {
+        if requester.try_recv().is_ok() {
+            return Err(protocol_error("start requester disconnected"));
+        }
+        if let Ok(session_id) = registered.try_recv() {
+            return Ok(StartWireResult::Started { session_id });
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|source| io_error(&stderr, source))?
+        {
+            if let Ok(session_id) = registered.try_recv() {
+                return Ok(StartWireResult::Started { session_id });
+            }
+            return Ok(StartWireResult::Exited {
+                code: status.code(),
+                stderr: truncate_stderr(&stderr),
+            });
+        }
+        if Instant::now() >= deadline {
+            return Err(protocol_error("start timed out waiting for registration"));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn ledger_repository_path(ledger: &Utf8Path) -> Option<Utf8PathBuf> {
+    ledger
+        .parent()
+        .filter(|runs| runs.file_name() == Some("runs"))
+        .and_then(Utf8Path::parent)
+        .filter(|ctx| ctx.file_name() == Some(".ctx"))
+        .and_then(Utf8Path::parent)
+        .map(|repo| {
+            std::fs::canonicalize(repo.as_std_path())
+                .ok()
+                .and_then(|path| Utf8PathBuf::from_path_buf(path).ok())
+                .unwrap_or_else(|| repo.to_path_buf())
+        })
+}
+
+fn prune_pending_starts(model: &mut CenterModel) {
+    model
+        .pending_starts
+        .retain(|_, pending| pending.since.elapsed() < ACTION_TIMEOUT);
+}
+
 fn snapshot_request(request: &Request) -> bool {
     matches!(
         request,
@@ -2410,10 +2999,12 @@ fn handle_request(
     match request {
         Request::Register { registration, .. } => {
             let ledger = registration.ledger_path;
-            model.refresh_ledger(paths, Utf8Path::new(&ledger))?;
-            if let Some(row) = model.rows.get_mut(Utf8Path::new(&ledger)) {
-                row.live = true;
-                row.live_holder = Some(registration.holder);
+            model.refresh_registered_ledger(paths, Utf8Path::new(&ledger), &registration.holder)?;
+            if let Some(token) = registration.spawn_token
+                && let Some(pending) = model.pending_starts.remove(&token)
+                && let Some(row) = model.rows.get(Utf8Path::new(&ledger))
+            {
+                let _ = pending.notify.try_send(row.summary.session_id.clone());
             }
             Ok(ResponseResult::Ok)
         }
@@ -2540,7 +3131,9 @@ fn handle_request(
                 ),
             ))
         }
-        Request::Subscribe { .. } => Err(protocol_error("subscribe is handled by the model owner")),
+        Request::Subscribe { .. } | Request::Start { .. } | Request::Control { .. } => Err(
+            protocol_error("request is handled by the connection worker"),
+        ),
     }
 }
 
@@ -2708,6 +3301,170 @@ mod tests {
     }
 
     #[test]
+    fn pending_start_blocks_idle_exit_until_action_timeout_prunes_it() {
+        let root = scratch("pending-start-prune");
+        let paths = paths(root.clone());
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (notify, _receiver) = mpsc::sync_channel(1);
+        model.pending_starts.insert(
+            "recent".to_string(),
+            PendingStart {
+                notify: notify.clone(),
+                since: Instant::now()
+                    .checked_sub(ACTION_TIMEOUT - Duration::from_secs(1))
+                    .expect("monotonic clock predates ACTION_TIMEOUT"),
+            },
+        );
+        model.pending_starts.insert(
+            "expired".to_string(),
+            PendingStart {
+                notify,
+                since: Instant::now()
+                    .checked_sub(ACTION_TIMEOUT)
+                    .expect("monotonic clock predates ACTION_TIMEOUT"),
+            },
+        );
+
+        assert!(model.has_live(), "a pending start keeps the center alive");
+        prune_pending_starts(&mut model);
+        assert!(model.pending_starts.contains_key("recent"));
+        assert!(!model.pending_starts.contains_key("expired"));
+        assert!(model.has_live(), "the recent pending start remains live");
+        model.pending_starts.clear();
+        assert!(!model.has_live(), "no pending work permits idle exit");
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn start_and_control_requests_round_trip_and_skip_the_snapshot_barrier() {
+        let start = Request::Start {
+            id: "start".to_string(),
+            target: StartTarget::Trait {
+                args: vec!["fixture".to_string()],
+                repo_path: "/repository".to_string(),
+            },
+        };
+        let control = Request::Control {
+            id: "control".to_string(),
+            session_id: "session".to_string(),
+            repo_key: Some("repository".to_string()),
+            command: ControlAction::Pause,
+        };
+        for request in [start, control] {
+            let encoded = serde_json::to_string(&request).expect("encode request");
+            let decoded: Request = serde_json::from_str(&encoded).expect("decode request");
+            assert_eq!(decoded.id(), request.id());
+            assert!(!snapshot_request(&decoded));
+        }
+    }
+
+    #[test]
+    fn resume_argv_is_exact_and_never_carries_worktree() {
+        assert_eq!(
+            resume_argv("session"),
+            [
+                "traits",
+                "internal",
+                "drive",
+                "--session",
+                "session",
+                "--progress",
+                "none"
+            ]
+        );
+        assert!(!resume_argv("session").iter().any(|arg| arg == "--worktree"));
+    }
+
+    #[test]
+    fn start_watch_retries_cleanup_after_temporary_queue_backpressure() {
+        let (jobs, receiver) = mpsc::sync_channel(1);
+        jobs.send(ModelCommand::SnapshotNext { id: 1 })
+            .expect("fill model queue");
+        let watch = StartWatch {
+            jobs: jobs.clone(),
+            token: "token".to_string(),
+        };
+        let (done, completed) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            drop(watch);
+            done.send(()).expect("report cleanup completion");
+        });
+
+        assert!(matches!(
+            receiver.recv(),
+            Ok(ModelCommand::SnapshotNext { id: 1 })
+        ));
+        assert!(
+            matches!(receiver.recv_timeout(STREAM_TIMEOUT), Ok(ModelCommand::ForgetStart { token }) if token == "token")
+        );
+        completed
+            .recv_timeout(STREAM_TIMEOUT)
+            .expect("cleanup completes after capacity returns");
+    }
+
+    #[test]
+    fn start_watch_retries_cleanup_after_sustained_queue_backpressure() {
+        let (jobs, receiver) = mpsc::sync_channel(1);
+        jobs.send(ModelCommand::SnapshotNext { id: 1 })
+            .expect("fill model queue");
+        let watch = StartWatch {
+            jobs: jobs.clone(),
+            token: "token".to_string(),
+        };
+        drop(watch);
+
+        // Cleanup does not inherit a request-response deadline. The owner may
+        // remain busy longer than a stream read while it drains its queue.
+        std::thread::sleep(STREAM_TIMEOUT + Duration::from_millis(50));
+        assert!(matches!(
+            receiver.recv(),
+            Ok(ModelCommand::SnapshotNext { id: 1 })
+        ));
+        assert!(matches!(
+            receiver.recv_timeout(STREAM_TIMEOUT),
+            Ok(ModelCommand::ForgetStart { token }) if token == "token"
+        ));
+    }
+
+    #[test]
+    fn truncated_stderr_is_bounded_and_never_contains_a_partial_utf8_scalar() {
+        let root = scratch("bounded-start-stderr");
+        let stderr = root.join("stderr.log");
+        let mut contents = vec![b'x'; START_STDERR_BYTES - 1];
+        contents.extend_from_slice("€ trailing output".as_bytes());
+        std::fs::write(stderr.as_std_path(), contents).expect("write stderr");
+
+        let result = truncate_stderr(&stderr);
+        assert_eq!(result.len(), START_STDERR_BYTES - 1);
+        assert!(result.is_ascii());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn start_rejects_a_relative_repository_path() {
+        let root = scratch("relative-start-path");
+        let paths = paths(root.clone());
+        let (jobs, _receiver) = mpsc::sync_channel(1);
+        let (_requester, disconnected) = mpsc::sync_channel(1);
+        let error = run_start(
+            &paths,
+            &jobs,
+            StartTarget::Trait {
+                args: vec!["fixture".to_string()],
+                repo_path: "relative/repository".to_string(),
+            },
+            &disconnected,
+        )
+        .expect_err("relative cwd must not inherit the center cwd");
+        assert!(
+            error
+                .to_string()
+                .contains("start requires an absolute repository path")
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
     fn successful_kill_releases_spawn_lock_despite_reap_failure() {
         let root = scratch("abort-killed");
         let lock_path = root.join("center.lock");
@@ -2800,6 +3557,18 @@ mod tests {
         .expect("fixture session deserializes")
     }
 
+    fn fixture_session_with_outcome(
+        status: &str,
+        outcome: &str,
+    ) -> ctx_traits_core::procedure::session::Session {
+        let mut value = serde_json::to_value(fixture_session(status)).expect("serialize fixture");
+        value["last-drive-outcome"] = serde_json::json!({
+            "outcome": outcome,
+            "recorded-at-epoch": 1,
+        });
+        serde_json::from_value(value).expect("fixture outcome deserializes")
+    }
+
     fn write_fixture_ledger(root: &Utf8Path, repo: &str, status: &str) -> Utf8PathBuf {
         let store = root.join(repo);
         std::fs::create_dir_all(store.as_std_path()).expect("create repository store");
@@ -2853,6 +3622,7 @@ mod tests {
     fn test_registration() -> DriverRegistration {
         DriverRegistration {
             ledger_path: "/ledger".to_string(),
+            spawn_token: None,
             holder: crate::run_control::DriverHolder {
                 pid: 1,
                 session_id: "session".to_string(),
@@ -2860,6 +3630,321 @@ mod tests {
                 started_at_epoch_secs: 1,
                 control_token: "token".to_string(),
             },
+        }
+    }
+
+    fn register_fixture(
+        model: &mut CenterModel,
+        paths: &CenterPaths,
+        ledger: &Utf8Path,
+        token: Option<&str>,
+    ) {
+        let mut registration = test_registration();
+        registration.ledger_path = ledger.to_string();
+        registration.spawn_token = token.map(str::to_string);
+        handle_request(
+            model,
+            paths,
+            Request::Register {
+                id: next_id("register-fixture"),
+                registration,
+            },
+        )
+        .expect("register fixture");
+    }
+
+    fn control_result_for_resolution(resolution: RowResolution) -> ControlWireResult {
+        let (jobs, receiver) = mpsc::sync_channel(1);
+        let worker = std::thread::spawn(move || {
+            run_control_request(
+                &jobs,
+                "session-fixture".to_string(),
+                Some("repository".to_string()),
+                ControlAction::Interrupt,
+            )
+        });
+        let ModelCommand::ResolveRow { reply, .. } = receiver.recv().expect("resolve request")
+        else {
+            panic!("control request must resolve the row first");
+        };
+        reply
+            .send(Ok(resolution))
+            .expect("reply to control request");
+        worker
+            .join()
+            .expect("control worker exits")
+            .expect("control resolution succeeds")
+    }
+
+    #[test]
+    fn register_with_a_spawn_token_completes_exactly_one_pending_start() {
+        let root = scratch("register-spawn-token");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (notify, receiver) = mpsc::sync_channel(1);
+        model.pending_starts.insert(
+            "spawn-token".to_string(),
+            PendingStart {
+                notify,
+                since: Instant::now(),
+            },
+        );
+
+        register_fixture(&mut model, &paths, &ledger, Some("spawn-token"));
+        assert_eq!(
+            receiver
+                .recv_timeout(STREAM_TIMEOUT)
+                .expect("start completion"),
+            "session-fixture"
+        );
+        assert!(!model.pending_starts.contains_key("spawn-token"));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn repeated_registration_with_the_same_spawn_token_completes_nothing() {
+        let root = scratch("repeated-spawn-token");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (notify, receiver) = mpsc::sync_channel(2);
+        model.pending_starts.insert(
+            "spawn-token".to_string(),
+            PendingStart {
+                notify,
+                since: Instant::now(),
+            },
+        );
+
+        register_fixture(&mut model, &paths, &ledger, Some("spawn-token"));
+        assert!(receiver.try_recv().is_ok());
+        register_fixture(&mut model, &paths, &ledger, Some("spawn-token"));
+        assert!(
+            receiver.try_recv().is_err(),
+            "reconnect must be an idempotent no-op"
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn register_without_a_spawn_token_completes_no_pending_start() {
+        let root = scratch("tokenless-register");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (notify, receiver) = mpsc::sync_channel(1);
+        model.pending_starts.insert(
+            "spawn-token".to_string(),
+            PendingStart {
+                notify,
+                since: Instant::now(),
+            },
+        );
+
+        register_fixture(&mut model, &paths, &ledger, None);
+        assert!(receiver.try_recv().is_err());
+        assert!(model.pending_starts.contains_key("spawn-token"));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn registered_repository_local_ledger_publishes_authoritative_repo_metadata() {
+        let root = scratch("registered-local-repository-metadata");
+        let paths = CenterPaths {
+            socket: root.join("center.sock"),
+            spawn_lock: root.join("center.lock"),
+            runs_root: root.join("flat-runs"),
+            index: root.join("index.sqlite3"),
+        };
+        std::fs::create_dir_all(paths.runs_root.as_std_path()).expect("create flat runs root");
+        let repository = root.join("repository");
+        let ledger = repository.join(".ctx/runs/session-fixture.json");
+        std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+            .expect("create repository-local store");
+        crate::run_session::write_run_session(&ledger, &fixture_session("completed"))
+            .expect("write ledger");
+        let lock_path = crate::run_control::driver_lock_path(&ledger);
+        let mut lock = crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        assert!(crate::file_lock::try_lock_exclusive(&lock).expect("hold lock"));
+        crate::file_lock::write_lock_metadata(&mut lock, &test_registration().holder)
+            .expect("write holder");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (outbound, received) = mpsc::sync_channel(1);
+        model.subscribers.insert(
+            1,
+            Subscriber {
+                repo_key: None,
+                outbound,
+                snapshot: None,
+                pending_deltas: VecDeque::new(),
+            },
+        );
+
+        register_fixture(&mut model, &paths, &ledger, None);
+        let canonical =
+            crate::state::canonical_repo_root(&repository).expect("canonical repository");
+        let expected_key = crate::state::repo_key(&canonical);
+        let row = model.rows.get(&ledger).expect("registered row");
+        assert_eq!(row.repo_key, expected_key);
+        assert_eq!(row.repo_path, canonical);
+        assert!(row.live);
+        assert_eq!(
+            row.live_holder.as_ref().map(|holder| &holder.session_id),
+            Some(&"session".to_string())
+        );
+        let Outbound::Delta(CenterDelta::Appeared { row }) = received
+            .recv_timeout(STREAM_TIMEOUT)
+            .expect("first registration delta")
+        else {
+            panic!("registration must publish Appeared");
+        };
+        assert_eq!(row.repo_key, expected_key);
+        assert_eq!(row.repo_path, canonical);
+        assert!(row.live);
+
+        drop(model);
+        let mut reopened = CenterModel::open(&paths).expect("reopen index");
+        reopened
+            .discover(&paths)
+            .expect("reconcile held registered ledger");
+        let row = reopened
+            .rows
+            .get(&ledger)
+            .expect("persisted registered row");
+        assert_eq!(row.repo_key, expected_key);
+        assert_eq!(row.repo_path, canonical);
+        assert!(row.live);
+        assert_eq!(
+            row.live_holder.as_ref().map(|holder| &holder.session_id),
+            Some(&"session".to_string())
+        );
+        drop(lock);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn control_resolution_reports_missing_ambiguous_and_not_live_targets() {
+        let root = scratch("control-resolution");
+        let paths = paths(root.clone());
+        let first = write_fixture_ledger(&root, "first", "completed");
+        let second = write_fixture_ledger(&root, "second", "completed");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        model.discover(&paths).expect("discover rows");
+
+        assert!(matches!(
+            control_result_for_resolution(RowResolution::Missing),
+            ControlWireResult::Missing
+        ));
+        assert!(matches!(
+            control_result_for_resolution(RowResolution::Ambiguous(vec![
+                "first".to_string(),
+                "second".to_string(),
+            ])),
+            ControlWireResult::Ambiguous(ids) if ids == ["first", "second"]
+        ));
+        for ledger in [first, second] {
+            let row = model.rows.get(&ledger).expect("discovered row");
+            assert!(matches!(
+                control_result_for_resolution(RowResolution::One(ResolvedRow {
+                    session_id: row.summary.session_id.clone(),
+                    ledger_path: row.ledger_path.clone(),
+                    repo_path: row.repo_path.clone(),
+                    live: false,
+                    holder: None,
+                })),
+                ControlWireResult::NotLive
+            ));
+        }
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn control_resolution_rejects_a_holderless_or_mismatched_live_row_as_unverifiable() {
+        let root = scratch("control-unverifiable");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "awaiting-agent-output");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        model.discover(&paths).expect("discover row");
+        let row = model.rows.get_mut(&ledger).expect("row");
+        row.live = true;
+        row.live_holder = None;
+        let row = model.rows.get(&ledger).expect("row");
+        assert!(matches!(
+            control_result_for_resolution(RowResolution::One(ResolvedRow {
+                session_id: row.summary.session_id.clone(),
+                ledger_path: row.ledger_path.clone(),
+                repo_path: row.repo_path.clone(),
+                live: true,
+                holder: None,
+            })),
+            ControlWireResult::Unverifiable
+        ));
+
+        let row = model.rows.get_mut(&ledger).expect("row");
+        row.live_holder = Some(crate::run_control::DriverHolder {
+            pid: 1,
+            session_id: "another-session".to_string(),
+            run_id: "run".to_string(),
+            started_at_epoch_secs: 1,
+            control_token: "token".to_string(),
+        });
+        let row = model.rows.get(&ledger).expect("row");
+        assert!(matches!(
+            control_result_for_resolution(RowResolution::One(ResolvedRow {
+                session_id: row.summary.session_id.clone(),
+                ledger_path: row.ledger_path.clone(),
+                repo_path: row.repo_path.clone(),
+                live: true,
+                holder: row.live_holder.clone(),
+            })),
+            ControlWireResult::Unverifiable
+        ));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn discovery_preserves_every_settled_pause_outcome_and_clears_stale_metadata() {
+        for outcome in [
+            "paused",
+            "paused-provider-credits",
+            "paused-budget-exhausted",
+        ] {
+            let root = scratch(&format!("settled-pause-{outcome}"));
+            let paths = paths(root.clone());
+            let ledger = root.join("repository").join("session-fixture.json");
+            std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+                .expect("create repository store");
+            crate::run_session::write_run_session(
+                &ledger,
+                &fixture_session_with_outcome("awaiting-agent-output", outcome),
+            )
+            .expect("write paused ledger");
+            let lock_path = crate::run_control::driver_lock_path(&ledger);
+            let mut lock =
+                crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+            crate::file_lock::write_lock_metadata(
+                &mut lock,
+                &crate::run_control::DriverHolder {
+                    pid: 1,
+                    session_id: "stale".to_string(),
+                    run_id: "stale".to_string(),
+                    started_at_epoch_secs: 1,
+                    control_token: String::new(),
+                },
+            )
+            .expect("write stale metadata");
+            let mut model = CenterModel::open(&paths).expect("open center");
+            model.discover(&paths).expect("discover paused ledger");
+            let row = model.rows.get(&ledger).expect("paused row");
+            assert!(!terminal(&row.summary), "{outcome} remains resumable");
+            assert_eq!(row.summary.last_drive_outcome.as_deref(), Some(outcome));
+            assert!(!row.live);
+            assert!(
+                crate::file_lock::read_lock_metadata::<crate::run_control::DriverHolder>(&mut lock)
+                    .is_none()
+            );
+            let _ = std::fs::remove_dir_all(root.as_std_path());
         }
     }
 
@@ -3093,7 +4178,13 @@ mod tests {
     fn notifications_require_registration_on_each_connection() {
         let (mut client, server) = UnixStream::pair().expect("stream pair");
         let (jobs, receiver) = mpsc::sync_channel(1);
-        let worker = std::thread::spawn(move || serve_connection_worker(server, jobs));
+        let worker = std::thread::spawn(move || {
+            serve_connection_worker(
+                server,
+                jobs,
+                paths(scratch("notifications-require-registration")),
+            )
+        });
         write_line(
             &mut client,
             &WireMessage::Hello {
@@ -3130,7 +4221,13 @@ mod tests {
     fn registration_requires_holder_and_binds_events_to_its_ledger() {
         let (mut client, server) = UnixStream::pair().expect("stream pair");
         let (jobs, receiver) = mpsc::sync_channel(2);
-        let worker = std::thread::spawn(move || serve_connection_worker(server, jobs));
+        let worker = std::thread::spawn(move || {
+            serve_connection_worker(
+                server,
+                jobs,
+                paths(scratch("registration-requires-holder-bad")),
+            )
+        });
         write_line(
             &mut client,
             &WireMessage::Hello {
@@ -3151,7 +4248,9 @@ mod tests {
 
         let (mut client, server) = UnixStream::pair().expect("stream pair");
         let (jobs, receiver) = mpsc::sync_channel(2);
-        let worker = std::thread::spawn(move || serve_connection_worker(server, jobs));
+        let worker = std::thread::spawn(move || {
+            serve_connection_worker(server, jobs, paths(scratch("registration-requires-holder")))
+        });
         write_line(
             &mut client,
             &WireMessage::Hello {
@@ -3167,6 +4266,7 @@ mod tests {
                 id: "register".to_string(),
                 registration: DriverRegistration {
                     ledger_path: "/ledger".to_string(),
+                    spawn_token: None,
                     holder: crate::run_control::DriverHolder {
                         pid: 1,
                         session_id: "session".to_string(),
@@ -3218,11 +4318,13 @@ mod tests {
         let (jobs, receiver) = mpsc::sync_channel(2);
         let stalled_worker = std::thread::spawn({
             let jobs = jobs.clone();
-            move || serve_connection_worker(stalled_server, jobs)
+            move || serve_connection_worker(stalled_server, jobs, paths(scratch("stalled-peer")))
         });
 
         let (mut client, server) = UnixStream::pair().expect("request pair");
-        let request_worker = std::thread::spawn(move || serve_connection_worker(server, jobs));
+        let request_worker = std::thread::spawn(move || {
+            serve_connection_worker(server, jobs, paths(scratch("typed-request")))
+        });
         write_line(
             &mut client,
             &WireMessage::Hello {
@@ -3263,7 +4365,9 @@ mod tests {
         jobs: mpsc::SyncSender<ModelCommand>,
     ) -> (UnixStream, std::thread::JoinHandle<()>) {
         let (mut client, server) = UnixStream::pair().expect("socket pair");
-        let worker = std::thread::spawn(move || serve_connection_worker(server, jobs));
+        let worker = std::thread::spawn(move || {
+            serve_connection_worker(server, jobs, paths(scratch("handshaken-worker")))
+        });
         write_line(
             &mut client,
             &WireMessage::Hello {
@@ -3301,6 +4405,7 @@ mod tests {
             id: "register".to_string(),
             registration: DriverRegistration {
                 ledger_path: ledger.to_string(),
+                spawn_token: None,
                 holder: crate::run_control::DriverHolder {
                     pid: std::process::id(),
                     session_id: "session-fixture".to_string(),
@@ -3861,10 +4966,10 @@ mod tests {
         // Insert reverse-lexically to prove request handling, rather than map
         // insertion order, chooses the same row as the former store scan.
         model
-            .refresh_ledger_inner(&paths, &second, false, Some(&HashMap::new()))
+            .refresh_ledger_inner(&paths, &second, false, Some(&HashMap::new()), None)
             .expect("cache second ledger");
         model
-            .refresh_ledger_inner(&paths, &first, false, Some(&HashMap::new()))
+            .refresh_ledger_inner(&paths, &first, false, Some(&HashMap::new()), None)
             .expect("cache first ledger");
 
         for _ in 0..4 {
@@ -4009,7 +5114,7 @@ mod tests {
         let ledger = write_fixture_ledger(&root, "repo", "completed");
         let mut model = CenterModel::open(&paths).expect("open center");
         model
-            .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()))
+            .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()), None)
             .expect("cache readable ledger");
         let (outbound, receiver) = mpsc::sync_channel(4);
         model.subscribers.insert(
@@ -4024,7 +5129,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         std::fs::write(ledger.as_std_path(), "not json").expect("corrupt ledger");
         model
-            .refresh_ledger_inner(&paths, &ledger, true, Some(&HashMap::new()))
+            .refresh_ledger_inner(&paths, &ledger, true, Some(&HashMap::new()), None)
             .expect("publish unreadable candidate");
         match receiver.recv().expect("row delta") {
             Outbound::Delta(CenterDelta::RowChanged { row }) => {
@@ -4042,7 +5147,7 @@ mod tests {
         let ledger = write_fixture_ledger(&root, "repo", "completed");
         let mut model = CenterModel::open(&paths).expect("open center");
         model
-            .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()))
+            .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()), None)
             .expect("cache readable ledger");
         let previous = model.rows.get(&ledger).expect("verified row").clone();
 
@@ -4060,7 +5165,7 @@ mod tests {
         std::fs::write(ledger.as_std_path(), "not json").expect("corrupt ledger");
         assert!(
             model
-                .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()))
+                .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()), None)
                 .is_err()
         );
         let retained = model.rows.get(&ledger).expect("previous row remains");
@@ -4297,6 +5402,67 @@ mod tests {
             model.rows.get(&ledger).expect("cached row").modified,
             cached_modified
         );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn discovery_retains_an_unscanned_registered_ledger_until_it_is_deleted() {
+        let root = scratch("unscanned-registered-live-row");
+        let paths = CenterPaths {
+            socket: root.join("center.sock"),
+            spawn_lock: root.join("center.lock"),
+            runs_root: root.join("flat-runs"),
+            index: root.join("index.sqlite3"),
+        };
+        std::fs::create_dir_all(paths.runs_root.as_std_path()).expect("create flat runs root");
+        let ledger = root
+            .join("repository")
+            .join(".ctx")
+            .join("runs")
+            .join("session-fixture.json");
+        std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+            .expect("create repository-local store");
+        crate::run_session::write_run_session(
+            &ledger,
+            &fixture_session_with_outcome("awaiting-agent-output", "paused"),
+        )
+        .expect("write ledger");
+        let lock_path = crate::run_control::driver_lock_path(&ledger);
+        let mut lock = crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        assert!(crate::file_lock::try_lock_exclusive(&lock).expect("lock ledger"));
+        crate::file_lock::write_lock_metadata(
+            &mut lock,
+            &crate::run_control::DriverHolder {
+                pid: 1,
+                session_id: "session-fixture".to_string(),
+                run_id: "run-fixture".to_string(),
+                started_at_epoch_secs: 1,
+                control_token: "token".to_string(),
+            },
+        )
+        .expect("write holder");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        register_fixture(&mut model, &paths, &ledger, None);
+        assert!(model.rows.get(&ledger).is_some_and(|row| row.live));
+
+        drop(lock);
+        model
+            .discover(&paths)
+            .expect("reprobe absent registered ledger");
+        assert!(model.rows.get(&ledger).is_some_and(|row| {
+            !row.live && row.summary.last_drive_outcome.as_deref() == Some("paused")
+        }));
+        assert!(matches!(
+            select_row(&model, "session-fixture", None),
+            RowSelection::One(_)
+        ));
+        assert!(
+            !model.has_live(),
+            "released unscanned row must not pin idle exit"
+        );
+        std::fs::remove_file(ledger.as_std_path()).expect("delete repository-local ledger");
+        model.discover(&paths).expect("reconcile deleted ledger");
+        assert!(!model.rows.contains_key(&ledger));
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
@@ -4887,12 +6053,12 @@ mod tests {
         let mut model = CenterModel::open(&paths).expect("open index");
         let original = HashMap::from([("repository".to_string(), "/old/path".to_string())]);
         model
-            .refresh_ledger_inner(&paths, &ledger, false, Some(&original))
+            .refresh_ledger_inner(&paths, &ledger, false, Some(&original), None)
             .expect("cache ledger");
         let moved = HashMap::from([("repository".to_string(), "/new/path".to_string())]);
         LEDGER_READS.with(|reads| reads.set(0));
         model
-            .refresh_ledger_inner(&paths, &ledger, true, Some(&moved))
+            .refresh_ledger_inner(&paths, &ledger, true, Some(&moved), None)
             .expect("refresh moved repository metadata");
         assert_eq!(
             model.rows.get(&ledger).expect("cached row").repo_path,
@@ -4910,12 +6076,12 @@ mod tests {
         let mut model = CenterModel::open(&paths).expect("open index");
         let indexed = HashMap::from([("repository".to_string(), "/known/path".to_string())]);
         model
-            .refresh_ledger_inner(&paths, &ledger, false, Some(&indexed))
+            .refresh_ledger_inner(&paths, &ledger, false, Some(&indexed), None)
             .expect("cache ledger");
         LEDGER_READS.with(|reads| reads.set(0));
         model.uncertain = true;
         model
-            .refresh_ledger_inner(&paths, &ledger, true, None)
+            .refresh_ledger_inner(&paths, &ledger, true, None, None)
             .expect("retain cached metadata while index is unavailable");
         assert_eq!(
             model.rows.get(&ledger).expect("cached row").repo_path,

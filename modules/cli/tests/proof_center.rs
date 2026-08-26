@@ -233,6 +233,7 @@ fn write_repo_scoped_completed_ledger(root: &std::path::Path, repo_key: &str) ->
     ledger
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assert_center_backed_readers_serve(
     socket: &std::path::Path,
     index: &std::path::Path,
@@ -351,7 +352,54 @@ prompt = "Return true."
 output = ["slot:answer"]
 "#;
 
+const DRIVE_PROOF_TRAIT_TWO_FRAMES: &str = r#"id = "center-drive-proof"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Center drive proof"
+description = "Two accepted frames through the real driver."
+
+[[agent]]
+id = "worker"
+description = "Fixture worker."
+summary = "Fixture worker."
+
+[[slot]]
+id = "answer"
+schema = "schema:boolean"
+description = "Fixture output."
+
+[[slot]]
+id = "answer-two"
+schema = "schema:boolean"
+description = "Second fixture output."
+
+[procedure]
+description = "Two fixture frames."
+
+[[procedure.sequence]]
+id = "frame-one"
+title = "Accept first frame"
+agent = "agent:worker"
+prompt = "Return true."
+output = ["slot:answer"]
+
+[[procedure.sequence]]
+id = "frame-two"
+title = "Accept second frame"
+agent = "agent:worker"
+prompt = "Return true again."
+output = ["slot:answer-two"]
+"#;
+
 fn write_drive_fixture(repo: &std::path::Path, script: &std::path::Path) {
+    write_drive_fixture_with_trait(repo, script, DRIVE_PROOF_TRAIT);
+}
+
+fn write_drive_fixture_with_trait(
+    repo: &std::path::Path,
+    script: &std::path::Path,
+    trait_source: &str,
+) {
     std::fs::create_dir_all(repo.join(".ctx/traits/center-drive-proof/generated"))
         .expect("create fixture directories");
     git_init(repo);
@@ -387,15 +435,28 @@ transport = "cli"
     .expect("write fixture manifest");
     std::fs::write(
         repo.join(".ctx/traits/center-drive-proof/generated/index.toml"),
-        DRIVE_PROOF_TRAIT,
+        trait_source,
     )
     .expect("write fixture trait");
 }
 
-fn write_fixture_harness(path: &std::path::Path) {
+enum FixtureRelease<'a> {
+    AfterFixedDelay,
+    WhenFileAppears(&'a std::path::Path),
+}
+
+fn write_fixture_harness(path: &std::path::Path, release: FixtureRelease<'_>) {
+    let release = match release {
+        FixtureRelease::AfterFixedDelay => "sleep 1".to_string(),
+        FixtureRelease::WhenFileAppears(file) => format!(
+            "i=0; while [ ! -e \"{}\" ]; do i=$((i+1)); [ \"$i\" -gt 120 ] && exit 9; sleep 1; done",
+            file.display()
+        ),
+    };
     std::fs::write(
         path,
-        r#"#!/bin/sh
+        format!(
+            r#"#!/bin/sh
 if [ "$1" = "--fixture-probe" ]; then
   printf 'fixture-1.0\n'
   exit 0
@@ -403,9 +464,15 @@ fi
 cat >/dev/null
 # Leave the real driver's registration refresh observable before the accepted
 # frame is released from this fixture harness.
-sleep 1
-printf '%s\n' '{"type":"result","session_id":"center-drive-proof","result":"{\"answer\":true}"}'
-"#,
+{release}
+count_file="$0.invocations"
+count=0
+[ -f "$count_file" ] && count=$(cat "$count_file")
+count=$((count+1))
+printf '%s\n' "$count" > "$count_file"
+printf '%s\n' '{{"type":"result","session_id":"center-drive-proof","result":"{{\"answer\":true,\"answer-two\":true}}"}}'
+"#
+        ),
     )
     .expect("write fixture harness");
     use std::os::unix::fs::PermissionsExt;
@@ -414,6 +481,74 @@ printf '%s\n' '{"type":"result","session_id":"center-drive-proof","result":"{\"a
         .permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(path, permissions).expect("make fixture harness executable");
+}
+
+fn prepare_drive_fixture(
+    root: &std::path::Path,
+    release: FixtureRelease<'_>,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let home = root.join("home");
+    let repo = root.join("repository");
+    std::fs::create_dir_all(&repo).expect("create fixture repository");
+    let harness = root.join("fixture-harness.sh");
+    write_fixture_harness(&harness, release);
+    write_drive_fixture(&repo, &harness);
+    let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
+    require_success("fixture init", &["traits", "init"], &repo, &home);
+    require_success(
+        "fixture review",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    require_success(
+        "fixture activate",
+        &["traits", "state", "--active", "--file", fixture],
+        &repo,
+        &home,
+    );
+    (repo, home, fixture.to_string())
+}
+
+fn prepare_two_frame_drive_fixture(
+    root: &std::path::Path,
+    release: FixtureRelease<'_>,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let home = root.join("home");
+    let repo = root.join("repository");
+    std::fs::create_dir_all(&repo).expect("create fixture repository");
+    let harness = root.join("fixture-harness.sh");
+    write_fixture_harness(&harness, release);
+    write_drive_fixture_with_trait(&repo, &harness, DRIVE_PROOF_TRAIT_TWO_FRAMES);
+    let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
+    require_success("fixture init", &["traits", "init"], &repo, &home);
+    require_success(
+        "fixture review",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    require_success(
+        "fixture activate",
+        &["traits", "state", "--active", "--file", fixture],
+        &repo,
+        &home,
+    );
+    (repo, home, fixture.to_string())
 }
 
 struct DriveEvidence {
@@ -531,7 +666,7 @@ fn run_drive_with_notification_environment(
     let repo = root.join("repository");
     std::fs::create_dir_all(&repo).expect("create fixture repository");
     let harness = root.join("fixture-harness.sh");
-    write_fixture_harness(&harness);
+    write_fixture_harness(&harness, FixtureRelease::AfterFixedDelay);
     write_drive_fixture(&repo, &harness);
     let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
     require_success("fixture init", &["traits", "init"], &repo, &home);
@@ -603,6 +738,194 @@ fn spawn_sentinel(
             .spawn()
             .expect("spawn private sentinel"),
     )
+}
+
+fn spawn_sentinel_with_home(
+    root: &std::path::Path,
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    idle_ms: &str,
+    home: &std::path::Path,
+) -> ChildGuard {
+    ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", socket)
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", root)
+            .env("CTX_CENTER_INDEX", index)
+            .env("CTX_CENTER_IDLE_MS", idle_ms)
+            .env("CTX_CENTER_SCAN_MS", "20")
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home)
+            .env("XDG_CACHE_HOME", home)
+            .env("TMPDIR", home)
+            .env("NO_COLOR", "1")
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .spawn()
+            .expect("spawn private sentinel with fixture environment"),
+    )
+}
+
+fn spawn_sentinel_with_home_and_outcome_failure_hook(
+    root: &std::path::Path,
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    idle_ms: &str,
+    home: &std::path::Path,
+) -> ChildGuard {
+    ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", socket)
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", root)
+            .env("CTX_CENTER_INDEX", index)
+            .env("CTX_CENTER_IDLE_MS", idle_ms)
+            .env("CTX_CENTER_SCAN_MS", "20")
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home)
+            .env("XDG_CACHE_HOME", home)
+            .env("TMPDIR", home)
+            .env("NO_COLOR", "1")
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("CTX_INTERNAL_TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE", "1")
+            .spawn()
+            .expect("spawn private sentinel with fixture environment and hook"),
+    )
+}
+
+fn start_fixture(repo: &std::path::Path, fixture: &str, ledger: &std::path::Path) -> String {
+    match ctx_traits_io::center::start_trait(
+        &[
+            "--file".to_string(),
+            fixture.to_string(),
+            "--out".to_string(),
+            ledger.to_string_lossy().into_owned(),
+            "--json".to_string(),
+        ],
+        camino::Utf8Path::from_path(repo).expect("UTF-8 repository"),
+    )
+    .expect("center start request")
+    {
+        ctx_traits_io::center::StartResult::Started { session_id } => session_id,
+        ctx_traits_io::center::StartResult::Exited { code, stderr } => {
+            panic!("fixture driver exited before registering ({code:?}): {stderr}")
+        }
+    }
+}
+
+fn await_outcome(ledger: &std::path::Path, outcome: &str) {
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        if let Ok(session) = ctx_traits_io::run_session::read_run_session(
+            &Utf8PathBuf::from_path_buf(ledger.to_path_buf()).expect("UTF-8 ledger"),
+        ) && session
+            .last_drive_outcome
+            .as_ref()
+            .map(|record| record.outcome.as_str())
+            == Some(outcome)
+        {
+            return;
+        }
+        assert!(Instant::now() < deadline, "ledger did not record {outcome}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn await_session_id(ledger: &std::path::Path) -> String {
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        if let Ok(session) = ctx_traits_io::run_session::read_run_session(
+            &Utf8PathBuf::from_path_buf(ledger.to_path_buf()).expect("UTF-8 ledger"),
+        ) {
+            return session.session_id.as_str().to_string();
+        }
+        assert!(Instant::now() < deadline, "driver did not write its ledger");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn await_control(session_id: &str, action: ctx_traits_io::center::ControlAction) {
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        match ctx_traits_io::center::control(session_id, None, action) {
+            Ok(ctx_traits_io::center::ControlResult::Acknowledged) => return,
+            Ok(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(result) => panic!("center did not acknowledge control request: {result:?}"),
+            Err(error) if Instant::now() < deadline => {
+                let _ = error;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("control request: {error}"),
+        }
+    }
+}
+
+fn await_start_log(root: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let logs = root.join("start-logs");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        if let Ok(entries) = std::fs::read_dir(&logs)
+            && let Some(path) = entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| path.to_string_lossy().ends_with(suffix))
+        {
+            return path;
+        }
+        assert!(Instant::now() < deadline, "center did not create {suffix}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn requester_process_start_helper() {
+    let Ok(repo) = std::env::var("CTX_TEST_START_REPOSITORY") else {
+        return;
+    };
+    let fixture = std::env::var("CTX_TEST_START_FIXTURE").expect("fixture argument");
+    let ledger = std::env::var("CTX_TEST_START_LEDGER").expect("ledger argument");
+    let _ = ctx_traits_io::center::start_trait(
+        &[
+            "--file".to_string(),
+            fixture,
+            "--out".to_string(),
+            ledger,
+            "--json".to_string(),
+        ],
+        camino::Utf8Path::new(&repo),
+    );
+}
+
+fn commit_fixture_repo(repo: &std::path::Path) {
+    let status = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=CTX Test",
+            "-c",
+            "user.email=ctx-test@example.invalid",
+            "add",
+            ".",
+        ])
+        .current_dir(repo)
+        .status()
+        .expect("stage fixture repository");
+    assert!(status.success(), "stage fixture repository");
+    let status = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=CTX Test",
+            "-c",
+            "user.email=ctx-test@example.invalid",
+            "commit",
+            "-m",
+            "fixture",
+        ])
+        .current_dir(repo)
+        .status()
+        .expect("commit fixture repository");
+    assert!(status.success(), "commit fixture repository");
 }
 
 /// A minimal, protocol-aware peer used to put the real driver notification
@@ -1357,7 +1680,7 @@ fn one_driver_frame_notification_reaches_two_subscribers() {
             branch: None,
             log_path: None,
         },
-        std::sync::Arc::new(|| {}),
+        std::sync::Arc::new(|_| {}),
     )
     .expect("acquire driver lock")
     .expect("test owns driver lock");
@@ -1365,6 +1688,7 @@ fn one_driver_frame_notification_reaches_two_subscribers() {
         ctx_traits_io::center::DriverNotifier::new(ctx_traits_io::center::DriverRegistration {
             ledger_path: ledger.to_string(),
             holder: driver_lock.holder().clone(),
+            spawn_token: None,
         });
     // The frame notification follows the authoritative atomic ledger rewrite.
     write_completed_ledger(&ledger);
@@ -1476,7 +1800,7 @@ fn real_accepted_drive_frame_notifies_two_subscribers_once() {
     let repo = root.join("repository");
     std::fs::create_dir_all(&repo).expect("create fixture repository");
     let harness = root.join("fixture-harness.sh");
-    write_fixture_harness(&harness);
+    write_fixture_harness(&harness, FixtureRelease::AfterFixedDelay);
     write_drive_fixture(&repo, &harness);
     let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
     require_success("fixture init", &["traits", "init"], &repo, &home);
@@ -1610,6 +1934,432 @@ fn real_accepted_drive_frame_notifies_two_subscribers_once() {
 }
 
 #[test]
+fn center_started_run_outlives_its_requester_and_appears_once_to_two_subscribers() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-start-two-subscribers");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let first = ctx_traits_io::center::subscribe(None).expect("first subscription");
+    let second = ctx_traits_io::center::subscribe(None).expect("second subscription");
+    for subscription in [&first, &second] {
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+        ));
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+        ));
+    }
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let result = ctx_traits_io::center::start_trait(
+        &[
+            "--file".to_string(),
+            fixture,
+            "--out".to_string(),
+            ledger.to_string_lossy().into_owned(),
+            "--json".to_string(),
+        ],
+        camino::Utf8Path::from_path(&repo).expect("UTF-8 repository"),
+    )
+    .expect("center start request");
+    assert!(matches!(
+        result,
+        ctx_traits_io::center::StartResult::Started { .. }
+    ));
+    std::fs::write(&release, "release").expect("release fixture frame");
+    for subscription in [&first, &second] {
+        let deadline = Instant::now() + PROCESS_DEADLINE;
+        let mut appeared = 0;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "subscriber did not observe the detached driver's completion"
+            );
+            match subscription.recv_timeout(remaining) {
+                Ok(ctx_traits_io::center::CenterEvent::Delta(
+                    ctx_traits_io::center::CenterDelta::Appeared { row },
+                )) if row.ledger_path == ledger.to_string_lossy() => appeared += 1,
+                Ok(ctx_traits_io::center::CenterEvent::Delta(
+                    ctx_traits_io::center::CenterDelta::RowChanged { row },
+                )) if row.ledger_path == ledger.to_string_lossy()
+                    && row.summary.last_drive_outcome.as_deref() == Some("completed") =>
+                {
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => panic!("read start delta: {error}"),
+            }
+        }
+        assert_eq!(appeared, 1, "each subscriber receives one Appeared delta");
+    }
+    drop(first);
+    drop(second);
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn center_start_of_a_child_that_exits_before_registering_reports_its_stderr() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-start-exit-stderr");
+    std::fs::create_dir_all(root.join("home")).expect("create fixture home");
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel = spawn_sentinel_with_home(
+        &root,
+        &socket,
+        &root.join("index.sqlite3"),
+        "100",
+        &root.join("home"),
+    );
+    drop(await_socket(&socket));
+    let result = ctx_traits_io::center::start_trait(
+        &["--definitely-not-a-traits-run-flag".to_string()],
+        camino::Utf8Path::from_path(&root).expect("UTF-8 repository"),
+    )
+    .expect("center start request");
+    match result {
+        ctx_traits_io::center::StartResult::Exited { stderr, .. } => {
+            assert!(
+                stderr.contains("--definitely-not-a-traits-run-flag"),
+                "the child stderr must be genuine, not an unrelated startup failure: {stderr}"
+            )
+        }
+        ctx_traits_io::center::StartResult::Started { session_id } => {
+            panic!("invalid child unexpectedly registered as {session_id}")
+        }
+    }
+    assert!(
+        await_exit(&mut sentinel.0).success(),
+        "center idle-exits after cleanup"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn dropping_the_requester_mid_start_leaves_the_detached_driver_running() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-start-requester-drop");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    // A real process owns the client socket. Killing it produces EOF on the
+    // center's cloned reader, unlike dropping a thread join handle.
+    let mut requester =
+        std::process::Command::new(std::env::current_exe().expect("current proof test executable"))
+            .args(["--exact", "requester_process_start_helper", "--nocapture"])
+            .env("CTX_TEST_START_REPOSITORY", &repo)
+            .env("CTX_TEST_START_FIXTURE", &fixture)
+            .env("CTX_TEST_START_LEDGER", ledger.to_string_lossy().as_ref())
+            .spawn()
+            .expect("spawn requester process");
+    let _stdout = await_start_log(&root, ".stdout.log");
+    requester
+        .kill()
+        .expect("terminate requester before registration");
+    requester.wait().expect("reap requester");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    while !ledger.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(ledger.exists(), "detached driver did not create its ledger");
+    std::fs::write(&release, "release").expect("release detached driver");
+    await_outcome(&ledger, "completed");
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn center_interrupt_stops_a_run_rediscovered_after_a_center_restart() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-interrupt-after-restart");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let _started_session_id = start_fixture(&repo, &fixture, &ledger);
+    let session_id = await_session_id(&ledger);
+    sentinel.0.kill().expect("kill original sentinel");
+    sentinel.0.wait().expect("reap original sentinel");
+    std::fs::remove_file(&socket).expect("remove stale socket after SIGKILL");
+    let mut restarted =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    await_control(&session_id, ctx_traits_io::center::ControlAction::Interrupt);
+    std::fs::write(&release, "release").expect("release interrupted harness");
+    await_outcome(&ledger, "interrupted");
+    restarted.0.kill().expect("stop restarted sentinel");
+    restarted.0.wait().expect("reap restarted sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn center_pause_in_flight_persists_before_its_delta_and_resume_continues_at_the_next_frame() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-pause-resume");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_two_frame_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let _started_session_id = start_fixture(&repo, &fixture, &ledger);
+    let session_id = await_session_id(&ledger);
+    let subscription = ctx_traits_io::center::subscribe(None).expect("subscribe for pause delta");
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    loop {
+        match subscription.recv_timeout(PROCESS_DEADLINE) {
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd) => break,
+            Ok(_) => {}
+            Err(error) => panic!("read pause snapshot: {error}"),
+        }
+    }
+    let count_file = root.join("fixture-harness.sh.invocations");
+    await_control(&session_id, ctx_traits_io::center::ControlAction::Pause);
+    let acknowledgement_deadline = Instant::now() + Duration::from_millis(100);
+    while Instant::now() < acknowledgement_deadline {
+        match subscription
+            .recv_timeout(acknowledgement_deadline.saturating_duration_since(Instant::now()))
+        {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::RowChanged { row },
+            )) if row.ledger_path == ledger.to_string_lossy()
+                && row.summary.last_drive_outcome.as_deref() == Some("paused") =>
+            {
+                panic!("a control acknowledgement must not publish a state delta");
+            }
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(error) => panic!("read acknowledgement window: {error}"),
+        }
+    }
+    std::fs::write(&release, "release first frame").expect("release first frame");
+    await_outcome(&ledger, "paused");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "center did not publish the durable pause"
+        );
+        match subscription.recv_timeout(remaining) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::RowChanged { row },
+            )) if row.ledger_path == ledger.to_string_lossy()
+                && row.summary.last_drive_outcome.as_deref() == Some("paused") =>
+            {
+                break;
+            }
+            Ok(_) => {}
+            Err(error) => panic!("read pause delta: {error}"),
+        }
+    }
+    assert_eq!(std::fs::read_to_string(&count_file).unwrap().trim(), "1");
+    let resumed =
+        ctx_traits_io::center::start_session(&session_id, None).expect("resume through center");
+    match resumed {
+        ctx_traits_io::center::StartResult::Started { .. } => {}
+        ctx_traits_io::center::StartResult::Exited { code, stderr } => {
+            panic!("resume exited before registering ({code:?}): {stderr}")
+        }
+    }
+    std::fs::write(&release, "second frame").expect("release second frame");
+    await_outcome(&ledger, "completed");
+    assert_eq!(std::fs::read_to_string(&count_file).unwrap().trim(), "2");
+    drop(subscription);
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn paused_worktree_run_retains_its_worktree_and_resume_reuses_it() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-paused-worktree");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    // Worktree creation requires a real HEAD and a resolvable default branch.
+    commit_fixture_repo(&repo);
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let _started_session_id = match ctx_traits_io::center::start_trait(
+        &[
+            "--file".to_string(),
+            fixture,
+            "--out".to_string(),
+            ledger.to_string_lossy().into_owned(),
+            "--json".to_string(),
+            "--worktree".to_string(),
+        ],
+        camino::Utf8Path::from_path(&repo).expect("UTF-8 repository"),
+    )
+    .expect("start worktree drive")
+    {
+        ctx_traits_io::center::StartResult::Started { session_id } => session_id,
+        result => panic!("worktree drive did not register: {result:?}"),
+    };
+    let session_id = await_session_id(&ledger);
+    await_control(&session_id, ctx_traits_io::center::ControlAction::Pause);
+    std::fs::write(&release, "pause worktree").expect("release worktree harness");
+    await_outcome(&ledger, "paused");
+    let paused_session = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
+    )
+    .expect("read paused worktree ledger");
+    let retained_worktree = paused_session
+        .provenance
+        .worktree
+        .clone()
+        .expect("paused worktree provenance");
+    let worktrees = repo.join(".ctx/traits/worktrees");
+    let retained = std::fs::read_dir(&worktrees)
+        .expect("read retained worktrees")
+        .count();
+    assert!(retained > 0, "paused drive must retain its worktree");
+    match ctx_traits_io::center::start_session(&session_id, None) {
+        Ok(ctx_traits_io::center::StartResult::Started { .. }) => {}
+        result => panic!("resumed worktree driver did not register: {result:?}"),
+    }
+    await_outcome(&ledger, "completed");
+    let completed_session = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
+    )
+    .expect("read resumed worktree ledger");
+    assert_eq!(
+        completed_session.provenance.worktree.as_ref(),
+        Some(&retained_worktree),
+        "resume must reuse the retained worktree identity, branch, and path"
+    );
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn failed_outcome_write_on_a_pause_reports_harness_failed_and_emits_no_ended_notification() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-failed-pause-outcome");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel = spawn_sentinel_with_home_and_outcome_failure_hook(
+        &root,
+        &socket,
+        &root.join("index.sqlite3"),
+        "5000",
+        &home,
+    );
+    drop(await_socket(&socket));
+    let subscription = ctx_traits_io::center::subscribe(None).expect("subscribe");
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+    ));
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let _started_session_id = start_fixture(&repo, &fixture, &ledger);
+    let session_id = await_session_id(&ledger);
+    await_control(&session_id, ctx_traits_io::center::ControlAction::Pause);
+    std::fs::write(&release, "release pause").expect("release harness");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    let mut ended = false;
+    while Instant::now() < deadline {
+        match subscription.recv_timeout(Duration::from_millis(100)) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::Ended { row },
+            )) if row.ledger_path == ledger.to_string_lossy() => {
+                ended = true;
+                break;
+            }
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(error) => panic!("read center delta: {error}"),
+        }
+        if ledger.exists() {
+            let session = ctx_traits_io::run_session::read_run_session(
+                &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
+            )
+            .expect("read ledger");
+            if session.last_drive_outcome.is_none() {
+                break;
+            }
+        }
+    }
+    assert!(!ended, "failed pause outcome write must not emit Ended");
+    let session = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger).expect("UTF-8 ledger"),
+    )
+    .expect("read ledger");
+    assert!(session.last_drive_outcome.is_none());
+    let report = await_start_log(&root, ".stdout.log");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        let output = std::fs::read_to_string(&report).unwrap_or_default();
+        if output.contains("harness-failed") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "detached driver report did not record harness-failed: {output}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(subscription);
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn real_driver_notifications_follow_their_durable_write_checkpoints() {
     let _serial = SENTINEL_TEST_LOCK
         .lock()
@@ -1619,7 +2369,7 @@ fn real_driver_notifications_follow_their_durable_write_checkpoints() {
     let repo = root.join("repository");
     std::fs::create_dir_all(&repo).expect("create fixture repository");
     let harness = root.join("fixture-harness.sh");
-    write_fixture_harness(&harness);
+    write_fixture_harness(&harness, FixtureRelease::AfterFixedDelay);
     write_drive_fixture(&repo, &harness);
     let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
     require_success("fixture init", &["traits", "init"], &repo, &home);
@@ -1695,7 +2445,7 @@ fn failed_outcome_write_emits_no_ended_notification() {
     let repo = root.join("repository");
     std::fs::create_dir_all(&repo).expect("create fixture repository");
     let harness = root.join("fixture-harness.sh");
-    write_fixture_harness(&harness);
+    write_fixture_harness(&harness, FixtureRelease::AfterFixedDelay);
     write_drive_fixture(&repo, &harness);
     let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
     require_success("fixture init", &["traits", "init"], &repo, &home);
@@ -1775,7 +2525,7 @@ fn unavailable_center_does_not_change_a_completed_drive_or_its_durable_evidence(
     let repo = root.join("repository");
     std::fs::create_dir_all(&repo).expect("create fixture repository");
     let harness = root.join("fixture-harness.sh");
-    write_fixture_harness(&harness);
+    write_fixture_harness(&harness, FixtureRelease::AfterFixedDelay);
     write_drive_fixture(&repo, &harness);
     let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
     require_success("fixture init", &["traits", "init"], &repo, &home);
@@ -2040,7 +2790,7 @@ fn restarted_center_accepts_the_next_driver_registration_and_frame() {
         branch: None,
         log_path: None,
     };
-    let driver_lock = ctx_traits_io::run_control::try_acquire(&facts, std::sync::Arc::new(|| {}))
+    let driver_lock = ctx_traits_io::run_control::try_acquire(&facts, std::sync::Arc::new(|_| {}))
         .expect("acquire driver lock")
         .expect("test owns driver lock");
     // Establish the notifier connection before the crash. The later frame must
@@ -2049,6 +2799,7 @@ fn restarted_center_accepts_the_next_driver_registration_and_frame() {
         ctx_traits_io::center::DriverNotifier::new(ctx_traits_io::center::DriverRegistration {
             ledger_path: ledger.to_string(),
             holder: driver_lock.holder().clone(),
+            spawn_token: None,
         });
     notifier.frame_done();
     let marker = root.join("frames");
