@@ -5337,7 +5337,17 @@ output = ["slot:answer"]
     // MCP dispatch so the two transport paths are covered in one drive.
     let refresh_header = nested_canonical_base.split_once("[procedure]").unwrap().0;
     let refresh_fixture = format!(
-        r#"{refresh_header}[[session]]
+        r#"{refresh_header}[[resource]]
+id = "refresh-resource"
+path = "refresh-resource.txt"
+root = "repo"
+trigger = "on-demand"
+
+[prompt.refresh-prompt]
+source = "resource:refresh-resource"
+input = ["resource:refresh-resource"]
+
+[[session]]
 id = "pair"
 
 [[agent]]
@@ -5419,7 +5429,8 @@ description = "Refresh resident guidance."
 id = "refresh-local-1"
 title = "Refresh local one"
 agent = "agent:local-a"
-prompt = "Refresh local one."
+prompt = "prompt:refresh-prompt"
+input = ["resource:refresh-resource"]
 intent = {{ require = [{{ id = "local-1-prompt", summary = "Local one prompt guidance." }}] }}
 behavior = {{ tone = [{{ id = "local-1-prompt-tone", summary = "Local one prompt tone." }}] }}
 output = ["slot:refresh-1"]
@@ -5427,7 +5438,8 @@ output = ["slot:refresh-1"]
 id = "refresh-local-2"
 title = "Refresh local two"
 agent = "agent:local-a"
-prompt = "Refresh local two."
+prompt = "prompt:refresh-prompt"
+input = ["resource:refresh-resource"]
 intent = {{ require = [{{ id = "local-2-prompt", summary = "Local two prompt guidance." }}] }}
 behavior = {{ tone = [{{ id = "local-2-prompt-tone", summary = "Local two prompt tone." }}] }}
 output = ["slot:refresh-2"]
@@ -5435,7 +5447,8 @@ output = ["slot:refresh-2"]
 id = "refresh-shared-a"
 title = "Refresh shared A"
 agent = "agent:shared-a"
-prompt = "Refresh shared A."
+prompt = "prompt:refresh-prompt"
+input = ["resource:refresh-resource"]
 intent = {{ require = [{{ id = "shared", summary = "Shared A prompt replacement." }}, {{ id = "shared-a-prompt", summary = "Shared A prompt guidance." }}] }}
 behavior = {{ tone = [{{ id = "shared-tone", summary = "Shared A prompt tone." }}, {{ id = "shared-a-prompt-tone", summary = "Shared A prompt tone marker." }}] }}
 output = ["slot:refresh-3"]
@@ -5443,7 +5456,8 @@ output = ["slot:refresh-3"]
 id = "refresh-shared-b"
 title = "Refresh shared B"
 agent = "agent:shared-b"
-prompt = "Refresh shared B."
+prompt = "prompt:refresh-prompt"
+input = ["resource:refresh-resource"]
 intent = {{ require = [{{ id = "shared", summary = "Shared B prompt replacement." }}, {{ id = "shared-b-prompt", summary = "Shared B prompt guidance." }}] }}
 behavior = {{ tone = [{{ id = "shared-tone", summary = "Shared B prompt tone." }}, {{ id = "shared-b-prompt-tone", summary = "Shared B prompt tone marker." }}] }}
 output = ["slot:refresh-4"]
@@ -5451,7 +5465,8 @@ output = ["slot:refresh-4"]
 id = "refresh-mcp-a"
 title = "Refresh MCP A"
 agent = "agent:mcp-a"
-prompt = "Refresh MCP A."
+prompt = "prompt:refresh-prompt"
+input = ["resource:refresh-resource"]
 intent = {{ require = [{{ id = "mcp-a-prompt", summary = "MCP A prompt guidance." }}] }}
 behavior = {{ tone = [{{ id = "mcp-a-prompt-tone", summary = "MCP A prompt tone." }}] }}
 output = ["slot:refresh-5"]
@@ -5459,12 +5474,18 @@ output = ["slot:refresh-5"]
 id = "refresh-mcp-b"
 title = "Refresh MCP B"
 agent = "agent:mcp-b"
-prompt = "Refresh MCP B."
+prompt = "prompt:refresh-prompt"
+input = ["resource:refresh-resource"]
 intent = {{ require = [{{ id = "mcp-b-prompt", summary = "MCP B prompt guidance." }}] }}
 behavior = {{ tone = [{{ id = "mcp-b-prompt-tone", summary = "MCP B prompt tone." }}] }}
 output = ["slot:refresh-6"]
 "#
     );
+    fs::write(
+        repo.join("refresh-resource.txt"),
+        "Refresh resource content.",
+    )
+    .unwrap();
     fs::write(&generated, &refresh_fixture).unwrap();
     fs::write(repo.join(".ctx/traits/runtime.toml"), runtime("mcp")).unwrap();
     require_success(
@@ -5538,176 +5559,389 @@ output = ["slot:refresh-6"]
             "{refresh_drive}"
         );
     }
-    let warm_pids = fs::read_to_string(capture.with_extension("txt.warm.pids")).unwrap();
+    let warm_pids: Vec<_> = fs::read_to_string(capture.with_extension("txt.warm.pids"))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
     assert_eq!(
-        warm_pids.lines().count(),
+        warm_pids.len(),
         2,
-        "resident sessions respawned: {warm_pids}"
+        "resident sessions respawned: {warm_pids:?}"
     );
-    let mut warm_prompts = Vec::new();
-    let mut warm_args = Vec::new();
-    for entry in fs::read_dir(&home).unwrap() {
-        let path = entry.unwrap().path();
-        let name = path.file_name().unwrap().to_string_lossy();
-        if name.starts_with("capture.txt.warm.") && name.contains(".message-") {
-            let message: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
-            warm_prompts.push(
+    assert_ne!(warm_pids[0], warm_pids[1]);
+    let resident_turns = |pid: &str| -> Vec<String> {
+        (0..2)
+            .map(|turn| {
+                let path = home.join(format!("capture.txt.warm.{pid}.message-{turn}.json"));
+                let message: serde_json::Value =
+                    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
                 message["message"]["content"][0]["text"]
                     .as_str()
-                    .unwrap()
-                    .to_string(),
+                    .unwrap_or_else(|| panic!("resident message had no text: {}", path.display()))
+                    .to_owned()
+            })
+            .collect()
+    };
+    let resident_args =
+        |pid: &str| fs::read_to_string(home.join(format!("capture.txt.warm.args.{pid}"))).unwrap();
+    let first_args = resident_args(&warm_pids[0]);
+    let second_args = resident_args(&warm_pids[1]);
+    let (local_pid, local_args, shared_pid, shared_args) = if first_args.contains("LOCAL A SYSTEM")
+    {
+        (&warm_pids[0], first_args, &warm_pids[1], second_args)
+    } else {
+        (&warm_pids[1], second_args, &warm_pids[0], first_args)
+    };
+    assert!(local_args.contains("LOCAL A SYSTEM"), "{local_args}");
+    assert!(shared_args.contains("SHARED A SYSTEM"), "{shared_args}");
+    for (args, expected_system) in [
+        (&local_args, "LOCAL A SYSTEM"),
+        (&shared_args, "SHARED A SYSTEM"),
+    ] {
+        let values: Vec<_> = args.lines().collect();
+        assert_eq!(
+            values
+                .windows(2)
+                .filter(|pair| *pair == ["--cli-system", expected_system])
+                .count(),
+            1,
+            "{args}"
+        );
+        assert_eq!(
+            values
+                .iter()
+                .filter(|value| **value == "--cli-system")
+                .count(),
+            1,
+            "{args}"
+        );
+        for system in [
+            "LOCAL A SYSTEM",
+            "SHARED A SYSTEM",
+            "SHARED B SYSTEM",
+            "MCP A SYSTEM",
+            "MCP B SYSTEM",
+            "UNASSIGNED SYSTEM",
+        ] {
+            assert_eq!(
+                args.matches(system).count(),
+                usize::from(system == expected_system),
+                "{args}"
             );
-        } else if name.starts_with("capture.txt.warm.args.") {
-            warm_args.push(fs::read_to_string(path).unwrap());
         }
     }
-    assert_eq!(warm_prompts.len(), 4, "resident turns: {warm_prompts:?}");
-    assert_eq!(warm_args.len(), 2);
-    for (index, marker) in [
-        "local-1-prompt",
-        "local-2-prompt",
-        "shared-a-prompt",
-        "shared-b-prompt",
-    ]
-    .iter()
-    .enumerate()
-    {
-        let prompt = warm_prompts
-            .iter()
-            .find(|prompt| prompt.contains(*marker))
-            .unwrap_or_else(|| panic!("missing {marker}: {warm_prompts:?}"));
+    assert!(!shared_args.contains("SHARED B SYSTEM"));
+    let local_turns = resident_turns(local_pid);
+    let shared_turns = resident_turns(shared_pid);
+    for pid in [local_pid, shared_pid] {
+        assert!(
+            !home
+                .join(format!("capture.txt.warm.{pid}.message-2.json"))
+                .exists(),
+            "resident {pid} handled an unexpected third turn"
+        );
+    }
+    let assert_current_guidance = |prompt: &str,
+                                   agent: &str,
+                                   agent_tone: &str,
+                                   ready: &str,
+                                   ready_tone: &str,
+                                   replacement: &str| {
+        let intent = extract_intent(prompt);
+        let behavior = extract_behavior(prompt);
+        for marker in ["root-only", "shared", agent, ready] {
+            assert_eq!(
+                intent.matches(&format!("id=\"{marker}\"")).count(),
+                1,
+                "{intent}"
+            );
+        }
+        for marker in [
+            "shared-tone",
+            "root-tone",
+            "shared-method",
+            "root-method",
+            "shared-format",
+            "root-format",
+            "root-verbosity",
+            "root-directness",
+            "root-scope",
+            "root-initiative",
+            "root-uncertainty",
+            agent_tone,
+            ready_tone,
+        ] {
+            assert_eq!(
+                behavior.matches(&format!("id=\"{marker}\"")).count(),
+                1,
+                "{behavior}"
+            );
+        }
+        assert!(intent.contains(replacement), "{intent}");
+        assert!(intent.find("root-only").unwrap() < intent.find(agent).unwrap());
+        assert!(intent.find(agent).unwrap() < intent.find(ready).unwrap());
+        assert!(behavior.find("root-tone").unwrap() < behavior.find(agent_tone).unwrap());
+        assert!(behavior.find(agent_tone).unwrap() < behavior.find(ready_tone).unwrap());
+        let include = prompt.find("<include>").expect("include opening");
+        let intent_start = prompt.find("<intent>").unwrap();
+        let behavior_start = prompt.find("<behavior>").unwrap();
+        let agent_start = prompt.find("<agent>").unwrap();
+        let input_start = prompt.find("<input>").unwrap();
+        assert!(
+            include < intent_start
+                && intent_start < behavior_start
+                && behavior_start < agent_start
+                && agent_start < input_start,
+            "{prompt}"
+        );
+        for stale in [
+            "local-a-agent",
+            "local-1-prompt",
+            "local-2-prompt",
+            "shared-a-agent",
+            "shared-a-prompt",
+            "shared-b-agent",
+            "shared-b-prompt",
+            "mcp-a-agent",
+            "mcp-a-prompt",
+            "mcp-b-agent",
+            "mcp-b-prompt",
+            "unassigned-only",
+            "unassigned-tone",
+            "container",
+        ] {
+            if stale != agent && stale != ready && stale != agent_tone && stale != ready_tone {
+                assert!(!prompt.contains(stale), "stale {stale}: {prompt}");
+            }
+        }
+        assert_unassigned_absent(prompt);
+        assert!(
+            !intent.contains("SYSTEM") && !behavior.contains("SYSTEM"),
+            "{prompt}"
+        );
+    };
+    let resident_cases = [
+        (
+            &local_turns[0],
+            0,
+            "local-a-agent",
+            "local-a-agent-tone",
+            "local-1-prompt",
+            "local-1-prompt-tone",
+            "Root replacement text.",
+        ),
+        (
+            &local_turns[1],
+            1,
+            "local-a-agent",
+            "local-a-agent-tone",
+            "local-2-prompt",
+            "local-2-prompt-tone",
+            "Root replacement text.",
+        ),
+        (
+            &shared_turns[0],
+            2,
+            "shared-a-agent",
+            "shared-a-agent-tone",
+            "shared-a-prompt",
+            "shared-a-prompt-tone",
+            "Shared A prompt replacement.",
+        ),
+        (
+            &shared_turns[1],
+            3,
+            "shared-b-agent",
+            "shared-b-agent-tone",
+            "shared-b-prompt",
+            "shared-b-prompt-tone",
+            "Shared B prompt replacement.",
+        ),
+    ];
+    for (prompt, index, agent, agent_tone, ready, ready_tone, replacement) in resident_cases {
+        assert_current_guidance(prompt, agent, agent_tone, ready, ready_tone, replacement);
         assert_eq!(
             extract_intent(prompt),
             extract_intent(&refresh_previews[index]),
-            "{marker}"
+            "{ready}"
         );
         assert_eq!(
             extract_behavior(prompt),
             extract_behavior(&refresh_previews[index]),
-            "{marker}"
-        );
-        let intent = prompt.find("<intent>").unwrap();
-        if let Some(include) = prompt.find("<include>") {
-            assert!(include < intent, "{prompt}");
-        }
-        assert!(
-            intent < prompt.find("<behavior>").unwrap()
-                && prompt.find("<behavior>").unwrap() < prompt.find("<agent>").unwrap()
-                && prompt.find("<agent>").unwrap() < prompt.find("<input>").unwrap(),
-            "{prompt}"
-        );
-        assert_eq!(
-            extract_intent(prompt).matches("id=\"shared\"").count(),
-            1,
-            "{prompt}"
-        );
-        assert_eq!(
-            extract_behavior(prompt)
-                .matches("id=\"shared-tone\"")
-                .count(),
-            1,
-            "{prompt}"
-        );
-        assert!(
-            !extract_intent(prompt).contains("SYSTEM")
-                && !extract_behavior(prompt).contains("SYSTEM"),
-            "{prompt}"
+            "{ready}"
         );
     }
-    let local_args = warm_args
-        .iter()
-        .find(|args| args.contains("LOCAL A SYSTEM"))
-        .unwrap();
-    let shared_args = warm_args
-        .iter()
-        .find(|args| args.contains("SHARED A SYSTEM"))
-        .unwrap();
-    assert!(
-        local_args
-            .lines()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|pair| pair == ["--cli-system", "LOCAL A SYSTEM"])
+    assert_ne!(
+        extract_intent(&local_turns[0]),
+        extract_intent(&local_turns[1])
     );
-    assert!(
-        shared_args
-            .lines()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|pair| pair == ["--cli-system", "SHARED A SYSTEM"])
+    assert_ne!(
+        extract_behavior(&local_turns[0]),
+        extract_behavior(&local_turns[1])
     );
-    assert!(!shared_args.contains("SHARED B SYSTEM"));
+    assert_ne!(
+        extract_intent(&shared_turns[0]),
+        extract_intent(&shared_turns[1])
+    );
+    assert_ne!(
+        extract_behavior(&shared_turns[0]),
+        extract_behavior(&shared_turns[1])
+    );
     let mcp_prompts = read_frames(2);
-    for (index, marker) in ["mcp-a-prompt", "mcp-b-prompt"].iter().enumerate() {
+    assert_eq!(
+        fs::read_to_string(capture.with_extension("txt.calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        2,
+        "MCP frames must use exactly two ordinary captures"
+    );
+    for (index, (agent, agent_tone, ready, ready_tone)) in [
+        (
+            "mcp-a-agent",
+            "mcp-a-agent-tone",
+            "mcp-a-prompt",
+            "mcp-a-prompt-tone",
+        ),
+        (
+            "mcp-b-agent",
+            "mcp-b-agent-tone",
+            "mcp-b-prompt",
+            "mcp-b-prompt-tone",
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let prompt = &mcp_prompts[index];
+        let intent = extract_intent(prompt);
+        let behavior = extract_behavior(prompt);
+        for marker in ["root-only", "shared", *agent, *ready] {
+            assert_eq!(
+                intent.matches(&format!("id=\"{marker}\"")).count(),
+                1,
+                "{intent}"
+            );
+        }
+        for marker in [
+            "shared-tone",
+            "root-tone",
+            "shared-method",
+            "root-method",
+            "shared-format",
+            "root-format",
+            "root-verbosity",
+            "root-directness",
+            "root-scope",
+            "root-initiative",
+            "root-uncertainty",
+            *agent_tone,
+            *ready_tone,
+        ] {
+            assert_eq!(
+                behavior.matches(&format!("id=\"{marker}\"")).count(),
+                1,
+                "{behavior}"
+            );
+        }
+        assert!(intent.find("root-only").unwrap() < intent.find(*agent).unwrap());
+        assert!(intent.find(*agent).unwrap() < intent.find(*ready).unwrap());
+        assert!(behavior.find("root-tone").unwrap() < behavior.find(*agent_tone).unwrap());
+        assert!(behavior.find(*agent_tone).unwrap() < behavior.find(*ready_tone).unwrap());
+        assert!(prompt.find("<intent>").unwrap() < prompt.find("<behavior>").unwrap());
         assert!(
-            mcp_prompts[index].contains(marker),
-            "{}",
-            mcp_prompts[index]
+            prompt.find("<behavior>").unwrap()
+                < prompt.find("Resolved prompt instructions:").unwrap()
         );
-        assert_eq!(
-            extract_intent(&mcp_prompts[index]),
-            extract_intent(&refresh_previews[index + 4])
-        );
-        assert_eq!(
-            extract_behavior(&mcp_prompts[index]),
-            extract_behavior(&refresh_previews[index + 4])
-        );
-        assert!(!mcp_prompts[index].contains(if index == 0 {
-            "mcp-b-prompt"
-        } else {
-            "mcp-a-prompt"
-        }));
+        for stale in [
+            "local-a-agent",
+            "local-1-prompt",
+            "local-2-prompt",
+            "shared-a-agent",
+            "shared-a-prompt",
+            "shared-b-agent",
+            "shared-b-prompt",
+            "mcp-a-agent",
+            "mcp-a-prompt",
+            "mcp-b-agent",
+            "mcp-b-prompt",
+            "unassigned-only",
+            "unassigned-tone",
+            "container",
+        ] {
+            if stale != *agent && stale != *ready && stale != *agent_tone && stale != *ready_tone {
+                assert!(!prompt.contains(stale), "stale {stale}: {prompt}");
+            }
+        }
+        assert_unassigned_absent(prompt);
+        assert_eq!(intent, extract_intent(&refresh_previews[index + 4]));
+        assert_eq!(behavior, extract_behavior(&refresh_previews[index + 4]));
     }
-    let refresh_active = home.join("refresh-active.json");
-    assert_exit_code(
-        &run_ctx(
-            &[
-                "traits",
-                "run",
-                "--file",
-                generated.to_str().unwrap(),
-                "--no-drive",
-                "--out",
-                refresh_active.to_str().unwrap(),
-            ],
-            &repo,
-            &home,
-        ),
-        0,
+    assert_ne!(
+        extract_intent(&mcp_prompts[0]),
+        extract_intent(&mcp_prompts[1])
     );
-    assert_exit_code(
-        &support::run_ctx_with_env(
-            &[
-                "traits",
-                "internal",
-                "drive",
-                "--file",
-                generated.to_str().unwrap(),
-                "--session",
-                refresh_active.to_str().unwrap(),
-                "--max-frames",
-                "1",
-                "--no-worktree",
-                "--no-wait",
-                "--progress",
-                "none",
-            ],
-            &repo,
-            &home,
-            &[],
-        ),
-        0,
+    assert_ne!(
+        extract_behavior(&mcp_prompts[0]),
+        extract_behavior(&mcp_prompts[1])
     );
-    let active_refresh = session_preview("refresh active", &refresh_active, None);
-    assert_eq!(
-        extract_intent(&active_refresh),
-        extract_intent(&refresh_previews[1])
-    );
-    assert_eq!(
-        extract_behavior(&active_refresh),
-        extract_behavior(&refresh_previews[1])
-    );
+    for (index, expected_preview) in refresh_previews.iter().enumerate().take(4) {
+        let refresh_active = home.join(format!("refresh-active-{index}.json"));
+        assert_exit_code(
+            &run_ctx(
+                &[
+                    "traits",
+                    "run",
+                    "--file",
+                    generated.to_str().unwrap(),
+                    "--no-drive",
+                    "--out",
+                    refresh_active.to_str().unwrap(),
+                ],
+                &repo,
+                &home,
+            ),
+            0,
+        );
+        if index > 0 {
+            let max_frames = index.to_string();
+            assert_exit_code(
+                &support::run_ctx_with_env(
+                    &[
+                        "traits",
+                        "internal",
+                        "drive",
+                        "--file",
+                        generated.to_str().unwrap(),
+                        "--session",
+                        refresh_active.to_str().unwrap(),
+                        "--max-frames",
+                        &max_frames,
+                        "--no-worktree",
+                        "--no-wait",
+                        "--progress",
+                        "none",
+                    ],
+                    &repo,
+                    &home,
+                    &[],
+                ),
+                0,
+            );
+        }
+        let active_refresh = session_preview("refresh active", &refresh_active, None);
+        assert_eq!(
+            extract_intent(&active_refresh),
+            extract_intent(expected_preview),
+            "active refresh intent {index}"
+        );
+        assert_eq!(
+            extract_behavior(&active_refresh),
+            extract_behavior(expected_preview),
+            "active refresh behavior {index}"
+        );
+    }
     for (index, step) in [
         "refresh-local-1",
         "refresh-local-2",
