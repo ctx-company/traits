@@ -1,0 +1,37 @@
+schema-version = "0.2"
+key = "0261"
+title = "Center compatibility and subscription polish"
+status = "draft"
+raised = "2026-08-26"
+content = """
+Owner-deferred remainder spilled from 0243.4 (ruling 2026-08-26): depth
+items that are real but not the bar for the center migration.
+
+- Reconnect-delay parity: apply the same bounded reconnect delay after a
+  rejected snapshot/delta projection as after connection failure, and keep
+  servicing queued commands during the delay.
+- Simultaneous two-version coverage: a v1-compatible center and the
+  current center running together on distinct sockets against the same
+  store, proving coexistence during rollouts.
+- Symmetric shared-index versioning: separate the legacy SQLite table
+  version from a v2 projection marker so old and new binaries read each
+  other cleanly in both directions.
+- Subscription regression coverage beyond 0243.4's named behaviors
+  (ordering, phase projection, retained terminal updates and similar).
+"""
+scope = """
+## Decisions
+Each bullet is independent; implement in the listed order. No production
+behavior change is in scope except what the bullets name.
+"""
+validation = """
+## Watch
+Depends on 0243.4's rescoped remainder landing first.
+
+## Done when
+Each bullet has landed with its own regression, gates green.
+"""
+
+[relations]
+parent = "0243"
+depends-on = ["0243.4"]

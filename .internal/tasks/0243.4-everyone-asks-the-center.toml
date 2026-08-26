@@ -1,51 +1,92 @@
 schema-version = "0.2"
 key = "0243.4"
 title = "Everyone asks the center"
-status = "ready"
+status = "draft"
 raised = "2026-08-24"
 content = """
-Every surface that reads session state directly converts to the center:
-the dashboard (subscribe replaces its whole IO worker loop — the 2 s
-reload tick, the 20 s flock sweep, reload_sync), `sessions`, `stats`,
-`tasks`' session overlay, and merge's run-id lookup. Four dashboards
-become four subscriptions to one model.
+Owner ruling (2026-08-26). The bulk of this task landed on main in merge
+d02eb425 at gates-green: every designated read surface (stats, tasks,
+merge lookup, story, dispatch preflight, run liveness) is center-backed
+and fail-loud, and the dashboard runs a live center subscription with a
+delta reducer (modules/cli/src/app/dashboard/worker.rs) instead of
+filesystem inventory polling. 48 review rounds of that work are already
+reviewer-verified. This task now covers ONLY the remainder below; ground
+against current main, not against the task's original full scope.
 
-This is the task with a clock on it: every direct read written between now
-and landing is a call site somebody has to find later, and the dashboard
-alone reads ledgers from a dozen places.
+A prior session's reviewer kept this task at closure/discovery
+equilibrium for 20+ rounds by unrolling depth past the landed state.
+The remainder is a closed list. Anything discovered beyond it is board
+material for a follow-up task, not additional cells for this one.
+"""
+scope = """
+## Decisions — the closed remainder
 
-What this DELETES — landing is not done until they are gone, not bypassed:
-- the summary sidecars and their apparatus: `summary_path`,
-  `summary_is_fresh`, `read_summary_or_ledger`,
-  `remove_summary_for_ledger`, and the missing-sidecars class with them
-  (390 of 886 in this repo's store)
-- `InventoryCache` and `run_inventory_from_paths`' scanning role — the
-  center's model is that memo, persistent and owned (the scan survives
-  only as the center's own reconcile reader)
-- 0243.1's bridge code, superseded by subscription
+Dashboard subscription hardening:
+- Make `SnapshotEnd` and delta projection transactional: retain the
+  accepted row map and worker session state until `reload_from_center_rows`
+  succeeds; a failed projection must never leave a wiped or partial view.
+- On a failed `SnapshotEnd` or delta projection, discard the subscription
+  and reconnect for a fresh complete snapshot (or retain and retry the
+  complete candidate); update `last_snapshot_at` only after an `Ok`
+  snapshot.
+- Preserve parked-Ask presentation and trait-source drift warnings when
+  `Command::Render` reprojects accepted rows, and retain the last accepted
+  parked-Ask presentation while `center::get` is unavailable.
+- Split periodic `Command::Refresh` from center-row application so the
+  periodic tick refreshes only non-session state and never calls
+  `center::get`.
+- Replace the hand-rolled `repo_key(state_repo_root)` filter with fallible
+  `state::current_repo_key()`.
+- Refresh the currently selected by-path session preview after relevant
+  subscription deltas or activity events; an unchanged selection must not
+  re-request.
 
-Out of scope: driver writes (drivers never go through the center to write
-their own ledger), and the attach/preview detail view may keep reading its
-one ledger by path.
+Center cache correctness:
+- Change the unchanged-row predicate so a fingerprint-matching row is
+  reusable when it has either a cached session or an explicit
+  `parse_error`, so unchanged corrupt ledgers stop bypassing the cache.
+- Replace the same-version narrower-summary simulation with a version-1
+  index fixture carrying the preceding summary shape, and assert the
+  current center rebuilds it.
 
-The dashboard's degraded mode (center unreachable) shows a visibly stale
-view — footer line — never silently old data and never a hard error.
-Merge's posture when the center cannot start: per the hung-vs-dead ruling
-in the parent, decide explicitly whether merge's lookup falls back to a
-direct read behind a flag or fails loudly; silent fallback to a
-differently-shaped slow path is how unreproducible bugs are born.
+Tasks surface:
+- Parity tests for readable and corrupt rows, and a failure test proving a
+  center request error can never produce a successful partial proposal or
+  reconcile report.
+
+Proofs and gates (one regression per behavior above, then):
+- chmod-after-snapshot proofs covering stats, tasks proposals/reconcile,
+  merge lookup, and a dashboard snapshot with zero client ledger reads
+  (cold and warm).
+- Dashboard subscription proofs for delta-only appearance and center
+  kill/restart degraded-mode recovery.
+- Ledger-read-count and real-process idle-exit regressions for an
+  unchanged corrupt ledger, including a list/stats request after the
+  initial snapshot.
+- Rerun `CTX_BIN="$CARGO_TARGET_DIR/debug/ctx" just test` and the focused
+  suites, then fold this task's work into one task-scoped commit.
+
+## Explicitly excluded (spilled to 0261, not cells here)
+- Reconnect-delay parity after rejected projections.
+- Simultaneous two-version center process coverage.
+- Symmetric shared-index versioning redesign (legacy table version vs v2
+  projection marker).
+- Regression coverage beyond the behaviors named above.
 """
 validation = """
-## Done when
+## Watch
+- Ground against main AFTER merge d02eb425: most of the original task text
+  is already landed; do not re-derive or re-demand it.
+- The excluded list is an owner ceiling. A finding in an excluded area is
+  advisory board material, never a blocker cell.
 
-No code outside the center and the attach/preview path opens a session
-ledger for reading — proven by the call-site inventory, not grep alone.
-The dashboard runs with its poll loop deleted: an externally started run
-appears via delta without any tick. `stats`, `sessions`, `tasks`, and
-merge's lookup return the same answers as before against the same scratch
-store, cold and warm. The sidecar apparatus and InventoryCache are deleted
-and the workspace tests pass without them.
+## Done when
+- Every behavior in the closed remainder has its named regression green.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard`,
+  `cargo test -p ctx-traits-io center`, and
+  `CTX_BIN="$CARGO_TARGET_DIR/debug/ctx" just test` exit 0.
+- One task-scoped commit holds the remainder; worktree clean.
 """
 
 [relations]
-depends-on = ["0243.3"]
+parent = "0243"
