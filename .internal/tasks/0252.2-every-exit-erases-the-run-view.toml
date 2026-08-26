@@ -1,60 +1,72 @@
 schema-version = "0.2"
 key = "0252.2"
 title = "Every exit erases the run view"
-status = "ready"
+status = "draft"
 raised = "2026-08-24"
 content = """
-Diagnosis (2026-08-24). The run view paints directly onto the normal
-screen — an inline viewport at full terminal height
+Diagnosis (2026-08-24, still accurate). The run view paints directly onto
+the normal screen — an inline viewport at full terminal height
 (tui_ratatui.rs `inline_viewport_height`). Exactly ONE path cleans that
 up: `close()` (run_view.rs), which commits the final tree into scrollback
 via `commit_inline_scrollback` and erases the viewport. Every other way
-out skips it:
+out — second ctrl-c while the driver is blocked (`interrupt.rs`
+`_exit(130)`), SIGTERM/external kill, a panic, an error propagating before
+`close()` — restores terminal MODES only (`FULL_RESTORE_ESCAPE`: raw off,
+mouse off, cursor shown). Nobody erases the painted rows, so the shell
+prompt lands inside a dead frame. The dashboard shows the same class
+second-hand: the attach/detach rebuild path ignores `terminal.clear()`
+failures.
 
-- second ctrl-c while the driver is blocked in a model call — the SIGINT
-  handler hard-exits (`interrupt.rs` `_exit(130)`)
-- SIGTERM / external kill — same hard exit
-- a panic (the hook calls `restore_terminal` only), or an error that
-  propagates before `close()` runs
-
-All of these restore terminal MODES (`FULL_RESTORE_ESCAPE`: raw off,
-mouse off, cursor shown) — that machinery is solid — but modes are all
-they restore. Nobody erases the painted rows, so the shell prompt lands
-inside a dead frame. The dashboard shows the same class second-hand: the
-attach/detach rebuild path ignores `terminal.clear()` failures, and
-exiting while attached crosses the same gap.
-
-## Shape
-
-- Prefill, in the house grammar (parent ruling 6): at pane construction,
-  pre-render an interrupted panel — `┌── <title> · <trait>` /
-  `│ session: <id>` / `│ error: interrupted (signal)` / `└── Failure` —
-  into a process-global buffer. The signal handler writes one static
-  clear-screen sequence plus that buffer verbatim: a single write of
-  pre-formatted bytes, async-signal-safe, refreshed if the pane's title
-  changes. Clearing the whole screen is correct for this pane because the
-  inline viewport IS the whole screen; scrollback above is untouched.
-- Panic hook and error-propagation paths funnel through `close()` (commit
-  or erase) instead of restore-modes-only. The hook stays correct for Alt
-  panes, which must NOT clear the primary screen.
-- Dashboard gap: stop ignoring `clear()` failures on the attach/detach
-  rebuild path, and prove exit-while-attached leaves nothing.
+Product ruling (2026-08-26, supersedes the earlier shape): a signal death
+during a live run must leave a clean terminal showing one interrupted
+panel in the house grammar with the run's real session id. Correctness of
+that panel under exotic instants of death is explicitly NOT the bar, and
+the full panic matrix is deferred. A prior attempt built a rescue-state
+ownership protocol (prefill refresh, pane generations, recovery-request
+queue) to make the panel perfect at any instant; that machinery is to be
+DELETED, not completed — its race surface diverged for 34 review rounds.
+"""
+scope = """
+## Decisions
+- The interrupted panel — `┌── <title> · <trait>` / `│ session: <id>` /
+  `│ error: interrupted (signal)` / `└── Failure` — is rendered ONCE at
+  Inline pane construction into an immutable byte blob and published with
+  a single atomic pointer swap. It is never refreshed: a stale title is
+  acceptable; the session id never changes.
+- The signal handler performs one atomic load and one write —
+  FULL_RESTORE_ESCAPE, clear-screen, blob — async-signal-safe: no
+  formatting, no allocation, no locks.
+- Alt panes publish null: the handler must never clear the primary screen
+  for an Alt pane.
+- Imperfect panel bytes during a construction/teardown instant are
+  acceptable by design (stale or duplicate panel, never a mode-corrupted
+  terminal). No pane-generation ownership protocol, no prefill refresh,
+  no recovery-request queue, no cross-drive rescue counters.
+- Error-propagation paths funnel through `close()`. ONE representative
+  injected-panic case must leave no frame rows; writer-thread,
+  concurrent, and panic-during-replacement permutations are out of scope
+  for now (best-effort mode restore, as today, is acceptable there).
+- Dashboard: stop ignoring `clear()` failures on the attach/detach
+  rebuild path.
+- A clean run's bytes stay identical to today (commit-to-scrollback path
+  unchanged).
 """
 validation = """
 ## Watch
-
-- Signal-handler code stays a write of pre-formatted static bytes —
-  no formatting, no allocation, no locks in the handler.
-- The prefilled panel matches 0252.1's grammar byte-for-byte; one proof
-  renders both and diffs them, from scratch fixtures.
+- The handler stays one atomic load plus one write of pre-rendered bytes
+  after mode restore — nothing else may run in signal context.
+- The panel is proven byte-for-byte against 0252.1's grammar from a
+  scratch fixture, with the correct session id and title-as-of-
+  construction.
+- Do not resurrect the deleted rescue machinery to satisfy a timing
+  proof; signal-timing perfection is explicitly not the bar.
 
 ## Done when
-
-Proven from captured pty bytes, not eyeballs: SIGTERM to a live scratch
-run leaves modes restored and only the interrupted panel on screen;
-the double-ctrl-c path leaves the same; an injected panic mid-run leaves
-no frame rows; dashboard attach then exit leaves no remnant. A clean run
-is byte-identical to today (commit-to-scrollback path unchanged).
+Proven from captured pty bytes, not eyeballs: double-ctrl-c and SIGTERM
+on a live scratch run leave modes restored and only the house-grammar
+interrupted panel with the correct session id; a clean run is
+byte-identical to today; dashboard attach-then-exit leaves nothing; one
+injected main-path panic leaves no frame rows.
 """
 
 [relations]
