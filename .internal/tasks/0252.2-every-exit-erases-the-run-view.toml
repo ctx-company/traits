@@ -1,73 +1,748 @@
 schema-version = "0.2"
 key = "0252.2"
 title = "Every exit erases the run view"
-status = "draft"
+status = "ready"
 raised = "2026-08-24"
 content = """
-Diagnosis (2026-08-24, still accurate). The run view paints directly onto
-the normal screen — an inline viewport at full terminal height
-(tui_ratatui.rs `inline_viewport_height`). Exactly ONE path cleans that
-up: `close()` (run_view.rs), which commits the final tree into scrollback
-via `commit_inline_scrollback` and erases the viewport. Every other way
-out — second ctrl-c while the driver is blocked (`interrupt.rs`
-`_exit(130)`), SIGTERM/external kill, a panic, an error propagating before
-`close()` — restores terminal MODES only (`FULL_RESTORE_ESCAPE`: raw off,
-mouse off, cursor shown). Nobody erases the painted rows, so the shell
-prompt lands inside a dead frame. The dashboard shows the same class
-second-hand: the attach/detach rebuild path ignores `terminal.clear()`
-failures.
+## Pre-edit contracts
+Grounding was read-only at current HEAD. Verify each declaration below before
+the first edit; a material mismatch blocks all edits and must be reported as
+the exact file, symbol, and failed contract.
 
-Product ruling (2026-08-26, supersedes the earlier shape): a signal death
-during a live run must leave a clean terminal showing one interrupted
-panel in the house grammar with the run's real session id. Correctness of
-that panel under exotic instants of death is explicitly NOT the bar, and
-the full panic matrix is deferred. A prior attempt built a rescue-state
-ownership protocol (prefill refresh, pane generations, recovery-request
-queue) to make the panel perfect at any instant; that machinery is to be
-DELETED, not completed — its race surface diverged for 34 review rounds.
+1. `modules/cli/src/app/presentation.rs` declares `TOP_BORDER = "┌── "`,
+   `BAR = "│"`, `BOTTOM_BORDER = "└── "`, `pub(crate) struct Panel`,
+   `pub(crate) fn Panel::new(product: impl Into<String>, headline: impl Into<String>, status: PanelStatus) -> Self`,
+   `pub(crate) fn Panel::row(mut self, row: PanelRow) -> Self`,
+   `pub(crate) fn Panel::styled_lines(&self) -> Vec<Line>`,
+   `pub(crate) fn PanelRow::toned(label: impl Into<String>, value: impl Into<String>, tone: RowTone) -> Self`,
+   and `PanelStatus::Blocked`. This file is NOT edited by this task; it is the
+   sole grammar authority the rescue path reuses. Sibling `0252.1` owns any
+   change to these glyphs. This task does not depend on `0252.1` because the
+   `┌── ` / `│` / `└── Failure` grammar and the failure row set already exist
+   at HEAD; introducing a second rendering of that grammar is forbidden.
+2. `modules/cli/src/app/run.rs` declares `fn print_final_output(session: &ctx_traits_core::procedure::session::Session, drive: &crate::app::drive::DriveReport, ledger_path: &camino::Utf8Path, trait_ref: Option<&ctx_traits_core::Trait>, failure_reason: Option<&str>, verbose: bool) -> crate::Result<()>`,
+   `fn run_header(session: &ctx_traits_core::procedure::session::Session, ledger_path: &camino::Utf8Path) -> (String, String)`,
+   and `fn run_header_from_title(trait_id: &str, title: Option<String>) -> (String, String)`.
+   `print_final_output` has NO isolated failure branch that could be rewritten
+   on its own. At `modules/cli/src/app/run.rs:1674-1685` it binds
+   `let (product, headline) = run_header(session, ledger_path);`, then
+   `let failed = !run_completed(session, drive);`, then ONE `status` binding
+   selecting `crate::app::presentation::PanelStatus::Blocked("Failure".to_string())`
+   or `crate::app::presentation::PanelStatus::Passed("Success".to_string())`,
+   then ONE panel construction outside the conditional:
+   `let mut panel = Panel::new(product, headline, status).row(PanelRow::toned("session", session.session_id.as_str(), RowTone::Default));`.
+   Only the rows after `session` are conditional. Lines 1686-1691 are
+   `if failed { panel = panel.row(PanelRow::toned("error", failure_reason.unwrap_or("run failed"), RowTone::Fail)); }`,
+   and lines 1692-1703 are the `else if let Some(landing) = ctx_traits_core::procedure::session::landing_state(session)`
+   arm that appends the optional `merged` row (`merged_fact`) and, under
+   `verbose`, the `landing` row (`landing_detail`). Everything after that
+   chain — the `if verbose { match &session.completion { ... } }` detail body
+   and the closing `emit_human(false, &panel, mode, || { ... })` call — is
+   outside step 4b's edit. Step 4b names the exact statements it moves.
+3. `modules/cli/src/app/tui.rs` declares `pub(crate) fn emit_lines(lines: &[Line]) -> crate::Result<()>`
+   and private `fn paint(tone: Tone, text: &str) -> String`. `emit_lines` is
+   the only ANSI serializer for `Line` values; `paint` is unreachable from
+   outside the module today.
+4. `modules/cli/src/app/tui_ratatui.rs` declares `static ACTIVE_GENERATION: AtomicU64`,
+   `static ACTIVE_SCREEN: AtomicU8`, `static TORN_DOWN_GENERATION: AtomicU64`,
+   `enum PaneScreen { Alt = 0, Inline = 1 }`,
+   `pub(crate) fn signal_safe_pane_active() -> bool`,
+   `pub(crate) const FULL_RESTORE_ESCAPE: &[u8]`,
+   `fn install_panic_hook()`, `fn restore_terminal(screen: PaneScreen)`,
+   `fn inline_viewport_height(terminal_rows: u16) -> u16` returning
+   `terminal_rows` unchanged,
+   `fn new_with_options(screen: PaneScreen, ctrl_c_policy: CtrlCPolicy) -> std::io::Result<Self>`,
+   `pub(crate) fn draw(&mut self, widget: impl FnOnce(&mut ratatui::Frame<'_>)) -> std::io::Result<()>`
+   with a leading `if self.detached() { return Ok(()); }` guard,
+   `pub(crate) fn quit(&mut self)`,
+   `pub(crate) fn commit_inline_scrollback(&mut self, lines: &[Line]) -> std::io::Result<()>`,
+   `pub(crate) fn detached(&self) -> bool`, and `fn leave(&mut self)`.
+   In `new_with_options`, `ACTIVE_GENERATION.store` currently precedes
+   `ACTIVE_SCREEN.store`.
+5. `modules/cli/src/app/interrupt.rs` declares `pub fn install()`,
+   `fn rescue_terminal_signal_safe()`, `extern "C" fn handle_sigterm(signal: i32)`,
+   `extern "C" fn handle_sigint(_signal: i32)`, `pub fn request_kill()`, and
+   `static SIGINT_COUNT: AtomicU64`. The SIGINT ladder at HEAD is: first
+   signal requests the graceful stop, second calls
+   `rescue_terminal_signal_safe`, third also calls `libc::_exit(130)`.
+   SIGTERM/SIGHUP rescue, kill the child group, and `libc::_exit(128 + signal)`
+   on the FIRST signal. The file has no `mod tests`.
+6. `modules/cli/src/app/run_view.rs` declares `struct RunPanelState` with
+   fields `repaint: RatatuiPane`, `session`, `title_state: Option<ctx_traits_core::procedure::session::SessionTitleState>`,
+   `last_tree_lines: Vec<tui::Line>`, `cadence`, `modal`, `handoff`;
+   `pub(crate) fn RunPanel::new_with_pane(trait_name: String, trait_ref: ctx_traits_core::Trait, plan: ctx_traits_core::procedure::run::Plan, session: ctx_traits_core::procedure::session::Session, repaint: RatatuiPane) -> Self`
+   ending in `panel.render(); panel.cadence.painted(); panel`;
+   `pub(crate) fn RunPanel::close(&self)`;
+   `pub(crate) fn RunPanel::set_title_state(&self, title_state: Option<ctx_traits_core::procedure::session::SessionTitleState>)`;
+   `fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool`
+   whose `ModalOutcome::Confirmed` arm calls `state.repaint.quit()`; and the
+   `LiveViewKeyAction::OpenDashboard` arm inside `poll_and_apply_keys`, which
+   calls `state.repaint.quit()` then `state.cadence.inactive()` before
+   `state.handoff.request(...)`. A `mod tests` exists in this file.
+7. `modules/cli/src/app/run_view/render.rs` declares
+   `pub(super) fn render_locked(state: &mut RunPanelState)`, whose final two
+   statements assign `state.last_tree_lines` and `fetch_max` the handled
+   generation.
+8. `modules/io/src/env_reference.rs` declares `pub enum EnvVarKind` with
+   variant `DebugOnlyTestHook`, `pub struct EnvVarDoc { pub name, pub contract, pub kind }`,
+   a `#[cfg(debug_assertions)]` block of `CTX_INTERNAL_TESTHOOK_*` constants,
+   and an `ENV_REFERENCE` table whose debug-only rows are appended under the
+   same cfg. `modules/cli/tests/proof_env_reference.rs` scans
+   `modules/*/src/**/*.rs` for quoted `CTX_`-prefixed literals and requires
+   each to appear in that table.
+9. `modules/cli/tests/support/src/lib.rs` declares
+   `pub fn run_pty_with_cursor_reply(binary: &Path, args: &str, cwd: &Path, home: &Path, marker: &str, termios_file: &str) -> (i32, String)`,
+   `pub fn text_after_terminal_restore(raw: &str) -> String`, and
+   `pub fn strip_escapes(raw: &str) -> String`.
+10. `modules/cli/tests/proof_output_style.rs` declares
+    `fn run_failed_default_output_is_exact()`, which already pins the ordinary
+    failure panel to exactly the `session` and `error` rows closing `Failure`.
+    That file is NOT edited.
+
+## Outcome
+Every abnormal exit from the full-height inline run viewport must remove the
+painted frame, and every hard-kill signal must leave the same failure panel
+the ordinary run-end path renders — built from the same `Panel` grammar and
+the same title/trait fallback, never a second rendering.
+
+Signal path. `interrupt::rescue_terminal_signal_safe` gains one additional
+gated `libc::write` of already-formatted bytes. Those bytes are composed
+outside every handler, at run-panel construction and on every title refresh,
+and published into a fixed-capacity process-global buffer. The handler
+performs only atomic loads and one `write`; no formatting, allocation, lock,
+`eprintln!`, crossterm, or ratatui call is added to any handler. The buffer
+begins with a clear-screen escape that homes the cursor and erases the
+display (CSI H then CSI 2 J) and deliberately omits the erase-scrollback
+operation (CSI 3 J), because the inline viewport already occupies every
+terminal row (`inline_viewport_height(rows) == rows`) while the scrollback
+above it must survive. Panel line terminators in the buffer are CR/LF,
+because `rescue_terminal_signal_safe` writes before its `tcsetattr` and the
+terminal may still be in raw mode.
+
+The escalation ladder is NOT changed. Attaching the panel write to
+`rescue_terminal_signal_safe` covers every path that actually performs a hard
+rescue today: SIGTERM and SIGHUP on the first signal, SIGINT on the second
+and third. Sibling `0252.4` owns any change making the second Ctrl-C the hard
+hatch; this task must not pre-empt it. Because the buffer starts with the
+clear escape, a repeated rescue overwrites rather than stacks, so the final
+visible screen carries exactly one panel.
+
+Ownership gating. The rescue bytes are armed against the exact pane
+generation that owns the terminal and are written only when that generation
+still owns an inline pane. A stale run panel must never be written over an
+active alternate-screen dashboard, demo, story view, or editor; for those
+panes the existing behavior is preserved exactly — leave the alternate screen
+and reveal the untouched primary screen, with no clear and no panel. Pane
+generations are monotonic and never reused, and `leave()` returns the active
+generation to 0, so generation equality is the whole disarm mechanism; no
+separate disarm entry point is added.
+
+Panic path. The process panic hook clears the inline viewport after
+restoring modes, and does nothing new for an alternate-screen pane. It does
+NOT write the interrupted panel: a panic is an internal fault, not a kill, so
+labelling it `interrupted (signal)` would be false, and the chained previous
+hook then prints the real panic message on a clean screen. This also covers
+the case where the panic poisoned `RunPanelState`'s mutex and a later
+`RunPanel::close` therefore skips its body.
+
+Quit, handoff, and commit failure. Confirmed `q` and the `d` dashboard
+handoff currently call `state.repaint.quit()` before any commit, so the later
+`RunPanel::close` finds a detached pane and `commit_inline_scrollback` is a
+no-op — the painted frame survives. Both paths, and `RunPanel::close` itself,
+must route through one shared teardown that commits the last rendered tree
+and, only when that commit fails, explicitly clears the viewport instead. A
+successful commit must not be followed by any additional clear, so a clean
+run's teardown bytes are unchanged. This one ordering fix is also the
+dashboard attach/exit fix: the attached observer is the same `RunPanel`, so
+its `q`/`d` exit no longer leaves a frame for the rebuilt alternate-screen
+dashboard to reveal on exit.
+
+Ordinary error propagation already reaches `close()`: `RunPanelGuard::drop`
+and `MergeSpanGuard::drop` both call `panel.close()` and cover every early
+return, so the draft's "an error that propagates before close() runs" is not
+a live defect in this revision. The remaining defect on that path is the
+ignored commit result, which the shared teardown resolves. No new guard is
+introduced. Likewise, the draft's "the attach/detach rebuild ignores
+terminal.clear() failures" does not hold: inline construction propagates that
+failure. The real attach remnant is the quit-before-close ordering above.
+
+The implementation allowlist is exactly:
+`modules/cli/src/app/tui.rs`, `modules/cli/src/app/tui_ratatui.rs`,
+`modules/cli/src/app/interrupt.rs`, `modules/cli/src/app/run.rs`,
+`modules/cli/src/app/run_view.rs`, `modules/cli/src/app/run_view/render.rs`,
+`modules/io/src/env_reference.rs`, `modules/cli/tests/support/src/lib.rs`,
+and new file `modules/cli/tests/proof_run_view_exit_teardown.rs`.
 """
 scope = """
-## Decisions
-- The interrupted panel — `┌── <title> · <trait>` / `│ session: <id>` /
-  `│ error: interrupted (signal)` / `└── Failure` — is rendered ONCE at
-  Inline pane construction into an immutable byte blob and published with
-  a single atomic pointer swap. It is never refreshed: a stale title is
-  acceptable; the session id never changes.
-- The signal handler performs one atomic load and one write —
-  FULL_RESTORE_ESCAPE, clear-screen, blob — async-signal-safe: no
-  formatting, no allocation, no locks.
-- Alt panes publish null: the handler must never clear the primary screen
-  for an Alt pane.
-- Imperfect panel bytes during a construction/teardown instant are
-  acceptable by design (stale or duplicate panel, never a mode-corrupted
-  terminal). No pane-generation ownership protocol, no prefill refresh,
-  no recovery-request queue, no cross-drive rescue counters.
-- Error-propagation paths funnel through `close()`. ONE representative
-  injected-panic case must leave no frame rows; writer-thread,
-  concurrent, and panic-during-replacement permutations are out of scope
-  for now (best-effort mode restore, as today, is acceptable there).
-- Dashboard: stop ignoring `clear()` failures on the attach/detach
-  rebuild path.
-- A clean run's bytes stay identical to today (commit-to-scrollback path
-  unchanged).
+## Ordered work
+Edit strictly in this order; each step compiles before the next begins.
+
+1. `modules/cli/src/app/tui.rs`. Add
+   `pub(crate) fn render_lines_ansi(lines: &[Line]) -> String`: for each line,
+   concatenate `paint(segment.tone, &segment.text)` over its segments, then
+   push one newline. Rewrite only the body of existing
+   `pub(crate) fn emit_lines(lines: &[Line]) -> crate::Result<()>` to write
+   `render_lines_ansi(lines)` to the locked stdout handle and flush,
+   preserving its signature and its byte output exactly (every line followed
+   by one newline). Add no color/capability gate here: `emit_lines` has none
+   today and its callers own that decision.
+
+2. `modules/cli/src/app/tui_ratatui.rs`.
+   a. Add `pub(crate) const CLEAR_VIEWPORT_ESCAPE: &[u8] = b"\\x1b[H\\x1b[2J";`
+      — cursor-home followed by erase-entire-display, and nothing else.
+      Document that erase-scrollback (`\\x1b[3J`) is deliberately absent, and
+      that this exact spelling is what makes a task-introduced clear
+      distinguishable in a captured PTY stream from the erases the terminal
+      stack already emits on every clean run: ratatui's `Terminal::clear()`
+      for an inline viewport emits a cursor-position set plus
+      `ClearType::AfterCursor` (`\\x1b[J`), both at construction
+      (`new_with_options`, `tui_ratatui.rs:581`) and again at the end of
+      `insert_before_no_scrolling_regions`, which `commit_inline_scrollback`
+      relies on. Neither is a substring of `\\x1b[H\\x1b[2J`, and crossterm
+      spells cursor moves as `\\x1b[1;1H`, so this constant never collides with
+      them.
+   b. Add `pub(crate) fn signal_safe_inline_generation() -> u64`: two atomic
+      loads; returns `ACTIVE_GENERATION` when `ACTIVE_SCREEN` equals
+      `PaneScreen::Inline as u8`, otherwise 0. Async-signal-safe; no lock, no
+      allocation.
+   c. In `fn new_with_options`, store `ACTIVE_SCREEN` BEFORE
+      `ACTIVE_GENERATION`, closing the window in which a handler observes a
+      live generation paired with the previous pane's screen mode.
+   d. In `fn install_panic_hook`, inside the existing `active != 0` arm and
+      after `restore_terminal(...)`, write `CLEAR_VIEWPORT_ESCAPE` to stderr
+      only when the resolved screen is `PaneScreen::Inline`. Do not write it
+      for `PaneScreen::Alt`. Do not write the rescue panel here.
+   e. Add `pub(crate) fn rescue_generation(&self) -> Option<u64>` on
+      `impl RatatuiPane`, returning `Some(self.generation)` only when the pane
+      is `PaneScreen::Inline` and not `detached()`.
+   f. Add `pub(crate) fn clear_viewport(&mut self) -> std::io::Result<()>` on
+      `impl RatatuiPane`: `Ok(())` for a non-inline, detached, or
+      terminal-less pane; otherwise `terminal.clear()`.
+   g. In the file's existing `mod tests`, add
+      `fn clear_viewport_escape_erases_the_screen_but_never_the_scrollback()`
+      asserting `CLEAR_VIEWPORT_ESCAPE` is exactly cursor-home plus
+      erase-display and contains no erase-scrollback subsequence.
+
+3. `modules/cli/src/app/interrupt.rs`.
+   a. Add `const RESCUE_PANEL_CAPACITY: usize = 4096;`,
+      `static mut RESCUE_PANEL: [u8; RESCUE_PANEL_CAPACITY]`,
+      `static RESCUE_PANEL_LEN: AtomicUsize`,
+      `static RESCUE_PANEL_GENERATION: AtomicU64`, and
+      `static RESCUE_PANEL_WRITE: std::sync::Mutex<()>`.
+   b. Add `pub(crate) fn arm_rescue_panel(generation: u64, panel: &crate::app::presentation::Panel)`.
+      Outside any handler: build the byte string as `CLEAR_VIEWPORT_ESCAPE`
+      followed by `crate::app::tui::render_lines_ansi(&panel.styled_lines())`
+      with every newline expanded to CR/LF. Take `RESCUE_PANEL_WRITE`; a
+      poisoned lock is recovered with `into_inner` rather than propagated.
+      Store `RESCUE_PANEL_LEN` 0, copy the bytes, store
+      `RESCUE_PANEL_GENERATION`, then store `RESCUE_PANEL_LEN` — that order is
+      what makes a concurrent handler read either nothing or a complete
+      buffer, never a torn one. Bytes exceeding `RESCUE_PANEL_CAPACITY` leave
+      the length at 0 (nothing is armed; the rescue degrades to today's
+      mode-only behavior). All stores and loads use `Ordering::SeqCst`,
+      matching this module's existing discipline. This lock is a leaf: it is
+      taken while `RunPanelState`'s mutex is held and must never itself take
+      another lock.
+   c. Add `fn write_rescue_panel_signal_safe()`: load the length; return when
+      0; load the armed generation; return unless it is nonzero and equal to
+      `super::tui_ratatui::signal_safe_inline_generation()`; then perform one
+      `libc::write` of exactly that many bytes to `STDERR_FILENO`. Atomic
+      loads plus one `write` only.
+   d. In `fn rescue_terminal_signal_safe`, call
+      `write_rescue_panel_signal_safe()` immediately after the existing
+      `FULL_RESTORE_ESCAPE` write and before the `tcsetattr` call. Change
+      nothing else in that function.
+   e. Do not change `handle_sigint`, `handle_sigterm`, `install`,
+      `SIGINT_COUNT`, `request_kill`, `request_stop`, or `reset`.
+   f. Add a `#[cfg(test)] mod tests` with a single test symbol
+      `fn arming_publishes_the_panel_bytes_under_generation_and_capacity_rules()`
+      plus a test-only reader
+      `#[cfg(test)] fn armed_rescue_panel_snapshot() -> Vec<u8>`. The test
+      must, from scratch data: arm a small panel and assert the snapshot
+      begins with `CLEAR_VIEWPORT_ESCAPE`, that stripping that prefix and
+      collapsing CR/LF back to newlines yields exactly
+      `crate::app::tui::render_lines_ansi(&panel.styled_lines())`, that the
+      recorded generation is the armed one, and that arming a panel whose
+      bytes exceed `RESCUE_PANEL_CAPACITY` leaves the length at 0.
+
+4. `modules/cli/src/app/run.rs`.
+   a. Add `pub(crate) fn failure_panel(product: &str, headline: &str, session_id: &str, error: &str) -> crate::app::presentation::Panel`,
+      returning `Panel::new(product, headline, PanelStatus::Blocked("Failure".to_string()))`
+      with a `RowTone::Default` `session` row then a `RowTone::Fail` `error`
+      row, in that order and with no other row.
+   b. In `fn print_final_output`, apply exactly this statement-level
+      transformation and nothing else. Delete the `let status = if failed {
+      ... } else { ... };` binding (`run.rs:1676-1680`). Replace the shared
+      `let mut panel = Panel::new(product, headline, status).row(...session...);`
+      construction (`:1681-1685`) together with the `if failed { ...error
+      row... } else if let Some(landing) = ... { ...merged/landing rows... }`
+      chain (`:1686-1703`) with this single binding, which routes the failed
+      side through `failure_panel` and leaves the successful side's status
+      text, row set, row order, and `verbose` condition byte-for-byte as they
+      are today:
+
+          let mut panel = if failed {
+              failure_panel(
+                  &product,
+                  &headline,
+                  session.session_id.as_str(),
+                  failure_reason.unwrap_or("run failed"),
+              )
+          } else {
+              let mut panel = Panel::new(
+                  product,
+                  headline,
+                  crate::app::presentation::PanelStatus::Passed("Success".to_string()),
+              )
+              .row(PanelRow::toned(
+                  "session",
+                  session.session_id.as_str(),
+                  RowTone::Default,
+              ));
+              if let Some(landing) =
+                  ctx_traits_core::procedure::session::landing_state(session)
+              {
+                  if let Some(merged) = merged_fact(session) {
+                      panel = panel.row(PanelRow::toned("merged", merged, RowTone::Default));
+                  }
+                  if verbose {
+                      panel = panel.row(PanelRow::toned(
+                          "landing",
+                          landing_detail(&landing),
+                          RowTone::Default,
+                      ));
+                  }
+              }
+              panel
+          };
+
+      `&product`/`&headline` deref-coerce to `&str` on the failed side while
+      the successful side still moves both `String`s; the arms are exclusive,
+      so that borrow/move split compiles. `let (product, headline) =
+      run_header(...)`, `let failed = ...`, the `if verbose { match
+      &session.completion { ... } }` detail body, the closing `emit_human(false,
+      &panel, mode, || { ... })` call, and the signature are all unchanged.
+      Because `failure_panel` emits exactly the `Blocked("Failure")` status and
+      the `session` + `error` rows this chain emitted, `proof_output_style`'s
+      `run_failed_default_output_is_exact` must keep passing untouched
+      (Done-when 3).
+   c. Widen `fn run_header_from_title` to
+      `pub(crate) fn run_header_from_title(trait_id: &str, title: Option<String>) -> (String, String)`.
+      Its body is unchanged; this is the shared title/trait fallback.
+
+5. `modules/io/src/env_reference.rs`. Add, inside the existing
+   `#[cfg(debug_assertions)]` test-hook block,
+   `pub const TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER: &str = "CTX_INTERNAL_TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER";`
+   with a doc comment naming its call site, and append the matching
+   `EnvVarDoc` row with `kind: EnvVarKind::DebugOnlyTestHook` under the same
+   cfg as the other test-hook rows. Do not assume a
+   `just testhook-absence-check` recipe exists — it does not; the debug-only
+   cfg gate at the definition is the whole guarantee, exactly as the four
+   existing hook names have it.
+
+6. `modules/cli/src/app/run_view/render.rs`. Add
+   `#[cfg(debug_assertions)] fn test_only_panic_after_render()` — reads
+   `ctx_traits_io::env_reference::TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER` and
+   panics with a fixed message when set — and its
+   `#[cfg(not(debug_assertions))] fn test_only_panic_after_render()` no-op
+   twin, following the `test_only_checkpoint` pattern in
+   `modules/cli/src/app/drive.rs`. Call it as the last statement of
+   `pub(super) fn render_locked`, after `state.last_tree_lines` is assigned,
+   so the injected panic always follows a fully painted frame. Change nothing
+   else in this file.
+
+7. `modules/cli/src/app/run_view.rs`.
+   a. Add `const RESCUE_ERROR_TEXT: &str = "interrupted (signal)";`.
+   b. Add `fn resolved_title(title_state: Option<&ctx_traits_core::procedure::session::SessionTitleState>) -> Option<String>`,
+      returning the title only for `SessionTitleState::Resolved` and `None`
+      for every other state, so an unresolved title falls back through the
+      shared `run_header_from_title` rule exactly as the ordinary run-end
+      panel does.
+   c. Add `fn rescue_panel(state: &RunPanelState) -> crate::app::presentation::Panel`:
+      `crate::app::run::run_header_from_title(state.session.trait_id.as_str(), resolved_title(state.title_state.as_ref()))`
+      then `crate::app::run::failure_panel(&product, &headline, state.session.session_id.as_str(), RESCUE_ERROR_TEXT)`.
+      This function must construct no glyph, border, row label, or status
+      string of its own.
+   d. Add `fn arm_rescue_panel_locked(state: &RunPanelState)`: when
+      `state.repaint.rescue_generation()` is `Some(generation)`, call
+      `crate::app::interrupt::arm_rescue_panel(generation, &rescue_panel(state))`.
+   e. In `pub(crate) fn RunPanel::new_with_pane`, call
+      `arm_rescue_panel_locked(&state)` inside the existing
+      `if let Ok(mut state) = state.lock()` block that installs the input
+      wake, so the buffer is armed before the first `panel.render()`. This is
+      the point where the run panel takes ownership of the pane, including a
+      pane handed over from `StartupView`; arming must not be attached to
+      `RatatuiPane::new_inline`, which can run before any session identity
+      exists. Signature unchanged.
+   f. In `pub(crate) fn RunPanel::set_title_state`, call
+      `arm_rescue_panel_locked(&state)` after `merge_title_state` and before
+      `render_locked`. Signature unchanged. This is the single refresh seam
+      every title source in `drive.rs` already funnels through.
+   g. Add `fn close_pane_locked(state: &mut RunPanelState)`: clone
+      `state.last_tree_lines`, call
+      `state.repaint.commit_inline_scrollback(&lines)`, and ONLY if that
+      returns `Err` call `state.repaint.clear_viewport()` (result discarded —
+      the pane is being abandoned either way); then `state.repaint.quit()` and
+      `state.cadence.inactive()`.
+   h. Rewrite the body of `pub(crate) fn RunPanel::close(&self)` to call
+      `close_pane_locked` inside its existing `if let Ok(mut state)` block,
+      keeping the trailing `self.handoff.close()` outside the lock.
+      Signature and poisoned-lock behavior unchanged.
+   i. In `fn apply_open_modal_key`, replace `state.repaint.quit();` in the
+      `ModalOutcome::Confirmed` arm with `close_pane_locked(state);`, leaving
+      the modal reset and the non-observer `eprintln!` notice exactly where
+      they are. Signature unchanged.
+   j. In the `LiveViewKeyAction::OpenDashboard` arm of `poll_and_apply_keys`,
+      replace `state.repaint.quit(); state.cadence.inactive();` with
+      `close_pane_locked(state);`, before the unchanged
+      `state.handoff.request(...)` call.
+   k. In the file's existing `mod tests`, add one test symbol
+      `fn rescue_panel_reuses_the_shared_failure_grammar_and_title_fallback()`
+      that, from scratch data (no repo file, no fixture inventory), asserts
+      `rescue_panel`'s styled lines equal
+      `crate::app::run::failure_panel(...)`'s styled lines for a resolved
+      title and, separately, for an unresolved title where the trait id
+      becomes the product and the headline is empty.
+
+8. `modules/cli/tests/support/src/lib.rs`. Add exactly these two symbols and
+   no others.
+   a. `pub fn run_pty_signal_after_marker(binary: &Path, args: &str, cwd: &Path, home: &Path, ready_pattern: &str, signal: &str, repeat: usize) -> (i32, String)`.
+      It spawns the shell with `exec` so the PTY child IS the `ctx` process and
+      `exp_pid` addresses it directly, answers every crossterm cursor-position
+      query exactly as `run_pty_with_cursor_reply` does, waits for
+      `ready_pattern` to prove the run pane is painted, sends `signal` to
+      `exp_pid` `repeat` times, and returns the child's own exit code from
+      `[wait]` alongside the full raw byte stream.
+   b. `pub fn run_pty_keys_after_markers(binary: &Path, args: &str, cwd: &Path, home: &Path, steps: &[(&str, &str)]) -> (i32, String)`.
+      Same spawn, cursor-reply, and isolation recipe; for each `(pattern,
+      keys)` step in order it waits for `pattern` and then sends `keys`
+      verbatim, and after the last step waits for eof and returns the child's
+      own `[wait]` exit code with the full raw byte stream. This is the one
+      key-driving PTY recipe; it lives here rather than in the proof file so
+      the cursor-reply and isolation logic is not copied a third time.
+   Environment isolation (`env_clear`, HOME/XDG/PATH/TERM) in both is
+   identical to `run_pty_with_cursor_reply`. Do not modify
+   `run_pty_with_cursor_reply`, `text_after_terminal_restore`, or
+   `strip_escapes`.
+
+9. New file `modules/cli/tests/proof_run_view_exit_teardown.rs`. Its symbol
+   surface is closed and is exactly the following — five constants, one
+   fixture type, one background-run type, five private functions, and the
+   five `#[test]` symbols named under "Focused proof". No other item may be
+   added to this file; anything a single test needs and no other test shares
+   stays inside that test's body.
+   a. `const TRAIT_ID: &str = "demo";`,
+      `const TRAIT_PATH: &str = ".ctx/traits/demo/generated/index.toml";`,
+      `const STEP_ID: &str = "only-step";` (the sequence step id
+      `command_trait_fixture` writes, used as the run-tree row anchor in the
+      captured stream),
+      `const CLEAR_VIEWPORT: &str = "\\x1b[H\\x1b[2J";` (the literal respelling
+      of crate-internal `tui_ratatui::CLEAR_VIEWPORT_ESCAPE`), and
+      `const RESCUE_ERROR_TEXT: &str = "interrupted (signal)";` (the literal
+      respelling of crate-internal `run_view::RESCUE_ERROR_TEXT`).
+   b. `struct ExitFixture { _scratch: support::ScratchRoot, repo: std::path::PathBuf, home: std::path::PathBuf }`
+      — scratch root held for its `Drop` cleanup, plus the repository and
+      HOME paths every driver call takes.
+   c. `fn command_trait_fixture(label: &str, cmd: &str) -> ExitFixture` —
+      builds the scratch repository and the command-only trait whose single
+      sequence step runs `cmd`.
+   d. `struct BackgroundRun(std::process::Child)` with
+      `impl Drop for BackgroundRun` — kills and reaps the child, so no live
+      run outlives test 4 on any assertion path.
+   e. `fn spawn_background_run(fixture: &ExitFixture) -> BackgroundRun` —
+      starts the live run test 4 attaches to.
+   f. `fn ledger_session_id(repo: &std::path::Path) -> String` — reads the
+      single `<repo>/.ctx/runs/*.json` ledger and returns its `session-id`
+      field.
+   g. `fn surviving_screen_text(raw: &str) -> String` — the final visible
+      screen: `strip_escapes` of everything after the LAST clear-screen
+      escape.
+   h. `fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str)`
+      — the shared surviving-panel assertion used by tests 1 and 2.
+   See "Focused proof" for each function's exact obligations.
+
+10. Run the four verification commands in the order given under "Done when".
+
+11. At most two targeted repair-and-rerun rounds in total across all failures
+    and review findings. Repair only files inside the allowlist, preserving
+    the edit order above when several need repair. After each repair, rerun
+    the failing command and every later verification step. A remaining
+    contract, test, scope, or review blocker stops completion and must be
+    reported instead.
+
+## Focused proof
+`modules/cli/tests/proof_run_view_exit_teardown.rs` carries exactly the closed
+symbol surface declared in step 9. Every fixture is built from scratch data
+through these existing `support` symbols, which are the only ones this file
+imports and none of which it modifies:
+`pub fn ScratchRoot::new(label: &str) -> ScratchRoot` and
+`pub fn ScratchRoot::home(&self) -> PathBuf` for the isolated scratch root and
+HOME; `pub fn git_init(dir: &Path)` for the scratch repository;
+`pub fn require_success(description: &str, args: &[&str], cwd: &Path, home: &Path) -> String`
+for the `ctx traits trust --approved` and `ctx traits state --active --file`
+calls that clear the fixture's gates; `pub fn ctx_bin() -> PathBuf` for the
+binary under test;
+`pub fn spawn_ctx(args: &[&str], cwd: &Path, home: &Path) -> std::process::Child`
+for test 4's background live run;
+`pub fn run_pty_with_cursor_reply(binary: &Path, args: &str, cwd: &Path, home: &Path, marker: &str, termios_file: &str) -> (i32, String)`;
+`pub fn text_after_terminal_restore(raw: &str) -> String`; and
+`pub fn strip_escapes(raw: &str) -> String`. The two step-8 drivers,
+`run_pty_signal_after_marker` and `run_pty_keys_after_markers`, are the only
+other PTY recipes this file drives with.
+
+`command_trait_fixture` creates the scratch root and HOME, `git_init`s
+`<home>/repo`, writes `.gitignore`, `.ctx/traits/demo/trait.toml`, and
+`TRAIT_PATH` with `std::fs::write` — a schema-0.2 manifest with one
+`kind = "command"` sequence step declared as `id = STEP_ID` whose `cmd` is the
+caller's string — commits with `git`, then clears the draft and unreviewed
+gates through `require_success`. `STEP_ID` is the step label the run tree
+renders, so it is the anchor tests locate in the painted frame and again in
+the committed scrollback. Tests 1 through 4 pass `"sleep 30"` so the run pane
+is reliably painted and the run is still in flight when the test acts; test 5
+builds two fixtures — `"true"` for the clean run it measures, and `"sleep 30"`
+for the killed capture that serves as its differential baseline.
+`ledger_session_id` parses the ledger with `serde_json` and returns
+`session-id`, so the expected session row value is observed rather than
+hardcoded. `surviving_screen_text` slices at the last occurrence of
+`CLEAR_VIEWPORT` and returns `strip_escapes` of the remainder.
+`assert_only_interrupted_panel` asserts that
+`surviving_screen_text(raw)` is exactly four panel lines: a `┌── ` top border
+carrying `trait_id`, a `session:` row whose value is `session_id`, an
+`error:` row whose value is `RESCUE_ERROR_TEXT`, and a closing
+`└── Failure` — with no journey, history, current-stream, or footer row from
+the live frame. No test may read committed repository content, a golden file,
+or a path inventory.
+
+1. `fn sigterm_leaves_only_the_interrupted_failure_panel()` — drive the run
+   through `run_pty_signal_after_marker` with one SIGTERM after the pane is
+   painted. Assert the child exit code is 143. Assert the captured bytes
+   contain `FULL_RESTORE_ESCAPE`'s leave-alternate-screen and show-cursor
+   sequences (modes restored). Then call
+   `assert_only_interrupted_panel(&raw, TRAIT_ID, &ledger_session_id(&fixture.repo))`.
+2. `fn repeated_sigint_leaves_only_the_interrupted_failure_panel()` — same
+   helper, `repeat` set to three SIGINTs, matching the ladder that actually
+   exists at HEAD (first graceful, second rescue, third hard exit). Assert
+   exit code 130, then the identical `assert_only_interrupted_panel` call,
+   proving the repeated clear-then-write overwrites rather than stacks. Do
+   not send raw
+   Ctrl-C bytes for this case and do not assert a two-press hard exit: in raw
+   mode Ctrl-C is a key handled by `poll_detach`/`request_kill` and never
+   reaches `handle_sigint`, and the two-press hard hatch belongs to `0252.4`.
+3. `fn panic_mid_run_leaves_no_frame_rows()` — run under
+   `run_pty_with_cursor_reply` with
+   `CTX_INTERNAL_TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER` set, so the first
+   fully painted frame is followed by a panic. That helper clears the
+   environment and exposes no extra-env parameter, and step 8 forbids
+   modifying it, so the hook is delivered by passing `/usr/bin/env` as
+   `binary` and
+   `"CTX_INTERNAL_TESTHOOK_PANIC_AFTER_RUN_VIEW_RENDER=1 <ctx_bin()> traits run --file <TRAIT_PATH>"`
+   as `args`: `env` execs `ctx`, so the reported `[wait]` code is still the
+   child's own. Assert the captured bytes contain `CLEAR_VIEWPORT` at an
+   offset after the first `STEP_ID` frame row (the hook fires only after a
+   fully painted frame), that the text after the final terminal restore
+   carries the panic message and no `STEP_ID` row, and that
+   `RESCUE_ERROR_TEXT` appears nowhere in the stream (a panic is not a kill).
+4. `fn dashboard_attach_then_exit_leaves_no_run_frame()` — hold a live run
+   through `spawn_background_run`, then drive `ctx traits dashboard` with
+   `run_pty_keys_after_markers`: press Enter on the sessions row to attach
+   (`attach_selected`), assert observer frame rows appear, press `q` and
+   confirm to detach back to the dashboard, then press `q` and confirm the
+   Exit modal. Assert the text after the final terminal restore
+   (`text_after_terminal_restore`) contains no live run-frame row, proving
+   the rebuilt alternate screen no longer reveals a stale primary-screen
+   frame on exit.
+5. `fn clean_run_teardown_commits_scrollback_without_an_extra_clear()` — run
+   the `"true"` fixture to normal completion under
+   `run_pty_with_cursor_reply` and assert the child exit code is 0.
+
+   A clean capture legitimately contains erase escapes that this task does not
+   introduce and must not forbid: `RatatuiPane::new_with_options` clears the
+   freshly built inline terminal (`tui_ratatui.rs:581`), and ratatui's
+   `insert_before_no_scrolling_regions` — the body of
+   `commit_inline_scrollback` — clears the viewport itself once the inserted
+   lines are drawn. Both spell that clear as a cursor-position set plus
+   `\\x1b[J` (`ClearType::AfterCursor`), never as `CLEAR_VIEWPORT`. The proof
+   therefore discriminates by exact byte sequence and by offset rather than by
+   erase-presence, and asserts, in this order:
+
+   a. Construction clear is located and excused, not counted as teardown:
+      `raw.find("\\x1b[J")` is `Some` and is less than
+      `raw.find(STEP_ID).expect("painted frame")` — the first erase in the
+      stream precedes the first painted frame, which is exactly the
+      construction clear at `tui_ratatui.rs:581`.
+   b. The teardown slice is named exactly:
+      `let commit_start = raw.rfind(STEP_ID).expect("committed tree row");`
+      — the last write of the step row in the whole stream, which is the copy
+      `commit_inline_scrollback` pushed into scrollback, since nothing after
+      it re-renders the tree — and `let teardown = &raw[commit_start..];`.
+      Every remaining byte assertion is made over that slice or over `raw`
+      explicitly.
+   c. The commit still happened: `strip_escapes(teardown)` contains a
+      `STEP_ID` row, and `text_after_terminal_restore(&raw)` still shows it —
+      the tree landed in scrollback instead of being erased.
+   d. No byte this task can add appears in the teardown slice:
+      `assert!(!teardown.contains(CLEAR_VIEWPORT))` and
+      `assert!(!teardown.contains(RESCUE_ERROR_TEXT))`. Whole-stream counts
+      are asserted 0 for both as well:
+      `assert_eq!(raw.matches(CLEAR_VIEWPORT).count(), 0)`.
+   e. Differential baseline, so (d) cannot pass vacuously: within this same
+      test, drive `command_trait_fixture("clean-teardown-killed", "sleep 30")`
+      through `run_pty_signal_after_marker` with one SIGTERM and assert
+      `killed.matches(CLEAR_VIEWPORT).count() >= 1`. The killed capture is the
+      named baseline: same fixture builder, same PTY recipe, same construction
+      path, differing only in how the run exits. Its nonzero count against the
+      clean capture's zero count is the byte-level comparison that proves the
+      clean teardown emits none of the bytes this task introduces — a spelling
+      or capture artifact would zero both sides and fail this assertion.
+   f. The ordinary run-end panel is intact:
+      `text_after_terminal_restore(&raw)` contains a `┌── ` top border, a
+      `session:` row whose value is `ledger_session_id(&fixture.repo)`, and a
+      closing `└── Success`.
+
+   Reconciliation with the golden exclusion: a literal byte-for-byte diff
+   against a pre-change capture would require committing today's bytes as a
+   golden, which the exclusions forbid as a frozen-inventory proof, and every
+   clean teardown at HEAD already routes through the function this task edits,
+   so no in-tree control path can produce a pre-change baseline. Assertions
+   (b) through (e) are the decomposition of that obligation for this change:
+   (b) names the slice, (c) proves the unchanged producer still wrote it, and
+   (d)/(e) pin the only bytes this task can add — `CLEAR_VIEWPORT_ESCAPE` and
+   the armed rescue panel — to zero in that slice while proving the same
+   capture pipeline does observe them on an abnormal exit. No other edit in
+   the allowlist can write a byte on the clean teardown path.
+
+## Reuse
+`modules/cli/src/app/presentation.rs`'s `Panel`/`PanelRow`/`PanelStatus` is
+the sole grammar authority; the rescue path reaches it only through
+`crate::app::run::failure_panel`, which is also what the ordinary run-end
+failure output uses after step 4b. The title/trait fallback has one
+implementation, `crate::app::run::run_header_from_title`. ANSI serialization
+has one implementation, `crate::app::tui::render_lines_ansi`, shared by
+`emit_lines` and the rescue arming path. The clear-screen escape has one
+definition, `tui_ratatui::CLEAR_VIEWPORT_ESCAPE`, shared by the panic hook
+and the armed buffer prefix. Inline pane teardown has one implementation,
+`run_view::close_pane_locked`, shared by `RunPanel::close`, confirmed `q`,
+and the `d` handoff. Signal rescue keeps one entry point,
+`interrupt::rescue_terminal_signal_safe`. The PTY driver recipe is shared
+through `modules/cli/tests/support/src/lib.rs`; both new drivers,
+`run_pty_signal_after_marker` and `run_pty_keys_after_markers`, sit beside
+`run_pty_with_cursor_reply` rather than being copied into the proof file. The
+surviving-panel assertion has one implementation,
+`assert_only_interrupted_panel`, shared by the SIGTERM and repeated-SIGINT
+tests, and the fixture builder has one implementation,
+`command_trait_fixture`, parameterized by the step command.
+
+## Exclusions
+Do not edit `modules/cli/src/app/presentation.rs`,
+`modules/cli/src/app/drive.rs`, `modules/cli/src/app/dashboard.rs`,
+`modules/cli/src/app/run_startup_view.rs`,
+`modules/cli/tests/proof_output_style.rs`,
+`modules/cli/tests/proof_run_startup_progress.rs`, or any task sibling.
+
+Do not change the SIGINT escalation ladder, `SIGINT_COUNT` accounting, the
+SIGTERM/SIGHUP exit codes, `request_kill`, or raw-mode Ctrl-C key handling in
+`poll_detach` — all of that is `0252.4`'s surface. Do not change the panel
+glyph set, row labels, closing state text, or the run-end content rule — that
+is `0252.1`'s surface, and `0252.2` renders no third variant of it. Do not
+add a second rescue buffer, a panic-specific panel, a disarm entry point, a
+new pane guard, a VT emulator dependency, a golden capture, or a trait
+abstraction over `RatatuiPane`. The golden exclusion is what focused proof 5
+reconciles: clean-teardown byte identity is proven there by an in-capture
+baseline plus exact-sequence, offset-scoped absence assertions, never by a
+committed capture of today's bytes. Do not assert that a clean stream
+contains no erase escape at all — inline construction and ratatui's
+`insert_before` both legitimately emit `\\x1b[J`.
+
+Do not perform any formatting, allocation, `String` work, locking,
+`eprintln!`, crossterm call, or ratatui call inside a signal handler. Do not
+lock `RunPanelState` from the panic hook. Do not add an unconditional clear
+after a successful `commit_inline_scrollback`. Do not include an
+erase-scrollback operation in any clear sequence. Do not write the rescue
+panel, or any clear, for an alternate-screen pane. Do not write a rescue
+panel armed by a generation that no longer owns the terminal. Do not change
+the signature of any existing symbol. Do not remove any symbol. Do not rename
+any symbol.
 """
 validation = """
 ## Watch
-- The handler stays one atomic load plus one write of pre-rendered bytes
-  after mode restore — nothing else may run in signal context.
-- The panel is proven byte-for-byte against 0252.1's grammar from a
-  scratch fixture, with the correct session id and title-as-of-
-  construction.
-- Do not resurrect the deleted rescue machinery to satisfy a timing
-  proof; signal-timing perfection is explicitly not the bar.
+- The handler side must remain atomic loads plus one `libc::write`; read the
+  final diff of `interrupt.rs` specifically for anything that allocates,
+  formats, or locks below `rescue_terminal_signal_safe`.
+- The generation gate is the only disarm. Confirm no path can leave a run
+  panel armed while an alternate-screen pane owns the terminal.
+- `close_pane_locked` runs inside `poll_and_apply_keys`, which
+  `render_locked` calls BEFORE `repaint.draw`. That is safe only because
+  `draw` returns early on a detached pane; confirm that guard is still in
+  place, or the frame would be repainted straight back over the cleared
+  viewport.
+- Resist widening: this task erases and rescues. It does not restyle, does
+  not add a modal, and does not change what a Ctrl-C means.
 
 ## Done when
-Proven from captured pty bytes, not eyeballs: double-ctrl-c and SIGTERM
-on a live scratch run leave modes restored and only the house-grammar
-interrupted panel with the correct session id; a clean run is
-byte-identical to today; dashboard attach-then-exit leaves nothing; one
-injected main-path panic leaves no frame rows.
+1. `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+   exits 0 with exactly five passing tests from new file
+   `modules/cli/tests/proof_run_view_exit_teardown.rs`, covering SIGTERM,
+   repeated SIGINT, an injected panic, dashboard attach-then-exit, and clean
+   teardown, all asserted from captured PTY bytes. The clean-teardown
+   criterion is specifically
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown clean_run_teardown_commits_scrollback_without_an_extra_clear -- --exact`
+   exiting 0, which carries the focused proof 5 byte comparison: the
+   construction clear located by offset and excused, the commit still present
+   in the named teardown slice, zero `CLEAR_VIEWPORT`/rescue bytes in that
+   slice, and the killed-capture differential that keeps the zero-count
+   assertion non-vacuous.
+2. `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib` exits 0 with a
+   nonzero passing count, including the new
+   `arming_publishes_the_panel_bytes_under_generation_and_capacity_rules`,
+   `rescue_panel_reuses_the_shared_failure_grammar_and_title_fallback`, and
+   `clear_viewport_escape_erases_the_screen_but_never_the_scrollback` tests.
+3. `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style`
+   exits 0 with a nonzero passing count and `proof_output_style.rs` untouched,
+   proving the `failure_panel` extraction did not move the ordinary run-end
+   failure output.
+4. `CARGO_TARGET_DIR=target just test-full` exits 0 after edits confined to
+   the nine allowlisted files. It supplies formatting, clippy, SDK and builtin
+   drift checks, the TypeScript lane, workspace binary builds, and every
+   workspace test — including `proof_env_reference`, which is what proves the
+   new debug-only hook name is registered.
+5. Substantive review of `git status --short` then `git diff` over the
+   allowlist confirms: the allowlist and edit order held; no existing
+   signature changed; the rescue panel is built only through
+   `run::failure_panel` and `run::run_header_from_title`; ANSI bytes come only
+   from `tui::render_lines_ansi`; nothing was added to a signal handler beyond
+   atomic loads and one `write`; the panic hook clears only for inline panes
+   and locks nothing; and no clear was added after a successful commit. This
+   criterion intentionally has no `[[checks]]` entry — the commands expose the
+   evidence but cannot carry the review verdict in an exit code.
+
+Run 1 through 4 in order. Permit at most two targeted repair-and-rerun rounds
+in total; after each repair rerun the failing command and every later step.
+Complete only when all four commands exit 0, the diff stays inside the
+allowlist, and review has no finding.
 """
 
 [relations]
 parent = "0252"
+
+[[checks]]
+name = "abnormal run-view exits leave no frame and a rescue panel"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+expect = 'test result: ok\. 5 passed; 0 failed'
+
+[[checks]]
+name = "rescue arming and panel reuse unit proofs pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "ordinary run-end failure output is unmoved"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "exit teardown passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
