@@ -4,32 +4,403 @@ title = "Buttons: a confirm is chosen, not typed"
 status = "ready"
 raised = "2026-08-24"
 content = """
-A button-row widget in the tui kit, then every fixed-answer modal uses it.
+A labeled-button row in the tui kit, wired into `Modal::Confirm` itself so
+every fixed-answer modal in the workspace converts at once, and the one
+dashboard surface that still types a fixed answer (task archive) stops
+typing it.
+
+## Where the answer set is actually fixed
+
+Read before touching anything — the prose in the parent names surfaces the
+code does not model the way the name suggests:
+
+- Fixed-answer, already `Modal::Confirm`, converts for free once the
+  variant carries buttons: attach-failure ack (`dashboard.rs:2747`), exit
+  (`2929`, `2961`), session stop (`4541`), resume (`4659`), delete
+  (`4703`), merge/deep-merge (`5260`), merge-queue drop (`5326`), mark-done
+  (`6760`), reconcile step (`6971`), split step (`7183`); plus
+  `tui_demo.rs:210, 217, 298`, `trait_editor.rs:212, 220`, and
+  `run_view.rs:1409` (which holds a `Modal` directly, not on `ModalHost`).
+- Fixed-answer but still typed — the real defect this task fixes:
+  **task archive**. `open_task_archive_modal` (`dashboard.rs:6580`) opens a
+  `Modal::text_input` seeded `"done"`, and `parse_task_archive_input`
+  (`dashboard.rs:828`) parses `done|cancelled|canceled` optionally followed
+  by `release`. The answer set is closed: status × release-dependents.
+- NOT fixed-answer, keeps its text field, untouched by this task: spawn
+  arguments (`5704`, `7567` — Enter already submits straight to
+  `apply_spawn_request`, there is no second confirm modal), trust reasons
+  (`5422`-`5552`, `apply_trait_action` writes only on `Submitted`), human
+  answer body (`4545`), split-child title (`6543`), task edit grammar
+  (`6616`). The parent's "spawn confirm" and "trust screens" prose does not
+  match the code; those are text inputs and stay text inputs. No
+  Submit/Cancel row is added to them — that is optional in the parent and
+  is not built here.
 
 ## Shape
 
-- Widget: a horizontal row of labeled buttons. Tab/arrows move focus,
-  enter fires the focused button, esc cancels. Focused button highlighted;
-  destructive buttons red. Palette doctrine unchanged: named ANSI only,
-  no truecolor, no animation.
-- Conversion: every yes-or-no modal on `ModalHost` — spawn confirm,
-  session delete/drop, tasks archive, and the trust screens where the
-  answer set is fixed — stops asking for typed `y`/enter and renders
-  buttons. The ModalHost invariant stands: no keypress side effect
-  without a resolved modal.
-- Typed input remains only where actual text is entered (spawn args,
-  reasons, tags); those modals may gain Submit/Cancel buttons but keep
-  their text field.
+- `Button { label, outcome, destructive }` + `ButtonRow { buttons,
+  focused }` in `tui_kit.rs`. `ButtonRow::handle_key` maps Left/Right and
+  Tab/Shift-Tab/BackTab to focus movement, Enter to the focused button's
+  own `ModalOutcome`, Esc to `Cancelled` unconditionally.
+- `Modal::Confirm` gains a `buttons: ButtonRow` field. `Modal::confirm`
+  keeps its exact signature and seeds `[Confirm(focused), Cancel]`, so all
+  existing confirm call sites and every `ModalOutcome::Confirmed` match arm
+  are byte-unchanged, and `run_view`'s direct `Modal` converts
+  automatically — this is why button state goes in the variant rather than
+  in a dashboard-side renderer. Initial focus is deliberately the
+  affirmative button: Enter must keep confirming, or
+  `proof_run_view_exit_teardown` (which quits both surfaces with `\\r`)
+  regresses for an unrelated reason.
+- `Modal::buttons(title, body, Vec<Button>)` for rows that are not yes/no.
+  It is the seam 0252.4's three-choice failure modal will use; no part of
+  0252.4 is built here.
+- `ModalOutcome::Chosen(String)` carries which labeled choice fired.
+- `y`/`n` stop resolving a confirm — a confirm is chosen, not typed.
+- Destructive buttons render `Color::Red`; focus renders `[ Label ]` BOLD
+  against ` Label ` DIM. Named ANSI foreground plus DIM/BOLD only: no
+  background, no reverse video, no truecolor, no animation, no mouse.
+
+## Files touched (repo-relative, nothing else)
+
+- `modules/cli/src/app/tui_kit.rs`
+- `modules/cli/src/app/tui_panes.rs`
+- `modules/cli/src/app/dashboard.rs`
+- `modules/cli/src/app/run_view.rs`
+- `modules/cli/src/app/tui_demo.rs`
+
+`trait_editor.rs` is deliberately NOT touched: it calls `Modal::confirm`
+(signature preserved) and its `apply_modal_outcome` match ends in `_ => {}`
+(`trait_editor.rs:269`), so it converts with no edit.
+
+## Step 1 — move the Tab mapping down a layer (`tui_kit.rs`, `tui_panes.rs`)
+
+`tui_panes` imports `tui_kit` (`tui_panes.rs:28`) and documents itself as
+the sibling that extends it; a kit widget calling up into `tui_panes` would
+invert that. Move, do not import:
+
+- Move `pub(crate) enum TabStep { Next, Prev }` and
+  `pub(crate) fn tab_cycle_key(key: &KeyEvent) -> Option<TabStep>` verbatim
+  from `tui_panes.rs:312-328` into `tui_kit.rs`.
+- In `tui_panes.rs`, replace them with
+  `pub(crate) use super::tui_kit::{TabStep, tab_cycle_key};`. Every caller
+  keeps its current path — `tui_panes::tab_cycle_key` at `run_view.rs:1422`,
+  `tui_demo.rs:236`, `run_view/render.rs:664`, and `tui_panes::TabStep` in
+  the `use` lists at `tui_demo.rs:29` and `run_view/render.rs:28`. The test
+  `tab_cycle_key_maps_tab_and_shift_tab_and_back_tab` (`tui_panes.rs:701`)
+  stays where it is and keeps passing through the re-export.
+
+Build before continuing, with exactly this command:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 2 — the widget (`tui_kit.rs`)
+
+New symbols, exact signatures:
+
+- `pub(crate) struct Button { label: String, outcome: ModalOutcome,
+  destructive: bool }`
+- `impl Button`:
+  - `pub(crate) fn new(label: impl Into<String>, outcome: ModalOutcome) -> Self`
+    — `debug_assert!(outcome != ModalOutcome::Pending)`; a button that
+    resolves to `Pending` would wedge the modal open forever.
+  - `pub(crate) fn destructive(self) -> Self` — builder, sets the flag.
+- `pub(crate) struct ButtonRow { buttons: Vec<Button>, focused: usize }`
+- `impl ButtonRow`:
+  - `pub(crate) fn new(buttons: Vec<Button>) -> Self` — `focused: 0`.
+  - `pub(crate) fn focused(&self) -> usize`
+  - `pub(crate) fn buttons(&self) -> &[Button]`
+  - `pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> ModalOutcome`
+  - `fn step(&mut self, step: TabStep)` (private) — wrapping next/prev over
+    a possibly-empty `buttons`; `focused` must stay in range on an empty row
+    rather than panicking on index.
+
+`ButtonRow::handle_key` order: `Esc => Cancelled`; then `tab_cycle_key(key)`
+(Step 1's mapping, one definition for the workspace) => `step(..)` +
+`Pending`; then `Left => step(Prev)`, `Right => step(Next)`, both `Pending`;
+then `Enter =>` the focused button's `outcome` clone, or `Pending` when the
+row is empty; everything else `Pending`.
+
+Changed symbols:
+
+- `pub(crate) enum ModalOutcome` (`tui_kit.rs:402`) gains `Chosen(String)`.
+  Derives unchanged.
+- The `Modal::Confirm { title: String, body: String }` variant
+  (`tui_kit.rs:348`) becomes
+  `Modal::Confirm { title: String, body: String, buttons: ButtonRow }`.
+  Existing `Modal::Confirm { body, .. }` destructures at
+  `dashboard.rs:13026` and `13206` keep compiling unchanged.
+- `Modal::confirm(title: impl Into<String>, body: impl Into<String>) -> Self`
+  (`tui_kit.rs:410`) — signature unchanged; now builds
+  `ButtonRow::new(vec![Button::new("Confirm", ModalOutcome::Confirmed),
+  Button::new("Cancel", ModalOutcome::Cancelled)])`.
+- New `pub(crate) fn buttons(title: impl Into<String>, body: impl
+  Into<String>, buttons: Vec<Button>) -> Self` on `Modal`.
+- `Modal::handle_key`'s `Confirm` arm (`tui_kit.rs:458-462`) delegates to
+  `buttons.handle_key(key)`. The `KeyCode::Char('y') => Confirmed` and
+  `KeyCode::Char('n') => Cancelled` arms are **removed**.
+- Doc comments: the `Modal` doc (`tui_kit.rs:343`), `handle_key`'s doc
+  (`tui_kit.rs:450`, which currently states the `y`/`n` contract), and the
+  module header's test ruling (`tui_kit.rs:20-21`) — amend the last to say
+  what the 2026-07-24 ruling actually forbids (frozen rendered inventories
+  and goldens) and that targeted style/behavior assertions on a scratch
+  `TestBackend` buffer are in-bounds, citing the existing precedent
+  `guide_conversation_modal_places_unicode_cursor_by_display_width`
+  (`tui_kit.rs:1477`), which already renders through `TestBackend`. None of
+  the rewritten prose may quote the old hint: after this task the literal
+  `y/enter confirm` appears nowhere in `tui_kit.rs`, comments included,
+  which is what criterion 1 asserts.
+
+`ModalHost` is not modified. Its exactly-once take-and-close
+(`tui_kit.rs:625-631`) already covers `Chosen` because it only tests
+`!= Pending`.
+
+## Step 3 — rendering (`tui_kit.rs`)
+
+- New `fn button_row_text(row: &ButtonRow) -> String` — the plain-text form
+  (`"[ Confirm ]  [ Cancel ]"`, focused and unfocused cells the same width
+  so focus never reflows the row), used for width/height budgeting.
+- New `fn button_row_spans(row: &ButtonRow) -> Vec<Span<'static>>` —
+  focused: `[ Label ]` with `Modifier::BOLD`; unfocused: `  Label  ` with
+  `Modifier::DIM`; destructive adds `.fg(Color::Red)` in both states.
+  `Color` is already imported (`tui_kit.rs:27`); no new dependency.
+- `fn confirm_size(area: Rect, body: &str) -> (u16, u16)`
+  (`tui_kit.rs:993`) becomes
+  `fn confirm_size(area: Rect, body: &str, buttons: &ButtonRow) -> (u16, u16)`
+  and budgets the row instead of the removed one-line hint: height =
+  `wrapped_rows(body, inner) + wrapped_rows(button_row_text(buttons), inner)
+  + 1 blank + 2 borders`, still `.min(area.height).max(1)`. A row wider than
+  the 70-column clamp therefore gets its real row count rather than being
+  clipped.
+- `render_modal`'s `Confirm` arms (`tui_kit.rs:1010`, `1034-1046`): pass
+  `buttons` to `confirm_size`, and replace the literal
+  `"y/enter confirm  n/esc cancel"` line with
+  `RLine::from(button_row_spans(buttons))`. Keep the existing
+  `Wrap { trim: false }` so an over-wide row wraps between buttons instead
+  of clipping. The `Clear`-then-border structure is untouched, so the
+  no-backgrounds doctrine holds. `dim_backdrop` is not called here — the
+  failure modal's backdrop belongs to 0252.4.
+
+Build again before continuing, with exactly this command:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 4 — compile fix (`run_view.rs`)
+
+`apply_open_modal_key` (`run_view.rs:1322-1352`) matches all four
+`ModalOutcome` variants explicitly and will no longer be exhaustive. Add
+`tui_kit::ModalOutcome::Chosen(_) => {}` with a one-line comment: the run
+view opens only `Modal::confirm` and `Modal::text_input`, so a choice row
+cannot reach it; the arm exists to keep the match honest. Nothing else in
+`run_view.rs` changes — the `q` confirm at `1409` converts through
+`Modal::confirm`, and the modal's focus trap already runs before
+`tab_cycle_key` at `1422` (`poll_and_apply_keys` `continue`s on a consumed
+key, `run_view.rs:1362-1364`), so Tab inside the modal cannot also cycle
+panes.
+
+## Step 5 — destructive tone (`dashboard.rs`, `tui_demo.rs`)
+
+Three artifact-removal confirms swap `Modal::confirm` for `Modal::buttons`
+with a red affirmative. Each keeps its existing title string verbatim, so
+the criterion-1 sweep can pin the site by that title:
+
+- `dashboard.rs:4703` session delete → `Modal::buttons("delete session",
+  body, vec![Button::new("Delete", ModalOutcome::Confirmed).destructive(),
+  Button::new("Cancel", ModalOutcome::Cancelled)])`.
+- `dashboard.rs:5326` merge-queue drop → same shape, title kept as
+  `"drop from queue"`, label `"Drop"`.
+- `tui_demo.rs:298` delete row → same shape, title kept as `"delete row"`,
+  body kept as `format!("Delete {}?", row.name)`, label `"Delete"`.
+
+Their `ModalOutcome::Confirmed` handlers are unchanged, so every downstream
+identity and liveness recheck (`plan_delete` refreshing its artifact plan,
+session re-lookup) stays exactly where it is.
+
+`.destructive()` is called exactly twice in all of `dashboard.rs` and
+exactly once in all of `tui_demo.rs` — these three sites and nowhere else,
+tests included. Criterion 1 pins those counts: a fourth destructive
+confirm, or a dashboard test that builds one, fails the sweep on purpose.
+
+## Step 6 — task archive stops typing (`dashboard.rs`)
+
+- **Remove** `fn parse_task_archive_input(text: &str) -> Result<(TaskDocStatus, bool), String>`
+  (`dashboard.rs:828-838`) and its doc comment.
+- **Add** `fn archive_buttons(dependents: usize) -> Vec<Button>` — always
+  `Done` (`Chosen("done")`), `Cancelled` (`Chosen("cancelled")`), `Cancel`
+  (`Cancelled`); when `dependents > 0`, also `Done + release`
+  (`Chosen("done-release")`) and `Cancelled + release`
+  (`Chosen("cancelled-release")`), so the shipped dependents sweep (0063.6)
+  survives the conversion and is offered only where it means something.
+  Pure and directly testable.
+- **Add** `fn archive_choice(value: &str) -> Option<(TaskDocStatus, bool)>`
+  mapping exactly those four ids to `(status, release_dependents)`.
+- `open_task_archive_modal` (`dashboard.rs:6580`) keeps its fresh
+  `fetch_task_digest` capture and its dependents count, drops the
+  `done/cancelled` and `add 'release'` grammar hints from `prompt` (the
+  buttons say it now), and opens
+  `Modal::buttons(prompt, body, archive_buttons(dependents))` instead of
+  `Modal::text_input(prompt, "done", false)`. Update its doc comment.
+- `apply_task_action` (`dashboard.rs:7224`): add an
+  `if let TaskAction::Archive { key, digest } = action { ... return ...; }`
+  block above the `let ModalOutcome::Submitted(text) = outcome else` guard
+  (`7245`), following `MarkDone`'s existing early-return precedent at
+  `7233-7243`; inside it, `let ModalOutcome::Chosen(choice) = outcome else
+  { return Ok(()) };` then `archive_choice(&choice)` — `None` sets
+  `state.message = Some("archive refused: unknown choice")` and returns
+  `Ok(())`. The `TaskUpdate { status, expected_digest: Some(digest),
+  release_dependents, .. }` write, its `effects_summary` message, and
+  `resync_tasks_board_after_write` are moved verbatim, not rewritten. The
+  old `TaskAction::Archive { .. }` arm inside the `match action` becomes
+  `unreachable!("handled above")`, matching `MarkDone`'s arm at `7248`;
+  update the comment at `7229-7231` to name both early-returning actions.
+- Update the `TaskAction::Archive` doc (`dashboard.rs:767-770`) and the
+  stale "`done`/`cancelled` for archive" phrasing at `dashboard.rs:758`.
+  The identifier `parse_task_archive_input` must survive nowhere in
+  `dashboard.rs` — not in a comment, not in a test name — and the archive
+  modal must open literally as
+  `Modal::buttons(prompt, body, archive_buttons(dependents))`; criterion 1
+  asserts both.
+
+Esc still produces no write: `Cancelled` is filtered in `apply_action`
+(`4960`) before any tag reaches a handler.
+
+## Step 7 — tests
+
+In `modules/cli/src/app/tui_kit.rs`:
+
+- Replace `confirm_modal_routes_yes_no_and_esc` (`1638-1667`) with
+  `button_row_moves_focus_by_arrows_and_tab_and_fires_only_the_focused_button`:
+  a scratch three-button row built with `Modal::buttons` (two choices plus a
+  destructive one) applied to a scratch `Vec<String>` side-effect log.
+  Assert Enter on the default focus fires only choice 0; that `Right`,
+  `Left`, `Tab`, `Shift-Tab` and `BackTab` each move focus and return
+  `Pending`; that Tab wraps; that a stray char and `y`/`n` are now
+  `Pending`; that Esc returns `Cancelled` from a non-default focus and the
+  side-effect log is still empty; and that a default `Modal::confirm`
+  answers Enter with `Confirmed` and Esc with `Cancelled`.
+- Add `button_row_renders_focused_bold_and_destructive_red`: render a
+  confirm-with-destructive modal through
+  `Terminal::new(TestBackend::new(..))` exactly as
+  `guide_conversation_modal_places_unicode_cursor_by_display_width`
+  (`1477`) does, locate the button row's cells, and assert the focused
+  button's cells carry `Modifier::BOLD`, an unfocused one carries
+  `Modifier::DIM`, the destructive button's cells carry `Color::Red`, no
+  cell carries a non-`Reset` background, and the buffer no longer contains
+  `"y/enter confirm"`. Targeted cell properties only — no full-frame
+  golden, no fixture file, no new dependency.
+- `modal_host_dispatches_exactly_once_on_resolution` (`1801-1818`): resolve
+  with `KeyCode::Enter`; keep the Pending assertions and add `Char('y')` to
+  them.
+- `confirm_size_wraps_long_artifact_lists_and_clamps_to_terminal` (`1670`):
+  re-check against the new signature and row budgeting; adjust the expected
+  height only if the row's real row count moved it.
+
+In `modules/cli/src/app/dashboard.rs`:
+
+- `modal_host_gates_every_session_action` (`10742`) and
+  `modal_host_gates_every_merge_action` (`10771`): resolve with
+  `KeyCode::Enter` instead of `Char('y')`.
+- The mark-done confirm test resolving with `Char('y')` (`13214-13226`):
+  same swap.
+- Replace `parse_task_archive_input_recognizes_the_release_token`
+  (`12752-12776`) with `archive_choice_maps_every_offered_button_value`:
+  assert the four id→`(status, release)` pairs, that an unknown id is
+  `None`, that `archive_buttons(0)` offers no release choice, that
+  `archive_buttons(2)` does, and — the drift guard that matters — that
+  **every** `Chosen` value any `archive_buttons(n)` emits resolves through
+  `archive_choice`, so a relabelled button can never silently become an
+  unknown choice.
+
+No test may read committed repo content; all fixtures are scratch, per the
+standing rulings.
+
+## Out of scope
+
+0252.4's failure modal, backdrop dimming, and Resume/Restart/Abort wiring;
+0252.5's group-delete modal; 0252.6's action registry; Submit/Cancel rows on
+text-input modals; mouse activation; a form/focus framework; truecolor;
+animation; any change to spawn, trust-reason, human-answer, split-title, or
+task-edit text entry.
 """
 validation = """
 ## Done when
 
-No dashboard modal with a fixed answer set asks for typed confirmation —
-shown by a sweep of `ModalHost` call sites. A scratch TUI proof drives
-focus with arrows and tab, fires with enter, cancels with esc leaving no
-side effect, and shows the destructive button toned red (behavioral
-assertion on the rendered buffer, scratch fixtures only).
+1. Every fixed-answer modal is chosen, not typed. The `y`/`n` arms are gone
+   from `Modal::handle_key`, and each `Modal::confirm`/`Modal::buttons` call
+   site in the sweep (`dashboard.rs:2747, 2929, 2961, 4541, 4659, 4703,
+   5260, 5326, 6760, 6971, 7183`; `tui_demo.rs:210, 217, 298`;
+   `trait_editor.rs:212, 220`; `run_view.rs:1409`) resolves through the
+   button row, with session delete, merge-queue drop, and demo delete-row
+   carrying a destructive button. Task archive opens buttons, not a seeded
+   text field, and `parse_task_archive_input` no longer exists. The sweep
+   is a source inspection, deliberately not a Rust test — no test may read
+   committed repo content. Each site is matched by its own literal, not by
+   line number, and `-U` makes the match survive whatever way rustfmt wraps
+   the call:
+   `D=modules/cli/src/app; cnt() { rg -cU "$2" "$D/$1" | grep -qx "$3"; }; has() { rg -qU "$2" "$D/$1"; }; no() { ! rg -qU "$2" "$D/$1"; }; has tui_kit.rs "fn buttons\\(" && no tui_kit.rs "KeyCode::Char\\(.y.\\) \\| KeyCode::Enter" && no tui_kit.rs "KeyCode::Char\\(.n.\\) \\| KeyCode::Esc" && no tui_kit.rs "y/enter confirm" && no dashboard.rs "parse_task_archive_input" && has dashboard.rs "fn archive_buttons\\(" && has dashboard.rs "Modal::buttons\\(\\s*prompt,\\s*body,\\s*archive_buttons\\(" && cnt dashboard.rs "Modal::confirm\\(\\s*\\"attach failed\\"" 1 && cnt dashboard.rs "Modal::confirm\\(\\s*\\"exit\\", \\"Quit ctx traits\\?\\"\\)" 2 && cnt dashboard.rs "Modal::confirm\\(\\s*title, body\\)" 2 && cnt dashboard.rs "Modal::confirm\\(\\s*\\"resume session\\"" 1 && cnt dashboard.rs "Modal::confirm\\(\\s*if deep" 1 && cnt dashboard.rs "Modal::confirm\\(\\s*format!\\(\\"mark " 1 && cnt dashboard.rs "Modal::confirm\\(\\s*format!\\(\\"split " 1 && cnt dashboard.rs "Modal::buttons\\(\\s*\\"delete session\\"" 1 && cnt dashboard.rs "Modal::buttons\\(\\s*\\"drop from queue\\"" 1 && cnt tui_demo.rs "Modal::confirm\\(\\s*\\"exit demo\\", \\"Quit the kit demo\\?\\"\\)" 2 && cnt tui_demo.rs "Modal::buttons\\(\\s*\\"delete row\\"" 1 && cnt trait_editor.rs "Modal::confirm\\(\\s*\\"exit editor\\", \\"Quit ctx traits internal edit\\?\\"\\)" 2 && cnt run_view.rs "tui_kit::Modal::confirm\\(" 1 && cnt dashboard.rs "\\.destructive\\(\\)" 2 && cnt tui_demo.rs "\\.destructive\\(\\)" 1`
+   It exits 0 only when all eleven dashboard sites, all three demo sites,
+   both editor sites and the run-view site are present in their converted
+   form; when the three destructive sites are the only `.destructive()`
+   calls in their files; when archive is button-driven; and when the `y`
+   arm, the `n` arm, the old hint, and `parse_task_archive_input` are all
+   gone. It fails on the pre-implementation tree, so a green run is real
+   evidence and not a vacuous match.
+2. The scratch TUI proof passes: focus moves by arrows and by
+   Tab/Shift-Tab/BackTab, Enter fires only the focused button, Esc cancels
+   leaving the scratch side-effect log empty, and the rendered buffer shows
+   the focused button BOLD and the destructive button `Color::Red` with no
+   painted background.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib button_row`
+3. Nothing that used typed confirmation regressed, including archive's
+   release-dependents capability and the ModalHost exactly-once gate.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib`
+4. Enter still quits both the run view and the dashboard — the initial-focus
+   decision is load-bearing for this.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+5. The landing gate is green.
+   `CARGO_TARGET_DIR=target just test-full`
+6. The diff touches only `modules/cli/src/app/tui_kit.rs`,
+   `tui_panes.rs`, `dashboard.rs`, `run_view.rs`, and `tui_demo.rs`.
+   `git status --short` names nothing else.
+
+Criteria 1-5 each carry a runnable command and a `[[checks]]` entry.
+Criterion 6 is the one read-and-compare verdict — `git status --short`
+carries its answer in output, not in an exit code — so it deliberately
+carries no `[[checks]]` entry.
+
+Run the steps in order; run the incremental build command declared at the
+end of Step 1 and again at the end of Step 3 rather than building only at
+the end, so a layering or exhaustiveness error surfaces next to the edit
+that caused it. Then run the criterion commands 1, 2, 3, 4, 5 in that
+order. Permit at most two targeted repair-and-rerun rounds in total; after
+each repair rerun the failing command and every later one. Complete only
+when all five criterion commands exit 0 and the diff stays inside the
+allowlist.
 """
 
 [relations]
 parent = "0252"
+
+[[checks]]
+name = "every fixed-answer modal is chosen, not typed"
+command = 'D=modules/cli/src/app; cnt() { rg -cU "$2" "$D/$1" | grep -qx "$3"; }; has() { rg -qU "$2" "$D/$1"; }; no() { ! rg -qU "$2" "$D/$1"; }; has tui_kit.rs "fn buttons\(" && no tui_kit.rs "KeyCode::Char\(.y.\) \| KeyCode::Enter" && no tui_kit.rs "KeyCode::Char\(.n.\) \| KeyCode::Esc" && no tui_kit.rs "y/enter confirm" && no dashboard.rs "parse_task_archive_input" && has dashboard.rs "fn archive_buttons\(" && has dashboard.rs "Modal::buttons\(\s*prompt,\s*body,\s*archive_buttons\(" && cnt dashboard.rs "Modal::confirm\(\s*\"attach failed\"" 1 && cnt dashboard.rs "Modal::confirm\(\s*\"exit\", \"Quit ctx traits\?\"\)" 2 && cnt dashboard.rs "Modal::confirm\(\s*title, body\)" 2 && cnt dashboard.rs "Modal::confirm\(\s*\"resume session\"" 1 && cnt dashboard.rs "Modal::confirm\(\s*if deep" 1 && cnt dashboard.rs "Modal::confirm\(\s*format!\(\"mark " 1 && cnt dashboard.rs "Modal::confirm\(\s*format!\(\"split " 1 && cnt dashboard.rs "Modal::buttons\(\s*\"delete session\"" 1 && cnt dashboard.rs "Modal::buttons\(\s*\"drop from queue\"" 1 && cnt tui_demo.rs "Modal::confirm\(\s*\"exit demo\", \"Quit the kit demo\?\"\)" 2 && cnt tui_demo.rs "Modal::buttons\(\s*\"delete row\"" 1 && cnt trait_editor.rs "Modal::confirm\(\s*\"exit editor\", \"Quit ctx traits internal edit\?\"\)" 2 && cnt run_view.rs "tui_kit::Modal::confirm\(" 1 && cnt dashboard.rs "\.destructive\(\)" 2 && cnt tui_demo.rs "\.destructive\(\)" 1'
+
+[[checks]]
+name = "button row focus, firing, cancel, and destructive tone"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib button_row"
+timeout-ms = 1800000
+expect = 'test result: ok\. 2 passed; 0 failed'
+
+[[checks]]
+name = "no typed-confirmation regression in the cli library tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "enter still quits the run view and the dashboard"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+expect = 'test result: ok\. 5 passed; 0 failed'
+
+[[checks]]
+name = "buttons pass the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
