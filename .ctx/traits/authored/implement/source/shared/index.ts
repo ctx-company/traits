@@ -16,16 +16,13 @@ export const INTENT: cdk.Intent = {
   require: [
     cdk.intent.Correctness,
     cdk.intent.Robustness,
-    cdk.intent.Leanness,
+    cdk.intent.Pragmatism,
     cdk.intent.ReuseOverReimplement,
-    cdk.intent.ReviewBeforeFinal,
-    cdk.intent.BoundedRefinement,
+    cdk.intent.ContractCeiling,
+    cdk.intent.RepresentativeProof,
   ],
   avoid: [
     cdk.intent.OverEngineering,
     cdk.intent.Duplication,
-    cdk.intent.ScopeCreep,
-    cdk.intent.UnboundedLoop,
-    cdk.intent.RubberStampReview,
   ],
 };

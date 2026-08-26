@@ -205,6 +205,7 @@ export const Uncertainty = {
  * @property behavior-preserving-default Observable behavior staying as it is unless the task changes it.
  * @property big-rewrite Rewriting a subsystem where a narrow fix would do.
  * @property bounded-refinement A review-and-repair loop with a condition that ends it.
+ * @property contract-ceiling The task's explicit ceiling on coverage and hardening.
  * @property correctness Whether the code does the right thing, ahead of how it reads.
  * @property data-loss Behavior that can delete, corrupt, overwrite, leak, or strand data.
  * @property destructive-change Deleting data or rewriting history.
@@ -223,6 +224,7 @@ export const Uncertainty = {
  * @property pragmatism The smallest practical change that satisfies the contract.
  * @property preserve-scope Staying inside the requested task.
  * @property report-actionable-finding A finding carrying what is wrong, why it matters, and where.
+ * @property representative-proof One proof standing for each behavior class.
  * @property reuse-over-reimplement Extracting shared logic instead of copying it.
  * @property review-before-final Inspecting completed work against its requirements before calling it done.
  * @property robustness Correctness under ordinary failure and boundary conditions.
@@ -236,6 +238,7 @@ export const Uncertainty = {
  * @property speculative-claim A guess presented as fact.
  * @property state-assumptions Assumptions made visible beside the claims they support.
  * @property style-only Cosmetic feedback where no style review was asked for.
+ * @property tail-case-pursuit Hardening against rare cases past the contract's stated bar.
  * @property taste-only-blocking Subjective preference treated as a blocking defect.
  * @property tests Coverage, assertions, uncovered branches, and stale tests.
  * @property unapproved-network Network access without explicit allowance.
@@ -248,7 +251,7 @@ export const Uncertainty = {
  * @property verify-coverage Whether changed behavior is covered by anything.
  * @property weaken-tests-to-pass Loosening a test instead of repairing the implementation.
  */
-export type IntentBuiltIn = "accretion" | "annotation-fidelity" | "behavior-preserving-default" | "big-rewrite" | "bounded-refinement" | "correctness" | "data-loss" | "destructive-change" | "duplication" | "elegance" | "gates-green-before-commit" | "gold-plating" | "inspect-changed-behavior" | "interface-widening" | "leanness" | "maintainability" | "match-surrounding-style" | "over-engineering" | "performance" | "policy-bypass" | "pragmatism" | "preserve-scope" | "report-actionable-finding" | "reuse-over-reimplement" | "review-before-final" | "robustness" | "role-attributed-output" | "rubber-stamp-review" | "scope-creep" | "secret-exfiltration" | "security" | "silent-deviation" | "specific" | "speculative-claim" | "state-assumptions" | "style-only" | "taste-only-blocking" | "tests" | "unapproved-network" | "unbounded-loop" | "unrequested-refactor" | "unsafe-command" | "user-impact" | "verbatim-execution" | "verifiable-goal" | "verify-coverage" | "weaken-tests-to-pass";
+export type IntentBuiltIn = "accretion" | "annotation-fidelity" | "behavior-preserving-default" | "big-rewrite" | "bounded-refinement" | "contract-ceiling" | "correctness" | "data-loss" | "destructive-change" | "duplication" | "elegance" | "gates-green-before-commit" | "gold-plating" | "inspect-changed-behavior" | "interface-widening" | "leanness" | "maintainability" | "match-surrounding-style" | "over-engineering" | "performance" | "policy-bypass" | "pragmatism" | "preserve-scope" | "report-actionable-finding" | "representative-proof" | "reuse-over-reimplement" | "review-before-final" | "robustness" | "role-attributed-output" | "rubber-stamp-review" | "scope-creep" | "secret-exfiltration" | "security" | "silent-deviation" | "specific" | "speculative-claim" | "state-assumptions" | "style-only" | "tail-case-pursuit" | "taste-only-blocking" | "tests" | "unapproved-network" | "unbounded-loop" | "unrequested-refactor" | "unsafe-command" | "user-impact" | "verbatim-execution" | "verifiable-goal" | "verify-coverage" | "weaken-tests-to-pass";
 export const Intent = {
   /** A parallel solution added beside an existing one instead of consolidating. Related behavior that grows a second helper, branch, or path next to the one already handling it, rather than being unified with it. */
   accretion: "accretion",
@@ -260,6 +263,8 @@ export const Intent = {
   bigRewrite: "big-rewrite",
   /** A review-and-repair loop with a condition that ends it. Repair cycles that recheck what was fixed and stop at a stated acceptance condition rather than running until something else intervenes. */
   boundedRefinement: "bounded-refinement",
+  /** The task's explicit ceiling on coverage and hardening. A contract's stated exclusions and accepted imperfections, treated as binding terms of the work rather than as gaps left to close. */
+  contractCeiling: "contract-ceiling",
   /** Whether the code does the right thing, ahead of how it reads. Real behavior gaps and defects, weighed above naming, formatting, and style preference. */
   correctness: "correctness",
   /** Behavior that can delete, corrupt, overwrite, leak, or strand data. Operations whose failure mode costs data rather than time — a migration dropping a column before the copy, a write that cannot be undone. */
@@ -296,6 +301,8 @@ export const Intent = {
   preserveScope: "preserve-scope",
   /** A finding carrying what is wrong, why it matters, and where. Enough for someone else to act: the defect, its consequence, and the location, rather than an observation that has to be re-derived. */
   reportActionableFinding: "report-actionable-finding",
+  /** One proof standing for each behavior class. Evidence chosen so each distinct failure class is exercised once by a representative case, rather than once per permutation of the same class. */
+  representativeProof: "representative-proof",
   /** Extracting shared logic instead of copying it. Existing behavior found and reused, so one definition serves both callers rather than two definitions drifting apart. */
   reuseOverReimplement: "reuse-over-reimplement",
   /** Inspecting completed work against its requirements before calling it done. A pass over the finished change measured against what was asked, before it is presented as complete. */
@@ -322,6 +329,8 @@ export const Intent = {
   stateAssumptions: "state-assumptions",
   /** Cosmetic feedback where no style review was asked for. Naming, formatting, and arrangement preferences raised in place of substantive findings. */
   styleOnly: "style-only",
+  /** Hardening against rare cases past the contract's stated bar. Coverage of timings, interleavings, and inputs the contract does not name, pursued after the stated conditions already hold - each finding real in isolation, unbounded as a set. */
+  tailCasePursuit: "tail-case-pursuit",
   /** Subjective preference treated as a blocking defect. A judgement about how something reads, given the weight of a correctness, safety, or trust problem. */
   tasteOnlyBlocking: "taste-only-blocking",
   /** Coverage, assertions, uncovered branches, and stale tests. Whether the tests actually establish what they appear to: missing assertions, branches nothing exercises, tests that no longer match the code. */

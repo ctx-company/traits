@@ -36,6 +36,10 @@ description = "Replacing working structure wholesale when the requested outcome 
 summary = "A review-and-repair loop with a condition that ends it."
 description = "Repair cycles that recheck what was fixed and stop at a stated acceptance condition rather than running until something else intervenes."
 
+[intent.contract-ceiling]
+summary = "The task's explicit ceiling on coverage and hardening."
+description = "A contract's stated exclusions and accepted imperfections, treated as binding terms of the work rather than as gaps left to close."
+
 [intent.correctness]
 summary = "Whether the code does the right thing, ahead of how it reads."
 description = "Real behavior gaps and defects, weighed above naming, formatting, and style preference."
@@ -108,6 +112,10 @@ description = "Adjacent work named as an option rather than performed, so the bo
 summary = "A finding carrying what is wrong, why it matters, and where."
 description = "Enough for someone else to act: the defect, its consequence, and the location, rather than an observation that has to be re-derived."
 
+[intent.representative-proof]
+summary = "One proof standing for each behavior class."
+description = "Evidence chosen so each distinct failure class is exercised once by a representative case, rather than once per permutation of the same class."
+
 [intent.reuse-over-reimplement]
 summary = "Extracting shared logic instead of copying it."
 description = "Existing behavior found and reused, so one definition serves both callers rather than two definitions drifting apart."
@@ -159,6 +167,10 @@ description = "What was taken as given when context was missing, said plainly an
 [intent.style-only]
 summary = "Cosmetic feedback where no style review was asked for."
 description = "Naming, formatting, and arrangement preferences raised in place of substantive findings."
+
+[intent.tail-case-pursuit]
+summary = "Hardening against rare cases past the contract's stated bar."
+description = "Coverage of timings, interleavings, and inputs the contract does not name, pursued after the stated conditions already hold - each finding real in isolation, unbounded as a set."
 
 [intent.taste-only-blocking]
 summary = "Subjective preference treated as a blocking defect."

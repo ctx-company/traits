@@ -1,5 +1,5 @@
 id = "implement"
-schema-version = "0.5"
+schema-version = "0.6"
 version = "0.25.0"
 name = "Basic"
 description = "Reviewed implementation: implement, review, refine & commit."
@@ -18,31 +18,22 @@ id = "correctness"
 id = "robustness"
 
 [[intent.require]]
-id = "leanness"
+id = "pragmatism"
 
 [[intent.require]]
 id = "reuse-over-reimplement"
 
 [[intent.require]]
-id = "review-before-final"
+id = "contract-ceiling"
 
 [[intent.require]]
-id = "bounded-refinement"
+id = "representative-proof"
 
 [[intent.avoid]]
 id = "over-engineering"
 
 [[intent.avoid]]
 id = "duplication"
-
-[[intent.avoid]]
-id = "scope-creep"
-
-[[intent.avoid]]
-id = "unbounded-loop"
-
-[[intent.avoid]]
-id = "rubber-stamp-review"
 
 [[behavior.tone]]
 id = "direct"
@@ -288,10 +279,28 @@ id = "smart"
 description = "Plan Drafting and Review"
 summary = "Review role."
 
+[[agent.intent.avoid]]
+id = "taste-only-blocking"
+
+[[agent.intent.avoid]]
+id = "tail-case-pursuit"
+
+[[agent.intent.avoid]]
+id = "rubber-stamp-review"
+
+[[agent.intent.avoid]]
+id = "unbounded-loop"
+
 [[agent]]
 id = "worker"
 description = "Implementation Work"
 summary = "Implementation role."
+
+[[agent.intent.require]]
+id = "preserve-scope"
+
+[[agent.intent.require]]
+id = "review-before-final"
 
 [prompt.draft-the-implementation-plan]
 text = """
@@ -304,7 +313,9 @@ output = ["slot:draft"]
 text = """
 Implement the draft task's drafted plan: {slot:draft}.
 Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
-Attached verdicts are the source of truth - work on exactly what they request, to completion.
+Attached verdicts are the source of truth - work on exactly what they request.
+Start with most complex items and aim for completing all of them.
+Don't discard your progress if you can't finish task to completion.
 
 Return this round's work summary: slot:work-summary"""
 input = ["slot:draft"]
@@ -317,7 +328,9 @@ Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
 Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
 Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
 
-Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)"""
+Return the typed review verdict: (slot:review-verdict-1).
+Verdict should come with proposed solutions.
+Put solutions in most efficient order."""
 input = [
     "slot:draft",
     "slot:work-summary",
