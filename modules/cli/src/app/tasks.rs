@@ -148,24 +148,7 @@ pub(crate) fn handle_tasks_proposals(
     let rows = ctx_traits_io::center::list(Some(&repo_key)).map_err(|e| crate::Error::Command {
         message: e.to_string(),
     })?;
-    let triples: Vec<(Option<String>, String, Option<String>)> = readable_center_rows(&rows)
-        .into_iter()
-        .map(|row| {
-            (
-                row.summary.task_key.clone(),
-                row.summary.run_id.clone(),
-                super::task_proposals::merged_landed_sha_from_terminal_frame(
-                    row.summary.last_terminal_merge_frame.as_ref(),
-                ),
-            )
-        })
-        .collect();
-    let runs: Vec<(Option<&str>, &str, Option<&str>)> = triples
-        .iter()
-        .map(|(key, run_id, sha)| (key.as_deref(), run_id.as_str(), sha.as_deref()))
-        .collect();
-    let proposals =
-        super::task_proposals::derive_proposals(&runs, &summaries, &sync_report.duplicate_keys);
+    let proposals = proposals_from_center(&rows, &summaries, &sync_report.duplicate_keys);
 
     match OutputMode::select(json, false) {
         OutputMode::Json => {
@@ -367,6 +350,30 @@ pub(crate) fn session_facts_from_center(
         });
     }
     facts
+}
+
+pub(crate) fn proposals_from_center(
+    rows: &[ctx_traits_io::center::CenterPublicRow],
+    summaries: &[ctx_traits_core::task::provider::TaskSummary],
+    duplicate_keys: &[ctx_traits_core::task::provider::DuplicateKey],
+) -> Vec<super::task_proposals::DoneProposal> {
+    let triples: Vec<(Option<String>, String, Option<String>)> = readable_center_rows(rows)
+        .into_iter()
+        .map(|row| {
+            (
+                row.summary.task_key.clone(),
+                row.summary.run_id.clone(),
+                super::task_proposals::merged_landed_sha_from_terminal_frame(
+                    row.summary.last_terminal_merge_frame.as_ref(),
+                ),
+            )
+        })
+        .collect();
+    let runs: Vec<(Option<&str>, &str, Option<&str>)> = triples
+        .iter()
+        .map(|(key, run_id, sha)| (key.as_deref(), run_id.as_str(), sha.as_deref()))
+        .collect();
+    super::task_proposals::derive_proposals(&runs, summaries, duplicate_keys)
 }
 
 /// Preserve the inventory's observable newest-ledger-first order while sharing
@@ -881,6 +888,113 @@ mod tests {
         let ordered = readable_center_rows(&rows);
         assert_eq!(ordered[0].summary.run_id, "newer-run");
         assert_eq!(ordered[1].summary.run_id, "older-run");
+    }
+
+    #[test]
+    fn proposals_from_center_rows_match_the_shared_derivation() {
+        let rows = readable_and_unreadable_center_rows();
+        let board = task_board();
+        let provider = FilesTaskBoard::open_read(board.clone());
+        let summaries = provider.list(false).expect("list task board");
+        let actual = proposals_from_center(&rows, &summaries, &[]);
+        let expected = super::super::task_proposals::derive_proposals(
+            &[(
+                Some("0001"),
+                "readable-run",
+                Some("0123456789abcdef0123456789abcdef01234567"),
+            )],
+            &summaries,
+            &[],
+        );
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 1);
+        let _ = std::fs::remove_dir_all(board.as_std_path());
+    }
+
+    fn readable_and_unreadable_center_rows() -> Vec<ctx_traits_io::center::CenterPublicRow> {
+        [
+            serde_json::json!({
+                "summary": {
+                    "session_id": "readable-session", "run_id": "readable-run",
+                    "trait_id": "test", "status": "completed", "task_key": "0001",
+                    "has_merge_frames": true,
+                    "last_terminal_merge_frame": {
+                        "stage": "landing", "status": "merged",
+                        "evidence": ["landed=0123456789abcdef0123456789abcdef01234567"]
+                    }
+                },
+                "repo_key": "repo", "repo_path": "/repo", "ledger_path": "/runs/readable.json",
+                "live": false, "modified_epoch_secs": 1
+            }),
+            serde_json::json!({
+                "summary": {
+                    "session_id": "unreadable-session", "run_id": "unreadable-run",
+                    "trait_id": "test", "status": "completed", "task_key": "0001",
+                    "has_merge_frames": true, "parse_error": "invalid JSON",
+                    "last_terminal_merge_frame": {
+                        "stage": "landing", "status": "merged",
+                        "evidence": ["landed=0123456789abcdef0123456789abcdef01234567"]
+                    }
+                },
+                "repo_key": "repo", "repo_path": "/repo", "ledger_path": "/runs/unreadable.json",
+                "live": false, "modified_epoch_secs": 2
+            }),
+        ]
+        .into_iter()
+        .map(|value| serde_json::from_value(value).expect("center row"))
+        .collect()
+    }
+
+    fn task_board() -> Utf8PathBuf {
+        let board = tempdir();
+        write_task(
+            &board,
+            "0001-task.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Task\"\nstatus = \"ready\"\n",
+        );
+        board
+    }
+
+    #[test]
+    fn reconcile_report_from_center_rows_matches_the_shared_derivation() {
+        let rows = readable_and_unreadable_center_rows();
+        let board = task_board();
+        let provider = FilesTaskBoard::open_read(board.clone());
+        let summaries = provider.list(true).expect("list task board");
+        let resolved = summaries
+            .iter()
+            .filter_map(|summary| {
+                provider
+                    .get(&summary.key)
+                    .ok()
+                    .flatten()
+                    .map(|task| (summary.key.clone(), task))
+            })
+            .collect();
+        let actual = super::super::task_proposals::derive_reconcile_report(
+            &session_facts_from_center(&rows),
+            &summaries,
+            &resolved,
+            &[],
+        );
+        let expected = super::super::task_proposals::derive_reconcile_report(
+            &[super::super::task_proposals::SessionFact {
+                run_id: "readable-run".to_string(),
+                task_key: Some("0001".to_string()),
+                task_digest: None,
+                landed_sha: Some("0123456789abcdef0123456789abcdef01234567".to_string()),
+                landed_is_ancestor: Some(false),
+                blocked_with_park_report: false,
+                terminal_epoch: None,
+            }],
+            &summaries,
+            &resolved,
+            &[],
+        );
+
+        assert_eq!(actual, expected);
+        let _ = std::fs::remove_dir_all(board.as_std_path());
     }
 
     fn assert_center_request_failure_is_not_partial(

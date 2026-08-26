@@ -198,6 +198,132 @@ fn write_completed_ledger(ledger: &Utf8PathBuf) {
         .expect("write completed ledger");
 }
 
+fn write_repo_scoped_completed_ledger(root: &std::path::Path, repo_key: &str) -> Utf8PathBuf {
+    let root = Utf8PathBuf::from_path_buf(root.to_path_buf()).expect("UTF-8 scratch root");
+    let ledger = root.join(repo_key).join("session.json");
+    let session = serde_json::from_value(serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": "cached-center-session",
+        "run-id": "cached-center-run",
+        "trait-id": "cached-center-trait",
+        "current-run-index": 0,
+        "status": "completed",
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "proof-center"},
+            "state-source": "test",
+            "started-at-epoch": 1000,
+            "task-key": "cached-center-task",
+            "merge-frames": [{
+                "stage": "landing",
+                "status": "merged",
+                "evidence": ["landed=0123456789abcdef0123456789abcdef01234567"],
+            }],
+        },
+        "ledger": {
+            "run-id": "cached-center-run",
+            "trait-id": "cached-center-trait",
+            "current-run-index": 0,
+            "final-state": "completed",
+        },
+        "last-drive-outcome": {"outcome": "completed", "recorded-at-epoch": 1001},
+        "state-digest": "sha256:cached-center-proof",
+    }))
+    .expect("completed fixture session");
+    ctx_traits_io::run_session::write_run_session(&ledger, &session).expect("write ledger");
+    ledger
+}
+
+fn assert_center_backed_readers_serve(
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    runs_root: &std::path::Path,
+    repo: &std::path::Path,
+    home: &std::path::Path,
+    board: &std::path::Path,
+    task_key: &str,
+    run_id: &str,
+    ledger_path: &camino::Utf8Path,
+) {
+    let run = |args: &[&str]| {
+        let mut command = controlled_command(
+            std::path::Path::new(env!("CARGO_BIN_EXE_ctx")),
+            args,
+            repo,
+            home,
+        );
+        command
+            .env("CTX_CENTER_SOCKET", socket)
+            .env("CTX_CENTER_SPAWN_LOCK", runs_root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", runs_root)
+            .env("CTX_CENTER_INDEX", index)
+            .env("CTX_CENTER_EXECUTABLE", runs_root.join("does-not-start"));
+        command.output().expect("run center-backed reader")
+    };
+    let stats = run(&["traits", "internal", "stats", "--json"]);
+    assert!(
+        stats.status.success(),
+        "stats failed: {}",
+        String::from_utf8_lossy(&stats.stderr)
+    );
+    let stats: serde_json::Value = serde_json::from_slice(&stats.stdout).expect("stats JSON");
+    assert_eq!(stats["total-runs"], 1);
+
+    let board = board.to_str().expect("UTF-8 board");
+    let proposals = run(&["tasks", "proposals", "--board", board, "--json"]);
+    assert!(
+        proposals.status.success(),
+        "proposals failed: {}",
+        String::from_utf8_lossy(&proposals.stderr)
+    );
+    assert!(String::from_utf8_lossy(&proposals.stdout).contains(task_key));
+    let reconcile = run(&["tasks", "reconcile", "--board", board, "--json"]);
+    assert!(
+        reconcile.status.success(),
+        "reconcile failed: {}",
+        String::from_utf8_lossy(&reconcile.stderr)
+    );
+
+    let subscription = ctx_traits_io::center::subscribe(None).expect("center subscription");
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    let mut found = false;
+    loop {
+        match subscription
+            .recv_timeout(PROCESS_DEADLINE)
+            .expect("center snapshot event")
+        {
+            ctx_traits_io::center::CenterEvent::SnapshotRow(row) => {
+                found |= row.summary.parse_error.is_none() && row.summary.run_id == run_id;
+            }
+            ctx_traits_io::center::CenterEvent::SnapshotEnd => break,
+            _ => {}
+        }
+    }
+    assert!(found, "subscription must serve the cached readable row");
+    drop(subscription);
+
+    let merge = run(&["traits", "merge", run_id, "--json"]);
+    assert!(
+        !merge.status.success(),
+        "merge must reopen the unavailable ledger"
+    );
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&merge.stdout),
+        String::from_utf8_lossy(&merge.stderr)
+    );
+    assert!(
+        output.contains(ledger_path.as_str()),
+        "merge error must name ledger: {output}"
+    );
+    assert!(
+        !output.contains("center records no run-session ledger"),
+        "merge must resolve the cached center row before reopening: {output}"
+    );
+}
+
 const DRIVE_PROOF_TRAIT: &str = r#"id = "center-drive-proof"
 schema-version = "0.4"
 version = "0.1.0"
@@ -2023,5 +2149,150 @@ fn periodic_scan_repairs_a_dropped_frame_notification_for_subscribers() {
     drop(subscription);
     child.0.kill().expect("stop private sentinel");
     child.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn center_kill_and_restart_recovers_a_subscription_without_a_client_request() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("subscription-restart");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let _environment = CenterEnvironment::install(&root);
+    let mut first = spawn_sentinel(&root, &socket, &index, "5000");
+    drop(await_socket(&socket));
+
+    let subscription = ctx_traits_io::center::subscribe(None).expect("subscription");
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+    ));
+
+    let ledger = write_running_ledger(&root);
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "center did not publish appeared delta"
+        );
+        match subscription.recv_timeout(remaining) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::Appeared { row },
+            )) if row.ledger_path == ledger => break,
+            Ok(_) => {}
+            Err(error) => panic!("appeared delta: {error}"),
+        }
+    }
+
+    first.0.kill().expect("kill first center");
+    first.0.wait().expect("reap first center");
+    // SIGKILL bypasses the sentinel's SocketGuard cleanup.
+    std::fs::remove_file(&socket).expect("remove dead center socket");
+    assert!(
+        subscription.recv_timeout(PROCESS_DEADLINE).is_err(),
+        "killed center must disconnect the subscription"
+    );
+    drop(subscription);
+
+    let restarted = ctx_traits_io::center::subscribe(None).expect("restart subscription");
+    assert!(matches!(
+        restarted.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    let mut recovered = false;
+    while !recovered {
+        match restarted
+            .recv_timeout(PROCESS_DEADLINE)
+            .expect("restarted snapshot event")
+        {
+            ctx_traits_io::center::CenterEvent::SnapshotRow(row) => {
+                recovered = row.ledger_path == ledger;
+            }
+            ctx_traits_io::center::CenterEvent::SnapshotEnd => break,
+            _ => {}
+        }
+    }
+    assert!(recovered, "restarted center must serve the persisted row");
+    drop(restarted);
+    await_socket_removal(&socket);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn center_backed_readers_serve_an_unreadable_ledger_warm_and_after_restart() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("unreadable-ledger-readers");
+    let repo = root.join("repository");
+    let home = root.join("home");
+    let board = root.join("board");
+    std::fs::create_dir_all(&repo).expect("create repository");
+    std::fs::create_dir_all(&board).expect("create board");
+    git_init(&repo);
+    std::fs::write(
+        board.join("cached-center-task.toml"),
+        "schema-version = \"0.2\"\nkey = \"cached-center-task\"\ntitle = \"Cached center task\"\nstatus = \"ready\"\n",
+    )
+    .expect("write board task");
+    let repo = Utf8PathBuf::from_path_buf(repo).expect("UTF-8 repository");
+    let repo_root = ctx_traits_io::state::canonical_repo_root(&repo).expect("canonical repo");
+    let repo_key = ctx_traits_io::state::repo_key(&repo_root);
+    let ledger = write_repo_scoped_completed_ledger(&root, &repo_key);
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let _environment = CenterEnvironment::install(&root);
+    let mut first = spawn_sentinel(&root, &socket, &index, "60000");
+    drop(await_socket(&socket));
+
+    let rows = ctx_traits_io::center::list(Some(&repo_key)).expect("prime center index");
+    assert_eq!(rows.len(), 1, "warm center must index the completed ledger");
+    let original_permissions = std::fs::metadata(&ledger)
+        .expect("stat ledger")
+        .permissions();
+    let mut unreadable = original_permissions.clone();
+    unreadable.set_mode(0o000);
+    std::fs::set_permissions(&ledger, unreadable).expect("make ledger unreadable");
+
+    assert_center_backed_readers_serve(
+        &socket,
+        &index,
+        &root,
+        repo.as_std_path(),
+        &home,
+        &board,
+        "cached-center-task",
+        "cached-center-run",
+        &ledger,
+    );
+    first.0.kill().expect("kill warm center");
+    first.0.wait().expect("reap warm center");
+    std::fs::remove_file(&socket).expect("remove dead center socket");
+    await_socket_removal(&socket);
+
+    let mut second = spawn_sentinel(&root, &socket, &index, "60000");
+    drop(await_socket(&socket));
+    assert_center_backed_readers_serve(
+        &socket,
+        &index,
+        &root,
+        repo.as_std_path(),
+        &home,
+        &board,
+        "cached-center-task",
+        "cached-center-run",
+        &ledger,
+    );
+    std::fs::set_permissions(&ledger, original_permissions).expect("restore ledger permissions");
+    second.0.kill().expect("stop restarted center");
+    second.0.wait().expect("reap restarted center");
     let _ = std::fs::remove_dir_all(root);
 }

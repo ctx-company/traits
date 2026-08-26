@@ -3784,8 +3784,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_summary_defaults_are_reprojected_from_cached_session() {
-        let root = scratch("legacy-summary-reproject");
+    fn a_version_one_index_is_reprojected_by_the_current_center() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = scratch("v1-summary-reproject");
         let paths = paths(root.clone());
         let ledger = root.join("repo/session.json");
         std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
@@ -3794,24 +3796,48 @@ mod tests {
         session.provenance.task_key = Some("0243.4".to_string());
         crate::run_session::write_run_session(&ledger, &session).expect("write ledger");
 
-        let mut model = CenterModel::open(&paths).expect("open index");
-        model
-            .refresh_ledger_inner(&paths, &ledger, false, Some(&HashMap::new()))
-            .expect("cache ledger");
-        model
-            .db
-            .execute(
-                "UPDATE center_rows SET summary = ?1 WHERE ledger = ?2",
-                params![cached_summary(), ledger.as_str()],
-            )
-            .expect("replace with preceding summary shape");
-        drop(model);
+        let metadata = std::fs::metadata(ledger.as_std_path()).expect("stat ledger");
+        let secs = metadata.mtime();
+        let nanos = metadata.mtime_nsec();
+        let size = i64::try_from(metadata.size()).expect("ledger size fits sqlite");
+        let db = Connection::open(paths.index.as_std_path()).expect("create v1 index");
+        db.execute_batch("CREATE TABLE center_meta (version INTEGER NOT NULL); CREATE TABLE center_rows (ledger TEXT PRIMARY KEY, repo_key TEXT NOT NULL, repo_path TEXT NOT NULL, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, summary TEXT NOT NULL); CREATE TABLE center_sessions (ledger TEXT PRIMARY KEY, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, session TEXT NOT NULL);")
+            .expect("create v1 tables");
+        db.execute(
+            "INSERT INTO center_meta(version) VALUES (?1)",
+            [CENTER_SCHEMA_VERSION],
+        )
+        .expect("write v1 marker");
+        db.execute(
+            "INSERT INTO center_rows(ledger, repo_key, repo_path, mtime_secs, mtime_nanos, size, summary) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![ledger.as_str(), "repo", "/repo", secs, nanos, size, cached_summary()],
+        )
+        .expect("write cached row");
+        db.execute(
+            "INSERT INTO center_sessions(ledger, mtime_secs, mtime_nanos, size, session) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![ledger.as_str(), secs, nanos, size, serde_json::to_string(&session).expect("encode session")],
+        )
+        .expect("write cached session");
+        drop(db);
 
         let model = CenterModel::open(&paths).expect("reopen and reproject");
         let row = model.rows.get(&ledger).expect("reprojected row");
         assert_eq!(row.summary.run_id, "run-fixture");
         assert_eq!(row.summary.task_key.as_deref(), Some("0243.4"));
         assert!(row.summary.parse_error.is_none());
+        assert!(row.session.is_some());
+        let schema_version: i64 = model
+            .db
+            .query_row("SELECT version FROM center_meta", [], |row| row.get(0))
+            .expect("read shared marker");
+        assert_eq!(schema_version, CENTER_SCHEMA_VERSION);
+        let projection_version: i64 = model
+            .db
+            .query_row("SELECT version FROM center_projection_meta", [], |row| {
+                row.get(0)
+            })
+            .expect("read projection marker");
+        assert_eq!(projection_version, CENTER_PROJECTION_VERSION);
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 

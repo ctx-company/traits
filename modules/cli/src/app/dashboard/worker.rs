@@ -216,7 +216,7 @@ fn run(
                         &snapshots,
                         &mut state,
                         &candidate_rows,
-                        true,
+                        None,
                     ) {
                         Ok(accepted) => accepted,
                         Err(()) => return,
@@ -240,17 +240,17 @@ fn run(
                 }
                 Ok(ctx_traits_io::center::CenterEvent::Delta(delta)) => {
                     if snapshotting {
-                        apply_delta(&mut staged_rows, delta);
+                        let _ = apply_delta(&mut staged_rows, delta);
                         continue;
                     }
                     let mut candidate_rows = rows.clone();
-                    let refresh_selected_preview = apply_delta(&mut candidate_rows, delta);
+                    let changed_ledger_path = apply_delta(&mut candidate_rows, delta);
                     if !snapshotting {
                         let accepted = match emit_subscription_snapshot(
                             &snapshots,
                             &mut state,
                             &candidate_rows,
-                            refresh_selected_preview,
+                            changed_ledger_path,
                         ) {
                             Ok(accepted) => accepted,
                             Err(()) => return,
@@ -306,20 +306,23 @@ fn run(
 fn apply_delta(
     rows: &mut HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     delta: ctx_traits_io::center::CenterDelta,
-) -> bool {
+) -> Option<String> {
     match delta {
         ctx_traits_io::center::CenterDelta::Appeared { row }
         | ctx_traits_io::center::CenterDelta::RowChanged { row } => {
-            rows.insert(row.ledger_path.clone(), *row);
-            true
+            let ledger_path = row.ledger_path.clone();
+            rows.insert(ledger_path.clone(), *row);
+            Some(ledger_path)
         }
         ctx_traits_io::center::CenterDelta::Ended { row } => {
             rows.remove(&row.ledger_path);
-            true
+            Some(row.ledger_path.clone())
         }
         // Activity lines do not change the row projection, but they may change
         // the selected detail view that intentionally reads one ledger by path.
-        ctx_traits_io::center::CenterDelta::ActivityLine { .. } => true,
+        ctx_traits_io::center::CenterDelta::ActivityLine { row, .. } => {
+            Some(row.ledger_path.clone())
+        }
     }
 }
 
@@ -417,9 +420,9 @@ fn emit_subscription_snapshot(
     snapshots: &mpsc::Sender<RefreshResult>,
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
-    refresh_selected_preview: bool,
+    changed_ledger_path: Option<String>,
 ) -> Result<bool, ()> {
-    emit_snapshot(snapshots, state, rows, true, true, refresh_selected_preview)
+    emit_snapshot(snapshots, state, rows, true, true, changed_ledger_path)
 }
 
 fn emit_command_snapshot(
@@ -446,7 +449,7 @@ fn emit_cached_rows_snapshot(
 ) -> Result<bool, ()> {
     // An explicit render may rebuild a scoped projection, so retain the same
     // enriched parked-Ask and trait-drift presentation as subscription renders.
-    emit_snapshot(snapshots, state, rows, clear_refresh_error, true, false)
+    emit_snapshot(snapshots, state, rows, clear_refresh_error, true, None)
 }
 
 fn emit_snapshot(
@@ -455,7 +458,7 @@ fn emit_snapshot(
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     clear_refresh_error: bool,
     enrich_session_presentations: bool,
-    refresh_selected_preview: bool,
+    changed_ledger_path: Option<String>,
 ) -> Result<bool, ()> {
     let rows: Vec<_> = rows.values().cloned().collect();
     let result = state
@@ -463,7 +466,7 @@ fn emit_snapshot(
         .map(|_| {
             let mut snapshot = DashboardSnapshot::from_state(state);
             snapshot.clear_refresh_error = clear_refresh_error;
-            snapshot.refresh_selected_preview = refresh_selected_preview;
+            snapshot.changed_ledger_path = changed_ledger_path;
             Arc::new(snapshot)
         })
         .map_err(|error| error.to_string());
@@ -547,8 +550,12 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
 
 #[cfg(test)]
 mod tests {
+    use super::super::FAIL_CENTER_PROJECTIONS;
     use super::*;
-    use crate::app::test_support::{CenterPeer, accept_center_subscription};
+    use crate::app::test_support::{
+        CenterPeer, accept_center_client, accept_center_subscription, read_center_request,
+        write_center_response,
+    };
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
 
@@ -631,6 +638,15 @@ mod tests {
         row
     }
 
+    fn parked_ask_row(title: &str) -> ctx_traits_io::center::CenterPublicRow {
+        let mut value = serde_json::to_value(current_repo_row("waiting-on-human", title))
+            .expect("encode center row");
+        let summary = value["summary"].as_object_mut().expect("row summary");
+        summary.insert("next_frame_kind".to_string(), serde_json::json!("ask"));
+        summary.insert("interrupted".to_string(), serde_json::json!(false));
+        serde_json::from_value(value).expect("parked Ask row")
+    }
+
     #[test]
     fn refresh_emits_an_empty_snapshot() {
         let (snapshots, results) = mpsc::channel();
@@ -663,6 +679,7 @@ mod tests {
 
     #[test]
     fn command_refresh_preserves_the_subscription_owned_session_model() {
+        let _lock = crate::app::test_support::center_environment_lock();
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
@@ -671,7 +688,7 @@ mod tests {
         let center_row = row("awaiting-agent-output", "parked title");
         let rows = HashMap::from([(center_row.ledger_path.clone(), center_row)]);
 
-        emit_subscription_snapshot(&snapshots, &mut state, &rows, true)
+        emit_subscription_snapshot(&snapshots, &mut state, &rows, None)
             .expect("seed subscription snapshot");
         let _ = results
             .recv()
@@ -789,6 +806,173 @@ mod tests {
     }
 
     #[test]
+    fn failed_complete_snapshot_projection_keeps_the_accepted_rows_and_reconnects() {
+        let peer_server = CenterPeer::install("failed-complete-projection");
+        let initial = current_repo_row("awaiting-agent-output", "rejected");
+        let recovered = current_repo_row("awaiting-agent-output", "recovered");
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut first = accept_center_subscription(&listener);
+            let row = serde_json::to_string(&initial).expect("encode rejected row");
+            writeln!(first, "{{\"kind\":\"snapshot-row\",\"row\":{row}}}")
+                .expect("write rejected snapshot row");
+            finish_snapshot(&mut first);
+            drop(first);
+
+            let mut second = accept_center_subscription(&listener);
+            let row = serde_json::to_string(&recovered).expect("encode recovered row");
+            writeln!(second, "{{\"kind\":\"snapshot-row\",\"row\":{row}}}")
+                .expect("write recovered snapshot row");
+            finish_snapshot(&mut second);
+        });
+
+        FAIL_CENTER_PROJECTIONS.store(1, std::sync::atomic::Ordering::SeqCst);
+        let worker = WorkerLoop::start();
+        let error = match worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("rejected projection result")
+        {
+            Ok(_) => panic!("injected projection must fail"),
+            Err(error) => error,
+        };
+        FAIL_CENTER_PROJECTIONS.store(0, std::sync::atomic::Ordering::SeqCst);
+        assert!(error.contains("injected center projection failure"));
+
+        worker.send(Command::Render {
+            all_repos: true,
+            screen: Screen::Sessions,
+        });
+        let retained = worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("render accepted rows")
+            .expect("render succeeds");
+        assert!(
+            retained.sessions.is_empty(),
+            "rejected snapshot was not accepted"
+        );
+        let recovered = worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("recovered snapshot")
+            .expect("recovered projection succeeds");
+        assert_eq!(recovered.sessions[0].title.as_deref(), Some("recovered"));
+        peer.join().expect("join center peer");
+    }
+
+    #[test]
+    fn failed_delta_projection_keeps_the_accepted_rows_and_reconnects() {
+        let peer_server = CenterPeer::install("failed-delta-projection");
+        let before = current_repo_row("awaiting-agent-output", "before");
+        let after = current_repo_row("awaiting-agent-output", "after");
+        let (release_delta, delta_released) = mpsc::channel();
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut first = accept_center_subscription(&listener);
+            let row = serde_json::to_string(&before).expect("encode before row");
+            writeln!(first, "{{\"kind\":\"snapshot-row\",\"row\":{row}}}")
+                .expect("write initial snapshot row");
+            finish_snapshot(&mut first);
+            delta_released.recv().expect("release delta");
+            let row = serde_json::to_string(&after).expect("encode after row");
+            writeln!(
+                first,
+                "{{\"kind\":\"delta\",\"delta\":{{\"type\":\"row-changed\",\"row\":{row}}}}}"
+            )
+            .expect("write rejected delta");
+            drop(first);
+
+            let mut second = accept_center_subscription(&listener);
+            let row = serde_json::to_string(&after).expect("encode recovered row");
+            writeln!(second, "{{\"kind\":\"snapshot-row\",\"row\":{row}}}")
+                .expect("write recovered snapshot row");
+            finish_snapshot(&mut second);
+        });
+
+        let worker = WorkerLoop::start();
+        let initial = worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("initial snapshot")
+            .expect("initial projection succeeds");
+        assert_eq!(initial.sessions[0].title.as_deref(), Some("before"));
+        FAIL_CENTER_PROJECTIONS.store(1, std::sync::atomic::Ordering::SeqCst);
+        release_delta.send(()).expect("release peer delta");
+        let error = match worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("rejected delta result")
+        {
+            Ok(_) => panic!("injected delta projection must fail"),
+            Err(error) => error,
+        };
+        FAIL_CENTER_PROJECTIONS.store(0, std::sync::atomic::Ordering::SeqCst);
+        assert!(error.contains("injected center projection failure"));
+
+        worker.send(Command::Render {
+            all_repos: true,
+            screen: Screen::Sessions,
+        });
+        let retained = worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("render accepted rows")
+            .expect("render succeeds");
+        assert_eq!(retained.sessions[0].title.as_deref(), Some("before"));
+        let recovered = worker
+            .recv_timeout(Duration::from_secs(3))
+            .expect("recovered snapshot")
+            .expect("recovered projection succeeds");
+        assert_eq!(recovered.sessions[0].title.as_deref(), Some("after"));
+        peer.join().expect("join center peer");
+    }
+
+    #[test]
+    fn parked_ask_presentation_survives_a_render_with_an_unavailable_center_get() {
+        let peer_server = CenterPeer::install("parked-ask-render");
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut stream = accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            assert_eq!(request["kind"], "get");
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({"type": "error", "data": {"message": "center unavailable"}}),
+            );
+        });
+        let (snapshots, results) = mpsc::channel();
+        let (previews, _preview_results) = mpsc::channel();
+        let (explanations, _explanation_results) = mpsc::channel();
+        let mut state = State::new_without_worker();
+        state.all_repos = true;
+        let center_row = parked_ask_row("waiting for approval");
+        let rows = HashMap::from([(center_row.ledger_path.clone(), center_row)]);
+        state
+            .reload_from_center_rows(&rows.values().cloned().collect::<Vec<_>>(), false)
+            .expect("seed accepted projection");
+        state.sessions[0].phase = "ask: approve the change (wait 1m)".to_string();
+
+        handle_one_command(
+            Command::Render {
+                all_repos: true,
+                screen: Screen::Sessions,
+            },
+            &snapshots,
+            &previews,
+            &explanations,
+            &mut state,
+            &rows,
+            false,
+        )
+        .expect("render accepted rows");
+        let snapshot = results
+            .recv()
+            .expect("render result")
+            .expect("render snapshot");
+        let phase = &snapshot.sessions[0].phase;
+        assert!(phase.starts_with("ask: approve the change (wait 1m); "));
+        assert!(phase.contains("has no pinned document"));
+        assert_eq!(phase.matches("has no pinned document").count(), 1);
+        peer.join().expect("join center peer");
+    }
+
+    #[test]
     fn accepted_delta_does_not_advance_completed_snapshot_time() {
         let completed_snapshot = std::time::UNIX_EPOCH + Duration::from_secs(3_723);
         let last_snapshot_at = Some(completed_snapshot);
@@ -837,37 +1021,45 @@ mod tests {
 
     #[test]
     fn activity_delta_requests_an_unchanged_selected_preview_refresh() {
+        let _lock = crate::app::test_support::center_environment_lock();
         let mut rows = HashMap::new();
         let center_row = row("awaiting-agent-output", "activity title");
 
-        assert!(apply_delta(
+        let changed_ledger_path = apply_delta(
             &mut rows,
             ctx_traits_io::center::CenterDelta::ActivityLine {
-                row: Box::new(center_row),
+                row: Box::new(center_row.clone()),
                 activity: ctx_traits_io::activity_sidecar::ActivityRecord::SessionTitle {
                     at_epoch_ms: 0,
                     title: "activity title".to_string(),
                 },
             },
-        ));
+        );
+        assert_eq!(
+            changed_ledger_path.as_deref(),
+            Some(center_row.ledger_path.as_str())
+        );
         assert!(rows.is_empty(), "activity does not alter the row model");
 
         let (snapshots, results) = mpsc::channel();
         let mut state = State::new_without_worker();
-        emit_subscription_snapshot(&snapshots, &mut state, &rows, true)
+        emit_subscription_snapshot(&snapshots, &mut state, &rows, changed_ledger_path)
             .expect("emit activity snapshot");
-        assert!(
+        assert_eq!(
             results
                 .recv()
                 .expect("activity result")
                 .expect("activity snapshot")
-                .refresh_selected_preview,
-            "the renderer must refresh the retained selected preview"
+                .changed_ledger_path
+                .as_deref(),
+            Some(center_row.ledger_path.as_str()),
+            "activity reports the changed ledger path to the renderer"
         );
     }
 
     #[test]
     fn worker_delta_snapshots_update_and_remove_renderer_state() {
+        let _lock = crate::app::test_support::center_environment_lock();
         let (snapshots, results) = mpsc::channel();
         let mut worker_state = State::new_without_worker();
         // ALL scope keeps this worker/state boundary focused on subscription
@@ -883,7 +1075,7 @@ mod tests {
                 row: Box::new(completed.clone()),
             },
         );
-        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, true)
+        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, None)
             .expect("emit terminal snapshot");
         let terminal = results
             .recv()
@@ -904,7 +1096,7 @@ mod tests {
                 row: Box::new(completed),
             },
         );
-        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, true)
+        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, None)
             .expect("emit removal snapshot");
         let removed = results
             .recv()

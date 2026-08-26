@@ -342,28 +342,28 @@ parent = "0243"
 [[checks]]
 name = "dashboard subscription regressions pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "center cache and corrupt-ledger regressions pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 600000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "tasks proposal and reconcile parity regressions pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "center process proofs pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "per-round workspace gate passes"
-command = "CTX_BIN=\"$CARGO_TARGET_DIR/debug/ctx\" just test"
+command = 'CTX_BIN="$CARGO_TARGET_DIR/debug/ctx" just test'
 timeout-ms = 900000

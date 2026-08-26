@@ -1221,9 +1221,9 @@ struct DashboardSnapshot {
     reload_duration: Option<Duration>,
     /// Only a fresh center subscription snapshot may clear an outage footer.
     clear_refresh_error: bool,
-    /// A center event changed session state, so the retained by-path preview
-    /// must be refreshed even when its selected identity did not change.
-    refresh_selected_preview: bool,
+    /// The ledger path a center delta changed. `None` for a complete snapshot
+    /// and local render; both fall back to selection identity changes.
+    changed_ledger_path: Option<String>,
 }
 
 impl DashboardSnapshot {
@@ -1236,10 +1236,14 @@ impl DashboardSnapshot {
             run_sightings: state.run_sightings.clone(),
             reload_duration: state.reload_duration,
             clear_refresh_error: true,
-            refresh_selected_preview: false,
+            changed_ledger_path: None,
         }
     }
 }
+
+#[cfg(test)]
+static FAIL_CENTER_PROJECTIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 impl State {
     fn new() -> Self {
@@ -1576,7 +1580,16 @@ impl State {
         // list-visible preview always tracks the current selection.
         if self.screen == Screen::Sessions {
             let current_preview = self.session_preview_request();
-            if current_preview != previous_preview || snapshot.refresh_selected_preview {
+            let changed_selection =
+                snapshot
+                    .changed_ledger_path
+                    .as_deref()
+                    .is_some_and(|changed| {
+                        current_preview
+                            .as_ref()
+                            .is_some_and(|request| request.ledger_path.as_str() == changed)
+                    });
+            if current_preview != previous_preview || changed_selection {
                 self.session_preview = None;
                 self.set_session_follow_all(false);
                 self.dispatch_session_preview();
@@ -1603,6 +1616,19 @@ impl State {
         rows: &[ctx_traits_io::center::CenterPublicRow],
         enrich_session_presentations: bool,
     ) -> crate::Result<()> {
+        #[cfg(test)]
+        if FAIL_CENTER_PROJECTIONS
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |remaining| remaining.checked_sub(1),
+            )
+            .is_ok()
+        {
+            return Err(crate::Error::Command {
+                message: "injected center projection failure".to_string(),
+            });
+        }
         let reload_started = std::time::Instant::now();
         let (sessions, merges, run_sightings) = Self::center_row_projections(rows, self.all_repos)?;
         // A render can occur while the center is reconnecting. Preserve an
@@ -9200,6 +9226,46 @@ mod tests {
                 .map(|view| view.session_id.as_str()),
             Some("selected")
         );
+    }
+
+    #[test]
+    fn unrelated_center_events_leave_an_unchanged_selected_preview_alone() {
+        for changed_ledger_path in [Some("/tmp/other.json".to_string()), None] {
+            let mut state = State::new_without_worker();
+            state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+            rebuild_visible_sessions(&mut state);
+            state.list_sessions.set_selected(1);
+            state.session_preview = Some(attached_view_for("selected"));
+            let mut snapshot =
+                snapshot_with_sessions(vec![row_with_id("selected", SessionClass::Live)]);
+            snapshot.changed_ledger_path = changed_ledger_path;
+
+            state.apply_snapshot(&snapshot);
+
+            assert_eq!(
+                state
+                    .session_preview
+                    .as_ref()
+                    .map(|view| view.session_id.as_str()),
+                Some("selected")
+            );
+        }
+    }
+
+    #[test]
+    fn selected_center_event_refreshes_the_retained_preview() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.session_preview = Some(attached_view_for("selected"));
+        let mut snapshot =
+            snapshot_with_sessions(vec![row_with_id("selected", SessionClass::Live)]);
+        snapshot.changed_ledger_path = Some("/tmp/selected.json".to_string());
+
+        state.apply_snapshot(&snapshot);
+
+        assert!(state.session_preview.is_none());
     }
 
     #[test]
