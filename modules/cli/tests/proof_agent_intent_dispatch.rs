@@ -130,7 +130,8 @@ case "$key" in
 esac
 session=$(printf '%s\n' "$last" | sed -n 's/^Run session: //p')
 if [ -n "$session" ]; then
-  printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_traits_run_set","arguments":{"session":"%s","target":"slot:%s","value":"%s","agent":"worker","harness":"capture"}}}\n' "$session" "$key" "$value" | "$ctx" traits internal mcp >/dev/null || exit 1
+  agent=$(printf '%s\n' "$last" | sed -n 's/^Agent role: //p')
+  printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ctx_traits_run_set","arguments":{"session":"%s","target":"slot:%s","value":"%s","agent":"%s","harness":"capture"}}}\n' "$session" "$key" "$value" "$agent" | "$ctx" traits internal mcp >/dev/null || exit 1
 fi
 printf '{"%s":"%s"}' "$key" "$value"
 "#
@@ -191,7 +192,7 @@ output = ["slot:answer"]
 
     let runtime = |transport: &str| {
         format!(
-            "schema-version = \"0.4\"\n\n[harness.capture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\", \"mcp\"]\nversion-probe = [\"--probe\"]\n\n[harness.capture.cli]\nargv = []\nprompt-via = \"arg\"\noutput = \"raw-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[harness.capture.mcp]\nmcp-config-flag = \"--mcp-config\"\nsystem-prompt-flag = \"--mcp-system\"\n\n[agent.role.worker]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n",
+            "schema-version = \"0.4\"\n\n[harness.capture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\", \"mcp\"]\nversion-probe = [\"--probe\"]\n\n[harness.capture.cli]\nargv = []\nprompt-via = \"arg\"\noutput = \"raw-json\"\nsystem-prompt-flag = \"--cli-system\"\n\n[harness.capture.mcp]\nmcp-config-flag = \"--mcp-config\"\nsystem-prompt-flag = \"--mcp-system\"\n\n[agent.role.worker]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.parallel-direct-agent]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n\n[agent.role.parallel-nested-agent]\nharness = \"capture\"\ntransport = \"{transport}\"\nsession-mode = \"per-frame\"\n",
             script.to_string_lossy(),
         )
     };
@@ -3451,6 +3452,288 @@ intent = {{ require = [{{ id = "fe-later-marker", summary = "For-each later mark
 output = ["slot:answer"]
 "#
     );
+    fs::write(&generated, &for_each_fixture).unwrap();
+
+    // Parallel branches retain their branch-local owner sequence. The direct
+    // and recursively nested leaves both use local index zero, so this also
+    // rejects an ambiguous top-level or container declaration lookup.
+    let parallel_fixture = format!(
+        r#"{nested_header}[[agent]]
+id = "parallel-direct-agent"
+description = "Direct parallel worker."
+system = "DIRECT SYSTEM"
+[agent.intent]
+require = [{{ id = "shared", summary = "Direct agent replacement text." }}, {{ id = "agent-only", summary = "Direct agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "shared-tone", summary = "Direct agent tone." }}, {{ id = "agent-tone", summary = "Direct agent tone added." }}]
+method = [{{ id = "shared-method", summary = "Direct agent method." }}, {{ id = "agent-method", summary = "Direct agent method added." }}]
+format = [{{ id = "shared-format", summary = "Direct agent format." }}, {{ id = "agent-format", summary = "Direct agent format added." }}]
+verbosity = {{ id = "agent-verbosity", summary = "Direct agent verbosity." }}
+directness = {{ id = "agent-directness", summary = "Direct agent directness." }}
+scope-control = {{ id = "agent-scope", summary = "Direct agent scope." }}
+uncertainty = {{ id = "agent-uncertainty", summary = "Direct agent uncertainty." }}
+
+[[agent]]
+id = "parallel-nested-agent"
+description = "Nested parallel worker."
+system = "NESTED SYSTEM"
+[agent.intent]
+require = [{{ id = "shared", summary = "Nested agent replacement text." }}, {{ id = "agent-only", summary = "Nested agent guidance." }}]
+[agent.behavior]
+tone = [{{ id = "shared-tone", summary = "Nested agent tone." }}, {{ id = "agent-tone", summary = "Nested agent tone added." }}]
+method = [{{ id = "shared-method", summary = "Nested agent method." }}, {{ id = "agent-method", summary = "Nested agent method added." }}]
+format = [{{ id = "shared-format", summary = "Nested agent format." }}, {{ id = "agent-format", summary = "Nested agent format added." }}]
+verbosity = {{ id = "agent-verbosity", summary = "Nested agent verbosity." }}
+directness = {{ id = "agent-directness", summary = "Nested agent directness." }}
+scope-control = {{ id = "agent-scope", summary = "Nested agent scope." }}
+uncertainty = {{ id = "agent-uncertainty", summary = "Nested agent uncertainty." }}
+
+[[slot]]
+id = "pl-items"
+schema = "[schema:text]"
+description = "Parallel items."
+
+[[slot]]
+id = "pl-item-b"
+schema = "schema:text"
+description = "Parallel item."
+
+[[slot]]
+id = "pl-answer-a"
+schema = "schema:text"
+description = "Direct answer."
+
+[[slot]]
+id = "pl-answer-a2"
+schema = "schema:text"
+description = "Direct next answer."
+
+[[slot]]
+id = "pl-answer-b"
+schema = "schema:text"
+description = "Nested answer."
+
+[[sequence.pl-direct.sequence]]
+id = "pl-a"
+title = "Parallel direct"
+agent = "agent:parallel-direct-agent"
+prompt = "Produce parallel direct answer."
+intent = {{ require = [{{ id = "shared", summary = "Parallel direct replacement text." }}, {{ id = "cross", summary = "Parallel direct cross marker." }}, {{ id = "pl-a-marker", summary = "Parallel direct marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Parallel direct tone." }}, {{ id = "pl-a-tone-marker", summary = "Parallel direct tone marker." }}], verbosity = {{ id = "pl-a-verbosity-marker", summary = "Parallel direct verbosity marker." }} }}
+output = ["slot:pl-answer-a"]
+
+[[sequence.pl-direct.sequence]]
+id = "pl-a-next"
+title = "Parallel direct next"
+agent = "agent:worker"
+prompt = "Produce parallel direct next answer."
+intent = {{ require = [{{ id = "pl-a-next-marker", summary = "Parallel direct next marker." }}] }}
+output = ["slot:pl-answer-a2"]
+
+[[sequence.pl-nested-body.sequence]]
+id = "pl-b"
+title = "Parallel nested"
+agent = "agent:parallel-nested-agent"
+prompt = "Produce parallel nested answer."
+input = ["slot:pl-item-b"]
+intent = {{ require = [{{ id = "shared", summary = "Parallel nested replacement text." }}, {{ id = "pl-b-marker", summary = "Parallel nested marker." }}], avoid = [{{ id = "cross", summary = "Parallel nested cross marker." }}] }}
+behavior = {{ tone = [{{ id = "shared-tone", summary = "Parallel nested tone." }}, {{ id = "pl-b-tone-marker", summary = "Parallel nested tone marker." }}] }}
+output = ["slot:pl-answer-b"]
+
+[[sequence.pl-nested.sequence]]
+id = "pl-fe"
+title = "Parallel nested for-each"
+kind = "for-each"
+over = "slot:pl-items"
+item = "slot:pl-item-b"
+max-items = 1
+sequence = "sequence:pl-nested-body"
+
+[procedure]
+description = "Parallel leaf guidance."
+
+[[procedure.sequence]]
+id = "pl-pre"
+title = "Parallel pre"
+agent = "agent:worker"
+prompt = "Produce parallel pre answer."
+intent = {{ require = [{{ id = "pl-pre-marker", summary = "Parallel pre marker." }}] }}
+output = ["slot:answer"]
+
+[[procedure.sequence]]
+id = "pl-seed"
+title = "Seed parallel elements"
+kind = "project"
+output = ["slot:pl-items"]
+
+[[procedure.sequence.projection]]
+source = {{ literal = ["parallel-item"] }}
+destination = "slot:pl-items"
+
+[[procedure.sequence]]
+id = "pl-panel"
+title = "Parallel panel"
+kind = "parallel"
+max-branches = 2
+branches = ["sequence:pl-direct", "sequence:pl-nested"]
+
+[[procedure.sequence]]
+id = "pl-post"
+title = "Parallel post"
+agent = "agent:worker"
+prompt = "Produce parallel post answer."
+intent = {{ require = [{{ id = "pl-post-marker", summary = "Parallel post marker." }}] }}
+output = ["slot:answer"]
+"#
+    );
+    fs::write(&generated, &parallel_fixture).unwrap();
+    require_success(
+        "approve parallel fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    let parallel_preview = preview_all("parallel");
+    assert_eq!(
+        parallel_preview.len(),
+        5,
+        "parallel preview: {parallel_preview:?}"
+    );
+    for (prompt, own, foreign, identity) in [
+        (
+            &parallel_preview[1],
+            "pl-a-marker",
+            "pl-b-marker",
+            "Direct parallel worker.",
+        ),
+        (
+            &parallel_preview[3],
+            "pl-b-marker",
+            "pl-a-marker",
+            "Nested parallel worker.",
+        ),
+    ] {
+        assert!(
+            prompt.contains(own) && prompt.contains(identity),
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains(foreign)
+                && !prompt.contains("pl-pre-marker")
+                && !prompt.contains("pl-post-marker"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("source=\""), "{prompt}");
+    }
+    let _ = run_with_env("cli", "parallel-cli.json", &[]);
+    let parallel_cli_frames = read_frames(5);
+    let parallel_cli_args: Vec<_> = (0..5)
+        .map(|index| {
+            fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap()
+        })
+        .collect();
+    let _ = run_with_env("mcp", "parallel-mcp.json", &[]);
+    let parallel_mcp_frames = read_frames(4);
+    let parallel_mcp_args: Vec<_> = (0..4)
+        .map(|index| {
+            fs::read_to_string(capture.with_extension(format!("txt.args.{index}"))).unwrap()
+        })
+        .collect();
+    for (frames, args, flag) in [
+        (&parallel_cli_frames, &parallel_cli_args, "--cli-system"),
+        (&parallel_mcp_frames, &parallel_mcp_args, "--mcp-system"),
+    ] {
+        for (index, system, own, foreign) in [
+            (1, "DIRECT SYSTEM", "pl-a-marker", "pl-b-marker"),
+            (3, "NESTED SYSTEM", "pl-b-marker", "pl-a-marker"),
+        ] {
+            assert!(
+                frames[index].contains(own) && !frames[index].contains(foreign),
+                "{}",
+                frames[index]
+            );
+            assert!(!frames[index].contains(system), "{}", frames[index]);
+            assert!(
+                args[index].contains(flag) && args[index].contains(system),
+                "{}",
+                args[index]
+            );
+        }
+    }
+    for (preview, cli, mcp) in [
+        (
+            &parallel_preview[1],
+            &parallel_cli_frames[1],
+            &parallel_mcp_frames[1],
+        ),
+        (
+            &parallel_preview[3],
+            &parallel_cli_frames[3],
+            &parallel_mcp_frames[3],
+        ),
+    ] {
+        assert_eq!(extract_intent(preview), extract_intent(cli));
+        assert_eq!(extract_intent(cli), extract_intent(mcp));
+        assert_eq!(extract_behavior(preview), extract_behavior(cli));
+        assert_eq!(extract_behavior(cli), extract_behavior(mcp));
+    }
+    let parallel_session = home.join("parallel-cli.json");
+    for (step, live) in [
+        ("pl-a", &parallel_cli_frames[1]),
+        ("pl-b", &parallel_cli_frames[3]),
+    ] {
+        let historical = session_preview("parallel historical", &parallel_session, Some(step));
+        assert_eq!(extract_intent(&historical), extract_intent(live));
+        assert_eq!(extract_behavior(&historical), extract_behavior(live));
+    }
+    let export_dir = home.join("parallel-static-export");
+    let export = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "export",
+            "--file",
+            generated.to_str().unwrap(),
+            "--profile",
+            "agent-skills",
+            "--format",
+            "compat",
+            "--out",
+            export_dir.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&export, 0);
+    let skill = fs::read_to_string(export_dir.join("agent-intent").join("SKILL.md")).unwrap();
+    for (source, own, foreign) in [
+        (
+            "sequence:pl-direct/pl-a",
+            "Parallel direct replacement text.",
+            "Parallel nested replacement text.",
+        ),
+        (
+            "sequence:pl-nested-body/pl-b",
+            "Parallel nested replacement text.",
+            "Parallel direct replacement text.",
+        ),
+    ] {
+        let tag = format!("id=\"shared\" source=\"{source}\">");
+        assert_eq!(skill.matches(&tag).count(), 1, "{skill}");
+        let start = skill.find(&tag).unwrap();
+        let end = start + skill[start..].find("</intent>").unwrap();
+        assert!(
+            skill[start..end].contains(own) && !skill[start..end].contains(foreign),
+            "{skill}"
+        );
+    }
     fs::write(&generated, &for_each_fixture).unwrap();
     require_success(
         "approve for-each fixture",
