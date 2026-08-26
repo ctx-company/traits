@@ -3,7 +3,7 @@ key = "0252.3"
 title = "Buttons: a confirm is chosen, not typed"
 status = "ready"
 raised = "2026-08-24"
-content = """
+content = '''
 A labeled-button row in the tui kit, wired into `Modal::Confirm` itself so
 every fixed-answer modal in the workspace converts at once, and the one
 dashboard surface that still types a fixed answer (task archive) stops
@@ -49,7 +49,7 @@ code does not model the way the name suggests:
   automatically — this is why button state goes in the variant rather than
   in a dashboard-side renderer. Initial focus is deliberately the
   affirmative button: Enter must keep confirming, or
-  `proof_run_view_exit_teardown` (which quits both surfaces with `\\r`)
+  `proof_run_view_exit_teardown` (which quits both surfaces with `\r`)
   regresses for an unrelated reason.
 - `Modal::buttons(title, body, Vec<Button>)` for rows that are not yes/no.
   It is the seam 0252.4's three-choice failure modal will use; no part of
@@ -318,8 +318,8 @@ standing rulings.
 text-input modals; mouse activation; a form/focus framework; truecolor;
 animation; any change to spawn, trust-reason, human-answer, split-title, or
 task-edit text entry.
-"""
-validation = """
+'''
+validation = '''
 ## Done when
 
 1. Every fixed-answer modal is chosen, not typed. The `y`/`n` arms are gone
@@ -334,7 +334,7 @@ validation = """
    committed repo content. Each site is matched by its own literal, not by
    line number, and `-U` makes the match survive whatever way rustfmt wraps
    the call:
-   `D=modules/cli/src/app; cnt() { rg -cU "$2" "$D/$1" | grep -qx "$3"; }; has() { rg -qU "$2" "$D/$1"; }; no() { ! rg -qU "$2" "$D/$1"; }; has tui_kit.rs "fn buttons\\(" && no tui_kit.rs "KeyCode::Char\\(.y.\\) \\| KeyCode::Enter" && no tui_kit.rs "KeyCode::Char\\(.n.\\) \\| KeyCode::Esc" && no tui_kit.rs "y/enter confirm" && no dashboard.rs "parse_task_archive_input" && has dashboard.rs "fn archive_buttons\\(" && has dashboard.rs "Modal::buttons\\(\\s*prompt,\\s*body,\\s*archive_buttons\\(" && cnt dashboard.rs "Modal::confirm\\(\\s*\\"attach failed\\"" 1 && cnt dashboard.rs "Modal::confirm\\(\\s*\\"exit\\", \\"Quit ctx traits\\?\\"\\)" 2 && cnt dashboard.rs "Modal::confirm\\(\\s*title, body\\)" 2 && cnt dashboard.rs "Modal::confirm\\(\\s*\\"resume session\\"" 1 && cnt dashboard.rs "Modal::confirm\\(\\s*if deep" 1 && cnt dashboard.rs "Modal::confirm\\(\\s*format!\\(\\"mark " 1 && cnt dashboard.rs "Modal::confirm\\(\\s*format!\\(\\"split " 1 && cnt dashboard.rs "Modal::buttons\\(\\s*\\"delete session\\"" 1 && cnt dashboard.rs "Modal::buttons\\(\\s*\\"drop from queue\\"" 1 && cnt tui_demo.rs "Modal::confirm\\(\\s*\\"exit demo\\", \\"Quit the kit demo\\?\\"\\)" 2 && cnt tui_demo.rs "Modal::buttons\\(\\s*\\"delete row\\"" 1 && cnt trait_editor.rs "Modal::confirm\\(\\s*\\"exit editor\\", \\"Quit ctx traits internal edit\\?\\"\\)" 2 && cnt run_view.rs "tui_kit::Modal::confirm\\(" 1 && cnt dashboard.rs "\\.destructive\\(\\)" 2 && cnt tui_demo.rs "\\.destructive\\(\\)" 1`
+   `D=modules/cli/src/app; cnt() { rg -cU "$2" "$D/$1" | grep -qx "$3"; }; has() { rg -qU "$2" "$D/$1"; }; no() { ! rg -qU "$2" "$D/$1"; }; has tui_kit.rs "fn buttons\(" && no tui_kit.rs "KeyCode::Char\(.y.\) \| KeyCode::Enter" && no tui_kit.rs "KeyCode::Char\(.n.\) \| KeyCode::Esc" && no tui_kit.rs "y/enter confirm" && no dashboard.rs "parse_task_archive_input" && has dashboard.rs "fn archive_buttons\(" && has dashboard.rs "Modal::buttons\(\s*prompt,\s*body,\s*archive_buttons\(" && cnt dashboard.rs "Modal::confirm\(\s*\"attach failed\"" 1 && cnt dashboard.rs "Modal::confirm\(\s*\"exit\", \"Quit ctx traits\?\"\)" 2 && cnt dashboard.rs "Modal::confirm\(\s*title, body\)" 2 && cnt dashboard.rs "Modal::confirm\(\s*\"resume session\"" 1 && cnt dashboard.rs "Modal::confirm\(\s*if deep" 1 && cnt dashboard.rs "Modal::confirm\(\s*format!\(\"mark " 1 && cnt dashboard.rs "Modal::confirm\(\s*format!\(\"split " 1 && cnt dashboard.rs "Modal::buttons\(\s*\"delete session\"" 1 && cnt dashboard.rs "Modal::buttons\(\s*\"drop from queue\"" 1 && cnt tui_demo.rs "Modal::confirm\(\s*\"exit demo\", \"Quit the kit demo\?\"\)" 2 && cnt tui_demo.rs "Modal::buttons\(\s*\"delete row\"" 1 && cnt trait_editor.rs "Modal::confirm\(\s*\"exit editor\", \"Quit ctx traits internal edit\?\"\)" 2 && cnt run_view.rs "tui_kit::Modal::confirm\(" 1 && cnt dashboard.rs "\.destructive\(\)" 2 && cnt tui_demo.rs "\.destructive\(\)" 1`
    It exits 0 only when all eleven dashboard sites, all three demo sites,
    both editor sites and the run-view site are present in their converted
    form; when the three destructive sites are the only `.destructive()`
@@ -373,7 +373,7 @@ order. Permit at most two targeted repair-and-rerun rounds in total; after
 each repair rerun the failing command and every later one. Complete only
 when all five criterion commands exit 0 and the diff stays inside the
 allowlist.
-"""
+'''
 
 [relations]
 parent = "0252"

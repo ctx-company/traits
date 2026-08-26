@@ -16,8 +16,10 @@
 //! colors plus `DIM`/`BOLD` modifiers only, no backgrounds, no reverse-video
 //! selection — [`Clear`] resets cells to the terminal's own default
 //! background rather than painting one, so modal rendering stays compliant.
-//! No fixture/snapshot tests here by owner ruling (2026-07-24): every test
-//! below asserts state-machine behavior, never a rendered frame.
+//! No fixture/snapshot tests here by owner ruling (2026-07-24): frozen
+//! rendered inventories and goldens are forbidden. Targeted behavior and
+//! style assertions on a scratch `TestBackend` buffer are in bounds, as in
+//! `guide_conversation_modal_places_unicode_cursor_by_display_width`.
 
 use std::collections::BTreeSet;
 
@@ -56,6 +58,23 @@ pub(crate) fn scroll_key(key: &KeyEvent) -> Option<ScrollDelta> {
         KeyCode::PageDown => Some(ScrollDelta::Down(PAGE_STEP)),
         KeyCode::Home | KeyCode::Char('g') => Some(ScrollDelta::Start),
         KeyCode::End | KeyCode::Char('G') => Some(ScrollDelta::End),
+        _ => None,
+    }
+}
+
+/// A `Tabs` cycle step, shared by pane focus rings and modal button rows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum TabStep {
+    Next,
+    Prev,
+}
+
+/// `Tab` cycles forward; `Shift-Tab` and `BackTab` cycle backward.
+pub(crate) fn tab_cycle_key(key: &KeyEvent) -> Option<TabStep> {
+    match key.code {
+        KeyCode::BackTab => Some(TabStep::Prev),
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => Some(TabStep::Prev),
+        KeyCode::Tab => Some(TabStep::Next),
         _ => None,
     }
 }
@@ -340,7 +359,7 @@ impl Focus {
     }
 }
 
-/// A modal dialog's own state machine: `Confirm` (yes/no) or `TextInput`
+/// A modal dialog's own state machine: fixed-answer buttons or `TextInput`
 /// (single- or multi-line). Editing is deliberately minimal — insert,
 /// backspace, cursor movement — anything heavier is what the `$EDITOR`
 /// round-trip primitive is for.
@@ -348,6 +367,7 @@ pub(crate) enum Modal {
     Confirm {
         title: String,
         body: String,
+        buttons: ButtonRow,
     },
     TextInput {
         title: String,
@@ -403,14 +423,118 @@ pub(crate) enum ModalOutcome {
     Pending,
     Cancelled,
     Confirmed,
+    Chosen(String),
     Submitted(String),
+}
+
+pub(crate) struct Button {
+    label: String,
+    outcome: ModalOutcome,
+    destructive: bool,
+}
+
+impl Button {
+    pub(crate) fn new(label: impl Into<String>, outcome: ModalOutcome) -> Self {
+        debug_assert!(outcome != ModalOutcome::Pending);
+        Self {
+            label: label.into(),
+            outcome,
+            destructive: false,
+        }
+    }
+
+    pub(crate) fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn outcome(&self) -> &ModalOutcome {
+        &self.outcome
+    }
+}
+
+pub(crate) struct ButtonRow {
+    buttons: Vec<Button>,
+    focused: usize,
+}
+
+impl ButtonRow {
+    pub(crate) fn new(buttons: Vec<Button>) -> Self {
+        Self {
+            buttons,
+            focused: 0,
+        }
+    }
+
+    pub(crate) fn focused(&self) -> usize {
+        self.focused
+    }
+
+    pub(crate) fn buttons(&self) -> &[Button] {
+        &self.buttons
+    }
+
+    fn step(&mut self, step: TabStep) {
+        let len = self.buttons.len();
+        if len == 0 {
+            self.focused = 0;
+            return;
+        }
+        self.focused = match step {
+            TabStep::Next => (self.focused + 1) % len,
+            TabStep::Prev => (self.focused + len - 1) % len,
+        };
+    }
+
+    pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> ModalOutcome {
+        if key.code == KeyCode::Esc {
+            return ModalOutcome::Cancelled;
+        }
+        if let Some(step) = tab_cycle_key(key) {
+            self.step(step);
+            return ModalOutcome::Pending;
+        }
+        match key.code {
+            KeyCode::Left => {
+                self.step(TabStep::Prev);
+                ModalOutcome::Pending
+            }
+            KeyCode::Right => {
+                self.step(TabStep::Next);
+                ModalOutcome::Pending
+            }
+            KeyCode::Enter => self
+                .buttons
+                .get(self.focused)
+                .map(|button| button.outcome.clone())
+                .unwrap_or(ModalOutcome::Pending),
+            _ => ModalOutcome::Pending,
+        }
+    }
 }
 
 impl Modal {
     pub(crate) fn confirm(title: impl Into<String>, body: impl Into<String>) -> Self {
+        Self::buttons(
+            title,
+            body,
+            vec![
+                Button::new("Confirm", ModalOutcome::Confirmed),
+                Button::new("Cancel", ModalOutcome::Cancelled),
+            ],
+        )
+    }
+
+    pub(crate) fn buttons(
+        title: impl Into<String>,
+        body: impl Into<String>,
+        buttons: Vec<Button>,
+    ) -> Self {
         Modal::Confirm {
             title: title.into(),
             body: body.into(),
+            buttons: ButtonRow::new(buttons),
         }
     }
 
@@ -447,19 +571,15 @@ impl Modal {
         }
     }
 
-    /// Routes one key. Esc always cancels; a confirm dialog accepts
-    /// `y`/enter to confirm and `n`/esc to cancel; enter submits in every
-    /// modal, single-line or multi-line. A multi-line input inserts a
+    /// Routes one key. Esc always cancels; a fixed-answer dialog resolves its
+    /// focused button on enter; enter submits every text-input modal,
+    /// single-line or multi-line. A multi-line input inserts a
     /// newline on alt+enter (and shift+enter where the terminal reports it)
     /// instead of submitting; `ctrl-d` remains a legacy submit alias, no
     /// longer hinted in the modal's footer row.
     pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> ModalOutcome {
         match self {
-            Modal::Confirm { .. } => match key.code {
-                KeyCode::Char('y') | KeyCode::Enter => ModalOutcome::Confirmed,
-                KeyCode::Char('n') | KeyCode::Esc => ModalOutcome::Cancelled,
-                _ => ModalOutcome::Pending,
-            },
+            Modal::Confirm { buttons, .. } => buttons.handle_key(key),
             Modal::TextInput {
                 input, multiline, ..
             } => input.handle_key(*multiline, key),
@@ -990,13 +1110,53 @@ fn budgeted_body_lines(
     (wrapped_body[..shown].to_vec(), hidden)
 }
 
-fn confirm_size(area: Rect, body: &str) -> (u16, u16) {
+fn button_row_text(row: &ButtonRow) -> String {
+    row.buttons()
+        .iter()
+        .map(|button| format!("[ {} ]", button.label))
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+fn button_row_spans(row: &ButtonRow) -> Vec<Span<'static>> {
+    row.buttons()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, button)| {
+            let text = if index == row.focused() {
+                format!("[ {} ]", button.label)
+            } else {
+                format!("  {}  ", button.label)
+            };
+            let style = if index == row.focused() {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().add_modifier(Modifier::DIM)
+            };
+            let style = if button.destructive {
+                style.fg(Color::Red)
+            } else {
+                style
+            };
+            let mut spans = vec![Span::styled(text, style)];
+            if index + 1 < row.buttons().len() {
+                spans.push(Span::raw("  "));
+            }
+            spans
+        })
+        .collect()
+}
+
+fn confirm_size(area: Rect, body: &str, buttons: &ButtonRow) -> (u16, u16) {
     let width = area.width.clamp(1, 70);
-    // Borders consume two columns; the hint is one additional wrapped row.
+    // Borders consume two columns; the button row follows one blank row.
     let inner_width = width.saturating_sub(2).max(1);
-    let height = (wrapped_rows(body, inner_width) + 2 + 2)
-        .min(area.height)
-        .max(1);
+    let height = (wrapped_rows(body, inner_width)
+        + wrapped_rows(&button_row_text(buttons), inner_width)
+        + 1
+        + 2)
+    .min(area.height)
+    .max(1);
     (width, height)
 }
 
@@ -1007,7 +1167,7 @@ fn confirm_size(area: Rect, body: &str) -> (u16, u16) {
 /// (`frame.set_cursor_position`), never reverse-video.
 pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &Modal) {
     let (width, height) = match modal {
-        Modal::Confirm { body, .. } => confirm_size(area, body),
+        Modal::Confirm { body, buttons, .. } => confirm_size(area, body, buttons),
         Modal::TextInput {
             multiline, body, ..
         } => {
@@ -1031,14 +1191,11 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
     match modal {
-        Modal::Confirm { body, .. } => {
+        Modal::Confirm { body, buttons, .. } => {
             let lines = vec![
                 RLine::from(body.clone()),
                 RLine::default(),
-                RLine::from(Span::styled(
-                    "y/enter confirm  n/esc cancel",
-                    Style::default().add_modifier(Modifier::DIM),
-                )),
+                RLine::from(button_row_spans(buttons)),
             ];
             frame.render_widget(
                 Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
@@ -1636,34 +1793,121 @@ mod tests {
     }
 
     #[test]
-    fn confirm_modal_routes_yes_no_and_esc() {
-        let mut modal = Modal::confirm("title", "body");
+    fn button_row_moves_focus_by_arrows_and_tab_and_fires_only_the_focused_button() {
+        let mut modal = Modal::buttons(
+            "title",
+            "body",
+            vec![
+                Button::new("One", ModalOutcome::Chosen("one".to_string())),
+                Button::new("Two", ModalOutcome::Chosen("two".to_string())),
+                Button::new("Delete", ModalOutcome::Chosen("delete".to_string())).destructive(),
+            ],
+        );
+        let mut log = Vec::new();
+        if let ModalOutcome::Chosen(value) = modal.handle_key(&key(KeyCode::Enter)) {
+            log.push(value);
+        }
+        assert_eq!(log, ["one"]);
+
+        let Modal::Confirm { buttons, .. } = &mut modal else {
+            panic!("expected buttons")
+        };
+        for (event, focused) in [
+            (key(KeyCode::Right), 1),
+            (key(KeyCode::Left), 0),
+            (key(KeyCode::Tab), 1),
+            (shift(KeyCode::Tab), 0),
+            (key(KeyCode::BackTab), 2),
+            (key(KeyCode::Tab), 0),
+        ] {
+            assert_eq!(buttons.handle_key(&event), ModalOutcome::Pending);
+            assert_eq!(buttons.focused(), focused);
+        }
         assert_eq!(
-            modal.handle_key(&key(KeyCode::Char('z'))),
+            buttons.handle_key(&key(KeyCode::Char('z'))),
             ModalOutcome::Pending
         );
         assert_eq!(
-            modal.handle_key(&key(KeyCode::Char('y'))),
-            ModalOutcome::Confirmed
+            buttons.handle_key(&key(KeyCode::Char('y'))),
+            ModalOutcome::Pending
         );
-
-        let mut modal = Modal::confirm("title", "body");
         assert_eq!(
-            modal.handle_key(&key(KeyCode::Enter)),
-            ModalOutcome::Confirmed
+            buttons.handle_key(&key(KeyCode::Char('n'))),
+            ModalOutcome::Pending
         );
-
-        let mut modal = Modal::confirm("title", "body");
+        buttons.handle_key(&key(KeyCode::Right));
         assert_eq!(
-            modal.handle_key(&key(KeyCode::Char('n'))),
+            buttons.handle_key(&key(KeyCode::Esc)),
             ModalOutcome::Cancelled
         );
+        assert_eq!(log, ["one"]);
 
-        let mut modal = Modal::confirm("title", "body");
+        let mut confirm = Modal::confirm("title", "body");
         assert_eq!(
-            modal.handle_key(&key(KeyCode::Esc)),
+            confirm.handle_key(&key(KeyCode::Enter)),
+            ModalOutcome::Confirmed
+        );
+        let mut confirm = Modal::confirm("title", "body");
+        assert_eq!(
+            confirm.handle_key(&key(KeyCode::Esc)),
             ModalOutcome::Cancelled
         );
+    }
+
+    #[test]
+    fn button_row_renders_focused_bold_and_destructive_red() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let modal = Modal::buttons(
+            "title",
+            "body",
+            vec![
+                Button::new("Ok", ModalOutcome::Confirmed),
+                Button::new("Delete", ModalOutcome::Chosen("del".to_string())).destructive(),
+                Button::new("Cancel", ModalOutcome::Cancelled),
+            ],
+        );
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).expect("terminal");
+        terminal
+            .draw(|frame| render_modal(frame, frame.area(), &modal))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let row = (0..12u16)
+            .find(|&y| {
+                (0..60u16)
+                    .map(|x| buffer.cell((x, y)).expect("cell").symbol())
+                    .collect::<String>()
+                    .contains("[ ")
+            })
+            .expect("button row");
+        let cells: Vec<_> = (0..60u16)
+            .map(|x| buffer.cell((x, row)).expect("cell"))
+            .collect();
+        let focused = cells
+            .iter()
+            .find(|cell| cell.symbol() == "[")
+            .expect("focused cell");
+        let destructive = cells
+            .iter()
+            .find(|cell| cell.symbol() == "D")
+            .expect("delete cell");
+        let unfocused = cells
+            .iter()
+            .find(|cell| cell.symbol() == "C")
+            .expect("cancel cell");
+        assert!(focused.modifier.contains(Modifier::BOLD));
+        assert!(destructive.modifier.contains(Modifier::DIM));
+        assert_eq!(destructive.fg, Color::Red);
+        assert!(unfocused.modifier.contains(Modifier::DIM));
+        for y in 0..12u16 {
+            for x in 0..60u16 {
+                assert_eq!(buffer.cell((x, y)).expect("cell").bg, Color::Reset);
+            }
+        }
+        let rendered: String = (0..12u16)
+            .flat_map(|y| (0..60u16).map(move |x| buffer.cell((x, y)).expect("cell").symbol()))
+            .collect();
+        assert!(!rendered.contains(&["y/enter", " confirm"].concat()));
     }
 
     #[test]
@@ -1675,7 +1919,8 @@ mod tests {
             height: 12,
         };
         let body = "/very/long/path/to/a/session/with/many/nested/components.json\n/another/very/long/path/to/a/worktree/with/many/nested/components";
-        let (width, height) = confirm_size(area, body);
+        let buttons = ButtonRow::new(vec![Button::new("Confirm", ModalOutcome::Confirmed)]);
+        let (width, height) = confirm_size(area, body, &buttons);
         assert_eq!(width, 40);
         assert!(height > 6);
         assert!(height <= area.height);
@@ -1810,7 +2055,8 @@ mod tests {
         assert_eq!(host.handle_key(&key(KeyCode::Char('z'))), None);
         assert!(host.is_open());
 
-        let resolved = host.handle_key(&key(KeyCode::Char('y')));
+        assert_eq!(host.handle_key(&key(KeyCode::Char('y'))), None);
+        let resolved = host.handle_key(&key(KeyCode::Enter));
         assert_eq!(resolved, Some(("approve", ModalOutcome::Confirmed)));
         assert!(!host.is_open());
         // Resolution fires exactly once: the same key again hits a closed host.

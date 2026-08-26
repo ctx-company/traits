@@ -47,7 +47,9 @@ use super::report_check::sequence_kind_label;
 use super::run_view;
 use super::trust_story;
 use super::tui;
-use super::tui_kit::{self, MarkSet, Modal, ModalHost, ModalOutcome, ScrollDelta, ScrollList};
+use super::tui_kit::{
+    self, Button, MarkSet, Modal, ModalHost, ModalOutcome, ScrollDelta, ScrollList,
+};
 use super::tui_panes::{self, FocusRing, PaneId, PaneLayoutResult, PaneScrolls, PaneTree};
 use super::tui_ratatui::{self, RatatuiPane, render_line};
 
@@ -757,9 +759,8 @@ enum Action {
     AttachFailed,
 }
 
-/// TASKS' `S`/`a` write tags (0063): the modal itself carries the typed text
-/// (a child title for split, `done`/`cancelled` for archive), resolved to
-/// `ModalOutcome::Submitted` on confirm. Dispatch (`d`) never opens a
+/// TASKS' `S`/`a` write tags (0063): split carries a typed child title while
+/// archive carries a selected fixed answer. Dispatch (`d`) never opens a
 /// `Task` modal — a blocked task refuses inline, and a permitted dispatch
 /// reuses `SessionAction::Spawn` unchanged.
 #[derive(Clone)]
@@ -825,19 +826,35 @@ struct PendingSplitChild {
     steps: Vec<ctx_traits_core::task::Step>,
 }
 
-/// `a`'s modal grammar: `done` or `cancelled` (`canceled` too), optionally
-/// followed by `release` to opt into the dependents sweep (0063.6) —
-/// `"done release"`, `"cancelled release"`. Case-insensitive.
-fn parse_task_archive_input(text: &str) -> Result<(TaskDocStatus, bool), String> {
-    let mut words = text.split_whitespace();
-    let status = match words.next().map(str::to_ascii_lowercase).as_deref() {
-        Some("done") => TaskDocStatus::Done,
-        Some("cancelled") | Some("canceled") => TaskDocStatus::Cancelled,
-        _ => return Err("type done or cancelled".to_string()),
-    };
-    let release_dependents =
-        words.next().map(str::to_ascii_lowercase).as_deref() == Some("release");
-    Ok((status, release_dependents))
+fn archive_buttons(dependents: usize) -> Vec<Button> {
+    let mut buttons = vec![
+        Button::new("Done", ModalOutcome::Chosen("done".to_string())),
+        Button::new("Cancelled", ModalOutcome::Chosen("cancelled".to_string())),
+    ];
+    if dependents > 0 {
+        buttons.extend([
+            Button::new(
+                "Done + release",
+                ModalOutcome::Chosen("done-release".to_string()),
+            ),
+            Button::new(
+                "Cancelled + release",
+                ModalOutcome::Chosen("cancelled-release".to_string()),
+            ),
+        ]);
+    }
+    buttons.push(Button::new("Cancel", ModalOutcome::Cancelled));
+    buttons
+}
+
+fn archive_choice(value: &str) -> Option<(TaskDocStatus, bool)> {
+    match value {
+        "done" => Some((TaskDocStatus::Done, false)),
+        "cancelled" => Some((TaskDocStatus::Cancelled, false)),
+        "done-release" => Some((TaskDocStatus::Done, true)),
+        "cancelled-release" => Some((TaskDocStatus::Cancelled, true)),
+        _ => None,
+    }
 }
 
 /// The three forms `e`'s modal grammar accepts, parsed by
@@ -4777,7 +4794,14 @@ fn open_delete_modal(state: &mut State) {
             plan,
             eligibility: DeleteEligibility::Session(row.class),
         }),
-        Modal::confirm("delete session", body),
+        Modal::buttons(
+            "delete session",
+            body,
+            vec![
+                Button::new("Delete", ModalOutcome::Confirmed).destructive(),
+                Button::new("Cancel", ModalOutcome::Cancelled),
+            ],
+        ),
     );
 }
 
@@ -5553,7 +5577,14 @@ fn open_merge_drop_modal(state: &mut State) {
             plan,
             eligibility: DeleteEligibility::Merge(row.class),
         }),
-        Modal::confirm("drop from queue", body),
+        Modal::buttons(
+            "drop from queue",
+            body,
+            vec![
+                Button::new("Drop", ModalOutcome::Confirmed).destructive(),
+                Button::new("Cancel", ModalOutcome::Cancelled),
+            ],
+        ),
     );
 }
 
@@ -6811,12 +6842,9 @@ fn open_task_split_modal(state: &mut State) {
     open_next_split_step(state, &parent);
 }
 
-/// `a`: archive — a text-input modal for the closing status (`done` or
-/// `cancelled`), optionally followed by `release` to run the dependents
-/// sweep (0063.6), defaulting to `done`. Reads the task fresh to capture
-/// the digest the eventual write is validated against. When the task has
-/// dependents in the last-synced board, the prompt names how many and
-/// hints at the `release` token.
+/// `a`: archive — a fixed-answer modal for the closing status. Reads the task
+/// fresh to capture the digest the eventual write is validated against; when
+/// the task has dependents, it also offers a choice that releases them.
 fn open_task_archive_modal(state: &mut State) {
     let Some(summary) = selected_task(state) else {
         state.message = Some("no task selected".to_string());
@@ -6836,20 +6864,18 @@ fn open_task_archive_modal(state: &mut State) {
         .and_then(|board| board.resolved.get(&key))
         .map(|resolved| resolved.relations.blocks.len())
         .unwrap_or(0);
-    let prompt = if dependents > 0 {
-        format!(
-            "archive {key} — done/cancelled ({dependents} task(s) depend on this — \
-             add 'release' to release them)"
-        )
+    let prompt = format!("archive {key}");
+    let body = if dependents > 0 {
+        format!("{dependents} task(s) depend on this; release also clears them.")
     } else {
-        format!("archive {key} — done/cancelled")
+        format!("No other task depends on {key}.")
     };
     state.modal_host.open(
         Action::Task(TaskAction::Archive {
             key: key.clone(),
             digest,
         }),
-        Modal::text_input(prompt, "done", false),
+        Modal::buttons(prompt, body, archive_buttons(dependents)),
     );
 }
 
@@ -7475,9 +7501,9 @@ fn apply_task_action(
     action: TaskAction,
     outcome: ModalOutcome,
 ) -> crate::Result<()> {
-    // `MarkDone` is a `Confirm` modal (`Confirmed`/`Cancelled`, `Cancelled`
-    // already filtered by `apply_action`), unlike every other `TaskAction`,
-    // which is a `TextInput` modal reading `Submitted(text)` — mirrors
+    // `MarkDone` and `Archive` resolve fixed-answer modals (`Cancelled`
+    // already filtered by `apply_action`); every other `TaskAction` reads a
+    // `TextInput` modal's `Submitted(text)` — mirrors
     // `apply_session_action`'s own `Spawn` special-case split.
     if let TaskAction::MarkDone {
         key,
@@ -7491,11 +7517,43 @@ fn apply_task_action(
         }
         return apply_task_mark_done(state, key, digest, evidence, closure);
     }
+    if let TaskAction::Archive { key, digest } = action {
+        let ModalOutcome::Chosen(choice) = outcome else {
+            return Ok(());
+        };
+        let Some((status, release_dependents)) = archive_choice(&choice) else {
+            state.message = Some("archive refused: unknown choice".to_string());
+            return Ok(());
+        };
+        let dir = super::tasks::board_dir(None)?;
+        let provider = FilesTaskBoard::open_read_write(dir);
+        match provider.update(
+            &key,
+            TaskUpdate {
+                status: Some(status),
+                expected_digest: Some(digest),
+                release_dependents,
+                ..Default::default()
+            },
+        ) {
+            Ok(outcome) => {
+                state.message = Some(format!(
+                    "archived {key}{}",
+                    effects_summary(&outcome.effects)
+                ));
+                resync_tasks_board_after_write(state)?;
+            }
+            Err(error) => {
+                state.message = Some(format!("archive refused: {error}"));
+            }
+        }
+        return Ok(());
+    }
     let ModalOutcome::Submitted(text) = outcome else {
         return Ok(());
     };
     match action {
-        TaskAction::MarkDone { .. } => unreachable!("handled above"),
+        TaskAction::MarkDone { .. } | TaskAction::Archive { .. } => unreachable!("handled above"),
         TaskAction::ReconcileStep { .. } | TaskAction::SplitStep { .. } => {
             unreachable!("apply_action routes reconcile/split queue steps before reaching here")
         }
@@ -7518,38 +7576,6 @@ fn apply_task_action(
                 }
                 Err(error) => {
                     state.message = Some(format!("split refused: {error}"));
-                }
-            }
-            Ok(())
-        }
-        TaskAction::Archive { key, digest } => {
-            let (status, release_dependents) = match parse_task_archive_input(text.trim()) {
-                Ok(parsed) => parsed,
-                Err(reason) => {
-                    state.message = Some(format!("archive refused: {reason}"));
-                    return Ok(());
-                }
-            };
-            let dir = super::tasks::board_dir(None)?;
-            let provider = FilesTaskBoard::open_read_write(dir);
-            match provider.update(
-                &key,
-                TaskUpdate {
-                    status: Some(status),
-                    expected_digest: Some(digest),
-                    release_dependents,
-                    ..Default::default()
-                },
-            ) {
-                Ok(outcome) => {
-                    state.message = Some(format!(
-                        "archived {key}{}",
-                        effects_summary(&outcome.effects)
-                    ));
-                    resync_tasks_board_after_write(state)?;
-                }
-                Err(error) => {
-                    state.message = Some(format!("archive refused: {error}"));
                 }
             }
             Ok(())
@@ -10435,7 +10461,7 @@ argv = ["git", "commit", "-m", "fixture"]
         );
         let Some((SessionAction::Delete { eligibility, .. }, ModalOutcome::Confirmed)) = host
             .handle_key(&crossterm::event::KeyEvent::new(
-                KeyCode::Char('y'),
+                KeyCode::Enter,
                 KeyModifiers::NONE,
             ))
         else {
@@ -10467,7 +10493,7 @@ argv = ["git", "commit", "-m", "fixture"]
         );
         let Some((MergeAction::Drop { eligibility, .. }, ModalOutcome::Confirmed)) = host
             .handle_key(&crossterm::event::KeyEvent::new(
-                KeyCode::Char('y'),
+                KeyCode::Enter,
                 KeyModifiers::NONE,
             ))
         else {
@@ -12128,7 +12154,7 @@ argv = ["git", "commit", "-m", "fixture"]
         assert!(pending.is_none());
         assert!(host.is_open());
         let resolved = host.handle_key(&crossterm::event::KeyEvent::new(
-            KeyCode::Char('y'),
+            KeyCode::Enter,
             KeyModifiers::NONE,
         ));
         assert!(matches!(
@@ -12153,7 +12179,7 @@ argv = ["git", "commit", "-m", "fixture"]
         );
         assert!(host.is_open());
         let resolved = host.handle_key(&crossterm::event::KeyEvent::new(
-            KeyCode::Char('y'),
+            KeyCode::Enter,
             KeyModifiers::NONE,
         ));
         assert!(matches!(
@@ -14122,30 +14148,41 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
-    fn parse_task_archive_input_recognizes_the_release_token() {
-        let (status, release) = parse_task_archive_input("done").unwrap();
-        assert_eq!(status, TaskDocStatus::Done);
-        assert!(!release);
+    fn archive_choice_maps_every_offered_button_value() {
+        assert_eq!(archive_choice("done"), Some((TaskDocStatus::Done, false)));
+        assert_eq!(
+            archive_choice("cancelled"),
+            Some((TaskDocStatus::Cancelled, false))
+        );
+        assert_eq!(
+            archive_choice("done-release"),
+            Some((TaskDocStatus::Done, true))
+        );
+        assert_eq!(
+            archive_choice("cancelled-release"),
+            Some((TaskDocStatus::Cancelled, true))
+        );
+        assert_eq!(archive_choice("unknown"), None);
 
-        let (status, release) = parse_task_archive_input("done release").unwrap();
-        assert_eq!(status, TaskDocStatus::Done);
-        assert!(release);
-
-        let (status, release) = parse_task_archive_input("cancelled release").unwrap();
-        assert_eq!(status, TaskDocStatus::Cancelled);
-        assert!(release);
-
-        let (status, release) = parse_task_archive_input("canceled").unwrap();
-        assert_eq!(status, TaskDocStatus::Cancelled);
-        assert!(!release);
-
-        // Anything after `release` (or a typo instead of it) is ignored —
-        // only its presence as the second token opts in.
-        let (_, release) = parse_task_archive_input("done nope").unwrap();
-        assert!(!release);
-
-        assert!(parse_task_archive_input("bogus").is_err());
-        assert!(parse_task_archive_input("").is_err());
+        for dependents in [0, 2] {
+            let buttons = archive_buttons(dependents);
+            let choices: Vec<&str> = buttons
+                .iter()
+                .filter_map(|button| match button.outcome() {
+                    ModalOutcome::Chosen(value) => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                choices
+                    .iter()
+                    .all(|choice| archive_choice(choice).is_some())
+            );
+            assert_eq!(
+                choices.iter().any(|choice| choice.contains("release")),
+                dependents > 0
+            );
+        }
     }
 
     #[test]
@@ -14592,7 +14629,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let (tag, outcome) = state
             .modal_host
             .handle_key(&crossterm::event::KeyEvent::new(
-                KeyCode::Char('y'),
+                KeyCode::Enter,
                 KeyModifiers::NONE,
             ))
             .expect("confirm resolves the open modal");

@@ -24,7 +24,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as RLine, Span};
 use ratatui::widgets::Paragraph;
 
-use super::tui_kit::{self, MarkSet, Modal, ModalHost, ModalOutcome, ScrollList};
+use super::tui_kit::{self, Button, MarkSet, Modal, ModalHost, ModalOutcome, ScrollList};
 use super::tui_panes::{
     self, FocusRing, MoveDir, PaneId, PaneLayoutResult, PaneScrolls, PaneTree, TabStep,
 };
@@ -295,7 +295,14 @@ fn handle_key(pane: &mut RatatuiPane, state: &mut DemoState, key: KeyEvent) -> c
                 if let Some(row) = state.selected_row() {
                     state.modal_host.open(
                         ActionTag::Delete(row.id),
-                        Modal::confirm("delete row", format!("Delete {}?", row.name)),
+                        Modal::buttons(
+                            "delete row",
+                            format!("Delete {}?", row.name),
+                            vec![
+                                Button::new("Delete", ModalOutcome::Confirmed).destructive(),
+                                Button::new("Cancel", ModalOutcome::Cancelled),
+                            ],
+                        ),
                     );
                 }
             }

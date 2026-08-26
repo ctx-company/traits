@@ -19,13 +19,13 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as RLine, Span};
 use ratatui::widgets::{Block, List, Paragraph, Tabs};
 
 use super::tui_kit::{self, ScrollList, ViewportScroll};
+pub(crate) use super::tui_kit::{TabStep, tab_cycle_key};
 
 /// The vertical regions every dashboard-style screen divides into: a 1-row
 /// tab bar, the pane tree's own area, and a 2-row footer (P506 §2 — hoisted
@@ -309,25 +309,6 @@ impl FocusRing {
     }
 }
 
-/// A `Tabs` cycle step, resolved from a key by [`tab_cycle_key`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum TabStep {
-    Next,
-    Prev,
-}
-
-/// `Tab` cycles forward, `Shift-Tab` (`BackTab`, or `Tab` with the `SHIFT`
-/// modifier — terminals report either) cycles backward. Backward cycling is
-/// new: nothing in the workspace mapped `Shift-Tab` before this phase.
-pub(crate) fn tab_cycle_key(key: &KeyEvent) -> Option<TabStep> {
-    match key.code {
-        KeyCode::BackTab => Some(TabStep::Prev),
-        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => Some(TabStep::Prev),
-        KeyCode::Tab => Some(TabStep::Next),
-        _ => None,
-    }
-}
-
 /// Builds a `Tabs` widget: the current tab BOLD, every other DIM, no
 /// highlight background — the two-tone palette applied to the widget the
 /// workspace has never imported before this phase.
@@ -503,6 +484,7 @@ impl PaneScrolls {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn leaf(id: PaneId) -> PaneTree {
         PaneTree::Leaf {

@@ -1345,6 +1345,9 @@ fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
                 let _ = reply.send(Some(text));
             }
         }
+        // The run view opens only `Modal::confirm` and `Modal::text_input`, so a
+        // choice row cannot reach here; the arm keeps the match honest.
+        tui_kit::ModalOutcome::Chosen(_) => {}
         tui_kit::ModalOutcome::Pending => {}
     }
     true
