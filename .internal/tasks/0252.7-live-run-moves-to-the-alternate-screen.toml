@@ -1,0 +1,86 @@
+schema-version = "0.2"
+key = "0252.7"
+title = "Live run moves to the alternate screen"
+status = "draft"
+raised = "2026-08-26"
+content = """
+Ctrl-C during a live run still leaves garbage on screen. Observed on a real
+run (2026-08-26): the "run killed; terminal restored" note glued onto the
+end of the live view's title row, and the queue-runner's blocked panel then
+printed over the stale frame without clearing it, producing interleaved
+remnants like `Failureribe→opencode` (the panel's short bottom-border line
+over a longer stale seat-mapping row) and `task queue:/6`.
+
+Why 0252.2 did not cover this: in raw mode Ctrl-C never becomes a SIGINT —
+it is a keystroke handled by `poll_detach` (tui_ratatui.rs), which kills the
+child, calls `leave()`, and prints the note. `restore_terminal`'s
+`PaneScreen::Inline` arm only disables raw mode and shows the cursor; it
+never clears the inline viewport or moves the cursor to a fresh line, so
+every subsequent cooked print lands on top of the last drawn frame. The
+0252.2 rescue panel (which begins with a full home+clear escape) lives on
+the signal path and is additionally gated to `PaneScreen::Inline` via
+`rescue_generation()`, so it never fires here.
+
+## Owner ruling (2026-08-26)
+
+The live-run view does not need to be inline. Scrollback of the live view
+after the run is not required. Move the live-run pane to the alternate
+screen, where `LeaveAlternateScreen` restores the shell exactly by
+construction and this entire class of teardown-hygiene bugs disappears.
+"""
+scope = """
+## Decisions
+
+- The live-run pane renders on the alternate screen (the `PaneScreen::Alt`
+  machinery already exists and is used by other surfaces; the live view
+  currently chooses Inline). All exit paths — completion, `q` quit, Ctrl-C
+  kill (`poll_detach`), SIGTERM/SIGHUP/panic via the signal rescue, failed
+  construction rollback — go through the existing Alt restore
+  (`DisableMouseCapture`, `LeaveAlternateScreen`, `Show`), landing the user
+  back on their untouched shell.
+- Post-run output (final outcome panel, queue-runner lines, the
+  "run killed; terminal restored" note) prints to the normal screen after
+  the alternate screen is left — at column 0 on a clean shell, which is the
+  whole point. What lands in scrollback after a run is exactly that cooked
+  output, not the live frames.
+- Reconcile the 0252.2 signal-path rescue with Alt: `rescue_generation()`
+  currently gates the armed panel to `PaneScreen::Inline`. On Alt the
+  correct semantics are: FULL_RESTORE_ESCAPE (which already carries the
+  leave-alternate-screen sequence) restores the shell, then the armed panel
+  prints into the normal screen. The panel must not be lost by the gate
+  simply because the screen mode changed.
+- P551 key-path semantics stay: Ctrl-C in the live view is still an instant
+  kill + detach, `q` still routes to the confirm-quit modal. Only the
+  screen the pane draws on changes.
+
+## Out of scope
+
+- Any new panic/exotic-exit coverage beyond what 0252.2 already shipped
+  (owner: "I don't care about every single panic for now" still stands).
+- Scrollback preservation or replay of live frames after the run.
+- Startup view (`run_startup_view.rs`) unless it shares the same pane
+  construction and comes along mechanically.
+
+## Watch
+
+- The live pane's scroll keys (P470: arrows/j/k/PgUp/PgDn, Tab focus) must
+  keep working on the alternate screen — scrolling is pane-internal state,
+  not terminal scrollback, so nothing should change, but prove it.
+- Detach-to-headless (`d`/detach flows, dashboard Resume spawning detached
+  drives) must not inherit an alternate screen it never leaves.
+- A headless drive (no pane constructed) must still never write terminal
+  escapes to a piped stderr — the existing `signal_safe_pane_active` gate
+  keeps that property; do not widen it.
+
+## Done when (sketch — architect refines)
+
+- PTY proof: Ctrl-C during a live run leaves the shell prompt clean — no
+  interleaved remnants, the note and the subsequent blocked/outcome panel
+  print from column 0 on fresh lines.
+- PTY proof: normal completion restores the shell and prints the final
+  panel cleanly below the pre-run prompt line.
+- PTY proof: kill/SIGTERM during a live run restores the shell and the
+  armed rescue panel prints intact on the normal screen (0252.2's proof
+  updated for Alt, not deleted).
+- Existing pane proofs (scroll, focus, q-modal, detach) stay green.
+"""
