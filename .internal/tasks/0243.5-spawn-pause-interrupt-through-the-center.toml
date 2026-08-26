@@ -4,49 +4,684 @@ title = "Spawn, interrupt, and pause go through the center"
 status = "ready"
 raised = "2026-08-24"
 content = """
-The center learns to act, without ever owning what it acts on.
+The center learns to act, without ever owning what it acts on. Four shared,
+IO-owned capabilities — start-detached-correlated-by-token, interrupt, pause,
+and resume-as-start-by-session-id — usable by the dashboard today and by the
+0258 desktop face later. No face may contact a driver's control socket or
+mutate orphan evidence itself after this task.
 
-SPAWN — the dashboard's `n` key and any future remote viewer: viewer sends
-start(trait, args, request-token); the center forks the driver DETACHED and
-keeps no handle; the driver comes up exactly as if typed in a terminal and
-its register (0243.3) carries the token back; the center matches it,
-answers the requesting viewer with the session id, and every subscriber
-gets the new-session delta. A driver that dies before registering is
-reported back to the requester with its stderr. The dashboard's existing
-direct-spawn code converts to this path — one code path for local and,
-later, remote.
+SPAWN — a viewer sends start(target); the center mints a spawn-request token,
+forks the driver DETACHED and keeps no handle; the driver comes up exactly as
+if typed in a terminal and its register (0243.3) carries the token back; the
+center matches it, answers the requesting viewer with the session id, and
+every subscriber gets the appeared delta. A driver that dies before
+registering is reported to the requester with its stderr.
 
-INTERRUPT and PAUSE — the center is a CLIENT of the driver's existing
-per-run control socket, addressed by the socket + token it read from the
-lock-holder metadata (0243.2) or received at register. Interrupt is today's
-mechanism, unforked. Pause is a variant: stop at the next frame boundary,
-write outcome `paused`, exit — a deliberate sibling of interrupted, resumable
-by the same `--session` resume that exists today. Resume through the center
-is spawn with a session id instead of a trait.
+INTERRUPT and PAUSE — the center is a CLIENT of the driver's existing per-run
+control socket, addressed by the socket + token read from lock-holder metadata
+(0243.2) or received at register. Interrupt is today's mechanism, unforked.
+Pause is a variant: stop at the next frame boundary, write outcome `paused`,
+exit — a deliberate sibling of interrupted, resumable by the same `--session`
+resume that exists today. Resume through the center is start with a session id
+instead of a trait.
 
-Pause is the primitive the future move/adopt (0243.6) stands on: pause ->
-copy -> resume. It must therefore leave the session in a state
-indistinguishable from any other resumable session — no center-only
-memory of "paused by whom" that a copy would lose.
+Pause is the primitive the future move/adopt stands on: pause -> copy ->
+resume. `paused` is therefore an ordinary `DriveOutcomeKind` wire value in the
+ledger, with no center-only memory of "paused by whom" that a copy would lose.
 
-Open inside this task before code: does a paused `--worktree` run hold its
-worktree or release it? Holding blocks the pool; releasing means resume
-must re-derive it (worktree id + branch are already a function of session
-id, and the stored path is already never read — audit note 01).
+WORKTREE RULING (recorded here, implemented and proven below). A paused
+`--worktree` run RETAINS its worktree and branch, exactly like every existing
+resumable outcome. Proof from current code: `traits run`/`traits drive` Clap
+help both already state the worktree and branch are retained after every
+outcome; `io::worktree::resume_or_prepare_worktree` re-enters the same
+registered worktree; there is no pause-time release primitive; and the ledger
+does not carry uncommitted mid-run changes, so releasing would destroy work
+the ledger cannot rebuild. The pool cost is bounded and already handled:
+`target_slot.rs` assigns four stable cache slots by worktree path and
+documents that a parked worktree keeps its slot, and a fifth run shares the
+least-recently-assigned slot rather than blocking or failing. A release/bundle
+mechanism for dirty state belongs to future move/adopt work, not here.
+"""
+scope = """
+## Decisions
+
+Every capability is an IO-owned typed API on `ctx_traits_io::center`, reusable
+by any face. The dashboard becomes a caller. Blocking start/control work runs
+on neither the center's model owner, the dashboard's UI thread, nor the
+dashboard worker's subscription loop.
+
+Acknowledgement of a control action is never treated as a durable outcome: the
+authoritative visible result is the later `RowChanged`/`Ended` delta the
+driver's own `record_drive_outcome` produces. No center path optimistically
+mutates a row after an ack.
+
+### Edit order (strict)
+
+**1. `modules/core/src/procedure/session.rs`**
+- Add variant `Paused` to `pub enum DriveOutcomeKind` (placed next to
+  `PausedProviderCredits`); add `"paused" => Self::Paused` to
+  `DriveOutcomeKind::from_wire`; add `Self::Paused => "paused"` to
+  `DriveOutcomeKind::as_str`.
+- Add `pub fn is_settled_pause(&self) -> bool` on `impl DriveOutcomeKind`,
+  true for `Paused | PausedProviderCredits | PausedBudgetExhausted`. This is
+  the ONE predicate for "a driver exited cleanly having recorded a durable
+  resumable pause"; center orphan repair consumes it, nothing copies it.
+- Do NOT touch `SessionState::derive`
+  (`modules/core/src/procedure/activity.rs`): only `Interrupted`/`Killed` map
+  to `Cancelled`, so a `paused` outcome over `awaiting-agent-output` already
+  derives `WaitingOnAgent` — nonterminal and resumable, which is required.
+
+**2. `modules/io/src/run_control.rs`**
+- Add `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum ControlCommand {
+  Interrupt, Pause }` with `pub fn from_wire(byte: u8) -> Option<Self>`
+  (`b'i'` -> `Interrupt`, `b'p'` -> `Pause`, anything else `None`) and
+  `pub fn wire(self) -> u8`.
+- Change `fn bind_control_listener(socket_path: Utf8PathBuf, on_command:
+  Arc<dyn Fn(ControlCommand) + Send + Sync>) -> crate::Result<ControlListener>`:
+  the accepted connection's single byte is now parsed by
+  `ControlCommand::from_wire`. An unreadable or unrecognized byte invokes NO
+  callback and writes NO `CONTROL_ACK` — the client then reports "not
+  confirmed" exactly as it does for a refused socket.
+- Change `pub fn try_acquire(facts: &crate::run_liveness::LiveRunFacts,
+  on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>)
+  -> crate::Result<Option<DriverLockGuard>>`; rename the parameter and update
+  the doc comment. Everything else about the guard, socket lifetime, and
+  teardown ordering is unchanged.
+- Add private `fn request_control(ledger_path: &Utf8Path, holder:
+  &DriverHolder, command: ControlCommand) -> crate::Result<bool>` holding
+  today's `request_interrupt` body verbatim except that it writes
+  `command.wire()` instead of the literal `b"i"`.
+- `pub fn request_interrupt(ledger_path: &Utf8Path, holder: &DriverHolder)
+  -> crate::Result<bool>` keeps its signature and becomes a one-line delegate
+  to `request_control(.., ControlCommand::Interrupt)`.
+- Add `pub fn request_pause(ledger_path: &Utf8Path, holder: &DriverHolder)
+  -> crate::Result<bool>` delegating to `request_control(..,
+  ControlCommand::Pause)`. Socket selection, connect/stream bounds,
+  acknowledgement, and the never-signal-a-pid handoff safety are shared, not
+  duplicated.
+- Update the closure arity at the surviving `try_acquire` call sites:
+  `modules/io/src/run_liveness.rs:476`, `modules/cli/src/app/drive.rs:1205`,
+  `modules/cli/tests/proof_center.rs:1223` and `:1917`,
+  `modules/cli/tests/proof_merge_on_completion.rs:561`. The two dashboard call
+  sites (`modules/cli/src/app/dashboard.rs:11017` and `:11085`) need no arity
+  edit: both sit inside kill-action tests deleted in step 8.
+- Update the one in-module `bind_control_listener` call site,
+  `modules/io/src/run_control.rs:629` inside
+  `request_interrupt_uses_the_validated_holders_token_without_reprobing`: its
+  closure becomes `Arc::new(move |_command: ControlCommand| { observed.store(
+  true, Ordering::SeqCst); })` — it accepts and ignores the command, because
+  that test asserts token selection, not the command discriminant. The
+  production call site at `:430` is the `try_acquire` body changed above.
+
+**3. `modules/io/src/process.rs`**
+- Extract today's `spawn_detached` body into private
+  `fn spawn_detached_with(exe: &Utf8Path, args: &[String], cwd: &Utf8Path,
+  stdout: Stdio, stderr: Stdio, envs: &[(&str, &str)]) -> crate::Result<Child>`
+  (setsid shim selection, `pre_exec` fallback, null stdin, env application,
+  error mapping unchanged).
+- `pub fn spawn_detached(exe, args, cwd, log_path, envs) -> crate::Result<Child>`
+  keeps its exact signature and behaviour (one truncated file, cloned handle
+  for stderr) and now delegates.
+- Add `pub fn spawn_detached_split(exe: &Utf8Path, args: &[String], cwd:
+  &Utf8Path, stdout_path: &Utf8Path, stderr_path: &Utf8Path, envs:
+  &[(&str, &str)]) -> crate::Result<Child>`: two distinct truncated files, so
+  the center reports genuine stderr rather than presenting combined output as
+  stderr. Same detach and same "dropping the handle never terminates the
+  child" contract.
+
+**4. `modules/cli/src/app/interrupt.rs`**
+- Add `static PAUSED: AtomicBool`.
+- Add `pub fn request_pause()`: stores `true` into `PAUSED` FIRST, then into
+  `INTERRUPTED`, so any thread that observes the interrupt flag already
+  observes the pause discriminant. Never touches `SIGINT_COUNT` or
+  `run_kill` — a pause is not an escalation.
+- Add `pub fn is_paused() -> bool`.
+- Extend `pub fn reset()` to clear `PAUSED` (signature unchanged) so a
+  long-lived host process never carries a pause into the next drive.
+- `handle_sigint` and `request_stop` are unchanged: a real `SIGINT` sets only
+  `INTERRUPTED`, so it still means interrupt.
+
+**5. `modules/cli/src/app/drive.rs`**
+- At the `run_control::try_acquire` call site (line 1205) pass
+  `std::sync::Arc::new(|command| match command {
+  ctx_traits_io::run_control::ControlCommand::Interrupt =>
+  crate::app::interrupt::request_stop(),
+  ctx_traits_io::run_control::ControlCommand::Pause =>
+  crate::app::interrupt::request_pause() })`.
+- Add `fn cooperative_stop_status() -> &'static str` returning `"paused"` when
+  `crate::app::interrupt::is_paused()` and `"interrupted"` otherwise, plus
+  `fn cooperative_stop_detail() -> &'static str` returning the matching
+  capability message ("drive paused at a frame boundary; resume with the same
+  --session to continue from the parent cursor" / today's SIGINT wording).
+  Use both at the three existing cooperative-stop checkpoints — `drive_loop`
+  (line ~2159, the `is_interrupted() && pending_wave_cache.is_empty()` guard),
+  `wait_for_attach_advance` (line ~4780), and the conductor-lease wait (line
+  ~1625) — replacing the hardcoded `"interrupted"` literals. No new checkpoint
+  is added: pause reuses the existing boundary, so an in-flight harness call is
+  never interrupted and already-dispatched concurrent outcomes still drain
+  through `pending_wave_cache` before exit.
+- Extend the `record_drive_outcome` write-failure hardening (line ~1497): the
+  downgrade condition becomes `report.credits_pause.is_some() ||
+  report.budget_pause.is_some() || report.status == "paused"`. A generic pause
+  whose durable marker did not land must report `harness-failed`, never a
+  resumable pause. `notifier.ended()` stays strictly after a successful write.
+
+**6. `modules/io/src/center.rs`**
+- `pub struct DriverRegistration` gains
+  `#[serde(default, skip_serializing_if = "Option::is_none")]
+  pub spawn_token: Option<String>`. Ephemeral request correlation only: it is
+  never written to the ledger, the SQLite index, `CenterRow`, or
+  `CenterPublicRow`. Add `const SPAWN_TOKEN_ENV: &str =
+  "CTX_CENTER_SPAWN_TOKEN"` and `pub fn spawn_token_from_env() -> Option<String>`
+  so the center owns the name; the `DriverNotifier::new` construction at
+  `modules/cli/src/app/drive.rs:1244` — the ONE production literal — supplies
+  `spawn_token: ctx_traits_io::center::spawn_token_from_env()`. A terminal run
+  carries `None`; every notifier reconnect repeats the same token.
+  A struct literal must name every field, so the five existing non-driver
+  literals each gain `spawn_token: None` in the same edit that adds the field:
+  `modules/io/src/center.rs:2854` (`fn test_registration`), `:3168` (the
+  registration `Request` in `registration_requires_holder_and_binds_events_to_its_ledger`),
+  `:3302` (`fn registered_notifier_stream`), and
+  `modules/cli/tests/proof_center.rs:1239` and `:1923`. `Some(token)` is
+  reserved for the new correlation regressions named under Done-when; no
+  existing test starts correlating a start by acquiring a token.
+- Protocol additions (`enum Request`, `enum ResponseResult`, and `Request::id`):
+  - `Start { id: String, target: StartTarget }` — the token is minted
+    center-side by `fn mint_spawn_token() -> String` as
+    `format!("{}-{}", std::process::id(), next_id("start"))`, unique among a
+    center's pending starts by construction and never colliding with a
+    restarted center's ids. A client never supplies or sees it.
+  - `Control { id: String, session_id: String, repo_key: Option<String>,
+    command: ControlAction }`
+  - `ResponseResult::Start(StartWireResult)` and
+    `ResponseResult::Control(ControlWireResult)`.
+  - `#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+    pub enum StartTarget { Trait { args: Vec<String>, repo_path: String },
+    Session { session_id: String, repo_key: Option<String> } }` — a trait start
+    carries its caller's explicitly resolved repository path; the center's own
+    inherited cwd is never used as a fallback anywhere on this path.
+    `Trait { args }` is EXACTLY the user-supplied trait arguments (what the
+    dashboard modal's non-comment lines contain, e.g. `["<trait-id>", "--set",
+    "task=0243.5"]`). It never carries the `traits run` command prefix and
+    never carries `--progress` or its value. Constructing the executable argv
+    is `run_start`'s exclusive job (step 6.1), so no caller may prepend or
+    append any of it; doing both would launch
+    `traits run traits run ... --progress none --progress none`.
+  - `pub enum ControlAction { Interrupt, Pause }` (wire-serialized; maps 1:1 to
+    `run_control::ControlCommand` through
+    `fn control_command(action: ControlAction) -> crate::run_control::ControlCommand`).
+  - `enum StartWireResult { Started { session_id: String },
+    Exited { code: Option<i32>, stderr: String } }`.
+  - `enum ControlWireResult { Acknowledged, Missing, Ambiguous(Vec<String>),
+    NotLive, Unverifiable, Refused }`.
+  - Add both new variants to `fn snapshot_request` returning `false`: neither
+    takes the query freshness barrier.
+- Model-owner work stays small and non-blocking. Add to `enum ModelCommand`:
+  - `WatchStart { token: String, notify: mpsc::SyncSender<String>,
+    reply: mpsc::SyncSender<crate::Result<()>> }`
+  - `ForgetStart { token: String }`
+  - `ResolveRow { session_id: String, repo_key: Option<String>,
+    reply: mpsc::SyncSender<crate::Result<RowResolution>> }`
+  with private `struct ResolvedRow { session_id: String, ledger_path:
+  Utf8PathBuf, repo_path: String, live: bool, holder:
+  Option<crate::run_control::DriverHolder> }` and private
+  `enum RowResolution { Missing, One(ResolvedRow), Ambiguous(Vec<String>) }`,
+  built through the existing `select_row` seam (exact-before-prefix,
+  repo-scoped, ambiguity reported) — no second resolution rule.
+- `CenterModel` gains private `pending_starts: HashMap<String, PendingStart>`
+  with `struct PendingStart { notify: mpsc::SyncSender<String>, since:
+  Instant }`. `handle_request(Request::Register { .. })`, after its existing
+  `refresh_ledger` + `live`/`live_holder` update, calls new
+  `fn complete_pending_start(model: &mut CenterModel, ledger: &Utf8Path,
+  token: Option<&str>)`: on a token hit it removes the entry and `try_send`s
+  the row's `summary.session_id`. Removal-before-send makes a notifier
+  reconnect that repeats the token an idempotent no-op.
+- `fn has_live` gains `|| !self.pending_starts.is_empty()`, so a center cannot
+  idle-exit while a correlation is outstanding. That liveness must be bounded,
+  not open-ended: new `fn prune_pending_starts(&mut self)`, called from the
+  idle branch of `run_server_at`, retains an entry only while
+  `entry.since.elapsed() < ACTION_TIMEOUT`, so a lost worker can never pin the
+  center alive forever. Elapsed time is the SOLE pruning predicate:
+  `mpsc::SyncSender` exposes no non-mutating disconnected query, and a probe
+  `try_send` would either deliver a bogus session id or merely report a full
+  channel, so receiver liveness must not be consulted here. Prompt cleanup
+  after a normal request comes from step 6's rule that EVERY `run_start`
+  return path sends `ForgetStart` — including the requester-disconnect path and
+  a failure to write the final response — leaving the timeout as a backstop
+  only for a worker that died without unwinding. Pending starts are transient
+  request state: never persisted, never consulted for recovery.
+- Start execution lives entirely in the connection worker (never the model
+  owner, whose `STREAM_TIMEOUT` budget cannot cover worktree preparation).
+  `fn serve_connection_worker` gains a `paths: CenterPaths` parameter (cloned
+  per accept at `modules/io/src/center.rs:2103` in `run_server_at`) and
+  intercepts `Request::Start` and `Request::Control` before the generic
+  `ModelCommand::Request` dispatch, exactly as it already intercepts
+  `Request::Subscribe`.
+  - Call sites for that signature change: update the production accept at
+  `:2103` FIRST, then every direct in-module test call — `:3096`
+  (`notifications_require_registration_on_each_connection`), `:3133` and
+  `:3154` (both in `registration_requires_holder_and_binds_events_to_its_ledger`),
+  `:3221` and `:3225` (both in `stalled_peer_does_not_delay_another_typed_request`)
+  — each passing `paths(scratch("<that test's name>"))` from the existing
+  `fn paths(root: Utf8PathBuf) -> CenterPaths` / `fn scratch(name: &str)`
+  test helpers (`CenterPaths` already derives `Clone`), reusing one scratch
+  root per test where a test starts two workers. The helper `fn
+  handshaken_worker(jobs: mpsc::SyncSender<ModelCommand>)` at `:3262` gains a
+  leading `paths: CenterPaths` parameter passed to its `serve_connection_worker`
+  call at `:3266`; its four callers — `:3332`, `:3344`, `:3349` (all in
+  `accepted_hostile_peers_do_not_delay_a_second_request`, sharing one cloned
+  value) and `:3525` (`bounded_socket_transport_carries_all_queries_and_large_get`)
+  — supply their own scratch-rooted `CenterPaths`. None of these tests sends
+  `Request::Start`, so the value is carried, never used, and no scratch root is
+  shared between tests.
+  - `fn run_start(paths: &CenterPaths, jobs: &mpsc::SyncSender<ModelCommand>,
+  target: StartTarget, token: &str) -> crate::Result<StartWireResult>`:
+  1. Resolve argv and cwd. This is the ONE place a start's executable argv is
+     built. `Trait { args, repo_path }` -> `["traits", "run", ..args,
+     "--progress", "none"]` in `repo_path`, where `args` arrived carrying
+     neither the prefix nor the progress flag.
+     `Session { session_id, repo_key }` -> `ResolveRow`, then
+     `resume_argv(&resolved.session_id)` in `resolved.repo_path`; an empty
+     `repo_path`, `Missing`, or `Ambiguous` fails loudly with a typed protocol
+     error and never falls back to the center's cwd.
+  2. `WatchStart` with the token.
+  3. `crate::process::spawn_detached_split` on `center_executable()` with
+     `[(run_liveness::SPAWNED_LOG_PATH_ENV, stdout_path),
+     (SPAWN_TOKEN_ENV, token)]`, logs at
+     `fn start_log_paths(paths: &CenterPaths, token: &str)
+     -> crate::Result<(Utf8PathBuf, Utf8PathBuf)>` under
+     `paths.runs_root.join("start-logs")` (center-owned and token-unique, so
+     concurrent starts never overwrite each other, and the proof harness's
+     `CTX_CENTER_RUNS_ROOT` already scopes it).
+  4. Poll the `WatchStart` receiver against `child.try_wait()` until one wins:
+     registration -> `Started { session_id }`; actual child exit ->
+     `Exited { code: status.code(), stderr }` with stderr read from the stderr
+     log and truncated to `const START_STDERR_BYTES: usize = 8 * 1024` (far
+     inside `MAX_LINE_BYTES`). On observing an exit, drain the receiver ONCE
+     more before concluding `Exited`: a very short run can register and then
+     finish before the next poll, and that must report `Started`, not a
+     spurious pre-registration failure. No five-second grace and no
+     `STREAM_TIMEOUT` bound governs this wait; the loop's own ceiling is
+     `ACTION_TIMEOUT`, past which it returns a typed protocol error rather
+     than waiting on a driver that neither registered nor exited.
+  5. Drop the `Child` and send `ForgetStart` on every exit path — the
+     `Started` path, the `Exited` path, the typed-error path, the
+     requester-disconnect path, and a failure to write the final response —
+     so the pending entry is normally gone the moment the request ends and
+     `prune_pending_starts`'s `ACTION_TIMEOUT` is only a backstop. The
+     detached child keeps running; it appears to every subscriber through the
+     ordinary `Appeared` delta.
+- Control execution also lives in the connection worker:
+  `fn run_control_request(jobs: &mpsc::SyncSender<ModelCommand>, session_id:
+  &str, repo_key: Option<&str>, action: ControlAction)
+  -> crate::Result<ControlWireResult>` asks the owner for a `RowResolution`,
+  maps `Missing`/`Ambiguous` straight through, `!live` -> `NotLive`, live with
+  `holder == None` or
+  `holder.session_id != resolved.session_id` -> `Unverifiable` (a held lock
+  with missing/malformed/stale metadata is authoritatively live but must never
+  be guessed at), then calls `run_control::request_interrupt` /
+  `request_pause` with that one validated holder — `true` -> `Acknowledged`,
+  `false` -> `Refused`. No row mutation follows an ack.
+- Orphan-repair fix in `CenterModel::refresh_after_probe`: in the
+  `DriverProbe::Unheld` maintenance branch, the
+  `if !terminal(&summary) { record_interrupted_outcome_in_session(..) }` guard
+  becomes `if !terminal(&summary) && !settled_pause(&summary) { .. }`, with new
+  `fn settled_pause(summary: &crate::run_summary::RunSummary) -> bool` reading
+  `summary.last_drive_outcome.as_deref().map(DriveOutcomeKind::from_wire)` and
+  delegating to core's `is_settled_pause`. Derived from ledger/summary evidence
+  only, never from center memory; the existing paused-credit and paused-budget
+  cases share this one predicate. Stale holder metadata is still cleared under
+  maintenance ownership and the row still goes `live = false`; only the
+  outcome overwrite is suppressed. `terminal()` and public `SessionState` are
+  untouched, so a paused row stays resumable to every reader.
+- Public client API (each mirrors the existing `list`/`get` encode-decode
+  shape and adds nothing else):
+  - `pub fn start_trait(args: &[String], repo_path: &Utf8Path)
+    -> crate::Result<StartResult>` — `args` is the user-supplied trait
+    arguments only; the client encodes them into `StartTarget::Trait`
+    unchanged and never prepends `traits run` or appends `--progress none`.
+  - `pub fn start_session(session_id: &str, repo_key: Option<&str>)
+    -> crate::Result<StartResult>`
+  - `pub fn control(session_id: &str, repo_key: Option<&str>,
+    action: ControlAction) -> crate::Result<ControlResult>`
+  - `pub enum StartResult { Started { session_id: String },
+    Exited { code: Option<i32>, stderr: String } }` and
+    `pub enum ControlResult { Acknowledged, Missing, Ambiguous(Vec<String>),
+    NotLive, Unverifiable, Refused }`.
+  - Add private `fn request_with_timeout(request: Request, timeout: Duration)
+    -> crate::Result<ResponseResult>` (today's `request` body with the read
+    bound threaded through the existing `read_line_bounded(stream, false,
+    timeout)` parameter); `fn request` delegates with `STREAM_TIMEOUT`. Start
+    and control use `const ACTION_TIMEOUT: Duration =
+    Duration::from_secs(600)`, because registration follows worktree
+    preparation and cannot be held to the two-second query bound.
+  - `fn resume_argv(session_id: &str) -> Vec<String>` moves here verbatim from
+    the dashboard: `["traits", "drive", "--session", <id>, "--progress",
+    "none"]`, still deliberately without `--worktree`.
+
+**7. `modules/cli/src/app/dashboard/worker.rs`**
+- Add `pub(super) struct ActionResult { pub message: String, pub session_id:
+  Option<String>, pub task_key: Option<String> }`, an `actions:
+  mpsc::Receiver<ActionResult>` + retained `mpsc::Sender<ActionResult>` on
+  `Handle`, and `pub(super) fn action_results(&self) -> Vec<ActionResult>`
+  draining like the existing `explanation_results`.
+- Add `pub(super) fn start_trait(&self, args: Vec<String>, cwd:
+  camino::Utf8PathBuf, task_key: Option<String>)`,
+  `pub(super) fn start_session(&self, session_id: String, display_id: String)`,
+  and `pub(super) fn control(&self, session_id: String, display_id: String,
+  action: ctx_traits_io::center::ControlAction)`. Each spawns its own
+  short-lived thread that calls the center client and sends one
+  `ActionResult`. They must NOT run inside `handle_one_command`: that runs on
+  the subscription loop's thread, and a multi-second start there would stall
+  every delta.
+- Neither start method formats its own text. Add one pure mapping seam,
+  `fn start_action_result(result: Result<ctx_traits_io::center::StartResult,
+  String>, task_key: Option<String>, display_id: Option<&str>)
+  -> ActionResult`, and require BOTH `start_trait` and `start_session` to
+  build their `ActionResult` solely through it (`start_trait` passes
+  `display_id: None`, `start_session` passes `Some(&display_id)` and
+  `task_key: None`). Its three branches are exhaustive and fixed:
+  - `Ok(StartResult::Started { session_id })` -> `session_id: Some(session_id)`,
+    `task_key` passed through, message naming the started/resumed session.
+  - `Ok(StartResult::Exited { code, stderr })` -> `session_id: None`,
+    `task_key: None`, and a message that contains the exit code AND, when
+    `stderr` is non-empty, the center-provided stderr string UNCHANGED and
+    entire (no first-line trim, no re-truncation — the center already bounded
+    it to `START_STDERR_BYTES`). This is the only path by which a driver that
+    died before registering explains itself, so dropping it silently loses the
+    task's required failure evidence.
+  - `Err(error)` -> `session_id: None`, `task_key: None`, message containing
+    the client error text.
+  `control` likewise formats nothing itself: `Ok(result)` renders through
+  step 8's `super::control_message(&result, &display_id)` and `Err(error)`
+  renders a message naming `display_id` and the error, both with
+  `session_id: None, task_key: None`.
+
+**8. `modules/cli/src/app/dashboard.rs`**
+- `State.worker` is `Option<worker::Handle>` and unit tests build
+  `State::new_without_worker()`, so the decisions must be testable without a
+  worker. Extract two pure seams and unit-test those, leaving each dispatch a
+  thin `if let Some(worker) = &state.worker`:
+  - `fn spawn_start_request(text: &str) -> Result<(Vec<String>, Option<String>),
+    String>` — today's line parsing, `FORBIDDEN` flag rejection, real-Clap
+    validation, and `task_dispatch_key`, returning `(user_args, task_key)` or
+    the exact refusal message. `user_args` is today's `user_args` vector
+    VERBATIM: the non-comment lines only. Validation still builds today's
+    `["ctx", "traits", "run", ..user_args, "--progress", "none"]` argv, but
+    that vector is now TEMPORARY — it exists only to feed
+    `surface::cli::parse` and is dropped; it is never returned and never
+    handed to the worker, because `run_start` (step 6.1) owns building the
+    executable argv. `apply_spawn_request` becomes: call it, set
+    `state.message` on `Err`, otherwise `worker.start_trait(user_args, cwd,
+    task_key)` with `cwd` still from `lifecycle_reporting::current_utf8_dir()`.
+    `worker.start_trait` passes `user_args` through to
+    `center::start_trait(&args, &cwd)` untouched.
+  - `fn control_message(result: &ctx_traits_io::center::ControlResult,
+    display_id: &str) -> String` — the one place a typed control result becomes
+    user text.
+- Both `spawn_resume` call sites move to the worker before `spawn_resume` is
+  deleted; no resume path may survive outside the center.
+  - `SessionAction::Resume` (line ~5388) calls `worker.start_session(
+    row.session_id.clone(), display_id.clone())` instead of
+    `spawn_resume(row)`; the existing `class.can_resume()` re-check and
+    `AttachRequest` behaviour are retained. Because the call is now
+    fire-and-forget, `state.message`, `session_preview`, `attach_request`, and
+    `reload()` follow the dispatch unconditionally, and the started/failed
+    outcome arrives later through `apply_action_results`.
+  - `SessionAction::Answer`'s successful non-completing branch (line ~5253,
+    `Ok(SetOutcome::Call { .. })`) likewise becomes
+    `worker.start_session(row.session_id.clone(), display_id.clone())` with
+    `state.message = Some(format!("answer accepted; resume started for
+    {display_id}"))`; its `Err(error)` resume arm disappears with the
+    synchronous call.
+- `SessionAction::Kill` (line ~5264) loses its ENTIRE direct branch — the
+  `run_control::probe`, `run_session::read_run_session` re-verification,
+  `request_interrupt`, `try_acquire_maintenance`,
+  `record_interrupted_outcome_in_session`, and `run_liveness::remove_row`
+  calls — and becomes `worker.control(session_id, display_id,
+  ControlAction::Interrupt)`. Orphan repair for an unheld-but-running-looking
+  ledger is now solely the center's `refresh_after_probe`; `NotLive` renders a
+  message saying the center will settle it.
+- Delete the four now-unreachable driver-touching dashboard tests —
+  `kill_action_refuses_an_unheld_replacement_session`,
+  `kill_action_marks_an_unchanged_unheld_waiting_session_interrupted`,
+  `kill_action_refuses_a_held_replacement_session_without_interrupting_it`,
+  `kill_action_requests_interrupt_for_an_unchanged_held_session` — and carry
+  their intent forward as the center control-resolution and orphan-repair
+  regressions named under Done-when. Coverage moves; it is not dropped.
+- The tick site at line ~2804 calls new `fn apply_action_results(state: &mut
+  State)` instead of `poll_pending_spawns(state)`: it sets `state.message` and,
+  for a `Started` result carrying a `task_key`, inserts
+  `optimistic_dispatched[task_key] = session_id`; it removes any key already
+  present in `task_session_join(state)`. Because the returned session id only
+  exists once the driver registered, the entry needs no timer at all.
+- `optimistic_dispatched` changes type from `HashMap<String,
+  std::time::Instant>` to `HashMap<String, String>` (task key -> registered
+  session id); update the `State` field (line 1187), its initializer (line
+  1345), and `fn task_visible_row_label`'s parameter (line 8640). Its
+  `contains_key`-based rendering is unchanged.
+- Removed symbols: `const SPAWN_GRACE_WINDOW`, `struct PendingSpawn`,
+  `State::pending_spawns`, `State::spawn_seq`, `fn poll_pending_spawns`,
+  `fn first_error_line`, `fn spawn_resume`, `fn resume_argv`,
+  `fn resolve_spawn_exe_and_log` (its last two callers are gone). The existing
+  test `resume_argv_is_exact_and_never_carries_worktree` (line 11793) moves
+  verbatim with `resume_argv` into `modules/io/src/center.rs`. Delete the
+  now-dead `ctx_traits_io::process::spawn_detached` import if unused.
+
+**9. `modules/cli/tests/proof_center.rs`** (plus the arity-only edit in
+`modules/cli/tests/proof_merge_on_completion.rs:561`)
+- Extend this suite; do not create a second process harness. Reuse
+  `SENTINEL_TEST_LOCK`, `CenterEnvironment::install`, `write_drive_fixture`,
+  `spawn_sentinel`, `await_socket`, `await_socket_removal`, `await_exit`, and
+  the existing subscription readers for every proof named under Done-when.
+- The pause proofs must hold a frame open long enough to request a pause
+  mid-flight. Revise the existing fixture-harness writer to exactly:
+  `#[derive(Clone, Copy)] enum FixtureRelease<'a> { AfterFixedDelay,
+  WhenFileAppears(&'a std::path::Path) }` and
+  `fn write_fixture_harness(path: &std::path::Path, release: FixtureRelease<'_>)`.
+  `AfterFixedDelay` writes today's script byte for byte (`sleep 1`, then the
+  single result line). `WhenFileAppears(release_file)` writes the same script
+  with `sleep 1` replaced by a BOUNDED poll —
+  `i=0; while [ ! -e <release_file> ]; do i=$((i+1)); [ "$i" -gt 120 ] && exit 9;
+  sleep 1; done` — so the frame stays open until the proof releases it and a
+  broken proof fails instead of hanging forever. No second fixture harness is
+  added. Update the five existing call sites (lines 408, 1353, 1496, 1572,
+  1652) to pass `FixtureRelease::AfterFixedDelay`; only the pause proofs pass
+  `WhenFileAppears`.
+- Proofs drive pause/interrupt/start through the public
+  `ctx_traits_io::center` client from the test process, which is what a face
+  will call — never through a private seam.
+
+**10. Inventory check (no edit of its own)**
+Before declaring the strict order complete, run
+`rg -n 'DriverRegistration|serve_connection_worker|bind_control_listener|spawn_resume' modules/io/src modules/cli/src modules/cli/tests`
+(deliberately backslash-free; it also matches each definition) and reconcile
+every hit against steps 2, 6, and 8: each `DriverRegistration` literal names
+`spawn_token`, each `serve_connection_worker` call passes `paths`, each
+`bind_control_listener` closure takes a `ControlCommand`, and `spawn_resume`
+has zero hits. A surviving `spawn_resume` hit means a resume path escaped the
+center.
+
+### Reuse points (do not reimplement)
+`run_control::request_interrupt`'s socket/ack/handoff logic; the driver
+`flock` + `control_token` authentication; `select_row`; `handle_request`'s
+single parse/liveness/persist/delta path; `process::spawn_detached`'s setsid
+shim and drop-does-not-kill contract; `DriverNotifier`'s reconnect/backoff;
+`drive_loop`'s `pending_wave_cache` drain boundary;
+`drive.rs::resolve_resume_worktree` + `worktree::verify_worktree_registration`;
+`proof_center.rs`'s `CenterEnvironment`, `SENTINEL_TEST_LOCK`,
+`write_drive_fixture`, `write_fixture_harness`, `spawn_sentinel`, and
+subscription readers.
+
+### Explicitly excluded
+- No new dashboard key, modal, or hint for pause. Pause ships as the shared
+  center API plus its proofs; the desktop face adopts it in 0258.3, and 0242's
+  ruling forbids landing an interactive verb nobody has agreed to keep.
+- No move/adopt, no worktree release/bundle primitive, no pause-time
+  `--worktree` teardown (see the ruling in content).
+- No "paused by whom" field anywhere; no new session status; no change to
+  `SessionState::derive` or `center::terminal`.
+- No refusal path for resuming an already-live session: the existing driver
+  lock returns `driver-lock-busy`, which surfaces honestly as `Exited`.
+- No change to `--worktree` on resume argv, no use of
+  `WorktreeProvenance.path` to direct execution.
+- No center-side retry of a start that exited, and no persistence of pending
+  starts across a center restart.
 """
 validation = """
+## Watch
+- A start must never block the model owner or the dashboard subscription
+  thread; a control request must never perform driver socket I/O on the model
+  owner. Both would deadlock registration or stall every subscriber.
+- An ack is not an outcome. Assert visible results through the delta the
+  driver's own durable write produces, never immediately after the ack.
+- Center cwd is never a fallback for a start's repository.
+- Every new regression is a behavioural proof over scratch fixtures; no test
+  may assert over committed repo content, so "no `run_control`/`run_session`
+  call remains on the dashboard's spawn, resume, or kill paths" is a review
+  reading of the diff, never a test.
+
 ## Done when
 
-Spawn from a dashboard produces a driver that outlives the requesting
-dashboard and appears on every subscriber; the requester gets the session
-id via its token; a driver failing before register reports back with
-stderr. Interrupt through the center stops a live scratch run via the
-existing control socket — including one the center discovered after a
-restart rather than spawned. Pause stops at a frame boundary with outcome
-`paused`; resume through the center continues from the next frame and the
-ledger shows no gap and no re-executed frame. The worktree question has a
-recorded answer implemented and proven either way.
+Each bullet names the exact `#[test] fn ...()` symbol to add, grouped under
+the existing command that runs it.
+
+`cargo test -p ctx-traits-core pause`
+- `paused_drive_outcome_kind_round_trips_the_wire_value()` —
+  `from_wire("paused")` is `Paused` and `Paused.as_str()` is `"paused"`.
+- `settled_pause_covers_every_durable_resumable_pause()` — `is_settled_pause`
+  is true for `Paused`, `PausedProviderCredits`, `PausedBudgetExhausted` and
+  false for `Interrupted`, `Killed`, `Completed`, `Other("paused-ish")`.
+
+`cargo test -p ctx-traits-io run_control`
+- `control_command_parses_only_the_known_wire_bytes()` — `b'i'`/`b'p'` map to
+  `Interrupt`/`Pause`, every other byte is `None`, and `wire()` round-trips.
+- `unrecognized_control_byte_invokes_no_callback_and_is_not_acknowledged()` —
+  a live listener sent `b'x'` runs neither branch and writes no ack.
+- `pause_request_delivers_the_pause_command_to_the_lock_holder()` —
+  `request_pause` against a `try_acquire`d guard returns true and the callback
+  observes `ControlCommand::Pause`.
+
+`cargo test -p ctx-traits-io center`
+- `register_with_a_spawn_token_completes_exactly_one_pending_start()` — the
+  matching watcher receives the row's session id and a second pending token
+  does not fire.
+- `repeated_registration_with_the_same_spawn_token_completes_nothing()` — a
+  notifier reconnect repeating the token is an idempotent no-op.
+- `register_without_a_spawn_token_completes_no_pending_start()` — a terminal
+  run never resolves someone else's start.
+- `pending_start_blocks_idle_exit_until_action_timeout_prunes_it()` — inserts
+  one pending start with `since: Instant::now() - (ACTION_TIMEOUT -
+  Duration::from_secs(1))` and asserts `prune_pending_starts` retains it and
+  `has_live` is still true; then sets `since: Instant::now() -
+  ACTION_TIMEOUT` and asserts the entry is dropped and `has_live` is false.
+  Both sides of the boundary are asserted with a synthesized `since`, so the
+  test neither sleeps nor consults the receiver. Build each `since` with
+  `Instant::now().checked_sub(..).expect("monotonic clock predates
+  ACTION_TIMEOUT")` rather than bare `-`, so a machine booted seconds ago
+  fails loudly instead of panicking inside an operator.
+- `control_resolution_reports_missing_ambiguous_and_not_live_targets()` — the
+  three distinct typed results come out of the `select_row` seam.
+- `control_resolution_rejects_a_holderless_or_mismatched_live_row_as_unverifiable()`
+  — a held row with absent metadata, and one whose `holder.session_id` differs,
+  both yield `Unverifiable` and contact no socket.
+- `discovery_preserves_every_settled_pause_outcome_and_clears_stale_metadata()`
+  — an unheld ledger whose last outcome is `paused`,
+  `paused-provider-credits`, or `paused-budget-exhausted` keeps that outcome
+  through `refresh_after_probe`, goes `live = false`, and loses stale holder
+  metadata; existing `discovery_repairs_an_unheld_nonterminal_ledger` stays
+  green for the non-pause case.
+- `start_and_control_requests_round_trip_and_skip_the_snapshot_barrier()` —
+  both requests and both wire results serialize and deserialize, and
+  `snapshot_request` returns false for each.
+- `resume_argv_is_exact_and_never_carries_worktree()` — moved verbatim from
+  `dashboard.rs`; argv is exactly
+  `traits drive --session <id> --progress none`.
+
+`cargo test -p ctx-traits-cli --lib dashboard`
+- `spawn_start_request_returns_only_user_arguments_and_the_task_key()` — the
+  returned vector equals the request's non-comment lines exactly: it does not
+  start with `"traits"`/`"run"` and contains no `"--progress"` element, while
+  the task key is still extracted. Argv construction is proved end to end by
+  `center_started_run_outlives_its_requester_and_appears_once_to_two_subscribers()`
+  under `cargo test -p ctx-traits-cli --test proof_center`, which only passes
+  if the spawned child's argv parsed as one `ctx traits run`.
+- `spawn_start_request_rejects_each_forbidden_flag_by_name()` — one assertion
+  per `FORBIDDEN` flag, each refusal naming the flag.
+- `spawn_start_request_rejects_text_that_is_not_a_traits_run_command()`
+- `control_message_renders_each_control_result_distinctly()` — all six
+  `ControlResult` variants produce distinct, non-empty text.
+- `start_action_result_reports_pre_registration_stderr()` (in
+  `modules/cli/src/app/dashboard/worker.rs`, run by this same filter) —
+  `Ok(StartResult::Exited { code: Some(2), stderr: <multi-line string> })`
+  yields an `ActionResult` whose `message` contains that complete stderr
+  string and the exit code, with `session_id` and `task_key` both `None`;
+  `Ok(StartResult::Started { .. })` with a task key yields the session id and
+  that key; `Err(..)` carries the error text.
+- `apply_action_results_records_the_registered_session_for_a_dispatched_task()`
+- `apply_action_results_clears_an_optimistic_entry_once_the_join_carries_it()`
+  — removal is driven by `task_session_join`, with no timer involved.
+
+`cargo test -p ctx-traits-cli --test proof_center`
+- `center_started_run_outlives_its_requester_and_appears_once_to_two_subscribers()`
+  — the start returns the registered session id and each of two independent
+  subscribers sees exactly one `Appeared`.
+- `center_start_of_a_child_that_exits_before_registering_reports_its_stderr()`
+  — `Exited` carries the exit code and bounded stderr, and the center then
+  reaches idle exit, proving no pending entry was left behind.
+- `dropping_the_requester_mid_start_leaves_the_detached_driver_running()` —
+  the child still registers and appears by delta.
+- `center_interrupt_stops_a_run_rediscovered_after_a_center_restart()` — the
+  center is SIGKILLed and restarted, so it controls a driver it never spawned.
+- `center_pause_in_flight_persists_before_its_delta_and_resume_continues_at_the_next_frame()`
+  — pause is requested while frame N is in flight; that frame is released and
+  completes; outcome `paused` is durable before the delta; resume through the
+  center executes frame N+1 with frame N's harness invocation count still
+  exactly one and the accepted ledger frames showing neither a gap nor a
+  duplicate.
+- `paused_worktree_run_retains_its_worktree_and_resume_reuses_it()` — the
+  worktree stays registered and resume reuses the same worktree id, branch,
+  and derived path.
+- `failed_outcome_write_on_a_pause_reports_harness_failed_and_emits_no_ended_notification()`
+
+Gates: `just test` exits 0 for the per-round workspace gate and `just test-full`
+exits 0 as the landing gate. One task-scoped commit; worktree clean.
 """
 
 [relations]
 depends-on = ["0243.2", "0243.3"]
+
+[[checks]]
+name = "paused outcome kind and the single settled-pause predicate hold"
+command = "cargo test -p ctx-traits-core pause"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "typed control command, unacknowledged invalid byte, and pause request pass"
+command = "cargo test -p ctx-traits-io run_control"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "center protocol, start correlation, control resolution, and paused orphan repair regressions pass"
+command = "cargo test -p ctx-traits-io center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "dashboard spawn, resume, and interrupt rewiring regressions pass"
+command = "cargo test -p ctx-traits-cli --lib dashboard"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "center process proofs cover start, interrupt after restart, pause, and resume continuity"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 1800000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
