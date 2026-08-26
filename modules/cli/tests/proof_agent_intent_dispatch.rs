@@ -3535,7 +3535,6 @@ id = "pl-b"
 title = "Parallel nested"
 agent = "agent:parallel-nested-agent"
 prompt = "Produce parallel nested answer."
-input = ["slot:pl-item-b"]
 intent = {{ require = [{{ id = "shared", summary = "Parallel nested replacement text." }}, {{ id = "pl-b-marker", summary = "Parallel nested marker." }}], avoid = [{{ id = "cross", summary = "Parallel nested cross marker." }}] }}
 behavior = {{ tone = [{{ id = "shared-tone", summary = "Parallel nested tone." }}, {{ id = "pl-b-tone-marker", summary = "Parallel nested tone marker." }}] }}
 output = ["slot:pl-answer-b"]
@@ -3616,6 +3615,13 @@ output = ["slot:answer"]
         "pl-b-tone-marker",
         "pl-post-marker",
     ];
+    let parallel_prompt_texts = [
+        "Produce parallel pre answer.",
+        "Produce parallel direct answer.",
+        "Produce parallel direct next answer.",
+        "Produce parallel nested answer.",
+        "Produce parallel post answer.",
+    ];
     for (index, (own_markers, identity)) in [
         (&["pl-pre-marker"][..], "Assigned worker."),
         (
@@ -3653,6 +3659,33 @@ output = ["slot:answer"]
                 assert!(
                     !prompt.contains(marker),
                     "parallel preview {index} leaked {marker}: {prompt}"
+                );
+            }
+        }
+        let (own_agent_text, foreign_agent_text) = match index {
+            1 => ("Direct agent guidance.", "Nested agent guidance."),
+            3 => ("Nested agent guidance.", "Direct agent guidance."),
+            _ => ("Assigned guidance.", "Direct agent guidance."),
+        };
+        assert!(
+            prompt.contains(own_agent_text),
+            "parallel preview {index}: {prompt}"
+        );
+        assert!(
+            !prompt.contains(foreign_agent_text),
+            "parallel preview {index} leaked foreign agent guidance: {prompt}"
+        );
+        for prompt_text in parallel_prompt_texts {
+            if prompt_text == parallel_prompt_texts[index] {
+                assert_eq!(
+                    prompt.matches(prompt_text).count(),
+                    1,
+                    "parallel preview {index}: {prompt}"
+                );
+            } else {
+                assert!(
+                    !prompt.contains(prompt_text),
+                    "parallel preview {index} leaked prompt {prompt_text}: {prompt}"
                 );
             }
         }
@@ -3738,6 +3771,33 @@ output = ["slot:answer"]
                     );
                 }
             }
+            let (own_agent_text, foreign_agent_text) = match index {
+                1 => ("Direct agent guidance.", "Nested agent guidance."),
+                3 => ("Nested agent guidance.", "Direct agent guidance."),
+                _ => ("Assigned guidance.", "Direct agent guidance."),
+            };
+            assert!(
+                prompt.contains(own_agent_text),
+                "parallel frame {index}: {prompt}"
+            );
+            assert!(
+                !prompt.contains(foreign_agent_text),
+                "parallel frame {index} leaked foreign agent guidance: {prompt}"
+            );
+            for prompt_text in parallel_prompt_texts {
+                if prompt_text == parallel_prompt_texts[index] {
+                    assert_eq!(
+                        prompt.matches(prompt_text).count(),
+                        1,
+                        "parallel frame {index}: {prompt}"
+                    );
+                } else {
+                    assert!(
+                        !prompt.contains(prompt_text),
+                        "parallel frame {index} leaked prompt {prompt_text}: {prompt}"
+                    );
+                }
+            }
         }
     }
     for (preview, cli, mcp) in [
@@ -3763,8 +3823,7 @@ output = ["slot:answer"]
         ("pl-b", &parallel_cli_frames[3]),
     ] {
         let historical = session_preview("parallel historical", &parallel_session, Some(step));
-        assert_eq!(extract_intent(&historical), extract_intent(live));
-        assert_eq!(extract_behavior(&historical), extract_behavior(live));
+        assert_eq!(historical, *live, "parallel historical {step}");
     }
     // Bounded dispatches leave each parallel leaf as the final captured frame,
     // proving the same composition path for each transport without relying on a
@@ -3858,6 +3917,12 @@ output = ["slot:answer"]
             extract_behavior(preview_prompt),
             "{target} {transport}"
         );
+        if transport == "cli" {
+            assert_eq!(
+                prompt, *preview_prompt,
+                "{target} {transport} prompt differs from static preview"
+            );
+        }
         assert!(!prompt.contains(system), "{target} {transport}: {prompt}");
         assert!(
             args.contains(flag) && args.contains(system),
@@ -3905,8 +3970,7 @@ output = ["slot:answer"]
         );
         assert_exit_code(&drive, 0);
         let active = session_preview("parallel active", &session, None);
-        assert_eq!(extract_intent(&active), extract_intent(live));
-        assert_eq!(extract_behavior(&active), extract_behavior(live));
+        assert_eq!(active, *live, "parallel active session prompt differs");
     }
     let parallel_conflict_fixture = parallel_fixture.replace(
         "intent = { require = [{ id = \"shared\", summary = \"Parallel direct replacement text.\" }, { id = \"cross\", summary = \"Parallel direct cross marker.\" }, { id = \"pl-a-marker\", summary = \"Parallel direct marker.\" }] }",
@@ -4100,10 +4164,20 @@ output = ["slot:answer"]
             "{prompt}"
         );
         assert!(
-            !prompt.contains("pl-pre-marker") && !prompt.contains("pl-post-marker"),
+            !prompt.contains("pl-pre-marker")
+                && !prompt.contains("pl-post-marker")
+                && !prompt.contains("pl-a-next-marker"),
             "{prompt}"
         );
     }
+    assert_eq!(
+        fs::read_to_string(capture.with_extension("txt.calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        4,
+        "parallel wave must make one pre-panel call, both cold sibling calls, and the direct branch's next authored call"
+    );
     let after_wave = run_ctx(
         &[
             "traits",
@@ -4124,6 +4198,23 @@ output = ["slot:answer"]
         &home,
     );
     assert_exit_code(&after_wave, 0);
+    let after_wave_frames = read_frames(5);
+    assert!(
+        after_wave_frames[3].contains("Produce parallel direct next answer.")
+            && after_wave_frames[3].contains("pl-a-next-marker")
+            && !after_wave_frames[3].contains("pl-a-marker")
+            && !after_wave_frames[3].contains("pl-b-marker"),
+        "parallel wave must advance the direct branch in authored order: {}",
+        after_wave_frames[3]
+    );
+    assert!(
+        after_wave_frames[4].contains("Produce parallel post answer.")
+            && after_wave_frames[4].contains("pl-post-marker")
+            && !after_wave_frames[4].contains("pl-a-marker")
+            && !after_wave_frames[4].contains("pl-b-marker"),
+        "parallel wave must consume the cached nested outcome before the post-panel frame: {}",
+        after_wave_frames[4]
+    );
     let physical_calls = fs::read_to_string(capture.with_extension("txt.calls"))
         .unwrap()
         .lines()
