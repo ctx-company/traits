@@ -5622,6 +5622,7 @@ output = ["slot:refresh-6"]
             "SHARED B SYSTEM",
             "MCP A SYSTEM",
             "MCP B SYSTEM",
+            "ASSIGNED SYSTEM",
             "UNASSIGNED SYSTEM",
         ] {
             assert_eq!(
@@ -5642,18 +5643,48 @@ output = ["slot:refresh-6"]
             "resident {pid} handled an unexpected third turn"
         );
     }
+    // This is deliberately independent of previews: resident and MCP prompts
+    // both need to prove the complete effective guidance, not merely agree
+    // with another surface using the same composer.
     let assert_current_guidance = |prompt: &str,
                                    agent: &str,
+                                   agent_summary: &str,
                                    agent_tone: &str,
+                                   agent_tone_summary: &str,
                                    ready: &str,
+                                   ready_summary: &str,
                                    ready_tone: &str,
-                                   replacement: &str| {
+                                   ready_tone_summary: &str,
+                                   intent_replacement: &str,
+                                   tone_replacement: &str| {
         let intent = extract_intent(prompt);
         let behavior = extract_behavior(prompt);
         for marker in ["root-only", "shared", agent, ready] {
             assert_eq!(
                 intent.matches(&format!("id=\"{marker}\"")).count(),
                 1,
+                "{intent}"
+            );
+        }
+        assert_eq!(
+            intent.matches("id=\"root-collision\"").count(),
+            2,
+            "{intent}"
+        );
+        for summary in [
+            intent_replacement,
+            "Root remains first.",
+            "Root collision remains accepted.",
+            agent_summary,
+            ready_summary,
+        ] {
+            assert_eq!(
+                intent.matches(summary).count(),
+                if summary == "Root collision remains accepted." {
+                    2
+                } else {
+                    1
+                },
                 "{intent}"
             );
         }
@@ -5678,11 +5709,190 @@ output = ["slot:refresh-6"]
                 "{behavior}"
             );
         }
-        assert!(intent.contains(replacement), "{intent}");
+        for summary in [
+            tone_replacement,
+            "Root tone remains.",
+            "Root method.",
+            "Root method remains.",
+            "Root format.",
+            "Root format remains.",
+            "Root verbosity.",
+            "Root directness.",
+            "Root scope.",
+            "Root initiative.",
+            "Root uncertainty.",
+            agent_tone_summary,
+            ready_tone_summary,
+        ] {
+            assert_eq!(behavior.matches(summary).count(), 1, "{behavior}");
+        }
         assert!(intent.find("root-only").unwrap() < intent.find(agent).unwrap());
         assert!(intent.find(agent).unwrap() < intent.find(ready).unwrap());
         assert!(behavior.find("root-tone").unwrap() < behavior.find(agent_tone).unwrap());
         assert!(behavior.find(agent_tone).unwrap() < behavior.find(ready_tone).unwrap());
+        for stale in [
+            "agent-only",
+            "agent-tone",
+            "agent-method",
+            "agent-format",
+            "agent-verbosity",
+            "agent-directness",
+            "agent-scope",
+            "agent-uncertainty",
+            "local-a-agent",
+            "local-a-agent-tone",
+            "local-1-prompt",
+            "local-1-prompt-tone",
+            "local-2-prompt",
+            "local-2-prompt-tone",
+            "shared-a-agent",
+            "shared-a-agent-tone",
+            "shared-a-prompt",
+            "shared-a-prompt-tone",
+            "shared-b-agent",
+            "shared-b-agent-tone",
+            "shared-b-prompt",
+            "shared-b-prompt-tone",
+            "mcp-a-agent",
+            "mcp-a-agent-tone",
+            "mcp-a-prompt",
+            "mcp-a-prompt-tone",
+            "mcp-b-agent",
+            "mcp-b-agent-tone",
+            "mcp-b-prompt",
+            "mcp-b-prompt-tone",
+            "unassigned-only",
+            "unassigned-tone",
+            "container",
+        ] {
+            if stale != agent && stale != ready && stale != agent_tone && stale != ready_tone {
+                assert!(
+                    !prompt.contains(&format!("id=\"{stale}\"")),
+                    "stale {stale}: {prompt}"
+                );
+            }
+        }
+        for stale in [
+            "Assigned replacement text.",
+            "Shared A replacement.",
+            "Shared B replacement.",
+            "Shared A prompt replacement.",
+            "Shared B prompt replacement.",
+            "Agent tone.",
+            "Shared A tone.",
+            "Shared B tone.",
+            "Shared A prompt tone.",
+            "Shared B prompt tone.",
+        ] {
+            if stale != intent_replacement && stale != tone_replacement {
+                assert!(
+                    !intent.contains(stale) && !behavior.contains(stale),
+                    "stale {stale}: {prompt}"
+                );
+            }
+        }
+        assert_unassigned_absent(prompt);
+        for system in [
+            "LOCAL A SYSTEM",
+            "SHARED A SYSTEM",
+            "SHARED B SYSTEM",
+            "MCP A SYSTEM",
+            "MCP B SYSTEM",
+            "ASSIGNED SYSTEM",
+            "UNASSIGNED SYSTEM",
+        ] {
+            assert!(
+                !intent.contains(system) && !behavior.contains(system),
+                "{prompt}"
+            );
+        }
+    };
+    let resident_cases = [
+        (
+            &local_turns[0],
+            0,
+            "local-a-agent",
+            "Local A agent guidance.",
+            "local-a-agent-tone",
+            "Local A agent tone.",
+            "local-1-prompt",
+            "Local one prompt guidance.",
+            "local-1-prompt-tone",
+            "Local one prompt tone.",
+            "Root replacement text.",
+            "Root tone.",
+        ),
+        (
+            &local_turns[1],
+            1,
+            "local-a-agent",
+            "Local A agent guidance.",
+            "local-a-agent-tone",
+            "Local A agent tone.",
+            "local-2-prompt",
+            "Local two prompt guidance.",
+            "local-2-prompt-tone",
+            "Local two prompt tone.",
+            "Root replacement text.",
+            "Root tone.",
+        ),
+        (
+            &shared_turns[0],
+            2,
+            "shared-a-agent",
+            "Shared A agent guidance.",
+            "shared-a-agent-tone",
+            "Shared A agent tone.",
+            "shared-a-prompt",
+            "Shared A prompt guidance.",
+            "shared-a-prompt-tone",
+            "Shared A prompt tone marker.",
+            "Shared A prompt replacement.",
+            "Shared A prompt tone.",
+        ),
+        (
+            &shared_turns[1],
+            3,
+            "shared-b-agent",
+            "Shared B agent guidance.",
+            "shared-b-agent-tone",
+            "Shared B agent tone.",
+            "shared-b-prompt",
+            "Shared B prompt guidance.",
+            "shared-b-prompt-tone",
+            "Shared B prompt tone marker.",
+            "Shared B prompt replacement.",
+            "Shared B prompt tone.",
+        ),
+    ];
+    for (
+        prompt,
+        index,
+        agent,
+        agent_summary,
+        agent_tone,
+        agent_tone_summary,
+        ready,
+        ready_summary,
+        ready_tone,
+        ready_tone_summary,
+        replacement,
+        tone_replacement,
+    ) in resident_cases
+    {
+        assert_current_guidance(
+            prompt,
+            agent,
+            agent_summary,
+            agent_tone,
+            agent_tone_summary,
+            ready,
+            ready_summary,
+            ready_tone,
+            ready_tone_summary,
+            replacement,
+            tone_replacement,
+        );
         let include = prompt.find("<include>").expect("include opening");
         let intent_start = prompt.find("<intent>").unwrap();
         let behavior_start = prompt.find("<behavior>").unwrap();
@@ -5695,72 +5905,6 @@ output = ["slot:refresh-6"]
                 && agent_start < input_start,
             "{prompt}"
         );
-        for stale in [
-            "local-a-agent",
-            "local-1-prompt",
-            "local-2-prompt",
-            "shared-a-agent",
-            "shared-a-prompt",
-            "shared-b-agent",
-            "shared-b-prompt",
-            "mcp-a-agent",
-            "mcp-a-prompt",
-            "mcp-b-agent",
-            "mcp-b-prompt",
-            "unassigned-only",
-            "unassigned-tone",
-            "container",
-        ] {
-            if stale != agent && stale != ready && stale != agent_tone && stale != ready_tone {
-                assert!(!prompt.contains(stale), "stale {stale}: {prompt}");
-            }
-        }
-        assert_unassigned_absent(prompt);
-        assert!(
-            !intent.contains("SYSTEM") && !behavior.contains("SYSTEM"),
-            "{prompt}"
-        );
-    };
-    let resident_cases = [
-        (
-            &local_turns[0],
-            0,
-            "local-a-agent",
-            "local-a-agent-tone",
-            "local-1-prompt",
-            "local-1-prompt-tone",
-            "Root replacement text.",
-        ),
-        (
-            &local_turns[1],
-            1,
-            "local-a-agent",
-            "local-a-agent-tone",
-            "local-2-prompt",
-            "local-2-prompt-tone",
-            "Root replacement text.",
-        ),
-        (
-            &shared_turns[0],
-            2,
-            "shared-a-agent",
-            "shared-a-agent-tone",
-            "shared-a-prompt",
-            "shared-a-prompt-tone",
-            "Shared A prompt replacement.",
-        ),
-        (
-            &shared_turns[1],
-            3,
-            "shared-b-agent",
-            "shared-b-agent-tone",
-            "shared-b-prompt",
-            "shared-b-prompt-tone",
-            "Shared B prompt replacement.",
-        ),
-    ];
-    for (prompt, index, agent, agent_tone, ready, ready_tone, replacement) in resident_cases {
-        assert_current_guidance(prompt, agent, agent_tone, ready, ready_tone, replacement);
         assert_eq!(
             extract_intent(prompt),
             extract_intent(&refresh_previews[index]),
@@ -5797,18 +5941,38 @@ output = ["slot:refresh-6"]
         2,
         "MCP frames must use exactly two ordinary captures"
     );
-    for (index, (agent, agent_tone, ready, ready_tone)) in [
+    for (
+        index,
+        (
+            agent,
+            agent_summary,
+            agent_tone,
+            agent_tone_summary,
+            ready,
+            ready_summary,
+            ready_tone,
+            ready_tone_summary,
+        ),
+    ) in [
         (
             "mcp-a-agent",
+            "MCP A agent guidance.",
             "mcp-a-agent-tone",
+            "MCP A agent tone.",
             "mcp-a-prompt",
+            "MCP A prompt guidance.",
             "mcp-a-prompt-tone",
+            "MCP A prompt tone.",
         ),
         (
             "mcp-b-agent",
+            "MCP B agent guidance.",
             "mcp-b-agent-tone",
+            "MCP B agent tone.",
             "mcp-b-prompt",
+            "MCP B prompt guidance.",
             "mcp-b-prompt-tone",
+            "MCP B prompt tone.",
         ),
     ]
     .iter()
@@ -5817,64 +5981,24 @@ output = ["slot:refresh-6"]
         let prompt = &mcp_prompts[index];
         let intent = extract_intent(prompt);
         let behavior = extract_behavior(prompt);
-        for marker in ["root-only", "shared", *agent, *ready] {
-            assert_eq!(
-                intent.matches(&format!("id=\"{marker}\"")).count(),
-                1,
-                "{intent}"
-            );
-        }
-        for marker in [
-            "shared-tone",
-            "root-tone",
-            "shared-method",
-            "root-method",
-            "shared-format",
-            "root-format",
-            "root-verbosity",
-            "root-directness",
-            "root-scope",
-            "root-initiative",
-            "root-uncertainty",
-            *agent_tone,
-            *ready_tone,
-        ] {
-            assert_eq!(
-                behavior.matches(&format!("id=\"{marker}\"")).count(),
-                1,
-                "{behavior}"
-            );
-        }
-        assert!(intent.find("root-only").unwrap() < intent.find(*agent).unwrap());
-        assert!(intent.find(*agent).unwrap() < intent.find(*ready).unwrap());
-        assert!(behavior.find("root-tone").unwrap() < behavior.find(*agent_tone).unwrap());
-        assert!(behavior.find(*agent_tone).unwrap() < behavior.find(*ready_tone).unwrap());
+        assert_current_guidance(
+            prompt,
+            agent,
+            agent_summary,
+            agent_tone,
+            agent_tone_summary,
+            ready,
+            ready_summary,
+            ready_tone,
+            ready_tone_summary,
+            "Root replacement text.",
+            "Root tone.",
+        );
         assert!(prompt.find("<intent>").unwrap() < prompt.find("<behavior>").unwrap());
         assert!(
             prompt.find("<behavior>").unwrap()
                 < prompt.find("Resolved prompt instructions:").unwrap()
         );
-        for stale in [
-            "local-a-agent",
-            "local-1-prompt",
-            "local-2-prompt",
-            "shared-a-agent",
-            "shared-a-prompt",
-            "shared-b-agent",
-            "shared-b-prompt",
-            "mcp-a-agent",
-            "mcp-a-prompt",
-            "mcp-b-agent",
-            "mcp-b-prompt",
-            "unassigned-only",
-            "unassigned-tone",
-            "container",
-        ] {
-            if stale != *agent && stale != *ready && stale != *agent_tone && stale != *ready_tone {
-                assert!(!prompt.contains(stale), "stale {stale}: {prompt}");
-            }
-        }
-        assert_unassigned_absent(prompt);
         assert_eq!(intent, extract_intent(&refresh_previews[index + 4]));
         assert_eq!(behavior, extract_behavior(&refresh_previews[index + 4]));
     }
