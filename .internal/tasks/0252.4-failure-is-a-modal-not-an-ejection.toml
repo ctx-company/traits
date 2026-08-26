@@ -5,38 +5,910 @@ status = "ready"
 raised = "2026-08-24"
 content = """
 Runs are resumable and re-drivable; the surface must show that instead of
-ejecting on every failure. Parent ruling 5, owner scope: ALL "fail or
-let's exit" events.
+ejecting on every failure. Parent ruling 5.
 
-## Shape
+## The contract, stated once
 
-- Trigger set: driver failure, harness failure, and the ctrl-c interrupt
-  request in the run view — any event that today tears the pane down and
-  exits.
-- Behavior: the pane stays up, the background dims, a modal states in one
-  short line what happened and offers three buttons (0252.3 widget):
-  - Resume/Retry — re-drive the SAME session via the `--session` resume
-    path that exists today.
-  - Restart — a fresh run, same trait and args, new session.
-  - Abort — tear down and print 0252.1's failure panel.
-- Ctrl-c: the FIRST ctrl-c opens this modal instead of the run pane's
-  instant kill (`CtrlCPolicy`, P551); the SECOND stays the hard escape
-  hatch, and 0252.2's rescue erases behind it.
-- Seam with 0243.5: pause-at-frame-boundary is the center arc's
-  primitive. This task rides today's interrupt and resume mechanics and
-  adopts pause when it lands — no dependency on the center.
+Every in-scope failure and the first raw-mode ctrl-c in the run view keep
+the pane, dim it, show ONE short line, and offer exactly three actions,
+always, in this order:
+
+1. `Resume/Retry` — re-drive the SAME session through the existing
+   `--session` path.
+2. `Restart` — start a FRESH session with the same trait and arguments.
+3. `Abort` — close the pane and print `0252.1`'s compact failure panel.
+
+There is no condition under which one of the three is withheld, greyed
+out, or replaced. A boundary that makes an action awkward (a terminally
+`Failed` session, an explicit `--out`, a named `--worktree`) is resolved by
+specifying exactly what that action does — never by removing it. Those
+three resolutions are Steps 6a, 6b, and 6c below.
+
+## Scope, resolved against the code
+
+The parent says "ALL fail-or-exit events". The code has three distinct
+exit families and they do NOT all mean failure. This task covers exactly
+one of them:
+
+- **In scope — terminal non-completion of a driven `ctx traits run` with a
+  live inline pane.** Both failure shapes: a non-completed `Ok(DriveReport)`
+  (`driver-lock-busy`, `failed`, `command-step-failed`, `harness-failed`,
+  `mcp-harness-failed`, timeouts, blocked/invalid harness output, bounds,
+  `interrupted`, `killed`, `awaiting-input` after a cancelled prompt) AND a
+  propagated `crate::Result::Err` out of `drive` (session read, trait load,
+  prompt/schema build, harness spawn, ledger write). Plus the FIRST raw-mode
+  ctrl-c in the run view, which opens the modal immediately rather than
+  waiting for the drive to drain.
+- **Out of scope — deliberate user exits that are not failures.** Confirmed
+  `q` (`run_view.rs:1409` confirm → `close_pane_locked`, run continues in
+  background) and bare `d` (dashboard handoff) keep today's behavior
+  exactly. The task's sentence "No path exits the TUI without either a
+  chosen Abort or the double-ctrl-c hatch" is scoped to the failure modal
+  itself: once the failure modal is open, Esc and every unrelated key are
+  inert and only Resume/Retry, Restart, Abort, or a second ctrl-c can leave
+  it.
+- **Out of scope — resumable pauses that already print their own guidance.**
+  `drive.credits_pause` and `drive.budget_pause` are excluded, which is
+  exactly the exclusion `CompletionOutcome::with_human_terminal_failure`
+  (`run.rs:1285-1296`) already encodes; this task reuses that predicate
+  rather than inventing a second failure classifier.
+
+Every other caller of `drive` — `ctx traits internal drive --session`
+(`command_handlers.rs:1339`), `generate.rs:568`, dashboard-spawned
+`--progress none` drives — is byte-unchanged, because the whole feature is
+gated behind one new opt-in field that only `run::drive_session` sets. This
+matters for correctness, not tidiness: a caller that shows the modal but
+never reads the choice would hang the pane forever.
+
+## Dependencies actually consumed
+
+- `0252.3` (declared): `Modal::buttons(title, body, Vec<Button>)`,
+  `Button::new`, `.destructive()`, `ModalOutcome::Chosen(String)`. NOT
+  present at HEAD — **Step 0 re-reads the landed shape before any code is
+  written.** `tui_kit.rs` itself is not edited by this task; 0252.3 states
+  that failure-modal backdrop dimming belongs here, so the dim call goes at
+  the run-view render site, not inside `render_modal`.
+- `0252.1` (declared): `run::failure_panel`, `run::run_header_from_title`,
+  `presentation::Panel`, `presentation::emit_human`. Abort prints through
+  those helpers only — no new panel grammar.
+- `0252.2` (NOT added to relations): its implementation is already at HEAD
+  (`b4671454`) even though the board row still says `ready`, so this task
+  reuses `interrupt::arm_rescue_panel`, `rescue_terminal_signal_safe`, the
+  generation gate, and `proof_run_view_exit_teardown.rs` with no board
+  dependency to add. The SIGINT ladder in `handle_sigint` is deliberately
+  left unchanged, so 0252.2's three-signal proof stays valid.
+- `0243.5` pause: not depended on. Resume/Retry rides today's
+  `interrupt::reset` + existing-session `drive` path.
+
+## Architecture: where the choice is made and where it is honored
+
+Two seams, because the ctrl-c requirement and the re-drive requirement live
+at different levels:
+
+1. **The pane decides.** The run pane owns the modal and records the chosen
+   `FailureChoice` in a leaf-locked slot the moment the user presses a
+   button — possibly while the drive thread is still draining a killed
+   harness. This is what makes the first ctrl-c instant.
+2. **`run::drive_session` honors it**, after `drive()` has fully returned.
+   By then `record_drive_outcome` has persisted the outcome and
+   `drop(driver_lock)` has released the driver lock and control socket
+   (`drive.rs:1485-1529`), so a same-session Resume/Retry cannot race the
+   invocation that just owned the ledger and come back `driver-lock-busy`.
+   On the propagated-`Err` shape `drive` returns before
+   `record_drive_outcome`, but `driver_lock` is a plain local acquired at
+   `drive.rs:1205` and released by its own drop on that early return, so
+   the same no-race guarantee holds there too.
+
+The pane therefore has to survive `drive()`'s return. Today
+`RunPanelGuard::drop` closes it on every non-`Completed` exit
+(`drive.rs:1915-1922`, `2294-2315`) — that is the ejection seam. The guard
+gains an optional release handoff instead of a second exit path.
+
+**Lock order, stated once and obeyed everywhere.** The panel state mutex is
+the OUTER lock; the failure-choice slot mutex is a LEAF. The key handler
+holds the state lock and takes the leaf lock to publish a choice. The
+drive-side waiter takes the leaf lock only inside
+`FailureChoiceSlot::take_timeout`, which returns an owned value with its
+guard already dropped, and only THEN takes the state lock via
+`RunPanel::active`. No path ever holds the leaf lock while taking the state
+lock.
+
+## Files touched (repo-relative, nothing else)
+
+- `modules/cli/src/app/interrupt.rs`
+- `modules/cli/src/app/tui_ratatui.rs`
+- `modules/cli/src/app/run_view.rs`
+- `modules/cli/src/app/run_view/render.rs`
+- `modules/cli/src/app/drive.rs`
+- `modules/cli/src/app/run.rs`
+- `modules/cli/src/app/command_handlers.rs`
+- `modules/cli/src/app/generate.rs`
+- `modules/cli/tests/proof_run_view_exit_teardown.rs`
+
+`tui_kit.rs` is deliberately NOT touched (0252.3 owns it; `dim_backdrop`
+already exists at `tui_kit.rs:886` and is called from the run view).
+`dashboard.rs`, `trait_editor.rs`, `tui_demo.rs` are NOT touched — their
+panes use `CtrlCPolicy::ForwardKey` and never arm escalation.
+
+## Step 0 — re-read the landed dependency (no edits)
+
+Read `tui_kit.rs`'s `Button`, `ButtonRow`, `Modal::buttons`, and
+`ModalOutcome::Chosen` as 0252.3 actually landed them, plus
+`apply_open_modal_key` (`run_view.rs:1320-1352`), which 0252.3 already
+extended with a `ModalOutcome::Chosen(_) => {}` arm. This task replaces
+that arm's comment and body. Do not code against the pre-0252.3 shape
+quoted anywhere in this plan.
+
+## Step 1 — one hard-escape body (`interrupt.rs`)
+
+New symbol:
+
+- `pub(crate) fn hard_escape() -> !` — `rescue_terminal_signal_safe();`
+  then `unsafe { libc::_exit(130) }`. Nothing else: no formatting, no
+  allocation, no lock, no crossterm, no ratatui. It is called both from the
+  `SIGINT` handler and from the input-pump thread, so it must stay
+  async-signal-safe even though the pump is an ordinary thread — the pump
+  must be able to escape while the run-panel mutex is held by a wedged
+  render thread.
+
+Changed symbol:
+
+- `extern "C" fn handle_sigint(_signal: i32)` (`interrupt.rs:183-193`): the
+  `count >= 3` arm calls `hard_escape()` instead of inlining
+  `rescue_terminal_signal_safe()` + `_exit(130)`. Behavior byte-identical —
+  the ladder (1 = graceful, 2 = rescue, 3 = rescue + 130) is NOT changed,
+  which is why `repeated_sigint_leaves_only_the_interrupted_failure_panel`
+  keeps passing untouched. Do NOT add `kill_active_process_group()` here;
+  that belongs only to `handle_sigterm`.
+
+`arm_rescue_panel`, the generation gate, `CLEAR_VIEWPORT_ESCAPE`,
+`FULL_RESTORE_ESCAPE`, and the 4096-byte buffer are reused as-is and not
+modified.
+
+## Step 2 — per-pane ctrl-c escalation (`tui_ratatui.rs`)
+
+The escalation is opt-in per pane, not a policy rewrite. `CtrlCPolicy`
+keeps both existing variants and their meanings; startup, dashboard, demo,
+and editor panes are untouched because they never arm.
+
+New symbols:
+
+- `#[derive(Default)] struct CtrlCEscalation { armed: AtomicBool, count: AtomicUsize }`
+  with a doc comment naming 0252.4: `armed` is set only by the run panel;
+  `count` is per-pane ctrl-c presses since the last reset.
+- `PumpControl` (`tui_ratatui.rs:245`) gains one field:
+  `ctrl_c: CtrlCEscalation`. Every existing `PumpControl { .. }` literal
+  adds exactly one line `ctrl_c: CtrlCEscalation::default(),` — at
+  `tui_ratatui.rs:637`, `:763`, and the five test literals at `:1401`,
+  `:1431`, `:1470`, `:1523`, `:1572`. `Default` is deliberately correct
+  (unarmed, zero) for all seven.
+- `impl RatatuiPane`:
+  - `pub(crate) fn arm_ctrl_c_escalation(&self)` — stores `armed = true`
+    and `count = 0`.
+  - `pub(crate) fn reset_ctrl_c_count(&self)` — stores `count = 0`; called
+    whenever a new attempt begins on a reused pane, so a Resume/Retry never
+    inherits a spent press budget.
+  - `#[cfg(test)] pub(crate) fn ctrl_c_count(&self) -> usize`.
+
+Changed symbols:
+
+- The pump thread's `Event::Key` ctrl-c branch (`tui_ratatui.rs:714-729`).
+  Order, all inside the existing `ctrl_c` condition:
+  1. if `pump.ctrl_c.armed` and
+     `pump.ctrl_c.count.fetch_add(1, SeqCst) + 1 >= 2` →
+     `crate::app::interrupt::hard_escape()` (diverges; never returns, never
+     forwards). This is the ONLY escalation site, and it lives on the pump
+     thread precisely because it is the one reader that keeps running when
+     the render thread or the panel mutex is stuck.
+  2. the existing `ctrl_c_policy == CtrlCPolicy::RequestStop` →
+     `interrupt::request_kill()` call, unchanged. The FIRST ctrl-c still
+     SIGKILLs the active harness/setup process group: Resume/Retry,
+     Restart, and Abort all require the current drive to stop, and a
+     cooperative `request_stop` would leave the modal floating over a run
+     that keeps burning through a ten-minute harness call.
+  3. forward the key as today.
+- `pub(crate) fn poll_detach(&mut self) -> Vec<KeyEvent>`
+  (`tui_ratatui.rs:900-918`): signature unchanged. Its ctrl-c arm becomes
+  conditional — when `self.pump.ctrl_c.armed` is set, push the key into
+  `unhandled` and `continue` (the run view opens its modal); when it is
+  NOT set, the existing `request_kill` + `self.detached = true` +
+  `self.leave()` + `eprintln!("run killed; terminal restored")` + early
+  return is preserved verbatim. That literal string must still exist in
+  `tui_ratatui.rs` after this task — it is the proof the unarmed path was
+  gated, not deleted. Update the method's doc comment (`:885-899`) to state
+  both paths.
+
+Build before continuing, with exactly this command:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 3 — the failure modal on the run pane (`run_view.rs`)
+
+New symbols:
+
+- `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub(crate) enum FailureChoice { Resume, Restart, Abort }`
+- `const FAILURE_RESUME_ID: &str = "resume";`,
+  `const FAILURE_RESTART_ID: &str = "restart";`,
+  `const FAILURE_ABORT_ID: &str = "abort";`
+- `const FAILURE_MODAL_TITLE: &str = "Run stopped";`
+- `const FAILURE_INTERRUPT_REASON: &str = "interrupted";` — the one-line
+  body used when ctrl-c opens the modal before any drive outcome exists.
+- `const FAILURE_CHOICE_POLL: std::time::Duration = std::time::Duration::from_millis(250);`
+- `fn failure_choice_from_id(value: &str) -> Option<FailureChoice>` — pure,
+  the exact mirror of 0252.3's `archive_choice` precedent, so a relabelled
+  button can never silently become an unknown choice.
+- `fn failure_modal_widget(reason: &str) -> tui_kit::Modal` —
+  `tui_kit::Modal::buttons(FAILURE_MODAL_TITLE, reason.to_string(), vec![...])`
+  with EXACTLY three buttons, unconditionally, in this order:
+  `Button::new("Resume/Retry", FAILURE_RESUME_ID)`,
+  `Button::new("Restart", FAILURE_RESTART_ID)`,
+  `Button::new("Abort", FAILURE_ABORT_ID).destructive()`. Focus therefore
+  starts on the least destructive action. There is no offer type, no
+  conditional button, and no session or option is consulted here — the
+  three-action contract is a constant of this widget. `reason` is one line;
+  the caller normalizes it (Step 6).
+- `#[derive(Default)] struct FailureChoiceSlot { chosen: Mutex<Option<FailureChoice>>, ready: Condvar }`
+  with exactly four methods, all leaf-locking and none taking any other
+  lock:
+  - `fn record(&self, choice: FailureChoice)` — locks, stores, drops the
+    guard, `ready.notify_all()`.
+  - `fn peek(&self) -> Option<FailureChoice>` — locks, copies, drops.
+  - `fn clear(&self)` — locks, sets `None`, drops.
+  - `fn take_timeout(&self, wait: std::time::Duration) -> Option<FailureChoice>`
+    — locks, `Condvar::wait_timeout_while(guard, wait, |slot| slot.is_none())`,
+    `slot.take()`, then RETURNS the owned value, dropping the guard at
+    return. A poisoned leaf mutex returns `Some(FailureChoice::Abort)` so
+    the waiter can never spin on a dead pane.
+- `RunPanel` gains one field: `failure: Arc<FailureChoiceSlot>`, built in
+  `new` (`run_view.rs:392`), `new_with_pane` (`:407`), and `new_observer`
+  (`:537`), and cloned with the rest (`RunPanel` is already `Clone` over
+  `Arc`s).
+- `RunPanelState` gains three fields:
+  - `failure: Arc<FailureChoiceSlot>` — **the same `Arc` the owning
+    `RunPanel` holds**, cloned into the state at construction. This is what
+    lets `apply_open_modal_key`, which only ever sees `&mut RunPanelState`,
+    publish into the exact slot `RunPanel::wait_failure_choice` awaits. No
+    signature change to `apply_open_modal_key` is needed or permitted.
+  - `failure_modal: bool` — `true` exactly while `state.modal` holds the
+    failure modal. One discriminator, same slot, the same shape
+    `pending_input_reply` already uses to distinguish the text prompt from
+    the `q` confirm.
+  - `failure_modal_enabled: bool` — set by `enable_failure_modal`; while
+    false, ctrl-c never opens a modal and the pane behaves as today.
+- `fn open_failure_modal_locked(state: &mut RunPanelState, reason: &str)` —
+  the single definition both entry points share, in this order:
+  1. return immediately when `!state.failure_modal_enabled`;
+  2. return immediately when `state.failure_modal` is already `true` — the
+     modal's body and button focus are written ONCE, when it opens. A later
+     call (the drive returning its real reason after a ctrl-c already
+     opened the modal on `FAILURE_INTERRUPT_REASON`) must not rewrite text
+     or reset focus under the user's fingers mid-choice;
+  3. return immediately when `state.failure.peek().is_some()` — a choice is
+     already recorded and the modal must not reappear over it;
+  4. `if let Some(reply) = state.pending_input_reply.take() { let _ = reply.send(None); }`
+     — a missing-input prompt being replaced must release the drive thread
+     blocked on `recv`, or the failure continuation is never reached;
+  5. `state.modal = Some(failure_modal_widget(reason));`
+     `state.failure_modal = true;` `render_locked(state);`
+- `impl RunPanel`:
+  - `pub(crate) fn enable_failure_modal(&self)` — locks state, sets
+    `failure_modal_enabled = true`, calls
+    `state.repaint.arm_ctrl_c_escalation()`. Called only by
+    `drive::create_run_panel` when the caller opted in (Step 5). This is
+    the explicit startup→run-view handoff transition: the startup pane is
+    never armed, so `poll_startup_interrupt` (`run_startup_view.rs:162-196`)
+    is byte-unchanged.
+  - `pub(crate) fn open_failure_modal(&self, reason: &str)` — locks state,
+    delegates to `open_failure_modal_locked`.
+  - `pub(crate) fn failure_modal_open(&self) -> bool`
+  - `pub(crate) fn clear_failure_modal(&self)` — locks state, clears
+    `state.modal` and `state.failure_modal`, calls `state.failure.clear()`
+    and `state.repaint.reset_ctrl_c_count()`, renders. Used before a
+    Resume/Retry re-drive and when a drive completed despite an open modal.
+  - `pub(crate) fn wait_failure_choice(&self) -> FailureChoice` — uses
+    `self.failure` directly (never the state lock) to await a choice:
+    ```
+    loop {
+        if let Some(choice) = self.failure.take_timeout(FAILURE_CHOICE_POLL) {
+            return choice;
+        }
+        if !self.active() {
+            return FailureChoice::Abort;
+        }
+    }
+    ```
+    **Bounded**: `take_timeout` returns its owned value with the leaf guard
+    already dropped, so `active()` (which takes the state lock) can never
+    invert the order; a pane that went detached (terminal hung up, panic
+    hook tore it down) yields `Abort` rather than blocking forever. This is
+    the loop's stop condition when there is no human left to answer.
+  - `pub(crate) fn active(&self) -> bool` — `!state.repaint.detached()`,
+    `false` when the state lock is poisoned.
+
+Changed symbols:
+
+- `fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool`
+  (`run_view.rs:1320-1352`). Signature unchanged. A new branch goes FIRST,
+  before the existing `match modal.handle_key(key)`:
+
+  ```
+  if state.failure_modal {
+      if let tui_kit::ModalOutcome::Chosen(id) = modal.handle_key(key)
+          && let Some(choice) = failure_choice_from_id(&id)
+      {
+          state.modal = None;
+          state.failure_modal = false;
+          state.repaint.reset_ctrl_c_count();
+          state.failure.record(choice);
+      }
+      return true;
+  }
+  ```
+
+  `state.failure.record` is the ONLY publication site and it runs while the
+  state lock is held — the outer-then-leaf order the architecture section
+  fixes. Everything else — `Cancelled` from Esc, `Pending`, `q`, arrow keys
+  that only move focus — leaves the modal open and consumes the key. Esc
+  must NOT reach the existing `Cancelled` arm: that arm clears the modal,
+  which would be a hidden exit from the failure state. The existing
+  `Confirmed` / `Cancelled` / `Submitted` / `Chosen(_)` arms below are
+  unchanged and now handle only the `q` confirm and the text prompt.
+- `fn poll_and_apply_keys(state: &mut RunPanelState) -> bool`
+  (`run_view.rs:1353-1418`). Immediately after
+  `let keys = state.repaint.poll_detach();`, inside the `for key in keys`
+  loop and **before** `apply_open_modal_key`, intercept ctrl-c:
+
+  ```
+  if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+      open_failure_modal_locked(state, FAILURE_INTERRUPT_REASON);
+      changed = true;
+      continue;
+  }
+  ```
+
+  It must precede the modal router, the guide router, and
+  `live_view_key_action`, so a ctrl-c struck while the `q` confirm, the
+  missing-input prompt, or the guide is open still opens the failure modal
+  instead of being eaten as `Pending` or as guide text.
+- `fn close_pane_locked` is NOT changed. `RunPanel::close` idempotence,
+  the scrollback commit, `RatatuiPane::draw`'s detached guard, and
+  `arm_rescue_panel_locked` are all untouched.
+- Update the stale doc comment at `run_view.rs:1289-1297`, which currently
+  says ctrl-c is "already handled inside `poll_detach` as an instant kill".
+
+## Step 4 — dim the backdrop, only for this modal (`run_view/render.rs`)
+
+- `struct LiveFrame<'_>` gains `dim_backdrop: bool`.
+- `render_locked` (`render.rs:34-114`) reads `state.failure_modal`
+  alongside `state.modal` and passes `dim_backdrop: state.failure_modal`.
+  It caches teardown tree lines only, exactly as today — modal pixels are
+  still not cached, so a hard kill shows 0252.2's rescue panel, not a
+  half-drawn modal.
+- `render_live_panes` (`render.rs:421-480`): in the existing
+  `if let Some(modal) = modal` arm, call
+  `tui_kit::dim_backdrop(frame, full_area);` before
+  `tui_kit::render_modal(frame, full_area, modal);` when the new flag is
+  set. This is the ordering `render_conversation_modal`
+  (`tui_kit.rs:1113-1118`) already documents: dim the whole area first,
+  then `Clear`+draw the modal at full brightness. `dim_backdrop`
+  (`tui_kit.rs:886-893`) strips BOLD and paints no background, so the
+  palette doctrine holds and the generic `render_modal` stays undimmed for
+  every other caller.
+
+Build again before continuing, with exactly this command:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+## Step 5 — the guard releases instead of closing (`drive.rs`)
+
+Changed symbols:
+
+- `pub struct DriveInputs<'a>` gains exactly two fields, both with doc
+  comments naming 0252.4 and the byte-identical default:
+  - `pub failure_modal: bool` — `false` (today's behavior) for every caller
+    but `run::drive_session`. A `bool` and not a policy struct: the modal's
+    three actions are unconditional, so there is nothing to configure.
+  - `pub live_panel: Option<run_view::RunPanel>` — a pane handed back in
+    for a Resume/Retry re-drive, so the same pane keeps painting across the
+    attempt boundary instead of being torn down and rebuilt. `None`
+    everywhere else.
+- `struct RunPanelGuard` (`drive.rs:1915-1922`) becomes
+  ```
+  pub(crate) struct RunPanelGuard {
+      panel: Option<run_view::RunPanel>,
+      release: Option<PanelHandoff>,
+  }
+  ```
+  with exactly this API — the three methods `run.rs` needs, no more:
+  - `pub(crate) fn new(panel: Option<run_view::RunPanel>, release: Option<PanelHandoff>) -> Self`
+  - `pub(crate) fn panel(&self) -> Option<&run_view::RunPanel>`
+  - `pub(crate) fn take(&mut self) -> Option<run_view::RunPanel>`
+  `Drop` takes the panel and, when `release` is `Some`, calls
+  `handoff.give(panel)`; otherwise `panel.close()` exactly as today. The
+  panel is thus never owned by anything but a guard at any hop — the
+  receiving side re-guards it (Step 6). Both fields stay private;
+  `drive.rs`'s own code sets `run_panel.panel` directly (same module), and
+  `PanelHandoff::give` stays private to this module. Both existing guard
+  sites are updated:
+  - `drive` (`drive.rs:1071`): `RunPanelGuard::new(input.live_panel.take(), release)`
+    where `release = input.panel_handoff.clone().filter(|_| input.failure_modal)`.
+    Construct a panel via `create_run_panel` only when
+    `run_panel.panel.is_none()` and `input.progress == cli::DriveProgress::Tui`;
+    the existing fallback-to-status error arm is unchanged and unreachable
+    for a handed-in pane. A handed-in pane keeps the ledger path, the armed
+    escalation, and the plan it already had — a Resume/Retry drives the
+    same session, so its plan and trait are the same bytes. The
+    `run_panel.0` field accesses at `:1075`, `:1354`, and `drive_loop`'s
+    `:2273-2311` become `run_panel.panel`.
+  - `drive_loop` (`drive.rs:2093`): same
+    `RunPanelGuard::new(initial_run_panel, release)`. The `Status::Completed`
+    arm (`drive.rs:2294-2307`) is unchanged — it still hands off explicitly.
+    With a release installed, every other return and every propagated `?`
+    now releases through `Drop` instead of closing, which is the whole
+    ejection fix.
+- `fn create_run_panel(input: &mut DriveInputs<'_>, session: &Session) -> crate::Result<run_view::RunPanel>`
+  (`drive.rs:4845-4881`): signature unchanged; after `set_live_ledger_path`,
+  add `if input.failure_modal { panel.enable_failure_modal(); }`.
+
+Ordering that must not move: `record_drive_outcome` (`drive.rs:1496`) and
+`drop(driver_lock)` (`drive.rs:1528`) still run after `drive_loop` returns
+and before `drive` returns. The guard released the panel earlier, but no
+choice is ACTED on until `drive` has fully returned, so a Resume/Retry
+never races the invocation that still holds the lock. `interrupt::reset`
+(`drive.rs:990-1009`) at the top of every `drive` clears the interrupt and
+kill flags a Resume/Retry must not inherit — already correct, do not touch.
+
+Accepted and pre-existing: between `drive_loop`'s return and `drive`'s
+return the pane is owned by the handoff rather than a guard. That window
+already exists today for the `Status::Completed` handoff (P549); this task
+widens which outcomes reach it, not the window itself.
+
+## Step 6 — the attempt loop (`run.rs`)
+
+New symbols:
+
+- `pub(crate) fn human_terminal_failure(session: &ctx_traits_core::procedure::session::Session, drive: &crate::app::drive::DriveReport) -> bool`
+  — extracted verbatim from the body of
+  `CompletionOutcome::with_human_terminal_failure` (`run.rs:1285-1296`):
+  `drive.credits_pause.is_none() && drive.budget_pause.is_none() && !run_completed(session, drive)`.
+  `with_human_terminal_failure` is rewritten to
+  `self.human_terminal_failure = human_output && human_terminal_failure(&self.session, drive);`
+  so the exit mapping and the modal trigger can never drift apart. This is
+  the one failure classifier; do not add a second.
+- `fn one_line_reason(text: &str) -> String` — first non-empty line,
+  whitespace-normalized, truncated on a char boundary to 120 chars, falling
+  back to `"run failed"` when the result is empty. The single normalizer
+  for BOTH failure shapes.
+- `fn failure_modal_reason(session: &ctx_traits_core::procedure::session::Session, drive: &crate::app::drive::DriveReport) -> String`
+  — `one_line_reason(&failure_reason(session, drive).unwrap_or_default())`.
+  Reuses the existing precedence selector (`run.rs:1114-1150`); does not
+  introduce a second explanation source.
+- `fn error_modal_reason(error: &crate::Error) -> String` —
+  `one_line_reason(&error.to_string())`. The propagated-`Err` shape's
+  reason; same normalizer, no `DriveReport` required.
+- `fn print_error_failure_panel(session: &ctx_traits_core::procedure::session::Session, ledger_path: &camino::Utf8Path, reason: &str, verbose: bool) -> crate::Result<()>`
+  — `let (product, headline) = run_header(session, ledger_path);` then
+  `crate::app::presentation::emit_human(false, &failure_panel(&product, &headline, session.session_id.as_str(), reason), mode, || Ok(()))`
+  with `mode` = `Verbose` under `--verbose`, else `Compact`. This is
+  0252.1's panel and nothing else — the same `failure_panel`
+  (`run.rs:1818`) and the same `run_header` (`:1802`) that
+  `print_final_output` uses for the `Ok(DriveReport)` shape. `Compact` never
+  invokes the detail closure (`presentation.rs:635-652`), which is why the
+  closure is `|| Ok(())`: there is no `DriveReport` to detail.
+- `#[derive(Clone, Copy, Debug, PartialEq, Eq)] struct FreshRunOverrides<'a> { out: Option<&'a str>, worktree: Option<Option<&'a str>> }`
+- `fn restart_overrides<'a>(out: Option<&'a str>, worktree: Option<Option<&'a str>>) -> FreshRunOverrides<'a>`
+  — the collision-safe transformation (Step 6b). Pure, takes the two
+  fields rather than the whole struct, directly unit-testable.
+- `fn restart_notices(out: Option<&str>, worktree: Option<Option<&str>>) -> Vec<String>`
+  — one line per transformation actually applied; empty when neither
+  applies. Pure.
+- `struct ResumeHandoff { session_arg: String, session_path: camino::Utf8PathBuf, last_session: ctx_traits_core::procedure::session::Session, panel: crate::app::run_view::RunPanel }`
+- `enum AttemptOutcome { Finished(Box<CompletionOutcome>), Resume(ResumeHandoff), Restart }`
+- `fn drive_session_attempt(input: &SessionStartInputs<'_>, json: bool, assignment_overrides: &[String], startup: Option<crate::app::run_startup_view::StartupView>, resume: Option<ResumeHandoff>, restart: bool) -> crate::Result<AttemptOutcome>`
+
+Changed symbol:
+
+- `fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutcome>`
+  (`run.rs:453-647`). Type signature unchanged (the binding becomes
+  `mut input`). Keeps its preflight (`guard_runtime_acceptance`, the
+  `--master` rejection, `split_trailing_json_flag`, `assignment_overrides`)
+  executed **once**, then:
+
+  ```
+  let mut startup = input.startup.take();   // consumed by attempt 1 only
+  let mut resume: Option<ResumeHandoff> = None;
+  let mut restart = false;
+  loop {
+      match drive_session_attempt(&input, json, &assignment_overrides, startup.take(), resume.take(), restart)? {
+          AttemptOutcome::Finished(outcome) => return Ok(*outcome),
+          AttemptOutcome::Resume(handoff) => resume = Some(handoff),
+          AttemptOutcome::Restart => restart = true,
+      }
+  }
+  ```
+
+  `restart` latches: once a fresh session has superseded the original
+  `--out`/named-worktree intent, every later attempt keeps the same
+  collision-safe overrides. Termination: every iteration past the first
+  requires an explicit human button press, and `wait_failure_choice`
+  returns `Abort` on a dead pane. `Finished` covers completion, Abort, and
+  every non-TUI path. The loop is entirely inside `drive_session`, so
+  `--task` queue members (`run.rs:773-845`, which build
+  `SessionStartInputs` in a per-task closure) still see exactly one
+  `CompletionOutcome` per queued task and the queue cursor cannot
+  double-advance.
+
+`drive_session_attempt` is today's `drive_session` body from
+`start_run_session` down, with the changes below.
+
+### 6a — Resume/Retry, including a terminally `Failed` session
+
+Resume/Retry ALWAYS re-drives the same session id through the existing
+resume primitive: skip `start_run_session`, reuse the carried
+`session_arg`/`session_path`, and pass `execution_dir: None` so `drive`'s
+`resolve_resume_worktree` (`drive.rs:1739-1793`) restores and verifies the
+recorded worktree provenance itself. No id is minted, no worktree is
+re-resolved, no core transition is copied.
+
+A persisted `Session::status == Failed` is NOT a reason to withhold the
+button. It is re-driven exactly like any other status; `drive_loop`'s
+`Status::Failed` arm (`drive.rs:2311-2315`) returns a `failed` report
+promptly, `drive_session_attempt` classifies it as failing again, and the
+modal reopens on the SAME one-line reason. That is the honest outcome — a
+re-drive that reports the same terminal state — and it costs one drive
+round-trip, not a lie in the button row. The loop stays bounded because
+each reopening requires another human press.
+
+### 6b — Restart, collision-safe by construction
+
+Restart ALWAYS starts a fresh session through `start_run_session` /
+`io::run::start` (`modules/io/src/run.rs:947-980`), which mints the new
+session and run ids. Two invocation options would make literal reuse
+destructive, so `restart_overrides` transforms exactly those two and
+nothing else:
+
+- `out`: always `None` for a restart attempt. An explicit `--out` names the
+  file `write_output_path` (`modules/io/src/run.rs:4165-4171`) writes the
+  session document to; reusing it would overwrite the previous session's
+  ledger, destroying the very run the user just chose not to abort. The
+  fresh session therefore writes to its own default session-store path
+  (`session_store_path(session_store, session_id)`), and the previous
+  ledger at `--out` is left intact.
+- `worktree`: `None` stays `None`; `Some(None)` stays `Some(None)`;
+  `Some(Some(name))` becomes `Some(None)`. `prepare_worktree`
+  (`modules/io/src/worktree.rs:246-255`) hard-errors with "a new run cannot
+  reuse an existing worktree" when the id is already registered, so reusing
+  an explicit name would abort the restart outright. Degrading to the bare
+  flag preserves the "run in a worktree" intent and lets
+  `derive_worktree_id(session_id)` derive a distinct id from the NEW
+  session id — collision-free by construction, using existing code and no
+  invented naming scheme.
+
+Every other field of `RunInputs` is passed through unchanged, so the trait,
+file, inputs, sets, assignments, resource root, trait args, and merge rung
+are byte-identical to attempt 1. Neither transformation is silent:
+`restart_notices` emits one `eprintln!` line per applied transformation
+before `start_run_session` runs, naming the ignored flag and where the
+previous run's ledger/worktree still is.
+
+### 6c — Abort, one panel, both failure shapes
+
+Abort closes the pane first (committing the last frame to scrollback and
+restoring the terminal), then prints 0252.1's compact failure panel exactly
+once:
+
+- `Ok(DriveReport)` shape: fall through to today's untouched path with
+  `merge_live_for_completion(None, ..)`; `print_final_output`
+  (`run.rs:1659-1699`) sees `!run_completed` and emits `failure_panel`
+  once, exactly as it does today for a non-TUI failure. `proof_output_style`
+  therefore keeps passing untouched.
+- `crate::Result::Err` shape: call `print_error_failure_panel(&final_session,
+  &merge_session_path, &error_modal_reason(&error), input.verbose)?` and
+  return
+  `Err(crate::Error::AlreadyReported { message: error.to_string(), exit_code: 1 })`.
+  `AlreadyReported` is the existing suppression mechanism — the dispatcher
+  maps it straight to `ExitCode::from(exit_code)` without printing
+  (`command_handlers.rs:179-183`) — so the generic `render_error` line is
+  suppressed and the panel is the only output. `exit_code: 1` is
+  deliberately `ExitCode::FAILURE`'s value: this path must keep today's
+  propagated-error exit status, not adopt one of the 3/4/5/7 run/merge
+  codes.
+
+Every non-Abort path prints nothing: Resume/Retry and Restart return before
+`loaded_trait`, `merge_live_for_completion`, `complete_after_drive`, and
+every print, so no intermediate failure panel is ever emitted. A failing
+attempt with NO live panel (status / `--no-tui` / `--json` / degraded TUI)
+takes today's path byte-identically, including the propagated `Err`, which
+still reaches the generic renderer.
+
+### 6d — the attempt body, in strict order
+
+1. **Ledger path first.** Move the existing
+   `merge_session_path = outcome.session_path.clone().ok_or_else(..)?`
+   derivation (`run.rs:565-573`) to immediately after `start_run_session`,
+   BEFORE `drive` is called. It reads only pre-drive state, it is
+   unreachable for a driven non-ephemeral session, and hoisting it removes
+   the last fallible post-drive operation that would otherwise run before
+   the panel is guarded — and gives the `Err` branch a ledger path for its
+   panel header. On a resume attempt it comes from
+   `ResumeHandoff::session_path` instead.
+2. **Start or resume.** When `resume` is `None`, call `start_run_session`
+   exactly as today (with `out`/`worktree` from `restart_overrides` when
+   `restart` is set, after emitting `restart_notices`) and derive
+   `session_arg`/`session_path`/`execution_dir` from its `StartOutcome`.
+   When `resume` is `Some`, skip `start_run_session` entirely per 6a. A
+   resume attempt is unreachable under `--json` (no TUI pane exists there),
+   so the JSON envelope's `resource_supported` still comes from a
+   `StartOutcome`; assert that with `debug_assert!(!json)` on the resume
+   branch and pass `false` there.
+3. **Opt in.** The `DriveInputs` literal (`run.rs:517-537`) sets
+   `failure_modal: input.progress == cli::DriveProgress::Tui && !json,` and
+   `live_panel: resume_panel,` (the panel moved out of the handoff before
+   this statement). `drive` is bound through `let drive_result = ...;` —
+   NOT `?` — so a propagated `Err` can still be offered the modal.
+4. **Guard the pane, first statement after `drive` returns.**
+   `let mut panel_guard = crate::app::drive::RunPanelGuard::new(panel_handoff.take(), None);`
+   No fallible operation may appear between `drive`'s return and this
+   statement. `release: None` means the guard closes on drop, which is the
+   deterministic-close guarantee for every `?` below.
+5. **Re-read the final session** exactly as today
+   (`ctx_traits_io::run::status(..).map(..).unwrap_or(fallback)`), where
+   `fallback` is `outcome.session` on a start attempt and
+   `ResumeHandoff::last_session` on a resume attempt. Infallible by
+   construction.
+6. **Classify and explain, split by shape:**
+   ```
+   let failing = match &drive_result {
+       Ok(report) => human_terminal_failure(&final_session, report),
+       Err(_) => true,
+   };
+   let reason = match &drive_result {
+       Ok(report) => failure_modal_reason(&final_session, report),
+       Err(error) => error_modal_reason(error),
+   };
+   ```
+7. **The choice point.** Scoped so the immutable borrow of `panel_guard`
+   ends before any `take()`:
+   ```
+   let choice = if failing {
+       match panel_guard.panel() {
+           Some(panel) if panel.active() => {
+               panel.open_failure_modal(&reason);
+               Some(panel.wait_failure_choice())
+           }
+           _ => None,
+       }
+   } else {
+       if let Some(panel) = panel_guard.panel() {
+           panel.clear_failure_modal();
+       }
+       None
+   };
+   ```
+   The `!failing` arm covers the ctrl-c-then-completed race: a recorded
+   choice and a stale modal are both cleared before today's path resumes.
+8. **Act on the choice:**
+   - `Some(FailureChoice::Resume)` → take the panel out of the guard,
+     `panel.clear_failure_modal()`, then
+     `return Ok(AttemptOutcome::Resume(ResumeHandoff { session_arg, session_path: merge_session_path, last_session: final_session, panel }));`
+   - `Some(FailureChoice::Restart)` → take the panel out of the guard,
+     `panel.close()`, `return Ok(AttemptOutcome::Restart);`
+   - `Some(FailureChoice::Abort)` → take the panel out of the guard and
+     `panel.close()` NOW, so the terminal is restored before any print.
+   - `None` → when `failing`, take and `close()` any panel the guard still
+     holds (an inactive pane, or no pane at all); when `!failing`, LEAVE the
+     panel in the guard.
+9. **Unwrap the drive result:**
+   ```
+   let drive = match drive_result {
+       Ok(report) => report,
+       Err(error) => {
+           if matches!(choice, Some(FailureChoice::Abort)) {
+               print_error_failure_panel(&final_session, &merge_session_path, &reason, input.verbose)?;
+               return Err(crate::Error::AlreadyReported { message: error.to_string(), exit_code: 1 });
+           }
+           return Err(error);
+       }
+   };
+   ```
+10. **Today's tail, unchanged**, except that the panel now comes from the
+    guard: `merge_live_for_completion(panel_guard.take(), ..)` replaces
+    `merge_live_for_completion(panel_handoff.take(), ..)` at
+    `run.rs:574-579`. Keeping the panel inside the guard until this exact
+    call is what preserves deterministic close across the `loaded_trait?`
+    and `complete_after_drive?` sites between it and step 8. Everything
+    from `loaded_trait` through `print_final_output`, the merge report, and
+    the story hook is byte-identical; the function returns
+    `Ok(AttemptOutcome::Finished(Box::new(completion)))`.
+
+**Accepted, named consequences.** A Restart attempt has no `StartupView`
+(it was consumed by attempt 1), so `run::start` narrates its init phases to
+stderr above the new pane — the same output a `--progress tui` run without
+a startup pane already produces. A Resume/Restart leaves the previous
+attempt's committed scrollback above the new frame; that is honest evidence
+of the attempt, not wreckage. `drive` records `last_drive_outcome` per
+invocation, so the ledger keeps only the most recent conductor outcome —
+continuation evidence is the retained session id plus the advanced frame
+cursor, which is what the proof asserts.
+
+## Step 7 — compile fixes at the other two `drive` call sites
+
+`DriveInputs` is a struct literal at three sites. Add
+`failure_modal: false, live_panel: None,` to the two that are NOT opting in:
+
+- `modules/cli/src/app/command_handlers.rs:1339` (`internal drive --session`)
+- `modules/cli/src/app/generate.rs:568`
+
+Nothing else in either file changes. This is what keeps `internal drive`,
+generator, and dashboard-spawned drives on today's exact behavior — a pane
+that opened a modal nobody waits on would hang.
+
+## Step 8 — tests
+
+`modules/cli/src/app/run_view.rs`, in the existing `mod tests`, reusing the
+`RatatuiPane::new_detached_for_test()` + panel fixture already used at
+`run_view.rs:2035-2180` (no terminal, no committed repo content):
+
+- `failure_modal_esc_and_unrelated_keys_never_dismiss_it` — open the modal,
+  feed Esc, `q`, `d`, a stray char and Tab; assert the modal stays open,
+  `failure_modal_open()` stays true, and no choice was recorded.
+- `failure_modal_records_each_choice_and_rearms_the_ctrl_c_budget` — for
+  each of the three ids, drive the button row to it and press Enter; assert
+  `wait_failure_choice()` returns the matching `FailureChoice`, the modal
+  closed, and `ctrl_c_count()` is back to 0.
+- `failure_modal_always_offers_resume_retry_restart_and_abort` — build the
+  widget for a `Status::Failed` session state and for a `Status::Running`
+  one; assert both emit exactly the ids `resume`, `restart`, `abort` in
+  that order with the labels `Resume/Retry`, `Restart`, `Abort`, and that
+  `failure_choice_from_id` resolves every emitted id and returns `None` for
+  anything else.
+- `failure_modal_replaces_a_pending_input_prompt_and_releases_its_reply` —
+  install a `request_input` prompt, open the failure modal, assert the
+  prompt's receiver observes `Ok(None)` (the drive thread is released) and
+  the failure modal is the one now open.
+- `failure_modal_does_not_reopen_over_a_recorded_choice` — record a choice
+  through the key path, then call `open_failure_modal` with a different
+  reason; assert no modal is open and `wait_failure_choice()` still returns
+  the originally recorded choice.
+
+`modules/cli/src/app/run.rs`, in its existing `mod tests`:
+
+- `failure_modal_restart_drops_an_explicit_out_and_derives_a_fresh_worktree`
+  — `restart_overrides(None, None)` is unchanged;
+  `restart_overrides(None, Some(None))` is unchanged;
+  `restart_overrides(Some("x.json"), Some(Some("wt")))` yields
+  `out: None, worktree: Some(None)`; `restart_notices` is empty for the
+  first two and has one line each naming `x.json` and `wt` for the third.
+- `failure_modal_reason_is_one_short_line` — `one_line_reason` collapses a
+  multi-line, whitespace-noisy reason to its first line, truncates past 120
+  chars on a char boundary (assert with a multi-byte input), and falls back
+  to `"run failed"` for empty input.
+
+`modules/cli/tests/proof_run_view_exit_teardown.rs` — four PTY tests, all
+built on the file's existing `command_trait_fixture`, `ledger_session_id`,
+`assert_only_interrupted_panel`, `surviving_screen_text`, and the shared
+`support::run_pty_keys_after_markers` / `text_after_terminal_restore`. Do
+not copy a new expect harness. Where a fixture command needs shell logic,
+write a small `.sh` file into the scratch repo and set `cmd = "sh <name>.sh"`
+rather than embedding quotes in the generated TOML.
+
+- `failure_modal_abort_prints_the_compact_failure_panel` — fixture step
+  `sleep 30`; wait for the `only-step` row, send `\\003`, wait for
+  `Resume/Retry` in the rendered modal, send Right/Right/Enter to fire
+  Abort. Assert the child exits non-zero and `text_after_terminal_restore`
+  contains exactly one `└── Failure` close line together with the observed
+  session id — the same grammar `proof_output_style` pins, printed once.
+- `second_ctrl_c_is_the_hard_escape_with_the_rescue_panel` — same fixture;
+  send `\\003`, wait for `Resume/Retry`, send `\\003` again. Assert exit
+  code 130 and reuse `assert_only_interrupted_panel` unchanged: the
+  survivor is 0252.2's armed rescue panel, not a half-drawn modal.
+- `failure_modal_resume_continues_the_same_session` — fixture script that
+  `sleep 30`s on its first invocation and prints the slot value on its
+  second (marker file in the scratch repo). Send `\\003`, wait for
+  `Resume/Retry`, press Enter. Assert the run then completes (exit 0), that
+  the repo still holds exactly ONE ledger, and that its session id equals
+  the one observed before the interrupt.
+- `failure_modal_restart_starts_a_second_session` — same script shape; send
+  `\\003`, wait for `Resume/Retry`, send Right/Enter to fire Restart.
+  Assert the second run completes and that TWO ledgers now exist with two
+  distinct session ids, the first still carrying its interrupted outcome.
+
+No test reads committed repo content; every fixture is scratch, per the
+standing rulings.
+
+## Out of scope
+
+Center-owned pause/resume and any `0243.5` API; changing the `SIGINT`
+escalation ladder; a failure modal for `q` or `d`; a failure modal for
+credits/budget pauses; a persisted restart recipe in the ledger; a modal
+for `internal drive --session`, the generator, or dashboard-spawned drives;
+`0252.5`'s group delete; `0252.6`'s action registry; any change to
+`tui_kit.rs`, `dashboard.rs`, `trait_editor.rs`, or `tui_demo.rs`; mouse
+activation; truecolor; animation.
 """
 validation = """
 ## Done when
 
-A scratch run that fails shows the dimmed modal with three buttons.
-Resume continues the same session id and the ledger shows continuation.
-Restart begins a new session with the same args. Abort exits and prints
-the 0252.1 failure panel. One ctrl-c opens the modal; a second still
-hard-exits with 0252.2's rescue. No path exits the TUI without either a
-chosen Abort or the double-ctrl-c hatch.
+1. The failure modal is a real modal, not an exit, and its three actions
+   are unconditional: Esc and unrelated keys never dismiss it, each of the
+   three ids maps to its choice and re-arms a fresh ctrl-c budget, the
+   widget always emits `Resume/Retry`/`Restart`/`Abort` (including for a
+   terminally `Failed` session), a replaced missing-input prompt releases
+   its blocked reply, a recorded choice is never overwritten by a reopen,
+   Restart's fresh-run overrides drop an explicit `--out` and degrade a
+   named `--worktree` to the derived form, and the modal reason is one
+   short line.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib failure_modal`
+2. The PTY behavior holds end to end, alongside 0252.2's five existing
+   teardown proofs: one ctrl-c opens the dimmed modal instead of killing
+   the pane, a second still hard-exits 130 leaving only the rescue failure
+   panel, Abort closes and prints 0252.1's compact panel once, Resume/Retry
+   completes the SAME session id from one ledger, and Restart produces a
+   second, distinct session.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+3. Ordinary compact run output did not move — Abort on the
+   `Ok(DriveReport)` shape still routes through the same
+   `run::failure_panel` / `print_final_output` path.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style`
+4. The feature is opt-in and the old ejection path was gated, not deleted.
+   A source inspection, deliberately not a Rust test — no test may read
+   committed repo content. It fails on the pre-implementation tree, so a
+   green run is real evidence and not a vacuous match:
+   `D=modules/cli/src/app; has() { grep -qE "$2" "$D/$1"; }; one() { [ "$(grep -cE "$2" "$D/$1")" = 1 ]; }; has interrupt.rs 'fn hard_escape\\(\\) -> !' && has tui_ratatui.rs 'fn arm_ctrl_c_escalation\\(' && has tui_ratatui.rs 'fn reset_ctrl_c_count\\(' && one tui_ratatui.rs 'run killed; terminal restored' && has run_view.rs 'fn wait_failure_choice\\(' && has run_view.rs 'fn enable_failure_modal\\(' && has run_view.rs 'enum FailureChoice' && has run_view/render.rs 'tui_kit::dim_backdrop\\(frame, full_area\\)' && has drive.rs 'pub failure_modal: bool' && has drive.rs 'pub live_panel: Option<run_view::RunPanel>' && one run.rs 'failure_modal: input\\.progress' && one command_handlers.rs 'failure_modal: false' && one generate.rs 'failure_modal: false'`
+   It exits 0 only when the shared hard-escape body exists, the per-pane
+   escalation is armed explicitly, the unarmed instant-kill path still
+   exists exactly once, the pane owns the choice API, the backdrop is
+   dimmed at the run-view call site (not inside `render_modal`), both new
+   `DriveInputs` fields exist, and exactly one caller opts in while the
+   other two are pinned to `false`.
+5. The landing gate is green.
+   `CARGO_TARGET_DIR=target just test-full`
+6. The diff touches only `modules/cli/src/app/interrupt.rs`,
+   `tui_ratatui.rs`, `run_view.rs`, `run_view/render.rs`, `drive.rs`,
+   `run.rs`, `command_handlers.rs`, `generate.rs`, and
+   `modules/cli/tests/proof_run_view_exit_teardown.rs`.
+   `git status --short` names nothing else.
+
+Criteria 1-5 each carry a runnable command and a `[[checks]]` entry.
+Criterion 6 is the one read-and-compare verdict — `git status --short`
+carries its answer in output, not in an exit code — so it deliberately
+carries no `[[checks]]` entry.
+
+Run the steps in order, starting with Step 0's read of 0252.3 as it
+actually landed. Run the incremental build command declared at the end of
+Step 2 and again at the end of Step 4 rather than building only at the
+end, so a pump/guard ownership error surfaces next to the edit that caused
+it. Then run the criterion commands 1, 2, 3, 4, 5 in that order. Permit at
+most two targeted repair-and-rerun rounds in total; after each repair
+rerun the failing command and every later one. Complete only when all five
+criterion commands exit 0 and the diff stays inside the allowlist.
 """
 
 [relations]
 parent = "0252"
 depends-on = ["0252.1", "0252.3"]
+
+[[checks]]
+name = "the failure modal is a modal, not an exit, with three unconditional actions"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib failure_modal"
+timeout-ms = 1800000
+expect = 'test result: ok\. 7 passed; 0 failed'
+
+[[checks]]
+name = "ctrl-c, abort, resume, and restart hold under a real pty"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+expect = 'test result: ok\. 9 passed; 0 failed'
+
+[[checks]]
+name = "compact run output did not move"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "the modal is opt-in and the old ejection path was gated, not deleted"
+command = '''D=modules/cli/src/app; has() { grep -qE "$2" "$D/$1"; }; one() { [ "$(grep -cE "$2" "$D/$1")" = 1 ]; }; has interrupt.rs 'fn hard_escape\(\) -> !' && has tui_ratatui.rs 'fn arm_ctrl_c_escalation\(' && has tui_ratatui.rs 'fn reset_ctrl_c_count\(' && one tui_ratatui.rs 'run killed; terminal restored' && has run_view.rs 'fn wait_failure_choice\(' && has run_view.rs 'fn enable_failure_modal\(' && has run_view.rs 'enum FailureChoice' && has run_view/render.rs 'tui_kit::dim_backdrop\(frame, full_area\)' && has drive.rs 'pub failure_modal: bool' && has drive.rs 'pub live_panel: Option<run_view::RunPanel>' && one run.rs 'failure_modal: input\.progress' && one command_handlers.rs 'failure_modal: false' && one generate.rs 'failure_modal: false' '''
+
+[[checks]]
+name = "failure-as-a-modal passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
