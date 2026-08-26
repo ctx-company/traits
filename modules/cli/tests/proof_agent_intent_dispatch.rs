@@ -3745,10 +3745,63 @@ output = ["slot:answer"]
         extract_behavior(&for_each_cli_frames[3])
     );
 
+    // One frame further leaves the second nested body prompt ready. This
+    // exercises active reconstruction through both the for-each and branch.
+    let for_each_active_nested_session = home.join("for-each-active-nested.json");
+    let nested_seed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            generated.to_str().unwrap(),
+            "--no-drive",
+            "--out",
+            for_each_active_nested_session.to_str().unwrap(),
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&nested_seed, 0);
+    let nested_active_drive = support::run_ctx_with_env(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            generated.to_str().unwrap(),
+            "--session",
+            for_each_active_nested_session.to_str().unwrap(),
+            "--max-frames",
+            "4",
+            "--no-worktree",
+            "--no-wait",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[],
+    );
+    assert_exit_code(&nested_active_drive, 0);
+    let active_nested = session_preview(
+        "for-each nested active",
+        &for_each_active_nested_session,
+        None,
+    );
+    assert_eq!(
+        extract_intent(&active_nested),
+        extract_intent(&for_each_cli_frames[4])
+    );
+    assert_eq!(
+        extract_behavior(&active_nested),
+        extract_behavior(&for_each_cli_frames[4])
+    );
+
     // Empty declarations are intentionally participation-equivalent to absent
     // guidance for an otherwise unguided body leaf.
     let unguided_anchor = "id = \"fe-nested\"\ntitle = \"For-each nested\"\nagent = \"agent:worker\"\nprompt = \"Produce for-each nested answer.\"\ninput = [\"slot:fe-item\"]\nintent = {{ require = [{{ id = \"shared\", summary = \"For-each nested replacement text.\" }}, {{ id = \"fe-nested-marker\", summary = \"For-each nested marker.\" }}] }}\nbehavior = {{ tone = [{{ id = \"shared-tone\", summary = \"For-each nested tone.\" }}, {{ id = \"fe-nested-tone-marker\", summary = \"For-each nested tone marker.\" }}] }}\n";
     let unguided_replacement = "id = \"fe-nested\"\ntitle = \"For-each nested\"\nagent = \"agent:worker\"\nprompt = \"Produce for-each nested answer.\"\ninput = [\"slot:fe-item\"]\n";
+    let mut unguided_baseline = None;
     for (label, addition) in [
         ("absent", ""),
         ("empty-intent", "intent = {}\n"),
@@ -3782,6 +3835,15 @@ output = ["slot:answer"]
             extract_behavior(&variant[4]),
             "{label}"
         );
+        let guidance = (
+            extract_intent(&variant[2]).to_owned(),
+            extract_behavior(&variant[2]).to_owned(),
+        );
+        if let Some(baseline) = &unguided_baseline {
+            assert_eq!(&guidance, baseline, "{label}");
+        } else {
+            unguided_baseline = Some(guidance);
+        }
     }
     fs::write(&generated, &for_each_fixture).unwrap();
 
@@ -3855,6 +3917,27 @@ output = ["slot:answer"]
         &home,
     );
 
+    // Static attribution must retain the one-based fallback for an id-less
+    // body declaration; runtime fixtures retain the ID for historical lookup.
+    let for_each_static_fixture = for_each_fixture.replacen(
+        "id = \"fe-nested\"\ntitle = \"For-each nested\"",
+        "title = \"For-each nested\"",
+        1,
+    );
+    fs::write(&generated, &for_each_static_fixture).unwrap();
+    require_success(
+        "approve id-less for-each static fixture",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            generated.to_str().unwrap(),
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
     let export_dir = home.join("for-each-static-export");
     let export = run_ctx(
         &[
@@ -3907,25 +3990,25 @@ output = ["slot:answer"]
             "</behavior>",
         ),
         (
-            "sequence:fe-branch-then/fe-nested",
+            "sequence:fe-branch-then/step-1",
             "shared",
             "For-each nested replacement text.",
             "</intent>",
         ),
         (
-            "sequence:fe-branch-then/fe-nested",
+            "sequence:fe-branch-then/step-1",
             "fe-nested-marker",
             "For-each nested marker.",
             "</intent>",
         ),
         (
-            "sequence:fe-branch-then/fe-nested",
+            "sequence:fe-branch-then/step-1",
             "shared-tone",
             "For-each nested tone.",
             "</behavior>",
         ),
         (
-            "sequence:fe-branch-then/fe-nested",
+            "sequence:fe-branch-then/step-1",
             "fe-nested-tone-marker",
             "For-each nested tone marker.",
             "</behavior>",
@@ -3949,7 +4032,7 @@ output = ["slot:answer"]
     }
     assert_eq!(skill.matches("sequence:fe-body/fe-a").count(), 6, "{skill}");
     assert_eq!(
-        skill.matches("sequence:fe-branch-then/fe-nested").count(),
+        skill.matches("sequence:fe-branch-then/step-1").count(),
         5,
         "{skill}"
     );
