@@ -286,6 +286,8 @@ output = ["slot:answer"]
         assert!(!prompt.contains("unassigned-only"));
         assert!(!prompt.contains("ASSIGNED SYSTEM"));
         assert!(!prompt.contains("UNASSIGNED SYSTEM"));
+        assert!(!prompt.contains("DIRECT SYSTEM"));
+        assert!(!prompt.contains("NESTED SYSTEM"));
     };
     let expected_mcp_prompt = |session: &std::path::Path| {
         format!(
@@ -1716,7 +1718,15 @@ output = ["slot:answer"]
                 "{label} session preview was not JSON: {error}\nstdout={stdout}\nstderr={stderr}"
             )
         });
-        json["frames"][0]["prompt"]
+        let frames = json["frames"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label} session preview had no frames array: {json}"));
+        assert_eq!(
+            frames.len(),
+            1,
+            "{label} session preview must project exactly one frame: {json}"
+        );
+        frames[0]["prompt"]
             .as_str()
             .unwrap_or_else(|| panic!("{label} session preview had no prompt: {json}"))
             .to_string()
@@ -3622,6 +3632,38 @@ output = ["slot:answer"]
         "Produce parallel nested answer.",
         "Produce parallel post answer.",
     ];
+    let parallel_agents = [
+        (
+            "worker",
+            "Assigned worker.",
+            "Assigned guidance.",
+            "ASSIGNED SYSTEM",
+        ),
+        (
+            "parallel-direct-agent",
+            "Direct parallel worker.",
+            "Direct agent guidance.",
+            "DIRECT SYSTEM",
+        ),
+        (
+            "worker",
+            "Assigned worker.",
+            "Assigned guidance.",
+            "ASSIGNED SYSTEM",
+        ),
+        (
+            "parallel-nested-agent",
+            "Nested parallel worker.",
+            "Nested agent guidance.",
+            "NESTED SYSTEM",
+        ),
+        (
+            "worker",
+            "Assigned worker.",
+            "Assigned guidance.",
+            "ASSIGNED SYSTEM",
+        ),
+    ];
     for (index, (own_markers, identity)) in [
         (&["pl-pre-marker"][..], "Assigned worker."),
         (
@@ -3662,19 +3704,21 @@ output = ["slot:answer"]
                 );
             }
         }
-        let (own_agent_text, foreign_agent_text) = match index {
-            1 => ("Direct agent guidance.", "Nested agent guidance."),
-            3 => ("Nested agent guidance.", "Direct agent guidance."),
-            _ => ("Assigned guidance.", "Direct agent guidance."),
-        };
+        let (own_role, own_identity, own_guidance, _) = parallel_agents[index];
         assert!(
-            prompt.contains(own_agent_text),
-            "parallel preview {index}: {prompt}"
+            prompt.contains(own_identity) && prompt.contains(own_guidance),
+            "parallel preview {index} selected the wrong assigned agent: {prompt}"
         );
-        assert!(
-            !prompt.contains(foreign_agent_text),
-            "parallel preview {index} leaked foreign agent guidance: {prompt}"
-        );
+        for (role, identity, guidance, system) in parallel_agents {
+            if role != own_role {
+                assert!(
+                    !prompt.contains(identity)
+                        && !prompt.contains(guidance)
+                        && !prompt.contains(system),
+                    "parallel preview {index} leaked foreign agent {role}: {prompt}"
+                );
+            }
+        }
         for prompt_text in parallel_prompt_texts {
             if prompt_text == parallel_prompt_texts[index] {
                 assert_eq!(
@@ -3708,36 +3752,6 @@ output = ["slot:answer"]
         (&parallel_cli_frames, &parallel_cli_args, "--cli-system"),
         (&parallel_mcp_frames, &parallel_mcp_args, "--mcp-system"),
     ] {
-        for (index, system, own, foreign, identity) in [
-            (
-                1,
-                "DIRECT SYSTEM",
-                "pl-a-marker",
-                "pl-b-marker",
-                "Direct parallel worker.",
-            ),
-            (
-                3,
-                "NESTED SYSTEM",
-                "pl-b-marker",
-                "pl-a-marker",
-                "Nested parallel worker.",
-            ),
-        ] {
-            assert!(
-                frames[index].contains(own)
-                    && frames[index].contains(identity)
-                    && !frames[index].contains(foreign),
-                "{}",
-                frames[index]
-            );
-            assert!(!frames[index].contains(system), "{}", frames[index]);
-            assert!(
-                args[index].contains(flag) && args[index].contains(system),
-                "{}",
-                args[index]
-            );
-        }
         for (index, prompt) in frames.iter().enumerate() {
             assert_unassigned_absent(prompt);
             assert!(
@@ -3771,18 +3785,30 @@ output = ["slot:answer"]
                     );
                 }
             }
-            let (own_agent_text, foreign_agent_text) = match index {
-                1 => ("Direct agent guidance.", "Nested agent guidance."),
-                3 => ("Nested agent guidance.", "Direct agent guidance."),
-                _ => ("Assigned guidance.", "Direct agent guidance."),
-            };
+            let (own_role, own_identity, own_guidance, own_system) = parallel_agents[index];
             assert!(
-                prompt.contains(own_agent_text),
-                "parallel frame {index}: {prompt}"
+                prompt.contains(own_identity) && prompt.contains(own_guidance),
+                "parallel frame {index} selected the wrong assigned agent: {prompt}"
             );
+            for (role, identity, guidance, system) in parallel_agents {
+                if role != own_role {
+                    assert!(
+                        !prompt.contains(identity)
+                            && !prompt.contains(guidance)
+                            && !prompt.contains(system),
+                        "parallel frame {index} leaked foreign agent {role}: {prompt}"
+                    );
+                }
+            }
             assert!(
-                !prompt.contains(foreign_agent_text),
-                "parallel frame {index} leaked foreign agent guidance: {prompt}"
+                args[index].contains(flag)
+                    && args[index].contains(own_system)
+                    && (args[index].contains("ASSIGNED SYSTEM")
+                        == (own_system == "ASSIGNED SYSTEM"))
+                    && (args[index].contains("DIRECT SYSTEM") == (own_system == "DIRECT SYSTEM"))
+                    && (args[index].contains("NESTED SYSTEM") == (own_system == "NESTED SYSTEM")),
+                "parallel frame {index} used the wrong system argv: {}",
+                args[index]
             );
             for prompt_text in parallel_prompt_texts {
                 if prompt_text == parallel_prompt_texts[index] {
@@ -3816,6 +3842,82 @@ output = ["slot:answer"]
         assert_eq!(extract_intent(cli), extract_intent(mcp));
         assert_eq!(extract_behavior(preview), extract_behavior(cli));
         assert_eq!(extract_behavior(cli), extract_behavior(mcp));
+    }
+    for (label, prompt, marker, tone_marker, text, tone, declared, verbosity) in [
+        (
+            "parallel preview direct",
+            &parallel_preview[1],
+            "pl-a-marker",
+            "pl-a-tone-marker",
+            "Parallel direct replacement text.",
+            "Parallel direct tone.",
+            "Produce parallel direct answer.",
+            Some("pl-a-verbosity-marker"),
+        ),
+        (
+            "parallel preview nested",
+            &parallel_preview[3],
+            "pl-b-marker",
+            "pl-b-tone-marker",
+            "Parallel nested replacement text.",
+            "Parallel nested tone.",
+            "Produce parallel nested answer.",
+            None,
+        ),
+        (
+            "parallel CLI direct",
+            &parallel_cli_frames[1],
+            "pl-a-marker",
+            "pl-a-tone-marker",
+            "Parallel direct replacement text.",
+            "Parallel direct tone.",
+            "Produce parallel direct answer.",
+            Some("pl-a-verbosity-marker"),
+        ),
+        (
+            "parallel CLI nested",
+            &parallel_cli_frames[3],
+            "pl-b-marker",
+            "pl-b-tone-marker",
+            "Parallel nested replacement text.",
+            "Parallel nested tone.",
+            "Produce parallel nested answer.",
+            None,
+        ),
+        (
+            "parallel MCP direct",
+            &parallel_mcp_frames[1],
+            "pl-a-marker",
+            "pl-a-tone-marker",
+            "Parallel direct replacement text.",
+            "Parallel direct tone.",
+            "Produce parallel direct answer.",
+            Some("pl-a-verbosity-marker"),
+        ),
+        (
+            "parallel MCP nested",
+            &parallel_mcp_frames[3],
+            "pl-b-marker",
+            "pl-b-tone-marker",
+            "Parallel nested replacement text.",
+            "Parallel nested tone.",
+            "Produce parallel nested answer.",
+            None,
+        ),
+    ] {
+        assert_leaf(
+            label,
+            prompt,
+            &parallel_markers,
+            &parallel_prompt_texts,
+            marker,
+            tone_marker,
+            text,
+            tone,
+            declared,
+            verbosity,
+            "pl-a-verbosity-marker",
+        );
     }
     let parallel_session = home.join("parallel-cli.json");
     for (step, live) in [
@@ -4158,17 +4260,51 @@ output = ["slot:answer"]
             .any(|prompt| prompt.contains("pl-b-marker") && !prompt.contains("pl-a-marker"))
     );
     for prompt in &wave_prompts {
-        assert_eq!(
-            prompt.matches("pl-a-marker").count() + prompt.matches("pl-b-marker").count(),
-            1,
-            "{prompt}"
-        );
+        let is_direct = prompt.contains("pl-a-marker");
+        let own_markers: &[&str] = if is_direct {
+            &["pl-a-marker", "pl-a-tone-marker", "pl-a-verbosity-marker"]
+        } else {
+            &["pl-b-marker", "pl-b-tone-marker"]
+        };
         assert!(
-            !prompt.contains("pl-pre-marker")
-                && !prompt.contains("pl-post-marker")
-                && !prompt.contains("pl-a-next-marker"),
-            "{prompt}"
+            prompt.contains("Assigned worker.") && prompt.contains("Assigned guidance."),
+            "parallel wave selected a non-worker sibling agent: {prompt}"
         );
+        assert_unassigned_absent(prompt);
+        assert!(!prompt.contains("source=\""), "{prompt}");
+        for marker in parallel_markers {
+            if own_markers.contains(&marker) {
+                assert_eq!(prompt.matches(marker).count(), 1, "{prompt}");
+            } else {
+                assert!(
+                    !prompt.contains(marker),
+                    "parallel wave leaked {marker}: {prompt}"
+                );
+            }
+        }
+        for prompt_text in parallel_prompt_texts {
+            let own_prompt = if is_direct {
+                "Produce parallel direct answer."
+            } else {
+                "Produce parallel wave nested answer."
+            };
+            if prompt_text == "Produce parallel nested answer." {
+                assert!(!prompt.contains(prompt_text), "{prompt}");
+            } else if prompt_text == own_prompt {
+                assert_eq!(prompt.matches(prompt_text).count(), 1, "{prompt}");
+            } else {
+                assert!(!prompt.contains(prompt_text), "{prompt}");
+            }
+        }
+        if !is_direct {
+            assert_eq!(
+                prompt
+                    .matches("Produce parallel wave nested answer.")
+                    .count(),
+                1,
+                "{prompt}"
+            );
+        }
     }
     assert_eq!(
         fs::read_to_string(capture.with_extension("txt.calls"))
@@ -4199,22 +4335,42 @@ output = ["slot:answer"]
     );
     assert_exit_code(&after_wave, 0);
     let after_wave_frames = read_frames(5);
-    assert!(
-        after_wave_frames[3].contains("Produce parallel direct next answer.")
-            && after_wave_frames[3].contains("pl-a-next-marker")
-            && !after_wave_frames[3].contains("pl-a-marker")
-            && !after_wave_frames[3].contains("pl-b-marker"),
-        "parallel wave must advance the direct branch in authored order: {}",
-        after_wave_frames[3]
-    );
-    assert!(
-        after_wave_frames[4].contains("Produce parallel post answer.")
-            && after_wave_frames[4].contains("pl-post-marker")
-            && !after_wave_frames[4].contains("pl-a-marker")
-            && !after_wave_frames[4].contains("pl-b-marker"),
-        "parallel wave must consume the cached nested outcome before the post-panel frame: {}",
-        after_wave_frames[4]
-    );
+    for (index, own_marker, own_prompt) in [
+        (
+            3,
+            "pl-a-next-marker",
+            "Produce parallel direct next answer.",
+        ),
+        (4, "pl-post-marker", "Produce parallel post answer."),
+    ] {
+        let prompt = &after_wave_frames[index];
+        assert!(
+            prompt.contains("Assigned worker.") && prompt.contains("Assigned guidance."),
+            "parallel wave frame {index} selected the wrong agent: {prompt}"
+        );
+        assert_unassigned_absent(prompt);
+        assert!(!prompt.contains("source=\""), "{prompt}");
+        for marker in parallel_markers {
+            if marker == own_marker {
+                assert_eq!(prompt.matches(marker).count(), 1, "{prompt}");
+            } else {
+                assert!(
+                    !prompt.contains(marker),
+                    "parallel wave frame {index} leaked {marker}: {prompt}"
+                );
+            }
+        }
+        for prompt_text in parallel_prompt_texts {
+            if prompt_text == own_prompt {
+                assert_eq!(prompt.matches(prompt_text).count(), 1, "{prompt}");
+            } else {
+                assert!(
+                    !prompt.contains(prompt_text),
+                    "parallel wave frame {index} leaked {prompt_text}: {prompt}"
+                );
+            }
+        }
+    }
     let physical_calls = fs::read_to_string(capture.with_extension("txt.calls"))
         .unwrap()
         .lines()
