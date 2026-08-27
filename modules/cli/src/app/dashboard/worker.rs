@@ -74,6 +74,23 @@ impl Handle {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn for_tests() -> Self {
+        let (commands, _command_rx) = mpsc::channel();
+        let (_snapshot_tx, snapshots) = mpsc::channel();
+        let (_preview_tx, previews) = mpsc::channel();
+        let (_explanation_tx, explanations) = mpsc::channel();
+        let (action_sender, actions) = mpsc::channel();
+        Self {
+            commands,
+            snapshots,
+            previews,
+            explanations,
+            actions,
+            action_sender,
+        }
+    }
+
     pub(super) fn explain(&self, request: ExplanationRequest) {
         let _ = self.commands.send(Command::Explain(request));
     }
@@ -647,7 +664,7 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
 
 #[cfg(test)]
 mod tests {
-    use super::super::FAIL_CENTER_PROJECTIONS;
+    use super::super::fail_center_projection_for_row;
     use super::*;
     use crate::app::test_support::{
         CenterPeer, accept_center_client, accept_center_subscription, read_center_request,
@@ -692,13 +709,18 @@ mod tests {
 
     impl WorkerLoop {
         fn start() -> Self {
+            Self::start_named("dashboard-worker-test")
+        }
+
+        fn start_named(name: &str) -> Self {
             let (commands, command_rx) = mpsc::channel();
             let (snapshot_tx, snapshots) = mpsc::channel();
             let (preview_tx, _preview_rx) = mpsc::channel();
             let (explanation_tx, _explanation_rx) = mpsc::channel();
-            let worker = std::thread::spawn(move || {
-                run(command_rx, snapshot_tx, preview_tx, explanation_tx)
-            });
+            let worker = std::thread::Builder::new()
+                .name(name.to_string())
+                .spawn(move || run(command_rx, snapshot_tx, preview_tx, explanation_tx))
+                .expect("spawn worker");
             Self {
                 commands: Some(commands),
                 snapshots,
@@ -934,8 +956,10 @@ mod tests {
     #[test]
     fn failed_complete_snapshot_projection_keeps_the_accepted_rows_and_reconnects() {
         let peer_server = CenterPeer::install("failed-complete-projection");
-        let initial = current_repo_row("awaiting-agent-output", "rejected");
-        let recovered = current_repo_row("awaiting-agent-output", "recovered");
+        let mut initial = current_repo_row("awaiting-agent-output", "rejected");
+        initial.ledger_path = "/runs/failed-complete-projection/session.json".to_string();
+        let mut recovered = current_repo_row("awaiting-agent-output", "recovered");
+        recovered.ledger_path = initial.ledger_path.clone();
         let listener = peer_server.listener();
         let peer = std::thread::spawn(move || {
             let mut first = accept_center_subscription(&listener);
@@ -952,8 +976,12 @@ mod tests {
             finish_snapshot(&mut second);
         });
 
-        FAIL_CENTER_PROJECTIONS.store(1, std::sync::atomic::Ordering::SeqCst);
-        let worker = WorkerLoop::start();
+        fail_center_projection_for_row(
+            "failed-complete-projection",
+            "/runs/failed-complete-projection/session.json",
+            "rejected",
+        );
+        let worker = WorkerLoop::start_named("failed-complete-projection");
         let error = match worker
             .recv_timeout(Duration::from_secs(3))
             .expect("rejected projection result")
@@ -961,7 +989,6 @@ mod tests {
             Ok(_) => panic!("injected projection must fail"),
             Err(error) => error,
         };
-        FAIL_CENTER_PROJECTIONS.store(0, std::sync::atomic::Ordering::SeqCst);
         assert!(error.contains("injected center projection failure"));
 
         worker.send(Command::Render {
@@ -977,18 +1004,21 @@ mod tests {
             "rejected snapshot was not accepted"
         );
         let recovered = worker
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(Duration::from_secs(8))
             .expect("recovered snapshot")
             .expect("recovered projection succeeds");
         assert_eq!(recovered.sessions[0].title.as_deref(), Some("recovered"));
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
     #[test]
     fn failed_delta_projection_keeps_the_accepted_rows_and_reconnects() {
         let peer_server = CenterPeer::install("failed-delta-projection");
-        let before = current_repo_row("awaiting-agent-output", "before");
-        let after = current_repo_row("awaiting-agent-output", "after");
+        let mut before = current_repo_row("awaiting-agent-output", "before");
+        before.ledger_path = "/runs/failed-delta-projection/session.json".to_string();
+        let mut after = current_repo_row("awaiting-agent-output", "after");
+        after.ledger_path = before.ledger_path.clone();
         let (release_delta, delta_released) = mpsc::channel();
         let listener = peer_server.listener();
         let peer = std::thread::spawn(move || {
@@ -1013,13 +1043,17 @@ mod tests {
             finish_snapshot(&mut second);
         });
 
-        let worker = WorkerLoop::start();
+        let worker = WorkerLoop::start_named("failed-delta-projection");
         let initial = worker
             .recv_timeout(Duration::from_secs(3))
             .expect("initial snapshot")
             .expect("initial projection succeeds");
         assert_eq!(initial.sessions[0].title.as_deref(), Some("before"));
-        FAIL_CENTER_PROJECTIONS.store(1, std::sync::atomic::Ordering::SeqCst);
+        fail_center_projection_for_row(
+            "failed-delta-projection",
+            "/runs/failed-delta-projection/session.json",
+            "after",
+        );
         release_delta.send(()).expect("release peer delta");
         let error = match worker
             .recv_timeout(Duration::from_secs(3))
@@ -1028,7 +1062,6 @@ mod tests {
             Ok(_) => panic!("injected delta projection must fail"),
             Err(error) => error,
         };
-        FAIL_CENTER_PROJECTIONS.store(0, std::sync::atomic::Ordering::SeqCst);
         assert!(error.contains("injected center projection failure"));
 
         worker.send(Command::Render {
@@ -1041,10 +1074,11 @@ mod tests {
             .expect("render succeeds");
         assert_eq!(retained.sessions[0].title.as_deref(), Some("before"));
         let recovered = worker
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(Duration::from_secs(8))
             .expect("recovered snapshot")
             .expect("recovered projection succeeds");
         assert_eq!(recovered.sessions[0].title.as_deref(), Some("after"));
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
@@ -1285,6 +1319,7 @@ mod tests {
             "subscription delta must update the worker model without Command::Refresh: {worker_errors:?}"
         );
 
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
@@ -1330,6 +1365,7 @@ mod tests {
             "the title update arrives while the frame is still active"
         );
 
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
@@ -1388,6 +1424,7 @@ mod tests {
             .expect("ended update success");
         assert!(removed.sessions.is_empty(), "only Ended deletes the row");
 
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
@@ -1456,6 +1493,7 @@ mod tests {
             "completed reconnect snapshot must clear outage state"
         );
 
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
@@ -1504,6 +1542,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("queued refresh remains serviceable during backoff")
             .expect("non-session refresh succeeds");
+        drop(worker);
         peer.join().expect("join center peer");
         assert!(
             attempts.load(std::sync::atomic::Ordering::Relaxed) <= 3,
@@ -1549,6 +1588,7 @@ mod tests {
             .expect("command snapshot")
             .expect("command snapshot success");
 
+        drop(worker);
         peer.join().expect("join center peer");
     }
 
@@ -1601,6 +1641,7 @@ mod tests {
             .expect("render snapshot success");
         assert_eq!(all_repos_snapshot.sessions.len(), 2);
 
+        drop(worker);
         peer.join().expect("join center peer");
     }
 

@@ -470,7 +470,12 @@ count=0
 [ -f "$count_file" ] && count=$(cat "$count_file")
 count=$((count+1))
 printf '%s\n' "$count" > "$count_file"
-printf '%s\n' '{{"type":"result","session_id":"center-drive-proof","result":"{{\"answer\":true,\"answer-two\":true}}"}}'
+case "$count" in
+  1) result='{{\"answer\":true}}' ;;
+  2) result='{{\"answer-two\":true}}' ;;
+  *) result='{{\"answer\":true}}' ;;
+esac
+printf '%s\n' "{{\"type\":\"result\",\"session_id\":\"center-drive-proof\",\"result\":\"$result\"}}"
 "#
         ),
     )
@@ -748,23 +753,35 @@ fn spawn_sentinel_with_home(
     home: &std::path::Path,
 ) -> ChildGuard {
     ChildGuard(
-        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
-            .arg("__ctx-center")
-            .env("CTX_CENTER_SOCKET", socket)
-            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
-            .env("CTX_CENTER_RUNS_ROOT", root)
-            .env("CTX_CENTER_INDEX", index)
-            .env("CTX_CENTER_IDLE_MS", idle_ms)
-            .env("CTX_CENTER_SCAN_MS", "20")
-            .env("HOME", home)
-            .env("XDG_CONFIG_HOME", home)
-            .env("XDG_CACHE_HOME", home)
-            .env("TMPDIR", home)
-            .env("NO_COLOR", "1")
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
+        sentinel_with_home_command(root, socket, index, idle_ms, home)
             .spawn()
             .expect("spawn private sentinel with fixture environment"),
     )
+}
+
+fn sentinel_with_home_command(
+    root: &std::path::Path,
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    idle_ms: &str,
+    home: &std::path::Path,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_ctx"));
+    command
+        .arg("__ctx-center")
+        .env("CTX_CENTER_SOCKET", socket)
+        .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+        .env("CTX_CENTER_RUNS_ROOT", root)
+        .env("CTX_CENTER_INDEX", index)
+        .env("CTX_CENTER_IDLE_MS", idle_ms)
+        .env("CTX_CENTER_SCAN_MS", "20")
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env("XDG_CACHE_HOME", home)
+        .env("TMPDIR", home)
+        .env("NO_COLOR", "1")
+        .env("PATH", std::env::var("PATH").unwrap_or_default());
+    command
 }
 
 fn spawn_sentinel_with_home_and_outcome_failure_hook(
@@ -775,20 +792,7 @@ fn spawn_sentinel_with_home_and_outcome_failure_hook(
     home: &std::path::Path,
 ) -> ChildGuard {
     ChildGuard(
-        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
-            .arg("__ctx-center")
-            .env("CTX_CENTER_SOCKET", socket)
-            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
-            .env("CTX_CENTER_RUNS_ROOT", root)
-            .env("CTX_CENTER_INDEX", index)
-            .env("CTX_CENTER_IDLE_MS", idle_ms)
-            .env("CTX_CENTER_SCAN_MS", "20")
-            .env("HOME", home)
-            .env("XDG_CONFIG_HOME", home)
-            .env("XDG_CACHE_HOME", home)
-            .env("TMPDIR", home)
-            .env("NO_COLOR", "1")
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
+        sentinel_with_home_command(root, socket, index, idle_ms, home)
             .env("CTX_INTERNAL_TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE", "1")
             .spawn()
             .expect("spawn private sentinel with fixture environment and hook"),
@@ -2311,35 +2315,6 @@ fn failed_outcome_write_on_a_pause_reports_harness_failed_and_emits_no_ended_not
     let session_id = await_session_id(&ledger);
     await_control(&session_id, ctx_traits_io::center::ControlAction::Pause);
     std::fs::write(&release, "release pause").expect("release harness");
-    let deadline = Instant::now() + PROCESS_DEADLINE;
-    let mut ended = false;
-    while Instant::now() < deadline {
-        match subscription.recv_timeout(Duration::from_millis(100)) {
-            Ok(ctx_traits_io::center::CenterEvent::Delta(
-                ctx_traits_io::center::CenterDelta::Ended { row },
-            )) if row.ledger_path == ledger.to_string_lossy() => {
-                ended = true;
-                break;
-            }
-            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(error) => panic!("read center delta: {error}"),
-        }
-        if ledger.exists() {
-            let session = ctx_traits_io::run_session::read_run_session(
-                &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
-            )
-            .expect("read ledger");
-            if session.last_drive_outcome.is_none() {
-                break;
-            }
-        }
-    }
-    assert!(!ended, "failed pause outcome write must not emit Ended");
-    let session = ctx_traits_io::run_session::read_run_session(
-        &Utf8PathBuf::from_path_buf(ledger).expect("UTF-8 ledger"),
-    )
-    .expect("read ledger");
-    assert!(session.last_drive_outcome.is_none());
     let report = await_start_log(&root, ".stdout.log");
     let deadline = Instant::now() + PROCESS_DEADLINE;
     loop {
@@ -2353,6 +2328,23 @@ fn failed_outcome_write_on_a_pause_reports_harness_failed_and_emits_no_ended_not
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    let quiet_deadline = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < quiet_deadline {
+        match subscription.recv_timeout(Duration::from_millis(100)) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::Ended { row },
+            )) if row.ledger_path == ledger.to_string_lossy() => {
+                panic!("failed pause outcome write must not emit Ended");
+            }
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(error) => panic!("read center delta: {error}"),
+        }
+    }
+    let session = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger).expect("UTF-8 ledger"),
+    )
+    .expect("read ledger");
+    assert!(session.last_drive_outcome.is_none());
     drop(subscription);
     sentinel.0.kill().expect("stop private sentinel");
     sentinel.0.wait().expect("reap private sentinel");

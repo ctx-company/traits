@@ -294,7 +294,9 @@ pub fn spawn_token_from_env() -> Option<String> {
 
 #[derive(Debug, Clone)]
 enum DriverEvent {
-    Register,
+    Register {
+        acknowledged: Option<mpsc::SyncSender<()>>,
+    },
     FrameDone,
     ActivityLine(crate::activity_sidecar::ActivityRecord),
     Ended,
@@ -311,7 +313,15 @@ pub struct DriverNotifier {
 
 impl DriverNotifier {
     pub fn new(registration: DriverRegistration) -> Self {
+        Self::new_with(registration, notifier_worker)
+    }
+
+    fn new_with(
+        registration: DriverRegistration,
+        worker: impl FnOnce(DriverRegistration, mpsc::Receiver<DriverEvent>) + Send + 'static,
+    ) -> Self {
         let (sender, receiver) = mpsc::sync_channel(notifier_queue_capacity());
+        let waits_for_registration = registration.spawn_token.is_some();
         // This debug-only seam lets process proofs compare notification loss to
         // an otherwise identical drive with transport disabled. It is not a
         // runtime feature of release builds.
@@ -324,19 +334,39 @@ impl DriverNotifier {
         // refusal to create this helper thread must not panic into a drive.
         if std::thread::Builder::new()
             .name("ctx-center-notifier".to_string())
-            .spawn(move || notifier_worker(registration, receiver))
+            .spawn(move || worker(registration, receiver))
             .is_err()
         {
             // Drop the receiver so producers retain their non-blocking,
             // failure-isolated behavior through `try_send` below.
         }
         let notifier = Self { sender };
-        notifier.register();
+        if waits_for_registration {
+            let (acknowledged, registered) = mpsc::sync_channel(1);
+            notifier.register_with_acknowledgement(acknowledged);
+            // A center-started driver must give the center a chance to correlate
+            // its registration before a short run can terminate. Other notifier
+            // events remain best effort, and a missing center remains bounded.
+            // Registration retries may each consume STREAM_TIMEOUT. Keep a
+            // center-started driver gated for the full start correlation lease
+            // so a fast exit cannot outrun a later successful retry.
+            let _ = registered.recv_timeout(ACTION_TIMEOUT);
+        } else {
+            notifier.register();
+        }
         notifier
     }
 
     pub fn register(&self) {
-        let _ = self.sender.try_send(DriverEvent::Register);
+        let _ = self
+            .sender
+            .try_send(DriverEvent::Register { acknowledged: None });
+    }
+
+    fn register_with_acknowledgement(&self, acknowledged: mpsc::SyncSender<()>) {
+        let _ = self.sender.try_send(DriverEvent::Register {
+            acknowledged: Some(acknowledged),
+        });
     }
     pub fn frame_done(&self) {
         let _ = self.sender.try_send(DriverEvent::FrameDone);
@@ -392,13 +422,15 @@ fn notifier_worker_with_sleep(
                 Err(_) => return,
             },
         };
-        let wire_event = match &event {
+        let (wire_event, registration_acknowledged) = match &event {
             // Registration is sent as the first line for every connection.
             // Do not duplicate it merely because this is the initial event.
-            DriverEvent::Register => None,
-            DriverEvent::FrameDone => Some(("frame-done", None)),
-            DriverEvent::ActivityLine(record) => Some(("activity-line", Some(record.clone()))),
-            DriverEvent::Ended => Some(("ended", None)),
+            DriverEvent::Register { acknowledged } => (None, acknowledged.as_ref()),
+            DriverEvent::FrameDone => (Some(("frame-done", None)), None),
+            DriverEvent::ActivityLine(record) => {
+                (Some(("activity-line", Some(record.clone()))), None)
+            }
+            DriverEvent::Ended => (Some(("ended", None)), None),
         };
         if stream.is_none() {
             stream = connect()
@@ -440,6 +472,9 @@ fn notifier_worker_with_sleep(
                 })
             });
         if sent {
+            if let Some(acknowledged) = registration_acknowledged {
+                let _ = acknowledged.try_send(());
+            }
             backoff = NOTIFIER_BACKOFF_MIN;
         } else {
             stream = None;
@@ -2745,22 +2780,25 @@ struct StartWatch {
 
 impl Drop for StartWatch {
     fn drop(&mut self) {
-        // Cleanup must outlive transient owner backpressure. The request worker
-        // cannot keep a pending start alive merely because its response peer left.
         let jobs = self.jobs.clone();
         let token = self.token.clone();
         std::thread::spawn(move || {
-            loop {
-                match jobs.try_send(ModelCommand::ForgetStart {
-                    token: token.clone(),
-                }) {
-                    Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => return,
-                    Err(mpsc::TrySendError::Full(_)) => {
-                        std::thread::sleep(Duration::from_millis(10))
-                    }
-                }
-            }
+            forget_start_with_retry(jobs, token);
         });
+    }
+}
+
+fn forget_start_with_retry(jobs: mpsc::SyncSender<ModelCommand>, token: String) {
+    // Retry transient owner backpressure, but leave timed-out entries to the
+    // pending-start pruner rather than permanently retaining a cleanup thread.
+    let deadline = Instant::now() + STREAM_TIMEOUT;
+    while Instant::now() < deadline {
+        match jobs.try_send(ModelCommand::ForgetStart {
+            token: token.clone(),
+        }) {
+            Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => return,
+            Err(mpsc::TrySendError::Full(_)) => std::thread::sleep(Duration::from_millis(10)),
+        }
     }
 }
 
@@ -3403,26 +3441,22 @@ mod tests {
     }
 
     #[test]
-    fn start_watch_retries_cleanup_after_sustained_queue_backpressure() {
+    fn start_watch_cleanup_stops_after_sustained_queue_backpressure() {
         let (jobs, receiver) = mpsc::sync_channel(1);
         jobs.send(ModelCommand::SnapshotNext { id: 1 })
             .expect("fill model queue");
-        let watch = StartWatch {
-            jobs: jobs.clone(),
-            token: "token".to_string(),
-        };
-        drop(watch);
+        let (done, completed) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            forget_start_with_retry(jobs, "token".to_string());
+            done.send(()).expect("report bounded cleanup completion");
+        });
 
-        // Cleanup does not inherit a request-response deadline. The owner may
-        // remain busy longer than a stream read while it drains its queue.
-        std::thread::sleep(STREAM_TIMEOUT + Duration::from_millis(50));
+        completed
+            .recv_timeout(STREAM_TIMEOUT + Duration::from_millis(100))
+            .expect("cleanup must stop while model capacity remains unavailable");
         assert!(matches!(
             receiver.recv(),
             Ok(ModelCommand::SnapshotNext { id: 1 })
-        ));
-        assert!(matches!(
-            receiver.recv_timeout(STREAM_TIMEOUT),
-            Ok(ModelCommand::ForgetStart { token }) if token == "token"
         ));
     }
 
@@ -3977,6 +4011,99 @@ mod tests {
         });
         server.join().expect("server completes");
         worker.join().expect("worker completes");
+    }
+
+    #[test]
+    fn token_correlated_notifier_waits_for_registration_ack_before_returning() {
+        let (client, mut server) = UnixStream::pair().expect("notification pair");
+        let (returned, finished) = mpsc::sync_channel(1);
+        let driver = std::thread::spawn(move || {
+            let mut client = Some(client);
+            let mut registration = test_registration();
+            registration.spawn_token = Some("spawn-token".to_string());
+            let _notifier =
+                DriverNotifier::new_with(registration, move |registration, receiver| {
+                    notifier_worker_with(registration, receiver, move || {
+                        Ok(client.take().expect("one notification connection"))
+                    });
+                });
+            returned.send(()).expect("report notifier return");
+        });
+
+        let request: Request =
+            serde_json::from_slice(&read_line(&mut server).expect("read token registration"))
+                .expect("decode token registration");
+        assert!(matches!(request, Request::Register { .. }));
+        assert!(matches!(
+            finished.recv_timeout(Duration::from_millis(25)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        write_line(
+            &mut server,
+            &WireMessage::Response {
+                id: request.id().to_owned(),
+                result: ResponseResult::Ok,
+            },
+        )
+        .expect("acknowledge token registration");
+        finished
+            .recv_timeout(STREAM_TIMEOUT)
+            .expect("token-correlated notifier return");
+        driver.join().expect("driver completes");
+    }
+
+    #[test]
+    fn token_correlated_notifier_waits_for_retry_acknowledgement_before_returning() {
+        let (first_client, mut first_server) = UnixStream::pair().expect("first pair");
+        let (second_client, mut second_server) = UnixStream::pair().expect("second pair");
+        let (returned, finished) = mpsc::sync_channel(1);
+        let driver = std::thread::spawn(move || {
+            let mut streams = std::collections::VecDeque::from([first_client, second_client]);
+            let mut registration = test_registration();
+            registration.spawn_token = Some("spawn-token".to_string());
+            let _notifier =
+                DriverNotifier::new_with(registration, move |registration, receiver| {
+                    notifier_worker_with(registration, receiver, move || {
+                        Ok(streams.pop_front().expect("next notification connection"))
+                    });
+                });
+            returned.send(()).expect("report notifier return");
+        });
+
+        let first: Request = serde_json::from_slice(
+            &read_line(&mut first_server).expect("read first token registration"),
+        )
+        .expect("decode first token registration");
+        assert!(matches!(first, Request::Register { .. }));
+        assert!(matches!(
+            finished.recv_timeout(Duration::from_millis(25)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        // Do not acknowledge the first registration. Its stream timeout forces
+        // the notifier to reconnect and retry the retained registration event.
+        std::thread::sleep(STREAM_TIMEOUT + NOTIFIER_BACKOFF_MIN);
+        let second: Request = serde_json::from_slice(
+            &read_line(&mut second_server).expect("read retried token registration"),
+        )
+        .expect("decode retried token registration");
+        assert!(matches!(second, Request::Register { .. }));
+        assert!(matches!(
+            finished.recv_timeout(Duration::from_millis(25)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        write_line(
+            &mut second_server,
+            &WireMessage::Response {
+                id: second.id().to_owned(),
+                result: ResponseResult::Ok,
+            },
+        )
+        .expect("acknowledge retried token registration");
+        finished
+            .recv_timeout(STREAM_TIMEOUT)
+            .expect("token-correlated notifier return after retry acknowledgement");
+        driver.join().expect("driver completes");
     }
 
     #[test]

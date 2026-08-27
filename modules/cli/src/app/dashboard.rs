@@ -1236,8 +1236,21 @@ impl DashboardSnapshot {
 }
 
 #[cfg(test)]
-static FAIL_CENTER_PROJECTIONS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static FAIL_CENTER_PROJECTION_ROWS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<(String, String, String)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+#[cfg(test)]
+fn fail_center_projection_for_row(worker: &str, ledger_path: &str, title: &str) {
+    FAIL_CENTER_PROJECTION_ROWS
+        .lock()
+        .expect("projection failure hook lock")
+        .insert((
+            worker.to_string(),
+            ledger_path.to_string(),
+            title.to_string(),
+        ));
+}
 
 impl State {
     fn new() -> Self {
@@ -1609,14 +1622,18 @@ impl State {
         enrich_session_presentations: bool,
     ) -> crate::Result<()> {
         #[cfg(test)]
-        if FAIL_CENTER_PROJECTIONS
-            .fetch_update(
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-                |remaining| remaining.checked_sub(1),
-            )
-            .is_ok()
-        {
+        if rows.iter().any(|row| {
+            row.summary.title.as_ref().is_some_and(|title| {
+                let worker = std::thread::current()
+                    .name()
+                    .unwrap_or_default()
+                    .to_string();
+                FAIL_CENTER_PROJECTION_ROWS
+                    .lock()
+                    .expect("projection failure hook lock")
+                    .remove(&(worker, row.ledger_path.clone(), title.clone()))
+            })
+        }) {
             return Err(crate::Error::Command {
                 message: "injected center projection failure".to_string(),
             });
@@ -4559,38 +4576,16 @@ fn open_kill_modal(state: &mut State) {
     };
     let session_id = row.session_id.clone();
     let display_id = state_short_session(state, &session_id);
-    let (title, body) = match ctx_traits_io::run_control::probe(&row.ledger_path) {
-        Ok(ctx_traits_io::run_control::DriverProbe::Held(_)) => (
+    let (title, body) = match row.class {
+        SessionClass::Live => (
             "stop session",
             format!(
                 "Request cooperative stop for {display_id}?\n\nIt finishes the current frame, then parks. This will not force-kill it."
             ),
         ),
-        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. }) if has_running_evidence(row) => {
-            (
-                "clear orphaned driver",
-                format!(
-                    "No driver holds {display_id}'s lock, but persisted evidence says a drive was running. Clear this orphaned driver evidence and mark the drive interrupted?"
-                ),
-            )
-        }
-        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. })
-            if row.status == Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman) =>
-        {
-            (
-                "cancel parked question",
-                format!("Mark the unanswered question in {display_id} interrupted?"),
-            )
-        }
-        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. }) => {
+        _ => {
             state.message = Some(format!(
-                "stop refused: {display_id} has no driver; resume or delete it instead"
-            ));
-            return;
-        }
-        Err(error) => {
-            state.message = Some(format!(
-                "stop refused: could not probe {display_id}'s driver lock: {error}"
+                "stop refused: {display_id} has no live center driver; the center will settle any orphaned durable state"
             ));
             return;
         }
@@ -4688,10 +4683,6 @@ fn open_answer_modal(state: &mut State) {
         }),
         Modal::text_input_with_body("answer question", question, "", true),
     );
-}
-
-fn has_running_evidence(row: &SessionRow) -> bool {
-    row.outcome == Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Running)
 }
 
 /// `s`: opens the RESUME confirm modal for the selected row. Refuses outright
@@ -8690,7 +8681,7 @@ mod tests {
         worker::Handle,
         std::sync::mpsc::Sender<worker::ActionResult>,
     ) {
-        let worker = worker::Handle::new();
+        let worker = worker::Handle::for_tests();
         let actions = worker.test_action_sender();
         (worker, actions)
     }
@@ -9096,7 +9087,7 @@ mod tests {
     #[test]
     fn first_snapshot_dispatches_its_selected_preview() {
         let mut state = State::new_without_worker();
-        state.worker = Some(worker::Handle::new());
+        state.worker = Some(worker::Handle::for_tests());
 
         state.apply_snapshot(&snapshot_with_sessions(vec![row_with_id(
             "selected",
@@ -9109,7 +9100,7 @@ mod tests {
     #[test]
     fn session_movement_queues_preview_without_inventory_loading() {
         let mut state = State::new_without_worker();
-        state.worker = Some(worker::Handle::new());
+        state.worker = Some(worker::Handle::for_tests());
         state.sessions = vec![
             row_with_id("first", SessionClass::Live),
             row_with_id("second", SessionClass::Live),
@@ -12324,7 +12315,7 @@ argv = ["git", "commit", "-m", "fixture"]
     // modal opens.
     #[test]
     fn open_trait_trust_modal_refuses_unreadable_row_before_opening() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.screen = Screen::Traits;
         state.traits = vec![trait_row("t1", "")];
         state.list_traits.set_len(state.traits.len());
@@ -12335,7 +12326,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
     #[test]
     fn open_trait_trust_modal_opens_for_readable_row() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.screen = Screen::Traits;
         state.traits = vec![trait_row("t1", "sha256:aaa")];
         state.list_traits.set_len(state.traits.len());
@@ -12346,7 +12337,7 @@ argv = ["git", "commit", "-m", "fixture"]
     // Test 5: cancelling a trust modal never writes.
     #[test]
     fn apply_trait_action_cancelled_never_writes() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.traits = vec![trait_row("t1", "sha256:aaa")];
         let action = TraitAction::Trust {
             label: "t1".to_string(),
@@ -12495,7 +12486,7 @@ argv = ["git", "commit", "-m", "fixture"]
     fn focus_reconciles_to_the_drawn_tree_below_every_screens_narrow_floor() {
         const NARROW_WIDTH: u16 = 80;
         for screen in Screen::all() {
-            let mut state = State::new();
+            let mut state = State::new_without_worker();
             state.screen = screen;
             // Simulate focus having moved to the preview/progress pane at a
             // wide layout on a prior frame, before the terminal narrowed.
@@ -12744,7 +12735,7 @@ argv = ["git", "commit", "-m", "fixture"]
     // `open_trait_trust_modal_refuses_unreadable_row_before_opening`.
     #[test]
     fn open_trust_modal_refuses_orphan_row_before_opening() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.screen = Screen::Trust;
         state.trust = vec![TrustRow {
             trait_id: None,
@@ -12766,7 +12757,7 @@ argv = ["git", "commit", "-m", "fixture"]
     // neighboring family, never a family-less row.
     #[test]
     fn open_trust_family_modal_gathers_exact_family_members() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.screen = Screen::Trust;
         state.trust = vec![
             trust_row_with_family("a1", "sha256:a1", "widgets"),
@@ -12796,7 +12787,7 @@ argv = ["git", "commit", "-m", "fixture"]
     // member's digest moved after the modal opened — never a partial apply.
     #[test]
     fn apply_trait_action_aborts_whole_family_set_when_a_member_moved() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.trust = vec![
             trust_row_with_family("a1", "sha256:a1", "widgets"),
             trust_row_with_family("a2", "sha256:MOVED", "widgets"),
@@ -14621,7 +14612,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
     #[test]
     fn reconcile_completion_message_names_every_ambiguous_finding() {
-        let mut state = State::new();
+        let mut state = State::new_without_worker();
         state.reconcile_ambiguous = vec![super::super::task_proposals::AmbiguousFinding {
             task_key: "0100".to_string(),
             reason: "no ancestry evidence".to_string(),
@@ -14633,7 +14624,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
     #[test]
     fn reconcile_completion_message_is_clean_when_nothing_ambiguous() {
-        let state = State::new();
+        let state = State::new_without_worker();
         assert_eq!(
             reconcile_completion_message(&state),
             "reconcile: no ambiguous findings"
