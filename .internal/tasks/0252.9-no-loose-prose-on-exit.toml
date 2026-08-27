@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0252.9"
+title = "No loose prose on exit"
+status = "draft"
+raised = "2026-08-27"
+content = """
+With the live view on the alternate screen (0252.7), every exit already
+restores a clean shell and prints a house-grammar outcome panel. The bare
+prose one-liners that used to explain a torn screen are now noise between
+the prompt and the panel — the owner does not want them:
+
+- `run killed; terminal restored` (modules/cli/src/app/tui_ratatui.rs:849,
+  the P551 ctrl-c kill note)
+- `run startup interrupted; terminal restored`
+  (modules/cli/src/app/run_startup_view.rs:193)
+- `halted — pass --continue-on-failure to run the remaining queue anyway`
+  (modules/cli/src/app/run.rs:1000)
+
+## Owner ruling (2026-08-27)
+
+Post-run user-facing output on run-view exit paths is house-grammar
+panels or nothing. A loose prose line is never printed around them.
+"""
+scope = """
+## Decisions
+
+- The two "terminal restored" notes are deleted, not restyled: after
+  0252.7 the restore is guaranteed by the alternate-screen leave, and the
+  outcome/failure panel that follows already states what happened to the
+  run. A note announcing terminal state is redundant by construction.
+- The queue-halt hint moves into the queue outcome panel: the panel that
+  reports the failed/halted queue carries the remaining-task count and
+  the `--continue-on-failure` hint as a toned panel row, in the house
+  two-tone palette, instead of a trailing bare println.
+- Explicitly out of scope: the `run tui unavailable; falling back to
+  status progress` diagnostics (three sites) — they precede any pane,
+  serve headless/fallback operation, and are not run-exit prose; and all
+  `--progress status`/`--json` line output, which is that mode's entire
+  interface, not decoration.
+- Forward-compatible with 0252.4: the failure modal's Abort path prints
+  the compact failure panel with no surrounding prose, so this task
+  removes the only remaining stray lines around run-view exits.
+
+## Done when (sketch — architect refines)
+
+- PTY proofs: ctrl-c kill, startup interrupt, and a halted queue each
+  show the restored shell followed by panel output only — the three
+  literal strings above appear nowhere in captured output (assert via
+  the support helpers, honoring the 0252.8 terminal-diff-aware matcher
+  doctrine for any panel-text assertions).
+- The queue outcome panel carries the remaining-count and
+  continue-on-failure hint as panel rows.
+- Full suite green.
+"""
+
+[relations]
+parent = "0252"
+depends-on = ["0252.7", "0252.8"]
