@@ -51,5 +51,3 @@ All children are done. A failed run answers "what happened, which session"
 in four lines; an interrupted terminal shows a clean prompt; a failure
 inside the TUI is a choice, not an ejection.
 """
-
-[relations]

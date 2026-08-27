@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.2"
 title = "Every exit erases the run view"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
 content = """
 ## Pre-edit contracts

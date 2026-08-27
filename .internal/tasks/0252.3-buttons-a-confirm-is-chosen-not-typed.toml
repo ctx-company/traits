@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.3"
 title = "Buttons: a confirm is chosen, not typed"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
 content = '''
 A labeled-button row in the tui kit, wired into `Modal::Confirm` itself so
