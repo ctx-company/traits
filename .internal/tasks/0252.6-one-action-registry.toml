@@ -1,828 +1,394 @@
 schema-version = "0.2"
 key = "0252.6"
 title = "One action registry: footer, guide, and menu from the same rows"
-status = "draft"
+status = "ready"
 raised = "2026-08-24"
 content = """
-Footer soup is a symptom: hints are hand-written strings living apart from
-the key handlers they describe, so screens accumulate both and neither can
-be trusted. `dashboard/keymap.rs` already admits this in its own header —
-"`handle_key`'s screen arms remain the actual dispatch" (`keymap.rs:1-8`) —
-and `tui_kit::Binding` carries only two display strings (`tui_kit.rs:750-758`),
-so it cannot match a `KeyEvent`, hold an explanation, or say whether a verb
-applies. Meanwhile `footer_line` (`dashboard.rs:8715-8772`) composes a
-hand-written navigation prefix, the map-derived hints, a dynamic scope verb,
-a dynamic orphan verb + count, a mark count, and a list position into one
-row. Three authorities, one row. The fix is structural.
+Footer soup is a symptom: hints are hand-written strings living apart from the
+key handlers they describe, so screens accumulate both and neither can be
+trusted. `dashboard/keymap.rs` says so in its own header — "`handle_key`'s
+screen arms remain the actual dispatch" — and `tui_kit::Binding`
+(`tui_kit.rs:870-878`) carries only two display strings, so it cannot match a
+`KeyEvent`, carry an executor id, hold an explanation, or say whether a verb
+applies. Meanwhile `footer_line` (`dashboard.rs:8530-8588`) concatenates three
+authorities into one row: a hand-written navigation literal, the keymap-derived
+hints, and hand-built dynamic scope/orphan/mark/position text — while the keymap
+table itself omits `v` and `o`, which `footer_line` writes by hand. Parent 0252
+(lines 43-45) rules that a short footer in `[?] guide · [d] dash` grammar, a `?`
+that opens the full list, and a command-menu key that lists what applies to the
+current item all derive from one action registry. That is this task.
 
-## Decisions this plan fixes (the task text does not decide them)
+## Goals and approach are different things in this plan
 
-1. **What counts as a registered action.** Exactly the keys that today reach
-   `handle_key`'s final `match key.code` (`dashboard.rs:2998-3090`) plus the
-   two screen-specific `Enter` arms in `handle_focus_key`
-   (`dashboard.rs:3105-3115`). Structural key handling — Ctrl-C, Alt-arrows,
-   `Tab`/`BackTab`/`1`-`5` screen switching, list movement (`↑↓`/`jk`,
-   including the autorepeat coalescer at `dashboard.rs:2847-2861`),
-   `PageUp`/`PageDown` paging, `Enter`/`Esc` focus, story-view keys, and the
-   overlay's own keys — is deliberately NOT registered. Those keys run before
-   the registry and keep their exact current behavior; folding them in would
-   mean either faking dispatch through a table that does not actually
-   dispatch them, or restructuring the autorepeat fast path for no behavior
-   change. They are documented on no surface at all after this task — decision
-   5 states that cost plainly rather than smuggling them back in as a
-   hand-written trailer.
-2. **Menu opener key: `.`** — verified unbound in `handle_key` today, as are
-   `?`, `:`, `/`. `/` and `:` both read as "type something" in a TUI; `.`
-   types nothing and means "the actions for THIS item". `?` is the guide, per
-   the parent.
-3. **Footer content: declaration order plus a fixed limit — no priority
-   field.** `action_rows(screen)` returns `[? guide, . menu]` ++ the screen's
-   own rows ++ `[r reload, q quit]`; the footer renders the first
-   `FOOTER_LIMIT = 5`. Each screen table is therefore ordered most-used-first
-   and its first three rows are what the footer shows. The footer does NOT
-   filter by applicability — which is also why `?` and `.` still appear in it
-   although decision 4 makes them inapplicable rows: footer chrome that
-   reflowed as the selection moved would be its own kind of noise, and the
-   menu already answers "what applies here".
+**Goals are binding.** Every "Done when" criterion below states an observable
+outcome and names a runnable command that decides it, and the exclusions at the
+end are binding too.
 
-   **The parent's `[?] guide · [d] dash` is the format, and it is derived,
-   not typed.** That exact string is the live run view's own footer today:
-   `LIVE_VIEW_GUIDE_ENTRY` prepended to `LIVE_VIEW`, whose first verb is `d`
-   = back to the dashboard (`tui_kit.rs:780-820`,
-   `run_view/render.rs:400-408`). The grammar it fixes is `[<key>] <lowercase
-   label>` joined by ` · `, which is exactly what `render_hint_list`
-   (`tui_kit.rs:760-768`) already emits and what `footer_hints` reuses. The
-   dashboard footer cannot carry the entry `[d] dash` itself: the dashboard
-   has no "go to the dashboard" verb, and `d` is already taken three ways
-   there — SESSIONS delete, MERGES deep merge, TASKS dispatch. All three keep
-   their key; none is renamed or moved to make room for a verb that would do
-   nothing. The contract is therefore proved the only way it can be proved
-   without lying about the dashboard's verbs: a `footer_hints` test declares
-   two `ActionRow`s, `?`/`guide` and `d`/`dash`, and asserts the derived
-   string is byte-for-byte `[?] guide · [d] dash`; each dashboard screen's
-   footer then asserts the same derivation with its own verbs, beginning
-   `[?] guide · [.] menu`. The live view's real footer keeps that spelling
-   untouched (decision 8), PTY assertion included
-   (`proof_run_view_exit_teardown.rs:218-237`).
-4. **Applicability is a cheap "is this meaningful for this row", never a
-   probe.** A predicate returns false only when the row projection or screen
-   state already proves the verb is meaningless (no selection, wrong row
-   kind, class mismatch). Anything that needs a driver-lock probe, a center
-   read, a filesystem read, or a dependency evaluation stays `true` and
-   refuses at execution time with its existing message — the established
-   inline refusals (`open_kill_modal` `:4535-4584`, `open_answer_modal`
-   `:4586-4673`, `dispatch_selected_task` `:7740-7789`) must survive this
-   task, not be erased into an invisible menu row. Predicates are pure reads
-   of already-loaded `State`: no I/O, no locks, no side effects — the menu
-   opens on a keypress and must be instant.
+**Everything else is the suggested route.** The file list, symbol names,
+signatures, the declaration inventory, predicate expressions, edit order,
+intermediate build commands, and proof mechanics are the architect's best
+guidance from reading HEAD, not a boundary. Where a goal genuinely requires
+deviating — a different symbol shape, an extra supporting file, a different way
+to observe a required behavior — deviate, and report the deviation in the work
+summary. It is not a violation and does not need escalation.
 
-   Exactly two rows are declared inapplicable outright — `?` guide and `.`
-   menu, both using `fn never(_: &State) -> bool { false }`. They are real
-   registry rows: they own their key, they dispatch through the registry, and
-   they show in the footer (decision 3) and in the guide (decision 6). But
-   they open overlays; they are not verbs over the current item, and
-   `handle_command_key` intercepts them before `run_command` is ever called.
-   `never` is what keeps the applicable-action menu from listing an entry
-   whose Enter would land on `run_command`'s `unreachable!` — the menu shows
-   only rows a `run_command` arm can actually execute.
-5. **Where the removed footer text goes.** The dynamic state — list position,
-   `[ALL]` repo scope, orphan count and shown/hidden, mark count — moves to
-   the footer's SECOND row, the status row `keymap_footer` already renders
-   (`tui_kit.rs:861-872`), shown whenever no message/loading/stale/explanation
-   text claims it. Action labels are therefore static verbs (`repo scope`,
+## Settled decisions (the parent does not decide these; this plan does)
+
+1. **What the registry dispatches, and what it only documents.** A row is
+   either *dispatched* — the registry matches the key and calls the executor —
+   or *reference-only*: declared in the same registry, shown in the `?` guide,
+   never matched by the registry and never shown in the footer or menu.
+   Reference rows exist because the parent says `?` opens the full list, and
+   because today's footer documents `↑↓/jk`, `PgUp/PgDn`, `Enter focus`,
+   `Esc list`, and `Tab/1-5`. Dropping that documentation would be a regression
+   this cleanup did not ask for; re-adding it as a hand-written navigation table
+   would recreate the second authority this task exists to delete. So structural
+   keys — list movement (including the autorepeat coalescer at
+   `dashboard.rs:2868-2889`), paging, `Enter`/`Esc` focus, `Tab`/`BackTab`/`1`-`5`,
+   alt+arrows, and Ctrl-C — keep their exact current handling **above** the
+   registry and are declared as reference rows so the guide can name them. Rows
+   internal to the overlay itself are not declared: the overlay is the thing on
+   screen, not a screen.
+
+2. **Applicability is a menu concept only, never a gate on the key.** Pressing a
+   registered key dispatches its command exactly as today, whether or not the
+   row "applies"; the executor's own authoritative checks and refusal messages
+   are what refuse, unchanged. Applicability decides only which rows the command
+   menu lists. A predicate is a pure read of already-loaded `State`: no center
+   call, no lock probe, no filesystem read, no git probe, no dependency
+   evaluation, no side effect — the menu opens on a keypress and must be
+   instant. Anything needing a probe stays applicable and refuses at execution.
+
+3. **Modifier semantics do not change.** Today the final dispatch matches
+   `key.code` and ignores modifiers after the Ctrl-C and alt+arrow special
+   cases, so ctrl/alt plus a command character reaches the command arm. This
+   task preserves that. Rejecting CONTROL/ALT on command keys would be a real
+   behavior tightening that neither the parent nor any code evidence requires;
+   it is out of scope, and a lean no-regression migration does not smuggle it
+   in. Ctrl-C and alt+arrows keep their precedence above the registry.
+
+4. **The overlay openers are dispatched rows that the menu never lists.** They
+   own their key, they dispatch through the registry, and they appear in the
+   footer and guide — but they are not verbs over the current row, so their
+   applicability is false and the menu cannot offer an entry whose execution has
+   no meaning. The menu is the only firing surface; the guide fires nothing.
+
+5. **Where the removed footer text goes.** Scope `[ALL]`, TRUST orphan count and
+   shown/hidden, mark count, and list position move to the footer's **second**
+   row — the status row `tui_kit::keymap_footer` (`tui_kit.rs:983-992`) already
+   renders and `tui_panes::screen_regions` (`tui_panes.rs:30-46`) already
+   reserves. Row two's existing precedence — loading/preview-pending, stale
+   refresh error, generated-explanation state, then `state.message` — is
+   preserved exactly; the relocated text is the new fallback where row two is
+   currently empty. Row-one labels are therefore static verbs (`repo scope`,
    `orphans`), never state-dependent strings.
 
-   The navigation/focus/screen-switch keys go NOWHERE. They are not registered
-   actions (decision 1), so they get no footer entry and no `?` entry. There
-   is no `Binding` trailer and no `keymap::NAVIGATION` table: a hand-written
-   hint list feeding the guide would be the very second authority this task
-   exists to delete, moved one surface over and no less parallel for it. Every
-   entry in every derived surface comes from an `ActionRow` or it does not
-   exist — that is the invariant, and Step 6 asserts it. The cost is stated
-   plainly rather than papered over: after this task `↑↓`/`jk`, `PgUp`/`PgDn`,
-   `Enter`/`Esc` focus, `Tab`/`1`-`5`, and `alt+arrows` are undocumented on
-   screen, though every one of those keys behaves exactly as it does today.
-   Documenting them again means registering them for real — dispatch included,
-   autorepeat fast path restructured — which is a parent-level decision about
-   what an "action" is, not this task's; it is listed under Out of scope.
-6. **The `?` overlay never fires anything.** It is the full reference list for
-   the current screen, including rows that do not apply. The menu is the only
-   firing surface, which is why an overlay entry carries
-   `id: Option<DashCmd>` and Enter fires only `Some`.
-7. **The menu binds to the selection it described, and captures no index.**
-   Entries are built once at open from the current selection, and the LOGICAL
-   identity of that selection is captured beside them
-   (`menu_selection(state)`, Step 4). The overlay traps `j`/`k`, so the cursor
-   cannot move underneath it — but snapshots keep applying while it is open
-   (`run_with_initial_session` never stops draining them), so the row the menu
-   described can be removed, reclassified, or replaced under an unchanged
-   cursor index, and `restore_visible_selection` (`dashboard.rs:2025-2058`)
-   deliberately lands the cursor on the group header — or on another row —
-   when the described session is gone. Enter would then aim a destructive verb
-   (`d` delete, `x` stop) at a row the menu never described.
+6. **The menu binds to the selection it described, by repository-aware
+   identity.** `run_with_initial_session` keeps applying worker snapshots while
+   an overlay is open (`dashboard.rs:2773-2892`), and those snapshots replace
+   sessions/traits/merges/trust and rebuild projections (`1480-1617`), so the row
+   a menu described can be removed, reclassified, or replaced under an unchanged
+   cursor. Before firing, the identity captured at open is compared with the
+   identity the live state selects now: equal fires, different closes the overlay
+   and executes nothing, with a message saying the selection changed. The
+   comparison is **logical, never by index**, and for SESSIONS and MERGES it is
+   **repository-aware** — `SessionId` is only nonempty text and is not
+   machine-wide unique (0252.5, lines 146-152), and in ALL-repositories mode two
+   repositories can expose the same session id at once, so a bare session-id
+   guard would not actually prove the menu fires on the row it listed.
+   `SessionRow` carries `repo_key`, `repo_path`, and an authoritative
+   `ledger_path`; `MergeRow` carries `ledger_path` and `repo_path`
+   (`dashboard.rs:220-243`, `412-438`). Existing `VisibleSelection` and
+   `restore_visible_selection` (`2009-2095`) and the modal action tags
+   (`5280-5319`, `5433-5508`) key on session id alone; that pre-existing all-repo
+   weakness is not this task's to fix, but the new pre-fire guard must not
+   reproduce it.
 
-   So before firing, the captured identity is compared with the identity the
-   live state selects NOW. Equal => fire. Different => close the overlay, say
-   `selection changed; reopen actions`, execute nothing. The comparison is by
-   logical identity (session id, group, trait id, merge session id, trust
-   trait id + digest, task key), never by index, so a snapshot that merely
-   redraws the same row still fires. On a match, firing calls the same `open_*`
-   seam the key already called, which re-looks-up by its own identity rules and
-   re-checks eligibility. No second implementation, no index-addressed side
-   effect, and no verb aimed at a row the menu never listed.
-8. **Scope stops at the dashboard.** `?` in the live/attached run view
-   (`run_view.rs:1368-1389`, `run_view/guide.rs:260-276`) keeps its paid-guide
-   meaning and is not touched. `LIVE_VIEW`, `LIVE_VIEW_GUIDE_ENTRY`,
-   `GUIDE_MODAL`, and `STORY_VIEW` stay `Binding` tables.
+7. **Scope stops at the dashboard.** `?` in the live/attached run view
+   (`run_view.rs:1379`, `run_view/guide.rs:266`) keeps its paid-guide meaning and
+   is untouched. `LIVE_VIEW`, `LIVE_VIEW_GUIDE_ENTRY`, `GUIDE_MODAL`, and
+   `STORY_VIEW` stay `Binding` tables, and `Binding` stays in `tui_kit.rs` for
+   them. The story-view footer branch stays behaviorally separate from the
+   dashboard registry.
 
-## Files touched (repo-relative, nothing else)
+## Suggested route
 
-- `modules/cli/src/app/tui_kit.rs`
-- `modules/cli/src/app/dashboard/keymap.rs`
-- `modules/cli/src/app/dashboard.rs`
+Evidenced minimal file set: `modules/cli/src/app/tui_kit.rs`,
+`modules/cli/src/app/dashboard/keymap.rs`, `modules/cli/src/app/dashboard.rs`.
+That is where every seam named below already lives, so it is the shortest route
+— not a fence. Take a supporting file if a goal needs one, and say so.
 
-`tui_demo.rs` is deliberately NOT touched: the scratch-screen proof lives as a
-scratch unit test in `tui_kit.rs` (precedent: the existing scratch
-`TestBackend` tests at `tui_kit.rs:1476` and `:1539`), which proves the same
-construction without colliding with 0252.3's demo edits. `tui_panes.rs`,
-`run_view.rs`, `run_view/render.rs`, `run_view/guide.rs`, `trait_editor.rs`,
-`modules/core`, `modules/io`, CLI argument parsing, dependencies, and
-`modules/cli/tests/` are all out of scope.
+**Before editing.** 0252.3 landed and 0252.5 may land in either order; re-locate
+every line anchor by symbol name (`rg -n "fn <name>"`) rather than by the line
+numbers here, which are reading aids. Read the SESSIONS `d` handling: at HEAD
+`open_delete_modal` starts from `selected_session`, so delete applicability is "a
+selected session row"; if 0252.5 has landed group deletion, widen it to "a
+selected session row or a selected group header" and reuse the delete seam it
+left. Nothing else changes either way. This plan touches neither `Modal` nor any
+delete implementation.
 
-## Step 0 — pre-edit reread (sibling-order independence)
+**Registry primitives (`tui_kit.rs`).** A key spec that can carry more than one
+physical code behind one display string, so today's MERGES `Enter`/`m` alias
+survives as one row rather than two rows sharing an id, and matches a `KeyEvent`
+with HEAD's modifier semantics (decision 3). An action row carrying an executor
+id, the key spec, a static lowercase label, a one-line explanation, whether it is
+dispatched or reference-only, and an applicability predicate; generic over the
+consumer's command id and state so the kit never learns about `RatatuiPane` or
+`State`. Lookup by key over the dispatched rows, an applicable-rows projection,
+and a footer projection built on the existing `render_hint_list`
+(`tui_kit.rs:882-890`) — the function that already emits the parent's
+`[key] label · [key] label` grammar. A hand-written `Copy`/`Clone` impl is likely
+needed: a derive would emit a `Ctx: Copy` bound and `Ctx = State` is not `Copy`.
 
-0252.3 and 0252.5 both edit `dashboard.rs`/`tui_kit.rs` and either may land
-first. This plan touches neither `Modal` nor any delete implementation, so it
-is order-independent, but two anchors must be re-read before editing rather
-than assumed:
+`render_hint_line` (`tui_kit.rs:892-898`) has only the dashboard keymap's two
+production calls, the dashboard story-footer call, and its own tui-kit test.
+Moving the story footer to `render_hint_list` leaves it uncalled and it can go,
+so the dashboard carries one hint grammar; the live-view tables are unaffected.
 
-- Re-locate every line anchor cited below by symbol name (`rg -n "fn <name>"`),
-  never by the line number, which is a reading aid only.
-- Read the `d` handling on SESSIONS. If a group header already deletes a group
-  (0252.5 landed), the SESSIONS `d` row's predicate is "a selected session row
-  OR a selected group header"; if not, it is "a selected session row".
-  Everything else is unchanged either way.
+**One overlay widget backing both surfaces (`tui_kit.rs`).** Entries built only
+from action rows — no trailer field, no free-text section, so there is no seam
+through which a hand-written hint could enter either overlay. A guide
+constructor takes every row of the screen and fires nothing; a menu constructor
+takes the applicable dispatched rows and fires the selected one. It is a focus
+trap like `Modal`: it consumes every key it sees, scrolls, and closes on its
+close keys. Reuse `scroll_key`/`ScrollList` (`tui_kit.rs:50-204`),
+`centered_rect` (`1041-1052`), `dim_style` (`997-999`), `Clear`, a bordered
+block, and the green selection tone `windowed_list_in_range` already uses
+(`809-842`). Named ANSI plus `DIM`/`BOLD` only. `tui_kit.rs:19-22` permits
+targeted behavior/style assertions on scratch `TestBackend` buffers and forbids
+frozen rendered inventories.
 
-No edits in this step.
+**The declarations (`dashboard/keymap.rs`).** This module becomes the
+declaration authority; its header sentence about `handle_key` being the dispatch
+becomes false and must be replaced. The 0148 case-discipline paragraph still
+governs which key a verb gets and stays. The display-only tables, `GLOBAL_TAIL`,
+`bindings`, `hint_line`, `global_tail_hint`, and the two display tests go; a
+per-screen row composition (lead rows, the screen's own rows, the global tail,
+plus the screen's reference rows) replaces them. `RepoScope` has identical
+metadata and behavior on SESSIONS and MERGES — declare it once and compose it
+into both, so the two cannot drift. `keymap` is a descendant of `dashboard`, so
+`State`'s private fields, `State::selected`, `VisibleRow`, `TaskVisibleRow`,
+`selected_session`, `selected_task`, and `selected_trust` are reachable through
+`super::` without widening visibility.
 
-## Step 1 — registry primitives (`tui_kit.rs`)
+Suggested dispatched inventory — exactly the keys `handle_key` binds today for
+that screen, no key gained or lost, ordered most-used-first so the footer prefix
+is the useful verbs. Explanations are one line, no trailing period, saying what
+the verb does rather than when it applies.
 
-New symbols, exact signatures:
+- Lead, every screen: `?` guide ("list every key this screen binds"), and the
+  menu opener ("list the actions that apply to the current row"). Both
+  inapplicable per decision 4. `.` is the suggested menu key — `.`, `?`, `:`,
+  and `/` are all unbound today, and `.` types nothing while `/` and `:` read as
+  "type something" — but the key is a product choice, not a parent ruling.
+- SESSIONS: `Enter` attach/expand, `a` answer, `n` spawn, `space` expand,
+  `s` resume, `S` story, `x` stop, `d` delete, `v` repo scope.
+- TRAITS: `a` approve, `b` block, `e` edit source, `x` explain.
+- MERGES: `Enter`/`m` merge (one row, two codes), `d` deep-merge, `x` drop,
+  `p` print path, `v` repo scope.
+- TRUST: `a` approve, `b` block, `space` mark, `A` approve family/marked,
+  `o` orphans.
+- TASKS: `d` dispatch, `y` mark done, `e` edit, `space` expand, `s` split,
+  `S` sync, `R` reconcile, `a` archive.
+- Tail, every screen: `r` reload, `q` quit.
+- Reference rows per screen (decision 1): list movement, paging, focus, list,
+  screen switching, pane movement, and the Ctrl-C quit prompt. `Enter` is
+  claimed by the registry on SESSIONS and MERGES and is a focus reference row
+  only on the screens where it is not, so no screen declares one key twice.
 
-- `pub(crate) struct KeySpec { pub(crate) display: &'static str, pub(crate) codes: &'static [KeyCode] }`
-  — `display` is the one presentation string (`"Enter/m"`, `"space"`, `"A"`);
-  `codes` is every physical key that fires the row, so today's aliases
-  (MERGES `Enter`/`m`) survive as ONE row rather than two rows sharing an id.
-- `impl KeySpec`:
-  - `pub(crate) const fn new(display: &'static str, codes: &'static [KeyCode]) -> Self`
-  - `pub(crate) fn matches(&self, key: &KeyEvent) -> bool` — true when
-    `self.codes.contains(&key.code)` AND
-    `!key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)`.
-    SHIFT is deliberately allowed: crossterm reports `A`/`S`/`R` as
-    `Char('A')` + SHIFT, and today's arms match those. Rejecting CONTROL/ALT
-    is a **deliberate tightening**, not an accident: today `ctrl-d` on
-    SESSIONS reaches the delete arm because `match key.code` ignores
-    modifiers. Say so in the doc comment.
-  - `pub(crate) fn binding(&self, label: &'static str) -> Binding` — the reuse
-    seam into the existing `render_hint_list`.
-- `pub(crate) struct ActionRow<Cmd: Copy + 'static, Ctx: 'static> { pub(crate) id: Cmd, pub(crate) key: KeySpec, pub(crate) label: &'static str, pub(crate) explain: &'static str, pub(crate) applies: fn(&Ctx) -> bool }`
-  — `Cmd` is the consumer's command id, `Ctx` the consumer's state. The kit
-  holds metadata and applicability only; the executor stays with the
-  consumer, so the kit never learns about `RatatuiPane` or `State`.
-- `impl<Cmd: Copy, Ctx> Clone for ActionRow<Cmd, Ctx>` (`fn clone(&self) -> Self { *self }`)
-  and `impl<Cmd: Copy, Ctx> Copy for ActionRow<Cmd, Ctx> {}` — written by
-  hand, not derived: `#[derive(Copy)]` would emit a `Ctx: Copy` bound and
-  `Ctx = State` is not `Copy`, even though `Ctx` appears only behind
-  `fn(&Ctx)`.
-- `pub(crate) fn action_for_key<Cmd: Copy, Ctx>(rows: &[ActionRow<Cmd, Ctx>], key: &KeyEvent) -> Option<Cmd>`
-  — first row whose `key.matches`. An unregistered key returns `None` and
-  therefore cannot act.
-- `pub(crate) fn applicable_actions<'a, Cmd: Copy, Ctx>(rows: &'a [ActionRow<Cmd, Ctx>], ctx: &Ctx) -> Vec<&'a ActionRow<Cmd, Ctx>>`
-- `pub(crate) fn footer_hints<Cmd: Copy, Ctx>(rows: &[ActionRow<Cmd, Ctx>], limit: usize) -> String`
-  — `render_hint_list(rows.iter().take(limit).map(|r| r.key.binding(r.label)))`,
-  i.e. exactly the parent's `[?] guide · [d] dash` shape, produced by the
-  function that already produces it.
+Suggested predicates, each a pure read of loaded state on an existing seam:
+attach/expand is a selected group header or a session row whose
+`SessionClass::can_attach()` holds — not "any visible row", since
+`can_attach` already rejects unreadable rows (`209-216`) and `attach_selected`
+refuses them (`4548-4562`); expand is a selected group header; answer is a
+selected row whose already-loaded `status`, `next_frame_kind`, and `interrupted`
+say it is parked on an unanswered ask (`240-257`, projected at `2250-2364`),
+with `open_answer_modal`'s center read and refusal messages left where they are
+(`4594-4680`); resume is `SessionClass::can_resume`; story is a nonempty
+`run_id`; **stop is simply the loaded `SessionClass::Live`** — 0243.5 rewrote
+`open_kill_modal` (`4565-4592`) to open only for a live row and to report "no
+live center driver" otherwise, and `has_running_evidence` no longer exists
+anywhere in the tree, so share that one classification with the opener rather
+than copy a stale three-case rule; delete is a selected session row, widened per
+the pre-edit reread; spawn, repo scope, sync, reconcile, reload, and quit are
+always applicable. Trait approve/block need a nonempty canonical digest; trait
+edit reuses `dashboard_trait_editable_source`
+(`lifecycle_reporting.rs:1784`, already imported by `dashboard.rs`); trait
+explain needs a selected trait. Merge and deep-merge use `MergeClass::can_retry`
+(`390-395`), drop uses `can_drop` (`397-402`), print path cheaply requires
+`worktree.is_some()` while `resolve_merge_worktree_path`'s git-registration probe
+stays at execution with its message. Trust approve/block need a selected record
+with a trait id and nonempty current digest; mark needs a trait id; `A` means the
+marked set when marks exist and the family otherwise, with the readable-member
+scan left at execution. Task verbs use `selected_task`, task expand a selected
+group header, each keeping its own deeper inline refusals.
 
-Changed/removed:
+**Dispatch and routing (`dashboard.rs`).** A command id enum with one variant per
+dispatched row, distinct from the existing `Action` (`746-758`), which is the
+modal *continuation* tag and stays untouched — say so in both doc comments so
+the two never get conflated. One exhaustive executor `match` whose arms call
+only the existing seams (`attach_selected`, `toggle_selected_group`, the `open_*`
+functions, `edit_selected_trait_source`, `explain_selected_trait`, merge
+retry/drop/print, trust toggles and modals, task actions, `State::reload`, and
+the exit modal); the exhaustiveness is the compiler-enforced half of "no row
+without an executor". No command behavior changes. `SessionAttach` reproduces
+today's header/row branch and `RepoScope` today's `all_repos` toggle plus both
+list resets plus reload.
 
-- **Remove** `pub(crate) fn render_hint_line(...)` (`tui_kit.rs:770-778`). Its
-  only non-test caller is `footer_line`'s story-view branch
-  (`dashboard.rs:8718`), rewritten in Step 5 to `render_hint_list` so exactly
-  one hint format survives in the dashboard. In
-  `every_binding_appears_in_live_view_guide_modal_and_story_view_hints`
-  (`tui_kit.rs:2008-2016`) switch the story-view block to `render_hint_list`
-  and its expected string to `format!("[{}] {}", ..)`.
-- Amend the module header (`tui_kit.rs:1-21`) to name the registry among the
-  kit's surfaces, keeping the two-tone palette paragraph and the 2026-07-24
-  test ruling verbatim.
+Exit-modal construction is byte-identical at Ctrl-C (`2997-3001`) and `q`
+(`3029-3033`); extract one exit-opening seam and route both through it so the
+prompt cannot drift.
 
-Build before continuing, with exactly this command:
-`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+Routing precedence, preserving today's trap ordering: modal resolve, modal trap,
+Ctrl-C (closing any open overlay first, then the shared exit seam — otherwise the
+exit modal draws over an overlay that reappears on cancel), then **the new
+overlay trap**, then story view, alt+arrows, the SESSIONS paging queue,
+navigation, then **registry command dispatch**, then focus handling, then a final
+match reduced to `Tab`/`BackTab`/`1`-`5`. Every `if state.screen ==` guard leaves
+that match, and so does `q`. `handle_focus_key`'s two screen-guarded `Enter` arms
+become registry rows, which is why focus handling must now run *after* the
+registry: on SESSIONS/MERGES the registry claims `Enter` first, and elsewhere the
+lookup misses and focus handling runs exactly as before.
 
-## Step 2 — the overlay widget (`tui_kit.rs`)
+The overlay trap: `Pending` returns, `Closed` clears the overlay, `Fire` reads
+the captured identity, closes the overlay (so no command leaves it behind, and
+neither does a refusal), compares against the identity live state selects now,
+and only on equality runs the executor. Suggested `State` shape: an overlay field
+and a captured-identity field, both cleared by one close seam and both cleared in
+`switch_screen` (`1392-1406`) — registry rows are screen-scoped, so a surviving
+overlay would list another screen's actions and a surviving capture would be a
+foreign screen's identity. Initialize in the centralized constructor
+(`1284-1355`). Render in `draw_screen`'s normal branch after the footer and
+before the modal (`7653-7744`), so modals still draw last; the story branch does
+not render it, since the overlay trap sits above the story trap — a debug
+assertion there keeps that invariant from rotting. Add the overlay to the
+autorepeat gate (`2868-2889`): without it a held `j` meant for the overlay moves
+the list underneath and never reaches `handle_key`.
 
-One component backs both derived overlays; the only difference is whether an
-entry carries a command id.
+Because the always-applicable global rows are in every screen's menu, the menu
+cannot be empty under this model — do not add an empty-menu branch unless the
+final semantics can actually produce one.
 
-- `pub(crate) struct OverlayEntry<Cmd> { key: String, label: String, explain: String, id: Option<Cmd> }`
-  with read accessors `pub(crate) fn key(&self) -> &str`,
-  `pub(crate) fn label(&self) -> &str`, `pub(crate) fn explain(&self) -> &str`,
-  and `pub(crate) fn id(&self) -> Option<Cmd>` (requires `Cmd: Copy`).
-- `pub(crate) enum OverlayOutcome<Cmd> { Pending, Closed, Fire(Cmd) }`
-- `pub(crate) struct ActionOverlay<Cmd> { title: String, entries: Vec<OverlayEntry<Cmd>>, list: ScrollList }`
-  — no trailer field and no free-text section: an overlay can only ever show
-  what its `entries` hold, and both constructors build `entries` from
-  `ActionRow`s alone (decision 5). There is no seam through which a
-  hand-written hint could enter either derived overlay.
-- `impl<Cmd: Copy> ActionOverlay<Cmd>`:
-  - `pub(crate) fn guide<Ctx>(title: impl Into<String>, rows: &[ActionRow<Cmd, Ctx>]) -> Self`
-    — every row, applicable or not, `id: None` (decision 6).
-  - `pub(crate) fn menu<Ctx>(title: impl Into<String>, rows: &[ActionRow<Cmd, Ctx>], ctx: &Ctx) -> Self`
-    — `applicable_actions` only, `id: Some(row.id)`. Rows whose predicate is
-    `never` (decision 4: `?` and `.` themselves) therefore cannot reach the
-    menu, so the menu can never offer an entry `run_command` refuses.
-  - `pub(crate) fn is_empty(&self) -> bool`
-  - `pub(crate) fn entries(&self) -> &[OverlayEntry<Cmd>]`
-  - `pub(crate) fn selected(&self) -> usize`
-  - `pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> OverlayOutcome<Cmd>`
-    — `Esc` / `q` / `?` / `.` => `Closed`; `Enter` => `Fire(id)` for the
-    selected entry's `Some(id)`, else `Pending`; otherwise `scroll_key(key)`
-    applied to `list` => `Pending`; everything else `Pending`. The overlay
-    consumes every key it sees: it is a focus trap, exactly like `Modal`.
-- `pub(crate) fn render_action_overlay<Cmd>(frame: &mut ratatui::Frame<'_>, area: Rect, overlay: &mut ActionOverlay<Cmd>)`
-  — `centered_rect` (`tui_kit.rs:921`) at `min(area.width, 70)` by the row
-  budget, `Clear`, a `Block::bordered` titled with `overlay.title` in
-  `dim_style()`, then one line per entry: `[key] label` in the default style
-  and ` — explain` with `Modifier::DIM`, the selected row `Color::Green` (the
-  same selection tone `windowed_list_in_range` already uses). Sizes through
-  `ScrollList::set_len`/`window` so a long list scrolls instead of
-  overflowing, and degrades inside whatever `Rect` it is given. Named ANSI
-  foreground plus `DIM`/`BOLD` only: no background, no reverse video.
+**The footer (`dashboard.rs`).** Row one becomes the registry projection over a
+bounded prefix of the screen's dispatched rows and nothing else: the navigation
+literal, both keymap hint helpers, the `v` scope verb, the `o` orphan verb and
+count, `[ALL]`, the mark count, and the appended position all leave
+`footer_line`. A cap of 5 entries is the suggested "short"; the parent fixes only
+the grammar. Row two keeps its existing precedence and falls through to the
+relocated state text (decision 5). The story branch changes only
+`render_hint_line` to `render_hint_list`.
 
-Build again before continuing:
-`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+**Proofs.** Scratch data only; no test may read committed repository content
+(standing ruling). Existing helpers support this without terminal side effects:
+`State::new_without_worker`, `row_with_id`, the trait/trust row builders, and
+`RatatuiPane::new_detached_for_test` (`tui_ratatui.rs:687`). Give the registry
+tests a shared name prefix so one filter runs the set — `action_registry_` is
+what the Done-when command below filters on. The central proof is behavioral and
+best done on a scratch screen in `tui_kit.rs`: declare a scratch command enum,
+context, and row table, and assert that one row reaches dispatch, footer, guide,
+and menu, then that deleting that one row removes it from all four at once.
+Existing footer tests for loading precedence (`9069-9080`), stale refresh
+(`9202-9255`), and screen-switch preservation (`12590-12614`) must keep passing;
+replace only the expectations the new footer genuinely obsoletes — the TRUST
+orphan footer test (`11995-12007`) and the navigation-prefix footer test
+(`12616-12627`).
 
-## Step 3 — the declarations (`dashboard/keymap.rs`)
+## Out of scope (binding)
 
-Rewrite this module. Its header currently states that screen arms remain the
-dispatch; after this task that sentence is false and must be replaced by the
-opposite contract. The 0148 case-discipline paragraph (`keymap.rs:10-15`)
-stays — it still governs which key a verb gets.
-
-**Removed**: `pub(super) const GLOBAL_TAIL`, `const SESSIONS`, `const TRAITS`,
-`const MERGES`, `const TRUST`, `const TASKS` (all `&[Binding]`),
-`pub(super) fn bindings`, `pub(super) fn hint_line`,
-`pub(super) fn global_tail_hint`, and both existing tests
-(`no_duplicate_key_within_a_context`, `every_binding_appears_in_its_own_hint_line`).
-
-**Added**:
-
-- `pub(super) type DashRow = ActionRow<DashCmd, State>;`
-- `const LEAD: &[DashRow]` — `?` guide, `.` menu, both with the `never`
-  predicate (decision 4).
-
-No `Binding` value and no hint-only table is declared in this module after the
-rewrite: `use tui_kit::Binding` is dropped from it, so a parallel hint list
-cannot be reintroduced here without re-importing the type (decision 5).
-Criterion 1 greps this file for the bare word `Binding` and fails on a hit, so
-do not name the type in a comment either — say "hint table" if the header
-needs to explain what is gone. `Binding` itself stays in `tui_kit.rs`: the
-live-view/guide/story tables still use it, and `KeySpec::binding` is the reuse
-seam into `render_hint_list`.
-- `const TAIL: &[DashRow]`, and `const SESSIONS/TRAITS/MERGES/TRUST/TASKS:
-  &[DashRow]`, each ordered most-used-first so its first three rows are the
-  footer (decision 3), and each covering exactly the keys `handle_key` binds
-  today for that screen — no key gained, none lost. Every field of every row
-  is fixed by the declaration matrix below.
-- `pub(super) fn action_rows(screen: Screen) -> Vec<DashRow>` —
-  `LEAD.iter().chain(screen_rows(screen)).chain(TAIL).copied().collect()`.
-  A `Vec` of ~14 `Copy` rows is built once per frame for the footer and once
-  per overlay open; that is far below the `format!` traffic `footer_line`
-  already does per frame, and it is what lets one flat slice feed all four
-  derived surfaces.
-- `fn screen_rows(screen: Screen) -> &'static [DashRow]` (private).
-### The declaration matrix — every production row, in declaration order
-
-Nothing here is left to the implementer: id, display key, physical codes,
-label, one-line explanation, and predicate are all fixed. `codes` drops the
-`KeyCode::` prefix for width — `Char('a')` means `&[KeyCode::Char('a')]`.
-Labels are static lowercase verbs (decision 5 — never state-dependent);
-explanations are exactly one line, no trailing period, and say what the verb
-DOES, not when it applies (the menu already answers that).
-
-`LEAD` (every screen, first):
-
-| id | display | codes | label | explain | applies |
-| `Guide` | `"?"` | `Char('?')` | `"guide"` | `"list every key this screen binds"` | `never` |
-| `Menu` | `"."` | `Char('.')` | `"menu"` | `"list the actions that apply to the current row"` | `never` |
-
-`SESSIONS`:
-
-| id | display | codes | label | explain | applies |
-| `SessionAttach` | `"Enter"` | `Enter` | `"attach/expand"` | `"attach to the selected run, or expand the selected group"` | `can_attach_or_expand` |
-| `SessionAnswer` | `"a"` | `Char('a')` | `"answer"` | `"answer the question this run is parked on"` | `can_answer` |
-| `SessionSpawn` | `"n"` | `Char('n')` | `"spawn"` | `"start a new run from a trait"` | `always` |
-| `SessionExpand` | `"space"` | `Char(' ')` | `"expand"` | `"collapse or expand the selected group"` | `can_expand_session_group` |
-| `SessionResume` | `"s"` | `Char('s')` | `"resume"` | `"resume a parked run from its last frame"` | `can_resume` |
-| `SessionStory` | `"S"` | `Char('S')` | `"story"` | `"read what this run did, frame by frame"` | `can_story` |
-| `SessionStop` | `"x"` | `Char('x')` | `"stop"` | `"ask the driver to stop after the current frame"` | `can_stop` |
-| `SessionDelete` | `"d"` | `Char('d')` | `"delete"` | `"remove this run's ledger, worktree, and branch"` | `can_delete_session` |
-| `RepoScope` | `"v"` | `Char('v')` | `"repo scope"` | `"switch between this repository only and all repositories"` | `always` |
-
-`TRAITS`:
-
-| id | display | codes | label | explain | applies |
-| `TraitApprove` | `"a"` | `Char('a')` | `"approve"` | `"record trust for this trait at its current digest"` | `can_trust_trait` |
-| `TraitBlock` | `"b"` | `Char('b')` | `"block"` | `"record a block for this trait at its current digest"` | `can_trust_trait` |
-| `TraitEditSource` | `"e"` | `Char('e')` | `"edit source"` | `"open this trait's authored source in $EDITOR"` | `can_edit_trait_source` |
-| `TraitExplain` | `"x"` | `Char('x')` | `"explain"` | `"show the narrator's explanation of this trait"` | `can_explain_trait` |
-
-`MERGES`:
-
-| id | display | codes | label | explain | applies |
-| `MergeStandard` | `"Enter/m"` | `Enter, Char('m')` | `"merge"` | `"retry the merge for the selected run"` | `can_merge_row` |
-| `MergeDeep` | `"d"` | `Char('d')` | `"deep-merge"` | `"retry the merge for the selected run through the deep merger"` | `can_merge_row` |
-| `MergeDrop` | `"x"` | `Char('x')` | `"drop"` | `"drop this run from the merge queue and remove its artifacts"` | `can_drop_merge` |
-| `MergePrintPath` | `"p"` | `Char('p')` | `"print path"` | `"print the selected run's worktree path"` | `can_print_merge_path` |
-| `RepoScope` | `"v"` | `Char('v')` | `"repo scope"` | `"switch between this repository only and all repositories"` | `always` |
-
-`TRUST`:
-
-| id | display | codes | label | explain | applies |
-| `TrustApprove` | `"a"` | `Char('a')` | `"approve"` | `"record trust for the selected record's trait"` | `can_trust_row` |
-| `TrustBlock` | `"b"` | `Char('b')` | `"block"` | `"record a block for the selected record's trait"` | `can_trust_row` |
-| `TrustMark` | `"space"` | `Char(' ')` | `"mark"` | `"add or remove this trait from the marked set"` | `can_mark_trust` |
-| `TrustApproveFamilyOrMarked` | `"A"` | `Char('A')` | `"approve family/marked"` | `"approve the whole family, or the marked set when one exists"` | `can_approve_family_or_marked` |
-| `TrustOrphans` | `"o"` | `Char('o')` | `"orphans"` | `"show or hide records whose trait no longer resolves"` | `always` |
-
-`TASKS`:
-
-| id | display | codes | label | explain | applies |
-| `TaskDispatch` | `"d"` | `Char('d')` | `"dispatch"` | `"start a run for the selected task"` | `can_task_row` |
-| `TaskMarkDone` | `"y"` | `Char('y')` | `"mark done"` | `"close the selected task as done"` | `can_task_row` |
-| `TaskEdit` | `"e"` | `Char('e')` | `"edit"` | `"change the selected task's fields"` | `can_task_row` |
-| `TaskExpand` | `"space"` | `Char(' ')` | `"expand"` | `"collapse or expand the selected group"` | `can_expand_task_group` |
-| `TaskSplit` | `"s"` | `Char('s')` | `"split"` | `"split the selected task into child tasks"` | `can_task_row` |
-| `TaskSync` | `"S"` | `Char('S')` | `"sync"` | `"re-read the whole task board now"` | `always` |
-| `TaskReconcile` | `"R"` | `Char('R')` | `"reconcile"` | `"review board changes proposed from run evidence"` | `always` |
-| `TaskArchive` | `"a"` | `Char('a')` | `"archive"` | `"archive the selected task with a closing status"` | `can_task_row` |
-
-`TAIL` (every screen, last):
-
-| id | display | codes | label | explain | applies |
-| `Reload` | `"r"` | `Char('r')` | `"reload"` | `"re-read every inventory this screen shows"` | `always` |
-| `Quit` | `"q"` | `Char('q')` | `"quit"` | `"leave the dashboard"` | `always` |
-
-Footer consequence (decision 3, `FOOTER_LIMIT = 5`): SESSIONS renders
-`[?] guide · [.] menu · [Enter] attach/expand · [a] answer · [n] spawn`, and
-each other screen the same two LEAD entries plus its own first three.
-
-### The predicates
-
-Every predicate is `fn <name>(state: &State) -> bool`, defined in this module,
-reading already-loaded `State` through `super::` seams — no I/O, no lock probe,
-no center read (decision 4). Exact bodies:
-
-- `always` — `true`. `never` — `false`; `never` is used by exactly the two
-  `LEAD` rows, which keep their footer and guide presence (neither surface
-  filters by applicability) and are dropped only by the menu, which fires what
-  it lists.
-- `can_attach_or_expand` — `state.sessions_visible.get(state.list_sessions.selected()).is_some()`
-  (a header expands, a row attaches; `SessionClass::can_attach`
-  `dashboard.rs:216-218` still gates the attach half at execution time).
-- `can_expand_session_group` — `matches!(state.sessions_visible.get(state.list_sessions.selected()), Some(super::VisibleRow::GroupHeader { .. }))`.
-- `can_answer` — `super::selected_session(state).is_some_and(super::row_may_answer)`.
-- `can_resume` — `super::selected_session(state).is_some_and(|row| row.class.can_resume())`.
-- `can_story` — `super::selected_session(state).is_some_and(|row| !row.run_id.is_empty())`
-  (`open_story_view` `:2112-2125`).
-- `can_stop` — `super::selected_session(state).is_some_and(super::row_may_stop)`.
-- `can_delete_session` — `super::selected_session(state).is_some()`, matching
-  what `open_delete_modal` (`:4713-4755`) actually enforces, NOT the stale
-  terminal-only comment beside it; widened per Step 0's reread if 0252.5 has
-  landed group delete.
-- `can_trust_trait` — `state.traits.get(state.selected()).is_some_and(|row| !row.canonical_digest.is_empty())`
-  (`open_trait_trust_modal` `:5643-5651`).
-- `can_edit_trait_source` — `state.traits.get(state.selected()).is_some_and(|row| super::dashboard_trait_editable_source(&row.source_path).is_some())`
-  (`:5871-5878`; already imported by `dashboard.rs:41`).
-- `can_explain_trait` — `state.traits.get(state.selected()).is_some()` (`:5899-5901`).
-- `can_merge_row` — `state.merges.get(state.selected()).is_some_and(|row| row.class.can_retry())`
-  (`:388-394`, `:5438-5447`).
-- `can_drop_merge` — `state.merges.get(state.selected()).is_some_and(|row| row.class.can_drop())`
-  (`:396-401`, `:5505-5514`).
-- `can_print_merge_path` — `state.merges.get(state.selected()).is_some_and(|row| row.worktree.is_some())`
-  — the row-projection half only; `resolve_merge_worktree_path`'s git
-  registration probe (`:5483-5498`) stays at execution time with its message.
-- `can_trust_row` — `super::selected_trust(state).is_some_and(|row| row.trait_id.is_some() && !row.current_digest.is_empty())`
-  (`:5664-5678`).
-- `can_mark_trust` — `super::selected_trust(state).is_some_and(|row| row.trait_id.is_some())`
-  (the `space` arm at `:3064-3070`).
-- `can_approve_family_or_marked` — `!state.trust_marks.is_empty() || super::selected_trust(state).is_some_and(|row| row.trait_id.is_some() && row.family.is_some())`
-  — `A` means "marked set" when marks exist and "family" otherwise
-  (`:3072-3078`, `:5697-5705`); the readable-member scan stays at execution.
-- `can_task_row` — `super::selected_task(state).is_some()`, shared by split,
-  archive, edit, mark done, and dispatch (each keeps its own inline refusal for
-  the deeper checks — decision 4).
-- `can_expand_task_group` — `matches!(state.tasks_visible.get(state.list_tasks.selected()), Some(super::TaskVisibleRow::GroupHeader { .. }))`.
-
-`keymap` is a descendant of the `dashboard` module, so `State`'s private
-fields, `State::selected`, `VisibleRow`, `TaskVisibleRow`, `selected_session`,
-`selected_task`, and `selected_trust` are all reachable through `super::`
-without widening any visibility.
-
-## Step 4 — dispatch and routing (`dashboard.rs`)
-
-- **Add** `#[derive(Clone, Copy, PartialEq, Eq, Debug)] pub(super) enum DashCmd`
-  with one variant per row id: `Guide`, `Menu`, `Reload`, `Quit`,
-  `SessionAttach`, `SessionExpand`, `SessionAnswer`, `SessionResume`,
-  `SessionStory`, `SessionStop`, `SessionDelete`, `SessionSpawn`, `RepoScope`,
-  `TraitApprove`, `TraitBlock`, `TraitEditSource`, `TraitExplain`,
-  `MergeStandard`, `MergeDeep`, `MergePrintPath`, `MergeDrop`, `TrustApprove`,
-  `TrustBlock`, `TrustMark`, `TrustApproveFamilyOrMarked`, `TrustOrphans`,
-  `TaskExpand`, `TaskSplit`, `TaskSync`, `TaskReconcile`, `TaskArchive`,
-  `TaskEdit`, `TaskMarkDone`, `TaskDispatch`. The existing `enum Action`
-  (`dashboard.rs:746-758`) is the modal CONTINUATION tag and is left
-  completely untouched — `DashCmd` is a key-command id, a different thing; say
-  so in both doc comments so the two names never get conflated.
-- **Add** `fn row_may_answer(row: &SessionRow) -> bool` — body exactly
-  `row.status == Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman)
-  && row.next_frame_kind == Some(ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask)
-  && row.outcome != Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)`
-  — and `fn row_may_stop(row: &SessionRow) -> bool` — body exactly
-  `row.class == SessionClass::Live || has_running_evidence(row)
-  || row.status == Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman)`,
-  the three cases `open_kill_modal` accepts (`:4544-4577`). These are the
-  row-projection APPROXIMATIONS decision 4 calls for, not extractions:
-  `open_answer_modal` (`:4586-4673`) and `open_kill_modal` (`:4535-4584`) make
-  no cheap pre-check today — their first act is a center read or a driver-lock
-  probe. Neither opener is changed by this task: it does NOT call these helpers
-  and does NOT gain an early return, so every probe, center read, and refusal
-  message inside them fires exactly as it does now, including when the menu
-  offered the verb and the authoritative check then refuses it.
-- **Add** `fn open_exit_modal(state: &mut State)` — the one exit seam, body
-  exactly `state.modal_host.open(Action::Exit, Modal::confirm("exit", "Quit
-  ctx traits?"));`, lifted from the two byte-identical copies that exist today
-  at `dashboard.rs:2967-2971` (Ctrl-C) and `:2998-3002` (the `q` arm). Both
-  call sites become `open_exit_modal(state)`: the Ctrl-C branch in routing
-  step 3 below, and `DashCmd::Quit` in `run_command`. Neither constructs
-  `Action::Exit` or `Modal::confirm` inline afterwards, so the exit prompt
-  cannot drift between the two ways of reaching it.
-- **Add** `fn run_command(pane: &mut RatatuiPane, state: &mut State, cmd: DashCmd) -> crate::Result<()>`
-  — one exhaustive `match cmd` over `DashCmd`, each arm calling the existing
-  seam and nothing else (`attach_selected`, `toggle_selected_group`,
-  `open_answer_modal`, `open_resume_modal`, `open_story_view`,
-  `open_kill_modal`, `open_delete_modal`, `open_spawn_modal`,
-  `open_trait_trust_modal`, `edit_selected_trait_source(pane, state)?`,
-  `explain_selected_trait`, `open_merge_retry_modal(state, false|true)`,
-  `print_merge_worktree_path`, `open_merge_drop_modal`, `open_trust_modal`,
-  `open_trust_family_modal`/`open_trust_marked_modal`, `toggle_trust_orphans`,
-  `toggle_selected_task_group`, `open_task_split_modal`, `sync_tasks_board`,
-  `open_task_reconcile`, `open_task_archive_modal`, `open_task_edit_modal`,
-  `open_task_mark_done_modal`, `dispatch_selected_task`, `state.reload()`, and
-  `open_exit_modal(state)` for `Quit`). `SessionAttach` reproduces today's
-  header/row branch (`dashboard.rs:3105-3111`) byte-for-byte. `RepoScope`
-  reproduces the `all_repos` toggle + both list resets + reload
-  (`:3029-3036`). The match's exhaustiveness is the compiler-enforced half of
-  the contract: a `DashCmd` with no executor does not build. `Guide`/`Menu`
-  are the two exceptions and reach it as
-  `unreachable!("overlay openers handled in handle_command_key")`, matching
-  the existing early-return-then-`unreachable!` precedent at `:7233-7248`.
-  That `unreachable!` is safe because it is reachable from nowhere by
-  construction, on both routes into this function: `handle_command_key`
-  intercepts those two ids before calling it, and the menu — the only other
-  caller — cannot list them, since decision 4 gives both rows the `never`
-  predicate and `ActionOverlay::menu` builds from `applicable_actions`. Step 6
-  asserts both halves.
-- **Add** the menu's stable-selection identity (decision 7), exactly:
-  - `#[derive(Clone, PartialEq, Eq)] enum MenuTaskSelection { Group(TaskGroup), Task(String) }`
-  - `#[derive(Clone, PartialEq, Eq)] enum MenuSelection { Sessions(Option<VisibleSelection>), Traits(Option<(String, Option<String>)>), Merges(Option<String>), Trust(Option<(Option<String>, String)>), Tasks(Option<MenuTaskSelection>) }`
-    — trait identity is `(id, variant)` (a family's variants share `id`,
-    `dashboard.rs:304-307`), merge identity is `session_id` (what
-    `apply_merge_action` already re-looks-up by), trust identity is
-    `(trait_id, current_digest)`, task identity is the board key.
-  - `fn menu_selection(state: &State) -> MenuSelection` — one arm per
-    `Screen`: `Sessions => MenuSelection::Sessions(selected_visible_row(state))`;
-    `Traits => MenuSelection::Traits(state.traits.get(state.selected()).map(|row| (row.id.clone(), row.variant.clone())))`;
-    `Merges => MenuSelection::Merges(state.merges.get(state.selected()).map(|row| row.session_id.clone()))`;
-    `Trust => MenuSelection::Trust(selected_trust(state).map(|row| (row.trait_id.clone(), row.current_digest.clone())))`;
-    `Tasks => MenuSelection::Tasks(state.tasks_visible.get(state.list_tasks.selected()).map(|row| match row { TaskVisibleRow::GroupHeader { group, .. } => MenuTaskSelection::Group(*group), TaskVisibleRow::Task(key) => MenuTaskSelection::Task(key.clone()) }))`.
-    Pure reads of loaded state, no I/O, on the same seams the predicates use.
-  - **Change** `enum VisibleSelection` (`:1976-1979`) to
-    `#[derive(Clone, PartialEq, Eq)]` — `SessionGroup` is already
-    `Clone + Copy + PartialEq + Eq` (`:1888`) and `String` is, so the derive
-    compiles as written and nothing else about the type moves.
-- **Add** `fn handle_command_key(pane: &mut RatatuiPane, state: &mut State, key: &KeyEvent) -> crate::Result<bool>`
-  — `tui_kit::action_for_key(&keymap::action_rows(state.screen), key)`; `None`
-  => `Ok(false)`; `Guide` => set `state.action_overlay_selection = None` and
-  open `state.action_overlay` as
-  `ActionOverlay::guide(format!("{} actions", state.screen.title()), &rows)`
-  (the guide fires nothing, so it binds to nothing);
-  `Menu` => build `ActionOverlay::menu(..)` and, when `is_empty()`, leave it
-  closed and set `state.message = Some("no actions apply to this row".into())`
-  rather than opening an empty box — otherwise open it AND capture
-  `state.action_overlay_selection = Some(menu_selection(state))`, the identity
-  the listed entries describe; any other id => `run_command(..)`. Returns
-  `Ok(true)` whenever a row matched.
-- **Add** fields `action_overlay: Option<tui_kit::ActionOverlay<DashCmd>>` and
-  `action_overlay_selection: Option<MenuSelection>` to `State`
-  (`dashboard.rs:1141` neighbourhood), both `None` in
-  `State::new_without_worker`'s initializer (`:1332-1339` neighbourhood), plus
-  `fn close_action_overlay(state: &mut State)` whose body clears BOTH fields —
-  the one seam that closes the overlay, so a captured selection can never
-  outlive the entries it belonged to.
-- **Rewrite** `handle_key`'s precedence (`dashboard.rs:2952-3092`) to exactly:
-  1. `state.modal_host.handle_key` resolve => `apply_action` (unchanged).
-  2. `state.modal_host.is_open()` => return (the focus trap, unchanged).
-  3. Ctrl-C => `close_action_overlay(state); open_exit_modal(state); return`
-     — the same prompt `DashCmd::Quit` opens, through the same helper, with
-     the inline `modal_host.open(..)` copy deleted. Closing the overlay first
-     is load-bearing: otherwise the exit modal draws over a still-open overlay
-     that would reappear on cancel.
-  4. **New**: `if state.action_overlay.is_some()` route the key through
-     `ActionOverlay::handle_key`. `Pending` => return; `Closed` =>
-     `close_action_overlay` + return; `Fire(cmd)` => decision 7's
-     stable-selection check, in exactly this order: read
-     `let described = state.action_overlay_selection.clone();` then
-     `close_action_overlay(state)` (so a command that opens a modal never
-     leaves the overlay behind it, and neither does a refusal); then
-     `if described != Some(menu_selection(state)) { state.message = Some("selection changed; reopen actions".to_string()); return Ok(()); }`
-     — no `run_command`, no side effect, on the row the menu never described.
-     Only on equality does `run_command(pane, state, cmd)?` run. A `Fire` with
-     `described == None` cannot occur (only a menu carries ids, and opening a
-     menu always captures), and the `!=` still refuses it if it ever does.
-     This trap sits above story view and below the modal trap, preserving the
-     existing trap ordering.
-  5. story view (unchanged), 6. Alt-arrow pane movement (unchanged),
-     7. `queue_sessions_pane_key` (unchanged), 8. `handle_navigation_key`
-     (unchanged).
-  9. **New**: `if handle_command_key(pane, state, &key)? { return Ok(()); }`.
-  10. `handle_focus_key` (moved BELOW the registry, see next bullet).
-  11. A final `match key.code` reduced to exactly `Tab`, `BackTab`,
-      `Char('1')..Char('5')`, and `_ => {}`. **Every** `if state.screen == ...`
-      arm is removed from it, and so is the `Char('q')` arm — `q` is the
-      `DashCmd::Quit` row now and never reaches step 11. That is the
-      "replaced, not paralleled" line.
-- **Change** `handle_focus_key` (`:3096-3122`): delete its
-  `KeyCode::Enter if state.screen == Screen::Sessions` and
-  `KeyCode::Enter if state.screen == Screen::Merges` arms — both are now
-  registry rows dispatched at step 9. It keeps `Esc` and the generic
-  `KeyCode::Enter => focus_pane(preview)`, which is why it must now run AFTER
-  the registry: on SESSIONS/MERGES the registry claims `Enter` first, and on
-  the other three screens `action_for_key` returns `None` and focus handling
-  runs exactly as before.
-- **Change** the autorepeat gate in `run_with_initial_session` (`:2847-2850`):
-  add `&& state.action_overlay.is_none()` to the
-  `!state.modal_host.is_open() && state.story_view.is_none()` condition.
-  Without it a held `j` intended for the overlay moves the list underneath it
-  and never reaches `handle_key` at all.
-- **Change** `draw_screen` (`:7838-7929`): in the normal branch, after
-  `footer_line` and before the modal,
-  `if let Some(overlay) = state.action_overlay.as_mut() { tui_kit::render_action_overlay(frame, area, overlay); }`.
-  The modal still draws last. The story-view branch (`:7846-7864`)
-  deliberately does NOT render the overlay: routing step 4 sits above the
-  story trap, so an overlay can never be open while a story is — add
-  `debug_assert!(state.action_overlay.is_none())` there to keep that invariant
-  from silently rotting.
-- **Change** `State::switch_screen` (`:1383-1397`): clear BOTH overlay fields
-  (`self.action_overlay = None; self.action_overlay_selection = None;`).
-  Registry rows are screen-scoped; a surviving overlay would list another
-  screen's actions, and a surviving capture would be a foreign screen's
-  identity.
-
-Build again before continuing:
-`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
-
-## Step 5 — the footer (`dashboard.rs`)
-
-- **Add** `const FOOTER_LIMIT: usize = 5;`
-- **Add** `fn footer_state_text(state: &State) -> String` — the dynamic state
-  decision 5 relocates: always
-  `format!("[{}]", state.current_list().position_text())`, plus `"  [ALL]"` on
-  SESSIONS/MERGES when `state.all_repos`, plus, on TRUST,
-  `"  {n} orphaned {shown|hidden}  {m} marked"` from the same
-  `TrustClass::Orphaned` count, `state.show_trust_orphans`, and
-  `state.trust_marks.len()` that `footer_line` reads today.
-- **Rewrite** `fn footer_line(state: &State) -> Paragraph<'static>`
-  (`:8715-8773`):
-  - story-view branch:
-    `tui_kit::keymap_footer(tui_kit::render_hint_list(tui_kit::STORY_VIEW.iter().copied()), state.message.as_deref())`
-    — the only change is `render_hint_line` => `render_hint_list`, so the
-    dashboard has one hint format.
-  - normal branch row 1:
-    `tui_kit::footer_hints(&keymap::action_rows(state.screen), FOOTER_LIMIT)`
-    and nothing else. The `navigation` literal, `keymap::hint_line`,
-    `keymap::global_tail_hint`, the `v` scope verb, the `o` orphan verb and
-    count, `[ALL]`, `[{} marked]`, and the appended position all leave this
-    function.
-  - normal branch row 2: the existing loading / stale / generated-explanation
-    / message precedence verbatim, falling through to
-    `Some(footer_state_text(state))` instead of `None`.
-
-## Step 6 — tests
-
-Every test uses scratch data only; none reads committed repository content
-(standing ruling). All nine carry the `action_registry_` prefix so one filter
-runs the set.
-
-In `modules/cli/src/app/tui_kit.rs`:
-
-- `action_registry_row_drives_dispatch_footer_guide_and_menu_and_removal_removes_all_four`
-  — **the scratch-screen proof, and the task's central assertion.** Build a
-  scratch `struct ScratchCtx { row: Option<&'static str> }`, a scratch
-  `enum ScratchCmd { Alpha, Beta, Gamma }`, and
-  `const FULL: &[ActionRow<ScratchCmd, ScratchCtx>]` where `Beta` applies only
-  when `row.is_some()`. Assert on `FULL`: `action_for_key` maps Beta's key to
-  `ScratchCmd::Beta`; `footer_hints(FULL, 2)` contains `[<key>] <label>` for
-  Beta in the bracketed `·`-joined form; `ActionOverlay::guide` lists Beta even
-  with `row: None`; `ActionOverlay::menu` lists Beta with `row: Some` and omits
-  it with `row: None`. Then build `REDUCED` — the same table with Beta's row
-  deleted — and assert all four go away at once: `action_for_key` on Beta's key
-  is `None`, the footer string no longer contains its label, and neither the
-  guide nor the menu contains it. Dispatch, footer, guide, menu: four surfaces,
-  one row, asserted by name rather than by count.
-- `action_registry_overlay_scrolls_fires_only_menu_entries_and_closes` —
-  `scroll_key` movement changes `selected()`; Enter on a `guide` overlay
-  returns `Pending` (decision 6); Enter on a `menu` overlay returns `Fire(id)`
-  for the selected entry; `Esc`, `q`, `?`, and `.` each return `Closed`; an
-  unrelated char returns `Pending` (the trap consumes it).
-- `action_registry_key_matcher_allows_shift_and_rejects_ctrl_and_alt` — a
-  `KeySpec` for `Char('A')` matches `Char('A')` + SHIFT; a `KeySpec` for
-  `Char('d')` does not match `Char('d')` + CONTROL or + ALT; a two-code spec
-  (`Enter`/`m`) matches both.
-- `action_registry_footer_hints_render_the_parent_spelling` — the parent's
-  format contract, proved on the derivation itself (decision 3). Declare two
-  scratch `ActionRow`s — key `?` / label `guide`, key `d` / label `dash` — and
-  assert `footer_hints(&rows, 2) == "[?] guide · [d] dash"`, byte for byte,
-  middle dot and single spaces included. Also assert `footer_hints(&rows, 1)`
-  is `"[?] guide"` with no trailing separator, so the limit truncates cleanly.
-  This is the one place the exact parent string is asserted; the dashboard
-  screens assert the same grammar with their own verbs.
-
-In `modules/cli/src/app/dashboard/keymap.rs`:
-
-- `action_registry_binds_no_key_twice_within_a_screen` — the surviving half of
-  `no_duplicate_key_within_a_context`, now over dispatchable rows: for every
-  `Screen::all()`, no `KeyCode` in `action_rows(screen)` appears in two
-  different rows (a single row legitimately owning two codes is fine), and no
-  `display` string repeats. A duplicate key would make `action_for_key`'s
-  first-match silently shadow a verb.
-
-In `modules/cli/src/app/dashboard.rs`:
-
-- `action_registry_covers_every_dashboard_command` — every `DashCmd` variant
-  (an explicitly enumerated scratch array, so adding a variant without a row
-  fails the assert) has AT LEAST ONE row across `LEAD ++ every screen ++
-  TAIL`. Not "exactly one": `RepoScope` is deliberately declared twice, once
-  on SESSIONS and once on MERGES, because `v` means the same thing on both and
-  one id with two screen-scoped declarations is the point of a per-screen
-  table. Uniqueness is enforced where it actually matters — per screen, per
-  key, by `action_registry_binds_no_key_twice_within_a_screen`. Combined with
-  `run_command`'s exhaustive match, this closes the loop in both directions:
-  no row without an executor, no executor without a row.
-  Same test, second half — the row schema is complete, not just present: for
-  every row of `action_rows(screen)` on every `Screen::all()`, assert
-  `!row.explain.is_empty()`, `!row.explain.contains('\\n')`, and the same for
-  `row.label` and `row.key.display`. A row shipped with an empty or multi-line
-  explanation would render a blank or overflowing guide line, so the one-line
-  explanation the task requires is an asserted invariant, not a convention.
-- `action_registry_sessions_menu_lists_applicable_actions_and_fires_the_selected_one`
-  — `State::new_without_worker()` with scratch SESSIONS rows and
-  `RatatuiPane::new_detached_for_test()` (`tui_ratatui.rs:755`). Press `.`
-  through `handle_key`; assert the overlay opened and its entries are exactly
-  the applicable set (a resumable row offers resume, a non-resumable one does
-  not; a group header offers expand, not resume); move to a known entry, press
-  Enter, and assert the overlay closed and the command's own seam ran — the
-  `modal_host` is open under the expected `Action` tag for a modal-opening
-  verb — proving the menu fires through the same seam the key does, not a
-  duplicate path. Same test, second half — a menu never fires against a
-  replaced row (decision 7): open the menu on a session row, then apply a
-  snapshot that removes that session (rebuild `state.sessions` without it,
-  `rebuild_visible_sessions`, `restore_visible_selection` — the same sequence a
-  reload runs), which lands the cursor on its group header; press Enter on the
-  entry that would open a modal and assert ALL of: the overlay closed,
-  `state.modal_host.is_open()` is false, `state.action_overlay_selection` is
-  `None`, and `state.message` is `Some("selection changed; reopen actions")`.
-  Then reopen the menu and fire the same entry with the selection unchanged,
-  asserting the modal DOES open — so the guard refuses a replaced row without
-  breaking the ordinary path. Same test, third half — the overlay openers are
-  not fireable: for every `Screen::all()`, `ActionOverlay::menu(.., &action_rows
-  (screen), &state)` contains no entry whose `id()` is `Some(DashCmd::Guide)`
-  or `Some(DashCmd::Menu)`; and driving `Enter` over every entry index of a
-  SESSIONS menu returns `Fire(cmd)` values that are all neither, so no key
-  sequence can route those two ids into `run_command`'s `unreachable!`.
-- `action_registry_footer_and_guide_are_registry_rows_only_on_every_screen` —
-  replaces `every_footer_starts_with_navigation_and_return_hints`
-  (`:12848-12859`). For each screen:
-  - the rendered footer row 1 begins exactly `[?] guide · [.] menu`, carries
-    exactly `FOOTER_LIMIT` bracketed entries joined by ` · `, and equals
-    `footer_hints(&action_rows(screen), FOOTER_LIMIT)` — same grammar as the
-    parent's `[?] guide · [d] dash`, same function, screen's own verbs;
-  - it contains none of `↑↓/jk list`, `Enter focus`, `Esc list`, `Tab/1-5`,
-    `alt+arrows`, `[ALL]`, `marked`, or `orphan` — the relocated text
-    (decision 5) is on row 2, checked by the next test;
-  - every entry of `ActionOverlay::guide(.., &action_rows(screen))` matches,
-    by `key()` and `label()`, some `ActionRow` in `action_rows(screen)`, and
-    the counts are equal — so the guide is exactly the registry, with nothing
-    hand-written smuggled in beside it, and the rendered overlay shows no line
-    that is not one of those entries.
-- `action_registry_status_row_carries_scope_orphan_mark_and_position_state` —
-  replaces `trust_footer_always_exposes_the_orphan_toggle_and_count`
-  (`:12227-12239`): the TRUST status row shows the orphan count and flips
-  shown/hidden across `toggle_trust_orphans`, SESSIONS shows `[ALL]` only when
-  `all_repos`, and every screen's status row shows the list position — while a
-  set `state.message` still wins that row, so the existing
-  loading/stale/explanation/message tests keep passing unchanged.
-
-## Out of scope
-
-0252.3's `ButtonRow`/`Modal::buttons`; 0252.5's group-delete verb and delete
-extraction; 0252.4's failure modal; migrating `LIVE_VIEW`/`GUIDE_MODAL`/
-`STORY_VIEW` or the live view's `?` to the registry; registering navigation,
-focus, paging, screen-switch, Ctrl-C, or story-view keys — or documenting them
-on any surface, which is the same decision (decision 5); a `tui_demo.rs`
-registry consumer; mouse activation; any new key beyond `?` and `.`; any
-change to what a command DOES once fired.
+0252.3's `ButtonRow`/`Modal::buttons`; 0252.5's group-delete implementation and
+delete extraction; 0252.4's failure modal; migrating `LIVE_VIEW`,
+`LIVE_VIEW_GUIDE_ENTRY`, `GUIDE_MODAL`, `STORY_VIEW`, or the live/attached run
+view's `?` to the registry; changing what any command does once fired;
+duplicating any command's behavior in the registry; adding I/O, locks, or probes
+to applicability; tightening or loosening modifier acceptance (decision 3);
+registering overlay-internal keys; a `tui_demo.rs` registry consumer; mouse
+activation; any new dashboard key beyond the guide and menu openers.
 """
 validation = """
 ## Done when
 
-1. No hand-written dashboard hint string survives beside the registry, and
-   dispatch reads the declaration. This is a source inspection, deliberately
-   NOT a Rust test — no test may read committed repository content:
-   `D=modules/cli/src/app; ! rg -q "render_hint_line" "$D" && ! rg -q "↑↓/jk list" "$D/dashboard.rs" && ! rg -q "keymap::hint_line|keymap::global_tail_hint" "$D/dashboard.rs" && ! rg -q "Binding" "$D/dashboard/keymap.rs" && ! rg -q "GLOBAL_TAIL|fn hint_line\\(|fn global_tail_hint\\(" "$D/dashboard/keymap.rs" && ! rg -q "KeyCode::(Char\\('.'\\)|Enter) if state\\.screen" "$D/dashboard.rs" && [ "$(rg -c "Modal::confirm\\(.exit." "$D/dashboard.rs")" = 1 ] && rg -q "fn open_exit_modal\\(" "$D/dashboard.rs" && rg -q "pub\\(crate\\) struct ActionRow" "$D/tui_kit.rs" && rg -q "fn action_rows\\(screen: Screen\\)" "$D/dashboard/keymap.rs" && rg -q "fn run_command\\(" "$D/dashboard.rs" && rg -q "fn handle_command_key\\(" "$D/dashboard.rs"`
-   It exits 0 only when the old renderer, the navigation literal, both keymap
-   render helpers, every `Binding` in `keymap.rs` — the type a parallel hint
-   table would need, so its absence is the mechanical form of decision 5 — the
-   `Binding` tables' accessors, and every screen-guarded key-dispatch arm are
-   gone; when exactly one site constructs the exit confirm, behind
-   `open_exit_modal`; AND when the registry type, the row tables, the
-   executor, and the key dispatcher exist. The dispatch-arm pattern is
-   deliberately narrow — `KeyCode::<key> if state.screen ...`, all 30 of whose
-   current matches sit inside `handle_key`'s final match and
-   `handle_focus_key`, both rewritten here. A bare `if state.screen ==`
-   pattern would be wrong: 35 lines match it today and several
-   (`queue_sessions_pane_key`, `handle_navigation_key`, `draw_screen`,
-   `handle_focus_key`'s `Esc` arm) legitimately survive this task. It fails on
-   the pre-implementation tree — `render_hint_line` and `↑↓/jk list` both
-   exist at HEAD — so a green run is real evidence, not a vacuous match.
-2. The scratch-screen proof passes: one registered row drives dispatch, the
-   footer, the `?` guide, and the command menu, and deleting that row removes
-   all four at once; `footer_hints` over `?`/`guide` and `d`/`dash` rows
-   renders exactly `[?] guide · [d] dash`, the parent's spelling, derived;
-   the overlay scrolls, fires only menu entries, and closes; the key matcher
-   allows SHIFT and rejects CONTROL/ALT; no screen binds a key twice; every
-   `DashCmd` variant has at least one row (`RepoScope` deliberately has two,
-   SESSIONS and MERGES) and every row carries a nonempty single-line label and
-   explanation; a menu whose row a snapshot replaced fires nothing and says
-   `selection changed; reopen actions`; the SESSIONS menu lists exactly the
-   applicable actions, never offers `Guide` or `Menu`, and Enter fires the
-   selected one through the same seam the key uses; every screen's footer begins
-   `[?] guide · [.] menu` and every guide entry comes from an `ActionRow`; the
-   relocated state text is on the status row.
+1. **The replaced authorities are gone — replaced, not paralleled.** No
+   hand-written dashboard hint literal, no display-only keymap hint table or its
+   render helpers, and no screen-guarded key-dispatch arm survives anywhere under
+   `modules/cli/src/app`, and exactly one site opens the exit confirm modal. This
+   is a source inspection, deliberately not a Rust test — no test may read
+   committed repository content:
+   `D=modules/cli/src/app; ! rg -q "↑↓/jk list" "$D" && ! rg -q "const GLOBAL_TAIL|fn hint_line\\(|fn global_tail_hint\\(" "$D" && ! rg -qU "KeyCode::(Char\\([^)]*\\)|Enter)\\s*\\n?\\s*if state\\.screen" "$D" && test $(rg -oU "Action::Exit,\\s*\\n?\\s*Modal::confirm" "$D" | wc -l) -eq 1`
+   The dispatch-arm pattern is multiline on purpose: today's `KeyCode::Char('v')`
+   arm carries its `if state.screen` guard on the next line, so a line-oriented
+   pattern would miss it. It is also narrow on purpose — a bare `if state.screen
+   ==` would be wrong, since `queue_sessions_pane_key`, `handle_navigation_key`,
+   `draw_screen`, and `handle_focus_key`'s `Esc` arm legitimately survive. The
+   command was run at HEAD and exits 1 there (32 guarded arms, the navigation
+   literal, and two exit-modal sites all present), so a green run is real
+   evidence rather than a vacuous match. The registry's *existence* is not
+   asserted by grep — criterion 2 proves it behaviorally, without pinning a name.
+
+2. **One declaration authority drives all four surfaces, and the menu is safe.**
    `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib action_registry_`
-3. Nothing that routed keys before this task regressed — the modal focus trap,
-   SESSIONS autorepeat and paging, stable selection across reloads, the
-   authoritative action rechecks, and the loading/stale/message footer rows.
+   Behaviors that must be proven (how to observe each is the run's choice):
+   - one registered row reaches dispatch, the footer, the `?` guide, and the
+     command menu, and removing that one row removes it from all four at once;
+   - the footer projection over `?`/`guide` and `d`/`dash` rows renders exactly
+     `[?] guide · [d] dash` — the parent's spelling, derived rather than typed —
+     and truncating at the cap leaves no trailing separator;
+   - the overlay scrolls, consumes keys as a focus trap, closes on its close
+     keys; guide entries fire nothing and menu entries fire;
+   - within a screen no key is declared twice (a single row owning aliases such
+     as MERGES `Enter`/`m` is fine, and is the reason the alias is one row);
+   - every dashboard command has at least one declaration and every declaration
+     has an executor — `RepoScope` deliberately appears on both SESSIONS and
+     MERGES from one shared declaration — and every row carries a nonempty,
+     single-line key display, label, and explanation;
+   - the menu lists exactly the applicable actions for the selected row, never
+     offers the guide or menu openers, and firing an entry runs the same seam the
+     key runs, not a duplicate path;
+   - pressing a registered key still dispatches regardless of applicability, and
+     the executor's existing authoritative refusal still fires with its current
+     message (decision 2) — for example stop on a non-live row;
+   - the pre-fire guard refuses a replaced row: after a snapshot replaces the
+     row the menu described, firing executes nothing, opens no modal, clears the
+     capture, and reports that the selection changed; reopening on an unchanged
+     selection fires normally; and the guard distinguishes two rows carrying the
+     **same session id in different repositories** (decision 6), not merely a
+     removal at an unchanged index;
+   - every screen's footer row one is the registry projection and contains none
+     of the relocated navigation, scope, orphan, mark, or position text, while
+     row two carries scope/orphan/mark/position and still yields to
+     loading/stale/explanation/message;
+   - every `?` guide entry comes from a registry row, counts included, and the
+     guide names the structural keys — list movement, paging, focus, list,
+     screen switching, pane movement, and the Ctrl-C quit prompt (decision 1).
+
+3. **Nothing that routed keys or rendered the footer before this task
+   regressed** — the modal focus trap, Ctrl-C and alt+arrow precedence, SESSIONS
+   autorepeat and paging, stable selection across reloads, the authoritative
+   action rechecks, and the loading/stale/message footer rows.
    `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib`
-4. The landing gate is green.
+
+4. **The landing gate is green.**
    `CARGO_TARGET_DIR=target just test-full`
-5. The diff touches only the three implementation files, plus this task file
-   if the board updates it. The verdict is in the exit code, not in the eye:
-   `test -z "$(git status --short | cut -c4- | rg -v '^(\\.internal/tasks/0252\\.6-one-action-registry\\.toml|modules/cli/src/app/tui_kit\\.rs|modules/cli/src/app/dashboard/keymap\\.rs|modules/cli/src/app/dashboard\\.rs)$')"`
-   Any other path — a stray `tui_demo.rs`, `tui_panes.rs`, `run_view*`, a new
-   test file under `modules/cli/tests/`, a `Cargo.toml` — survives the `rg -v`
-   and makes the string non-empty, so the command exits 1. The task file is
-   allowed because the board rewrites it in place; it is not implementation
-   scope, and no step above edits it.
 
-Criteria 1-4 each carry a runnable command and a `[[checks]]` entry.
-Criterion 5 carries a runnable command but deliberately NO `[[checks]]` entry:
-checks execute in a clean detached worktree of the merged sha, where
-`git status --short` is empty by construction, so the entry would exit 0 for
-every possible diff. A check that cannot fail is worse than no check
-(standing doctrine), so criterion 5 stays an implementer-run command,
-executed in the working tree where it can actually fail.
-
-Run Step 0's reread first, then the steps in order, running the incremental
-build command declared at the end of Steps 1, 2, and 4 rather than building
-only at the end, so a generics/exhaustiveness/borrow error surfaces next to the
-edit that caused it. Then run the criterion commands 1, 2, 3, 4, 5 in that
-order. Permit at most two targeted repair-and-rerun rounds in total; after each
-repair rerun the failing command and every later one. Complete only when all
-five criterion commands exit 0.
+Run the criterion commands 1, 2, 3, 4 in that order; building incrementally
+(`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`) after the primitives,
+the overlay, and the dispatch rewrite is suggested so a generics, exhaustiveness,
+or borrow error surfaces next to the edit that caused it. Permit at most two
+targeted repair-and-rerun rounds in total; after each repair rerun the failing
+command and every later one. Complete when all four criterion commands exit 0.
 """
 
 [relations]
 parent = "0252"
 
 [[checks]]
-name = "no hand-written hint survives and dispatch reads the registry"
-command = 'D=modules/cli/src/app; ! rg -q "render_hint_line" "$D" && ! rg -q "↑↓/jk list" "$D/dashboard.rs" && ! rg -q "keymap::hint_line|keymap::global_tail_hint" "$D/dashboard.rs" && ! rg -q "Binding" "$D/dashboard/keymap.rs" && ! rg -q "GLOBAL_TAIL|fn hint_line\(|fn global_tail_hint\(" "$D/dashboard/keymap.rs" && ! rg -q "KeyCode::(Char\(...\)|Enter) if state\.screen" "$D/dashboard.rs" && [ "$(rg -c "Modal::confirm\(.exit." "$D/dashboard.rs")" = 1 ] && rg -q "fn open_exit_modal\(" "$D/dashboard.rs" && rg -q "pub\(crate\) struct ActionRow" "$D/tui_kit.rs" && rg -q "fn action_rows\(screen: Screen\)" "$D/dashboard/keymap.rs" && rg -q "fn run_command\(" "$D/dashboard.rs" && rg -q "fn handle_command_key\(" "$D/dashboard.rs"'
+name = "the replaced hint and dispatch authorities are gone"
+command = 'D=modules/cli/src/app; ! rg -q "↑↓/jk list" "$D" && ! rg -q "const GLOBAL_TAIL|fn hint_line\(|fn global_tail_hint\(" "$D" && ! rg -qU "KeyCode::(Char\([^)]*\)|Enter)\s*\n?\s*if state\.screen" "$D" && test $(rg -oU "Action::Exit,\s*\n?\s*Modal::confirm" "$D" | wc -l) -eq 1'
 
 [[checks]]
 name = "one row drives dispatch, footer, guide, and menu"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib action_registry_"
 timeout-ms = 1800000
-expect = 'test result: ok\. 9 passed; 0 failed'
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
 
 [[checks]]
 name = "no key-routing or footer regression in the cli library tests"
