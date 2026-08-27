@@ -26,7 +26,7 @@ verdict), which this task adopts as its contract:
 This is test infrastructure with no product-behaviour change; it exists so
 0252.4 and every later PTY proof assert against product bytes only.
 
-## Grounded against HEAD 7a22359b (implementation code as of e7881711)
+## Grounded against HEAD 21d87c6f (implementation code as of e7881711)
 
 Defects 1 and 3 are confirmed verbatim in the code:
 
@@ -34,16 +34,16 @@ Defects 1 and 3 are confirmed verbatim in the code:
   and `:668-713` (`run_pty_signal_after_marker`) build `Command::new("expect")`
   by hand and set only HOME/XDG/PATH/TERM/CTX_STARTUP_BIN. Neither exports
   `CTX_CENTER_SOCKET` / `CTX_CENTER_SPAWN_LOCK` / `CTX_CENTER_RUNS_ROOT` /
-  `CTX_CENTER_INDEX`, nor `LC_ALL`/`LANG`/`NO_COLOR`/`TMPDIR`.
+  `CTX_CENTER_INDEX`, nor `LC_ALL`/`LANG`/`TMPDIR`.
   `controlled_command` (`:324-367`) is the single existing authority for
   all of that; `modules/io/src/center.rs:550-569` proves the tuple is
   all-or-nothing (`incomplete private center configuration`), which is why
   it is never re-declared in a second place.
 - Scope correction to defect 1 as originally written: the third helper,
   `run_pty_keys_after_markers` (`:716-763`), ALREADY goes through
-  `controlled_command`, and `spawn_background_run` already goes through
-  `spawn_ctx`/`controlled_command`. So the dashboard proof is not
-  tuple-less at HEAD, and this convergence is not what turns a
+  `controlled_command` (since 0243.5, `da5ec12e`), and `spawn_background_run`
+  already goes through `spawn_ctx`/`controlled_command`. So the dashboard
+  proof is not tuple-less at HEAD, and this convergence is not what turns a
   `live (0)` dashboard into `live (1)`. Convergence is still required —
   two helpers running children against the production endpoint is the
   defect — but no Done-when may claim it as the cause of a dashboard
@@ -61,7 +61,8 @@ Defects 1 and 3 are confirmed verbatim in the code:
   deleted for them — they stay forbidden. The current key API is already
   `steps: &[(&str, &str)]`, and
   `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
-  already transmits ETX through it, so no raw-key variant is needed.
+  already transmits ETX through it (`"\\u{3}"`, one byte 0x03), so no
+  raw-key variant is needed.
 
 ## Correction 1 — `in-progress {role}@{harness}` is NOT a post-spawn marker
 
@@ -71,7 +72,7 @@ HEAD, and the whole readiness rule below is built on the refutation:
 
 - `narration_for` has a SECOND call route besides `update_live_display`:
   `RunPanel::refresh` calls it directly at
-  `modules/cli/src/app/run_view.rs:716` on every frame refresh, and
+  `modules/cli/src/app/run_view.rs:693-727` on every frame refresh, and
   `narration_for` (`render.rs:1086-1096`) unconditionally returns
   `Some(RunNarration { label: active_label(session), .. })`.
 - `LiveLine::current_display` (`tui.rs:189-207`) returns the
@@ -94,13 +95,13 @@ The readiness rule that follows, and that every later PTY proof inherits:
 **a readiness marker for key delivery must contain text that only the
 spawned child could have produced.** Here that is the stub agent's own
 stdout, `live tick <n>`, painted into the run view either as a model-text
-stream row (`run_view.rs:747`) or as the dimmed passthrough live line
+stream row (`run_view.rs:736-761`) or as the dimmed passthrough live line
 after the two-second `NARRATION_SOFT_TIMEOUT` (`tui.rs:150-160`, `:189-207`,
 `:247`). Both routes require `RunPanel::push_bytes`, which is fed only by
 bytes the spawned harness already emitted (`drive.rs:909-925`, narrator-free
-passthrough). The `in-progress worker@stub` label is still ASSERTED by the
-proof — it identifies the frame as an agent frame — but it is never the
-thing waited on.
+passthrough; plain non-JSON lines become text deltas at
+`harness_stream.rs:1258-1291`). The `in-progress worker@stub` label is NOT
+asserted at all — see Correction 5.
 
 ## Correction 2 — a shared deadline needs `exp_continue -continue_timer`
 
@@ -132,23 +133,94 @@ records child status. Turning that single `eof` arm into a causal
 `__PTY_EOF_BEFORE__` record would misclassify every successful signalled
 exit as a failure. The readiness wait and the exit wait must be separate
 blocks, with only the first treating EOF as causal.
+
+## Correction 4 — convergence must SUBTRACT `NO_COLOR`, not deliver it
+
+The earlier draft credited `controlled_command` with delivering `NO_COLOR=1`
+to the PTY children. That is exactly backwards, and taking it literally
+would make this task's own proofs unsatisfiable:
+
+- `controlled_command` (`:324-367`) sets `NO_COLOR=1`. Expect propagates its
+  environment to the child it spawns (verified locally: Expect launched with
+  `NO_COLOR=1`, child printed `NO_COLOR=1`).
+- `stderr_supports_live` returns false for ANY set `NO_COLOR`
+  (`modules/cli/src/app/tui.rs:226-236`). `drive.rs:1976-1984` then degrades
+  even an explicit `--progress tui` to Status, and
+  `command_handlers.rs:509-516` refuses the startup pane on the same
+  predicate. With `NO_COLOR` set there is no run pane, no alternate screen,
+  and no painted readiness text for a marker wait to find.
+- The dashboard is unaffected because `dashboard::interactive_available`
+  (`dashboard.rs:147-163`) checks TTY/CI/TERM but not `NO_COLOR` — which is
+  why the key helper's dashboard proof survives the combination today while
+  a run-pane proof driven through the same helper could not.
+
+So the shared seam keeps `controlled_command` as the SINGLE environment and
+Center authority — the tuple, `LC_ALL`/`LANG=C`, `TMPDIR`, `env_clear`,
+PATH/toolchain passthrough — and then removes exactly one variable,
+`NO_COLOR`, because a PTY proof's whole subject is the coloured, painted
+surface. `.env_remove("NO_COLOR")` on the returned builder is the one-line
+seam-local exception. Duplicating the Center tuple, or relaxing the product
+eligibility predicate, would both be wrong.
+
+Consequence for the collateral callers: the two hand-built helpers never had
+`NO_COLOR` at all, so `env_remove` leaves their children's colour behaviour
+byte-identical. What actually changes for them is the Center tuple,
+`LC_ALL`/`LANG=C`, `TMPDIR` and `env_clear` — that, not `NO_COLOR`, is the
+likely mover if command 4 goes red.
+
+## Correction 5 — painted text is escape-split; the matcher is shared
+
+Owner ruling 2026-08-27 (terminal-diff-aware markers): ratatui's cell diff
+may emit cursor/style escapes between adjacent characters of painted text,
+so no proof may demand byte-contiguity of UI-painted text in the raw
+stream. `support::strip_escapes` (`:29-69`) already documents this for
+post-hoc assertions, but it cannot make an in-flight Expect `-re` wait
+tolerant.
+
+Two call sites need the same tolerance from ONE authority — the dashboard's
+live wait for `live (1)` (inside Expect) and its post-hoc assertion (in
+Rust). The resolution is a literal-first pair in support, no regex crate and
+therefore no change to `modules/cli/tests/support/Cargo.toml`:
+`escape_tolerant_pattern(literal)` compiles the literal into the Expect
+pattern, `contains_escape_tolerant(raw, literal)` answers the same question
+in Rust by reusing `strip_escapes`. Both take the same `&str` literal
+constant, so the marker text is declared once.
+
+The child-produced readiness marker (`live tick <n>`) needs no tolerance:
+harness passthrough bytes reach the PTY contiguously. Only ratatui-painted
+text does.
+
+## Correction 6 — the child-exit diagnostic must not claim what it saw
+
+`run_pty_with_cursor_reply`'s final block waits for EOF only; it never
+matches the completion marker. A hang diagnostic phrased "after {marker}"
+would assert an observation that did not happen. The hang record names the
+wait's context ("the wrapped command"), never a marker the block did not
+match.
 """
 scope = """
 ## Decisions
 
 - One PTY key/marker helper stays the route for all key-driven PTY
   proofs: `support::run_pty_keys_after_markers`, with its existing public
-  signature and ETX passed as the raw Rust string "\\x03" (one byte 0x03 —
-  never the four characters backslash-x-0-3). `PtyKey` and
+  signature and ETX passed as one byte 0x03 spelled in Rust source exactly
+  as the existing `"\\u{3}"` — that is the sole ETX representation in this
+  plan, never a raw string of the four characters backslash-x-0-3, and no
+  other spelling is introduced. `PtyKey` and
   `run_pty_raw_keys_after_markers` are forbidden names; neither exists at
   HEAD, so neither is deleted.
 - All three helpers converge on ONE private execution seam that launches
-  Expect through `controlled_command`. That is what delivers the isolated
-  Center tuple and the pinned locale/`NO_COLOR`/`TMPDIR`; the tuple is
-  never re-declared in a second place.
+  Expect through `controlled_command`, then removes `NO_COLOR` from that
+  builder (content Correction 4). `controlled_command` remains the sole
+  declaration of the Center tuple, locale and TMPDIR; the tuple is never
+  re-declared in a second place, and no product eligibility predicate is
+  touched.
 - Child status and every driver diagnostic travel on Expect stderr. The
-  returned `String` is built from stdout only and carries child terminal
-  bytes exclusively.
+  returned `String` is built from stdout only and carries no
+  Expect-driver status or diagnostic metadata. (Not "product bytes
+  exclusively": the caller-supplied shell completion marker of
+  `run_pty_with_cursor_reply` is printed inside the PTY by the wrapped
+  shell and legitimately stays in the returned stream.)
 - Readiness is a marker wait under ONE 30-second deadline shared by every
   marker wait, enforced by `remaining` AND `exp_continue -continue_timer`,
   with a causal panic naming the marker that never appeared. No fixed
@@ -156,8 +228,10 @@ scope = """
   parameter.
 - Keys are delivered only after a marker whose text only the spawned child
   can have produced (content Correction 1). For the Ctrl-C proof that is
-  the stub agent's `live tick <n>`; `in-progress worker@stub` is asserted
-  but never waited on. No fallback to a pre-spawn label.
+  the stub agent's `live tick <n>`. No fallback to a pre-spawn label.
+- Markers over ratatui-painted text go through the single escape-tolerant
+  matcher pair (content Correction 5); markers over child passthrough text
+  do not need it.
 - The bounded wait for the child's own exit after the last key/signal is
   NOT readiness and carries its own diagnostic and its own budget.
 - The compact failure-panel grammar (0252.1) and every product surface
@@ -173,15 +247,17 @@ requires it (a caller that stops compiling, an import that goes unused, a
 sibling proof that the shared-environment convergence perturbs). Do it,
 and report it in the work summary — it is not a violation and it is not
 an owner escalation. The three other callers of
-`run_pty_with_cursor_reply` — `proof_run_startup_progress.rs`,
-`proof_task_queue_pane_handoff.rs`, `proof_task_queue_refusal_teardown.rs`
-— are expected collateral, because the seam changes the environment their
-children run under.
+`run_pty_with_cursor_reply` — `proof_run_startup_progress.rs:308`,
+`proof_task_queue_pane_handoff.rs:100`,
+`proof_task_queue_refusal_teardown.rs:156` — are expected collateral,
+because the seam changes the environment their children run under.
+`modules/cli/tests/support/Cargo.toml` is deliberately NOT expected: the
+matcher below adds no dependency.
 
 ## Step 0 — read before editing
 
-`modules/cli/tests/support/src/lib.rs:324-367` (`controlled_command`) and
-`:613-763` (the three helpers), then
+`modules/cli/tests/support/src/lib.rs:29-69` (`strip_escapes`), `:324-367`
+(`controlled_command`) and `:613-763` (the three helpers), then
 `modules/cli/tests/proof_run_view_exit_teardown.rs` end to end. The three
 helper bodies are near-identical; the seam below is the deduplication.
 
@@ -192,11 +268,15 @@ helper bodies are near-identical; the seam below is the deduplication.
 ```
 pub const PTY_CHILD_EXIT_SENTINEL: &str = "__CHILD_EXIT__";
 
+pub fn escape_tolerant_pattern(literal: &str) -> String
+pub fn contains_escape_tolerant(raw: &str, literal: &str) -> bool
+
 const PTY_DEADLINE_SECS: u64 = 30;
 const PTY_EOF_GRACE_SECS: u64 = 30;
 const PTY_TIMEOUT_RECORD: &str = "__PTY_TIMEOUT__";
 const PTY_EOF_BEFORE_RECORD: &str = "__PTY_EOF_BEFORE__";
 const PTY_HANG_RECORD: &str = "__PTY_HANG__";
+const PTY_ANSI_RUN: &str = r"(?:\\x1b\\[[0-9;]*[a-zA-Z])*";
 const PTY_CURSOR_BRANCH: &str =
     r#"-re {\\x1b\\[6n} { send -- "\\033\\[40;120R"; exp_continue -continue_timer }"#;
 
@@ -207,9 +287,13 @@ fn pty_marker_wait(pattern: &str, on_match: &str) -> String
 fn pty_final_wait(what: &str, extra_arms: &str) -> String
 ```
 
-`run_pty_script` runs
-`controlled_command(Path::new("expect"), &["-c", script], cwd, home)`
-plus `.env("TERM", "xterm-256color").env("CTX_STARTUP_BIN", startup_bin)`,
+### 1a — the execution seam
+
+`run_pty_script` builds
+`controlled_command(Path::new("expect"), &["-c", script], cwd, home)`,
+then `.env_remove("NO_COLOR")` (content Correction 4 — the seam's ONE
+deliberate subtraction, commented as such),
+`.env("TERM", "xterm-256color")`, `.env("CTX_STARTUP_BIN", startup_bin)`,
 takes `output()`, decodes `String::from_utf8_lossy(&output.stderr)`, and
 then, IN THIS ORDER:
 
@@ -218,7 +302,9 @@ then, IN THIS ORDER:
 2. `pty_record(&err, PTY_TIMEOUT_RECORD)` → `panic!("PTY marker never
    appeared within {PTY_DEADLINE_SECS}s: {what}")`
 3. `pty_record(&err, PTY_HANG_RECORD)` → `panic!("PTY child never exited
-   within {PTY_EOF_GRACE_SECS}s after {what}")`
+   within {PTY_EOF_GRACE_SECS}s while waiting for child exit ({what})")`
+   — the wording claims only what the block actually waited on (content
+   Correction 6); it never says "after {marker}".
 4. `assert!(output.status.success(), "PTY driver failed: {output:?}")`
 5. `pty_record(&err, PTY_CHILD_EXIT_SENTINEL)` parsed as `i32`, panicking
    with the stderr text when absent
@@ -237,7 +323,31 @@ may itself contain `__` (`__NEVER_PAINTED__` renders as
 `__PTY_EOF_BEFORE____NEVER_PAINTED____` and must parse back to
 `__NEVER_PAINTED__`).
 
-`pty_script_prelude` emits, once per script, right after `spawn`:
+### 1b — the escape-tolerant matcher pair
+
+One literal is the authority; two mechanisms read it.
+
+`escape_tolerant_pattern(literal)` walks `literal` char by char, pushing a
+`\\` before any ERE metacharacter (`\\ ^ $ . [ ] | ( ) * + ? { }`) and then
+the char itself, and inserting `PTY_ANSI_RUN` BETWEEN adjacent characters
+(not before the first, not after the last). `"live (1)"` compiles to
+`live<RUN> <RUN>\\(<RUN>1<RUN>\\)` with `<RUN>` = `(?:\\x1b\\[[0-9;]*[a-zA-Z])*`,
+a form verified accepted by the local Expect 5.45. `PTY_ANSI_RUN` contains
+no brace, so a pattern stays brace-balanced inside `-re {…}`; escaped
+braces from a literal are safe too (Tcl does not count a backslashed brace
+for nesting). Doc-comment the function with its intended input: a plain
+painted literal, not a regex.
+
+`contains_escape_tolerant(raw, literal)` is
+`strip_escapes(raw).contains(literal)` — the same tolerance realised
+post-hoc by the existing stripper (`:29-69`), which is why support needs no
+regex dependency and `support/Cargo.toml` stays dependency-free.
+
+### 1c — the script builders
+
+`pty_script_prelude` emits, once per script, IMMEDIATELY AFTER the helper's
+`spawn` line (spawn first, then prelude — a deadline that starts before the
+child exists would charge process startup to readiness):
 
 ```
 set child_status {}
@@ -327,33 +437,39 @@ pub fn run_pty_keys_after_markers(
 ) -> (i32, String)
 ```
 
-Per-helper script assembly after the extraction:
+Per-helper script assembly after the extraction — spawn line first,
+prelude second, waits third, in every helper:
 
-- `run_pty_with_cursor_reply`: prelude, its existing `spawn -noecho
-  /bin/sh -c "stty …; $env(CTX_STARTUP_BIN) {args}; …"` line verbatim, then
-  `pty_final_wait(marker, "")`. It has no readiness marker, so it charges
-  nothing to the deadline; it gains a `timeout` arm it never had, so a hung
-  child now reports `__PTY_HANG__{marker}__` instead of falling through to
-  an empty status parse.
-- `run_pty_signal_after_marker`: prelude, its existing direct
-  `spawn … exec $env(CTX_STARTUP_BIN) {args}`, then
+- `run_pty_with_cursor_reply`: its existing `spawn -noecho /bin/sh -c
+  "stty …; $env(CTX_STARTUP_BIN) {args}; …"` line verbatim, prelude, then
+  `pty_final_wait("the wrapped command", "")`. It has no readiness marker,
+  so it charges nothing to the deadline; it gains a `timeout` arm it never
+  had, so a hung child now reports `__PTY_HANG__the wrapped command__`
+  instead of falling through to an empty status parse. The hang text names
+  the wait, not the marker, because this block never matches the marker.
+- `run_pty_signal_after_marker`: its existing direct
+  `spawn … exec $env(CTX_STARTUP_BIN) {args}`, prelude, then
   `pty_marker_wait(ready_pattern, "<kill loop>")` where the kill loop is the
-  current `for {set i 0} {$i < {repeat}}} {incr i} { exec kill -{signal}
+  current `for {set i 0} {$i < {repeat}} {incr i} { exec kill -{signal}
   [exp_pid] }` body WITHOUT `exp_continue` (the block ends on match), then
-  `pty_final_wait(ready_pattern, extra_arms)` where `extra_arms` is
+  `pty_final_wait("the signalled child", extra_arms)` where `extra_arms` is
   `-re {{ready_pattern}} { <same kill loop>; exp_continue -continue_timer }`.
   That two-phase split is what makes EOF-before-marker causal while a normal
   signalled EOF still records status; keeping the re-signal arm in phase two
   preserves today's behaviour of re-signalling on a later repaint, which the
   repeated-SIGINT proof relies on.
-- `run_pty_keys_after_markers`: prelude, existing spawn, one
+- `run_pty_keys_after_markers`: existing spawn, prelude, one
   `pty_marker_wait(pattern, "send -- {{key}}")` per step, then
   `pty_final_wait("the last key", "")`.
 - All three end by calling `run_pty_script(&script, binary, cwd, home)` and
   returning its pair unchanged.
 
 The literal `set timeout 30` disappears from the file — both budgets are
-interpolated from the two consts.
+interpolated from the two consts. Every occurrence of the token
+`exp_continue` anywhere in this file — code, doc comment or prose comment —
+must be written `exp_continue -continue_timer`, because validation criterion
+5 proves the timer discipline by counting occurrences of both forms in the
+whole source.
 
 Build after this step:
 `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --no-run`
@@ -432,64 +548,69 @@ keeps its exact signature and all five current call sites (`sigterm`,
    `output = "claude-stream-json"`; and `[agent.role.worker]` with
    `harness = "stub"`, `transport = "cli"`. No narrator role is declared —
    that is what keeps RAW passthrough on the panel rather than narrator
-   text (`drive.rs:909-925`).
+   text (`drive.rs:909-925`, `drive.rs:9203-9216`).
 4. `index_toml` mirrors `proof_center.rs:328-352`, NOT the command
    fixture's 0.2 header: `schema-version = "0.4"` (agent steps are a 0.4+
    shape — every `agent = "agent:…"` fixture in `modules/cli/tests` uses
-   0.4 or later), `name = "{label}"`, the `[[agent]] id = "worker"` table,
-   the `notified` slot, and one `[[procedure.sequence]]` step with
+   0.4 or later), `name = "{label}"`, the `[[agent]] id = "worker"` table
+   with its `description`/`summary`, the `notified` slot, a `[procedure]`
+   description, and one `[[procedure.sequence]]` step with
    `id`/`title = "{STEP_ID}"`, `agent = "agent:worker"`,
    `prompt = "Stream."`, `output = ["slot:notified"]`.
 
-### 2c — the key-driven call site
+### 2c — the key-driven call sites
 
 - Two new file-local constants:
   `const LIVE_AGENT_TICK: &str = r"live tick [0-9]";` — the ONLY readiness
-  pattern for key delivery, and post-spawn by construction: only the stub
-  harness's own stdout produces that text.
-  No `LIVE_AGENT_LABEL` constant is added: the label is ratatui-painted
-  (content Correction 1 proves it is painted pre-spawn, and the owner
-  ruling below removes raw-stream assertions on painted text), so the
-  matched `LIVE_AGENT_TICK` wait itself is the agent-frame evidence.
+  pattern for key delivery, post-spawn by construction (only the stub
+  harness's own stdout produces that text) and contiguous by construction
+  (harness passthrough, not painted UI), so it needs no escape tolerance.
+  `const LIVE_DASHBOARD_MARKER: &str = "live (1)";` — the single literal
+  authority for the dashboard's wait AND its post-hoc assertion.
+  No label constant is added and no assertion is made on the
+  ratatui-painted `in-progress worker@stub` label: content Correction 1
+  proves it is painted pre-spawn, so it is not evidence, and the owner
+  ruling forbids raw-stream assertions on painted text.
 - `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
   (`:264-290`) switches its fixture to `agent_trait_fixture("ctrl-c")` and
-  keeps ONE step, now `(LIVE_AGENT_TICK, "\\x03")` — the raw string, not
-  `\\u{3}`. ETX is sent only after the agent's own output is on screen,
-  under the Step 1 deadline. Its existing assertions (non-zero code, alt
-  screen entered and left, the `run killed; terminal restored` line, no
-  `STEP_ID` after restore, `│   ` prefixes, no `CLEAR_VIEWPORT`) are
-  unchanged, plus two additions under the owner ruling (2026-08-27,
-  terminal-diff-aware markers: ratatui's diff renderer may split painted
-  text across cell updates, so no proof may demand byte-contiguity of
-  UI-painted text in the raw stream):
-  the agent-frame evidence is the `LIVE_AGENT_TICK` wait itself having
-  matched — child passthrough bytes are contiguous by construction, and
-  only the stub agent produces that text; no assertion on the
-  ratatui-painted `LIVE_AGENT_LABEL` is made against the raw stream.
-  And `assert!(raw.find("live tick").unwrap() < raw.rfind(LEAVE_ALT).unwrap());`
-  — the key landed after real agent output (passthrough, contiguous) and
-  before teardown.
+  keeps ONE step, now `(LIVE_AGENT_TICK, "\\u{3}")` — one byte 0x03. ETX is
+  sent only after the agent's own output is on screen, under the Step 1
+  deadline. Its existing assertions (non-zero code, alt screen entered and
+  left, the `run killed; terminal restored` line, no `STEP_ID` after
+  restore, `│   ` prefixes, no `CLEAR_VIEWPORT`) are unchanged, plus one
+  addition:
+  `assert!(raw.find("live tick").unwrap() < raw.rfind(LEAVE_ALT).unwrap());`
+  — the key landed after real agent output and before teardown. The
+  agent-frame evidence is the `LIVE_AGENT_TICK` wait itself having matched;
+  there is no second, painted-text assertion.
 - `dashboard_attach_then_exit_leaves_no_run_frame` (`:217-239`) drops
   `thread::sleep(Duration::from_secs(1))` at `:221` and changes its FIRST
-  step pattern from `"session-"` to the escape-tolerant form of
-  `live (1)`, so a bounded marker wait replaces the sleep outright.
-  Owner ruling (2026-08-27, terminal-diff-aware markers): `live (1)` is
-  ratatui-painted and may be split across cell updates, so both the wait
-  pattern and the post-hoc assertion match the marker text while
-  permitting ANSI escape runs between its characters — the support crate
-  gains one small escape-tolerant matcher used by both; the marker text
-  itself is unchanged and no terminal-state reconstruction is
-  introduced. `kkkkkkkkj\\r` stays: it still clamps
-  to the top live-group header, moves to the first session and attaches.
-  The count and the row come from the same `rebuild_visible_sessions` pass
-  (`dashboard.rs:1919-2045`, rendered at `:8255-8274`), so a frame
-  containing `live (1)` is a frame whose session row exists. Then assert
-  the same escape-tolerant match of `live (1)` over the captured raw
-  stream. Do NOT assert the
-  absence of `live (0)`: the dashboard's first paint legitimately precedes
-  Center's discovery of the run, and forbidding it would be flaky. This is
-  a sleep-for-marker swap, not evidence about the Center tuple — both
-  sides of this test already went through `controlled_command` at HEAD.
+  step pattern from `"session-"` to the escape-tolerant compilation of the
+  same marker, so a bounded marker wait replaces the sleep outright:
+
+  ```
+  let live_one = support::escape_tolerant_pattern(LIVE_DASHBOARD_MARKER);
+  … &[(live_one.as_str(), "kkkkkkkkj\\r"), …]
+  ```
+
+  then, after `drop(background)`:
+
+  ```
+  assert!(
+      support::contains_escape_tolerant(&raw, LIVE_DASHBOARD_MARKER),
+      "dashboard never showed {LIVE_DASHBOARD_MARKER}: {raw:?}"
+  );
+  ```
+
+  `kkkkkkkkj\\r` stays: it still clamps to the top live-group header, moves
+  to the first session and attaches. The count and the row come from the
+  same `rebuild_visible_sessions` pass (`dashboard.rs:2016-2045`, rendered
+  at `:8255-8274`), so a frame containing `live (1)` is a frame whose
+  session row exists. Do NOT assert the absence of `live (0)`: the
+  dashboard's first paint legitimately precedes Center's discovery of the
+  run, and forbidding it would be flaky. This is a sleep-for-marker swap,
+  not evidence about the Center tuple — both sides of this test already
+  went through `controlled_command` at HEAD.
 - Out-of-band status assertions, one line each, covering all three
   helpers through their existing tests — no new fixture, no new run:
   `assert!(!raw.contains(support::PTY_CHILD_EXIT_SENTINEL))` in
@@ -519,18 +640,21 @@ keeps its exact signature and all five current call sites (`sigterm`,
   the 0252.1 panel grammar are all untouched. If a proof only passes by
   changing product code, that is a finding for 0252.4, not a licence. In
   particular, do NOT make a refresh stop painting the active label
-  pre-spawn to rescue the old marker; the fixture supplies post-spawn text
-  instead.
+  pre-spawn to rescue the old marker, and do NOT relax
+  `stderr_supports_live` to survive `NO_COLOR`; the fixture supplies
+  post-spawn text and the seam subtracts the variable instead.
 - 0252.4's modal contract and its five representative proofs — they
   consume this baseline.
 - The seven bespoke `Command::new("expect")` scripts in
-  `proof_run_startup_progress.rs`. They do not use the shared key/marker
-  helper; converting them is scope creep. They must still compile and
-  pass.
+  `proof_run_startup_progress.rs` (`:130`, `:267`, `:365`, `:415`, `:456`,
+  `:497`, `:581`). They do not use the shared key/marker helper;
+  converting them is scope creep. They must still compile and pass.
 - Widening the workspace to make `modules/cli/tests/support` a member.
   It is a path dev-dependency, so its own unit tests would not run in the
   normal gate — which is exactly why every helper-level proof above lives
   in the `ctx-traits-cli` integration test that already exercises it.
+- Adding a regex dependency to `modules/cli/tests/support/Cargo.toml`.
+  Step 1b's pair needs none.
 - Reading `/dev/tty` for readiness in any form. It is dead and stays
   absent.
 """
@@ -539,9 +663,10 @@ validation = """
 
 1. The teardown suite passes with the truthful helper: seven tests
    (the six at HEAD plus the diagnostic one), including the sleep-free
-   `live (1)` dashboard wait, the Ctrl-C proof driven off the stub
-   agent's own `live tick` output, its label and ordering assertions, and
-   the unfiltered four-line failure panel.
+   escape-tolerant `live (1)` dashboard wait, the Ctrl-C proof driven off
+   the stub agent's own `live tick` output with its ordering assertion
+   (`live tick` before the last `LEAVE_ALT`), and the unfiltered four-line
+   failure panel. No assertion on ratatui-painted label text.
    `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
 2. Exit status is out of band and stdout is clean: the same run reports
    143 / 130 / 0 / non-zero exactly as before while
@@ -551,10 +676,11 @@ validation = """
    command as 1 — `a_marker_that_never_appears_names_itself_in_the_panic`
    with `expected = "PTY child exited before __NEVER_PAINTED__ ever appeared"`.
 4. The other shared-helper callers stay green under the converged
-   environment (`controlled_command` adds `LC_ALL`/`LANG=C`,
-   `NO_COLOR=1`, `TMPDIR`, and the Center tuple to two helpers that
-   previously had none — this is the change most likely to move
-   unrelated output):
+   environment (`controlled_command` adds `LC_ALL`/`LANG=C`, `TMPDIR`,
+   `env_clear` and the Center tuple to two helpers that previously had
+   none — that, not colour, is the change most likely to move unrelated
+   output; `NO_COLOR` is removed by the seam and those two children never
+   had it):
    `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown`
 5. No forbidden artifact, no stdout status transport, and a deadline that
    is actually enforced — `remaining` present, no literal per-block
@@ -569,11 +695,17 @@ validation = """
    at a quote) while permitting the planned
    `support::PTY_CHILD_EXIT_SENTINEL` assertions, which name no literal.
    Proving the returned stdout is actually clean is criterion 2's job,
-   not this grep's. The last grep targets the whole-second sleep only;
-   `ledger_session_id`'s bounded `from_millis(100)` poll is a ledger
-   wait, not key readiness, and legitimately survives.
+   not this grep's. The count equality searches the WHOLE support source,
+   so a comment containing a bare `exp_continue` fails it even when the
+   generated Tcl is correct — Step 1 requires every occurrence, prose
+   included, to carry `-continue_timer`. The last grep targets the
+   whole-second sleep only; `ledger_session_id`'s bounded
+   `from_millis(100)` poll is a ledger wait, not key readiness, and
+   legitimately survives.
 6. The landing gate is green:
    `CARGO_TARGET_DIR=target just test-full`
+   (`Justfile:152-180` exports its own gate target directory, so the
+   prefix here is a caller convenience, not the final authority.)
 
 ## Order and bounded refinement
 
@@ -594,19 +726,22 @@ condition, not a judgement call.
   `__CHILD_EXIT__` transport moves.
 - A red result in command 4 is this task's own collateral (the converged
   environment), not a pre-existing failure — fix it here rather than
-  reporting it as a baseline break. `NO_COLOR=1` reaching two children
-  that never had it is the likeliest mover.
-- If `live tick [0-9]` or `live \\(1\\)` never matches, the panic already
-  names the pattern. Read the raw stream it captured before changing
-  anything: for the stub, check that the role assignment resolved, that
-  `--fixture-probe` was answered, and that ticks are still arriving; for
-  the dashboard, check whether styling split the header row with SGR
-  escapes. The one permitted repair is to make the same pattern
-  escape-tolerant: keep every literal fragment, keep the stub-produced
-  `live tick` text in the readiness pattern, and allow
-  `(?:\\x1b\\[[0-9;]*[a-zA-Z])*` between adjacent fragments. Never a
-  sleep, never a pattern a pre-spawn frame can satisfy, never
-  `/dev/tty`.
+  reporting it as a baseline break. The Center tuple, `LC_ALL`/`LANG=C`,
+  `TMPDIR` and `env_clear` reaching two children that never had them is
+  the likeliest mover.
+- If the Ctrl-C proof reports no alternate screen at all, the seam's
+  `NO_COLOR` removal is missing or was re-added: `stderr_supports_live`
+  (`tui.rs:226-236`) degrades `--progress tui` to status for ANY set
+  `NO_COLOR`, and Expect propagates its own environment to the child.
+  Fix the seam; never the predicate.
+- If `live tick [0-9]` or the compiled `live (1)` pattern never matches,
+  the panic already names the pattern. Read the raw stream it captured
+  before changing anything: for the stub, check that the role assignment
+  resolved, that `--fixture-probe` was answered, and that ticks are still
+  arriving; for the dashboard, check whether the run reached live state at
+  all. The one permitted repair is to widen escape tolerance through
+  `escape_tolerant_pattern` — never a sleep, never a pattern a pre-spawn
+  frame can satisfy, never `/dev/tty`.
 - The Ctrl-C proof's fixture kind changes; its rescue assertions do not.
   If the restored screen differs for an agent frame, report that
   observation — do not weaken the assertion and do not edit product code
