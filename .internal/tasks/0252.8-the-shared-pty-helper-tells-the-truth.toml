@@ -447,8 +447,10 @@ keeps its exact signature and all five current call sites (`sigterm`,
   `const LIVE_AGENT_TICK: &str = r"live tick [0-9]";` — the ONLY readiness
   pattern for key delivery, and post-spawn by construction: only the stub
   harness's own stdout produces that text.
-  `const LIVE_AGENT_LABEL: &str = "in-progress worker@stub";` — asserted,
-  never waited on (content Correction 1 proves it is painted pre-spawn).
+  No `LIVE_AGENT_LABEL` constant is added: the label is ratatui-painted
+  (content Correction 1 proves it is painted pre-spawn, and the owner
+  ruling below removes raw-stream assertions on painted text), so the
+  matched `LIVE_AGENT_TICK` wait itself is the agent-frame evidence.
 - `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
   (`:264-290`) switches its fixture to `agent_trait_fixture("ctrl-c")` and
   keeps ONE step, now `(LIVE_AGENT_TICK, "\\x03")` — the raw string, not
@@ -456,20 +458,34 @@ keeps its exact signature and all five current call sites (`sigterm`,
   under the Step 1 deadline. Its existing assertions (non-zero code, alt
   screen entered and left, the `run killed; terminal restored` line, no
   `STEP_ID` after restore, `│   ` prefixes, no `CLEAR_VIEWPORT`) are
-  unchanged, plus two additions:
-  `assert!(support::strip_escapes(&raw).contains(LIVE_AGENT_LABEL));` —
-  this is an agent frame, and
-  `assert!(raw.find("live tick").unwrap() < raw.rfind(LEAVE_ALT).unwrap());`
-  — the key landed after real agent output and before teardown.
+  unchanged, plus two additions under the owner ruling (2026-08-27,
+  terminal-diff-aware markers: ratatui's diff renderer may split painted
+  text across cell updates, so no proof may demand byte-contiguity of
+  UI-painted text in the raw stream):
+  the agent-frame evidence is the `LIVE_AGENT_TICK` wait itself having
+  matched — child passthrough bytes are contiguous by construction, and
+  only the stub agent produces that text; no assertion on the
+  ratatui-painted `LIVE_AGENT_LABEL` is made against the raw stream.
+  And `assert!(raw.find("live tick").unwrap() < raw.rfind(LEAVE_ALT).unwrap());`
+  — the key landed after real agent output (passthrough, contiguous) and
+  before teardown.
 - `dashboard_attach_then_exit_leaves_no_run_frame` (`:217-239`) drops
   `thread::sleep(Duration::from_secs(1))` at `:221` and changes its FIRST
-  step pattern from `"session-"` to `r"live \\(1\\)"`, so a bounded marker
-  wait replaces the sleep outright. `kkkkkkkkj\\r` stays: it still clamps
+  step pattern from `"session-"` to the escape-tolerant form of
+  `live (1)`, so a bounded marker wait replaces the sleep outright.
+  Owner ruling (2026-08-27, terminal-diff-aware markers): `live (1)` is
+  ratatui-painted and may be split across cell updates, so both the wait
+  pattern and the post-hoc assertion match the marker text while
+  permitting ANSI escape runs between its characters — the support crate
+  gains one small escape-tolerant matcher used by both; the marker text
+  itself is unchanged and no terminal-state reconstruction is
+  introduced. `kkkkkkkkj\\r` stays: it still clamps
   to the top live-group header, moves to the first session and attaches.
   The count and the row come from the same `rebuild_visible_sessions` pass
   (`dashboard.rs:1919-2045`, rendered at `:8255-8274`), so a frame
   containing `live (1)` is a frame whose session row exists. Then assert
-  `support::strip_escapes(&raw).contains("live (1)")`. Do NOT assert the
+  the same escape-tolerant match of `live (1)` over the captured raw
+  stream. Do NOT assert the
   absence of `live (0)`: the dashboard's first paint legitimately precedes
   Center's discovery of the run, and forbidding it would be flaky. This is
   a sleep-for-marker swap, not evidence about the Center tuple — both
