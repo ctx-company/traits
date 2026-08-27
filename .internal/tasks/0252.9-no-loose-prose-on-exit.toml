@@ -1,58 +1,487 @@
 schema-version = "0.2"
 key = "0252.9"
 title = "No loose prose on exit"
-status = "draft"
+status = "ready"
 raised = "2026-08-27"
-content = """
-With the live view on the alternate screen (0252.7), every exit already
-restores a clean shell and prints a house-grammar outcome panel. The bare
-prose one-liners that used to explain a torn screen are now noise between
-the prompt and the panel — the owner does not want them:
+content = '''
+With the live view on the alternate screen (0252.7), an exit already
+restores a clean shell. The bare prose one-liners that used to explain a
+torn screen are now noise between the prompt and whatever the command
+actually reports — the owner does not want them:
 
-- `run killed; terminal restored` (modules/cli/src/app/tui_ratatui.rs:849,
+- `run killed; terminal restored` (`modules/cli/src/app/tui_ratatui.rs:849`,
   the P551 ctrl-c kill note)
 - `run startup interrupted; terminal restored`
-  (modules/cli/src/app/run_startup_view.rs:193)
+  (`modules/cli/src/app/run_startup_view.rs:193`)
 - `halted — pass --continue-on-failure to run the remaining queue anyway`
-  (modules/cli/src/app/run.rs:1000)
+  (`modules/cli/src/app/run.rs:1000`)
 
 ## Owner ruling (2026-08-27)
 
 Post-run user-facing output on run-view exit paths is house-grammar
 panels or nothing. A loose prose line is never printed around them.
-"""
-scope = """
-## Decisions
 
-- The two "terminal restored" notes are deleted, not restyled: after
-  0252.7 the restore is guaranteed by the alternate-screen leave, and the
-  outcome/failure panel that follows already states what happened to the
-  run. A note announcing terminal state is redundant by construction.
-- The queue-halt hint moves into the queue outcome panel: the panel that
-  reports the failed/halted queue carries the remaining-task count and
-  the `--continue-on-failure` hint as a toned panel row, in the house
-  two-tone palette, instead of a trailing bare println.
-- Explicitly out of scope: the `run tui unavailable; falling back to
-  status progress` diagnostics (three sites) — they precede any pane,
-  serve headless/fallback operation, and are not run-exit prose; and all
-  `--progress status`/`--json` line output, which is that mode's entire
-  interface, not decoration.
-- Forward-compatible with 0252.4: the failure modal's Abort path prints
-  the compact failure panel with no surrounding prose, so this task
-  removes the only remaining stray lines around run-view exits.
+## How to read this plan
 
-## Done when (sketch — architect refines)
+Goals and approach are separated, and only goals bind. What binds is
+exactly four things: `validation`'s Done-when list with the existing
+command that decides each one; the binding constraints and exclusions at
+the top of `scope` (including the queue panel's grammar, which is product
+output, not a proof mechanic); every REUSE POINT named below (an existing
+authority that must not be duplicated — a second copy of the same
+classification or grammar is a defect regardless of route); and the finite
+repair cap with its single final landing-gate run.
 
-- PTY proofs: ctrl-c kill, startup interrupt, and a halted queue each
-  show the restored shell followed by panel output only — the three
-  literal strings above appear nowhere in captured output (assert via
-  the support helpers, honoring the 0252.8 terminal-diff-aware matcher
-  doctrine for any panel-text assertions).
-- The queue outcome panel carries the remaining-count and
-  continue-on-failure hint as panel rows.
-- Full suite green.
-"""
+Everything else is the architect's best route from the grounding, not a
+boundary: expected files, symbol names and signatures, edit order, which
+proof hosts which behaviour, fixture and matcher choices, exact hint
+wording, and every diagnostic hypothesis under `Watch`. Deviate from any
+of it whenever a goal requires it, and report the deviation in the work
+summary — that is not a plan violation, not a finding, and not an owner
+escalation.
+
+## Grounded against HEAD 501ad6c0 (0252.4 and 0252.8 not landed here)
+
+Seven facts about the code decide the shape of this work. Several correct
+the draft this plan replaces.
+
+### 1. Board order: this task must run after 0252.4, not beside it
+
+0252.4's validation criterion 6 and its third `[[checks]]` entry both run
+`rg -q 'run killed; terminal restored' modules/cli/src && echo
+kill-note-retained` — the note's PRESENCE is a mandatory gate there, and
+its content fact 3 explicitly assigns the deletion to this task. If
+0252.9 lands first, 0252.4's check can never pass. `depends-on` therefore
+gains `0252.4`; the board order is `0252.8 -> 0252.4 -> 0252.9`.
+
+This is not only a check conflict. 0252.4 rewrites `poll_detach`'s second
+stage, the run view and `proof_run_view_exit_teardown.rs`, so every line
+anchor and proof name below is stated as it reads at HEAD and must be
+RE-READ after 0252.4 and 0252.8 land, before the first edit.
+
+### 2. Removing the startup note leaves NOTHING, and that is the goal
+
+`run_startup_view.rs:174-195` marks the running row `Failed`/`interrupted`,
+restores through `pane.quit()`, ends decode-diagnostics capture, prints
+the note on stderr, then `std::process::exit(130)`. There is no outcome
+panel on this path and this task does not add one: the acceptance is a
+restored cooked shell with no surviving startup frame and no loose line,
+exit 130 — "panels or nothing" resolving to nothing. The draft's sketch
+implying panel output after a startup interrupt was wrong.
+
+Everything else on that path is load-bearing and stays: process-group
+kill, exit code, `pane.quit()` restore, the discarded warning capture
+(secrecy), and the startup-to-live handoff. Only the `eprintln!` goes.
+The unrelated `"run startup interrupted"` ERROR message
+(`command_handlers.rs:541`, `drive.rs:1005`) is a different string on a
+different path and is untouched.
+
+### 3. The kill note's path is 0252.4's to gate and this task's to delete
+
+The crossterm pump calls `interrupt::request_kill()` immediately on raw
+ctrl-c before forwarding the key (`tui_ratatui.rs:642-661`); that stays.
+The note lives in the SECOND stage, `poll_detach` (`:823-855`), which
+re-requests the kill, marks the pane detached, leaves the alternate
+screen and prints. 0252.4 gates that stage for an opted-in live pane;
+what survives it — attached observers and any pane that did not opt in —
+still reaches the `eprintln!`. This task removes the producer outright, so
+those paths restore and say nothing. `poll_detach`'s doc comment
+currently promises the note and goes stale with it.
+
+### 4. The queue report is not a panel today — this is a migration
+
+`run.rs:994-1002` is a direct `println!` table: a `task queue:` heading,
+one `  {key}: {label}` line per outcome, and the halt sentence. Moving the
+sentence "into the queue outcome panel" therefore means building a real
+panel through the shared kit, not relocating one string.
+
+The kit is the authority and needs no edit: `Panel::new` / `Panel::row` /
+`Panel::next` / `PanelRow::toned` / `PanelStatus` / `emit_human`
+(`presentation.rs:171-220`, `631-653`). `PanelRow::toned` sanitizes and
+lowercases labels (`:89-99`); `RowTone` is the closed set
+`Default|Pass|Fail|Warn` (`:42-63`); `header_text` omits the `·`
+separator for an empty headline (`:459-465`), so a product-only header
+renders `┌── task queue`. `presentation_for("run")` already declares
+`CommandPresentation::Panel` (`:693-738`) — the direct table is the
+exception, not a registry gap. REUSE POINT: `presentation.rs` is consumed,
+never modified, and no custom ANSI or new tone is justified.
+
+### 5. One reporter serves every non-JSON mode — decided, not left open
+
+`print_task_queue_report` is called once, from `handle_task_queue_run`
+(`run.rs:854`), under `if !input.json`. `DriveProgress`
+(`surface/cli.rs:2487-2494`) is retained on `TaskQueueInputs` but never
+consulted for the final report, so `none`, `status`, `stream` and `tui`
+all get the same bytes today.
+
+DECISION: the panel replaces that one reporter for every non-JSON mode.
+The draft's exclusion of `--progress status` output covers that mode's
+PROGRESS NARRATION — its running interface — not the final queue outcome,
+which is post-run output and squarely inside the owner ruling. Branching
+the report by progress mode would mean two renderers for one outcome and
+would leave the loose sentence alive on the modes the ruling covers.
+`--json` is untouched: it never reaches the reporter.
+
+### 6. Halt, failure and "remaining" are three different predicates
+
+`drive_task_queue` (`run.rs:877-894`) pushes exactly one outcome per
+ATTEMPTED key and breaks after the first halting outcome unless
+`continue_on_failure`. So the exact count of never-attempted tasks is
+`input.queue.len() - outcomes.len()`; no second scan and no persisted
+state is needed. Three consequences the draft did not settle:
+
+- `halted == true` with ZERO remaining is ordinary — the last or only
+  member failed. Parent ruling 3 ("a `next:` row appears only when a real
+  action exists") means the continue hint must NOT appear there. Today's
+  code prints it unconditionally on any halt; that is the bug this task
+  fixes rather than reproduces.
+- `halted == false` while halting outcomes exist is ordinary under
+  `--continue-on-failure`, and still exits 7 as "task queue completed with
+  failures". The panel's CLOSING state must follow the real failure
+  predicate `outcomes.iter().any(TaskQueueOutcome::halts)`, not `halted`.
+- `TaskQueueOutcome::halts()` and `::label()` (`run.rs:673-703`) are the
+  single authorities for classification and per-task wording. REUSE POINT:
+  the panel derives both row text and row tone from them; a second match
+  on outcome variants is a defect.
+
+`handle_task_queue_run` (`run.rs:773-869`) drops the startup pane BEFORE
+any report output, and returns `Error::AlreadyReported` with
+`EXIT_RUN_FAILED` (7) so the dispatcher prints no second generic line.
+Both invariants stay exactly as they are.
+
+### 7. Two neighbouring loose lines are deliberately NOT in scope
+
+- `run_view.rs:1336` prints `live view closed; run continues - reattach
+  with ctx traits dashboard` after a confirmed `q`. That is a detach
+  notice while the run keeps going, not post-run outcome output.
+- `run.rs:839` prints `ctx run --task {key}: {error}` for a propagated
+  queue-member error. Task 0198 deliberately preserves it as diagnosable
+  per-member refusal detail, and `proof_task_queue_refusal_teardown.rs:190`
+  gates it.
+
+Neither is one of this task's three named removals. Removing either
+without a new owner ruling is scope creep, and the second would regress a
+landed task.
+'''
+scope = '''
+## Binding constraints and exclusions
+
+These bound the outcome regardless of the route taken.
+
+- The three named strings have no producer left anywhere in
+  `modules/cli/src`: `run killed; terminal restored`, `run startup
+  interrupted; terminal restored`, and `halted — pass
+  --continue-on-failure to run the remaining queue anyway`. Nothing loose
+  replaces them.
+- The ctrl-c and startup-interrupt paths keep every behaviour around the
+  deleted lines: immediate process-group kill, terminal restore before any
+  further output, discarded startup warning capture, exit 130 for the
+  startup interrupt, and the run-view exit path 0252.4 landed.
+- The startup interrupt's acceptance is a restored cooked shell with no
+  surviving startup frame, no loose prose and exit 130. No panel is
+  required or added on that path (content fact 2).
+- The final `--task` queue report is emitted as ONE shared-kit panel for
+  every non-JSON mode (content fact 5), with this grammar:
+  - header product `task queue`, empty headline;
+  - one row per ATTEMPTED member, in queue order, label = the task key,
+    value = `TaskQueueOutcome::label()` verbatim, tone `Fail` when
+    `halts()` and `Pass` otherwise — no second classification;
+  - closing state `PanelStatus::Passed("Success")` when no outcome halts,
+    `PanelStatus::Blocked("Failure")` when any does — the same vocabulary
+    the single-run panel already closes with;
+  - when AND ONLY WHEN the queue halted early with at least one member
+    never attempted: a `remaining` row carrying that exact count
+    (`queue.len() - outcomes.len()`) and a `next` row whose value names
+    `--continue-on-failure`. Zero remaining means neither row (parent
+    ruling 3);
+  - an empty expanded queue still reports: header, no rows, `Success`.
+- Every existing per-task outcome text survives the migration verbatim,
+  and the pane is still dropped before any report output.
+- `--json` output is byte-identical, and the queue's exit mapping is
+  unchanged: `AlreadyReported` with `EXIT_RUN_FAILED` (7) whenever any
+  outcome halts, exit 0 otherwise. A rendering failure must not silently
+  convert a halted queue into a success.
+- The task-0198 per-member refusal line (`run.rs:839`) and the run-view
+  `q` detach notice (`run_view.rs:1336`) stay exactly as they are
+  (content fact 7).
+- The three `run tui unavailable; falling back to status progress`
+  diagnostics (`command_handlers.rs:522`, `drive.rs:1082`,
+  `drive.rs:4867`) keep their count and wording.
+- No new renderer: run failure output continues to go through
+  `run::failure_panel` / `run_header_from_title` (`run.rs:1812-1833`) and
+  the queue panel through `presentation.rs`'s kit. REUSE POINT for both.
+
+## Suggested approach — guidance, not a boundary
+
+### Expected files
+
+- `modules/cli/src/app/tui_ratatui.rs`
+- `modules/cli/src/app/run_startup_view.rs`
+- `modules/cli/src/app/run.rs`
+- `modules/cli/src/app/surface/cli.rs` — the `--continue-on-failure` help
+  at `:2367-2369` says outcomes are reported "in a table at the end"; a
+  narrow wording fix, nothing else.
+- `modules/cli/tests/proof_run_view_exit_teardown.rs`
+- `modules/cli/tests/proof_run_startup_progress.rs`
+- `modules/cli/tests/proof_task_queue_refusal_teardown.rs`
+- `modules/cli/tests/proof_task_queue_pane_handoff.rs`
+
+Touching files beyond this list is legitimate whenever a binding goal
+requires it. Do it and report it in the work summary.
+
+### Step 0 — re-read the landed baseline before editing
+
+0252.4 and 0252.8 land first and both move this task's ground. Read
+`modules/cli/tests/support/src/lib.rs` (the three helpers, the bounded
+readiness wait, the escape-tolerant matcher authority, any fixture 0252.8
+added), then `proof_run_view_exit_teardown.rs` end to end, then
+`poll_detach` and the run view's first-ctrl-c path as 0252.4 left them.
+None of the proof guidance below survives contact if they landed
+differently; the goals do.
+
+### Step 1 — delete the two notes
+
+`tui_ratatui.rs`: remove the `eprintln!` in `poll_detach` and correct the
+method's doc comment, which currently promises the note. `run_startup_view.rs`:
+remove the `eprintln!` at `:193` only — the row marking, `pane.quit()`,
+`end_capture()` and `exit(130)` around it all stay. Do not quote either
+deleted literal in a replacement comment: Done-when 6's grep scans source
+text and a comment reintroduces the string.
+
+### Step 2 — the queue report becomes a panel
+
+`run.rs`. The smallest reuse-oriented shape is to split construction from
+emission: a pure builder taking `(&[(String, TaskQueueOutcome)], halted,
+queue_len)` and returning a `Panel` built only from `halts()` and
+`label()`, plus a caller that emits it with
+`emit_human(false, &panel, HumanOutputMode::Compact, || Ok(()))?` from
+where `print_task_queue_report` is called today — after the pane drop,
+before the `AlreadyReported` return. `.next(PanelRow::toned("next", …,
+RowTone::Default))` is the kit's structurally distinct action row and the
+existing convention (`lifecycle_handlers.rs:330`). Suggested wording, not
+pinned: remaining value `"{n} not attempted"` at `RowTone::Warn`, next
+value naming the `--continue-on-failure` rerun.
+
+Splitting the builder out is what makes the tone map, the closing state
+and the zero-remaining hint policy provable as `--lib` units next to the
+existing `task_queue_drive_tests`, without a PTY. Update the `run.rs`
+comments that call the report "plain-text rows" and the `cli.rs` help
+that calls it a table.
+
+Build after Steps 1-2:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+### Step 3 — units beside the code they cover
+
+Tone `Fail` for each halting variant and `Pass` for each non-halting one;
+`Failure` close under `--continue-on-failure` with `halted == false` and
+a halting outcome present; `Success` close and no rows for an empty
+queue; remaining row and next row present for a halt with work left and
+ABSENT for a halt with zero remaining; per-task values equal to
+`label()`.
+
+### Step 4 — the four PTY proofs
+
+What each must prove is in `validation`; how to observe it is the run's
+choice within 0252.8's landed rules (child-produced bounded readiness,
+escape-tolerant matching for painted text, helper status out of band, no
+filtering of product bytes). Guidance from the grounding:
+
+- `proof_run_startup_progress.rs:500-569` is a bespoke Expect script, not
+  a shared helper, and 0252.8 leaves it alone. Keep its exit-130, no
+  surviving startup pane, no live `Run Panel`, visible-cursor and cooked
+  termios assertions; replace the two note assertions with the absence of
+  that string. Do not demand a panel production does not emit.
+- `proof_run_view_exit_teardown.rs` hosts the ctrl-c class and, after
+  0252.4, already hosts that task's Abort proof (its criterion 5: leave
+  the alternate screen first, then exactly one compact failure panel).
+  The cheapest route is to extend that landed assertion with the kill
+  note's absence rather than to add a second exit test; Done-when 1 names
+  the outcome, the run picks the observation.
+- `proof_task_queue_refusal_teardown.rs` is the zero-remaining boundary
+  for free: its refusal test already drives a SINGLE-member queue
+  (`--task 0003`), so a halt there leaves nothing to continue. Its
+  `halted — pass …` assertion becomes: the panel closes `Failure`, the
+  `0003` row still carries its `failed:` outcome, the task-0198 refusal
+  line still precedes it, and no next/continue row appears. Its
+  empty-charter test keeps its shape against the empty panel. Note that
+  this file's refusal case is not a candidate for a strict "panel output
+  only" assertion — 0198's diagnostic legitimately precedes the panel.
+- `proof_task_queue_pane_handoff.rs` already owns
+  `failing_two_member_queue_fixture` (tasks 0002 and 0003, `cmd = "false"`,
+  so both fail). REUSE POINT: drive that same fixture WITHOUT
+  `--continue-on-failure` for the remaining-work case — 0002 halts, 0003
+  is never attempted, remaining is exactly 1. Do not build a third queue
+  fixture. The existing `--continue-on-failure` test keeps proving two
+  alternate-screen entries and both member rows.
+- Both queue files currently assert `task queue:` and call the report a
+  table in comments; update assertions and comments together.
+
+No golden capture and no frozen full-frame inventory. Assert restore
+ordering, panel structure and semantic rows, absence of the three old
+strings, exit code and cooked termios, from scratch fixtures only.
+
+## Out of scope
+
+- `presentation.rs`, `interrupt.rs`, the signal ladder and rescue path,
+  status-progress rendering, JSON serialization, and the three
+  `run tui unavailable` fallback diagnostics.
+- `modules/cli/tests/support/src/lib.rs`: owned by 0252.8 and consumed
+  here. Edit it only if the landed API has a concrete defect, and report
+  that prominently.
+- 0252.4's modal contract and its five representative behaviours: this
+  task consumes them and must not weaken or re-litigate them.
+- `proof_output_style.rs:796-836`, which pins ordinary failed single-run
+  output. It is a regression gate here, not a target, and normally stays
+  unedited.
+- The two neighbouring loose lines of content fact 7.
+- Any new panel on the startup-interrupt path.
+'''
+validation = '''
+## Done when — binding goals, each with the existing command that decides it
+
+1. On the live-pane ctrl-c path 0252.4 landed — the first ctrl-c opens
+   the failure modal, `Abort` closes the pane — the alternate screen is
+   left BEFORE any output and exactly one compact shared failure panel
+   follows the restore, in the existing `run::failure_panel` /
+   `run_header_from_title` grammar (session row, error row, `Failure`
+   close). The kill note appears nowhere in the captured output, and the
+   suite's existing exit-code and no-frame-remnant assertions still hold:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+2. A startup interrupt leaves a restored cooked shell with a visible
+   cursor, no surviving startup frame, no live run frame, exit 130, and
+   no loose prose after the restore — the removed string is asserted
+   absent and no panel is required:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_startup_progress`
+3. A queue that halts with work remaining reports one shared-kit panel
+   carrying every attempted member's outcome, the exact count of
+   never-attempted tasks, a next row naming `--continue-on-failure`, a
+   `Failure` close and exit 7 — with the old halt sentence and the old
+   `task queue:` heading gone. The `--continue-on-failure` run still shows
+   two alternate-screen constructions and both member rows:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_task_queue_pane_handoff`
+4. A halt with ZERO tasks remaining shows no next/continue row while still
+   closing `Failure` with its member outcome, the task-0198 per-member
+   refusal line still survives teardown ahead of the panel, and an empty
+   expanded queue still reports a panel with no rows and exits 0:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_task_queue_refusal_teardown`
+5. The panel's construction rules hold as units — tone `Fail` exactly for
+   halting outcomes, closing state driven by the real failure predicate
+   rather than `halted` (so `--continue-on-failure` with a failure still
+   closes `Failure`), remaining and next rows present only for a halt with
+   work left, per-task values equal to `TaskQueueOutcome::label()` — and
+   ordinary non-queue run output is unchanged:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib --test proof_output_style`
+6. The three prose producers are gone from the product tree and the three
+   fallback diagnostics are intact:
+   `! rg -n 'terminal restored' modules/cli/src && ! rg -n 'to run the remaining queue anyway' modules/cli/src && test "$(rg -o 'run tui unavailable; falling back to status progress' modules/cli/src | wc -l | tr -d ' ')" = 3 && echo exit-prose-clean`
+7. The landing gate is green:
+   `CARGO_TARGET_DIR=target just test-full`
+
+Criteria 3 and 4 share one `[[checks]]` entry (one cargo invocation over
+both queue targets); the rest carry one each. No check is derived for
+"`--json` output is byte-identical" — checks run in a clean detached
+worktree of the merged sha with no baseline to diff against, and a source
+grep would pass on any rewrite that kept the branch. That one is a
+reviewer instruction below.
+
+## Order and bounded refinement
+
+Two things bind. The landing gate runs ONCE, at the end, after the other
+criterion commands have passed. And refinement is finitely bounded: at
+most two targeted repair-and-rerun rounds in total. A round repairs one
+named failure, then reruns the failed command AND every later criterion
+command the repair could invalidate. If a third round would be needed,
+STOP and report the failing command with its output rather than
+continuing. That is the stop condition, not a judgement call.
+
+Everything else about sequencing is suggested. A route the grounding
+supports: Step 0's re-read, then Steps 1-4, running
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli` after Step 2 so a
+type or borrow error surfaces next to the edit that caused it; then
+criterion commands 5, 6, 3, 4, 1, 2, 7 — units and the grep first because
+they cost seconds rather than minutes, the gate last. Intermediate
+commands (incremental builds, `--lib` name filters, single-test
+invocations) are conveniences: run, skip, reorder or substitute them
+freely. Report any deviation in the work summary rather than escalating
+it.
+
+Before calling the work done, inspect `git status --short` and `git diff`
+substantively: only justified files changed; no second outcome
+classification or second panel renderer introduced; the pane still
+dropped before report output; the 0198 refusal line and the `q` detach
+notice untouched; `--json` still returning before the reporter; and no
+deleted literal reintroduced inside a comment.
+
+## Watch
+
+The diagnoses below are first hypotheses, not the only permitted ones.
+Where a bullet restates a binding goal or exclusion, that part binds; the
+causal guess and the suggested repair never do.
+
+- If Done-when 6's grep fails while the code is clean, a comment quoting a
+  deleted literal is the likely cause — it scans source text, not
+  behaviour. Rewrite the comment; do not weaken the check.
+- If a queue proof reports the panel but the wrong closing state, suspect
+  the predicate: BINDING is that the close follows
+  `outcomes.iter().any(halts)` and the remaining/next rows follow a real
+  early halt with work left. `halted` alone answers neither question
+  (content fact 6).
+- If the refusal proof loses the `ctx run --task 0003:` line, that is a
+  task-0198 regression, not a panel cleanup. Restore it; the panel is
+  allowed to be preceded by that diagnostic.
+- If a proof hangs waiting for painted text, readiness is the cheaper
+  suspect than this task's edits: 0252.8's rules bind — child-produced
+  bounded readiness, escape tolerance through the landed shared
+  authority, never a sleep, never `/dev/tty`.
+- On the paths that emit no panel at all — the startup interrupt, and any
+  pane that never opted into 0252.4's modal — deleting the note leaves an
+  empty restored region. That is the expected shape there: assert absence
+  plus restore/termios/exit rather than inventing output. It is NOT an
+  alternative outcome for Done-when 1, whose Abort path must show the
+  compact failure panel.
+- A red `proof_output_style` most likely means the shared failure grammar
+  moved. BINDING: that suite is a regression gate for this task, not a
+  target.
+- If the landed 0252.4 modal makes the first ctrl-c never reach
+  `poll_detach`, the note is still deleted — the surviving non-opted-in
+  panes are the reason the producer must go, not just the live pane.
+'''
 
 [relations]
 parent = "0252"
-depends-on = ["0252.7", "0252.8"]
+depends-on = ["0252.7", "0252.8", "0252.4"]
+
+[[checks]]
+name = "the run-view exit path restores the shell with no kill note"
+command = "cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "a startup interrupt restores cooked mode and prints no loose prose"
+command = "cargo test -p ctx-traits-cli --test proof_run_startup_progress"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "the queue reports one panel with the remaining count and no halt sentence"
+command = "cargo test -p ctx-traits-cli --test proof_task_queue_refusal_teardown --test proof_task_queue_pane_handoff"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "panel construction units hold and ordinary run output is unchanged"
+command = "cargo test -p ctx-traits-cli --lib --test proof_output_style"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "the three prose producers are gone and the three fallback diagnostics remain"
+command = "! rg -n 'terminal restored' modules/cli/src && ! rg -n 'to run the remaining queue anyway' modules/cli/src && test \"$(rg -o 'run tui unavailable; falling back to status progress' modules/cli/src | wc -l | tr -d ' ')\" = 3 && echo exit-prose-clean"
+expect = 'exit-prose-clean'
+
+[[checks]]
+name = "the landing gate stays green"
+command = "just test-full"
+timeout-ms = 3600000
