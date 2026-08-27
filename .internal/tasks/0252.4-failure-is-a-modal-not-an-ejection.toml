@@ -1,9 +1,9 @@
 schema-version = "0.2"
 key = "0252.4"
 title = "Failure is a modal, not an ejection"
-status = "draft"
+status = "ready"
 raised = "2026-08-24"
-content = """
+content = '''
 Runs are resumable and re-drivable; the surface must show that instead of
 ejecting on every failure. Parent ruling 5.
 
@@ -30,6 +30,25 @@ settled below so this run can land unattended. This task runs after
 0252.8 (truthful PTY helper) and 0252.7 (live view on the alternate
 screen) in the same queue; the plan builds on both being landed.
 
+## How to read this plan
+
+Goals and approach are separated, and only goals bind. What binds is
+exactly four things: `validation`'s Done-when list with the existing
+command that decides each one, the binding constraints and exclusions in
+`scope`, every REUSE POINT (an existing authority that must not be
+duplicated — a second copy of the same grammar is a defect regardless of
+route), and the finite repair cap with its single final landing-gate run
+in "Order and bounded refinement".
+
+Everything else is the architect's best route from the grounding, not a
+boundary: expected files, symbol names and signatures, edit and step
+order, seam shape, intermediate commands and the order they run in,
+fixture and matcher choices, which assertion proves which behaviour, and
+every diagnostic hypothesis and suggested repair under `Watch`. Deviate
+from any of it whenever a goal requires it. Report the deviation in the
+work summary — it is not a plan violation, not a finding, and not an
+owner escalation.
+
 ## Owner rulings, settled 2026-08-27 — decisions, not open questions;
 the run must not re-litigate or escalate them
 
@@ -46,34 +65,365 @@ the run must not re-litigate or escalate them
 4. Expected-file lists in the plan are guidance, not a boundary: when a
    named Done-when requires touching a file beyond the list, do it and
    report it in the work summary.
-"""
-scope = """
-## Scope
 
-- The failure modal itself: in-scope failure classes and the first
-  raw-mode ctrl-c keep the pane, dim it, one short line, three actions
-  in the fixed order, keyboard selection per the 0252.3 button grammar.
-- Resume/Retry wiring through the existing `--session` re-drive path;
-  Restart wiring through a fresh session with identical trait and
-  arguments; Abort teardown to the compact failure panel on the normal
-  screen.
-- Representative proofs only — one per behavior class: an in-scope
-  failure shows the modal; first ctrl-c shows the modal; Resume
-  re-drives the same session; Restart starts a fresh session; Abort
-  restores the shell and prints the panel. No permutation battery
-  across failure kinds, timings, or interleavings — the contract
-  ceiling is the five named classes.
+## Grounded against HEAD 546a0553 (0252.7 landed at e7881711; 0252.8 not landed here)
+
+Nine facts about the code as it stands decide the shape of this work.
+They are corrections against the obvious route, not implementation
+orders.
+
+### 1. Raw ctrl-c is not SIGINT, and its kill has already fired
+
+The crossterm pump detects the key and calls `interrupt::request_kill()`
+IMMEDIATELY, before forwarding it (`tui_ratatui.rs:642-661`). That call
+is load-bearing: a silent harness may never cause another render. The
+ejection is a SECOND stage — `poll_detach` drains the forwarded key,
+calls `request_kill()` again, marks the pane detached, leaves the
+alternate screen and prints a note (`tui_ratatui.rs:823-855`). Only that
+second stage may be gated, and only for a live pane that has opted in.
+The kill keeps firing on the first ctrl-c: this modal offers
+Resume/Restart/Abort for a killed attempt; it does not make ctrl-c
+cooperative and does not defer the kill.
+
+### 2. The opt-in cannot be global
+
+Production run, startup and attached-observer panes all come from the
+same `RatatuiPane::new_run_pane()` (`tui_ratatui.rs:455-459`), and
+startup hands its own pane forward without rebuilding the terminal
+(`run_startup_view.rs:209-211`, `drive.rs:4872-4908`). Startup consumes
+ctrl-c through `poll_startup_interrupt` and exits 130
+(`run_startup_view.rs:162-207`). Rewriting `CtrlCPolicy::RequestStop`
+would change startup and observers, which are excluded. The opt-in
+belongs to the live `RunPanel` once it exists, not to the pane
+constructor.
+
+### 3. The loose kill note is 0252.9's to delete
+
+`run killed; terminal restored` (`tui_ratatui.rs:849`) belongs to
+sibling 0252.9. An opted-in live pane no longer reaches that branch on
+the first ctrl-c, which is this task's change; the prose itself stays in
+the tree for the paths that still eject.
+
+### 4. Every non-completed drive currently closes the pane
+
+`drive_loop` wraps the panel in a `RunPanelGuard` whose `Drop` always
+calls `panel.close()` (`drive.rs:1942-1949`, `2110-2120`), and
+`drive::drive` has an outer guard over every early return
+(`drive.rs:1020-1085`). The ONE existing release path is normal
+`Session::Completed`, which moves the panel into
+`DriveInputs::panel_handoff` instead of closing it
+(`drive.rs:2321-2337`) for `run::drive_session` to take
+(`run.rs:516-594`). `PanelHandoff` is already a cloneable
+`Arc<Mutex<Option<RunPanel>>>` with `new`/`give`/`take`
+(`drive.rs:203-231`). REUSE POINT: retaining a failed pane extends that
+handoff; a second panel transport would duplicate lifecycle logic.
+
+### 5. The failure class is an existing predicate, not a new one
+
+`run_completed` requires both persisted `Session::status == Completed`
+and `drive.final_session_status == Some(Completed)` (`run.rs:1152-1167`),
+and `print_final_output` already selects the compact failure panel on
+`!run_completed` (`run.rs:1659-1723`). The nearest in-scope human
+predicate is `CompletionOutcome::with_human_terminal_failure` — human
+output, no credits pause, no budget pause, not completed
+(`run.rs:1285-1297`). REUSE POINT: the modal trigger and the existing
+exit mapping must be decided by the same predicate, or they drift. Two
+neighbours are deliberately NOT re-drivable failures: credits and budget
+pauses have their own resumable guidance and are early-returned
+(`run.rs:1671-1682`), and a completed drive with a parked or failed
+merge still renders as Success (`run.rs:1040-1057`, `1690-1723`).
+
+### 6. The one line has an authority, and it is not short today
+
+`run::failure_reason` is the explanation authority — session stop
+message, stop reason, fired bound, first drive warning, drive status, in
+that precedence (`run.rs:1114-1150`). REUSE POINT: modal text derives
+from it. But its sources can be long or multiline: `PanelRow::toned`
+sanitizes terminal controls without enforcing one line
+(`presentation.rs:89-99`) and `render_modal` wraps. One short line is
+therefore an explicit normalization this task adds once and uses for
+both the report-failure and the propagated-error case, with a stable
+fallback when the reason is empty.
+
+### 7. Esc is structurally `Cancelled`, and `Chosen` is currently dropped
+
+The button grammar is landed and needs no edit: `Modal::buttons`,
+`Button::new`, `.destructive()`, `ModalOutcome::Chosen(String)`, focus
+starting at index 0, Left/Right and Tab/Shift-Tab wrapping, Enter
+resolving, unrelated keys `Pending` (`tui_kit.rs:362-588`, `457-515`,
+`1113-1148`). Two consequences. Esc always returns `Cancelled`, and
+`apply_open_modal_key` clears any cancelled modal and answers a pending
+input receiver with `None` (`run_view.rs:1323-1357`) — so a failure
+modal, whose only exits are its three buttons, needs its own
+discriminator and an earlier branch, not a tweak to the shared arm. And
+`ModalOutcome::Chosen(_)` is an explicitly-ignored arm in that same
+function: that is the seam for the three choices.
+
+### 8. A blocked missing-input drive must be released, or nothing can be honoured
+
+A drive awaiting input blocks synchronously on
+`panel.request_input(...).recv()` (`drive.rs:2343-2363`), and
+`state.modal` is shared with that prompt and with the quit confirmation
+(`run_view.rs:211-351`). If ctrl-c replaces an open input prompt, the
+displaced `pending_input_reply` must receive `None`; otherwise the drive
+thread never returns and no choice can be acted on.
+
+### 9. Resume is `internal drive --session`; Restart collides on two arguments
+
+The real same-session continuation primitive is
+`ctx traits internal drive --session <id-or-path>` and its in-process
+equivalent `drive::drive(DriveInputs { session, .. })`
+(`surface/cli.rs:1474-1539`, `command_handlers.rs:1293-1402`), which
+resolves the ledger (`run_session::resolve_session_path`), reloads the
+pinned trait (`io/run.rs:3806-3888`), restores recorded worktree
+provenance (`drive.rs:1766-1788`) and advances the existing cursor. The
+visible `ctx traits --session … run …` spelling is NOT a resume
+primitive — the outer session value is unused in the `Run` branch
+(`command_handlers.rs:287-304`, `487-744`) — so a Resume implementation
+must not recurse through it. A terminally `Failed` session is still
+accepted by the drive entry and returns a failed report promptly
+(`drive.rs:2230-2342`), so a failed Resume can honestly reopen the same
+modal with no copied core transition.
+
+Restart's fresh identity is already implemented: every `io::run::start`
+mints new session and run IDs (`io/run.rs:947-980`), reached from
+`run::start_run_session` with the live `SessionStartInputs`
+(`run.rs:51-94`, `334-439`). The ledger does not persist the original
+raw trait-argument spellings (`core/session.rs:244-317`;
+`io/run.rs:1458-1547`), which is why the in-process values are the
+honest source. Exactly two of those values collide with a fresh start:
+an explicit `--out` sends the new session to the same file and
+overwrites the prior ledger (`io/run.rs:4165-4171`), and a named
+worktree makes `prepare_worktree` refuse, because a new run cannot reuse
+a registered worktree (`io/worktree.rs:232-255`). A bare worktree
+already derives its ID from the fresh session ID (`io/run.rs:995-1005`).
+
+## Correction — 0252.8's helper is the baseline, and it is not in this worktree
+
+At HEAD the shared helpers still hand-build environments, push
+`__CHILD_EXIT__…` into asserted PTY stdout, and use timer-resetting
+`exp_continue` (`support/src/lib.rs:613-763`), and the teardown proof
+still filters that metadata (`proof_run_view_exit_teardown.rs:135-153`).
+0252.8 fixes all of it and keeps the three public helper names,
+parameter order and return types stable — but its implementation, its
+fixture additions and any new matcher symbol names must be RE-READ after
+it lands, before this task's first proof edit. Two inherited rules bind
+here regardless of what those symbols end up being called: readiness for
+key delivery is text only the spawned child could have produced (a
+painted step label or `in-progress role@harness` is painted pre-spawn),
+and any wait on or assertion about ratatui-painted text goes through
+0252.8's escape-tolerant authority, because the cell diff may insert
+escapes between adjacent characters.
+'''
+scope = '''
+## Binding constraints and exclusions
+
+These bound the outcome regardless of the route taken.
+
+- The three actions are always present, always in the order
+  `Resume/Retry`, `Restart`, `Abort`, with focus starting on
+  `Resume/Retry`. There is no fourth action, no conditional action, and
+  no state in which the modal is open with fewer than three.
+- The failure modal is not dismissible except through its three
+  buttons: Esc, `q` and unrelated keys leave it open and leave its
+  focused button where the user put it. Opening is idempotent — a later
+  final drive reason must not replace an already-open modal or move its
+  focus, and a recorded choice must not be overwritten by a later
+  reopen.
+- The first raw-mode ctrl-c still kills the process group immediately
+  (content fact 1). The modal changes what the surface does next.
+- Ctrl-c opens the modal even over an open quit confirmation, missing
+  input prompt or guide, and a displaced missing-input wait is released
+  so the drive thread can finish (content fact 8).
+- The modal body is ONE short single line derived from
+  `run::failure_reason` (content fact 6), normalized once and reused for
+  both the report-failure and propagated-error cases, never a second
+  reason source.
+- Only the live `RunPanel` opts into modal ctrl-c handling. Startup
+  panes, attached observers, standalone `internal drive --session` and
+  generated meta-traits keep today's behaviour — a caller that cannot
+  consume a choice must never display the modal.
+- Resume and Restart act only AFTER the failed `drive()` has returned
+  and released the driver lock and its persisted outcome
+  (`drive.rs:1493-1541`). A key handler records intent; it does not
+  start a re-drive.
+- Resume re-drives the SAME session through the existing `--session`
+  drive entry (content fact 9), never through the visible
+  `ctx traits --session … run` spelling and never by reimplementing
+  cursor advance. Restart starts a FRESH session through the existing
+  start path with the same trait and arguments, preserving the previous
+  run's ledger.
+- Abort leaves the alternate screen FIRST and then prints exactly one
+  compact failure panel on the restored normal screen, built through the
+  existing `run::failure_panel` / `run_header_from_title` grammar
+  (`run.rs:1812-1833`). No second renderer, no duplicated glyphs,
+  labels, title fallback or ANSI serialization — 0252.2's rescue path
+  already reuses the same constructors (`run_view.rs:1000-1029`).
+- Waiting for a choice cannot hang the run: a detached, closed or
+  poisoned pane resolves to Abort within a finite bound rather than
+  blocking forever after terminal loss.
+- Proofs assert product bytes only, at the five representative
+  behaviour classes named in `validation` — one per class. No
+  permutation battery across failure kinds, timings or interleavings.
+
+## Suggested approach — guidance, not a boundary
+
+### Expected files
+
+- `modules/cli/src/app/tui_ratatui.rs`
+- `modules/cli/src/app/run_view.rs`
+- `modules/cli/src/app/run_view/render.rs`
+- `modules/cli/src/app/drive.rs`
+- `modules/cli/src/app/run.rs`
+- `modules/cli/tests/proof_run_view_exit_teardown.rs`
+- `modules/cli/src/app/command_handlers.rs` and
+  `modules/cli/src/app/generate.rs` — default literals only, if
+  `DriveInputs` grows a field.
+
+Touching files beyond this list is legitimate whenever a binding goal
+requires it. Do it and report it in the work summary (ruling 4).
+
+### Step 0 — re-read the post-0252.8 baseline before editing
+
+`modules/cli/tests/support/src/lib.rs` (the three helpers, the readiness
+wait, the escape-tolerant matcher authority, any fixture 0252.8 added)
+and `proof_run_view_exit_teardown.rs` end to end, then observe that
+suite's own passing count. None of this plan's proof guidance survives
+contact if 0252.8 landed differently; the goals do.
+
+### Step 1 — failure-choice state in the run view
+
+`run_view.rs`. `RunPanelState` already owns the session, trait, plan,
+pane, the single `modal`, the pending input reply and cached tree lines
+(`run_view.rs:211-351`), and `RunPanel` is cheap to clone over `Arc`s.
+The suggested shape:
+
+- a discriminator distinguishing the failure modal from the quit
+  confirm and the input prompt, so an earlier branch in
+  `apply_open_modal_key` traps `Cancelled` and unrelated keys instead of
+  clearing (content fact 7);
+- an idempotent open that builds `Modal::buttons` with the three fixed
+  `Button::new(..., ModalOutcome::Chosen(...))` values in order,
+  displacing an input prompt by answering its reply with `None`
+  (content fact 8), and returning early if a failure modal is already
+  open;
+- a choice slot that is a LEAF lock plus a wake, published from the key
+  handler while the state mutex is held and read after releasing it —
+  polling the state mutex from the orchestration thread would deadlock
+  rendering — with a bounded wait that resolves to Abort when the pane
+  is detached or the lock is poisoned;
+- a clear that returns the panel to ordinary live rendering for Resume.
+
+The `ModalOutcome::Chosen(_)` arm at `run_view.rs:1353` is where the
+three choices map. Ctrl-c interception belongs before the modal, guide,
+`d`, `q` and scroll routers in `poll_and_apply_keys`
+(`run_view.rs:1359-1431`).
+
+### Step 2 — dim the backdrop, only for this modal
+
+`run_view/render.rs`. `render_live_panes` (`:421-480`) renders a normal
+modal without dimming. REUSE POINT: `tui_kit::dim_backdrop`
+(`tui_kit.rs:994-1013`) adds `DIM`, removes `BOLD` and paints no
+background, and `render_conversation_modal` (`tui_kit.rs:1269-1281`)
+establishes the order — dim the full area, then `Clear`, then render the
+modal at full brightness. Generic `render_modal` deliberately does not
+dim, so the failure-only dim goes at this call site, not into the kit.
+`tui_kit.rs` should not need an edit.
+
+### Step 3 — the ctrl-c opt-in
+
+`tui_ratatui.rs`. Gate only the second stage of `poll_detach`
+(`:823-855`) for a pane that has opted in, leaving the pump's immediate
+`request_kill` (`:642-661`) and the unarmed startup/observer path
+untouched, and forwarding the key so the run view can open the modal.
+The opt-in should be set once a live `RunPanel` exists (content fact 2)
+and should be off by default.
+
+### Step 4 — retain the failed pane
+
+`drive.rs`. Extend the existing `panel_handoff` release
+(`drive.rs:203-231`, `2321-2337`) so a retained-on-failure run releases
+its live panel to `run::drive_session` instead of closing it through
+`RunPanelGuard::drop`, and so a same-session re-drive can accept an
+already-live panel. Any new `DriveInputs` field defaults to off/empty at
+the `command_handlers.rs` and `generate.rs` construction sites.
+`drive()` already resets interrupt and run-kill state at the top of
+every invocation (`drive.rs:990-1009`) — REUSE POINT for Resume rather
+than a second reset.
+
+### Step 5 — the attempt loop in `run.rs`
+
+Keeping the loop inside `drive_session` (`run.rs:453`) is what lets
+Restart reuse the live `SessionStartInputs` values semantically, with no
+shell quoting and no reliance on provenance the ledger does not hold
+(content fact 9); it also means one task-queue member (`run.rs:763-845`)
+does not advance until its decision reaches a final `CompletionOutcome`
+or error. Suggested pieces:
+
+- one shared in-scope predicate and one short-line normalizer (content
+  facts 5 and 6);
+- Resume: clear the modal, re-drive the same session through the
+  existing `--session` drive entry with the retained panel;
+- Restart: close the retained pane, then call the existing start path
+  with the same values, using the default session path instead of an
+  explicit `--out` and degrading a named worktree to the bare derived
+  form (content fact 9) — every other argument preserved;
+- Abort: close first, then print. For an `Ok(DriveReport)` failure,
+  falling back into the existing `print_final_output` path avoids a
+  second renderer; a propagated `drive()` error needs a narrow sibling
+  using the same `run_header`/`failure_panel` and then
+  `Error::AlreadyReported` with exit code 1 (`error.rs:28-33`,
+  `command_handlers.rs:164-183`) so the generic CLI renderer does not
+  print a second line. Propagated errors keep exit code 1; do not remap
+  them onto run or merge codes.
+
+Build after Steps 1-5:
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
+
+### Step 6 — units beside the code they cover
+
+Fixed button order and focus, Esc and unrelated keys trapped, choice
+mapping, idempotent open, displaced input released with `None`,
+short-line normalization of a long multiline reason and of an empty one,
+and the two Restart boundary transformations. These are cheap, they need
+no PTY, and they are what makes a red end-to-end proof diagnosable.
+
+### Step 7 — the five representative proofs
+
+`proof_run_view_exit_teardown.rs`, consuming 0252.8's helpers. What each
+must prove is in `validation`; how to observe it is the run's choice
+within 0252.8's rules (post-spawn marker readiness, escape-tolerant
+matching for painted text, out-of-band child status). Guidance from the
+grounding, not a pin: the Resume proof is convincing when it observes
+ONE retained ledger and session id and a completion after the choice;
+the Restart proof when it observes TWO ledgers with distinct session ids
+and the first still present; the Abort proof when it inspects bytes
+after the final alternate-screen restore. The existing raw-ctrl-c test
+(`:265-290`) is the natural host for the ctrl-c class and changes only
+as the new first-ctrl-c behaviour requires. Do NOT filter helper
+metadata out of asserted bytes — after 0252.8 there is none, and a
+filter would hide a regression in it.
 
 ## Explicitly excluded (owner ceiling — findings here are advisory
 board material, never blocker cells)
 
 - Second-ctrl-c and signal-path behavior: owned and landed by 0252.2;
-  its hard-escape contract is untouchable here.
+  its hard-escape contract is untouchable here. `interrupt.rs`'s signal
+  ladder, rescue buffer, generation gate and handler calls are not
+  edited (`interrupt.rs:42-89`, `139-192`).
 - PTY-helper behavior: owned by 0252.8; this task consumes it.
+- Deleting the loose `run killed; terminal restored` note: 0252.9
+  (content fact 3).
 - Every-panic and exotic-exit coverage: parent ruling stands ("I don't
   care about every single panic for now").
 - Dashboard-side actions (delete/archive/action registry): 0252.5 and
   0252.6.
+- The 0252.3 button grammar itself (`tui_kit.rs`), startup-pane
+  behaviour, and the ordinary non-interactive failure output pinned by
+  `proof_output_style::run_failed_default_output_is_exact`
+  (`proof_output_style.rs:795-836`) — all consumed, none rewritten.
+- Merge dispositions and credits/budget pauses as re-drivable failures
+  (content fact 5).
 
 ## Landing discipline
 
@@ -81,29 +431,156 @@ board material, never blocker cells)
   just test-full`). A baseline failure that predates this task's own
   diff is reported with evidence and does not block merging this task's
   green work.
-"""
-validation = """
+'''
+validation = '''
+## Done when — binding goals, each with the existing command that decides it
+
+1. An in-scope run failure keeps the pane instead of ejecting: after a
+   drive that ends non-completed for a human run, the alternate screen
+   is still held, the live content behind the modal is dimmed, the modal
+   states the failure in one short line derived from
+   `run::failure_reason`, and offers exactly `Resume/Retry`, `Restart`,
+   `Abort` in that order with focus on the first.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+2. The FIRST raw-mode ctrl-c during a live run opens that same modal
+   instead of detaching and printing a note, while the process group is
+   still killed immediately. Same command as 1.
+3. `Resume/Retry` re-drives the SAME session: after the choice the run
+   continues on the session id observed before the failure — one ledger,
+   one session id, reaching completion. Same command as 1.
+4. `Restart` starts a FRESH session with the same trait and arguments:
+   two ledgers exist afterwards with distinct session ids, and the first
+   run's ledger is preserved rather than overwritten. Same command as 1.
+5. `Abort` restores the shell and prints exactly one compact failure
+   panel: the alternate screen is left BEFORE any of that output, the
+   panel carries the observed session id in the existing
+   `run::failure_panel` grammar, and no live-frame remnant appears after
+   the restore. Same command as 1.
+   (Criteria 1-5 are the five representative classes — one proof each.
+   They share one command because they share one suite; the assertions
+   live in those tests.)
+6. Excluded surfaces are provably unchanged. The ordinary
+   non-interactive failure output still matches its pinned shape and
+   headless/piped runs stay byte-identical:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style`
+   and the loose exit note stays in the tree for the paths 0252.9 owns:
+   `rg -q 'run killed; terminal restored' modules/cli/src && echo kill-note-retained`
+7. The modal's own invariants hold as units, so a red end-to-end proof
+   is diagnosable: fixed three-button order and initial focus, Esc and
+   unrelated keys leaving the failure modal open with its focus unmoved,
+   each choice mapping to its action, a second open being a no-op over
+   an open modal or a recorded choice, a displaced missing-input wait
+   answered with `None`, a long multiline and an empty failure reason
+   both normalizing to one short line, and the two Restart boundary
+   transformations (default session path instead of an explicit `--out`;
+   a named worktree degraded to the bare derived form). Existing pane,
+   rescue-arming and restore-constant invariants still pass alongside
+   them:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib`
+8. The landing gate is green:
+   `CARGO_TARGET_DIR=target just test-full`
+
+Criteria 1-5 carry one shared `[[checks]]` entry; criteria 6, 7 and 8
+carry one each. No entry is derived for "the signal path is untouched":
+checks run in a clean detached worktree of the merged sha where there is
+no diff to inspect, and a source grep asserting the shape of
+`interrupt.rs` would pass on any rewrite that kept its words. That one
+stays a reviewer instruction below.
+
+## Order and bounded refinement
+
+Two things here bind. The landing gate
+(`CARGO_TARGET_DIR=target just test-full`) runs ONCE, at the end, after
+the other criterion commands have passed. And refinement is finitely
+bounded: at most two targeted repair-and-rerun rounds in total. A round
+repairs one named failure, then reruns the failed command and every
+other criterion command the repair could invalidate. If a third round
+would be needed, STOP and report the failing command with its output and
+the remaining evidence rather than continuing. That is the stop
+condition, not a judgement call.
+
+Everything else about sequencing is suggested. A route the grounding
+supports: Step 0's re-read, then Steps 1-7, running
+`CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli` before writing
+the units so a borrow, lock-order or exhaustiveness error surfaces next
+to the edit that caused it; then criterion commands 7, 1, 6, 8 — units
+first because they cost seconds rather than minutes, the gate last.
+Intermediate commands are conveniences, not obligations: incremental
+builds, a `--lib` filter such as `failure_modal`, single-test
+invocations. Run, skip, reorder or substitute them freely. Any deviation
+from a suggested step order, intermediate command, diagnostic route or
+proof mechanic in service of a Done-when is reported in the work summary
+and is not an owner escalation.
+
 ## Watch
+
+The diagnoses and repairs below are the architect's first hypotheses
+from the grounding, not the only permitted ones. Where a bullet also
+restates a binding goal, exclusion or ruling, that part is marked and
+binds; the causal guess and the suggested fix never do. Reaching a
+Done-when by a different diagnosis or repair is reported in the work
+summary, not escalated.
 
 - The excluded list is an owner ceiling. A finding in an excluded area
   is advisory, never a blocker cell.
-- The reviewer verifies the five representative proofs and the modal
-  contract; "take as many rounds as it needs" applies to closing the
-  named contract, not widening it.
 - The settled rulings in content are final for this run; escalation is
   not a path for re-opening them.
-
-## Done when (sketch — architect refines against post-0252.7 main)
-
-- The five representative PTY proofs pass using 0252.8's helper
-  (marker readiness, out-of-band exit status, Center-tuple
-  observation).
-- The modal renders per the 0252.3 button grammar on the alternate
-  screen; Abort restores the shell and prints the compact panel from
-  column 0 with no interleaved live-frame remnants.
-- Full suite green per the landing discipline above.
-"""
+- The reviewer verifies the five representative classes and the modal
+  contract; "take as many rounds as it needs" applies to closing the
+  named contract, not widening it.
+- Final substantive review inspects `git status --short` and
+  `git diff`: only justified files changed; the three actions always
+  present and ordered; no signal-path or second-ctrl-c code touched; no
+  helper metadata filtered out of asserted bytes; Abort closing before
+  printing and through the shared panel constructors; Resume and Restart
+  acting only after the prior `drive()` released its lock.
+- If a proof hangs waiting for the modal, readiness is the cheaper
+  suspect than the modal: a painted step label is pre-spawn, and painted
+  text needs 0252.8's escape tolerance. A better post-spawn marker or
+  wider escape tolerance is the suggested repair; another cause is
+  possible and another fix is fine. BINDING regardless of route:
+  readiness is post-spawn evidence only, the `/dev/tty` design is dead
+  (ruling 3), and no repair may make a pre-spawn frame satisfy the wait
+  or substitute a sleep for evidence.
+- If the ctrl-c proof shows no alternate screen at all, check the helper
+  environment seam first (0252.8, `NO_COLOR` at the PTY seam) before
+  this task's opt-in — that is where the grounding puts it. BINDING:
+  `stderr_supports_live` is not a repair target.
+- If Restart overwrites the first ledger or a worktree registration
+  refuses the fresh run, that is content fact 9's known collision rather
+  than a core bug; the suggested fix is in this task's restart path.
+  BINDING is only the goal — the first run's ledger survives and the
+  fresh session is distinct. `io/run.rs` and `io/worktree.rs` are shared
+  core: if a Done-when genuinely requires editing them, do it and report
+  it prominently in the work summary.
+- A red `proof_output_style` most likely means the compact failure
+  grammar moved. BINDING: that suite is a regression gate for this task,
+  not a target.
+'''
 
 [relations]
 parent = "0252"
 depends-on = ["0252.8", "0252.7", "0252.3", "0252.2"]
+
+[[checks]]
+name = "the five representative failure-modal behaviours hold end to end"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "modal, choice and restart-boundary unit invariants hold"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
+
+[[checks]]
+name = "the compact failure output and 0252.9's exit note are untouched"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style && rg -q 'run killed; terminal restored' modules/cli/src && echo kill-note-retained"
+timeout-ms = 1800000
+expect = 'kill-note-retained'
+
+[[checks]]
+name = "the failure modal passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 3600000
