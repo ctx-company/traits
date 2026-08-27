@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.8"
 title = "The shared PTY helper tells the truth"
-status = "ready"
+status = "draft"
 raised = "2026-08-27"
 content = """
 0252.4's 12-hour run died with four mandatory proofs permanently red, and
