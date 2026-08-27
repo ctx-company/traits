@@ -2766,9 +2766,7 @@ impl DecodeWarningCapture {
 
 impl Drop for DecodeWarningCapture {
     fn drop(&mut self) {
-        for line in ctx_traits_io::decode_diagnostics::end_capture() {
-            eprintln!("{line}");
-        }
+        ctx_traits_io::decode_diagnostics::flush_capture();
     }
 }
 
@@ -2795,7 +2793,7 @@ fn run_with_initial_session(
     while !state.quit && !pane.detached() {
         if let Some(request) = state.attach_request.take() {
             // P081: tears down this process's own alt-screen pane before the
-            // observer's inline pane exists — mirrors the `d`-handoff's own
+            // observer's run pane exists — mirrors the `d`-handoff's own
             // ordering the other direction (dashboard thread takes the
             // terminal only after the live view has already quit its pane).
             pane.quit();
@@ -2804,9 +2802,6 @@ fn run_with_initial_session(
                 state.guide_chat.as_ref(),
                 state.guide_chat_session_id.as_deref(),
             );
-            // The observer's own capture-end disarmed the shared toggle;
-            // re-arm before this pane retakes the terminal.
-            ctx_traits_io::decode_diagnostics::begin_capture();
             pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
                 ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
                     path: "<tty>".to_string(),
@@ -2908,7 +2903,7 @@ fn run_with_initial_session(
 /// the finished-while-attached case; `Ok(None)` is an ordinary detach.
 /// Trait-resolution failure degrades to `Err` (the caller renders it as a
 /// dashboard message) with no terminal ever handed to a panel — this
-/// function creates its own inline pane, so nothing is left half-torn-down.
+/// function creates its own run pane, so nothing is left half-torn-down.
 fn run_attached_observer(
     request: &AttachRequest,
     guide_chat: Option<&run_view::GuideChatHandle>,
@@ -2921,7 +2916,7 @@ fn run_attached_observer(
         &loaded.trait_ref,
         session.run_id.clone(),
     )?;
-    let pane = RatatuiPane::new_inline().map_err(|source| {
+    let pane = RatatuiPane::new_run_pane().map_err(|source| {
         ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
             path: "<tty>".to_string(),
             source,

@@ -39,16 +39,13 @@ static RESCUE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Leaf lock: callers may hold the run-panel lock; this lock never takes another.
 static RESCUE_PANEL_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Arms the inline signal rescue panel. A handler racing a title refresh may
+/// Arms the alternate-screen signal rescue panel. A handler racing a title refresh may
 /// observe a partially replaced old buffer; eliminating that window requires a
 /// second buffer, so the signal path instead keeps this bounded best effort.
 pub(crate) fn arm_rescue_panel(generation: u64, panel: &crate::app::presentation::Panel) {
-    let mut bytes = super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE.to_vec();
-    bytes.extend(
-        crate::app::tui::render_lines_ansi(&panel.styled_lines())
-            .replace('\n', "\r\n")
-            .bytes(),
-    );
+    let bytes = crate::app::tui::render_lines_ansi(&panel.styled_lines())
+        .replace('\n', "\r\n")
+        .into_bytes();
     let _guard = RESCUE_PANEL_WRITE
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -70,11 +67,13 @@ pub(crate) fn arm_rescue_panel(generation: u64, panel: &crate::app::presentation
 }
 
 fn write_rescue_panel_signal_safe() {
-    let len = RESCUE_PANEL_LEN.load(Ordering::SeqCst);
+    // Consume the published panel before writing so SIGINT escalation cannot
+    // print a second panel after the terminal has already been rescued.
+    let len = RESCUE_PANEL_LEN.swap(0, Ordering::SeqCst);
     let generation = RESCUE_PANEL_GENERATION.load(Ordering::SeqCst);
     if len == 0
         || generation == 0
-        || generation != super::tui_ratatui::signal_safe_inline_generation()
+        || generation != super::tui_ratatui::signal_safe_rescue_generation()
     {
         return;
     }
@@ -176,18 +175,17 @@ extern "C" fn handle_sigterm(signal: i32) {
     unsafe { libc::_exit(128 + signal) };
 }
 
-/// Escalation ladder: the 1st `SIGINT` requests the graceful between-frames
-/// stop (unchanged P402 semantics); the 2nd additionally rescues the
-/// terminal out of raw/alternate mode so the user is never stranded behind a
-/// pane while the drain finishes; the 3rd gives up on draining and exits
-/// with the conventional 130, after the same terminal rescue.
+/// Escalation ladder: the first two `SIGINT`s request the graceful
+/// between-frames stop (unchanged P402 semantics); the third gives up on
+/// draining, restores the terminal, writes the one-shot rescue panel, and
+/// exits with the conventional 130. Deferring terminal handback until the
+/// terminating delivery prevents an interrupted renderer from writing frames
+/// onto the restored normal screen.
 extern "C" fn handle_sigint(_signal: i32) {
     INTERRUPTED.store(true, Ordering::SeqCst);
     let count = SIGINT_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
-    if count >= 2 {
-        rescue_terminal_signal_safe();
-    }
     if count >= 3 {
+        rescue_terminal_signal_safe();
         // SAFETY: `_exit` is async-signal-safe; 130 = 128 + SIGINT.
         unsafe { libc::_exit(130) };
     }
@@ -264,12 +262,8 @@ mod tests {
             .row(PanelRow::toned("session", "one", RowTone::Default));
         arm_rescue_panel(42, &panel);
         let bytes = armed_rescue_panel_snapshot();
-        assert!(bytes.starts_with(super::super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE));
-        let rendered = String::from_utf8(
-            bytes[super::super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE.len()..].to_vec(),
-        )
-        .unwrap()
-        .replace("\r\n", "\n");
+        assert!(!bytes.starts_with(super::super::tui_ratatui::CLEAR_VIEWPORT_ESCAPE));
+        let rendered = String::from_utf8(bytes).unwrap().replace("\r\n", "\n");
         assert_eq!(
             rendered,
             crate::app::tui::render_lines_ansi(&panel.styled_lines())

@@ -1,4 +1,4 @@
-//! Inline startup progress shown before a driven run has a session panel.
+//! Startup progress shown before a driven run has a session panel.
 
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +29,7 @@ struct Inner {
     interrupted: bool,
 }
 
-/// A shared, synchronous observer plus the one inline terminal owner. The
+/// A shared, synchronous observer plus the one terminal owner. The
 /// owner is consumed by the live panel only after session startup succeeds.
 pub(crate) struct StartupView {
     inner: Arc<Mutex<Inner>>,
@@ -55,7 +55,7 @@ impl StartupView {
         .collect();
         let view = Self {
             inner: Arc::new(Mutex::new(Inner {
-                pane: Some(RatatuiPane::new_inline()?),
+                pane: Some(RatatuiPane::new_run_pane()?),
                 rows,
                 interrupted: false,
             })),
@@ -183,14 +183,13 @@ impl StartupView {
                 row.detail = "interrupted".to_string();
             }
             // A synchronous startup operation (notably config loading) may
-            // be blocked indefinitely. Commit and restore from the input
+            // be blocked indefinitely. Restore from the input
             // pump itself so Ctrl-C never strands raw mode waiting for that
             // operation to return.
-            let lines = Self::lines(&inner.rows);
             if let Some(pane) = inner.pane.as_mut() {
-                let _ = pane.commit_inline_scrollback(&lines);
                 pane.quit();
             }
+            let _ = ctx_traits_io::decode_diagnostics::end_capture();
             eprintln!("run startup interrupted; terminal restored");
             std::process::exit(130);
         }
@@ -221,8 +220,8 @@ impl StartupView {
         };
         // Startup initialization is synchronous, so an observer can still
         // complete work after Ctrl-C was received on the pane input thread.
-        // The interrupted row is the terminal disposition and must survive
-        // until Drop projects it into inline scrollback.
+        // The interrupted row is the terminal disposition and must not be
+        // overwritten before teardown restores the terminal.
         if inner.interrupted {
             return;
         }
@@ -252,18 +251,6 @@ impl Drop for StartupView {
         let Ok(mut inner) = self.inner.lock() else {
             return;
         };
-        if !inner.interrupted
-            && !inner.rows.iter().any(|row| row.state == State::Failed)
-            && let Some(row) = inner
-                .rows
-                .iter_mut()
-                .rev()
-                .find(|row| row.state == State::Running)
-        {
-            row.state = State::Failed;
-            row.detail = "startup did not complete".to_string();
-        }
-        let lines = Self::lines(&inner.rows);
         if let Some(mut pane) = inner.pane.take() {
             // Decode warnings originate in the trait document. Do not project
             // them into the terminal until the trust row has completed.
@@ -274,7 +261,8 @@ impl Drop for StartupView {
             {
                 let _ = ctx_traits_io::decode_diagnostics::end_capture();
             }
-            let _ = pane.commit_inline_scrollback(&lines);
+            pane.quit();
+            ctx_traits_io::decode_diagnostics::flush_capture();
         }
     }
 }

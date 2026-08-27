@@ -400,7 +400,7 @@ impl RunPanel {
             trait_ref,
             plan,
             session,
-            RatatuiPane::new_inline()?,
+            RatatuiPane::new_run_pane()?,
         ))
     }
 
@@ -1034,6 +1034,9 @@ fn close_pane_locked(state: &mut RunPanelState) {
         let _ = state.repaint.clear_viewport();
     }
     state.repaint.quit();
+    if !state.observer {
+        ctx_traits_io::decode_diagnostics::flush_capture();
+    }
     state.cadence.inactive();
 }
 

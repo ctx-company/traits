@@ -7,7 +7,10 @@ use std::path::PathBuf;
 
 use support::{
     ScratchRoot, ctx_bin, git_init, require_success, run_pty_with_cursor_reply, strip_escapes,
+    text_after_terminal_restore,
 };
+
+const ENTER_ALT: &str = "\x1b[?1049h";
 
 struct Fixture {
     _scratch: ScratchRoot,
@@ -154,17 +157,25 @@ fn failed_startup_pty(
         "failed startup PTY failed: {output:?}"
     );
     let output = String::from_utf8_lossy(&output.stdout);
-    let marker = output
-        .find("__STARTUP_FAILURE_COMPLETE__")
-        .unwrap_or_else(|| panic!("post-exit failure marker was not visible: {output:?}"));
-    let committed = &output[..marker];
+    let leave = output
+        .rfind("\x1b[?1049l")
+        .unwrap_or_else(|| panic!("startup pane did not leave the alternate screen: {output:?}"));
     assert!(
-        committed.contains(label),
-        "failed startup did not preserve {label:?} in scrollback: {output:?}"
+        output.contains(ENTER_ALT),
+        "startup pane did not enter the alternate screen: {output:?}"
     );
     assert!(
-        committed.contains(reason),
-        "failed startup did not preserve {reason:?} in scrollback: {output:?}"
+        output[..leave].contains(label),
+        "failed startup did not paint {label:?}: {output:?}"
+    );
+    let restored = text_after_terminal_restore(&output);
+    assert!(
+        restored.contains(reason),
+        "failed startup did not report {reason:?} after restore: {output:?}"
+    );
+    assert!(
+        !restored.contains(label),
+        "failed startup row survived terminal restore: {output:?}"
     );
     if check_termios {
         let termios =
@@ -181,7 +192,7 @@ fn failed_startup_pty(
 }
 
 #[test]
-fn startup_pty_commits_each_failed_stage_before_restoring_the_terminal() {
+fn startup_pty_paints_each_failed_stage_before_restoring_the_terminal() {
     let fixture = command_trait_fixture();
     failed_startup_pty(
         &fixture,
@@ -248,23 +259,17 @@ fn startup_pty_commits_each_failed_stage_before_restoring_the_terminal() {
 }
 
 #[test]
-fn startup_pty_falls_back_to_the_existing_initialization_line_when_unavailable() {
+fn startup_pty_needs_no_cursor_query_on_the_alternate_screen() {
     let fixture = command_trait_fixture();
 
-    // A PTY that allocates but never answers ratatui's cursor query, which is
-    // what exercises the allocation-error fallback without corrupting the
-    // normal line-oriented startup narration. `expect` with no reply handler
-    // is exactly that, and it is the same tool the other proofs in this file
-    // already use. `script` was doing this job and could not: its argument
-    // grammar differs between BSD and util-linux — `script -q /dev/null CMD`
-    // runs the command on macOS and is rejected on Linux with "unrecognized
-    // option", so this proof passed locally and failed on every Linux runner.
+    // A PTY that deliberately never answers cursor queries. Alternate-screen
+    // startup does not issue one, so the run still completes.
     let output = Command::new("expect")
         .args([
             "-c",
             r#"
                 set timeout 30
-                spawn -noecho $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml
+                spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml"
                 expect eof
             "#,
         ])
@@ -278,19 +283,28 @@ fn startup_pty_falls_back_to_the_existing_initialization_line_when_unavailable()
         .output()
         .unwrap();
     assert!(output.status.success(), "startup PTY failed: {output:?}");
+    let output = String::from_utf8_lossy(&output.stdout);
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("ctx run · initialization"),
-        "unavailable startup pane did not preserve line narration: {:?}",
-        String::from_utf8_lossy(&output.stdout)
+        !output.contains("ctx run · initialization"),
+        "startup unexpectedly used narration: {output:?}"
+    );
+    assert!(
+        output.contains(ENTER_ALT),
+        "startup did not enter alternate screen: {output:?}"
+    );
+    assert!(
+        saw_startup_pane(&output),
+        "startup pane did not render: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[6n"),
+        "startup issued a cursor query: {output:?}"
     );
 }
 
 #[test]
-fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
+fn startup_pty_uses_the_alternate_screen_and_hands_off_to_the_live_run() {
     let fixture = command_trait_fixture();
-    // `script` deliberately leaves cursor-position queries unanswered. Expect
-    // provides the missing terminal reply so this covers the successful inline
-    // owner path rather than the allocation-fallback case above.
     let (exit_code, output) = run_pty_with_cursor_reply(
         &ctx_bin(),
         "traits run --file .ctx/traits/demo/generated/index.toml",
@@ -303,6 +317,14 @@ fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
     assert!(
         saw_startup_pane(&output),
         "sized PTY did not allocate the startup pane: {output:?}"
+    );
+    assert!(
+        output.contains(ENTER_ALT),
+        "startup did not enter alternate screen: {output:?}"
+    );
+    assert!(
+        !saw_startup_pane(&text_after_terminal_restore(&output)),
+        "startup pane survived terminal restore: {output:?}"
     );
     assert!(
         !output.contains("ctx run · initialization"),
@@ -468,7 +490,7 @@ fn startup_pty_is_visible_before_delayed_config_resolution() {
 }
 
 #[test]
-fn startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff() {
+fn startup_pty_ctrl_c_restores_the_terminal_before_the_interrupt_note() {
     let fixture = command_trait_fixture();
     make_delayed_config_fifo(&fixture);
 
@@ -510,9 +532,16 @@ fn startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff() {
         "Ctrl-C did not terminate the startup child itself: {output:?}"
     );
     let output = String::from_utf8_lossy(&output.stdout);
+    let restored = text_after_terminal_restore(&output);
     assert!(
-        output.contains("interrupted"),
-        "interrupted startup rows were not committed to scrollback: {output:?}"
+        restored
+            .lines()
+            .any(|line| line.trim() == "run startup interrupted; terminal restored"),
+        "interrupt note was not printed after restore: {output:?}"
+    );
+    assert!(
+        !saw_startup_pane(&restored),
+        "startup pane survived terminal restore: {output:?}"
     );
     assert!(
         !output.contains("Run Panel"),
@@ -521,7 +550,7 @@ fn startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff() {
     assert!(
         output.contains("run startup interrupted; terminal restored")
             && output.contains("\x1b[?25h"),
-        "Ctrl-C did not restore the inline terminal to cooked, visible-cursor mode: {output:?}"
+        "Ctrl-C did not restore the terminal to cooked, visible-cursor mode: {output:?}"
     );
     let termios = fs::read_to_string(fixture.repo.join(".ctx/startup-termios")).unwrap();
     // Every token, not the `lflags:` line: BSD `stty -a` labels its groups

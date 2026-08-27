@@ -1,7 +1,7 @@
-//! PTY coverage for 0199: a `--task` queue run must bring up the inline
-//! run pane for EVERY member, never falling back to status progress because
-//! a fresh cursor query raced the previous member's (or the startup pane's)
-//! still-draining input pump. Reuses the expect/PTY recipe and fixture
+//! PTY coverage for 0199: a `--task` queue run must bring up the alternate-screen
+//! run pane for EVERY member, never falling back to status progress while a
+//! previous member's (or the startup pane's) input pump is still draining.
+//! Reuses the expect/PTY recipe and fixture
 //! shape `proof_task_queue_refusal_teardown.rs` already established for the
 //! `--task` queue path (0198), rather than reimplementing it.
 
@@ -24,7 +24,7 @@ struct Fixture {
 /// independent `ready` tasks. Each queue member's command step is rejected
 /// fast — non-interactive, no stdin to approve it — so no worker harness
 /// and no merge machinery is ever exercised, but `create_run_panel`
-/// (`drive.rs`) still builds a fresh inline pane per member first, which is
+/// (`drive.rs`) still builds a fresh run pane per member first, which is
 /// exactly the handoff window 0199 closes.
 fn failing_two_member_queue_fixture() -> Fixture {
     let scratch = ScratchRoot::new("p0199-queue-pane-handoff");
@@ -88,17 +88,14 @@ fn failing_two_member_queue_fixture() -> Fixture {
     }
 }
 
-/// Every `RatatuiPane` inline construction issues crossterm's `ESC[6n`
-/// cursor query as its first act; `expect`'s reply handler only ever fires
-/// on a query that was actually sent. Two answered queries is therefore
-/// direct proof of two distinct inline-pane constructions, independent of
-/// screen content — the same signal the plan's Done-when condition names.
-fn cursor_query_count(raw: &str) -> usize {
-    raw.matches("\u{1b}[6n").count()
+/// Each run pane enters the alternate screen exactly once, making this a
+/// construction signal independent of screen content.
+fn alternate_screen_entries(raw: &str) -> usize {
+    raw.matches("\u{1b}[?1049h").count()
 }
 
 #[test]
-fn task_queue_brings_up_the_inline_pane_for_every_member() {
+fn task_queue_brings_up_the_live_pane_for_every_member() {
     let fixture = failing_two_member_queue_fixture();
     let (exit_code, raw) = run_pty_with_cursor_reply(
         &ctx_bin(),
@@ -115,7 +112,7 @@ fn task_queue_brings_up_the_inline_pane_for_every_member() {
     //
     // This proof does not own that classification; it is asserted only so a
     // change to it is noticed here rather than read as a pane regression.
-    // What this proof owns is below: that the inline pane came up for every
+    // What this proof owns is below: that the live pane came up for every
     // member and the teardown/construct handoff did not race.
     assert_eq!(
         exit_code, 7,
@@ -127,9 +124,9 @@ fn task_queue_brings_up_the_inline_pane_for_every_member() {
         "the cursor-position fallback fired — the pane teardown/construct handoff raced: {raw:?}"
     );
     assert!(
-        cursor_query_count(&raw) >= 2,
-        "expected two distinct inline-pane constructions (one cursor query each), got {}: {raw:?}",
-        cursor_query_count(&raw)
+        alternate_screen_entries(&raw) >= 2,
+        "expected two distinct alternate-screen pane constructions, got {}: {raw:?}",
+        alternate_screen_entries(&raw)
     );
 
     let text = text_after_terminal_restore(&raw);

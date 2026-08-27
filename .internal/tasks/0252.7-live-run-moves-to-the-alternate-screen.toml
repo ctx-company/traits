@@ -30,7 +30,7 @@ after the run is not required. Move the live-run pane to the alternate
 screen, where `LeaveAlternateScreen` restores the shell exactly by
 construction and this entire class of teardown-hygiene bugs disappears.
 """
-scope = """
+scope = '''
 ## Decisions
 
 1. **One run/live constructor, always Alt.** `RatatuiPane::new_inline()` is
@@ -207,7 +207,7 @@ Build: `CARGO_TARGET_DIR=target cargo build -p ctx-traits-io`
 
 - **Edit** `pub(crate) fn arm_rescue_panel(generation: u64, panel: &crate::app::presentation::Panel)`:
   the buffer is now the panel alone —
-  `let bytes = crate::app::tui::render_lines_ansi(&panel.styled_lines()).replace('\\n', "\\r\\n").into_bytes();`
+  `let bytes = crate::app::tui::render_lines_ansi(&panel.styled_lines()).replace('\n', "\r\n").into_bytes();`
   — with the `CLEAR_VIEWPORT_ESCAPE` prefix removed (decision 5). Lock order,
   the `RESCUE_PANEL_LEN` store-0-first sequence, the capacity refusal, and the
   generation/length publish order are unchanged. Its doc drops "inline" and
@@ -292,8 +292,8 @@ Build: `CARGO_TARGET_DIR=target cargo build -p ctx-traits-cli`
 ## Step 6 — `modules/cli/tests/proof_run_view_exit_teardown.rs`
 
 Module doc: PTY coverage for alternate-screen run-view teardown paths. Add
-`const ENTER_ALT: &str = "\\x1b[?1049h";` and
-`const LEAVE_ALT: &str = "\\x1b[?1049l";`, keep `CLEAR_VIEWPORT` for the
+`const ENTER_ALT: &str = "\x1b[?1049h";` and
+`const LEAVE_ALT: &str = "\x1b[?1049l";`, keep `CLEAR_VIEWPORT` for the
 negative assertions, delete `fn surviving_screen_text`.
 
 - `fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str)`
@@ -330,7 +330,7 @@ negative assertions, delete `fn surviving_screen_text`.
   deleted — the SIGTERM test above owns that shape.
 - **New** `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
   — the reported defect, previously untested. `command_trait_fixture("ctrl-c", "sleep 30")`,
-  driven by the shared `run_pty_keys_after_markers(&ctx_bin(), "traits --session .ctx/runs/ctrl-c.json run --progress tui --file .ctx/traits/demo/generated/index.toml", ..., &[(STEP_ID, "\\u{3}")])`
+  driven by the shared `run_pty_keys_after_markers(&ctx_bin(), "traits --session .ctx/runs/ctrl-c.json run --progress tui --file .ctx/traits/demo/generated/index.toml", ..., &[(STEP_ID, "\u{3}")])`
   (a real 0x03 byte, sent once the step row is painted). Assert: exit code is
   nonzero (classification is owned by the queue/refusal proofs, not here);
   `raw` contains `ENTER_ALT` and `LEAVE_ALT`; in
@@ -348,7 +348,7 @@ Stays at eight tests. Add the same `ENTER_ALT` constant.
 
 - `fn failed_startup_pty(fixture, command, label, reason, check_termios)`
   keeps its signature and expect script; its assertions become: the raw stream
-  contains `ENTER_ALT`; `label` appears in `&output[..output.rfind("\\x1b[?1049l").expect(...)]`
+  contains `ENTER_ALT`; `label` appears in `&output[..output.rfind("\x1b[?1049l").expect(...)]`
   (the stage really painted before teardown); `text_after_terminal_restore(&output)`
   contains `reason` — the cooked error the CLI prints after the screen is
   handed back (verified at HEAD: `invalid manifest at run.trait-source: trait
@@ -360,7 +360,7 @@ Stays at eight tests. Add the same `ENTER_ALT` constant.
   keeping the same expect invocation that deliberately answers nothing:
   assert the child succeeded, `saw_startup_pane(&output)`,
   `!output.contains("ctx run · initialization")`, `output.contains(ENTER_ALT)`,
-  and `!output.contains("\\x1b[6n")`. The unanswered-cursor-query fallback it
+  and `!output.contains("\x1b[6n")`. The unanswered-cursor-query fallback it
   used to prove is unreachable once no run surface issues the query; the
   line-narration fallback for an ineligible environment stays covered by
   `startup_pty_uses_status_narration_when_live_tui_is_environment_ineligible`.
@@ -389,7 +389,7 @@ Stays at eight tests. Add the same `ENTER_ALT` constant.
 
 `modules/cli/tests/proof_task_queue_pane_handoff.rs`:
 - Replace `fn cursor_query_count(raw: &str) -> usize` with
-  `fn alternate_screen_entries(raw: &str) -> usize { raw.matches("\\x1b[?1049h").count() }`
+  `fn alternate_screen_entries(raw: &str) -> usize { raw.matches("\x1b[?1049h").count() }`
   and rewrite its doc: Alt construction issues no cursor query, so the
   per-pane signal is the enter-alternate-screen escape, one per construction.
 - Rename the test to `task_queue_brings_up_the_live_pane_for_every_member`;
@@ -419,8 +419,8 @@ both tests must stay green untouched.
   the live-view footer/guide/scroll bindings, and dashboard key behavior.
 - Widening `signal_safe_pane_active`, adding a second rescue buffer, or making
   the signal path allocate.
-"""
-validation = """
+'''
+validation = '''
 ## Done when
 
 1. Live-run teardown is clean on every exit path the pane owns: SIGTERM and
@@ -456,7 +456,7 @@ validation = """
    `CARGO_TARGET_DIR=target just test-full`
 7. The diff touches only the files Step 1-8 name. The verdict is in the exit
    code, not in the eye:
-   `test -z "$(git status --short | cut -c4- | rg -v '^(\\.internal/tasks/0252\\.7-live-run-moves-to-the-alternate-screen\\.toml|modules/io/src/decode_diagnostics\\.rs|modules/cli/src/app/(tui_ratatui|interrupt|run_view|run_startup_view|dashboard)\\.rs|modules/cli/tests/support/src/lib\\.rs|modules/cli/tests/proof_(run_view_exit_teardown|run_startup_progress|task_queue_pane_handoff|task_queue_refusal_teardown)\\.rs)$')"`
+   `test -z "$(git status --short | cut -c4- | rg -v '^(\.internal/tasks/0252\.7-live-run-moves-to-the-alternate-screen\.toml|modules/io/src/decode_diagnostics\.rs|modules/cli/src/app/(tui_ratatui|interrupt|run_view|run_startup_view|dashboard)\.rs|modules/cli/tests/support/src/lib\.rs|modules/cli/tests/proof_(run_view_exit_teardown|run_startup_progress|task_queue_pane_handoff|task_queue_refusal_teardown)\.rs)$')"`
 
 Criteria 1-4 and 6 each carry a `[[checks]]` entry. Criterion 5 does not: its
 two suites also run inside `just test-full`, and a sixth entry would spend a
@@ -475,7 +475,7 @@ edit that caused it. Then run the criterion commands 1, 2, 3, 4, 5, 6, 7 in
 that order. Permit at most two targeted repair-and-rerun rounds in total;
 after each repair, rerun the failing command and every later one. Complete
 only when all seven criterion commands exit 0.
-"""
+'''
 
 [relations]
 parent = "0252"

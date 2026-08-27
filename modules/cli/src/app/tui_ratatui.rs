@@ -67,13 +67,9 @@ pub(crate) fn signal_safe_pane_active() -> bool {
     ACTIVE_GENERATION.load(Ordering::SeqCst) != 0
 }
 
-/// Returns the active generation only while it owns an inline pane.
-pub(crate) fn signal_safe_inline_generation() -> u64 {
-    if ACTIVE_SCREEN.load(Ordering::SeqCst) == PaneScreen::Inline as u8 {
-        ACTIVE_GENERATION.load(Ordering::SeqCst)
-    } else {
-        0
-    }
+/// Returns the generation of the pane currently eligible for a rescue panel.
+pub(crate) fn signal_safe_rescue_generation() -> u64 {
+    ACTIVE_GENERATION.load(Ordering::SeqCst)
 }
 
 /// The canonical "leave every mode a pane can enter" escape sequence:
@@ -99,11 +95,8 @@ pub(crate) const FULL_RESTORE_ESCAPE: &[u8] =
 /// crossterm's `ESC[1;1H` cursor move, so PTY proofs can identify this clear.
 pub(crate) const CLEAR_VIEWPORT_ESCAPE: &[u8] = b"\x1b[H\x1b[2J";
 
-/// Which terminal mode a [`RatatuiPane`] owns: the historical full alternate
-/// screen (dashboard, demo, trait editor), or P244's inline viewport (the
-/// live run pane), which leaves the caller's scrollback above it intact for
-/// the whole run and commits its final frame to scrollback on clean
-/// teardown instead of restoring a blank alternate screen.
+/// Which terminal mode a [`RatatuiPane`] owns: the full alternate screen used
+/// by production panes, or the retained inline viewport implementation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PaneScreen {
     Alt = 0,
@@ -172,6 +165,7 @@ fn install_panic_hook() {
                 TORN_DOWN_GENERATION.store(active, Ordering::SeqCst);
                 let screen = PaneScreen::from_u8(ACTIVE_SCREEN.load(Ordering::SeqCst));
                 restore_terminal(screen);
+                let _ = ctx_traits_io::decode_diagnostics::end_capture();
                 if screen == PaneScreen::Inline {
                     let _ =
                         std::io::Write::write_all(&mut std::io::stderr(), CLEAR_VIEWPORT_ESCAPE);
@@ -312,8 +306,8 @@ impl Drop for PumpExitGuard {
 /// Blocks the calling thread, up to `deadline` total, until every registered
 /// pump that is mid-teardown (`stop == true`) has observed it (`exited ==
 /// true`) — the handshake that closes the race documented on
-/// [`inline_capable_screen`]: a fresh cursor query must never race a dying
-/// pane's reader for the same crossterm-internal reply. A live, merely
+/// terminal construction: a fresh input pump must never race a dying pane's
+/// reader for the same crossterm-internal event source. A live, merely
 /// suspended pump (`stop == false`) is never waited on, and an entry owned by
 /// the calling thread is skipped so a wake closure can never make
 /// construction wait on itself.
@@ -397,78 +391,28 @@ pub(crate) struct RatatuiPane {
     /// before this pump that meant no key handling at all.
     keys: mpsc::Receiver<crossterm::event::KeyEvent>,
     pump: Arc<PumpControl>,
-    /// The dimensions used to construct the current inline terminal. Keeping
-    /// them on the pane makes duplicate resize events no-ops without
-    /// recreating any run-panel presentation state.
-    inline_size: Option<(u16, u16)>,
+    /// The most recently consumed terminal dimensions. Keeping them on the
+    /// pane makes duplicate resize events no-ops without recreating state.
+    last_terminal_size: Option<(u16, u16)>,
     last_inline_resize: Instant,
-}
-
-/// Which screen an inline-preferring pane can actually be built on.
-///
-/// `Viewport::Inline` is the pane we want: it keeps the caller's scrollback
-/// above the run and commits its last frame into it on teardown. Building one
-/// costs a cursor-position query, and crossterm answers that by writing
-/// `ESC [ 6 n` and looping on `poll_internal` (`cursor/sys/unix.rs`). That loop
-/// returns an error on TIMEOUT but SWALLOWS a poll error and retries with no
-/// backoff and no bound:
-///
-/// ```text
-/// Err(_) => {}
-/// ```
-///
-/// So on a terminal whose reply never reaches crossterm's reader the query
-/// never returns. It spins one core at 100% inside `Terminal::with_options`,
-/// before the first frame, with an empty screen and no diagnostic — and it
-/// cannot be bounded from out here, because it never yields.
-///
-/// It reproduces exactly when stdin is not the terminal, which is what `just`
-/// hands every recipe. Enabling crossterm's `use-dev-tty` does NOT avoid it;
-/// that was tried and the hang is identical.
-///
-/// [`adopt_controlling_terminal`] removes the cause rather than working around
-/// it, so this only picks the fallback when even that could not produce a
-/// terminal — a genuinely headless invocation, where the alternate screen at
-/// least renders (fullscreen viewport, no cursor query) instead of hanging.
-fn inline_capable_screen() -> PaneScreen {
-    if std::io::stdin().is_terminal() && !stdin_was_adopted() {
-        PaneScreen::Inline
-    } else {
-        PaneScreen::Alt
-    }
 }
 
 /// Put a real terminal on stdin when the process was handed something else.
 ///
-/// crossterm reads terminal replies — cursor position, and every key event —
-/// through one event source anchored to stdin. Given a pipe there, that source
-/// answers `Err` forever, and both of crossterm's consumers spin on it rather
-/// than failing: the cursor query in `cursor/sys/unix.rs` and our own input
-/// pump both discard the error and retry immediately. The visible result is a
-/// pane that never draws, or draws and then ignores every key at 100% CPU.
+/// crossterm reads every key event through one event source anchored to stdin.
+/// Given a pipe there, the input pump retries its errors immediately instead
+/// of failing. The visible result is a pane that draws and then ignores every
+/// key at 100% CPU.
 ///
 /// `just` hands every recipe a pipe on stdin, so `just implement` got exactly
 /// that. The fix is not to detect the condition and degrade — it is to stop
 /// being in it. A process with a controlling terminal can open `/dev/tty` and
-/// put it on fd 0, after which stdin IS a terminal and every downstream
-/// consumer, crossterm included, simply works. The inline pane comes back with
-/// it, because the cursor query it needs can now be answered.
+/// put it on fd 0, after which stdin IS a terminal and crossterm's input pump
+/// simply works.
 ///
 /// Idempotent, and a no-op when stdin is already a terminal or when no
 /// controlling terminal exists (CI, a daemon, a detached spawn) — those keep
 /// today's behaviour and fall to the alternate screen or to status progress.
-/// True once [`adopt_controlling_terminal`] actually replaced stdin. The
-/// inline viewport needs a cursor-position reply, and on an adopted stdin that
-/// reply is contended: the startup pane's input pump is already draining the
-/// same process-global crossterm reader, so the query can spin unanswered.
-/// The alternate screen needs no cursor query at all, so an adopted terminal
-/// takes that path — working input beats preserved scrollback.
-static STDIN_ADOPTED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn stdin_was_adopted() -> bool {
-    STDIN_ADOPTED.load(Ordering::SeqCst)
-}
-
 pub(crate) fn adopt_controlling_terminal() {
     static ADOPTED: Once = Once::new();
     ADOPTED.call_once(|| {
@@ -495,9 +439,7 @@ pub(crate) fn adopt_controlling_terminal() {
         // and fd 0 stays valid. A failure leaves the original stdin in place,
         // which is exactly the no-op we want.
         unsafe {
-            if libc::dup2(source_fd, libc::STDIN_FILENO) >= 0 {
-                STDIN_ADOPTED.store(true, Ordering::SeqCst);
-            }
+            let _ = libc::dup2(source_fd, libc::STDIN_FILENO);
         }
     });
 }
@@ -510,15 +452,10 @@ impl RatatuiPane {
         Self::new_with_options(PaneScreen::Alt, CtrlCPolicy::ForwardKey)
     }
 
-    /// P244: constructs the live run pane on ratatui's `Viewport::Inline`
-    /// instead of the alternate screen — the caller's scrollback above the
-    /// pane survives the whole run, and the final frame is committed to
-    /// scrollback on clean teardown (see [`Self::commit_inline_scrollback`])
-    /// rather than being discarded by an alternate-screen restore. Ctrl-c
-    /// policy matches [`Self::new`]: this is still the live-run pane, with
-    /// nothing else ctrl-c could mean there.
-    pub(crate) fn new_inline() -> std::io::Result<Self> {
-        Self::new_with_options(inline_capable_screen(), CtrlCPolicy::RequestStop)
+    /// Constructs the live run pane on the alternate screen. Live-frame
+    /// scrollback is deliberately discarded when the pane restores the shell.
+    pub(crate) fn new_run_pane() -> std::io::Result<Self> {
+        Self::new_with_options(PaneScreen::Alt, CtrlCPolicy::RequestStop)
     }
 
     fn new_with_options(screen: PaneScreen, ctrl_c_policy: CtrlCPolicy) -> std::io::Result<Self> {
@@ -534,10 +471,9 @@ impl RatatuiPane {
         // P0199: a torn-down predecessor pane's input pump can still be
         // draining crossterm's process-global event reader for up to ~150ms
         // after `leave()` flips `stop`. Waiting here — before raw mode, and
-        // therefore before the inline viewport's cursor-position query below
-        // — closes the race documented on `inline_capable_screen`: no reader
-        // still alive to eat/contend the `ESC[6n` reply this construction is
-        // about to issue. A pump that still hasn't exited by the deadline
+        // — closes the input-reader handoff race: no reader still alive to
+        // contend the event source this construction is about to claim. A
+        // pump that still hasn't exited by the deadline
         // fails construction outright (see `await_draining_pumps`) instead of
         // letting the race it detected happen anyway.
         await_draining_pumps(PUMP_HANDOFF_DEADLINE)?;
@@ -547,7 +483,7 @@ impl RatatuiPane {
             let _ = disable_raw_mode();
             return Err(err);
         }
-        let mut inline_size = None;
+        let mut last_terminal_size = None;
         let terminal = match screen {
             PaneScreen::Alt => {
                 if let Err(err) = execute!(std::io::stderr(), EnterAlternateScreen) {
@@ -602,20 +538,16 @@ impl RatatuiPane {
                     restore_terminal(PaneScreen::Inline);
                     return Err(err);
                 }
-                inline_size = Some((columns, rows));
+                last_terminal_size = Some((columns, rows));
                 terminal
             }
         };
         let generation = PANE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         ACTIVE_SCREEN.store(screen as u8, Ordering::SeqCst);
         ACTIVE_GENERATION.store(generation, Ordering::SeqCst);
-        if screen == PaneScreen::Inline {
-            // P244 fix (`inline-pane-stderr-interleave`): route every decode
-            // warning reachable on the drive loop's per-frame path (§
-            // `commit_inline_scrollback`'s own doc comment names the exact
-            // call sites) into the buffer this pane drains at clean teardown,
-            // instead of letting a raw `eprintln!` scroll the real screen out
-            // from under a viewport that has no way to notice it happened.
+        if ctrl_c_policy == CtrlCPolicy::RequestStop {
+            // Run panes retain advisories until their owner restores the
+            // terminal and drains them. Other Alt surfaces own no such drain.
             ctx_traits_io::decode_diagnostics::begin_capture();
         }
         // Discard whatever crossterm already buffered for the reader before
@@ -740,7 +672,7 @@ impl RatatuiPane {
             detached: false,
             keys,
             pump,
-            inline_size,
+            last_terminal_size,
             last_inline_resize: Instant::now(),
         })
     }
@@ -776,7 +708,7 @@ impl RatatuiPane {
                 exited: AtomicBool::new(true),
                 owner_thread: Mutex::new(None),
             }),
-            inline_size: None,
+            last_terminal_size: None,
             last_inline_resize: Instant::now(),
         }
     }
@@ -791,18 +723,22 @@ impl RatatuiPane {
         }
     }
 
-    /// Applies the most recent coalesced inline resize. The old viewport is
+    /// Applies the most recent coalesced resize. The old inline viewport is
     /// re-anchored and cleared before replacement construction; a failed
     /// replacement keeps it as the redraw path. No full `leave` path runs
     /// during this swap.
     pub(crate) fn apply_resize(&mut self) -> bool {
-        if self.screen != PaneScreen::Inline || self.detached() {
+        if self.detached() {
             return false;
         }
         let size = self.pump.resize_size.swap(0, Ordering::SeqCst);
         let (columns, rows) = unpack_terminal_size(size);
-        if size == 0 || self.inline_size == Some((columns, rows)) {
+        if size == 0 || self.last_terminal_size == Some((columns, rows)) {
             return false;
+        }
+        if self.screen == PaneScreen::Alt {
+            self.last_terminal_size = Some((columns, rows));
+            return true;
         }
         if self.last_inline_resize.elapsed() < INLINE_RESIZE_INTERVAL {
             self.requeue_resize(size);
@@ -824,7 +760,7 @@ impl RatatuiPane {
                     return true;
                 }
                 self.terminal = Some(terminal);
-                self.inline_size = Some((columns, rows));
+                self.last_terminal_size = Some((columns, rows));
                 self.last_inline_resize = Instant::now();
                 true
             }
@@ -878,9 +814,10 @@ impl RatatuiPane {
         self.detached || TORN_DOWN_GENERATION.load(Ordering::SeqCst) == self.generation
     }
 
-    /// Generation eligible for a signal-safe inline rescue panel.
+    /// Generation eligible for a signal-safe rescue panel. Ownership is by
+    /// generation equality, not screen mode.
     pub(crate) fn rescue_generation(&self) -> Option<u64> {
-        (self.screen == PaneScreen::Inline && !self.detached()).then_some(self.generation)
+        (!self.detached()).then_some(self.generation)
     }
 
     /// Non-blocking drain of key presses forwarded by the pump thread. P470:
@@ -917,9 +854,9 @@ impl RatatuiPane {
         unhandled
     }
 
-    /// Startup owns the same inline terminal before a live panel exists. It
-    /// needs to observe Ctrl-C without tearing the pane down itself so its
-    /// owner can first commit the final startup rows to scrollback.
+    /// Startup owns the run pane before a live panel exists. It observes Ctrl-C
+    /// without tearing the pane down so its owner can restore it before
+    /// reporting the interruption.
     pub(crate) fn poll_startup_interrupt(&mut self) -> bool {
         if self.detached() {
             return false;
@@ -1465,8 +1402,8 @@ mod tests {
         // A stopped-but-not-yet-exited pump, registered exactly the way a
         // real spawn does, must make `await_draining_pumps` return `Err`
         // rather than returning `Ok` once the deadline elapses — the
-        // invariant `new_with_options` depends on to never issue a cursor
-        // query while this pump could still be draining crossterm's reader.
+        // invariant `new_with_options` depends on to never start another pump
+        // while this pump could still be draining crossterm's event source.
         let pump = Arc::new(PumpControl {
             stop: AtomicBool::new(true),
             paused: AtomicBool::new(false),
@@ -1518,8 +1455,8 @@ mod tests {
     fn draining_pump_handoff_rejects_same_thread_conflict() {
         // A stopped-but-unexited pump owned by the *calling* thread must
         // fail the handoff, not be silently skipped as "not our problem" —
-        // skipping it would let `new_with_options` proceed to a cursor query
-        // while this thread's own predecessor pump could still be draining.
+        // skipping it would let `new_with_options` proceed while this thread's
+        // own predecessor pump could still be draining the event source.
         let pump = Arc::new(PumpControl {
             stop: AtomicBool::new(true),
             paused: AtomicBool::new(false),

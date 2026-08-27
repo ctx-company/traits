@@ -12,16 +12,11 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// P244 fix (`inline-pane-stderr-interleave`): while a ratatui inline
-/// viewport (`Viewport::Inline`) owns the terminal, ANY raw stderr write
-/// scrolls the user's real screen out from under the pane without ratatui
-/// knowing — the alternate screen used to absorb this silently, but an
-/// inline viewport desyncs permanently for the rest of the run once that
-/// happens. `load_trait_for_session`/`resolved_frame_prompt` on the drive
-/// loop's per-frame path both reach [`print_decode_warnings`] for any trait
-/// or dependency manifest that decodes with warnings, so this capture
-/// toggle is the routed sink the CLI's inline pane installs for its
-/// lifetime instead of patching those two call sites individually.
+/// While a live ratatui pane owns the terminal, raw stderr writes must wait
+/// until its owner restores the terminal. `load_trait_for_session` and
+/// `resolved_frame_prompt` can both reach [`print_decode_warnings`] on the
+/// drive loop's per-frame path, so capture routes those advisories through
+/// the pane lifetime instead of patching the call sites individually.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
 static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Every line ever emitted (or captured) by this process. A decode warning
@@ -48,6 +43,14 @@ pub fn end_capture() -> Vec<String> {
     CAPTURING.store(false, Ordering::SeqCst);
     let mut captured = CAPTURED.lock().unwrap_or_else(|poison| poison.into_inner());
     std::mem::take(&mut *captured)
+}
+
+/// Ends capture and prints every buffered line to stderr. Call only after the
+/// terminal that owned capture has been restored.
+pub fn flush_capture() {
+    for line in end_capture() {
+        eprintln!("{line}");
+    }
 }
 
 /// Print one `ctx traits: <label>: <warning>` line per decode warning, in

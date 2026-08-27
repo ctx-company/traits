@@ -612,7 +612,7 @@ pub fn pin_volatile_ledger_fields(text: &str) -> String {
 
 /// Runs `ctx <args>` under `expect` on a sized PTY, answering every
 /// crossterm `ESC[6n` cursor-position query with a synthetic reply so the
-/// inline pane's construction never stalls, then reports the child's own
+/// surface that still issues it never stalls, then reports the child's own
 /// exit code (recovered from `expect`'s `[wait]`, not `expect`'s own status)
 /// alongside the full raw stdout stream. Extracted after this recipe was
 /// copied inline into two proof files (`proof_run_startup_progress.rs`,
@@ -762,19 +762,35 @@ pub fn run_pty_keys_after_markers(
     (exit_code, raw)
 }
 
-/// `restore_terminal`'s `Show` (`\x1b[?25h`) is the one escape sequence an
-/// inline pane's teardown always emits and nowhere else on this path — so
-/// slicing the raw PTY stream at its *last* occurrence, before stripping
-/// escapes, proves content arrived on a cooked terminal after the pane
-/// actually handed the screen back, not merely somewhere in the byte
-/// history before a later repaint could have painted over it.
-pub fn text_after_terminal_restore(raw: &str) -> String {
+/// Slicing after the restore paired with the final alternate-screen entry
+/// proves content arrived after the pane handed the screen back. A panic can
+/// trigger an idempotent unwind restore later, so the final leave alone is not
+/// a reliable boundary. Inline panes use their final cursor-show directly.
+pub fn raw_after_terminal_restore(raw: &str) -> &str {
     const CURSOR_SHOW: &str = "\u{1b}[?25h";
-    let boundary = raw
-        .rfind(CURSOR_SHOW)
-        .unwrap_or_else(|| panic!("terminal restore (cursor show) escape never appeared: {raw:?}"))
-        + CURSOR_SHOW.len();
-    strip_escapes(&raw[boundary..])
+    const ENTER_ALT: &str = "\u{1b}[?1049h";
+    const LEAVE_ALT: &str = "\u{1b}[?1049l";
+    let boundary = match raw.rfind(ENTER_ALT) {
+        Some(enter) => {
+            let after_enter = enter + ENTER_ALT.len();
+            let leave = raw[after_enter..]
+                .find(LEAVE_ALT)
+                .unwrap_or_else(|| panic!("alternate screen was never left: {raw:?}"));
+            let after_leave = after_enter + leave + LEAVE_ALT.len();
+            let show = raw[after_leave..].find(CURSOR_SHOW).unwrap_or_else(|| {
+                panic!("cursor was never shown after alternate-screen leave: {raw:?}")
+            });
+            after_leave + show
+        }
+        None => raw.rfind(CURSOR_SHOW).unwrap_or_else(|| {
+            panic!("terminal restore (cursor show) escape never appeared: {raw:?}")
+        }),
+    } + CURSOR_SHOW.len();
+    &raw[boundary..]
+}
+
+pub fn text_after_terminal_restore(raw: &str) -> String {
+    strip_escapes(raw_after_terminal_restore(raw))
 }
 
 pub fn git_init_on_branch(dir: &Path, branch: &str) {

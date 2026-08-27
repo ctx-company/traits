@@ -1,4 +1,4 @@
-//! PTY coverage for inline run-view teardown paths.
+//! PTY coverage for alternate-screen run-view teardown paths.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,8 +7,8 @@ use std::thread;
 use std::time::Duration;
 
 use support::{
-    ScratchRoot, ctx_bin, git_init, require_success, run_pty_keys_after_markers,
-    run_pty_signal_after_marker, run_pty_with_cursor_reply, spawn_ctx, strip_escapes,
+    ScratchRoot, ctx_bin, git_init, raw_after_terminal_restore, require_success,
+    run_pty_keys_after_markers, run_pty_signal_after_marker, run_pty_with_cursor_reply, spawn_ctx,
     text_after_terminal_restore,
 };
 
@@ -16,6 +16,8 @@ const TRAIT_ID: &str = "demo";
 const TRAIT_PATH: &str = ".ctx/traits/demo/generated/index.toml";
 const STEP_ID: &str = "only-step";
 const CLEAR_VIEWPORT: &str = "\x1b[H\x1b[2J";
+const ENTER_ALT: &str = "\x1b[?1049h";
+const LEAVE_ALT: &str = "\x1b[?1049l";
 const RESCUE_ERROR_TEXT: &str = "interrupted (signal)";
 
 struct ExitFixture {
@@ -130,19 +132,12 @@ fn ledger_session_id(repo: &Path) -> String {
     panic!("expected exactly one run ledger in {}", repo.display());
 }
 
-fn surviving_screen_text(raw: &str) -> String {
-    let clear = raw
-        .rfind(CLEAR_VIEWPORT)
-        .expect("task clear-screen escape never appeared");
-    strip_escapes(&raw[clear + CLEAR_VIEWPORT.len()..])
-}
-
 fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str) {
-    let text = surviving_screen_text(raw);
+    let text = support::strip_escapes(raw_after_terminal_restore(raw));
     let lines = text
         .lines()
         .map(|line| line.trim_end_matches('\r'))
-        .filter(|line| !line.contains("__CHILD_EXIT__"))
+        .filter(|line| !line.trim().is_empty() && !line.contains("CHILD_EXIT__"))
         .collect::<Vec<_>>();
     assert_eq!(
         lines,
@@ -154,6 +149,7 @@ fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str) {
         ],
         "unexpected surviving screen: {text:?}"
     );
+    assert!(!raw_after_terminal_restore(raw).contains(CLEAR_VIEWPORT));
 }
 
 #[test]
@@ -169,7 +165,7 @@ fn sigterm_leaves_only_the_interrupted_failure_panel() {
         1,
     );
     assert_eq!(code, 143);
-    assert!(raw.contains("\x1b[?1049l") && raw.contains("\x1b[?25h"));
+    assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT) && raw.contains("\x1b[?25h"));
     assert_only_interrupted_panel(&raw, TRAIT_ID, &ledger_session_id(&fixture.repo));
 }
 
@@ -186,6 +182,7 @@ fn repeated_sigint_leaves_only_the_interrupted_failure_panel() {
         3,
     );
     assert_eq!(code, 130);
+    assert!(raw.contains(ENTER_ALT));
     assert_only_interrupted_panel(&raw, TRAIT_ID, &ledger_session_id(&fixture.repo));
 }
 
@@ -205,13 +202,16 @@ fn panic_mid_run_leaves_no_frame_rows() {
         ".ctx/panic-termios",
     );
     assert_ne!(code, 0);
-    let clear = raw
-        .find(CLEAR_VIEWPORT)
-        .expect("panic did not clear the viewport");
-    assert!(raw[..clear].contains(STEP_ID));
-    assert!(raw[clear..].contains("test hook: panic after run-view render"));
-    assert!(!text_after_terminal_restore(&raw).contains(STEP_ID));
+    assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT));
+    assert!(raw.find(STEP_ID).unwrap() < raw.rfind(LEAVE_ALT).unwrap());
+    let restored = text_after_terminal_restore(&raw);
+    assert!(
+        restored.contains("test hook: panic after run-view render"),
+        "panic diagnostic was not printed after restore: {raw:?}"
+    );
+    assert!(!restored.contains(STEP_ID));
     assert!(!raw.contains(RESCUE_ERROR_TEXT));
+    assert!(!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT));
 }
 
 #[test]
@@ -225,9 +225,8 @@ fn dashboard_attach_then_exit_leaves_no_run_frame() {
         &fixture.repo,
         &fixture.home,
         &[
-            // The first live session is selected when the center publishes
-            // its snapshot, so Enter attaches directly.
-            ("session-", "\r"),
+            // Clamp selection to the top, then move to the first live session.
+            ("session-", "kkkkkkkkj\r"),
             (r"(?s)only-step.*\[d\] dash", "q"),
             ("Quit live view?", "\r"),
             ("SESSIONS", "q"),
@@ -240,7 +239,7 @@ fn dashboard_attach_then_exit_leaves_no_run_frame() {
 }
 
 #[test]
-fn clean_run_teardown_commits_scrollback_without_an_extra_clear() {
+fn clean_run_teardown_discards_the_live_frame_and_prints_the_final_panel() {
     let fixture = command_trait_fixture("clean", "true");
     let (code, raw) = run_pty_with_cursor_reply(
         &ctx_bin(),
@@ -251,27 +250,41 @@ fn clean_run_teardown_commits_scrollback_without_an_extra_clear() {
         ".ctx/termios",
     );
     assert_eq!(code, 0);
-    assert!(raw.find("\x1b[J").unwrap() < raw.find(STEP_ID).unwrap());
-    let commit_start = raw.rfind(STEP_ID).expect("committed tree row");
-    let teardown = &raw[commit_start..];
-    assert!(strip_escapes(teardown).contains(STEP_ID));
-    assert!(!teardown.contains(CLEAR_VIEWPORT));
-    assert!(!teardown.contains(RESCUE_ERROR_TEXT));
-    assert!(!raw.contains(CLEAR_VIEWPORT));
+    assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT));
+    assert!(raw.find(STEP_ID).unwrap() < raw.rfind(LEAVE_ALT).unwrap());
     let final_text = text_after_terminal_restore(&raw);
     assert!(final_text.contains("┌── "));
     assert!(final_text.contains(&format!("session: {}", ledger_session_id(&fixture.repo))));
     assert!(final_text.contains("└── Success"));
+    assert!(!final_text.contains(STEP_ID));
+    assert!(!final_text.contains(RESCUE_ERROR_TEXT));
+    assert!(!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT));
+}
 
-    let killed = command_trait_fixture("clean-teardown-killed", "sleep 30");
-    let (_, killed_raw) = run_pty_signal_after_marker(
+#[test]
+fn ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note() {
+    let fixture = command_trait_fixture("ctrl-c", "sleep 30");
+    let (code, raw) = run_pty_keys_after_markers(
         &ctx_bin(),
-        "traits --session .ctx/runs/killed.json run --progress tui --file .ctx/traits/demo/generated/index.toml",
-        &killed.repo,
-        &killed.home,
-        STEP_ID,
-        "TERM",
-        1,
+        "traits --session .ctx/runs/ctrl-c.json run --progress tui --file .ctx/traits/demo/generated/index.toml",
+        &fixture.repo,
+        &fixture.home,
+        &[(STEP_ID, "\u{3}")],
     );
-    assert!(killed_raw.matches(CLEAR_VIEWPORT).count() >= 1);
+    assert_ne!(code, 0);
+    assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT));
+    let restored = text_after_terminal_restore(&raw);
+    assert!(
+        restored
+            .lines()
+            .any(|line| line.trim() == "run killed; terminal restored")
+    );
+    assert!(!restored.contains(STEP_ID));
+    assert!(
+        restored
+            .lines()
+            .filter(|line| line.contains('│'))
+            .all(|line| line.starts_with("│   "))
+    );
+    assert!(!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT));
 }

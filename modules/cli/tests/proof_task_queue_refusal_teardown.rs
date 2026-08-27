@@ -1,5 +1,5 @@
 //! PTY coverage for 0198: `--task` queue refusals and the outcome table
-//! must survive the inline startup pane's teardown, exactly as a single
+//! must survive the run startup pane's teardown, exactly as a single
 //! run's startup-stage failures already do (see
 //! `proof_run_startup_progress.rs`). This file reuses that file's fixture,
 //! stripping, and expect recipe verbatim rather than reimplementing it.
