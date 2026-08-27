@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.6"
 title = "One action registry: footer, guide, and menu from the same rows"
-status = "ready"
+status = "draft"
 raised = "2026-08-24"
 content = """
 Footer soup is a symptom: hints are hand-written strings living apart from

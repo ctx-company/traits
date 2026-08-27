@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.5"
 title = "Delete sessions by group"
-status = "ready"
+status = "draft"
 raised = "2026-08-24"
 content = """
 Parent ruling 7: `ctx traits sessions delete --failed`. Plus the dashboard

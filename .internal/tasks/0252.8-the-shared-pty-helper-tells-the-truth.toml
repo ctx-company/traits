@@ -1,0 +1,70 @@
+schema-version = "0.2"
+key = "0252.8"
+title = "The shared PTY helper tells the truth"
+status = "draft"
+raised = "2026-08-27"
+content = """
+0252.4's 12-hour run died with four mandatory proofs permanently red, and
+all four traced to the shared PTY test helper rather than product code —
+the run's reviewer wrote the exact defect list (session 28f2ba9f22, final
+verdict), which this task adopts as its contract:
+
+1. The helper spawns runs without the isolated Center tuple, so
+   dashboard-observation proofs see `live (0)` instead of the launched
+   run.
+2. The helper sends keys (Ctrl-C) before the command child is provably
+   ready; Resume/Restart proofs time out. The plan's original readiness
+   mechanism (a `/dev/tty` readiness token) is infeasible in the PTY
+   harness — owner ruling 2026-08-27: readiness is the post-spawn
+   run-view marker (the `in-progress` line the live view prints), waited
+   on with a bounded loop.
+3. The helper writes a `__CHILD_EXIT__<code>__` sentinel (sometimes
+   indented) into PTY stdout after the child dies, so any
+   rescue-output-is-last assertion sees helper metadata after the rescue
+   panel. Owner ruling 2026-08-27: child exit status travels out-of-band
+   (Expect stderr), never through the PTY byte stream a proof asserts on.
+
+This is test infrastructure with no product-behavior change; it exists so
+0252.4 and every later PTY proof assert against product bytes only.
+"""
+scope = """
+## Decisions
+
+- One PTY key/marker helper is the route for all key-driven PTY proofs:
+  the reviewer's carried instruction stands — delete the raw-key variant
+  (`PtyKey`, `run_pty_raw_keys_after_markers`) and route callers through
+  `support::run_pty_keys_after_markers`, passing ETX as the raw string
+  "\\x03".
+- The helper exports the isolated Center tuple (socket/index/spawn
+  environment) to spawned children so center-backed observation works in
+  proofs.
+- Readiness: a bounded wait (30 seconds total) on the post-spawn
+  run-view marker, emitting a causal timeout diagnostic naming what
+  never appeared — no unbounded polling, no fixed sleeps, no `/dev/tty`.
+- Child exit status: parsed exclusively from Expect stderr; captured
+  stdout is returned as pure child terminal bytes with no helper
+  metadata appended.
+- Expected files (guidance, not a boundary — touching others is
+  legitimate when a Done-when requires it): the shared PTY support
+  module under modules/cli/tests/ and the proofs that call it.
+
+## Out of scope
+
+- Any product-code change (interrupt.rs, tui_ratatui.rs, run view).
+- 0252.4's modal contract and proofs (they consume this baseline).
+
+## Done when (sketch — architect refines)
+
+- A helper-level proof spawns a run and observes it via the Center tuple
+  (not `live (0)`).
+- A helper-level proof shows keys are delivered only after the run-view
+  marker, and the readiness wait times out with the causal diagnostic
+  when the marker never appears.
+- A proof asserts captured stdout contains no `__CHILD_EXIT__` bytes
+  while the exit code is still reported correctly via stderr.
+- The raw-key variant is gone; all former callers compile and pass
+  through the single helper. Full suite green.
+"""
+
+[relations]
+parent = "0252"
