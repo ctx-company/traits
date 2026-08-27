@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0252.8"
 title = "The shared PTY helper tells the truth"
-status = "draft"
+status = "ready"
 raised = "2026-08-27"
 content = """
 0252.4's 12-hour run died with four mandatory proofs permanently red, and
@@ -12,59 +12,511 @@ verdict), which this task adopts as its contract:
 1. The helper spawns runs without the isolated Center tuple, so
    dashboard-observation proofs see `live (0)` instead of the launched
    run.
-2. The helper sends keys (Ctrl-C) before the command child is provably
-   ready; Resume/Restart proofs time out. The plan's original readiness
-   mechanism (a `/dev/tty` readiness token) is infeasible in the PTY
-   harness — owner ruling 2026-08-27: readiness is the post-spawn
-   run-view marker (the `in-progress` line the live view prints), waited
-   on with a bounded loop.
+2. The helper sends keys (Ctrl-C) without a bounded, diagnosable wait on
+   the live view's post-spawn `in-progress` marker; Resume/Restart proofs
+   time out with no causal message. Owner ruling 2026-08-27: readiness is
+   that marker waited on under a bounded deadline, never a fixed sleep and
+   never a `/dev/tty` token.
 3. The helper writes a `__CHILD_EXIT__<code>__` sentinel (sometimes
    indented) into PTY stdout after the child dies, so any
    rescue-output-is-last assertion sees helper metadata after the rescue
    panel. Owner ruling 2026-08-27: child exit status travels out-of-band
    (Expect stderr), never through the PTY byte stream a proof asserts on.
 
-This is test infrastructure with no product-behavior change; it exists so
+This is test infrastructure with no product-behaviour change; it exists so
 0252.4 and every later PTY proof assert against product bytes only.
+
+## Grounded against HEAD e7881711
+
+Defects 1 and 3 are confirmed verbatim in the code:
+
+- `modules/cli/tests/support/src/lib.rs:622-664` (`run_pty_with_cursor_reply`)
+  and `:668-713` (`run_pty_signal_after_marker`) build `Command::new("expect")`
+  by hand and set only HOME/XDG/PATH/TERM/CTX_STARTUP_BIN. Neither exports
+  `CTX_CENTER_SOCKET` / `CTX_CENTER_SPAWN_LOCK` / `CTX_CENTER_RUNS_ROOT` /
+  `CTX_CENTER_INDEX`, so their children fall back to the production,
+  UID-scoped endpoint. `run_pty_keys_after_markers` (`:716-763`) already
+  goes through `controlled_command` (`:324-367`), which is the single
+  existing authority for that tuple; `modules/io/src/center.rs:550-569`
+  proves the tuple is all-or-nothing (`incomplete private center
+  configuration`).
+- All three helpers end their Tcl with `puts "__CHILD_EXIT__[lindex
+  $child_status 3]__"`. Plain Tcl `puts` is Expect's stdout, and the Rust
+  side then searches that same stdout for the sentinel and returns it
+  inside the asserted stream (`:656-663`, `:705-712`, `:755-762` — the
+  same eight lines copied three times). The workaround is visible at
+  `modules/cli/tests/proof_run_view_exit_teardown.rs:140`, where
+  `assert_only_interrupted_panel` filters every restored line containing
+  `CHILD_EXIT__` before asserting the four-line failure panel.
+- `PtyKey` and `run_pty_raw_keys_after_markers` do not exist anywhere in
+  Rust at HEAD; they are artifacts of the failed run's prose. Nothing is
+  deleted for them — they stay forbidden. The current key API is already
+  `steps: &[(&str, &str)]`, and
+  `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
+  already transmits ETX through it, so no raw-key variant is needed.
+
+Defect 2 is confirmed as a bound-and-diagnostic defect, not a missing
+mechanism. `run_pty_keys_after_markers` does wait on a caller marker
+before every key — there is no sleep in the helper — but `set timeout 30`
+is re-armed per Expect block, so a multi-step drive can wait far past 30
+seconds in total, and a marker that never arrives reports only
+`PTY driver failed: {output:?}` with `__PTY_TIMEOUT__{pattern}__` buried
+in a debug dump. The two callers that do gate on time are the proofs, not
+the helper: `dashboard_attach_then_exit_leaves_no_run_frame` sleeps a flat
+one second before attaching. Those are the three things this task fixes:
+one shared deadline, one causal message, no sleep.
+
+## The post-spawn marker that gates key delivery
+
+Readiness for key delivery is ONE marker: the live run view's narration
+label `in-progress {role}@{harness}`. It is the only painted text that
+cannot exist before the agent child is spawned and streaming, and every
+link in that chain is a product fact at HEAD:
+
+- `session_text::active_label` (`session_text.rs:115-139`) is the sole
+  producer of the text; `render::narration_for` (`render.rs:1086-1096`) is
+  its sole consumer (`rg -n active_label modules/cli/src` returns exactly
+  those two sites plus the import at `render.rs:19`).
+- `narration_for` is reached only from `update_live_display`
+  (`render.rs:1082-1084`), whose four call sites are `push_bytes`,
+  `set_thinking_tokens`, `push_summary` and `finish_live`
+  (`run_view.rs:758,776,793,872`) — each one fed by bytes the spawned
+  agent already produced (`drive.rs:917-925` pushes raw harness chunks
+  into the panel when no narrator is configured).
+- The label reaches the screen as `{label}: {text}` through
+  `overlay_event_row` (`render.rs:1045-1068`) and `narration_line`
+  (`render.rs:1445-1462`). Until the first live chunk arrives,
+  `state.view.narration` is `None` (`render.rs:1745`) and no such line is
+  painted at all.
+
+The `@` is what makes the marker unambiguous. The header's bare
+`in-progress` is `session_status(Status::AwaitingAgentOutput)`
+(`session_text.rs:187`) reached through `phase_text`
+(`session_text.rs:98-113`, `projection.rs:168`) — a status fact carrying
+no harness. A pattern anchored on `in-progress <role>@` therefore matches
+the post-spawn narration line and nothing else. Confirm both producers
+without executing anything:
+
+`rg -n 'in-progress \\{role\\}@\\{harness\\}' modules/cli/src/app/run_view/session_text.rs && rg -n 'active_label' modules/cli/src/app/run_view/render.rs`
+
+A command frame can never paint that label — it produces no agent output —
+and its journey row is painted before `advance_commands` dispatches the
+child (`modules/cli/src/app/drive.rs:2258-2274`), so a command-only
+fixture cannot supply post-spawn readiness at any pattern. That is a
+fixture limitation, not a product gap: the one key-driven proof in this
+file moves to a TEST-ONLY agent fixture (stub harness script, the shape
+already proven at `proof_center.rs:452-489`) so the marker it waits on is
+the real post-spawn one. The signal-driven proofs deliver no keys and keep
+their own markers. The dashboard proof's post-spawn fact is Center's own
+`live (1)` group header (`dashboard.rs:1946`, `:2016-2045`,
+`:8255-8274`), which is what deletes its fixed sleep.
 """
 scope = """
 ## Decisions
 
-- One PTY key/marker helper is the route for all key-driven PTY proofs:
-  the reviewer's carried instruction stands — delete the raw-key variant
-  (`PtyKey`, `run_pty_raw_keys_after_markers`) and route callers through
-  `support::run_pty_keys_after_markers`, passing ETX as the raw string
-  "\\x03".
-- The helper exports the isolated Center tuple (socket/index/spawn
-  environment) to spawned children so center-backed observation works in
-  proofs.
-- Readiness: a bounded wait (30 seconds total) on the post-spawn
-  run-view marker, emitting a causal timeout diagnostic naming what
-  never appeared — no unbounded polling, no fixed sleeps, no `/dev/tty`.
-- Child exit status: parsed exclusively from Expect stderr; captured
-  stdout is returned as pure child terminal bytes with no helper
-  metadata appended.
-- Expected files (guidance, not a boundary — touching others is
-  legitimate when a Done-when requires it): the shared PTY support
-  module under modules/cli/tests/ and the proofs that call it.
+- One PTY key/marker helper stays the route for all key-driven PTY
+  proofs: `support::run_pty_keys_after_markers`, with its existing public
+  signature and ETX passed as the raw Rust string "\\x03". `PtyKey` and
+  `run_pty_raw_keys_after_markers` are forbidden names; neither exists at
+  HEAD, so neither is deleted.
+- All three helpers converge on ONE private execution seam that launches
+  Expect through `controlled_command`. That is what delivers the isolated
+  Center tuple; the tuple is never re-declared in a second place.
+- Child status and every driver diagnostic travel on Expect stderr. The
+  returned `String` is built from stdout only and carries child terminal
+  bytes exclusively.
+- Readiness is a marker wait under ONE 30-second deadline shared by every
+  wait before the final EOF, with a causal panic naming the marker that
+  never appeared. No fixed sleeps, no `/dev/tty`, no filesystem readiness
+  protocol, and no new helper parameter.
+- Keys are delivered only after the post-spawn run-view marker
+  `in-progress {role}@{harness}` is observed. No pre-spawn paint and no
+  weaker fallback pattern substitutes for it; the fixture changes to make
+  that marker exist, the product does not.
+- The compact failure-panel grammar (0252.1) and every product surface
+  are untouched.
+
+## Expected files — guidance, not a boundary
+
+- `modules/cli/tests/support/src/lib.rs`
+- `modules/cli/tests/proof_run_view_exit_teardown.rs`
+
+Touching files beyond this list is legitimate whenever a named Done-when
+requires it (a caller that stops compiling, an import that goes unused, a
+sibling proof that the shared-environment convergence perturbs). Do it,
+and report it in the work summary — it is not a violation and it is not
+an owner escalation. The three other callers of
+`run_pty_with_cursor_reply` — `proof_run_startup_progress.rs`,
+`proof_task_queue_pane_handoff.rs`, `proof_task_queue_refusal_teardown.rs`
+— are expected collateral, because the seam changes the environment their
+children run under.
+
+## Step 0 — read before editing
+
+`modules/cli/tests/support/src/lib.rs:324-367` (`controlled_command`) and
+`:613-763` (the three helpers), then
+`modules/cli/tests/proof_run_view_exit_teardown.rs` end to end. The three
+helper bodies are near-identical; the seam below is the deduplication.
+
+## Step 1 — one execution/status seam in support
+
+`modules/cli/tests/support/src/lib.rs`:
+
+- New public constant, the single authority for the sentinel text:
+  `pub const PTY_CHILD_EXIT_SENTINEL: &str = "__CHILD_EXIT__";`
+- New private seam, replacing the three copied bodies at `:656-663`,
+  `:705-712`, `:755-762`:
+  `fn run_pty_script(script: &str, startup_bin: &Path, cwd: &Path, home: &Path) -> (i32, String)`
+  It runs
+  `controlled_command(Path::new("expect"), &["-c", script], cwd, home)`
+  plus `.env("TERM", "xterm-256color").env("CTX_STARTUP_BIN", startup_bin)`,
+  takes `output()`, and then, IN THIS ORDER, reads
+  `String::from_utf8_lossy(&output.stderr)`:
+  1. `__PTY_TIMEOUT__{what}__` present → `panic!("PTY readiness never
+     appeared within 30s: {what}")`
+  2. `__PTY_EOF_BEFORE__{what}__` present → `panic!("PTY child exited
+     before {what} ever appeared")`
+  3. otherwise `assert!(output.status.success(), "PTY driver failed:
+     {output:?}")`, then parse `{PTY_CHILD_EXIT_SENTINEL}{code}__` from
+     stderr, panicking with the stderr text when absent.
+  It returns `(code, String::from_utf8_lossy(&output.stdout).into_owned())`.
+  The diagnostic branches must run BEFORE the success assertion, or the
+  causal message is lost to Expect's exit 2.
+- All three Tcl scripts switch every `puts` to `puts stderr` — the child
+  status record and both `__PTY_TIMEOUT__` / `__PTY_EOF_BEFORE__` records.
+  `run_pty_with_cursor_reply`'s caller-supplied completion marker is NOT
+  touched: it is printed by the wrapped shell (`printf '{marker}\\n'`),
+  it is a separate established contract, and
+  `proof_task_queue_pane_handoff`, `proof_task_queue_refusal_teardown`
+  and `proof_run_startup_progress` locate it to delimit committed output.
+- `run_pty_with_cursor_reply` (`:622`) and `run_pty_signal_after_marker`
+  (`:668`) lose their hand-rolled `Command::new("expect")` blocks in
+  favour of `run_pty_script` — that is what gives their children the
+  Center tuple — while keeping these exact public signatures, parameter
+  order and return types unchanged:
+
+  ```
+  pub fn run_pty_with_cursor_reply(
+      binary: &Path,
+      args: &str,
+      cwd: &Path,
+      home: &Path,
+      marker: &str,
+      termios_file: &str,
+  ) -> (i32, String)
+
+  pub fn run_pty_signal_after_marker(
+      binary: &Path,
+      args: &str,
+      cwd: &Path,
+      home: &Path,
+      ready_pattern: &str,
+      signal: &str,
+      repeat: usize,
+  ) -> (i32, String)
+  ```
+- The `ESC[6n` cursor-reply branch (`send -- "\\033[40;120R"`) stays in
+  every script; it is shared behaviour and must not regress.
+
+Build after this step:
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --no-run`
+
+## Step 2 — one shared deadline in the key helper
+
+Same file. `run_pty_keys_after_markers` keeps its exact public signature —
+no parameter is added, removed, or reordered:
+
+```
+pub fn run_pty_keys_after_markers(
+    binary: &Path,
+    args: &str,
+    cwd: &Path,
+    home: &Path,
+    steps: &[(&str, &str)],
+) -> (i32, String)
+```
+
+New private constant carrying the deadline machinery, emitted once at the
+top of the script after `spawn`:
+
+```
+const PTY_DEADLINE_PROC: &str = r#"
+    set deadline [expr {[clock seconds] + 30}]
+    proc remaining {what} {
+        global deadline
+        set left [expr {$deadline - [clock seconds]}]
+        if {$left <= 0} {
+            puts stderr "__PTY_TIMEOUT__${what}__"
+            exit 2
+        }
+        return $left
+    }
+"#;
+```
+
+`${what}` braces are mandatory — bare `$what__` parses as a variable named
+`what__` and the record comes out empty.
+
+- Every per-step block sets `set timeout [remaining {<pattern>}]` before
+  `expect`, so the 30 seconds is a TOTAL budget across all marker waits,
+  not 30 seconds each. The literal `set timeout 30` disappears from every
+  marker block. Each block keeps its `timeout` and `eof` arms, now writing
+  `__PTY_TIMEOUT__{pattern}__` / `__PTY_EOF_BEFORE__{pattern}__` to
+  stderr.
+- The final EOF wait after the last key is NOT charged to that budget: it
+  waits on the child's own lifetime and keeps its own `set timeout 30`.
+- `run_pty_signal_after_marker`'s single marker wait goes through the same
+  `remaining` proc, so both key-driven and signal-driven readiness fail
+  with the same causal text.
+
+## Step 3 — the proofs consume product bytes only
+
+`modules/cli/tests/proof_run_view_exit_teardown.rs`. Every change here is
+test-side; `ExitFixture`'s fields, the trait id/path constants, and the
+trust/activate calls stay as they are, and no filesystem readiness signal
+or argv rewrite is introduced.
+
+- `assert_only_interrupted_panel` (`:135-153`) loses
+  `&& !line.contains("CHILD_EXIT__")` from its filter. Nothing replaces
+  it: with the sentinel out of band the four product lines stand alone.
+
+### 3a — one fixture scaffold, two fixtures
+
+Split the body of `command_trait_fixture` (`:29-79`) so the agent fixture
+is not a second scaffold:
+
+`fn scaffold_fixture(scratch: ScratchRoot, label: &str, declarations: &str, step: &str, runtime: Option<&str>) -> ExitFixture`
+
+It does exactly what `command_trait_fixture` does today — create
+`.ctx/traits/demo/generated`, `git_init`, write the same `.gitignore`,
+write `index.toml` as the current header (`id`/`schema-version`/`version`/
+`name = "{label}"`/`summary`/`[procedure] description`/the `notified`
+slot) plus `declarations` plus `step`, write `trait.toml`, write
+`runtime` to `.ctx/traits/runtime.toml` when `Some`, `git add -A` and
+commit, then `traits trust --approved TRAIT_PATH` and
+`traits state --active --file TRAIT_PATH`.
+
+`fn command_trait_fixture(label: &str, command: &str) -> ExitFixture`
+keeps its exact signature and all five current call sites (`sigterm`,
+`sigint`, `panic`, `dashboard`, `clean`); it now delegates with
+`ScratchRoot::new("p252-run-view-exit")`, `declarations = ""`,
+`runtime = None`, and its existing `kind = "command"` / `cmd = "{command}"`
+step block verbatim.
+
+### 3b — the test-only agent fixture the Ctrl-C proof drives
+
+`fn agent_trait_fixture(label: &str) -> ExitFixture`
+
+1. `let scratch = ScratchRoot::new("p252-run-view-exit");` then
+   `let harness = scratch.home().join("stub-agent.sh");`
+2. `fn write_stub_agent_harness(path: &Path)` writes this exact script and
+   sets mode `0o755` (`std::os::unix::fs::PermissionsExt`, same as
+   `proof_center.rs:483-488`):
+
+   ```
+   #!/bin/sh
+   if [ "$1" = "--fixture-probe" ]; then printf 'stub-1.0\n'; exit 0; fi
+   cat >/dev/null
+   i=0
+   while :; do i=$((i+1)); printf 'live tick %s\n' "$i"; sleep 1; done
+   ```
+
+   Both properties are load-bearing. Distinct text per line and a tick
+   period well inside the deadline: `LiveLine::push_bytes` records the
+   chunk, but `current_display` keeps the `(initialization)` fallback
+   until `NARRATION_SOFT_TIMEOUT` (2s — `tui.rs:189-207`, `:247`), and
+   `RunPanel::push_bytes` only calls `update_live_display` when the
+   display actually changed (`run_view.rs:855-878`). The label is
+   therefore painted by the first tick after the soft timeout, roughly 3s
+   in; a single chunk would never paint it. Plain non-JSON lines are
+   legitimate deltas (`harness_stream.rs:1281-1291`), so no stream-JSON
+   shape is needed. The loop never exits, so the run is still live when
+   ETX arrives.
+3. `runtime` is `.ctx/traits/runtime.toml` in the shape already proven at
+   `proof_center.rs:405-425`: `schema-version = "0.4"`, `[harness.stub]`
+   with `kind = "custom"`, `bin = <harness path>`,
+   `transports = ["cli"]`, `version-probe = ["--fixture-probe"]`;
+   `[harness.stub.cli]` with `argv = []`, `prompt-via = "stdin"`,
+   `output = "claude-stream-json"`; and `[agent.role.worker]` with
+   `harness = "stub"`, `transport = "cli"`. No narrator role is declared —
+   that is what keeps RAW passthrough on the panel rather than narrator
+   text (`drive.rs:917-925`).
+4. `declarations` is the `[[agent]]` table (`id = "worker"`, description,
+   summary) and `step` is the same `id`/`title = "{STEP_ID}"` block with
+   `agent = "agent:worker"`, `prompt = "Stream."`,
+   `output = ["slot:notified"]` — the shape at `proof_center.rs:355-390`.
+
+### 3c — the key-driven call site
+
+- New file-local constant, the ONLY readiness pattern for key delivery:
+  `const LIVE_AGENT_MARKER: &str = r"in-progress worker@";`
+  The `@` is what pins it to `active_label`'s post-spawn narration line
+  rather than the header's status word (see the content section).
+- `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
+  (`:264-290`) switches its fixture to `agent_trait_fixture("ctrl-c")` and
+  keeps ONE step, now `(LIVE_AGENT_MARKER, "\\x03")` — the raw string, not
+  `\\u{3}`. ETX is sent only after that post-spawn marker is observed,
+  under the Step 2 deadline. Its existing assertions (non-zero code, alt
+  screen entered and left, the `run killed; terminal restored` line, no
+  `STEP_ID` after restore, `│   ` prefixes, no `CLEAR_VIEWPORT`) are
+  unchanged, plus one ordering assertion proving the key landed after the
+  marker was painted and before teardown:
+  `assert!(raw.find(LIVE_AGENT_MARKER).unwrap() < raw.rfind(LEAVE_ALT).unwrap());`
+- `dashboard_attach_then_exit_leaves_no_run_frame` (`:217-239`) drops
+  `thread::sleep(Duration::from_secs(1))` at `:221` and changes its FIRST
+  step pattern from `"session-"` to `r"live \\(1\\)"`, so the bounded
+  marker wait replaces the sleep outright. The count is computed in the
+  same `rebuild_visible_sessions` pass that emits the row
+  (`dashboard.rs:2016-2045`), so a frame containing `live (1)` is a frame
+  whose session row exists. Then assert
+  `support::strip_escapes(&raw).contains("live (1)")`. Do NOT assert the
+  absence of `live (0)` anywhere in the stream: the dashboard's first
+  paint legitimately precedes Center's discovery of the run, so that
+  assertion would be flaky. `live (1)` appearing at all is the Center
+  observation this task restores — a tuple-less dashboard can only ever
+  print `live (0)`. This proof drives the DASHBOARD, not a run view, so
+  its post-spawn gate is Center's own observation of the launched run;
+  `LIVE_AGENT_MARKER` is the gate wherever a key is delivered into a live
+  run view, and this test delivers none.
+- Out-of-band status assertions, one line each, covering all three
+  helpers through their existing tests — no new fixture, no new run:
+  `assert!(!raw.contains(support::PTY_CHILD_EXIT_SENTINEL))` in
+  `sigterm_leaves_only_the_interrupted_failure_panel` (signal helper, code
+  143), `clean_run_teardown_discards_the_live_frame_and_prints_the_final_panel`
+  (cursor-reply helper, code 0), and
+  `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
+  (key helper, non-zero code). Using the constant, not a literal, is what
+  keeps the proof file free of the sentinel text.
+- One new test for the causal diagnostic:
+  `#[should_panic(expected = "exited before")]`
+  `fn a_marker_that_never_appears_names_itself_in_the_panic()` — a
+  `command_trait_fixture("diagnostic", "true")` run driven with one step
+  whose pattern cannot match (e.g. `"__NEVER_PAINTED__"`). The child exits
+  first, so this exercises the `__PTY_EOF_BEFORE__` branch in bounded time
+  (~1s) rather than burning the full 30-second deadline; both branches are
+  parsed by the same `run_pty_script` code and both name the missing
+  pattern.
+- Drop `thread` / `Duration` imports if the sleep removal leaves them
+  unused (`ledger_session_id` still uses both, so check before deleting).
 
 ## Out of scope
 
-- Any product-code change (interrupt.rs, tui_ratatui.rs, run view).
-- 0252.4's modal contract and proofs (they consume this baseline).
+- Any product-code change: `interrupt.rs`, `tui_ratatui.rs`, the run
+  view, the dashboard, signal escalation, alternate-screen behaviour, and
+  the 0252.1 panel grammar are all untouched. If a proof only passes by
+  changing product code, that is a finding for 0252.4, not a licence.
+- Any product change that would make a command frame paint a post-spawn
+  marker (a new paint or a live-view repaint while a command blocks). The
+  key-driven proof uses an agent fixture precisely so no product code has
+  to move; the command-frame proofs in this file are signal-driven or
+  dashboard-driven and deliver no keys into a live run view.
+- 0252.4's modal contract and its five representative proofs — they
+  consume this baseline.
+- The seven bespoke `Command::new("expect")` scripts in
+  `proof_run_startup_progress.rs`. They do not use the shared key/marker
+  helper; converting them is scope creep. They must still compile and
+  pass.
+- Widening the workspace to make `modules/cli/tests/support` a member.
+  It is a path dev-dependency, so its own unit tests would not run in the
+  normal gate — which is exactly why every helper-level proof above lives
+  in the `ctx-traits-cli` integration test that already exercises it.
+- Reading `/dev/tty` for readiness in any form. It is dead and stays
+  absent.
+"""
+validation = """
+## Done when — each criterion with the command that decides it
 
-## Done when (sketch — architect refines)
+1. The teardown suite passes with the truthful helper: seven tests
+   (the six at HEAD plus the diagnostic one), including the
+   `live (1)` Center observation, the sleep-free dashboard proof, the
+   marker-then-ETX ordering assertion, and the unfiltered four-line
+   failure panel.
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+2. Exit status is out of band and stdout is clean: the same run reports
+   143 / 130 / 0 / non-zero exactly as before while
+   `PTY_CHILD_EXIT_SENTINEL` appears in no returned stream. Same command
+   as 1 — the assertions live in those tests.
+3. A marker that never appears panics causally, naming it. Same command
+   as 1 — `a_marker_that_never_appears_names_itself_in_the_panic`.
+4. The other shared-helper callers stay green under the converged
+   environment (`controlled_command` adds `LC_ALL`/`LANG=C`,
+   `NO_COLOR=1`, `TMPDIR`, and the Center tuple to two helpers that
+   previously had none — this is the change most likely to move
+   unrelated output):
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown`
+5. No forbidden artifact, no stdout status transport, and one shared
+   deadline rather than a per-block one:
+   `! rg -n 'PtyKey|run_pty_raw_keys_after_markers' modules && ! rg -n '\\"__CHILD_EXIT__|CHILD_EXIT__\\"' modules/cli/tests/proof_run_view_exit_teardown.rs && ! rg -n 'puts \\"' modules/cli/tests/support/src/lib.rs && rg -q 'puts stderr' modules/cli/tests/support/src/lib.rs && rg -q 'set timeout \\[remaining' modules/cli/tests/support/src/lib.rs && ! rg -n 'sleep\\(Duration::from_secs' modules/cli/tests/proof_run_view_exit_teardown.rs`
+   The sentinel predicate is deliberately narrow: it rejects the raw
+   literal `"__CHILD_EXIT__` and the old
+   `line.contains("CHILD_EXIT__")` filter workaround (both end or begin
+   at a quote) while permitting the planned
+   `support::PTY_CHILD_EXIT_SENTINEL` assertions, which name no literal.
+   Proving the returned stdout is actually clean is criterion 2's job,
+   not this grep's. The last grep targets the whole-second sleep only;
+   `ledger_session_id`'s bounded `from_millis(100)` poll is a ledger
+   wait, not key readiness, and legitimately survives.
+6. The landing gate is green:
+   `CARGO_TARGET_DIR=target just test-full`
 
-- A helper-level proof spawns a run and observes it via the Center tuple
-  (not `live (0)`).
-- A helper-level proof shows keys are delivered only after the run-view
-  marker, and the readiness wait times out with the causal diagnostic
-  when the marker never appears.
-- A proof asserts captured stdout contains no `__CHILD_EXIT__` bytes
-  while the exit code is still reported correctly via stderr.
-- The raw-key variant is gone; all former callers compile and pass
-  through the single helper. Full suite green.
+## Order and bounded refinement
+
+Run Step 0's read, then Steps 1, 2, 3 in that order, running Step 1's
+`--no-run` build before starting Step 2 so a seam or borrow error
+surfaces next to the edit that caused it. Then run commands 1, 4, 5, 6 in
+that order.
+
+Permit at most two targeted repair-and-rerun rounds. A round repairs one
+named failure, then reruns the failed command AND every later command in
+the list. If a third round would be needed, stop and report the failing
+command with its output rather than continuing — that is the stop
+condition, not a judgement call.
+
+## Watch
+
+- `run_pty_with_cursor_reply`'s caller marker is not the child-status
+  sentinel. Removing it breaks three other proofs; only the
+  `__CHILD_EXIT__` transport moves.
+- A red result in command 4 is this task's own collateral (the converged
+  environment), not a pre-existing failure — fix it here rather than
+  reporting it as a baseline break.
+- Key delivery waits on the post-spawn narration marker
+  `in-progress worker@` under the shared deadline, and on nothing else. If
+  that wait expires, the panic already names the pattern: read it, then
+  check the fixture side (role assignment resolved, `--fixture-probe`
+  answered, the harness still ticking distinct lines past the 2s soft
+  timeout). Never a sleep, never a widened pattern that a pre-spawn header
+  line satisfies, never `/dev/tty`.
+- The Ctrl-C proof's fixture kind changes; its rescue assertions do not.
+  If the restored screen differs for an agent frame, report that
+  observation — do not weaken the assertion and do not edit product code
+  to satisfy it.
+- Test-helper metadata is out of band for every later PTY proof. A
+  finding about helper bytes in an asserted stream is a defect in this
+  task, not an acceptable filter in the caller.
 """
 
 [relations]
 parent = "0252"
+
+[[checks]]
+name = "PTY teardown proofs pass with the truthful helper"
+command = "cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 1800000
+
+[[checks]]
+name = "the other shared-PTY-helper callers stay green under the converged environment"
+command = "cargo test -p ctx-traits-cli --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 1800000
+
+[[checks]]
+name = "no raw-key artifacts, no stdout child-status transport, one shared deadline"
+command = "! rg -n 'PtyKey|run_pty_raw_keys_after_markers' modules && ! rg -n '\\\"__CHILD_EXIT__|CHILD_EXIT__\\\"' modules/cli/tests/proof_run_view_exit_teardown.rs && ! rg -n 'puts \\\"' modules/cli/tests/support/src/lib.rs && rg -q 'puts stderr' modules/cli/tests/support/src/lib.rs && rg -q 'set timeout \\[remaining' modules/cli/tests/support/src/lib.rs && ! rg -n 'sleep\\(Duration::from_secs' modules/cli/tests/proof_run_view_exit_teardown.rs && echo pty-helper-clean"
+expect = "pty-helper-clean"
+
+[[checks]]
+name = "landing gate stays green"
+command = "just test-full"
+timeout-ms = 1800000
