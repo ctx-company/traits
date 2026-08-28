@@ -1,0 +1,68 @@
+schema-version = "0.2"
+key = "0264"
+title = "q means detach, not death"
+status = "draft"
+raised = "2026-08-28"
+content = """
+Quitting the live view with `q` prints "live view closed; run continues —
+reattach with ctx traits dashboard" (modules/cli/src/app/run_view.rs:1336)
+and the run then dies. Proven live on 2026-08-28 with architect session
+c73eeda4d699 (an 0262 planning run parked on its plannotator approval
+gate): the owner pressed `q`, saw the message, and the session's last
+activity and ledger writes land at 13:32:50-57 — the q moment — with
+nothing after. Kernel evidence: no process held the session's driver-lock
+flock across four checks over the following six minutes (the same
+`run_control::probe` authority the product trusts), and no process on the
+machine referenced the session id. The ~30s driver-lock mtime bumps
+observed afterward are the center's periodic probe sweep touching every
+lock on disk, dead sessions included — they are not liveness and misled
+the first diagnosis.
+
+The message promises detached continuation; the implementation delivers
+death. Either outcome may be a defensible product choice — silently
+delivering the opposite of the printed promise is not.
+
+## Owner contract
+
+`q` closes the VIEW only. The drive survives it: frames keep executing,
+the ledger keeps advancing, gates and waits (including an architect run
+parked on its plan-approval gate) keep running, and the session is
+reattachable from the dashboard. The printed message becomes true.
+"""
+scope = """
+## Goals (binding)
+
+1. After `q` (confirm-quit accepted) during a live run, the drive
+   continues to its normal outcome: frames advance, the ledger's
+   slot-revisions grow, and the driver-lock flock stays held by the
+   driving process until the run genuinely ends.
+2. The detached run is reattachable from the dashboard and its rows
+   classify correctly while detached.
+3. A run parked on a long-blocking step at q-time (the plannotator
+   approval gate is the live case) survives the detach and completes
+   when the step resolves.
+4. The teardown paths that SHOULD end the run (ctrl-c kill, SIGTERM,
+   completion) are unchanged — 0252.2's and 0252.7's landed contracts
+   stand.
+
+## Suggested starting points — guidance, not a boundary
+
+- `run_view.rs:1294-1340` (the `q` confirm-quit modal and the
+  continuation message), `tui_ratatui.rs` detach/teardown seams, and
+  wherever view teardown currently takes the drive loop down with it —
+  the architect grounds the actual mechanism; this draft deliberately
+  does not guess it.
+- Proof shape: a PTY test that q-quits a live run, then asserts with the
+  flock authority that the drive still holds the lock, that the ledger
+  advances afterward, and that the run reaches its normal outcome.
+
+## Out of scope
+
+- Changing ctrl-c/kill semantics (P551) or the alternate-screen
+  restore (0252.7).
+- The center's probe touching lock mtimes (cosmetic; noted in 0262's
+  world if ever needed).
+"""
+
+[relations]
+depends-on = ["0252.7"]
