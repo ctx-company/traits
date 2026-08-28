@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono%3Awght%40400&family=IBM+Plex+Sans%3Aital%2Cwght%400%2C100..700%3B1%2C100..700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      *, ::before, ::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      data-pencil-name="Config — Runtime"
+      style="align-items: flex-start; background-color: #0c0d10; border-radius: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 0px; height: 900px; justify-content: flex-start; overflow: hidden; width: 1440px"
+    >
+      <div
+        data-pencil-name="Title Bar"
+        style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: 36px; justify-content: flex-start; padding: 0px 20px; width: 100%"
+      >
+        <div
+          data-pencil-name="Light Close"
+          style="background-color: #ff5f57; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 12px; width: 12px"
+        ></div>
+        <div
+          data-pencil-name="Light Min"
+          style="background-color: #febc2e; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 12px; width: 12px"
+        ></div>
+        <div
+          data-pencil-name="Light Zoom"
+          style="background-color: #28c840; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 12px; width: 12px"
+        ></div>
+        <div
+          data-pencil-name="Logo Wrap"
+          style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 0px 0px 0px 8px; width: fit-content"
+        >
+          <div
+            data-pencil-name="Logo"
+            style="align-items: flex-start; background-image: url('ctx-logo-white.png'); background-position: center; background-repeat: no-repeat; background-size: contain; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 18px; justify-content: flex-start; width: 34px"
+          ></div>
+        </div>
+        <div
+          data-pencil-name="Bar Spacer"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: 1px; justify-content: flex-start"
+        ></div>
+        <div
+          data-pencil-name="Top Menu"
+          style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 18px; height: fit-content; justify-content: flex-start; width: fit-content"
+        >
+          <div
+            data-pencil-name="Menu Sessions"
+            style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+          >
+            Sessions
+          </div>
+          <div
+            data-pencil-name="Menu Traits"
+            style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+          >
+            Traits
+          </div>
+          <div
+            data-pencil-name="Menu Tasks"
+            style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+          >
+            Tasks
+          </div>
+          <div
+            data-pencil-name="Menu Configuration"
+            style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+          >
+            Config
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="Columns"
+        style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; justify-content: flex-start; width: 100%"
+      >
+        <div
+          data-pencil-name="Rail"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 0px; height: 100%; justify-content: flex-start; padding: 18px 0px; width: 260px"
+        >
+          <div
+            data-pencil-name="Rail Heading"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 0px 18px 12px 18px; width: fit-content"
+          >
+            <div
+              data-pencil-name="Rail Label"
+              style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              Spaces
+            </div>
+          </div>
+          <div
+            data-pencil-name="Repo Rows"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 3px; height: fit-content; justify-content: flex-start; padding: 0px 10px; width: 100%"
+          >
+            <div
+              data-pencil-name="Repo ctx-trait"
+              style="align-items: center; background-color: #16181d; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 10px; width: 100%"
+            >
+              <div
+                data-pencil-name="Repo Left"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 10px; height: fit-content; justify-content: flex-start; width: fit-content"
+              >
+                <div
+                  data-pencil-name="Dot"
+                  style="background-color: #eceef2; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 5px; width: 5px"
+                ></div>
+                <div
+                  data-pencil-name="Name"
+                  style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  ctx-company/traits
+                </div>
+              </div>
+              <div
+                data-pencil-name="Count"
+                style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                3
+              </div>
+            </div>
+            <div
+              data-pencil-name="Repo ctx-notify"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 10px; width: 100%"
+            >
+              <div
+                data-pencil-name="Repo Left"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 10px; height: fit-content; justify-content: flex-start; width: fit-content"
+              >
+                <div
+                  data-pencil-name="Dot"
+                  style="background-color: #eceef2; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 5px; width: 5px"
+                ></div>
+                <div
+                  data-pencil-name="Name"
+                  style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  ctx-company/notify
+                </div>
+              </div>
+              <div
+                data-pencil-name="Count"
+                style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                1
+              </div>
+            </div>
+            <div
+              data-pencil-name="Repo ctx-gate"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 10px; height: fit-content; justify-content: flex-start; padding: 8px 10px; width: 100%"
+            >
+              <div
+                data-pencil-name="Repo Left"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 10px; height: fit-content; justify-content: flex-start; width: fit-content"
+              >
+                <div
+                  data-pencil-name="Dot"
+                  style="background-color: #33363d; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 5px; width: 5px"
+                ></div>
+                <div
+                  data-pencil-name="Name"
+                  style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  ctx-company/gate
+                </div>
+              </div>
+            </div>
+            <div
+              data-pencil-name="Repo ctx-work"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 10px; height: fit-content; justify-content: flex-start; padding: 8px 10px; width: 100%"
+            >
+              <div
+                data-pencil-name="Repo Left"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 10px; height: fit-content; justify-content: flex-start; width: fit-content"
+              >
+                <div
+                  data-pencil-name="Dot"
+                  style="background-color: #33363d; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; height: 5px; width: 5px"
+                ></div>
+                <div
+                  data-pencil-name="Name"
+                  style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  ctx-company/work
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Rail Spacer"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; justify-content: flex-start; width: 100%"
+          ></div>
+          <div
+            data-pencil-name="Footer Divider"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: center; padding: 12px 16px 0px 16px; width: 100%"
+          >
+            <div
+              data-pencil-name="Divider Line"
+              style="background-color: #2b2e35; box-sizing: border-box; flex-shrink: 0; height: 1px; width: 32px"
+            ></div>
+          </div>
+          <div
+            data-pencil-name="Rail Footer"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 6px; height: fit-content; justify-content: flex-start; padding: 14px 18px 0px 18px; width: fit-content"
+          >
+            <div
+              data-pencil-name="Owner"
+              style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              Oskar Cieslik
+            </div>
+            <div
+              data-pencil-name="Space Line"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 5px; height: fit-content; justify-content: flex-start; width: fit-content"
+            >
+              <div
+                data-pencil-name="Space"
+                style='box-sizing: border-box; color: #a7abb5; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                ctx-company/traits
+              </div>
+              <div
+                data-pencil-name="Sep"
+                style='box-sizing: border-box; color: #4d525c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                ·
+              </div>
+              <div
+                data-pencil-name="Locality"
+                style='box-sizing: border-box; color: #4d525c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                local
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Main Pane"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 28px; height: 100%; justify-content: flex-start; padding: 18px 40px 20px 40px"
+        >
+          <div
+            data-pencil-name="Context"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+          >
+            <div
+              data-pencil-name="Title Block"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 5px; height: fit-content; justify-content: flex-start; width: fit-content"
+            >
+              <div
+                data-pencil-name="Title"
+                style='box-sizing: border-box; color: #f2f4f7; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                runtime — ctx-company/traits
+              </div>
+              <div
+                data-pencil-name="Description"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12px; font-style: italic; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; width: 560px'
+              >
+                Three seats, two engines, one trust list — runtime.toml as loaded.
+              </div>
+            </div>
+            <div
+              data-pencil-name="Header Menu"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 8px; width: fit-content"
+            >
+              <div
+                data-pencil-name="Menu Glyph"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                ∷
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Agents Section"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 12px; height: fit-content; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="Section Heading"
+              style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              Agents
+            </div>
+            <div
+              data-pencil-name="Agents Rows"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; width: 100%"
+            >
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; background-color: #16181d; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    smart
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    Plan drafting and review — the strong seat.
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    claude-opus-5
+                  </div>
+                  <div
+                    data-pencil-name="Right Bottom"
+                    style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    effort high
+                  </div>
+                </div>
+              </div>
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    worker
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    Implementation work inside the run worktree.
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    gpt-5.6-terra
+                  </div>
+                  <div
+                    data-pencil-name="Right Bottom"
+                    style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    medium
+                  </div>
+                </div>
+              </div>
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    scribe
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    Commit messages and summaries — the small seat.
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    claude-haiku-4-5
+                  </div>
+                  <div
+                    data-pencil-name="Right Bottom"
+                    style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    low
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Runtime Section"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 12px; height: fit-content; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="Section Heading"
+              style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              Runtime
+            </div>
+            <div
+              data-pencil-name="Runtime Rows"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; width: 100%"
+            >
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    harness
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    Executes model calls and tools for every frame.
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    opencode 0.4.2
+                  </div>
+                </div>
+              </div>
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    center
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    One process every face asks — sessions, deltas, spawn.
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    nightly · local
+                  </div>
+                </div>
+              </div>
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    store
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    Ledgers, runs, and the derived index.
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    ~/.config/ctx/traits
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Trust Section"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 12px; height: fit-content; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="Section Heading"
+              style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              Trust
+            </div>
+            <div
+              data-pencil-name="Trust Rows"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; width: 100%"
+            >
+              <div
+                data-pencil-name="Config Row"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 8px 12px; width: 100%"
+              >
+                <div
+                  data-pencil-name="Row Text"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Row Title"
+                    style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    approved traits
+                  </div>
+                  <div
+                    data-pencil-name="Row Desc"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    implement · plan · architect · research · optimize
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="Row Right"
+                  style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="Right Top"
+                    style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    5 digests
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Pane Spacer"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; justify-content: flex-start; width: 100%"
+          ></div>
+          <div
+            data-pencil-name="Config Bar"
+            style="align-items: center; border: 1px solid #23262d; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 10px 14px; width: 100%"
+          >
+            <div
+              data-pencil-name="State"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: fit-content"
+            >
+              <div
+                data-pencil-name="State Word"
+                style='box-sizing: border-box; color: #7fc79a; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                valid
+              </div>
+              <div
+                data-pencil-name="Detail"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                · runtime.toml · loaded 13:02
+              </div>
+            </div>
+            <div
+              data-pencil-name="Act Edit"
+              style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              edit runtime.toml
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Preview Column"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 0px; height: 100%; justify-content: flex-start; padding: 18px 22px; width: 380px"
+        >
+          <div
+            data-pencil-name="Seat Block"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; padding: 0px 0px 20px 0px; width: 100%"
+          >
+            <div
+              data-pencil-name="Block Heading"
+              style='box-sizing: border-box; color: #585d68; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              seat
+            </div>
+            <div
+              data-pencil-name="Row name"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+            >
+              <div
+                data-pencil-name="Key"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                name
+              </div>
+              <div
+                data-pencil-name="Val"
+                style='box-sizing: border-box; color: #d7dae0; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                smart · strong seat
+              </div>
+            </div>
+            <div
+              data-pencil-name="Seat Desc"
+              style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: 17px; text-align: left; width: 100%'
+            >
+              Drafts plans, reviews implementations, and issues typed verdicts. Research-family
+              traits bind it on both compose and review sides.
+            </div>
+          </div>
+          <div
+            data-pencil-name="Facts Block"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; padding: 0px 0px 20px 0px; width: 100%"
+          >
+            <div
+              data-pencil-name="Row model"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+            >
+              <div
+                data-pencil-name="Key"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                model
+              </div>
+              <div
+                data-pencil-name="V"
+                style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                claude-opus-5
+              </div>
+            </div>
+            <div
+              data-pencil-name="Row effort"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+            >
+              <div
+                data-pencil-name="Key"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                effort
+              </div>
+              <div
+                data-pencil-name="V"
+                style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                high
+              </div>
+            </div>
+            <div
+              data-pencil-name="Row used by"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+            >
+              <div
+                data-pencil-name="Key"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                used by
+              </div>
+              <div
+                data-pencil-name="V"
+                style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                implement · plan · architect
+              </div>
+            </div>
+            <div
+              data-pencil-name="Row source"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+            >
+              <div
+                data-pencil-name="Key"
+                style='box-sizing: border-box; color: #8b909c; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                source
+              </div>
+              <div
+                data-pencil-name="V"
+                style='box-sizing: border-box; color: #eceef2; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                runtime.toml · trait-scoped
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Col Spacer"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; justify-content: flex-start; width: 100%"
+          ></div>
+          <div
+            data-pencil-name="Col Footer"
+            style='box-sizing: border-box; color: #4d525c; font-family: "IBM Plex Mono", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: right; width: 100%'
+          >
+            runtime.toml · valid · 13:02
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
