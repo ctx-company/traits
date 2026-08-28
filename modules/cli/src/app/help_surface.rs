@@ -71,7 +71,7 @@ fn classify(name: &str) -> Result<&'static str, String> {
         // which stay runnable — is `hidden`.
         "init" | "doctor" | "cache" => "core",
         "build" | "create" | "fork" | "import" => "author",
-        "list" | "check" | "trust" | "dependency" | "diff" => "manage",
+        "list" | "check" | "trust" | "dependency" | "diff" | "state" | "sessions" => "manage",
         "generate" | "refine" | "critique" => "ai-assistance",
         "run" | "merge" => "execute",
         // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info` are

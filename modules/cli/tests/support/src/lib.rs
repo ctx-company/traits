@@ -589,6 +589,32 @@ pub fn require_success(description: &str, args: &[&str], cwd: &Path, home: &Path
     stdout
 }
 
+/// Discover the P451 active repo-qualifier key `doctor --config` reports for
+/// `repo` — the same key an operator would copy into `[repo."<key>"]` — by
+/// running doctor before any `[repo.*]` block exists, so the discovery
+/// itself never depends on the behavior under test. Also the store key
+/// `ctx traits sessions delete` reads under (`0252.5`): the session store is
+/// `home/ctx/traits/runs/<active_repo_key>`.
+pub fn active_repo_key(repo: &Path, home: &Path) -> String {
+    let stdout = require_success(
+        "active-repo-key discovery",
+        &["traits", "doctor", "--config"],
+        repo,
+        home,
+    );
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("repo.active-key:"))
+        .unwrap_or_else(|| panic!("doctor --config printed no repo.active-key row: {stdout}"));
+    let after_colon = line.split_once(':').unwrap().1;
+    after_colon
+        .split('[')
+        .next()
+        .unwrap_or(after_colon)
+        .trim()
+        .to_string()
+}
+
 /// Like [`require_success`], but layering `extra_env` via [`run_ctx_with_env`].
 pub fn require_success_with_env(
     description: &str,

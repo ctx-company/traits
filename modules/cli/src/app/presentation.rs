@@ -711,6 +711,7 @@ pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "state",
     "import",
     "cache",
+    "sessions",
     // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info`/`publish`
     // moved under this group and are now hidden aliases, so they are no longer
     // visible top-level commands and must not appear above. Their subcommands render
@@ -735,7 +736,7 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
     let presentation = match name {
         "doctor" | "init" | "create" | "fork" | "list" | "build" | "generate" | "refine"
         | "critique" | "merge" | "trust" | "state" | "import" | "cache" | "check" | "diff"
-        | "run" | "dependency" => Panel,
+        | "run" | "dependency" | "sessions" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \
