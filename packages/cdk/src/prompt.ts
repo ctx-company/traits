@@ -140,10 +140,15 @@ function promptOf(fields: PromptFields): PromptHandle {
     throw new Error(`prompt.${id}: expected either text prompt body or source, not both`);
   }
   const refs = promptRefsForFields(fields);
+  // `signal:` refs are read via `{signal:...}` tokens but are never a
+  // canonical input contract (core's `PROMPT_REQUIRED_INPUT_KINDS` omits
+  // `signal`) — only auto-derived input, never an explicitly authored one,
+  // needs the exclusion.
+  const inputRefs = fields.input === undefined ? refs.filter((ref) => !ref.startsWith("signal:")) : refs;
   const declarations = collectMany([fields.input, fields.output, fields.source, fields.text]);
   const declaration = compact({
     id,
-    input: normalizeRefList(fields.input ?? refs),
+    input: normalizeRefList(fields.input ?? inputRefs),
     output: normalizeRefList(fields.output),
     description: fields.description,
     text,

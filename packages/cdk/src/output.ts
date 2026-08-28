@@ -109,15 +109,19 @@ function buildInstructionOutput(
 }
 
 /**
- * Resolves one `output.prompt` interpolation site to its slot ref, whether
- * optionality was written, and the underlying resolved value (kept so the
+ * Resolves one `output.prompt` interpolation site: a slot ref (whether
+ * optionality was written, and the underlying resolved value, kept so the
  * attaching step can later claim authorship against the actual slot handle
- * rather than only its ref string).
+ * rather than only its ref string), or a signal ref — interpolating a
+ * signal itself IS that step's may-emit declaration (0253.2), not a WRITE
+ * contract, so it carries no optionality/authorship concept of its own.
  */
 function resolveOutputPromptRef(
   value: OutputPromptInterpolation,
   fieldPath: string,
-): { readonly ref: string; readonly optional: boolean; readonly slotValue: SlotHandle } {
+):
+  | { readonly kind: "slot"; readonly ref: string; readonly optional: boolean; readonly slotValue: SlotHandle }
+  | { readonly kind: "signal"; readonly ref: string } {
   const wrapper = value as OptionalSlotRead;
   if (
     value !== null &&
@@ -128,11 +132,14 @@ function resolveOutputPromptRef(
   ) {
     const ref = refText(wrapper.slot, fieldPath);
     if (!ref.startsWith("slot:")) throw new Error(`${fieldPath}: optional() applies to slot refs only`);
-    return { ref, optional: true, slotValue: wrapper.slot };
+    return { kind: "slot", ref, optional: true, slotValue: wrapper.slot };
   }
   const ref = refText(value, fieldPath);
-  if (!ref.startsWith("slot:")) throw new Error(`${fieldPath}: output.prompt interpolation must be a slot reference`);
-  return { ref, optional: false, slotValue: value as SlotHandle };
+  if (ref.startsWith("signal:")) return { kind: "signal", ref };
+  if (!ref.startsWith("slot:")) {
+    throw new Error(`${fieldPath}: output.prompt interpolation must be a slot or signal reference`);
+  }
+  return { kind: "slot", ref, optional: false, slotValue: value as SlotHandle };
 }
 
 interface OutputTemplateParts {
@@ -140,6 +147,8 @@ interface OutputTemplateParts {
   readonly refs: readonly string[];
   readonly optionalRefs: readonly string[];
   readonly slotByRef: ReadonlyMap<string, SlotHandle>;
+  /** Signals interpolated in this template, in interpolation order — a SEPARATE list from `refs`: every existing `refs`/`slots` consumer treats `refs` as the step's slot output contract, and a signal is not one (P565/0253.2). */
+  readonly signals: readonly string[];
   readonly declarations: ReturnType<typeof collectMany>;
 }
 
@@ -151,10 +160,25 @@ function outputTemplateParts(
   const refs: string[] = [];
   const optionalRefs: string[] = [];
   const slotByRef = new Map<string, SlotHandle>();
+  const signals: string[] = [];
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
-    if (value === undefined) throw new Error(`output.prompt interpolation ${index}: expected a slot reference`);
-    const { ref, optional, slotValue } = resolveOutputPromptRef(value, `output.prompt interpolation ${index}`);
+    if (value === undefined) {
+      throw new Error(`output.prompt interpolation ${index}: expected a slot or signal reference`);
+    }
+    const resolved = resolveOutputPromptRef(value, `output.prompt interpolation ${index}`);
+    if (resolved.kind === "signal") {
+      if (!signals.includes(resolved.ref)) signals.push(resolved.ref);
+      // Signals render BRACED (`{signal:...}`), unlike a slot ref (see
+      // below): `frame_prompt.rs`'s `authored_signal_refs` scans the
+      // compiled prompt for exactly this token to render the emission
+      // guidance into the step's `<spec>` block, and a signal interpolation
+      // is exempt from the slot read-contract rule — it's the may-emit
+      // declaration itself, not a step reading its own output.
+      text += `{${resolved.ref}}${strings[index + 1] ?? ""}`;
+      continue;
+    }
+    const { ref, optional, slotValue } = resolved;
     if (!refs.includes(ref)) refs.push(ref);
     if (optional && !optionalRefs.includes(ref)) optionalRefs.push(ref);
     slotByRef.set(ref, slotValue);
@@ -165,7 +189,7 @@ function outputTemplateParts(
     // the step read its own not-yet-produced output.
     text += `${ref}${strings[index + 1] ?? ""}`;
   }
-  return { text, refs, optionalRefs, slotByRef, declarations: collectMany(values) };
+  return { text, refs, optionalRefs, slotByRef, signals, declarations: collectMany(values) };
 }
 
 /** Merges a base output-template's parts with an extension's, per the same required-beats-optional rule `prompt.ts`'s `composeTemplateMeta` applies. */
@@ -179,19 +203,21 @@ function composeOutputTemplateParts(base: OutputTemplateParts, extension: Output
     (ref) => !requiredRefs.has(ref),
   );
   const slotByRef = new Map([...base.slotByRef, ...extension.slotByRef]);
+  const signals = uniqueInOrder([...base.signals, ...extension.signals]);
   return {
     text: `${base.text}\n${extension.text}`,
     refs,
     optionalRefs,
     slotByRef,
+    signals,
     declarations: mergeDeclarationSets(base.declarations, extension.declarations),
   };
 }
 
 function finishOutputTemplate(parts: OutputTemplateParts): OutputTemplateHandle {
-  if (parts.refs.length === 0) {
+  if (parts.refs.length === 0 && parts.signals.length === 0) {
     throw new Error(
-      "output.prompt: expected at least one interpolated slot — a template with zero interpolations has no output contract",
+      "output.prompt: expected at least one interpolated slot or signal — a template with zero interpolations has no output contract",
     );
   }
   const template = withMeta(
@@ -203,6 +229,7 @@ function finishOutputTemplate(parts: OutputTemplateParts): OutputTemplateHandle 
         refs: parts.refs,
         ...(parts.optionalRefs.length === 0 ? {} : { optionalRefs: parts.optionalRefs }),
         slots: parts.refs.map((ref) => parts.slotByRef.get(ref)),
+        ...(parts.signals.length === 0 ? {} : { signals: parts.signals }),
       },
       declarations: parts.declarations,
     },

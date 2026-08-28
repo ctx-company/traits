@@ -99,6 +99,16 @@ export interface Scope {
   readonly loop?: LoopScopeState;
   readonly parallel?: ParallelScopeState;
   readonly forEach?: ForEachScopeState;
+  /**
+   * Signal refs this scope's guard observes (0253.2) — set on a `"when"`
+   * scope by `flow.when` before its body runs, from the `condition.signal(
+   * ...)` members of its guard. A step's signal-FIELD prompt interpolation
+   * (`${sig.reason}`) is legal only when its own signal ref appears in the
+   * union of this field across every currently-open scope (see
+   * `guardedSignalsInScope`) — a step nested in `flow.loop` inside a guarded
+   * `flow.when` is still in scope.
+   */
+  readonly guardedSignals?: ReadonlySet<string>;
 }
 
 interface BuildFrame {
@@ -181,7 +191,7 @@ export function nearestScope(kind: ScopeKind | readonly ScopeKind[]): Scope | un
   return undefined;
 }
 
-function pushScope(kind: ScopeKind, caller: string): Scope {
+function pushScope(kind: ScopeKind, caller: string, guardedSignals?: ReadonlySet<string>): Scope {
   const build = requireBuild(caller);
   const scope: Scope = {
     kind,
@@ -189,6 +199,7 @@ function pushScope(kind: ScopeKind, caller: string): Scope {
     ...(kind === "loop" ? { loop: { abortIfArms: [], maxIterationsCalled: false, onComplete: [], onAbort: [] } } : {}),
     ...(kind === "parallel" ? { parallel: {} } : {}),
     ...(kind === "for-each" ? { forEach: { itemSchemaCalled: false, onComplete: [] } } : {}),
+    ...(guardedSignals === undefined ? {} : { guardedSignals }),
   };
   build.scopes.push(scope);
   return scope;
@@ -211,8 +222,9 @@ export function runInScope<T>(
   kind: ScopeKind,
   label: string,
   callback: () => T,
+  guardedSignals?: ReadonlySet<string>,
 ): { readonly result: T; readonly scope: Scope } {
-  pushScope(kind, label);
+  pushScope(kind, label, guardedSignals);
   let result: T;
   let scope: Scope;
   try {
@@ -224,6 +236,22 @@ export function runInScope<T>(
     throw new Error(`${label}: async callbacks are not supported — flow.* bodies must run synchronously`);
   }
   return { result, scope };
+}
+
+/**
+ * The union of `guardedSignals` across every currently-open scope (0253.2) —
+ * so a step nested arbitrarily deep inside a guarded `flow.when` (through a
+ * `flow.loop`/`flow.match` arm/`flow.parallel` branch) is still considered
+ * in scope for that signal's field reads. Empty when no build is active or
+ * no enclosing scope carries a guard.
+ */
+export function guardedSignalsInScope(): ReadonlySet<string> {
+  if (activeBuild === undefined) return new Set();
+  const union = new Set<string>();
+  for (const scope of activeBuild.scopes) {
+    for (const signal of scope.guardedSignals ?? []) union.add(signal);
+  }
+  return union;
 }
 
 export function registerItem(caller: string, item: SequenceHandle, title?: string): void {

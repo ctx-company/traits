@@ -38,6 +38,7 @@ import type {
   AgentHandle,
   ArgvItem,
   ConditionHandle,
+  DeclaredSignalWithFields,
   DependencyFields,
   DraftOf,
   FieldRef,
@@ -52,6 +53,7 @@ import type {
   SchemaValue,
   SessionBinding,
   SessionHandle,
+  SignalFieldRef,
   SignalFields,
   SlotHandle,
   SlotSink,
@@ -3254,6 +3256,126 @@ describe("typed rule/signal/dependency (P459)", () => {
       package: "@ctx/shared",
     };
     void mixedSource;
+  });
+});
+
+describe("signals: the third reference kind (0253.2)", () => {
+  it("signal({ schema }) declares the payload schema and pulls its declaration into the built trait", () => {
+    const payload = schema.object("review-payload", { reason: schema.text() });
+    const review = signal({ id: "review", description: "A review result.", schema: payload });
+    const draft = toDraftJson(
+      trait("signal-schema-fixture", {
+        version: "0.1.0",
+        description: "s",
+        name: "Signal Schema Fixture",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        signal: [review],
+      }),
+    ) as {
+      readonly signal?: readonly { readonly id: string; readonly description: string; readonly schema?: string }[];
+      readonly schema?: readonly { readonly id: string }[];
+    };
+
+    expect(draft.signal).toEqual([{ id: "review", description: "A review result.", schema: "schema:review-payload" }]);
+    expect(draft.schema?.map((entry) => entry.id)).toContain("review-payload");
+  });
+
+  it("interpolating a signal itself in output.prompt IS the may-emit declaration — no separate emits: field", () => {
+    const proposal = slot.text("emit-proposal");
+    const ready = signal({ id: "emit-ready", description: "Proposal ready." });
+    const step = sequence.prompt("emit", {
+      input: input.prompt`Produce a proposal.`,
+      output: [proposal, output.prompt`Emit the review signal ${ready}.`],
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "signal-emit-fixture",
+        name: "Signal Emit Fixture",
+        description: "signal emit fixture.",
+        procedure: procedure({ description: "d", sequence: [step] }),
+      }),
+    ) as {
+      readonly procedure?: {
+        readonly sequence?: readonly { readonly output?: unknown; readonly "on-complete"?: unknown }[];
+      };
+      readonly prompt?: Record<string, { readonly text?: string }>;
+    };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual(["slot:emit-proposal"]);
+    expect(draft.procedure?.sequence?.[0]?.["on-complete"]).toEqual(["signal:emit-ready"]);
+    expect(draft.prompt?.emit?.text).toBe("Produce a proposal.\n\nEmit the review signal {signal:emit-ready}.");
+  });
+
+  it("an unknown signal field throws at author time, naming the signal and the path", () => {
+    const payload = schema.object("unknown-field-payload", { reason: schema.text() });
+    const review = signal({ id: "unknown-field-review", description: "d", schema: payload });
+    expect(() => (review as unknown as { readonly nope: unknown }).nope).toThrow(
+      /signal "unknown-field-review" has no field "nope"/,
+    );
+  });
+
+  it("a schema'd signal mints typed field refs — ${sig.field} typechecks, and condition.signal still accepts the handle", () => {
+    const payload = schema.object("typed-field-payload", { reason: schema.text() });
+    const review = signal({ id: "typed-field-review", description: "d", schema: payload });
+    expectTypeOf(review).toMatchTypeOf<DeclaredSignalWithFields<{ readonly reason: string }>>();
+    expectTypeOf(review.reason).toMatchTypeOf<SignalFieldRef<string>>();
+    input.prompt`Reason: ${review.reason}`;
+    expect(condition.signal(review)).toEqual({ signal: "signal:typed-field-review" });
+    // An unschema'd signal is still accepted everywhere a SignalHandle is.
+    const plain = signal({ id: "typed-field-plain", description: "d" });
+    expect(condition.signal(plain)).toEqual({ signal: "signal:typed-field-plain" });
+  });
+
+  it("rejects an unknown signal field and an unrelated CDK value as a signal field interpolation, at author time", () => {
+    const payload = schema.object("field-boundary-payload", { reason: schema.text() });
+    const review = signal({ id: "field-boundary-review", description: "d", schema: payload });
+    input.prompt`Reason: ${review.reason}`;
+    // Not invoked: `review.notAField` throws at the proxy's own `get` trap
+    // (asserted separately above), before the interpolation type error below
+    // would ever be reached at runtime.
+    const interpolateUnknownField = () =>
+      // @ts-expect-error `notAField` isn't a declared payload field — the mapped field-ref type resolves it as `unknown` via `CdkObject`'s index signature, which is not assignable to a prompt interpolation.
+      input.prompt`Reason: ${review.notAField}`;
+    void interpolateUnknownField;
+
+    const slotPayload = schema.object("field-boundary-slot-payload", { reason: schema.text() });
+    const noteSlot = slot({ id: "field-boundary-slot", schema: slotPayload });
+    // Not invoked: `noteSlot.reason` carries no `meta.ref`, so
+    // `promptTemplate` throws at runtime for the same reason `condition.
+    // equals` (not prompt interpolation) is the FieldRef's actual consumer;
+    // only the type boundary below is under test here.
+    const interpolateSlotFieldRef = () =>
+      // @ts-expect-error a slot FieldRef carries no `meta.ref` and is not a legal signal field prompt interpolation, even though it is another CDK-minted field ref.
+      input.prompt`Reason: ${noteSlot.reason}`;
+    void interpolateSlotFieldRef;
+
+    // @ts-expect-error an unrelated CDK handle (a schema declaration itself) is not a signal field prompt interpolation.
+    input.prompt`Reason: ${payload}`;
+  });
+
+  it("a NAMED prompt() containing a signal field interpolation keeps the token in text but excludes the signal from its own input contract", () => {
+    const payload = schema.object("named-prompt-signal-payload", { reason: schema.text() });
+    const review = signal({ id: "named-prompt-signal", description: "d", schema: payload });
+    const note = slot.text("named-prompt-signal-note");
+    const named = prompt({
+      id: "named-prompt-signal-text",
+      text: input.prompt`Reason: ${review.reason} Note: ${note}`,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "named-prompt-signal-fixture",
+        name: "Named Prompt Signal Fixture",
+        description: "d",
+        prompt: [named],
+      }),
+    ) as {
+      readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[] }>;
+    };
+
+    expect(draft.prompt?.["named-prompt-signal-text"]?.text).toBe(
+      "Reason: {signal:named-prompt-signal.reason} Note: {slot:named-prompt-signal-note}",
+    );
+    expect(draft.prompt?.["named-prompt-signal-text"]?.input).toEqual(["slot:named-prompt-signal-note"]);
   });
 });
 

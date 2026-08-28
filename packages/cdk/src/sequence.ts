@@ -1407,7 +1407,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     input,
     output,
     format: fields.format === undefined || typeof fields.format === "string" ? fields.format : [...fields.format],
-    "on-complete": onCompleteRules(fields.onComplete, outputRefs),
+    "on-complete": onCompleteRules(appendTemplateSignals(fields.onComplete, outputTemplateRender?.signals), outputRefs),
   };
   if (kind !== "branch" && kind !== "ask" && kind !== "project" && kind !== "parallel") {
     const singleStepWhen = (fields as { readonly when?: GuardValue }).when;
@@ -2005,7 +2005,14 @@ function attachOutputTemplates(
   kind: SequenceFields["kind"],
   agentRef: string | undefined,
   outputValue: SequenceOutputValue | readonly SequenceOutputValue[] | undefined,
-): { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[] } | undefined {
+):
+  | {
+      readonly text: string;
+      readonly refs: readonly string[];
+      readonly optionalRefs: readonly string[];
+      readonly signals: readonly string[];
+    }
+  | undefined {
   if (outputValue === undefined) return undefined;
   const items = Array.isArray(outputValue) ? outputValue : [outputValue];
   const templates = items.filter((item) => isOutputTemplateHandle(item));
@@ -2021,10 +2028,17 @@ function attachOutputTemplates(
   let text = "";
   const refs: string[] = [];
   const optionalRefs: string[] = [];
+  const signals: string[] = [];
   for (const handle of templates) {
     const content = outputTemplateContent(handle);
     if (content === undefined) {
       throw new Error(`procedure.sequence ${stepId}: expected an output.prompt value in output:`);
+    }
+    // `ask`'s `output:` accepts exactly one slot and never declares
+    // `on-complete` (`AskSequenceFields.onComplete?: never`) — an
+    // interpolated signal has nowhere legal to lower to on that kind.
+    if (kind === "ask" && content.signals !== undefined && content.signals.length > 0) {
+      throw new Error(`procedure.sequence ${stepId}: output.prompt may not interpolate a signal on an ask step`);
     }
     const templateOptionalRefs = new Set(content.optionalRefs ?? []);
     content.refs.forEach((ref, index) => {
@@ -2039,9 +2053,30 @@ function attachOutputTemplates(
       refs.push(ref);
       if (templateOptionalRefs.has(ref)) optionalRefs.push(ref);
     });
+    for (const signal of content.signals ?? []) {
+      if (!signals.includes(signal)) signals.push(signal);
+    }
     text += (text === "" ? "" : "\n\n") + content.text;
   }
-  return { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs) };
+  return { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs), signals };
+}
+/** Appends interpolated `output.prompt` signals (in interpolation order, skipping any already present) after any explicit `onComplete` entries — the explicit spelling always wins ordering, matching `onCompleteRules`' own precedence. */
+function appendTemplateSignals(
+  explicit: SequenceFields["onComplete"],
+  templateSignals: readonly string[] | undefined,
+): SequenceFields["onComplete"] {
+  if (templateSignals === undefined || templateSignals.length === 0) return explicit;
+  const explicitList = explicit === undefined ? [] : Array.isArray(explicit) ? explicit : [explicit];
+  const explicitRefs = new Set(
+    explicitList.map((item) =>
+      typeof item === "string" || metaOf(item)?.ref !== undefined
+        ? refText(item, "sequence.onComplete")
+        : refText(item.signal, "sequence.onComplete.signal"),
+    ),
+  );
+  const appended = templateSignals.filter((signal) => !explicitRefs.has(signal));
+  if (appended.length === 0) return explicit;
+  return [...explicitList, ...appended];
 }
 /**
  * Merges a legacy `input:` dependency list (P447-era command/check surface)
