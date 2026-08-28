@@ -1,0 +1,28 @@
+[package]
+id = "walkthrough"
+version = "0.1.0"
+name = "Walkthrough"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant]
+
+[family.variant.default]
+path = "generated/default/index.toml"
+aliases = ["walkthrough-default"]
+
+[publish]
+name = "@ctx-traits/walkthrough"
+access = "public"
+
+[budget]
+max-frames = 24
+frame-seconds = 1800
+total-seconds = 7200
+max-retries = 3
+idle-seconds = 600
+
+[defaults.port]
+output-dir = ".hidden/walkthroughs"
