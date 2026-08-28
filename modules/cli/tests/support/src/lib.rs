@@ -116,6 +116,72 @@ pub fn ctx_bin() -> PathBuf {
     )
 }
 
+/// Submit caller-provided fields through the persisted `internal call` boundary.
+/// Identity fields come from the current frame template so every proof follows
+/// the same stale-frame protection as a real caller.
+pub fn call_session_frame(
+    repo: &Path,
+    home: &Path,
+    ledger_path: &Path,
+    agent: Option<&str>,
+    fields: serde_json::Value,
+) -> serde_json::Value {
+    let ledger: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(ledger_path).expect("fixture session ledger readable"),
+    )
+    .expect("fixture session ledger is JSON");
+    let template = &ledger["next-frame"]["call-template"];
+    let mut data = serde_json::json!({
+        "session-id": template["session-id"],
+        "run-id": template["run-id"],
+        "state-digest": template["state-digest"],
+        "expected-sequence-item-id": template["expected-sequence-item-id"],
+        "expected-run-index": template["expected-run-index"],
+        "expected-source-index": template["expected-source-index"],
+    });
+    let object = data
+        .as_object_mut()
+        .expect("fixture call payload is an object");
+    if let Some(position_path) = template["expected-position-path"].as_array() {
+        object.insert(
+            "expected-position-path".to_string(),
+            position_path.clone().into(),
+        );
+    }
+    object.extend(
+        fields
+            .as_object()
+            .expect("caller fields are an object")
+            .clone(),
+    );
+    let data_path = ledger_path.with_extension("call.json");
+    std::fs::write(&data_path, data.to_string()).expect("fixture call payload writable");
+    let mut args = vec![
+        "traits".to_string(),
+        "internal".to_string(),
+        "call".to_string(),
+        "--session".to_string(),
+        ledger_path.to_str().unwrap().to_string(),
+    ];
+    if let Some(agent) = agent {
+        args.extend(["--agent".to_string(), agent.to_string()]);
+    }
+    args.extend([
+        "--data".to_string(),
+        data_path.to_str().unwrap().to_string(),
+        "--json".to_string(),
+    ]);
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let output = run_ctx(&arg_refs, repo, home);
+    assert!(
+        output.status.success(),
+        "persisted call must succeed: {:?}",
+        utf8(&output)
+    );
+    let (stdout, _) = utf8(&output);
+    serde_json::from_str(&stdout).expect("persisted call returns JSON")
+}
+
 /// Absolute path to the repository root, resolved at runtime (P477 rule,
 /// task 0099): a baked `env!("CARGO_MANIFEST_DIR")` here would freeze
 /// whatever worktree happened to compile this crate, which then survives as

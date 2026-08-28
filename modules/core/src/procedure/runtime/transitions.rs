@@ -156,6 +156,7 @@ pub fn intro_sequence_frame(trait_ref: &Trait, state: &State) -> crate::Result<S
         loop_context: None,
         for_each_context: None,
         guard_explanations: Vec::new(),
+        signal_payloads: Vec::new(),
         title: proc.description.clone(),
         frame_text: bounded(text),
         prompt: None,
@@ -360,6 +361,19 @@ fn build_sequence_frame(
         loop_context: ready.loop_context.clone(),
         for_each_context: ready.for_each_context.clone(),
         guard_explanations: ready.guard_explanations.clone(),
+        signal_payloads: visible_signal_emissions_in_scope(
+            state,
+            "",
+            &repeated_activation_scope(&ready.position_path),
+        )
+        .into_iter()
+        .filter_map(|signal| {
+            signal.payload.as_ref().map(|payload| FrameSignalPayload {
+                signal_ref: signal.signal_ref.clone(),
+                payload: payload.clone(),
+            })
+        })
+        .collect(),
         title: ready.item.title.clone(),
         frame_text: bounded(frame_text),
         prompt,
@@ -677,6 +691,7 @@ pub fn apply_step_output(
     let mut accepted_signals = Vec::new();
     for signal in envelope.signals {
         let emission = validate_signal_with_context(
+            trait_ref,
             ready.sequence_index,
             &allowed_signals,
             signal,
@@ -710,11 +725,13 @@ pub fn apply_step_output(
         if matched {
             let allowed: BTreeSet<&str> = BTreeSet::from([emit.signal_ref()]);
             let emission = validate_signal_with_context(
+                trait_ref,
                 ready.sequence_index,
                 &allowed,
                 StepSignalOutput {
                     ref_text: emit.signal_ref().to_string(),
                     evidence: Some(derived_signal_evidence(when, &evaluations)),
+                    payload: None,
                     producer_agent: None,
                     producer_harness: None,
                 },

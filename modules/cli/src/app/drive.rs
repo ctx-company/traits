@@ -371,6 +371,7 @@ struct AssignmentPlan {
 #[derive(Debug, Clone)]
 struct ParsedHarnessOutput {
     slots: BTreeMap<String, Value>,
+    signals: BTreeMap<String, Value>,
     harness_session_id: Option<String>,
     /// Top-level keys of model-authored JSON objects that were inspected but
     /// did not satisfy the requested slots — so a correction can say what the
@@ -2711,7 +2712,7 @@ fn drive_loop(
             return Ok(report);
         };
         let output_id = cli.output.as_deref().unwrap_or("raw-json");
-        let mut requested = requested_outputs(&frame)?;
+        let mut requested = requested_outputs(&frame, &loaded_trait)?;
         let mut schema = requested_output_schema(&requested, &loaded_trait);
         let mut prompt = frame_prompt(&prompt_context, &schema, None);
         let mut pending_delivery_is_complete_frame = true;
@@ -3358,7 +3359,7 @@ fn drive_loop(
                 frame = refreshed_frame;
                 prompt_context =
                     resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
-                requested = requested_outputs(&frame)?;
+                requested = requested_outputs(&frame, &loaded_trait)?;
                 schema = requested_output_schema(&requested, &loaded_trait);
                 refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                 if pending_delivery_is_complete_frame {
@@ -3422,7 +3423,7 @@ fn drive_loop(
                 frame = refreshed_frame;
                 prompt_context =
                     resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
-                requested = requested_outputs(&frame)?;
+                requested = requested_outputs(&frame, &loaded_trait)?;
                 schema = requested_output_schema(&requested, &loaded_trait);
                 refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                 let correction = RejectionClass::OutputTruncated.format_correction(
@@ -3533,11 +3534,12 @@ fn drive_loop(
                 return Ok(report);
             }
             let parsed = match parse_harness_output(&run.stdout, output_id, &requested) {
-                Ok(parsed) if !parsed.slots.is_empty() => parsed,
+                Ok(parsed) if required_slots_satisfied(&parsed, &requested) => parsed,
                 Ok(parsed) => {
                     retry_count += 1;
                     let expected = requested
                         .iter()
+                        .filter(|requested| !requested.is_signal)
                         .map(|slot| slot.property.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -3566,7 +3568,7 @@ fn drive_loop(
                     frame = refreshed_frame;
                     prompt_context =
                         resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
-                    requested = requested_outputs(&frame)?;
+                    requested = requested_outputs(&frame, &loaded_trait)?;
                     schema = requested_output_schema(&requested, &loaded_trait);
                     refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                     let correction = RejectionClass::MissingSlot.format_correction(
@@ -3655,7 +3657,7 @@ fn drive_loop(
                     frame = refreshed_frame;
                     prompt_context =
                         resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
-                    requested = requested_outputs(&frame)?;
+                    requested = requested_outputs(&frame, &loaded_trait)?;
                     schema = requested_output_schema(&requested, &loaded_trait);
                     refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
                     let correction = RejectionClass::UnparseableOutput.format_correction(
@@ -3750,7 +3752,8 @@ fn drive_loop(
             // `observed_keys` only records failed object candidates. A complete
             // top-level object can therefore have no observed keys while its
             // submitted slots still provide content-rejection shape evidence.
-            let received_shapes = received_slot_shapes(&parsed.slots, &requested, &schema);
+            let received_shapes =
+                received_output_shapes(&parsed.slots, &parsed.signals, &requested, &schema);
             let response = submit_harness_output(
                 &input,
                 &frame,
@@ -3765,6 +3768,7 @@ fn drive_loop(
                     reasoning_effort: plan.reasoning_effort.clone(),
                 },
                 parsed.slots,
+                parsed.signals,
                 &worktree_env,
                 current_elapsed_seconds(),
                 run_panel.0.as_ref(),
@@ -4000,7 +4004,7 @@ fn drive_loop(
             // Recompose every full-contract component from that authoritative
             // session before the escalation retry can dispatch it.
             prompt_context = resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
-            requested = requested_outputs(&frame)?;
+            requested = requested_outputs(&frame, &loaded_trait)?;
             schema = requested_output_schema(&requested, &loaded_trait);
             refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
             let observed_session_id = parsed.harness_session_id.clone();
@@ -4073,10 +4077,23 @@ fn drive_loop(
                 );
                 return Ok(report);
             }
+            let validations = response
+                .response
+                .schema_validation
+                .iter()
+                .chain(
+                    response
+                        .response
+                        .rejected_signals
+                        .iter()
+                        .flat_map(|signal| signal.schema_validation.iter()),
+                )
+                .cloned()
+                .collect::<Vec<_>>();
             let correction = class.format_correction(
                 &requested,
                 &schema,
-                &response.response.schema_validation,
+                &validations,
                 &received_shapes,
                 &parsed.observed_keys,
             );
@@ -6180,6 +6197,7 @@ impl RejectionClass {
             Self::MissingSlot => {
                 let missing = requested
                     .iter()
+                    .filter(|requested| !requested.is_signal)
                     .filter(|requested| !observed_keys.contains(&requested.property))
                     .map(|requested| requested.property.as_str())
                     .collect::<Vec<_>>();
@@ -6209,12 +6227,32 @@ struct ReceivedShape {
 }
 
 fn complete_contract_request(requested: &[RequestedSlotKey]) -> String {
-    let properties = requested
+    let required = requested
         .iter()
+        .filter(|requested| !requested.is_signal)
         .map(|requested| requested.property.as_str())
         .collect::<Vec<_>>();
-    let properties = bounded_names(&properties);
-    format!("Return every requested top-level output in one complete response: {properties}.")
+    let signals = requested
+        .iter()
+        .filter(|requested| requested.is_signal)
+        .map(|requested| requested.property.as_str())
+        .collect::<Vec<_>>();
+    let required = if required.is_empty() {
+        "There are no required top-level outputs.".to_string()
+    } else {
+        format!(
+            "Return every required top-level output in one complete response: {}.",
+            bounded_names(&required)
+        )
+    };
+    if signals.is_empty() {
+        required
+    } else {
+        format!(
+            "{required} You may additionally emit these optional signal payloads: {}.",
+            bounded_names(&signals)
+        )
+    }
 }
 
 fn requested_property_shape(schema: &Value, property: &str) -> String {
@@ -6247,15 +6285,17 @@ fn schema_shape(schema: &Value) -> String {
     }
 }
 
-fn received_slot_shapes(
+fn received_output_shapes(
     slots: &BTreeMap<String, Value>,
+    signals: &BTreeMap<String, Value>,
     requested: &[RequestedSlotKey],
     _schema: &Value,
 ) -> BTreeMap<String, ReceivedShape> {
     requested
         .iter()
         .filter_map(|requested| {
-            slots
+            let values = if requested.is_signal { signals } else { slots };
+            values
                 .get(&requested.ref_text)
                 .map(|value| (requested.ref_text.clone(), received_shape(value)))
         })
@@ -7456,7 +7496,7 @@ fn attempt_concurrent_wave(
     let mut branch_runs: Vec<(usize, CliHarnessRun<'_>)> = Vec::with_capacity(frames.len());
     for (index, frame) in frames.iter().enumerate() {
         let offset = current_offset + index;
-        let Ok(requested) = requested_outputs(frame) else {
+        let Ok(requested) = requested_outputs(frame, request.loaded_trait) else {
             return Err(WaveIneligible::SiblingUnresolvable);
         };
         let sibling = &sibling_assignments[index];
@@ -9133,6 +9173,7 @@ fn parse_harness_output(
 ) -> Result<ParsedHarnessOutput, String> {
     let mut result = ParsedHarnessOutput {
         slots: BTreeMap::new(),
+        signals: BTreeMap::new(),
         harness_session_id: None,
         observed_keys: BTreeSet::new(),
     };
@@ -9155,16 +9196,27 @@ fn parse_harness_output(
         if result.harness_session_id.is_none() {
             result.harness_session_id = harness_stream::session_id_from_event(output_id, &value);
         }
-        if let Some(slots) = slots_from_value(
+        if let Some((slots, signals)) = slots_from_value(
             &value,
             requested,
             &mut result.observed_keys,
             output_id == "raw-json",
         )? {
             result.slots = slots;
+            result.signals = signals;
         }
     }
     Ok(result)
+}
+
+/// Signal payloads are optional response properties. A parsed response is
+/// ready for submission once every required slot descriptor is present, even
+/// when the frame has no slots at all.
+fn required_slots_satisfied(parsed: &ParsedHarnessOutput, requested: &[RequestedSlotKey]) -> bool {
+    requested
+        .iter()
+        .filter(|requested| !requested.is_signal)
+        .all(|requested| parsed.slots.contains_key(&requested.ref_text))
 }
 
 fn emit_output_progress(
@@ -9727,25 +9779,67 @@ pub(crate) fn cold_narrator_config_for_session_title(
 /// parsing via [`harness_stream::find_nested_object`]), so a slot named in a
 /// deeply nested OpenCode-style event payload is found just as reliably as
 /// one at the top level of a Claude-style event.
+type HarnessValues = (BTreeMap<String, Value>, BTreeMap<String, Value>);
+
 fn slots_from_value(
     value: &Value,
     requested: &[RequestedSlotKey],
     observed: &mut BTreeSet<String>,
     direct_model_output: bool,
-) -> Result<Option<BTreeMap<String, Value>>, String> {
-    let mut matcher = |object: &serde_json::Map<String, Value>| -> Option<BTreeMap<String, Value>> {
+) -> Result<Option<HarnessValues>, String> {
+    let mut matcher = |object: &serde_json::Map<String, Value>| -> Option<(BTreeMap<String, Value>, BTreeMap<String, Value>)> {
+        let signal_descriptors = requested
+            .iter()
+            .filter(|requested| requested.is_signal)
+            .collect::<Vec<_>>();
+        // With only optional signal outputs, an outer harness event is not a
+        // model response. Keep walking until a nested model object names one
+        // of the requested channels; absence remains a valid no-emission.
+        if requested.iter().all(|requested| requested.is_signal)
+            && !signal_descriptors.is_empty()
+            && !signal_descriptors
+                .iter()
+                .any(|requested| object.contains_key(&requested.property))
+        {
+            return None;
+        }
         let mut slots = BTreeMap::new();
-        for requested in requested {
+        for requested in requested.iter().filter(|requested| !requested.is_signal) {
             let value = object.get(&requested.property)?;
             slots.insert(requested.ref_text.clone(), value.clone());
         }
-        Some(slots)
+        let signals = signal_descriptors
+            .into_iter()
+            .filter_map(|requested| {
+                object
+                    .get(&requested.property)
+                    .cloned()
+                    .map(|payload| (requested.ref_text.clone(), payload))
+            })
+            .collect();
+        Some((slots, signals))
     };
     // JSON parsed out of message text is model-authored: when it fails the
     // slot match, its keys are what the model chose to send — exactly what a
     // specific correction should quote back.
     let mut record_observed = |value: &Value| record_observed_keys(value, requested, observed);
-    let slots = harness_stream::find_nested_object(value, &mut matcher, &mut record_observed);
+    let order = if direct_model_output {
+        harness_stream::NestedObjectMatchOrder::MatcherFirst
+    } else {
+        harness_stream::NestedObjectMatchOrder::WrapperFirst
+    };
+    let slots = harness_stream::find_nested_object_with_order(
+        value,
+        &mut matcher,
+        &mut record_observed,
+        order,
+    );
+    if slots.is_none()
+        && direct_model_output
+        && requested.iter().all(|requested| requested.is_signal)
+    {
+        return Ok(Some((BTreeMap::new(), BTreeMap::new())));
+    }
     if slots.is_none() && direct_model_output {
         record_observed_keys(value, requested, observed);
     }
@@ -9796,11 +9890,15 @@ struct HarnessSubmissionEvidence<'a> {
     reasoning_effort: Option<String>,
 }
 
+// Submission combines independently-owned drive context, parsed output, and UI
+// state; a context object here would only forward these one-use arguments.
+#[allow(clippy::too_many_arguments)]
 fn submit_harness_output(
     input: &DriveInputs<'_>,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     evidence_input: HarnessSubmissionEvidence<'_>,
     produced_slots: BTreeMap<String, Value>,
+    signals: BTreeMap<String, Value>,
     env_overlay: &BTreeMap<String, String>,
     elapsed_seconds: Option<u64>,
     run_panel: Option<&run_view::RunPanel>,
@@ -9853,7 +9951,18 @@ fn submit_harness_output(
             expected_source_index: template.expected_source_index,
             expected_position_path: template.expected_position_path.clone(),
             produced_slots,
-            signals: BTreeMap::new(),
+            signals: signals
+                .into_iter()
+                .map(|(ref_text, payload)| {
+                    (
+                        ref_text,
+                        ctx_traits_core::procedure::session::SignalSubmission {
+                            evidence: None,
+                            payload: Some(payload),
+                        },
+                    )
+                })
+                .collect(),
             warnings: vec![evidence.clone()],
             command_execution: None,
             caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
@@ -10206,6 +10315,7 @@ mod resolve_progress_tests {
             property: "answer".to_string(),
             operation: WriteOperation::Replace,
             schema_ref: Some("schema:boolean".to_string()),
+            is_signal: false,
         }]
     }
 
@@ -10344,8 +10454,9 @@ mod resolve_progress_tests {
     #[test]
     fn content_shape_uses_submitted_slots_not_failed_candidate_keys() {
         let requested = requested();
-        let shapes = super::received_slot_shapes(
+        let shapes = super::received_output_shapes(
             &BTreeMap::from([("slot:answer".to_string(), json!({"z": true, "a": false}))]),
+            &BTreeMap::new(),
             &requested,
             &json!({"properties": {"answer": {"type": "object"}}}),
         );
@@ -10371,6 +10482,7 @@ mod resolve_progress_tests {
                 property: "other".to_string(),
                 operation: WriteOperation::Replace,
                 schema_ref: Some("schema:text".to_string()),
+                is_signal: false,
             },
         ];
         let parsed = super::parse_harness_output(
@@ -10505,6 +10617,7 @@ mod resolve_progress_tests {
                 property: "other".to_string(),
                 operation: WriteOperation::Replace,
                 schema_ref: Some("schema:text".to_string()),
+                is_signal: false,
             },
         ];
         let mut observed = BTreeSet::new();
@@ -10520,6 +10633,180 @@ mod resolve_progress_tests {
             &observed,
         );
         assert!(correction.contains("missing: other"), "{correction}");
+    }
+
+    #[test]
+    fn parses_signal_payloads_without_a_slot_contract() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:review".to_string(),
+            property: "review".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        }];
+        let parsed = super::parse_harness_output(
+            r#"{"review":{"reason":"missing-test"}}"#,
+            "raw-json",
+            &requested,
+        )
+        .expect("nested optional signal payload parses");
+        assert!(parsed.slots.is_empty());
+        assert_eq!(
+            parsed.signals.get("signal:review"),
+            Some(&json!({"reason": "missing-test"}))
+        );
+    }
+
+    #[test]
+    fn parses_nested_signal_payloads_without_a_slot_contract() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:review".to_string(),
+            property: "review".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        }];
+        let parsed = super::parse_harness_output(
+            r#"{"type":"result","result":"{\"review\":{\"reason\":\"nested\"}}"}"#,
+            "claude-json",
+            &requested,
+        )
+        .expect("nested optional signal payload parses");
+        assert_eq!(
+            parsed.signals.get("signal:review"),
+            Some(&json!({"reason": "nested"}))
+        );
+    }
+
+    #[test]
+    fn enveloped_signal_named_result_does_not_capture_the_result_wrapper() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:result".to_string(),
+            property: "result".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        }];
+        let parsed = super::parse_harness_output(
+            r#"{"type":"result","result":"{\"result\":{\"reason\":\"nested\"}}"}"#,
+            "claude-json",
+            &requested,
+        )
+        .expect("nested result signal payload parses");
+        assert_eq!(
+            parsed.signals.get("signal:result"),
+            Some(&json!({"reason": "nested"}))
+        );
+    }
+
+    #[test]
+    fn enveloped_signal_payload_preserves_nested_wrapper_named_field() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:result".to_string(),
+            property: "result".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        }];
+        let parsed = super::parse_harness_output(
+            r#"{"type":"result","result":"{\"result\":{\"result\":{\"reason\":\"nested\"}}}"}"#,
+            "claude-json",
+            &requested,
+        )
+        .expect("nested result signal payload parses");
+        assert_eq!(
+            parsed.signals.get("signal:result"),
+            Some(&json!({"result": {"reason": "nested"}}))
+        );
+    }
+
+    #[test]
+    fn raw_signal_named_result_remains_matcher_first() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:result".to_string(),
+            property: "result".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        }];
+        let parsed = super::parse_harness_output(
+            r#"{"result":"{\"result\":{\"reason\":\"nested\"}}"}"#,
+            "raw-json",
+            &requested,
+        )
+        .expect("raw result signal payload parses");
+        assert_eq!(
+            parsed.signals.get("signal:result"),
+            Some(&json!(r#"{"result":{"reason":"nested"}}"#))
+        );
+    }
+
+    #[test]
+    fn optional_signal_contract_allows_an_omitted_signal() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:review".to_string(),
+            property: "review".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        }];
+        let parsed = super::parse_harness_output(r#"{}"#, "raw-json", &requested)
+            .expect("omitted optional signal is valid");
+        assert!(parsed.slots.is_empty() && parsed.signals.is_empty());
+    }
+
+    #[test]
+    fn submission_gate_accepts_signal_only_responses_and_rejects_missing_slots() {
+        let signal = RequestedSlotKey {
+            ref_text: "signal:review".to_string(),
+            property: "review".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        };
+        let signal_only = vec![signal.clone()];
+        let emitted =
+            super::parse_harness_output(r#"{"review":"approved"}"#, "raw-json", &signal_only)
+                .expect("emitted signal parses");
+        let omitted = super::parse_harness_output(r#"{}"#, "raw-json", &signal_only)
+            .expect("omitted optional signal parses");
+        assert!(super::required_slots_satisfied(&emitted, &signal_only));
+        assert!(super::required_slots_satisfied(&omitted, &signal_only));
+
+        let mixed = vec![requested().pop().unwrap(), signal];
+        let missing_slot =
+            super::parse_harness_output(r#"{"review":"approved"}"#, "raw-json", &mixed)
+                .expect("partial mixed response parses for correction evidence");
+        assert!(
+            !super::required_slots_satisfied(&missing_slot, &mixed),
+            "an optional signal must not satisfy a required slot"
+        );
+    }
+
+    #[test]
+    fn missing_slot_correction_excludes_omitted_optional_signals() {
+        let slot = requested().pop().unwrap();
+        let signal = RequestedSlotKey {
+            ref_text: "signal:review".to_string(),
+            property: "review".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:text".to_string()),
+            is_signal: true,
+        };
+        let correction = RejectionClass::MissingSlot.format_correction(
+            &[slot, signal],
+            &json!({}),
+            &[],
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        );
+
+        assert!(correction.contains("missing: answer"), "{correction}");
+        assert!(
+            !correction.contains("missing: answer, review")
+                && !correction.contains("missing: review"),
+            "optional signal payloads must not be described as missing required outputs: {correction}"
+        );
     }
 
     #[test]
@@ -10549,6 +10836,7 @@ mod resolve_progress_tests {
                 property: format!("very-long-output-name-{index}-abcdefghijklmnopqrstuvwxyz"),
                 operation: WriteOperation::Replace,
                 schema_ref: Some("schema:boolean".to_string()),
+                is_signal: false,
             })
             .collect::<Vec<_>>();
         let validations = requested
@@ -10572,6 +10860,44 @@ mod resolve_progress_tests {
                 && correction.len() < 1_500
                 && !correction.contains("internal validator wording"),
             "complete correction must be bounded: {correction}"
+        );
+    }
+
+    #[test]
+    fn signal_payload_correction_uses_typed_evidence_without_validator_wording() {
+        let requested = vec![RequestedSlotKey {
+            ref_text: "signal:review".to_string(),
+            property: "review".to_string(),
+            operation: WriteOperation::Replace,
+            schema_ref: Some("schema:review-payload".to_string()),
+            is_signal: true,
+        }];
+        let correction = RejectionClass::ContentRejection.format_correction(
+            &requested,
+            &json!({"properties": {"review": {"type": "object", "required": ["reason"]}}}),
+            &[SchemaValidation {
+                ref_text: "signal:review".to_string(),
+                schema_ref: Some("schema:review-payload".parse().unwrap()),
+                status: SchemaStatus::Rejected,
+                reason: "internal validator wording".to_string(),
+            }],
+            &super::received_output_shapes(
+                &BTreeMap::new(),
+                &BTreeMap::from([("signal:review".to_string(), json!({"wrong": true}))]),
+                &requested,
+                &json!({}),
+            ),
+            &BTreeSet::new(),
+        );
+        assert!(
+            correction
+                .contains("property `review` (signal:review) with schema schema:review-payload")
+                && correction.contains("received object with fields: wrong")
+                && correction.contains("required shape object requiring reason")
+                && correction.contains("There are no required top-level outputs")
+                && correction.contains("optional signal payloads: review")
+                && !correction.contains("internal validator wording"),
+            "signal corrections must expose typed repair evidence only: {correction}"
         );
     }
 }

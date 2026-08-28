@@ -106,6 +106,9 @@ pub(crate) struct RequestedSlotKey {
     pub(crate) property: String,
     pub(crate) operation: ctx_traits_core::r#trait::procedure::WriteOperation,
     pub(crate) schema_ref: Option<String>,
+    /// Optional signal-payload channels share the response object with slots,
+    /// but are never required slot outputs.
+    pub(crate) is_signal: bool,
 }
 
 /// Compose the MCP onboarding prompt for a frame. Takes the session spelling,
@@ -501,7 +504,14 @@ pub(crate) fn resolved_frame_prompt(
     pending_inputs: &[PendingInput],
 ) -> crate::Result<ResolvedFramePrompt> {
     let raw_prompt = resolved_prompt_section(loaded, session, frame, pending_inputs)?;
-    let refs = frame_reference_texts(frame, pending_inputs);
+    let mut refs = frame_reference_texts(frame, pending_inputs);
+    // Scan before interpolation consumes authored signal tokens. Their meaning
+    // is declared by the trait, independently of whether a payload exists yet.
+    if let Some(evidence) = frame.prompt.as_ref()
+        && let Ok(Ok(authored)) = resolved_prompt_body(loaded, session, frame, evidence)
+    {
+        refs.extend(authored_signal_refs(&authored, loaded));
+    }
     let prompt_section = bare_reference_names(&raw_prompt);
     let input_section = resolved_input_section(loaded, session, frame, pending_inputs)?;
     let include_section = resolved_include_section(loaded, session, frame)?;
@@ -1213,6 +1223,27 @@ fn resolve_input_value_tokens(
             values.insert(format!("setting:{}", record.id), rendered);
         }
     }
+    for payload in &frame.signal_payloads {
+        let ref_text = payload.signal_ref.to_string();
+        if let Some(rendered) =
+            ctx_traits_core::r#trait::prompt::render_interpolation_value(&payload.payload)
+        {
+            values.insert(ref_text.clone(), rendered);
+        }
+        if let Some((signal, field)) = ref_text.split_once(':') {
+            for token in token_candidates(&text, &format!("{signal}:{field}.")) {
+                let Some(field) = token.strip_prefix(&format!("{signal}:{field}.")) else {
+                    continue;
+                };
+                if let Some(value) = frame
+                    .signal_payload_field(&ref_text, Some(field))
+                    .and_then(ctx_traits_core::r#trait::prompt::render_interpolation_value)
+                {
+                    values.insert(token, value);
+                }
+            }
+        }
+    }
     let mut resolved = String::with_capacity(text.len());
     let mut remaining = text.as_str();
     while let Some(start) = remaining.find('{') {
@@ -1232,6 +1263,15 @@ fn resolve_input_value_tokens(
     }
     resolved.push_str(remaining);
     resolved
+}
+
+fn token_candidates(text: &str, prefix: &str) -> Vec<String> {
+    ctx_traits_core::r#trait::prompt::scan_interpolations(text)
+        .0
+        .into_iter()
+        .map(|interpolation| interpolation.ref_text)
+        .filter(|token| token.starts_with(prefix))
+        .collect()
 }
 
 fn accepted_input_value<'a>(
@@ -1622,6 +1662,31 @@ fn frame_reference_texts(
         .collect()
 }
 
+fn authored_signal_refs(text: &str, loaded: &ctx_traits_io::run::LoadedTrait) -> Vec<String> {
+    let mut refs = BTreeMap::new();
+    for token in ctx_traits_core::r#trait::prompt::scan_interpolations(text)
+        .0
+        .into_iter()
+        .map(|interpolation| interpolation.ref_text)
+    {
+        let Some(token) = token.strip_prefix("signal:") else {
+            continue;
+        };
+        let token = format!("signal:{token}");
+        let base = token.split('.').next().unwrap_or(token.as_str());
+        if base.strip_prefix("signal:").is_some_and(|id| {
+            loaded
+                .trait_ref
+                .signals
+                .iter()
+                .any(|signal| signal.id == id && signal.schema.is_some())
+        }) {
+            refs.insert(base.to_string(), ());
+        }
+    }
+    refs.into_keys().collect()
+}
+
 /// A `<spec>` block: what each named value MEANS, as distinct from what it
 /// currently holds.
 ///
@@ -1680,6 +1745,12 @@ fn reference_description(
             .iter()
             .find(|resource| resource.id == id)
             .and_then(|resource| resource.hint.clone()),
+        "signal" => loaded
+            .trait_ref
+            .signals
+            .iter()
+            .find(|signal| signal.id == id)
+            .map(|signal| signal.description.clone()),
         _ => None,
     }
     .filter(|text| !text.trim().is_empty())
@@ -1708,6 +1779,12 @@ fn reference_hint(loaded: &ctx_traits_io::run::LoadedTrait, ref_text: &str) -> O
             .iter()
             .find(|slot| slot.id == id)
             .and_then(|slot| slot.hint.clone()),
+        "signal" => loaded
+            .trait_ref
+            .signals
+            .iter()
+            .find(|signal| signal.id == id)
+            .and_then(|signal| signal.schema.as_ref().map(ToString::to_string)),
         _ => None,
     }
     .filter(|text| !text.trim().is_empty())
@@ -1816,10 +1893,16 @@ pub(crate) fn requested_output_schema(
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for output in requested {
-        required.push(Value::String(output.property.clone()));
+        if !output.is_signal {
+            required.push(Value::String(output.property.clone()));
+        }
         properties.insert(
             output.property.clone(),
-            requested_output_json_schema(output, loaded),
+            if output.is_signal {
+                json_schema_for_ref(output.schema_ref.as_deref(), loaded, 0)
+            } else {
+                requested_output_json_schema(output, loaded)
+            },
         );
     }
     serde_json::json!({
@@ -1978,8 +2061,9 @@ fn declared_json_schema(
 
 pub(crate) fn requested_outputs(
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+    loaded: &ctx_traits_io::run::LoadedTrait,
 ) -> crate::Result<Vec<RequestedSlotKey>> {
-    let outputs = frame
+    let mut outputs = frame
         .requested_outputs
         .iter()
         .map(|output| {
@@ -1989,9 +2073,31 @@ pub(crate) fn requested_outputs(
                 property,
                 operation: output.operation.clone(),
                 schema_ref: output.schema_ref.as_ref().map(ToString::to_string),
+                is_signal: false,
             })
         })
         .collect::<crate::Result<Vec<_>>>()?;
+    for signal_ref in &frame.allowed_signals {
+        let Some(id) = signal_ref.strip_prefix("signal:") else {
+            continue;
+        };
+        let Some(schema) = loaded
+            .trait_ref
+            .signals
+            .iter()
+            .find(|signal| signal.id == id)
+            .and_then(|signal| signal.schema.as_ref())
+        else {
+            continue;
+        };
+        outputs.push(RequestedSlotKey {
+            ref_text: signal_ref.clone(),
+            property: id.to_string(),
+            operation: ctx_traits_core::r#trait::procedure::WriteOperation::Replace,
+            schema_ref: Some(schema.to_string()),
+            is_signal: true,
+        });
+    }
     let mut seen = BTreeMap::<&str, &str>::new();
     for output in &outputs {
         if let Some(existing) = seen.insert(output.property.as_str(), output.ref_text.as_str()) {
@@ -2105,12 +2211,13 @@ mod resolve_input_value_tokens_setting_tests {
     use ctx_traits_core::digest::Digest;
     use ctx_traits_core::procedure::run::Id as RunId;
     use ctx_traits_core::procedure::runtime::{
-        FinalState, ResolvedSettingRecord, SequenceFrame, SequenceFrameKind, SettingSourceLayer,
-        State,
+        FinalState, FrameSignalPayload, ResolvedSettingRecord, SequenceFrame, SequenceFrameKind,
+        SettingSourceLayer, State,
     };
     use ctx_traits_core::procedure::session::{
         CallerProvenance, Provenance, Session, SessionId, Status,
     };
+    use ctx_traits_core::reference::Reference;
     use serde_json::json;
 
     fn empty_state(resolved_settings: Vec<ResolvedSettingRecord>, run_id: RunId) -> State {
@@ -2225,6 +2332,7 @@ mod resolve_input_value_tokens_setting_tests {
             loop_context: None,
             for_each_context: None,
             guard_explanations: Vec::new(),
+            signal_payloads: Vec::new(),
             title: "test".to_string(),
             frame_text: String::new(),
             prompt: None,
@@ -2263,6 +2371,26 @@ mod resolve_input_value_tokens_setting_tests {
             !rendered.contains("{setting:review-rounds}"),
             "setting token should have been replaced, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn prompt_rendering_substitutes_visible_signal_payload_fields_only() {
+        let session = test_session(Vec::new());
+        let mut frame = test_frame();
+        frame.signal_payloads.push(FrameSignalPayload {
+            signal_ref: Reference::parse("signal:needs-review").expect("signal ref"),
+            payload: json!({ "reason": { "code": "missing-test" } }),
+        });
+
+        let rendered = resolve_input_value_tokens(
+            &session,
+            &frame,
+            "Reason: {signal:needs-review.reason.code}; missing: {signal:needs-review.other}."
+                .to_string(),
+        );
+
+        assert!(rendered.contains("missing-test"));
+        assert!(rendered.contains("{signal:needs-review.other}"));
     }
 }
 

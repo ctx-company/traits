@@ -107,7 +107,7 @@ pub enum Status {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub enum CallResponseKind {
@@ -1476,6 +1476,8 @@ pub struct Session {
 pub struct SignalSubmission {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2348,6 +2350,7 @@ fn submit_run_submission(
             .map(|(ref_text, signal)| StepSignalOutput {
                 ref_text,
                 evidence: signal.evidence,
+                payload: signal.payload,
                 producer_agent: producer_agent.clone(),
                 producer_harness: producer_harness.clone(),
             })
@@ -2498,7 +2501,13 @@ fn build_session(
     let status = match frame_result {
         NextSequenceFrameResult::Frame(mut frame) => {
             let state_digest = ledger_digest(&state)?;
-            attach_call_template(&session_id, &state, &state_digest, frame.as_mut());
+            attach_call_template(
+                trait_ref,
+                &session_id,
+                &state,
+                &state_digest,
+                frame.as_mut(),
+            );
             let is_command_frame = frame.command.is_some();
             let is_ask_frame = frame.kind == SequenceFrameKind::Ask;
             let missing_assigned_agent = !is_command_frame
@@ -3144,6 +3153,7 @@ fn command_execution_succeeded(
 }
 
 fn attach_call_template(
+    trait_ref: &Trait,
     session_id: &SessionId,
     state: &State,
     state_digest: &Digest,
@@ -3182,10 +3192,15 @@ fn attach_call_template(
         .allowed_signals
         .iter()
         .map(|signal| {
+            let payload_schema = signal
+                .strip_prefix("signal:")
+                .and_then(|id| trait_ref.signals.iter().find(|declared| declared.id == id))
+                .and_then(|declared| declared.schema.as_ref().map(ToString::to_string));
             (
                 signal.clone(),
                 SequenceSignalTemplate {
                     evidence: Some("optional evidence string".to_string()),
+                    payload_schema,
                 },
             )
         })
@@ -3380,6 +3395,11 @@ fn correction_for_report(report: &StepValidationReport) -> Option<String> {
     for validation in &report.schema_validation {
         if validation.status != SchemaStatus::Accepted {
             parts.push(format!("{}: {}", validation.ref_text, validation.reason));
+        }
+    }
+    for signal in &report.signal_validation {
+        if signal.acceptance == AcceptanceStatus::Rejected {
+            parts.push(format!("{}: {}", signal.signal_ref, signal.reason));
         }
     }
     if parts.is_empty() {
