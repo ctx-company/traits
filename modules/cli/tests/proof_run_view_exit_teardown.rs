@@ -1,13 +1,14 @@
 //! PTY coverage for alternate-screen run-view teardown paths.
 
 use std::fs;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::thread;
 use std::time::Duration;
 
 use support::{
-    ScratchRoot, ctx_bin, git_init, raw_after_terminal_restore, require_success,
+    ScratchRoot, ctx_bin, git_init, painted_pattern, raw_after_terminal_restore, require_success,
     run_pty_keys_after_markers, run_pty_signal_after_marker, run_pty_with_cursor_reply, spawn_ctx,
     text_after_terminal_restore,
 };
@@ -19,6 +20,8 @@ const CLEAR_VIEWPORT: &str = "\x1b[H\x1b[2J";
 const ENTER_ALT: &str = "\x1b[?1049h";
 const LEAVE_ALT: &str = "\x1b[?1049l";
 const RESCUE_ERROR_TEXT: &str = "interrupted (signal)";
+const DASHBOARD_SESSION_MARKER: &str = "session-";
+const AGENT_TICK_MARKER: &str = "ctx-fixture-tick-2";
 
 struct ExitFixture {
     _scratch: ScratchRoot,
@@ -26,7 +29,7 @@ struct ExitFixture {
     home: PathBuf,
 }
 
-fn command_trait_fixture(label: &str, command: &str) -> ExitFixture {
+fn fixture_repo() -> (ScratchRoot, PathBuf, PathBuf) {
     let scratch = ScratchRoot::new("p252-run-view-exit");
     let home = scratch.home();
     let repo = home.join("repo");
@@ -37,6 +40,36 @@ fn command_trait_fixture(label: &str, command: &str) -> ExitFixture {
         ".ctx/traits/worktrees/\n.ctx/runs/\n",
     )
     .unwrap();
+    (scratch, repo, home)
+}
+
+fn commit_trust_and_activate(repo: &Path, home: &Path) {
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "init"])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    require_success(
+        "approve fixture",
+        &["traits", "trust", "--approved", TRAIT_PATH],
+        repo,
+        home,
+    );
+    require_success(
+        "activate fixture",
+        &["traits", "state", "--active", "--file", TRAIT_PATH],
+        repo,
+        home,
+    );
+}
+
+fn command_trait_fixture(label: &str, command: &str) -> ExitFixture {
+    let (scratch, repo, home) = fixture_repo();
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(
@@ -49,28 +82,60 @@ fn command_trait_fixture(label: &str, command: &str) -> ExitFixture {
         "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
     )
     .unwrap();
-    Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(&repo)
-        .status()
-        .unwrap();
-    Command::new("git")
-        .args(["commit", "-q", "-m", "init"])
-        .current_dir(&repo)
-        .status()
-        .unwrap();
-    require_success(
-        "approve fixture",
-        &["traits", "trust", "--approved", TRAIT_PATH],
-        &repo,
-        &home,
-    );
-    require_success(
-        "activate fixture",
-        &["traits", "state", "--active", "--file", TRAIT_PATH],
-        &repo,
-        &home,
-    );
+    commit_trust_and_activate(&repo, &home);
+    ExitFixture {
+        _scratch: scratch,
+        repo,
+        home,
+    }
+}
+
+fn agent_trait_fixture() -> ExitFixture {
+    let (scratch, repo, home) = fixture_repo();
+    let harness = home.join("ctx-fixture-agent.sh");
+    fs::write(
+        &harness,
+        r#"#!/bin/sh
+if [ "$1" = "--fixture-probe" ]; then
+  printf 'fixture-1.0\n'
+  exit 0
+fi
+cat >/dev/null
+i=0
+while [ "$i" -lt 60 ]; do
+  i=$((i + 1))
+  printf 'ctx-fixture-tick-%s\n' "$i"
+  sleep 1
+done
+printf '{"type":"result","session_id":"fixture","result":"{}"}\n'
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(&harness).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&harness, permissions).unwrap();
+    fs::write(
+        repo.join(".ctx/traits/runtime.toml"),
+        format!(
+            "schema-version = \"0.4\"\n\n[harness.fixture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\"]\nversion-probe = [\"--fixture-probe\"]\n\n[harness.fixture.cli]\nargv = []\nprompt-via = \"stdin\"\noutput = \"claude-stream-json\"\n\n[agent.role.worker]\nharness = \"fixture\"\ntransport = \"cli\"\n",
+            harness.display().to_string()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        format!(
+            "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"agent\"\ndescription = \"Demo\"\nsummary = \"Demo\"\n\n[[agent]]\nid = \"worker\"\ndescription = \"Fixture worker\"\nsummary = \"Fixture worker\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[procedure]\ndescription = \"Run agent\"\n\n[[procedure.sequence]]\nid = \"{STEP_ID}\"\ntitle = \"{STEP_ID}\"\nagent = \"agent:worker\"\nprompt = \"Stream output.\"\noutput = [\"slot:notified\"]\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/trait.toml"),
+        "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    commit_trust_and_activate(&repo, &home);
     ExitFixture {
         _scratch: scratch,
         repo,
@@ -137,7 +202,7 @@ fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str) {
     let lines = text
         .lines()
         .map(|line| line.trim_end_matches('\r'))
-        .filter(|line| !line.trim().is_empty() && !line.contains("CHILD_EXIT__"))
+        .filter(|line| !line.trim().is_empty())
         .collect::<Vec<_>>();
     assert_eq!(
         lines,
@@ -165,6 +230,7 @@ fn sigterm_leaves_only_the_interrupted_failure_panel() {
         1,
     );
     assert_eq!(code, 143);
+    assert!(!raw.contains("__CHILD_EXIT__"));
     assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT) && raw.contains("\x1b[?25h"));
     assert_only_interrupted_panel(&raw, TRAIT_ID, &ledger_session_id(&fixture.repo));
 }
@@ -218,7 +284,6 @@ fn panic_mid_run_leaves_no_frame_rows() {
 fn dashboard_attach_then_exit_leaves_no_run_frame() {
     let fixture = command_trait_fixture("dashboard", "sleep 30");
     let background = spawn_background_run(&fixture);
-    thread::sleep(Duration::from_secs(1));
     let (code, raw) = run_pty_keys_after_markers(
         &ctx_bin(),
         "traits",
@@ -226,7 +291,7 @@ fn dashboard_attach_then_exit_leaves_no_run_frame() {
         &fixture.home,
         &[
             // Clamp selection to the top, then move to the first live session.
-            ("session-", "kkkkkkkkj\r"),
+            (&painted_pattern(DASHBOARD_SESSION_MARKER), "kkkkkkkkj\r"),
             (r"(?s)only-step.*\[d\] dash", "q"),
             ("Quit live view?", "\r"),
             ("SESSIONS", "q"),
@@ -235,6 +300,10 @@ fn dashboard_attach_then_exit_leaves_no_run_frame() {
     );
     drop(background);
     assert_eq!(code, 0, "dashboard output: {raw:?}");
+    assert!(
+        support::painted_text_present(&raw, DASHBOARD_SESSION_MARKER),
+        "dashboard never painted {DASHBOARD_SESSION_MARKER}: {raw:?}"
+    );
     assert!(!text_after_terminal_restore(&raw).contains(STEP_ID));
 }
 
@@ -250,6 +319,7 @@ fn clean_run_teardown_discards_the_live_frame_and_prints_the_final_panel() {
         ".ctx/termios",
     );
     assert_eq!(code, 0);
+    assert!(!raw.contains("__CHILD_EXIT__"));
     assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT));
     assert!(raw.find(STEP_ID).unwrap() < raw.rfind(LEAVE_ALT).unwrap());
     let final_text = text_after_terminal_restore(&raw);
@@ -263,16 +333,22 @@ fn clean_run_teardown_discards_the_live_frame_and_prints_the_final_panel() {
 
 #[test]
 fn ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note() {
-    let fixture = command_trait_fixture("ctrl-c", "sleep 30");
+    let fixture = agent_trait_fixture();
     let (code, raw) = run_pty_keys_after_markers(
         &ctx_bin(),
         "traits --session .ctx/runs/ctrl-c.json run --progress tui --file .ctx/traits/demo/generated/index.toml",
         &fixture.repo,
         &fixture.home,
-        &[(STEP_ID, "\u{3}")],
+        &[(painted_pattern(AGENT_TICK_MARKER).as_str(), "\u{3}")],
     );
     assert_ne!(code, 0);
+    assert!(!raw.contains("__CHILD_EXIT__"));
     assert!(raw.contains(ENTER_ALT) && raw.contains(LEAVE_ALT));
+    let last_leave = raw.rfind(LEAVE_ALT).unwrap();
+    assert!(
+        support::painted_text_present(&raw[..last_leave], AGENT_TICK_MARKER),
+        "agent output was not painted before teardown: {raw:?}"
+    );
     let restored = text_after_terminal_restore(&raw);
     assert!(
         restored
@@ -287,4 +363,27 @@ fn ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note() {
             .all(|line| line.starts_with("│   "))
     );
     assert!(!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT));
+}
+
+#[test]
+fn readiness_eof_reports_the_complete_marker_payload() {
+    let fixture = command_trait_fixture("eof", "true");
+    let panic = catch_unwind(AssertUnwindSafe(|| {
+        run_pty_keys_after_markers(
+            &ctx_bin(),
+            "traits run --progress tui --file .ctx/traits/demo/generated/index.toml",
+            &fixture.repo,
+            &fixture.home,
+            &[("__NEVER__MATCHES__", "q")],
+        )
+    }))
+    .expect_err("missing marker must fail causally");
+    let message = if let Some(message) = panic.downcast_ref::<String>() {
+        message.as_str()
+    } else if let Some(message) = panic.downcast_ref::<&str>() {
+        message
+    } else {
+        panic!("unexpected panic payload")
+    };
+    assert!(message.contains("__NEVER__MATCHES__"), "{message}");
 }
