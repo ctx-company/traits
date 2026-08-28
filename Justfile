@@ -226,3 +226,29 @@ implement tasks:
 
 implement-with trait_id tasks:
 	@{{justfile_directory()}}/.internal/scripts/implement.sh --trait {{quote(trait_id)}} {{quote(tasks)}}
+
+# 0253.7: answer an architect run parked on its plan-approval gate.
+plan-show:
+    #!/usr/bin/env sh
+    m=$(ls -t .ctx/traits/worktrees/*/.plan-await 2>/dev/null | head -1)
+    [ -n "$m" ] || { echo "no plan awaiting approval"; exit 1; }
+    d=$(dirname "$m"); p=$(cat "$m")
+    echo "== plan awaiting approval: $d/$p"
+    echo
+    cat "$d/$p"
+
+approve-plan:
+    #!/usr/bin/env sh
+    m=$(ls -t .ctx/traits/worktrees/*/.plan-await 2>/dev/null | head -1)
+    [ -n "$m" ] || { echo "no plan awaiting approval"; exit 1; }
+    d=$(dirname "$m")
+    printf 'approved' > "$d/.plan-answer"
+    echo "approved: $(cat "$m" 2>/dev/null || echo "$d")"
+
+revise-plan +corrections:
+    #!/usr/bin/env sh
+    m=$(ls -t .ctx/traits/worktrees/*/.plan-await 2>/dev/null | head -1)
+    [ -n "$m" ] || { echo "no plan awaiting approval"; exit 1; }
+    d=$(dirname "$m")
+    printf '%s' "{{corrections}}" > "$d/.plan-answer"
+    echo "corrections sent to: $(cat "$m" 2>/dev/null || echo "$d")"

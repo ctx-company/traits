@@ -86,6 +86,11 @@ schema = "schema:text"
 description = "Read-only evidence about the target, its board context, relevant code, invariants, reuse points, and existing commands."
 
 [[slot]]
+id = "owner-answer"
+schema = "schema:text"
+description = "The owner's verdict on the critic-approved plan, verbatim from the approval gate: the literal string 'approved' accepts the plan and ends the refinement loop; any other content is the owner's binding corrections for the next rewrite iteration."
+
+[[slot]]
 id = "receipt"
 schema = "schema:architect-receipt"
 description = "Receipt for architect's one in-place rewrite."
@@ -365,6 +370,7 @@ Rewrite only {slot:target} in place from its draft plan to a ready execution pla
 - At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
 - Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
 Prior critic verdict, when present: {slot:critic-verdict}. Fix its blockers only.
+Owner corrections, when present, are the owner's binding instructions for this iteration and override every other consideration: {slot:owner-answer}
 
 Return the typed receipt for this one rewrite, recording draft to ready and any permitted relations correction: slot:receipt"""
 input = [
@@ -415,6 +421,7 @@ input = [
     "slot:grounding",
     "slot:task-snapshot",
     { slot = "slot:critic-verdict", optional = true },
+    { slot = "slot:owner-answer", optional = true },
 ]
 output = ["slot:receipt"]
 
@@ -475,6 +482,57 @@ sequence = "sequence:ctx-branch-arm-s-25-architect-refinement-body-41-assert-tas
 slot = "slot:task-check"
 field = "ok"
 equals = false
+
+[[sequence.architect-refinement-body.sequence]]
+id = "present-the-plan-to-the-owner"
+title = "Present the plan to the owner"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then"
+
+[sequence.architect-refinement-body.sequence.when]
+slot = "slot:critic-verdict"
+field = "status"
+equals = "approved"
+
+[[sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence]]
+id = "owner-approval-gate"
+title = "Await the owner's verdict"
+input = ["slot:target-file"]
+output = ["slot:owner-answer"]
+
+[sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    '''
+d=$(pwd); m="$d/.plan-await"; f="$d/.plan-answer"
+printf "%s\n" "$1" > "$m"
+i=0
+while [ ! -f "$f" ]; do
+  i=$((i+1))
+  if [ $((i%60)) -eq 0 ]; then echo "plan awaiting owner answer ($((i/60))m): $1" >&2; fi
+  sleep 1
+done
+cat "$f"
+rm -f "$f" "$m"''',
+    "_",
+    "{slot:target-file}",
+]
+
+[[sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence]]
+id = "refresh-snapshot-after-owner-review"
+title = "Refresh snapshot after owner review"
+input = ["slot:target-file"]
+output = ["slot:task-snapshot"]
+
+[sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'test -f "$1" && cksum < "$1"',
+    "_",
+    "{slot:target-file}",
+]
 
 [[sequence.ctx-branch-arm-s-25-architect-refinement-body-41-assert-task-unchanged-after-critic-failed-then.sequence]]
 id = "assert-task-unchanged-after-critic-failed-exit"
@@ -543,12 +601,16 @@ id = "architect-refinement"
 title = "Architect refinement"
 kind = "loop"
 sequence = "sequence:architect-refinement-body"
-max-iterations = 4
+max-iterations = 24
 on-exhausted = "abort"
 
-[procedure.sequence.until]
+[[procedure.sequence.until.all]]
 slot = "slot:critic-verdict"
 field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:owner-answer"
 equals = "approved"
 
 [[procedure.sequence]]

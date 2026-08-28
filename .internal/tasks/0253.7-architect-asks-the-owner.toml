@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0253.7"
 title = "Architect asks the owner: the plan-approval loop"
-status = "draft"
+status = "done"
 raised = "2026-08-28"
 content = """
 Owner ruling 2026-08-28: an architect run does not finish by declaring
@@ -56,3 +56,6 @@ scope = """
 [relations]
 parent = "0253"
 depends-on = ["0253.4"]
+# Implemented directly by owner delegation on 2026-08-28 (interim
+# filesystem-handshake transport; 0253.4's ask machinery replaces the
+# transport when it lands, semantics unchanged).

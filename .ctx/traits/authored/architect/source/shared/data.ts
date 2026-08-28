@@ -41,6 +41,11 @@ export const criticVerdict = cdkSlot({
   description: "Open-endedness-only critic verdict for the rewritten task.",
 });
 export const receipt = cdkSlot({ id: "receipt", schema: receiptSchema, description: "Receipt for architect's one in-place rewrite." });
+export const ownerAnswer = cdkSlot.text({
+  id: "owner-answer",
+  description:
+    "The owner's verdict on the critic-approved plan, verbatim from the approval gate: the literal string 'approved' accepts the plan and ends the refinement loop; any other content is the owner's binding corrections for the next rewrite iteration.",
+});
 export const commitLog = cdkSlot.text({
   id: "commit-log",
   description:
@@ -57,4 +62,4 @@ export const receipts = cdkPort.output.of("receipts", receiptSchema, {
 });
 
 export const port = { task, receipts };
-export const slot = { target, targetFile, grounding, taskSnapshot, taskCheck, criticVerdict, receipt, commitLog };
+export const slot = { target, targetFile, grounding, taskSnapshot, taskCheck, criticVerdict, ownerAnswer, receipt, commitLog };
