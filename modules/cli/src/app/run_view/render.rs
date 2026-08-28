@@ -73,6 +73,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
         focus,
         pending_keys,
         modal,
+        failure_modal,
         guide,
         ..
     } = state;
@@ -96,6 +97,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
                 focus,
                 pending_keys,
                 modal,
+                modal_dims_backdrop: *failure_modal,
                 guide: guide.as_ref(),
             },
         );
@@ -365,6 +367,7 @@ pub(super) struct LiveFrame<'a> {
     pub(super) focus: &'a mut FocusRing,
     pub(super) pending_keys: &'a mut Vec<KeyEvent>,
     pub(super) modal: Option<&'a tui_kit::Modal>,
+    pub(super) modal_dims_backdrop: bool,
     pub(super) guide: Option<&'a GuideChatHandle>,
 }
 
@@ -435,6 +438,7 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
         focus,
         pending_keys,
         modal,
+        modal_dims_backdrop,
         guide,
     } = state;
     let full_area = frame.area();
@@ -474,6 +478,9 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
         },
     );
     if let Some(modal) = modal {
+        if modal_dims_backdrop {
+            tui_kit::dim_backdrop(frame, full_area);
+        }
         tui_kit::render_modal(frame, full_area, modal);
     } else if let Some(guide) = guide.filter(|guide| guide.is_open()) {
         guide.render(frame, full_area);
@@ -2860,6 +2867,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 )
@@ -2873,6 +2881,70 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(rendered.contains("unique current"));
+    }
+
+    #[test]
+    fn only_failure_modals_dim_the_live_backdrop() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Modifier;
+
+        let draw = |dims_backdrop| {
+            let mut scrolls = PaneScrolls::new();
+            let mut progress_follow = true;
+            let mut journey_follow = true;
+            let mut history_follow = true;
+            let mut current_follow = true;
+            let mut focus = FocusRing::new(vec![PROGRESS_PANE]);
+            let mut keys = Vec::new();
+            let modal = tui_kit::Modal::buttons(
+                "Run failed",
+                "bad drive".to_string(),
+                vec![tui_kit::Button::new(
+                    "Abort",
+                    tui_kit::ModalOutcome::Chosen("abort".to_string()),
+                )],
+            );
+            let mut terminal = Terminal::new(TestBackend::new(120, 24)).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    render_live_panes(
+                        frame,
+                        LiveFrame {
+                            title_line: &tui::Line::blank(),
+                            progress_lines: &[],
+                            journey_lines: &[],
+                            journey_ladder: &[],
+                            history_rows: &[],
+                            current_rows: &[],
+                            landing_lines: None,
+                            scrolls: &mut scrolls,
+                            progress_follow: &mut progress_follow,
+                            journey_follow: &mut journey_follow,
+                            history_follow: &mut history_follow,
+                            current_follow: &mut current_follow,
+                            focus: &mut focus,
+                            pending_keys: &mut keys,
+                            modal: Some(&modal),
+                            modal_dims_backdrop: dims_backdrop,
+                            guide: None,
+                        },
+                    );
+                })
+                .expect("draw");
+            terminal
+                .backend()
+                .buffer()
+                .cell((0, 0))
+                .expect("backdrop cell")
+                .style()
+                .add_modifier
+        };
+
+        let failure = draw(true);
+        assert!(failure.contains(Modifier::DIM));
+        assert!(!failure.contains(Modifier::BOLD));
+        assert!(!draw(false).contains(Modifier::DIM));
     }
 
     /// P552: pending titles use a stable visible row; resolved titles render
@@ -2913,6 +2985,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -2958,6 +3031,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -3011,6 +3085,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -3142,6 +3217,7 @@ mod tests {
                             focus: &mut focus,
                             pending_keys: &mut keys,
                             modal: None,
+                            modal_dims_backdrop: false,
                             guide: Some(&GuideChatHandle(Arc::new(Mutex::new(GuideChat {
                                 guide,
                                 dispatch: Arc::new(|_| Ok(String::new())),

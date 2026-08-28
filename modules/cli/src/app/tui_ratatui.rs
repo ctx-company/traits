@@ -384,6 +384,7 @@ pub(crate) struct RatatuiPane {
     generation: u64,
     screen: PaneScreen,
     detached: bool,
+    modal_ctrl_c: bool,
     /// Key presses forwarded by the pump thread. Reading events on a
     /// dedicated thread (instead of polling inside draw calls) is what keeps
     /// the quit keys responsive during silent stretches — a worker thinking
@@ -670,6 +671,7 @@ impl RatatuiPane {
             generation,
             screen,
             detached: false,
+            modal_ctrl_c: false,
             keys,
             pump,
             last_terminal_size,
@@ -691,6 +693,7 @@ impl RatatuiPane {
             generation: 0,
             screen: PaneScreen::Alt,
             detached: true,
+            modal_ctrl_c: false,
             keys,
             pump: Arc::new(PumpControl {
                 stop: AtomicBool::new(true),
@@ -715,6 +718,12 @@ impl RatatuiPane {
 
     pub(crate) fn input_generation(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.pump.input_generation)
+    }
+
+    /// Keep raw Ctrl-C in the run-view key stream while preserving the
+    /// immediate process-group kill requested by the pump.
+    pub(crate) fn arm_modal_ctrl_c(&mut self) {
+        self.modal_ctrl_c = true;
     }
 
     pub(crate) fn install_input_wake(&mut self, wake: Arc<dyn Fn() + Send + Sync + 'static>) {
@@ -844,6 +853,10 @@ impl RatatuiPane {
                 key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
             if ctrl_c {
                 crate::app::interrupt::request_kill();
+                if self.modal_ctrl_c {
+                    unhandled.push(key);
+                    continue;
+                }
                 self.detached = true;
                 self.leave();
                 eprintln!("run killed; terminal restored");

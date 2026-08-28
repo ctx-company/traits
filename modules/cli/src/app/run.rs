@@ -463,9 +463,9 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
     }
     let json = split_trailing_json_flag(input.trait_args, input.json).1;
     let assignment_overrides = input.assignments.to_vec();
-    let startup = input.startup;
+    let mut startup = input.startup;
     let startup_observer = startup.as_ref().map(|view| view.observer());
-    let outcome = match start_run_session(
+    let mut outcome = match start_run_session(
         RunInputs {
             trait_id: input.trait_id,
             file: input.file,
@@ -487,7 +487,7 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
             // resumed drive lands with this same rung with no window where
             // a globally discoverable ledger carries no intent yet.
             merge_rung: input.merge_rung,
-            startup_observer,
+            startup_observer: startup_observer.clone(),
         },
         // Defer leading command frames to the drive loop so the TUI paints
         // the command step as running instead of freezing pre-drive.
@@ -501,53 +501,158 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
             return Err(error);
         }
     };
-    let session_path = outcome.session_path.as_ref().map(|path| path.to_string());
-    let session_arg = session_path
+    let mut session_path = outcome.session_path.as_ref().map(|path| path.to_string());
+    let mut session_arg = session_path
         .clone()
         .unwrap_or_else(|| outcome.session.session_id.as_str().to_string());
     // `run::start` already prepared the worktree (if requested); pass its
     // execution directory straight through instead of re-resolving it.
-    // P549: a handoff installed unconditionally — `drive_loop` only ever
-    // releases a panel into it at its one normal `Status::Completed` exit,
-    // and only when a panel exists at all (`--progress tui` on a real
-    // terminal); every other outcome leaves it empty, so
-    // `merge_live_for_completion` below falls back to the plain stage-line
-    // sink exactly as it does for a caller that never installs a handoff.
+    // Retained TUI attempts return their pane through this handoff on every
+    // exit. The final completion path takes and closes it before reporting.
     let panel_handoff = crate::app::drive::PanelHandoff::new();
-    let drive = crate::app::drive::drive(crate::app::drive::DriveInputs {
-        file: input.file,
-        session: &session_arg,
-        session_store: input.session_store,
-        assignments: &assignment_overrides,
-        max_frames: input.max_frames,
-        frame_seconds: input.frame_seconds,
-        total_seconds: input.total_seconds,
-        max_retries: input.max_retries,
-        attach_wait_seconds: input.attach_wait_seconds,
-        idle_seconds: input.idle_seconds,
-        max_in_flight: input.max_in_flight,
-        wait: input.wait,
-        progress: input.progress,
-        worktree: None,
-        execution_dir: outcome.execution_dir.as_deref(),
-        clear_merge_intent: false,
-        panel_handoff: Some(panel_handoff.clone()),
-        startup,
-        frame_observer: None,
-    })?;
+    // Only a retained TUI failure uses the compact modal line for its final
+    // panel. Headless and piped output retain their established full detail.
+    let mut retained_failure_line = None;
+    macro_rules! drive_once {
+        () => {
+            crate::app::drive::drive(crate::app::drive::DriveInputs {
+                file: input.file,
+                session: &session_arg,
+                session_store: input.session_store,
+                assignments: &assignment_overrides,
+                max_frames: input.max_frames,
+                frame_seconds: input.frame_seconds,
+                total_seconds: input.total_seconds,
+                max_retries: input.max_retries,
+                attach_wait_seconds: input.attach_wait_seconds,
+                idle_seconds: input.idle_seconds,
+                max_in_flight: input.max_in_flight,
+                wait: input.wait,
+                progress: input.progress,
+                worktree: None,
+                execution_dir: outcome.execution_dir.as_deref(),
+                clear_merge_intent: false,
+                retain_panel_on_failure: true,
+                panel_handoff: Some(panel_handoff.clone()),
+                startup: startup.take(),
+                frame_observer: None,
+            })
+        };
+    }
+    // Restart is shared by both failed reports and propagated drive errors so
+    // their fresh-session boundary cannot diverge.
+    macro_rules! restart_session {
+        () => {
+            start_run_session(
+                RunInputs {
+                    trait_id: input.trait_id,
+                    file: input.file,
+                    input: input.input,
+                    sets: input.sets,
+                    session_store: input.session_store,
+                    ephemeral: false,
+                    strict_loops: input.strict_loops,
+                    override_dependencies: input.override_dependencies,
+                    task_dispatch: input.task_dispatch,
+                    assignments: &assignment_overrides,
+                    resource_root: input.resource_root,
+                    out: restart_out(input.out),
+                    worktree: restart_worktree(input.worktree),
+                    json,
+                    trait_args: input.trait_args,
+                    merge_rung: input.merge_rung,
+                    startup_observer: startup_observer.clone(),
+                },
+                true,
+            )
+        };
+    }
 
+    let (drive, final_session) = loop {
+        let drive = match drive_once!() {
+            Ok(drive) => drive,
+            Err(error) => {
+                let Some(panel) = panel_handoff.take() else {
+                    return Err(error);
+                };
+                let line = short_failure_line(Some(&error.to_string()));
+                let abort_trait_id = outcome.session.trait_id.clone();
+                let abort_session_id = outcome.session.session_id.as_str().to_string();
+                panel.open_failure_modal(&line);
+                resolve_propagated_drive_error_choice(
+                    panel.wait_for_failure_choice(),
+                    panel,
+                    &panel_handoff,
+                    &mut outcome,
+                    || restart_session!(),
+                    |panel| {
+                        propagated_drive_error_abort(
+                            panel,
+                            PropagatedDriveError {
+                                trait_id: &abort_trait_id,
+                                session_id: &abort_session_id,
+                                line: &line,
+                            },
+                            |panel| {
+                                use crate::app::presentation::{HumanOutputMode, emit_human};
+                                emit_human(false, panel, HumanOutputMode::Compact, || Ok(()))
+                            },
+                        )
+                    },
+                )?;
+                session_path = outcome.session_path.as_ref().map(|path| path.to_string());
+                session_arg = session_path
+                    .clone()
+                    .unwrap_or_else(|| outcome.session.session_id.as_str().to_string());
+                continue;
+            }
+        };
+        let final_session = ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
+            trait_file: input.file,
+            trait_id: None,
+            session: &session_arg,
+            session_store: input.session_store,
+            elapsed_seconds: None,
+        })
+        .map(|inspected| inspected.session)
+        .unwrap_or_else(|_| outcome.session.clone());
+        if !human_terminal_failure(!json, &final_session, &drive) {
+            break (drive, final_session);
+        }
+        let Some(panel) = panel_handoff.take() else {
+            break (drive, final_session);
+        };
+        let line = short_failure_line(failure_reason(&final_session, &drive).as_deref());
+        panel.open_failure_modal(&line);
+        match panel.wait_for_failure_choice() {
+            crate::app::run_view::FailureChoice::Resume => {
+                panel.clear_failure_modal();
+                panel_handoff.give(panel);
+            }
+            crate::app::run_view::FailureChoice::Restart => {
+                restart_propagated_attempt(panel, &mut outcome, || restart_session!())?;
+                session_path = outcome.session_path.as_ref().map(|path| path.to_string());
+                session_arg = session_path
+                    .clone()
+                    .unwrap_or_else(|| outcome.session.session_id.as_str().to_string());
+            }
+            crate::app::run_view::FailureChoice::Abort => {
+                retained_failure_line = Some(line);
+                panel_handoff.give(panel);
+                break (drive, final_session);
+            }
+        }
+    };
+
+    let (merge_live, merger_stdout_observer, merge_span_guard) = merge_live_for_completion(
+        panel_handoff.take(),
+        final_session.run_id.as_str(),
+        final_session.session_id.as_str(),
+        &assignment_overrides,
+    );
     // outcome.session is the pre-drive snapshot; re-inspect for the completed
     // state so both the JSON envelope and the plain-text final output reflect
     // what actually landed, not the pre-drive placeholder.
-    let final_session = ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
-        trait_file: input.file,
-        trait_id: None,
-        session: &session_arg,
-        session_store: input.session_store,
-        elapsed_seconds: None,
-    })
-    .map(|inspected| inspected.session)
-    .unwrap_or(outcome.session);
     // Load presentation inputs BEFORE a successful merge removes the
     // worktree the trait file may live under.
     let loaded_trait = if json {
@@ -571,12 +676,6 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
             message: "internal error: driven session start has no resolved session path"
                 .to_string(),
         })?;
-    let (merge_live, merger_stdout_observer, merge_span_guard) = merge_live_for_completion(
-        panel_handoff.take(),
-        final_session.run_id.as_str(),
-        final_session.session_id.as_str(),
-        &assignment_overrides,
-    );
     let completion = complete_after_drive(
         input.session_store,
         &merge_session_path,
@@ -620,7 +719,9 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
             &drive,
             &merge_session_path,
             loaded_trait.as_ref().map(|loaded| &loaded.trait_ref),
-            completion.failure_reason.as_deref(),
+            retained_failure_line
+                .as_deref()
+                .or(completion.failure_reason.as_deref()),
             input.verbose,
         )?;
         if input.verbose
@@ -1166,6 +1267,117 @@ fn run_completed_status(
         && drive_status == Some(ctx_traits_core::procedure::session::Status::Completed)
 }
 
+fn human_terminal_failure(
+    human_output: bool,
+    session: &ctx_traits_core::procedure::session::Session,
+    drive: &crate::app::drive::DriveReport,
+) -> bool {
+    human_terminal_failure_values(
+        human_output,
+        drive.credits_pause.is_some(),
+        drive.budget_pause.is_some(),
+        session.status.clone(),
+        drive.final_session_status.clone(),
+    )
+}
+
+fn human_terminal_failure_values(
+    human_output: bool,
+    credits_paused: bool,
+    budget_paused: bool,
+    session_status: ctx_traits_core::procedure::session::Status,
+    drive_status: Option<ctx_traits_core::procedure::session::Status>,
+) -> bool {
+    human_output
+        && !credits_paused
+        && !budget_paused
+        && !run_completed_status(session_status, drive_status)
+}
+
+pub(crate) fn short_failure_line(reason: Option<&str>) -> String {
+    const LIMIT: usize = 64;
+    let text = reason
+        .unwrap_or_default()
+        .lines()
+        .find_map(|line| {
+            let line = crate::app::tui::clean_live_text(line)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!line.is_empty()).then_some(line)
+        })
+        .unwrap_or_else(|| "run failed".to_string());
+    crate::app::tui::truncate_display_width_end(&text, LIMIT)
+}
+
+fn restart_out(_: Option<&str>) -> Option<&str> {
+    None
+}
+
+fn restart_worktree(worktree: Option<Option<&str>>) -> Option<Option<&str>> {
+    match worktree {
+        Some(Some(_)) => Some(None),
+        other => other,
+    }
+}
+
+/// Data needed to render a propagated drive error after its pane is closed.
+struct PropagatedDriveError<'a> {
+    trait_id: &'a str,
+    session_id: &'a str,
+    line: &'a str,
+}
+
+/// Resolves a propagated drive error after `drive()` has released its lock.
+/// Startup and output remain call-site seams because they require CLI inputs.
+fn resolve_propagated_drive_error_choice<T>(
+    choice: crate::app::run_view::FailureChoice,
+    panel: crate::app::run_view::RunPanel,
+    handoff: &crate::app::drive::PanelHandoff,
+    attempt: &mut T,
+    start: impl FnOnce() -> crate::Result<T>,
+    abort: impl FnOnce(crate::app::run_view::RunPanel) -> crate::Result<()>,
+) -> crate::Result<()> {
+    match choice {
+        crate::app::run_view::FailureChoice::Resume => {
+            panel.clear_failure_modal();
+            handoff.give(panel);
+            Ok(())
+        }
+        crate::app::run_view::FailureChoice::Restart => {
+            restart_propagated_attempt(panel, attempt, start)
+        }
+        crate::app::run_view::FailureChoice::Abort => abort(panel),
+    }
+}
+
+/// Closes the retained pane before crossing the fresh-session boundary and
+/// replaces the active attempt only after startup succeeds.
+fn restart_propagated_attempt<T>(
+    panel: crate::app::run_view::RunPanel,
+    attempt: &mut T,
+    start: impl FnOnce() -> crate::Result<T>,
+) -> crate::Result<()> {
+    panel.close();
+    *attempt = start()?;
+    Ok(())
+}
+
+fn propagated_drive_error_abort(
+    panel: crate::app::run_view::RunPanel,
+    error: PropagatedDriveError<'_>,
+    emit: impl FnOnce(&crate::app::presentation::Panel) -> crate::Result<()>,
+) -> crate::Result<()> {
+    panel.close();
+    let (product, headline) = run_header_from_title(error.trait_id, None);
+    let panel = failure_panel(&product, &headline, error.session_id, error.line);
+    emit(&panel)?;
+    Err(crate::Error::AlreadyReported {
+        message: String::new(),
+        exit_code: 1,
+    })
+}
+
 /// The compact panel's landing fact comes exclusively from terminal merge
 /// evidence. Post-merge cleanup failure still means main advanced.
 fn merged_fact(session: &ctx_traits_core::procedure::session::Session) -> Option<String> {
@@ -1289,10 +1501,7 @@ impl CompletionOutcome {
         human_output: bool,
         drive: &crate::app::drive::DriveReport,
     ) -> Self {
-        self.human_terminal_failure = human_output
-            && drive.credits_pause.is_none()
-            && drive.budget_pause.is_none()
-            && !run_completed(&self.session, drive);
+        self.human_terminal_failure = human_terminal_failure(human_output, &self.session, drive);
         self
     }
 
@@ -2322,9 +2531,11 @@ pub(crate) fn run_envelope<T: serde::Serialize>(
 #[cfg(test)]
 mod completion_disposition_tests {
     use super::{
-        CompletionDisposition, disposition_for_merge_status, disposition_for_report_status,
-        failure_reason_from_values, merged_fact_from_terminal, run_completed_status,
-        run_header_from_title,
+        CompletionDisposition, PropagatedDriveError, disposition_for_merge_status,
+        disposition_for_report_status, failure_reason_from_values, human_terminal_failure_values,
+        merged_fact_from_terminal, propagated_drive_error_abort,
+        resolve_propagated_drive_error_choice, restart_out, restart_worktree, run_completed_status,
+        run_header_from_title, short_failure_line,
     };
     use ctx_traits_core::procedure::session::{MergeStatus, Status};
 
@@ -2394,6 +2605,154 @@ mod completion_disposition_tests {
             Some(Status::Blocked)
         ));
         assert!(!run_completed_status(Status::Completed, None));
+    }
+
+    #[test]
+    fn short_failure_line_is_sanitized_single_line_and_bounded() {
+        assert_eq!(short_failure_line(None), "run failed");
+        assert_eq!(short_failure_line(Some("\n\t\x1b[31m")), "run failed");
+        assert_eq!(
+            short_failure_line(Some("\x1b[31m bad\t drive\nignored")),
+            "bad drive"
+        );
+        assert_eq!(short_failure_line(Some("left\u{202e}right")), "left right");
+        let long = "x".repeat(80);
+        let line = short_failure_line(Some(&long));
+        assert_eq!(crate::app::tui::display_width(&line), 64);
+        assert!(line.ends_with("..."));
+        let wide = "界".repeat(40);
+        assert_eq!(
+            crate::app::tui::display_width(&short_failure_line(Some(&wide))),
+            63
+        );
+    }
+
+    #[test]
+    fn restart_boundaries_preserve_prior_ledgers() {
+        assert_eq!(restart_out(Some("prior-ledger.json")), None);
+        assert_eq!(restart_out(None), None);
+        assert_eq!(restart_worktree(Some(Some("named"))), Some(None));
+        assert_eq!(restart_worktree(Some(None)), Some(None));
+        assert_eq!(restart_worktree(None), None);
+    }
+
+    #[test]
+    fn terminal_failure_excludes_non_terminal_presentation_cases() {
+        assert!(!human_terminal_failure_values(
+            false,
+            false,
+            false,
+            Status::Failed,
+            Some(Status::Failed),
+        ));
+        assert!(!human_terminal_failure_values(
+            true,
+            true,
+            false,
+            Status::Failed,
+            Some(Status::Failed),
+        ));
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
+            true,
+            Status::Failed,
+            Some(Status::Failed),
+        ));
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
+            false,
+            Status::Completed,
+            Some(Status::Completed),
+        ));
+        assert!(human_terminal_failure_values(
+            true,
+            false,
+            false,
+            Status::Failed,
+            Some(Status::Failed),
+        ));
+    }
+
+    #[test]
+    fn propagated_drive_error_resume_reseeds_the_retained_panel() {
+        let handoff = crate::app::drive::PanelHandoff::new();
+
+        let panel = crate::app::run_view::tests::detached_panel_for_test();
+        panel.clear_failure_modal();
+        handoff.give(panel);
+
+        assert!(
+            handoff.take().is_some(),
+            "Resume must seed the real handoff"
+        );
+    }
+
+    #[test]
+    fn propagated_drive_error_restart_closes_before_a_fresh_session() {
+        let handoff = crate::app::drive::PanelHandoff::new();
+        let panel = crate::app::run_view::tests::detached_panel_for_test();
+        let observed = panel.clone();
+        let mut attempt = "failed-session".to_string();
+
+        resolve_propagated_drive_error_choice(
+            crate::app::run_view::FailureChoice::Restart,
+            panel,
+            &handoff,
+            &mut attempt,
+            || {
+                assert!(observed.was_closed_for_test());
+                Ok("fresh-session".to_string())
+            },
+            |_| unreachable!("Restart must not report an Abort panel"),
+        )
+        .unwrap();
+
+        assert!(observed.was_closed_for_test());
+        assert_eq!(
+            attempt, "fresh-session",
+            "Restart must replace the failed attempt with the fresh startup result"
+        );
+    }
+
+    #[test]
+    fn propagated_drive_error_abort_closes_before_reporting_exit_one() {
+        let panel = crate::app::run_view::tests::detached_panel_for_test();
+        let observed = panel.clone();
+        let report = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let reported = std::sync::Arc::clone(&report);
+
+        let error = propagated_drive_error_abort(
+            panel,
+            PropagatedDriveError {
+                trait_id: "trait",
+                session_id: "session",
+                line: "drive failed",
+            },
+            move |failure| {
+                assert!(observed.was_closed_for_test());
+                *reported.lock().unwrap() = Some(failure.styled_lines());
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::Error::AlreadyReported { exit_code: 1, .. }
+        ));
+        let report = report
+            .lock()
+            .unwrap()
+            .take()
+            .expect("failure panel emitted");
+        assert!(
+            report
+                .iter()
+                .flat_map(|line| line.segments())
+                .any(|(text, _)| text.contains("drive failed"))
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@ key = "0252.4"
 title = "Failure is a modal, not an ejection"
 status = "ready"
 raised = "2026-08-24"
-content = '''
+content = """
 Runs are resumable and re-drivable; the surface must show that instead of
 ejecting on every failure. Parent ruling 5.
 
@@ -214,8 +214,8 @@ painted step label or `in-progress role@harness` is painted pre-spawn),
 and any wait on or assertion about ratatui-painted text goes through
 0252.8's escape-tolerant authority, because the cell diff may insert
 escapes between adjacent characters.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -431,8 +431,8 @@ board material, never blocker cells)
   just test-full`). A baseline failure that predates this task's own
   diff is reported with evidence and does not block merging this task's
   green work.
-'''
-validation = '''
+"""
+validation = """
 ## Done when — binding goals, each with the existing command that decides it
 
 1. An in-scope run failure keeps the pane instead of ejecting: after a
@@ -556,11 +556,16 @@ summary, not escalated.
 - A red `proof_output_style` most likely means the compact failure
   grammar moved. BINDING: that suite is a regression gate for this task,
   not a target.
-'''
+"""
 
 [relations]
+depends-on = [
+    "0252.8",
+    "0252.7",
+    "0252.3",
+    "0252.2",
+]
 parent = "0252"
-depends-on = ["0252.8", "0252.7", "0252.3", "0252.2"]
 
 [[checks]]
 name = "the five representative failure-modal behaviours hold end to end"
@@ -578,7 +583,7 @@ expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
 name = "the compact failure output and 0252.9's exit note are untouched"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style && rg -q 'run killed; terminal restored' modules/cli/src && echo kill-note-retained"
 timeout-ms = 1800000
-expect = 'kill-note-retained'
+expect = "kill-note-retained"
 
 [[checks]]
 name = "the failure modal passes the landing gate"

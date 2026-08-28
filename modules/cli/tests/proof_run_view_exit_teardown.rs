@@ -73,7 +73,98 @@ fn command_trait_fixture(label: &str, command: &str) -> ExitFixture {
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(
-            "id = \"demo\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"{label}\"\nsummary = \"Demo\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"{STEP_ID}\"\ntitle = \"{STEP_ID}\"\nkind = \"command\"\ncmd = \"{command}\"\noutput = [\"slot:notified\"]\n"
+            "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"{label}\"\ndescription = \"Demo\"\nsummary = \"Demo\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"{STEP_ID}\"\ntitle = \"{STEP_ID}\"\nkind = \"command\"\ncmd = \"{command}\"\noutput = [\"slot:notified\"]\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/trait.toml"),
+        "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    commit_trust_and_activate(&repo, &home);
+    ExitFixture {
+        _scratch: scratch,
+        repo,
+        home,
+    }
+}
+
+fn two_step_agent_trait_fixture(label: &str) -> ExitFixture {
+    let (scratch, repo, home) = fixture_repo();
+    let harness = home.join("ctx-fixture-two-step-agent.sh");
+    fs::write(
+        &harness,
+        r#"#!/bin/sh
+if [ "$1" = "--fixture-probe" ]; then
+  printf 'fixture-1.0\n'
+  exit 0
+fi
+cat >/dev/null
+printf '{"type":"result","session_id":"fixture","result":"{\\"notified\\":\\"ok\\"}"}\n'
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(&harness).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&harness, permissions).unwrap();
+    fs::write(
+        repo.join(".ctx/traits/runtime.toml"),
+        format!(
+            "schema-version = \"0.4\"\n\n[harness.fixture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\"]\nversion-probe = [\"--fixture-probe\"]\n\n[harness.fixture.cli]\nargv = []\nprompt-via = \"stdin\"\noutput = \"claude-stream-json\"\n\n[agent.role.worker]\nharness = \"fixture\"\ntransport = \"cli\"\n",
+            harness.display().to_string()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        format!(
+            "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"{label}\"\ndescription = \"Demo\"\nsummary = \"Demo\"\n\n[[agent]]\nid = \"worker\"\ndescription = \"Fixture worker\"\nsummary = \"Fixture worker\"\n\n[procedure]\ndescription = \"Run agents\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"first-step\"\ntitle = \"first-step\"\nagent = \"agent:worker\"\nprompt = \"First.\"\noutput = [\"slot:notified\"]\n\n[[procedure.sequence]]\nid = \"second-step\"\ntitle = \"second-step\"\nagent = \"agent:worker\"\nprompt = \"Second.\"\noutput = [\"slot:notified\"]\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/trait.toml"),
+        "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    commit_trust_and_activate(&repo, &home);
+    ExitFixture {
+        _scratch: scratch,
+        repo,
+        home,
+    }
+}
+
+/// The harness marker is emitted by the spawned child before it returns an
+/// incomplete result, which makes the run fail after the child has started.
+fn failing_agent_trait_fixture(label: &str, marker: &str) -> ExitFixture {
+    let (scratch, repo, home) = fixture_repo();
+    let harness = home.join("ctx-fixture-failing-agent.sh");
+    fs::write(
+        &harness,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--fixture-probe\" ]; then\n  printf 'fixture-1.0\\n'\n  exit 0\nfi\ncount_file=\"$0.count\"\ncount=0\nif [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$count_file\"\ncat >/dev/null\nprintf '{marker}-%s\\n' \"$count\"\nprintf '{{\"type\":\"result\",\"session_id\":\"fixture\",\"result\":\"{{}}\"}}\\n'\n"
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(&harness).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&harness, permissions).unwrap();
+    fs::write(
+        repo.join(".ctx/traits/runtime.toml"),
+        format!(
+            "schema-version = \"0.4\"\n\n[harness.fixture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\"]\nversion-probe = [\"--fixture-probe\"]\n\n[harness.fixture.cli]\nargv = []\nprompt-via = \"stdin\"\noutput = \"claude-stream-json\"\n\n[agent.role.worker]\nharness = \"fixture\"\ntransport = \"cli\"\n",
+            harness.display().to_string()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        format!(
+            "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"{label}\"\ndescription = \"Demo\"\nsummary = \"Demo\"\n\n[[agent]]\nid = \"worker\"\ndescription = \"Fixture worker\"\nsummary = \"Fixture worker\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[procedure]\ndescription = \"Run agent\"\n\n[[procedure.sequence]]\nid = \"{STEP_ID}\"\ntitle = \"{STEP_ID}\"\nagent = \"agent:worker\"\nprompt = \"Fail after spawning.\"\noutput = [\"slot:notified\"]\n"
         ),
     )
     .unwrap();
@@ -169,20 +260,7 @@ fn spawn_background_run(fixture: &ExitFixture) -> BackgroundRun {
 
 fn ledger_session_id(repo: &Path) -> String {
     for _ in 0..30 {
-        let ledger = fs::read_dir(repo.parent().unwrap().join("ctx/traits/runs"))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .flat_map(|entry| fs::read_dir(entry.path()).into_iter().flatten().flatten())
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension == "json")
-                    && !path
-                        .file_name()
-                        .is_some_and(|name| name.to_string_lossy().ends_with(".summary.json"))
-            })
-            .collect::<Vec<_>>();
+        let ledger = ledger_paths(repo);
         if ledger.len() == 1 {
             return serde_json::from_str::<serde_json::Value>(
                 &fs::read_to_string(&ledger[0]).unwrap(),
@@ -197,7 +275,44 @@ fn ledger_session_id(repo: &Path) -> String {
     panic!("expected exactly one run ledger in {}", repo.display());
 }
 
-fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str) {
+fn ledger_paths(repo: &Path) -> Vec<PathBuf> {
+    fs::read_dir(repo.parent().unwrap().join("ctx/traits/runs"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|entry| fs::read_dir(entry.path()).into_iter().flatten().flatten())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+                && !path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(".summary.json"))
+        })
+        .collect()
+}
+
+fn ledger_session_ids(repo: &Path, count: usize) -> Vec<String> {
+    for _ in 0..30 {
+        let ledger = ledger_paths(repo);
+        if ledger.len() == count {
+            return ledger
+                .iter()
+                .map(|path| {
+                    serde_json::from_str::<serde_json::Value>(&fs::read_to_string(path).unwrap())
+                        .unwrap()["session-id"]
+                        .as_str()
+                        .expect("run ledger has a session-id")
+                        .to_string()
+                })
+                .collect();
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("expected {count} run ledgers in {}", repo.display());
+}
+
+fn assert_only_failure_panel(raw: &str, trait_id: &str, session_id: &str, error: &str) {
     let text = support::strip_escapes(raw_after_terminal_restore(raw));
     let lines = text
         .lines()
@@ -209,12 +324,16 @@ fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str) {
         [
             format!("┌── {trait_id}"),
             format!("│   session: {session_id}"),
-            format!("│   error:   {RESCUE_ERROR_TEXT}"),
+            format!("│   error:   {error}"),
             "└── Failure".to_string(),
         ],
         "unexpected surviving screen: {text:?}"
     );
     assert!(!raw_after_terminal_restore(raw).contains(CLEAR_VIEWPORT));
+}
+
+fn assert_only_interrupted_panel(raw: &str, trait_id: &str, session_id: &str) {
+    assert_only_failure_panel(raw, trait_id, session_id, RESCUE_ERROR_TEXT);
 }
 
 #[test]
@@ -332,14 +451,20 @@ fn clean_run_teardown_discards_the_live_frame_and_prints_the_final_panel() {
 }
 
 #[test]
-fn ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note() {
+fn ctrl_c_during_a_live_run_opens_failure_modal_and_aborts() {
     let fixture = agent_trait_fixture();
     let (code, raw) = run_pty_keys_after_markers(
         &ctx_bin(),
         "traits --session .ctx/runs/ctrl-c.json run --progress tui --file .ctx/traits/demo/generated/index.toml",
         &fixture.repo,
         &fixture.home,
-        &[(painted_pattern(AGENT_TICK_MARKER).as_str(), "\u{3}")],
+        &[
+            (painted_pattern(AGENT_TICK_MARKER).as_str(), "\u{3}"),
+            (
+                painted_pattern("Resume/Retry").as_str(),
+                "\u{1b}[C\u{1b}[C\r",
+            ),
+        ],
     );
     assert_ne!(code, 0);
     assert!(!raw.contains("__CHILD_EXIT__"));
@@ -349,12 +474,12 @@ fn ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note() {
         support::painted_text_present(&raw[..last_leave], AGENT_TICK_MARKER),
         "agent output was not painted before teardown: {raw:?}"
     );
-    let restored = text_after_terminal_restore(&raw);
     assert!(
-        restored
-            .lines()
-            .any(|line| line.trim() == "run killed; terminal restored")
+        support::painted_text_present(&raw[..last_leave], "Resume/Retry"),
+        "failure modal was not painted: {raw:?}"
     );
+    let restored = text_after_terminal_restore(&raw);
+    assert!(!restored.contains("run killed; terminal restored"));
     assert!(!restored.contains(STEP_ID));
     assert!(
         restored
@@ -363,6 +488,113 @@ fn ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note() {
             .all(|line| line.starts_with("│   "))
     );
     assert!(!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT));
+}
+
+#[test]
+fn failed_run_keeps_the_pane_for_the_three_choice_modal() {
+    let fixture = command_trait_fixture("failed", "false");
+    let ready = painted_pattern("Resume/Retry");
+    let (code, raw) = run_pty_keys_after_markers(
+        &ctx_bin(),
+        "traits run --progress tui --file .ctx/traits/demo/generated/index.toml",
+        &fixture.repo,
+        &fixture.home,
+        &[(ready.as_str(), "\u{1b}[C\u{1b}[C\r")],
+    );
+    assert_ne!(code, 0);
+    let leave = raw.rfind(LEAVE_ALT).expect("terminal restored");
+    let modal = &raw[..leave];
+    for label in ["Resume/Retry", "Restart", "Abort"] {
+        assert!(
+            support::painted_text_present(modal, label),
+            "missing {label}: {raw:?}"
+        );
+    }
+    assert!(support::painted_text_present(modal, "[ Resume/Retry ]"));
+    assert!(support::painted_text_present(modal, "  Restart  "));
+    assert!(support::painted_text_present(
+        modal,
+        "runtime surfaces are available"
+    ));
+}
+
+#[test]
+fn resume_reuses_the_same_bounded_session() {
+    let fixture = two_step_agent_trait_fixture("resumable");
+    let ready = painted_pattern("Resume/Retry");
+    let (code, raw) = run_pty_keys_after_markers(
+        &ctx_bin(),
+        "traits run --progress tui --max-frames 1 --file .ctx/traits/demo/generated/index.toml",
+        &fixture.repo,
+        &fixture.home,
+        &[(ready.as_str(), "\r")],
+    );
+    assert_eq!(code, 0, "resume output: {raw:?}");
+    let sessions = ledger_session_ids(&fixture.repo, 1);
+    assert_eq!(sessions.len(), 1);
+    let leave = raw.rfind(LEAVE_ALT).expect("terminal restored");
+    let pre_restore = &raw[..leave];
+    assert!(
+        support::painted_text_present(pre_restore, "Resume/Retry"),
+        "failure modal was not painted before terminal restoration: {raw:?}"
+    );
+    let session_prefix = sessions[0]
+        .strip_prefix("session-")
+        .expect("ledger session id prefix")
+        .get(..12)
+        .expect("ledger session id display prefix");
+    assert!(
+        support::painted_text_present(pre_restore, session_prefix),
+        "the session later committed was not painted before Resume: {raw:?}"
+    );
+    let restored = text_after_terminal_restore(&raw);
+    assert!(restored.contains(&sessions[0]));
+    assert!(restored.contains("└── Success"));
+}
+
+#[test]
+fn restart_starts_a_fresh_session_and_preserves_the_first_ledger() {
+    const RESTART_CHILD_MARKER: &str = "ctx-fixture-restart-child";
+    let fixture = failing_agent_trait_fixture("restart", RESTART_CHILD_MARKER);
+    let first_ready = painted_pattern("Resume/Retry");
+    let restarted_child = painted_pattern(&format!("{RESTART_CHILD_MARKER}-2"));
+    let second_ready = painted_pattern("Resume/Retry");
+    let (code, raw) = run_pty_keys_after_markers(
+        &ctx_bin(),
+        "traits run --progress tui --max-retries 0 --file .ctx/traits/demo/generated/index.toml",
+        &fixture.repo,
+        &fixture.home,
+        &[
+            (first_ready.as_str(), "\u{1b}[C\r"),
+            (restarted_child.as_str(), ""),
+            (second_ready.as_str(), "\u{1b}[C\u{1b}[C\r"),
+        ],
+    );
+    assert_ne!(code, 0, "restart output: {raw:?}");
+    let sessions = ledger_session_ids(&fixture.repo, 2);
+    assert_ne!(sessions[0], sessions[1]);
+    assert!(ledger_paths(&fixture.repo).iter().all(|path| path.exists()));
+}
+
+#[test]
+fn abort_restores_before_the_compact_failure_panel() {
+    let fixture = command_trait_fixture("abort", "false");
+    let ready = painted_pattern("Resume/Retry");
+    let (code, raw) = run_pty_keys_after_markers(
+        &ctx_bin(),
+        "traits run --progress tui --file .ctx/traits/demo/generated/index.toml",
+        &fixture.repo,
+        &fixture.home,
+        &[(ready.as_str(), "\u{1b}[C\u{1b}[C\r")],
+    );
+    assert_ne!(code, 0);
+    let session = ledger_session_id(&fixture.repo);
+    assert_only_failure_panel(
+        &raw,
+        TRAIT_ID,
+        &session,
+        "runtime surfaces are available for controlled dogfood only; d...",
+    );
 }
 
 #[test]

@@ -180,17 +180,14 @@ pub struct DriveInputs<'a> {
     /// an invocation that loses the lock race must never mutate the ledger
     /// a concurrent driver already holds), never before.
     pub clear_merge_intent: bool,
-    /// P549: when set and this drive reaches its NORMAL completed exit (the
-    /// single `Status::Completed` arm in `drive_loop`, never an early
-    /// stop/interrupt/failure return), the live [`run_view::RunPanel`] — if
-    /// one was created (`--progress tui` on a real terminal) — is released
-    /// into this handoff instead of being closed by `RunPanelGuard`'s drop.
-    /// The caller (`complete_after_drive`'s callers) takes it back out and
-    /// re-wraps it in its own drop-close guard for the merge span, so the
-    /// panel is never owned by anything but a guard at any hop (the
-    /// 2026-07-22 terminal-restore incident discipline). `None` for every
-    /// caller that hasn't opted in (e.g. `dashboard`'s `d`rive action) —
-    /// byte-identical to today's unconditional close.
+    /// Retain a live panel in `panel_handoff` on every drive exit so the
+    /// top-level run flow can offer its terminal failure actions.
+    pub retain_panel_on_failure: bool,
+    /// Receives a completed pane for the merge span, or every pane exit when
+    /// `retain_panel_on_failure` is set. The caller takes it back out and
+    /// re-wraps it in its own drop-close guard (or seeds it into Resume), so
+    /// the pane always has one deterministic terminal owner. `None` retains
+    /// the unconditional-close behavior for callers that have not opted in.
     pub panel_handoff: Option<PanelHandoff>,
     /// A startup pane created before session initialization. It is consumed by
     /// the first live frame rather than allocating a second terminal owner.
@@ -200,11 +197,11 @@ pub struct DriveInputs<'a> {
     pub frame_observer: Option<FrameObserver<'a>>,
 }
 
-/// Cheap, cloneable one-shot slot a completed drive's live pane is handed
-/// off through — see [`DriveInputs::panel_handoff`]. `Arc<Mutex<..>>` rather
-/// than a channel: at most one handoff ever happens per drive, and the
-/// receiving side (a synchronous caller sequenced right after `drive()`
-/// returns) never blocks waiting for it.
+/// Cheap, cloneable slot a live pane is handed off through — see
+/// [`DriveInputs::panel_handoff`]. Retained failure handling may seed the
+/// pane back into a subsequent drive attempt, so this is bidirectional rather
+/// than completed-only or one-shot. The synchronous receiving side never
+/// blocks waiting for it.
 #[derive(Clone, Default)]
 pub(crate) struct PanelHandoff(std::sync::Arc<std::sync::Mutex<Option<run_view::RunPanel>>>);
 
@@ -219,13 +216,14 @@ impl PanelHandoff {
         Self::default()
     }
 
-    fn give(&self, panel: run_view::RunPanel) {
+    /// Bidirectional transport for a retained pane between drive attempts.
+    pub(crate) fn give(&self, panel: run_view::RunPanel) {
         if let Ok(mut slot) = self.0.lock() {
             *slot = Some(panel);
         }
     }
 
-    /// Takes the handed-off panel, if a completed drive released one.
+    /// Takes the handed-off panel, if a drive released one.
     pub(crate) fn take(&self) -> Option<run_view::RunPanel> {
         self.0.lock().ok().and_then(|mut slot| slot.take())
     }
@@ -1069,9 +1067,21 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
                 startup.fail(error.to_string());
             }
         })?;
-    let mut run_panel = RunPanelGuard(None);
+    let mut run_panel = RunPanelGuard::new(
+        None,
+        input
+            .retain_panel_on_failure
+            .then(|| input.panel_handoff.clone())
+            .flatten(),
+    );
     if input.progress == cli::DriveProgress::Tui {
-        match create_run_panel(&mut input, &early_session) {
+        match input
+            .panel_handoff
+            .as_ref()
+            .and_then(PanelHandoff::take)
+            .map(Ok)
+            .unwrap_or_else(|| create_run_panel(&mut input, &early_session))
+        {
             Ok(panel) => run_panel.0 = Some(panel),
             Err(err) => {
                 // No live panel will take ownership. Commit the failed startup
@@ -1940,11 +1950,20 @@ mod awaiting_input_prompt_tests {
     }
 }
 
-struct RunPanelGuard(Option<run_view::RunPanel>);
+struct RunPanelGuard(Option<run_view::RunPanel>, Option<PanelHandoff>);
+impl RunPanelGuard {
+    fn new(panel: Option<run_view::RunPanel>, handoff: Option<PanelHandoff>) -> Self {
+        Self(panel, handoff)
+    }
+}
 impl Drop for RunPanelGuard {
     fn drop(&mut self) {
-        if let Some(panel) = self.0.as_ref() {
-            panel.close();
+        if let Some(panel) = self.0.take() {
+            if let Some(handoff) = self.1.as_ref() {
+                handoff.give(panel);
+            } else {
+                panel.close();
+            }
         }
     }
 }
@@ -2118,7 +2137,13 @@ fn drive_loop(
     // + the alternate screen stuck on the user's tty when such a worker
     // outlives main. `close()` is idempotent and late renders no-op on the
     // closed pane.
-    let mut run_panel = RunPanelGuard(initial_run_panel);
+    let mut run_panel = RunPanelGuard::new(
+        initial_run_panel,
+        input
+            .retain_panel_on_failure
+            .then(|| input.panel_handoff.clone())
+            .flatten(),
+    );
     // 0110: parsed once here, not reloaded every frame — the frame-boundary
     // sink watcher below only ever needs the declaration itself, and a
     // trait load per frame would be wasted I/O the pre-loop static path
@@ -2322,13 +2347,9 @@ fn drive_loop(
         match outcome.session.status {
             ctx_traits_core::procedure::session::Status::Completed => {
                 report.status = "completed".to_string();
-                // P549: the ONE normal-completion exit — hand the live pane
-                // off instead of letting `RunPanelGuard` close it, so a
-                // caller with a persisted merge intent can keep the same
-                // pane running through the automatic merge. `take()` clears
-                // `run_panel.0`, so the guard's drop becomes a no-op for
-                // this exit; every other return in this function leaves
-                // `run_panel.0` untouched and the guard closes as before.
+                // Normal completion hands the pane over before the guard
+                // drops. Retained failure exits use that same handoff from
+                // the guard, allowing the caller to show its modal.
                 if let Some(handoff) = input.panel_handoff.as_ref()
                     && let Some(panel) = run_panel.0.take()
                 {
@@ -4913,6 +4934,9 @@ fn create_run_panel(
             message: format!("start ratatui run pane: {source}"),
         })?,
     };
+    if input.retain_panel_on_failure {
+        panel.arm_failure_modal_ctrl_c();
+    }
     // Presentation-only: lets the pane re-derive journey rows from the
     // persisted ledger while this thread is blocked inside a command frame
     // (`RunPanel::set_live_ledger_path`); a resolution failure just leaves
