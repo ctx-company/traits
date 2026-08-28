@@ -56,6 +56,7 @@ scope = """
 [relations]
 parent = "0253"
 depends-on = ["0253.4"]
-# Implemented directly by owner delegation on 2026-08-28 (interim
-# filesystem-handshake transport; 0253.4's ask machinery replaces the
-# transport when it lands, semantics unchanged).
+# Implemented directly by owner delegation on 2026-08-28: the gate is
+# the owner's plannotator UI (annotate --gate --json --require-approval);
+# approve exits the loop, annotations return as binding corrections.
+# 0253.4's ask machinery may later replace the transport.

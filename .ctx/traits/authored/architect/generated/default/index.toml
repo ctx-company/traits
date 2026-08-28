@@ -504,17 +504,15 @@ output = ["slot:owner-answer"]
 argv = [
     "sh",
     "-c",
-    '''
-d=$(pwd); m="$d/.plan-await"; f="$d/.plan-answer"
-printf "%s\n" "$1" > "$m"
-i=0
-while [ ! -f "$f" ]; do
-  i=$((i+1))
-  if [ $((i%60)) -eq 0 ]; then echo "plan awaiting owner answer ($((i/60))m): $1" >&2; fi
-  sleep 1
-done
-cat "$f"
-rm -f "$f" "$m"''',
+    """
+d=$(pwd); c="$d/.plan-review.md"
+cp "$1" "$c"
+if out=$(plannotator annotate "$c" --gate --json --require-approval); then
+  echo approved
+else
+  printf "%s" "$out"
+fi
+rm -f "$c"""",
     "_",
     "{slot:target-file}",
 ]
