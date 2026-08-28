@@ -1359,6 +1359,7 @@ fn handle_internal(
                 ),
                 execution_dir: None,
                 clear_merge_intent: no_merge,
+                retain_panel_on_failure: false,
                 panel_handoff: Some(panel_handoff.clone()),
                 startup: None,
                 frame_observer: None,

@@ -593,6 +593,7 @@ pub(crate) fn run_builtin_trait_observed(
         worktree: None,
         execution_dir: None,
         clear_merge_intent: false,
+        retain_panel_on_failure: false,
         panel_handoff: None,
         startup: None,
         frame_observer,

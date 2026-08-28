@@ -6,10 +6,11 @@
 //! `--task` queue path (0198), rather than reimplementing it.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use support::{
-    ScratchRoot, ctx_bin, git_init, require_success, run_pty_with_cursor_reply,
+    ScratchRoot, ctx_bin, git_init, painted_pattern, require_success, run_pty_keys_after_markers,
     text_after_terminal_restore,
 };
 
@@ -20,10 +21,9 @@ struct Fixture {
 }
 
 /// A `demo` trait that declares a `task-board` resource and a single
-/// `cmd = "false"` step, dispatched to by `runtime.toml`, plus two
-/// independent `ready` tasks. Each queue member's command step is rejected
-/// fast — non-interactive, no stdin to approve it — so no worker harness
-/// and no merge machinery is ever exercised, but `create_run_panel`
+/// agent step, dispatched to by `runtime.toml`, plus two
+/// independent `ready` tasks. Each queue member's fixture child emits a
+/// marker then returns an incomplete result, so `create_run_panel`
 /// (`drive.rs`) still builds a fresh run pane per member first, which is
 /// exactly the handoff window 0199 closes.
 fn failing_two_member_queue_fixture() -> Fixture {
@@ -33,10 +33,17 @@ fn failing_two_member_queue_fixture() -> Fixture {
     fs::create_dir_all(repo.join(".ctx/traits/authored/demo/generated")).unwrap();
     fs::create_dir_all(repo.join(".internal/tasks")).unwrap();
     git_init(&repo);
+    let harness = home.join("ctx-fixture-queue-agent.sh");
+    fs::write(
+        &harness,
+        "#!/bin/sh\nif [ \"$1\" = \"--fixture-probe\" ]; then\n  printf 'fixture-1.0\\n'\n  exit 0\nfi\ncount_file=\"$0.count\"\ncount=0\nif [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$count_file\"\ncat >/dev/null\nprintf 'ctx-fixture-queue-child-%s\\n' \"$count\"\nprintf '{\"type\":\"result\",\"session_id\":\"fixture\",\"result\":\"{}\"}\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&harness, fs::Permissions::from_mode(0o755)).unwrap();
     fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/authored/demo/generated/index.toml"),
-        "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"Demo\"\ndescription = \"Demo trait with a task-board resource and a step that always fails fast.\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task to implement.\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"false\"\noutput = [\"slot:notified\"]\n",
+        format!("id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"Demo\"\ndescription = \"Demo trait with a task-board resource and a child-backed failing step.\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task to implement.\"\n\n[[agent]]\nid = \"worker\"\ndescription = \"Fixture worker\"\nsummary = \"Fixture worker\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[procedure]\ndescription = \"Run agent\"\n\n[[procedure.sequence]]\nid = \"agent\"\ntitle = \"Run agent\"\nagent = \"agent:worker\"\nprompt = \"Fail after spawning.\"\noutput = [\"slot:notified\"]\n"),
     )
     .unwrap();
     fs::write(
@@ -55,7 +62,7 @@ fn failing_two_member_queue_fixture() -> Fixture {
     }
     fs::write(
         repo.join(".ctx/traits/runtime.toml"),
-        "[tasks]\ndispatch-trait = \"demo\"\n",
+        format!("[tasks]\ndispatch-trait = \"demo\"\n\n[harness.fixture]\nkind = \"custom\"\nbin = {:?}\ntransports = [\"cli\"]\nversion-probe = [\"--fixture-probe\"]\n\n[harness.fixture.cli]\nargv = []\nprompt-via = \"stdin\"\noutput = \"claude-stream-json\"\n\n[agent.role.worker]\nharness = \"fixture\"\ntransport = \"cli\"\n", harness.display().to_string()),
     )
     .unwrap();
     Command::new("git")
@@ -94,16 +101,43 @@ fn alternate_screen_entries(raw: &str) -> usize {
     raw.matches("\u{1b}[?1049h").count()
 }
 
+fn shell_quote(value: &std::path::Path) -> String {
+    format!(
+        "'{}'",
+        value.display().to_string().replace('\'', "'\\\"'\\\"'")
+    )
+}
+
 #[test]
 fn task_queue_brings_up_the_live_pane_for_every_member() {
     let fixture = failing_two_member_queue_fixture();
-    let (exit_code, raw) = run_pty_with_cursor_reply(
-        &ctx_bin(),
-        "traits run --worktree --merge --task 0002 --task 0003 --continue-on-failure",
+    let termios_file = fixture.repo.join(".ctx/queue-handoff-termios");
+    let wrapper = fixture.repo.join(".ctx/queue-handoff-wrapper.sh");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n{} \"$@\"\nstatus=$?\nstty -a > {}\nexit $status\n",
+            shell_quote(&ctx_bin()),
+            shell_quote(&termios_file),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    let first_failure_modal = painted_pattern("Resume/Retry");
+    // This is emitted by the second member's spawned fixture child, after the
+    // first Abort has released its modal.
+    let second_member = painted_pattern("ctx-fixture-queue-child-2");
+    let second_failure_modal = painted_pattern("Resume/Retry");
+    let (exit_code, raw) = run_pty_keys_after_markers(
+        &wrapper,
+        "traits run --worktree --merge --max-retries 0 --task 0002 --task 0003 --continue-on-failure",
         &fixture.repo,
         &fixture.home,
-        "__QUEUE_HANDOFF_COMPLETE__",
-        ".ctx/queue-handoff-termios",
+        &[
+            (first_failure_modal.as_str(), "\u{1b}[C\u{1b}[C\r"),
+            (second_member.as_str(), ""),
+            (second_failure_modal.as_str(), "\u{1b}[C\u{1b}[C\r"),
+        ],
     );
     // `cmd = "false"` is a command-permission rejection, so neither member
     // completes and the queue halts — `EXIT_RUN_FAILED`, the same code
@@ -130,10 +164,7 @@ fn task_queue_brings_up_the_live_pane_for_every_member() {
     );
 
     let text = text_after_terminal_restore(&raw);
-    let marker = text
-        .find("__QUEUE_HANDOFF_COMPLETE__")
-        .unwrap_or_else(|| panic!("post-exit completion marker was not visible: {text:?}"));
-    let committed = &text[..marker];
+    let committed = &text;
     // Both members reach the table — the point of `--continue-on-failure`,
     // and the thing a pane that failed to hand off would cut short. The
     // outcome WORD is deliberately not asserted: it is classification, which
@@ -146,7 +177,7 @@ fn task_queue_brings_up_the_live_pane_for_every_member() {
         "task queue outcome table did not report both members: {committed:?}"
     );
 
-    let termios = fs::read_to_string(fixture.repo.join(".ctx/queue-handoff-termios")).unwrap();
+    let termios = fs::read_to_string(termios_file).unwrap();
     let flags = termios.split_whitespace().collect::<Vec<_>>();
     assert!(
         flags.contains(&"icanon")

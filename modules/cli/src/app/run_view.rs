@@ -60,6 +60,16 @@ pub(crate) struct RunPanel {
     state: Arc<Mutex<RunPanelState>>,
     cadence: Arc<PanelCadence>,
     handoff: Arc<DashboardHandoff>,
+    failure_choice: Arc<Mutex<Option<FailureChoice>>>,
+    #[cfg(test)]
+    close_calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FailureChoice {
+    Resume,
+    Restart,
+    Abort,
 }
 
 const RESCUE_ERROR_TEXT: &str = "interrupted (signal)";
@@ -279,6 +289,10 @@ struct RunPanelState {
     /// `q`'s confirm-quit dialog (P551). While open, every drained key routes
     /// here instead of into `pending_keys` — the pane's own focus trap.
     modal: Option<tui_kit::Modal>,
+    /// True only for the terminal failure action modal. It must not inherit
+    /// the cancellation behavior of the ordinary quit/input dialogs.
+    failure_modal: bool,
+    failure_choice: Arc<Mutex<Option<FailureChoice>>>,
     /// `Some` only while `modal` is an [`RunPanel::request_input`] prompt —
     /// distinguishes it from the plain `q` confirm-quit modal, which shares
     /// the same `modal` slot but has no reply channel. The drive thread that
@@ -446,6 +460,7 @@ impl RunPanel {
         let handoff = Arc::new(DashboardHandoff {
             state: Mutex::new(DashboardHandoffState::default()),
         });
+        let failure_choice = Arc::new(Mutex::new(None));
         let state = Arc::new(Mutex::new(RunPanelState {
             cadence: Arc::clone(&cadence),
             input_generation,
@@ -484,6 +499,8 @@ impl RunPanel {
             focus: FocusRing::new(vec![PROGRESS_PANE]),
             pending_keys: Vec::new(),
             modal: None,
+            failure_modal: false,
+            failure_choice: Arc::clone(&failure_choice),
             pending_input_reply: None,
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
@@ -506,6 +523,9 @@ impl RunPanel {
             state: Arc::clone(&state),
             cadence: Arc::clone(&cadence),
             handoff,
+            failure_choice,
+            #[cfg(test)]
+            close_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
         let weak_state = Arc::downgrade(&state);
         let wake_cadence = Arc::clone(&cadence);
@@ -636,10 +656,68 @@ impl RunPanel {
     /// and the alternate screen used to outlive the process. Idempotent; any
     /// late render from a lingering clone no-ops on the detached pane.
     pub(crate) fn close(&self) {
+        #[cfg(test)]
+        self.close_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Ok(mut state) = self.state.lock() {
             close_pane_locked(&mut state);
         }
         self.handoff.close();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn was_closed_for_test(&self) -> bool {
+        self.close_calls.load(std::sync::atomic::Ordering::SeqCst) > 0
+    }
+
+    /// Arms raw Ctrl-C forwarding only for a retained live-run pane.
+    pub(crate) fn arm_failure_modal_ctrl_c(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.repaint.arm_modal_ctrl_c();
+        }
+    }
+
+    /// Opens the non-dismissible terminal-failure modal. A recorded choice is
+    /// deliberately retained until the orchestrator consumes it.
+    pub(crate) fn open_failure_modal(&self, line: &str) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        open_failure_modal_locked(&mut state, line);
+        render_locked(&mut state);
+    }
+
+    pub(crate) fn wait_for_failure_choice(&self) -> FailureChoice {
+        loop {
+            if let Ok(choice) = self.failure_choice.lock() {
+                if let Some(choice) = *choice {
+                    return choice;
+                }
+            } else {
+                return FailureChoice::Abort;
+            }
+            let detached = self
+                .state
+                .lock()
+                .map(|state| state.repaint.detached())
+                .unwrap_or(true);
+            if detached {
+                return FailureChoice::Abort;
+            }
+            self.tick();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    pub(crate) fn clear_failure_modal(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.modal = None;
+            state.failure_modal = false;
+            if let Ok(mut choice) = self.failure_choice.lock() {
+                *choice = None;
+            }
+            render_locked(&mut state);
+        }
     }
 
     fn handoff_driver(&self) -> HandoffDriver {
@@ -1324,6 +1402,20 @@ fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
     let Some(modal) = state.modal.as_mut() else {
         return false;
     };
+    if state.failure_modal {
+        if let tui_kit::ModalOutcome::Chosen(choice) = modal.handle_key(key) {
+            let choice = match choice.as_str() {
+                "resume" => FailureChoice::Resume,
+                "restart" => FailureChoice::Restart,
+                "abort" => FailureChoice::Abort,
+                _ => return true,
+            };
+            if let Ok(mut recorded) = state.failure_choice.lock() {
+                recorded.get_or_insert(choice);
+            }
+        }
+        return true;
+    }
     match modal.handle_key(key) {
         tui_kit::ModalOutcome::Confirmed => {
             state.modal = None;
@@ -1363,6 +1455,21 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     }
     let keys = state.repaint.poll_detach();
     for key in keys {
+        if key.code == KeyCode::Char('c')
+            && key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
+        {
+            // `poll_detach` already requested the immediate kill. Retained
+            // panes receive the key here so the user can choose the terminal
+            // disposition after the drive lock unwinds.
+            open_failure_modal_locked(
+                state,
+                &crate::app::run::short_failure_line(Some("run interrupted")),
+            );
+            changed = true;
+            continue;
+        }
         if apply_open_modal_key(state, &key) {
             changed = true;
             continue;
@@ -1429,6 +1536,40 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
         state.pending_keys.push(key);
     }
     changed
+}
+
+/// The one failure-modal transition. Both completed drive failures and raw
+/// Ctrl-C enter here so the action grammar cannot diverge.
+fn open_failure_modal_locked(state: &mut RunPanelState, line: &str) {
+    let choice_recorded = state
+        .failure_choice
+        .lock()
+        .ok()
+        .is_some_and(|choice| choice.is_some());
+    if state.failure_modal || choice_recorded {
+        return;
+    }
+    if let Some(reply) = state.pending_input_reply.take() {
+        let _ = reply.send(None);
+    }
+    state.modal = Some(tui_kit::Modal::buttons(
+        "Run failed",
+        line.to_string(),
+        vec![
+            tui_kit::Button::new(
+                "Resume/Retry",
+                tui_kit::ModalOutcome::Chosen("resume".to_string()),
+            ),
+            tui_kit::Button::new(
+                "Restart",
+                tui_kit::ModalOutcome::Chosen("restart".to_string()),
+            ),
+            tui_kit::Button::new("Abort", tui_kit::ModalOutcome::Chosen("abort".to_string()))
+                .destructive(),
+        ],
+    ));
+    state.failure_modal = true;
+    arm_rescue_panel_locked(state);
 }
 
 /// 0082: `Ladder` replaces the old bottom-pinned `ActiveRow` alignment.
@@ -1544,8 +1685,34 @@ fn entered_step_text(view: &RunView, phase: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn detached_panel_for_test() -> RunPanel {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "detached-panel-test"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Detached Panel Test"
+description = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        RunPanel::new_with_pane(
+            "detached-panel-test".to_string(),
+            trait_ref,
+            plan,
+            session_with_history_revisions(Vec::new(), Vec::new()),
+            RatatuiPane::new_detached_for_test(),
+        )
+    }
 
     #[test]
     fn rescue_panel_reuses_the_shared_failure_grammar_and_title_fallback() {
@@ -2194,6 +2361,97 @@ description = "A test trait."
     }
 
     #[test]
+    fn failure_modal_traps_non_choices_and_preserves_the_three_actions() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "failure-modal-test"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Failure Modal Test"
+description = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let panel = RunPanel::new_with_pane(
+            "failure-modal-test".to_string(),
+            trait_ref,
+            attribution_plan(vec![planned_item(
+                "check",
+                ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+                0,
+                0,
+            )]),
+            session_with_history_revisions(Vec::new(), Vec::new()),
+            RatatuiPane::new_detached_for_test(),
+        );
+        let receiver = panel.request_input("Missing input".to_string(), String::new());
+        panel.open_failure_modal("bad drive");
+        assert_eq!(receiver.recv().expect("displaced reply"), None);
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            // Move focus first: reopening must not replace the modal and
+            // reset it back to Resume/Retry.
+            assert!(apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Right, crossterm::event::KeyModifiers::NONE),
+            ));
+        }
+        panel.open_failure_modal("new reason");
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            for key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('x')] {
+                assert!(apply_open_modal_key(
+                    &mut state,
+                    &KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
+                ));
+            }
+            assert!(state.failure_modal);
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+            );
+        }
+        assert_eq!(
+            *panel.failure_choice.lock().expect("choice lock"),
+            Some(FailureChoice::Restart)
+        );
+        panel.open_failure_modal("new reason");
+        assert_eq!(
+            *panel.failure_choice.lock().expect("choice lock"),
+            Some(FailureChoice::Restart),
+            "a recorded choice is never overwritten"
+        );
+        panel.clear_failure_modal();
+        panel.open_failure_modal("bad drive");
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+            );
+        }
+        assert_eq!(
+            *panel.failure_choice.lock().expect("choice lock"),
+            Some(FailureChoice::Resume)
+        );
+        panel.clear_failure_modal();
+        panel.open_failure_modal("bad drive");
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            for key in [KeyCode::Right, KeyCode::Right, KeyCode::Enter] {
+                apply_open_modal_key(
+                    &mut state,
+                    &KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
+                );
+            }
+        }
+        assert_eq!(
+            *panel.failure_choice.lock().expect("choice lock"),
+            Some(FailureChoice::Abort)
+        );
+    }
+
+    #[test]
     fn pane_scrolls_preserve_independent_offsets() {
         let mut scrolls = PaneScrolls::new();
         scrolls.get_mut(PROGRESS_PANE).set_len(30);
@@ -2256,6 +2514,7 @@ description = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -2286,6 +2545,7 @@ description = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -2338,6 +2598,7 @@ description = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -2443,6 +2704,7 @@ description = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        modal_dims_backdrop: false,
                         guide: None,
                     },
                 );
@@ -2530,6 +2792,7 @@ description = "A test trait."
                             focus: &mut focus,
                             pending_keys: keys,
                             modal: None,
+                            modal_dims_backdrop: false,
                             guide: None,
                         },
                     );
