@@ -21,7 +21,7 @@ const GATE_SCRIPT = [
   'd=$(pwd); c="$d/.plan-review.md"',
   'cp "$1" "$c"',
   'if out=$(plannotator annotate "$c" --gate --json --require-approval); then',
-  "  echo approved",
+  "  printf approved",
   "else",
   '  printf "%s" "$out"',
   "fi",
