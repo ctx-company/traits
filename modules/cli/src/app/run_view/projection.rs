@@ -2151,6 +2151,7 @@ description = "A test trait."
             rate_limit: None,
             budget_pause: None,
             tokens_by_model: None,
+            summons: None,
         });
         let ledger_path = camino::Utf8PathBuf::from(format!(
             "/tmp/ctx-traits-run-view-ledger-seed-{}.json",

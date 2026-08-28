@@ -17,9 +17,10 @@
  * The canonical, the runtime, the TUI and every build error say "step" too —
  * the authoring word never has to be translated.
  */
-import type { AgentHandle, PromptInterpolation, SequenceHandle } from "../handles.js";
+import type { AgentHandle, DeclaredSignalWithFields, PromptInterpolation, SequenceHandle } from "../handles.js";
 import type { CommandInterpolation, CommandTemplateValue } from "../input.js";
 import type {
+  AskSequenceFields,
   CheckSequenceFields,
   CommandSequenceFields,
   PromptRegistrarOptions,
@@ -30,6 +31,7 @@ import type { IdOverride } from "./registrars.js";
 
 type CommandRegistrarOptions = Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride;
 type CheckRegistrarOptions = Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride;
+type AskRegistrarOptions = Omit<AskSequenceFields, "id" | "kind" | "title"> & IdOverride;
 
 export type PromptStepFields = {
   readonly agent: AgentHandle;
@@ -45,7 +47,10 @@ export type CheckStepFields = {
   readonly input: CommandTemplateValue;
 } & Omit<CheckRegistrarOptions, "id" | "input">;
 
-export type StepFields = PromptStepFields | CommandStepFields | CheckStepFields;
+/** A reusable signal-gated question, answered by a human through the normal current-frame submission path — mirrors `AskSequenceFields` (`when`/`output` required, `agent` never). */
+export type AskStepFields = Omit<AskRegistrarOptions, "id">;
+
+export type StepFields = PromptStepFields | CommandStepFields | CheckStepFields | AskStepFields;
 
 /**
  * Derives a declared/parameterized step's placement return type from its OWN
@@ -76,7 +81,10 @@ export type StepResultOf<F> = F extends { readonly output: infer RawOutput }
  * everything else.
  */
 export type Step<F extends StepFields, R extends SequenceHandle = StepResultOf<F>> = F & {
-  (title: string, overrides?: Partial<PromptRegistrarOptions & CommandRegistrarOptions & CheckRegistrarOptions>): R;
+  (
+    title: string,
+    overrides?: Partial<PromptRegistrarOptions & CommandRegistrarOptions & CheckRegistrarOptions & AskRegistrarOptions>,
+  ): R;
 };
 
 /**
@@ -164,10 +172,36 @@ function defineCheckStep(
   return Object.assign(register, fields) as unknown as CheckStep<CheckStepFields>;
 }
 
+function defineAskStep<const F extends AskStepFields>(fields: F): Step<F>;
+/**
+ * Unlike `prompt`/`command`/`check`, an ask's factory parameter is the
+ * SIGNAL it is guarded on, not a bare interpolation ref — `when:` needs a
+ * signal-typed value to pass through, and `${sig.field}` field reads need
+ * the signal's field surface, so an unannotated `PromptInterpolation`
+ * fallback would not type either. The factory receives exactly one signal
+ * positionally; `defineStep.ask((sig) => ({ when: sig, ... }))`.
+ */
+function defineAskStep<const Sig extends DeclaredSignalWithFields, const F extends AskStepFields>(
+  factory: (signal: Sig) => F,
+): ParameterizedStep<[Sig], StepResultOf<F>>;
+function defineAskStep(
+  fieldsOrFactory: AskStepFields | ((signal: DeclaredSignalWithFields) => AskStepFields),
+): unknown {
+  if (typeof fieldsOrFactory === "function") {
+    const factory = fieldsOrFactory;
+    return (title: string, signal: DeclaredSignalWithFields): SequenceHandle =>
+      stepRegistrars.ask(title, factory(signal) as unknown as AskRegistrarOptions);
+  }
+  const fields = fieldsOrFactory;
+  const register = (title: string, overrides: Record<string, unknown> = {}): SequenceHandle =>
+    stepRegistrars.ask(title, { ...fields, ...overrides } as unknown as AskRegistrarOptions);
+  return Object.assign(register, fields) as unknown as Step<AskStepFields>;
+}
+
 /**
  * Declares a reusable step. The kind is named rather than inferred, so a
  * `check` is as declarable as a `command` and a reader of the call site knows
- * which of the three they are looking at.
+ * which of `prompt`/`command`/`check`/`ask` they are looking at.
  *
  * Each also accepts a FACTORY beside the static fields object (0253.3):
  * `defineStep.x((refs) => ({...}))`. An unannotated factory parameter falls
@@ -187,10 +221,13 @@ export const defineStep = {
   command: defineCommandStep,
   /** A reusable check step, verdict slot included. @example `const gate = defineStep.check({ input: input.command\`just test\` });` */
   check: defineCheckStep,
+  /** A reusable signal-gated question, answered by a human. @example `const summon = defineStep.ask((sig) => ({ when: sig, input: input.prompt\`${sig.reason}\`, output: schema.text() }));` */
+  ask: defineAskStep,
 } as const;
 
 /**
- * Places a step inline: `step.command`, `step.check`, `step.project`. A
- * namespace only — a step's kind is always named at the call site.
+ * Places a step inline: `step.command`, `step.check`, `step.project`,
+ * `step.ask`. A namespace only — a step's kind is always named at the call
+ * site.
  */
 export const step = stepRegistrars;

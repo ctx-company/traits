@@ -895,6 +895,7 @@ argv = ["git", "commit", "-m", "fixture"]
             rate_limit: None,
             budget_pause: None,
             tokens_by_model: None,
+            summons: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: "wt-fixture".to_string(),
@@ -1124,7 +1125,13 @@ pub enum DriveOutcomeKind {
     HarnessOutputTruncated,
     HarnessOutputInvalid,
     AttachWaitExpired,
-    WaitingOnHuman,
+    /// P0253.4: a run parked on an authored `ask` step, distinct from the
+    /// legacy `WaitingOnHuman` wire value it supersedes. The session
+    /// [`Status::WaitingOnHuman`] / `SessionState::WaitingOnHuman`
+    /// vocabulary is unrelated and
+    /// deliberately left alone (persisted, JsonSchema-surfaced enums) —
+    /// this variant only renames the *outcome*, not frame readiness.
+    AwaitingOwner,
     OutOfTreeMutation,
     CommandStepFailed,
     /// A historical or harness-specific wire value. It remains readable so a
@@ -1163,7 +1170,8 @@ impl DriveOutcomeKind {
             "harness-output-truncated" => Self::HarnessOutputTruncated,
             "harness-output-invalid" => Self::HarnessOutputInvalid,
             "attach-wait-expired" => Self::AttachWaitExpired,
-            "waiting-on-human" => Self::WaitingOnHuman,
+            "waiting-on-human" => Self::AwaitingOwner,
+            "awaiting-owner" => Self::AwaitingOwner,
             "out-of-tree-mutation" => Self::OutOfTreeMutation,
             "command-step-failed" => Self::CommandStepFailed,
             value => Self::Other(value.to_string()),
@@ -1200,7 +1208,7 @@ impl DriveOutcomeKind {
             Self::HarnessOutputTruncated => "harness-output-truncated",
             Self::HarnessOutputInvalid => "harness-output-invalid",
             Self::AttachWaitExpired => "attach-wait-expired",
-            Self::WaitingOnHuman => "waiting-on-human",
+            Self::AwaitingOwner => "awaiting-owner",
             Self::OutOfTreeMutation => "out-of-tree-mutation",
             Self::CommandStepFailed => "command-step-failed",
             Self::Other(value) => value,
@@ -1216,7 +1224,10 @@ impl DriveOutcomeKind {
     pub fn is_settled_pause(&self) -> bool {
         matches!(
             self,
-            Self::Paused | Self::PausedProviderCredits | Self::PausedBudgetExhausted
+            Self::Paused
+                | Self::PausedProviderCredits
+                | Self::PausedBudgetExhausted
+                | Self::AwaitingOwner
         )
     }
 }
@@ -1296,6 +1307,37 @@ pub struct DriveOutcome {
     /// tokens at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
+    /// P0253.4: present only when `outcome` is `awaiting-owner`, carrying the
+    /// rendered question as durable ledger evidence so a reader never has to
+    /// re-resolve the trait file to show a parked summons. `None` on every
+    /// ledger written before this field existed, and on any ledger whose
+    /// `awaiting-owner` outcome predates this change (readers fall back to
+    /// live re-resolution — see [`crate::procedure::session`] doc note above
+    /// `DriveOutcomeKind::AwaitingOwner`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summons: Option<SummonsRecord>,
+}
+
+/// The durable question evidence for a run parked `awaiting-owner` on an
+/// authored `ask` step (P0253.4). Composed once, at the park point, from the
+/// CLI's `resolved_human_question_body` — the one question composer every
+/// reader (dashboard row, answer modal, `ctx traits answer`, static preview)
+/// shares — so this is the single write path, not a second composer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename_all = "kebab-case")]
+pub struct SummonsRecord {
+    /// The parked frame's `item_id` (the authored step's identity).
+    pub step_id: String,
+    pub title: String,
+    /// The interpolated question text alone, in the same shape
+    /// `resolved_human_question_body` returns — no `source:`/`ref:`/`digest:`
+    /// metadata lines.
+    pub question: String,
+    /// The wire form of the ask's single requested output slot ref.
+    pub answer_slot: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_ref: Option<String>,
 }
 
 /// The effective drive budget recorded as evidence alongside a
@@ -1372,6 +1414,8 @@ pub struct DriveTerminalEvidence {
     >,
     /// See [`DriveOutcome::tokens_by_model`] (0130).
     pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
+    /// See [`DriveOutcome::summons`] (P0253.4).
+    pub summons: Option<SummonsRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -6454,6 +6498,42 @@ output = ["slot:first", "slot:second"]
         assert!(DriveOutcomeKind::Paused.is_settled_pause());
         assert!(DriveOutcomeKind::PausedProviderCredits.is_settled_pause());
         assert!(DriveOutcomeKind::PausedBudgetExhausted.is_settled_pause());
+        assert!(DriveOutcomeKind::AwaitingOwner.is_settled_pause());
         assert!(!DriveOutcomeKind::Other("paused-ish".to_string()).is_settled_pause());
+    }
+
+    /// P0253.4: both the new wire value and the legacy one it supersedes
+    /// deserialize to the same variant (a ledger parked before this change
+    /// stays readable), while serialization only ever emits the new value.
+    #[test]
+    fn awaiting_owner_drive_outcome_kind_accepts_the_legacy_wire_alias() {
+        assert_eq!(
+            DriveOutcomeKind::from_wire("awaiting-owner"),
+            DriveOutcomeKind::AwaitingOwner
+        );
+        assert_eq!(
+            DriveOutcomeKind::from_wire("waiting-on-human"),
+            DriveOutcomeKind::AwaitingOwner
+        );
+        assert_eq!(DriveOutcomeKind::AwaitingOwner.as_str(), "awaiting-owner");
+    }
+
+    /// The `from_wire`/`as_str`-based test above proves the wire vocabulary;
+    /// this proves the actual `serde` impls used by every real ledger
+    /// read/write (`impl Serialize`/`Deserialize for DriveOutcomeKind`)
+    /// agree with it: both the new and legacy JSON string values deserialize
+    /// to `AwaitingOwner`, and serializing it back emits only the new value.
+    #[test]
+    fn awaiting_owner_drive_outcome_kind_round_trips_through_serde() {
+        let from_new: DriveOutcomeKind =
+            serde_json::from_str("\"awaiting-owner\"").expect("new wire value deserializes");
+        assert_eq!(from_new, DriveOutcomeKind::AwaitingOwner);
+        let from_legacy: DriveOutcomeKind =
+            serde_json::from_str("\"waiting-on-human\"").expect("legacy wire value deserializes");
+        assert_eq!(from_legacy, DriveOutcomeKind::AwaitingOwner);
+        assert_eq!(
+            serde_json::to_string(&DriveOutcomeKind::AwaitingOwner).unwrap(),
+            "\"awaiting-owner\""
+        );
     }
 }

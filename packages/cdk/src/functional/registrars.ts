@@ -20,7 +20,9 @@ import type {
   SlotHandle,
   SlotWithFields,
 } from "../handles.js";
+import { refText } from "../ref.js";
 import type {
+  AskSequenceFields,
   CheckSequenceFields,
   CommandSequenceFields,
   ExhaustionPolicy,
@@ -232,9 +234,50 @@ function stepCommandRegistrarImpl(
 }
 const stepCommandRegistrar = stepCommandRegistrarImpl as unknown as CommandPlacementFn;
 
+/** `step.ask`'s placement shape: the same {@link VirtualSlotSurfaceOf}-derived `.result` typing as `step.command`, plus the `id:` override every `step.*` registrar accepts. `when`/`output` stay required — an ask with no guard or no answer slot is rejected by the canonical validator either way, so requiring them here surfaces the same error at authoring time instead of build time. */
+type AskPlacementFn = <
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
+  title: string,
+  opts: Omit<AskSequenceFields, "id" | "kind" | "title" | "output"> & IdOverride & { readonly output: RawOutput },
+) => SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
+
+/**
+ * `step.ask`: a signal-gated question placed inline, answered by a human
+ * through the normal current-frame submission path. Unlike `step.prompt`,
+ * an ask does not pass through `installAgentPromptLowering` (it has no
+ * `agent:`), so the 0253.2 guarded-scope rule is enforced here directly —
+ * with the ask's OWN `when` signal added to the guarded set, since an ask
+ * is never nested inside its own `flow.when` (the `when:` field IS the
+ * guard for this step's body, the same may-emit declaration a `flow.when`
+ * wrapper would otherwise supply).
+ */
+function stepAskRegistrarImpl(
+  title: string,
+  opts: Omit<AskSequenceFields, "id" | "kind" | "title"> & IdOverride,
+): SequenceHandle {
+  requireBuild(`step.ask(${JSON.stringify(title)})`);
+  const frame = captureAuthorFrame();
+  // An ask's `when` must stay a bare `signal:<id>` ref (the canonical
+  // validator requires it) — `withPositionalWhen`'s `condition.all([not(until),
+  // when])` composition would corrupt that, so refuse loudly instead of
+  // silently emitting a guard the build then rejects.
+  forbidPositionalUntil(title, "step.ask", frame);
+  const id = opts.id ?? mintId(title);
+  const signalRef = refText(opts.when, `step.ask(${JSON.stringify(title)}).when`);
+  requireSignalFieldsGuarded(opts as unknown as PromptRegistrarOptions, title, frame, signalRef);
+  const item = sequence.ask(id, { ...opts, title } as Omit<AskSequenceFields, "id" | "kind"> & {
+    readonly output: SequenceOutputValue | readonly SequenceOutputValue[];
+  });
+  registerItem(`step.ask(${JSON.stringify(title)})`, item, title);
+  return item;
+}
+const stepAskRegistrar = stepAskRegistrarImpl as unknown as AskPlacementFn;
+
 export const stepRegistrars = {
   prompt: stepPromptRegistrar,
   command: stepCommandRegistrar,
+  ask: stepAskRegistrar,
   check(
     title: string,
     opts: Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride,
@@ -279,6 +322,7 @@ function requireSignalFieldsGuarded(
   promptOpts: PromptRegistrarOptions,
   title: string,
   frame: AuthorFrame | undefined,
+  ownGuardSignal?: string,
 ): void {
   const probe = promptOpts as {
     readonly input?: unknown;
@@ -286,7 +330,13 @@ function requireSignalFieldsGuarded(
     readonly prompt?: unknown;
     readonly output?: unknown;
   };
-  const guarded = guardedSignalsInScope();
+  const guarded = new Set(guardedSignalsInScope());
+  // A step's own `when: condition.signal(sig)`/`when: sig` guard is the
+  // may-emit declaration for THAT step's body, the same way the emitting
+  // step interpolating a signal declares it — an `ask` is never nested in
+  // its own `flow.when`, so without this its guard signal's fields would be
+  // unreadable in the very question it gates.
+  if (ownGuardSignal !== undefined) guarded.add(ownGuardSignal);
   const outputCandidates = Array.isArray(probe.output) ? probe.output : [probe.output];
   const refSources = [
     ...[probe.input, probe.text, probe.prompt].map((candidate) => metaOf(candidate)?.refs ?? []),

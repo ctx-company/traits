@@ -815,8 +815,10 @@ fn next_action_hint(
         .map(|agent| format!(" --agent {}", agent.role))
         .unwrap_or_default();
     match session.status {
+        ctx_traits_core::procedure::session::Status::WaitingOnHuman => {
+            format!("ctx traits answer {}", out.unwrap_or("<run-session>"))
+        }
         ctx_traits_core::procedure::session::Status::AwaitingAgentOutput
-        | ctx_traits_core::procedure::session::Status::WaitingOnHuman
         | ctx_traits_core::procedure::session::Status::Rejected => format!(
             "ctx traits internal session frame set --session {} --key <target> --value <value>{agent_flag}",
             out.unwrap_or("<run-session>")

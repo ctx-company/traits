@@ -773,6 +773,24 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 live: crate::app::merge::tty_stage_line_live(),
                 merger_stdout_observer: None,
             }),
+            Some(cli::TraitsCommand::Answer {
+                session,
+                value,
+                value_json,
+                session_store,
+                file,
+                no_resume,
+                json,
+            }) => crate::app::answer::handle_answer(crate::app::answer::AnswerInputs {
+                session: &session,
+                session_store: session_store.as_deref(),
+                file: file.as_deref(),
+                value: value.as_deref(),
+                value_json: value_json.as_deref(),
+                no_resume,
+                json,
+            })
+            .map(|_| CommandOutput::new(())),
             Some(cli::TraitsCommand::Check {
                 trait_arg,
                 file,

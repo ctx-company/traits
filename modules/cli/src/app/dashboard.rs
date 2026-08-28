@@ -36,7 +36,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as RLine, Span};
 use ratatui::widgets::Paragraph;
 
-use super::frame_prompt::resolved_human_question_body;
+use super::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
+use super::frame_prompt::summons_question;
 use super::lifecycle_reporting::{
     DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source,
     dashboard_trait_inventory,
@@ -1818,7 +1819,7 @@ fn classify_session(
 /// own cwd, which the default scope guarantees IS the session's repo) is
 /// left untouched. Shared by every answer-path trait load (modal open, row
 /// presentation, the Answer applier's `run::set`) so all three agree.
-fn resolve_answer_trait_file(
+pub(crate) fn resolve_answer_trait_file(
     session: &ctx_traits_core::procedure::session::Session,
     repo_path: Option<&str>,
 ) -> Option<String> {
@@ -1842,35 +1843,34 @@ fn parked_ask_presentation(
     repo_path: Option<&str>,
 ) -> Option<String> {
     let frame = session.next_frame.as_ref()?;
-    if session.status != ctx_traits_core::procedure::session::Status::WaitingOnHuman
-        || frame.kind != ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
-    {
+    if !super::frame_prompt::is_live_summons(session, frame) {
         return None;
     }
-    if matches!(
-        session.last_drive_outcome.as_ref().map(|o| &o.outcome),
-        Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
-    ) {
-        return None;
-    }
-    let trait_file = resolve_answer_trait_file(session, repo_path);
-    let loaded = ctx_traits_io::run::load_trait_for_session(
-        trait_file.as_deref(),
-        None,
-        session,
-        "dashboard",
-    )
-    .ok()?;
-    let question = resolved_human_question_body(&loaded, session, frame)
-        .ok()?
-        .chars()
-        .take(80)
-        .collect::<String>();
+    // Stored evidence first (P0253.4 blocker 1): every row in the SESSIONS
+    // list calls this, so paying for `load_trait_for_session` per row per
+    // render for a question already durable on the outcome would make the
+    // list slower the more summons are parked. Only a ledger parked before
+    // that field existed falls back to resolving and re-rendering the trait.
+    let question = match super::frame_prompt::stored_summons_question(session, frame) {
+        Some(question) => question,
+        None => {
+            let trait_file = resolve_answer_trait_file(session, repo_path);
+            let loaded = ctx_traits_io::run::load_trait_for_session(
+                trait_file.as_deref(),
+                None,
+                session,
+                "dashboard",
+            )
+            .ok()?;
+            summons_question(&loaded, session, frame).ok()?
+        }
+    };
+    let question = question.chars().take(80).collect::<String>();
     let wait = session
         .last_drive_outcome
         .as_ref()
         .filter(|outcome| {
-            outcome.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::WaitingOnHuman
+            outcome.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::AwaitingOwner
         })
         .map(|outcome| {
             std::time::SystemTime::now()
@@ -1881,7 +1881,7 @@ fn parked_ask_presentation(
         })
         .map(|seconds| tui::elapsed_text(Duration::from_secs(seconds)))
         .unwrap_or_else(|| "wait unknown".to_string());
-    Some(format!("ask: {question} ({wait})"))
+    Some(format!("summons: {question} ({wait})"))
 }
 
 /// SESSIONS-screen grouping (P506 §3.1/§1.1): the owner's five buckets, in
@@ -4600,19 +4600,27 @@ fn open_answer_modal(state: &mut State) {
             return;
         }
     };
-    if matches!(
-        session.last_drive_outcome.as_ref().map(|o| &o.outcome),
-        Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
-    ) {
+    // Derived state, not raw `Status::WaitingOnHuman` (P0253.4, mirrors the
+    // Answer applier's own TOCTOU re-check below): `record_interrupted_outcome`
+    // never rewrites `status` away from `WaitingOnHuman`, so a raw-status
+    // check would open the modal on an already-cancelled question.
+    let session_outcome = session.last_drive_outcome.as_ref().map(|o| &o.outcome);
+    let session_state = ctx_traits_core::procedure::activity::SessionState::derive(
+        &session.status,
+        session_outcome,
+        false,
+    );
+    if session_state == ctx_traits_core::procedure::activity::SessionState::Cancelled {
         state.message = Some(format!(
             "answer refused: {display_id}'s question was cancelled"
         ));
         return;
     }
-    let Some(frame) = session.next_frame.as_ref().filter(|frame| {
-        session.status == ctx_traits_core::procedure::session::Status::WaitingOnHuman
-            && frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
-    }) else {
+    let Some(frame) = session
+        .next_frame
+        .as_ref()
+        .filter(|frame| super::frame_prompt::is_live_summons(&session, frame))
+    else {
         state.message = Some(format!(
             "answer refused: {display_id} is not waiting for a human"
         ));
@@ -4624,34 +4632,45 @@ fn open_answer_modal(state: &mut State) {
         ));
         return;
     };
-    let trait_file = resolve_answer_trait_file(&session, row.repo_path.as_deref());
-    let loaded = match ctx_traits_io::run::load_trait_for_session(
-        trait_file.as_deref(),
-        None,
-        &session,
-        "dashboard",
-    ) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            state.message = Some(format!(
-                "answer unavailable: could not resolve question for {display_id}: {error}"
-            ));
-            return;
+    // Stored evidence first (P0253.4 blocker 1): a durable summons record
+    // opens the modal without resolving the trait at all, so a summons still
+    // answers even when the trait source is unavailable (moved, deleted
+    // dependency, unreadable package) — only a ledger parked before that
+    // field existed falls back to resolving and re-rendering the trait.
+    let question_body = match super::frame_prompt::stored_summons_question(&session, frame) {
+        Some(question) => question,
+        None => {
+            let trait_file = resolve_answer_trait_file(&session, row.repo_path.as_deref());
+            let loaded = match ctx_traits_io::run::load_trait_for_session(
+                trait_file.as_deref(),
+                None,
+                &session,
+                "dashboard",
+            ) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    state.message = Some(format!(
+                        "answer unavailable: could not resolve question for {display_id}: {error}"
+                    ));
+                    return;
+                }
+            };
+            match summons_question(&loaded, &session, frame) {
+                Ok(body) => body,
+                Err(error) => {
+                    state.message = Some(format!(
+                        "answer unavailable: could not resolve question for {display_id}: {error}"
+                    ));
+                    return;
+                }
+            }
         }
     };
-    let question = match resolved_human_question_body(&loaded, &session, frame) {
-        Ok(body) => format!(
-            "{body}\n---\nanswer slot: {} (schema: {})",
-            output.slot_ref,
-            output.schema_ref.as_deref().unwrap_or("schema:any")
-        ),
-        Err(error) => {
-            state.message = Some(format!(
-                "answer unavailable: could not resolve question for {display_id}: {error}"
-            ));
-            return;
-        }
-    };
+    let question = format!(
+        "{question_body}\n---\nanswer slot: {} (schema: {})",
+        output.slot_ref,
+        output.schema_ref.as_deref().unwrap_or("schema:any")
+    );
     state.modal_host.open(
         Action::Session(SessionAction::Answer {
             session_id: row.session_id.clone(),
@@ -5078,72 +5097,31 @@ fn apply_session_action(
                 ));
                 return Ok(());
             };
-            let Some(maintenance) =
-                ctx_traits_io::run_control::try_acquire_maintenance(&row.ledger_path)?
-            else {
-                state.message = Some(format!(
-                    "answer refused: {display_id}'s driver lock is held"
-                ));
-                state.reload();
-                return Ok(());
-            };
-            let current = ctx_traits_io::run_session::read_run_session(&row.ledger_path)?;
-            // Re-check against the *derived* state (blocker 2, P509), not raw
-            // `status`: `record_interrupted_outcome` never rewrites `status`
-            // away from `WaitingOnHuman`, so a cancel that lands between
-            // modal open and submit is only visible through the outcome the
-            // derivation folds in. This closes the TOCTOU the raw-status
-            // check left open.
-            let current_outcome = current.last_drive_outcome.as_ref().map(|o| &o.outcome);
-            let current_state = ctx_traits_core::procedure::activity::SessionState::derive(
-                &current.status,
-                current_outcome,
-                false,
-            );
-            let valid = current_state
-                == ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman
-                && current.state_digest.as_str() == state_digest
-                && current.next_frame.as_ref().is_some_and(|frame| {
-                    frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
-                        && frame.requested_outputs.first().is_some_and(|output| {
-                            output.slot_ref.to_string() == target && output.schema_ref == schema_ref
-                        })
-                });
-            if !valid {
-                let message = if current_state
-                    == ctx_traits_core::procedure::activity::SessionState::Cancelled
-                {
-                    format!("answer refused: {display_id}'s question was cancelled")
-                } else {
-                    format!("answer refused: {display_id}'s question changed; reopen it")
-                };
-                state.message = Some(message);
-                state.reload();
-                return Ok(());
-            }
-            let value = if schema_ref.as_deref() == Some("schema:text") {
-                serde_json::Value::String(text)
-            } else {
-                match serde_json::from_str(&text) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        state.message = Some(format!(
-                            "answer rejected: enter JSON for {}: {error}",
-                            schema_ref.as_deref().unwrap_or("schema:any")
-                        ));
-                        return Ok(());
-                    }
+            let value = match super::answer::parse_schema_aware_value(&text, schema_ref.as_deref())
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    state.message = Some(format!("answer rejected: {error}"));
+                    return Ok(());
                 }
             };
-            let answer_trait_file = resolve_answer_trait_file(&current, row.repo_path.as_deref());
-            let result = ctx_traits_io::run::set(ctx_traits_io::run::SetRequest {
+            // The dashboard's driver-lock check needs the trait file resolved
+            // against *some* known-good session for `resolve_answer_trait_file`;
+            // the row's own last-read session (pre-lock) is fine for this — the
+            // shared helper (blocker 2, P0253.4) re-reads and re-validates
+            // against the fresh ledger once the lock is held, so a stale trait
+            // file resolved here cannot itself submit a stale answer.
+            let row_session = ctx_traits_io::run_session::read_run_session(&row.ledger_path)?;
+            let answer_trait_file =
+                resolve_answer_trait_file(&row_session, row.repo_path.as_deref());
+            let outcome = submit_answer(AnswerSubmission {
+                ledger_path: &row.ledger_path,
                 trait_file: answer_trait_file.as_deref(),
-                trait_id: None,
-                session: row.ledger_path.as_str(),
                 session_store: None,
                 target: &target,
+                schema_ref: schema_ref.as_deref(),
+                expected_state_digest: &state_digest,
                 value,
-                out: None,
                 caller: ctx_traits_core::procedure::session::CallerProvenance {
                     surface: "dashboard".to_string(),
                     caller: "ctx traits dashboard".to_string(),
@@ -5151,25 +5129,49 @@ fn apply_session_action(
                     harness: None,
                 },
                 existing_input_evidence: "ctx traits dashboard answer",
+                advance_command_frames: true,
             });
-            drop(maintenance);
-            match result {
-                Ok(ctx_traits_io::run::SetOutcome::Call { response, .. })
-                    if response.response_kind == ctx_traits_core::procedure::session::CallResponseKind::RejectedCorrectionRequired => {
-                    state.message = Some("answer rejected; correct it and reopen the question".to_string());
+            match outcome {
+                Ok(AnswerSubmissionOutcome::LockHeld) => {
+                    state.message = Some(format!(
+                        "answer refused: {display_id}'s driver lock is held"
+                    ));
                 }
-                Ok(ctx_traits_io::run::SetOutcome::Call { response, .. })
-                    if response.session.status == ctx_traits_core::procedure::session::Status::Completed => {
+                Ok(AnswerSubmissionOutcome::Cancelled) => {
+                    state.message = Some(format!(
+                        "answer refused: {display_id}'s question was cancelled"
+                    ));
+                }
+                Ok(AnswerSubmissionOutcome::Stale) => {
+                    state.message = Some(format!(
+                        "answer refused: {display_id}'s question changed; reopen it"
+                    ));
+                }
+                Ok(AnswerSubmissionOutcome::RejectedCorrection) => {
+                    state.message =
+                        Some("answer rejected; correct it and reopen the question".to_string());
+                }
+                Ok(AnswerSubmissionOutcome::NotRouted) => {
+                    state.message = Some(
+                        "answer refused: question did not route to its current frame".to_string(),
+                    );
+                }
+                Ok(AnswerSubmissionOutcome::Submitted { response })
+                    if response.session.status
+                        == ctx_traits_core::procedure::session::Status::Completed =>
+                {
                     state.message = Some(format!("answer accepted; {display_id} completed"));
                 }
-                Ok(ctx_traits_io::run::SetOutcome::Call { .. }) => {
+                Ok(AnswerSubmissionOutcome::Submitted { .. }) => {
                     if let Some(worker) = state.worker.as_ref() {
-                        worker.start_session(row.session_id.clone(), display_id.clone(), row.repo_key.clone());
+                        worker.start_session(
+                            row.session_id.clone(),
+                            display_id.clone(),
+                            row.repo_key.clone(),
+                        );
                     }
-                    state.message = Some(format!("answer accepted; resume started for {display_id}"));
-                }
-                Ok(ctx_traits_io::run::SetOutcome::Session { .. }) => {
-                    state.message = Some("answer refused: question did not route to its current frame".to_string());
+                    state.message =
+                        Some(format!("answer accepted; resume started for {display_id}"));
                 }
                 Err(error) => state.message = Some(format!("answer rejected: {error}")),
             }
@@ -9955,6 +9957,7 @@ mod tests {
             rate_limit: None,
             budget_pause: None,
             tokens_by_model: None,
+            summons: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: format!("wt-{run_id}"),
@@ -10086,6 +10089,7 @@ argv = ["git", "commit", "-m", "fixture"]
             rate_limit: None,
             budget_pause: None,
             tokens_by_model: None,
+            summons: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: format!("wt-{run_id}"),
@@ -11857,6 +11861,113 @@ argv = ["git", "commit", "-m", "fixture"]
             resolve_answer_trait_file_path(".ctx/traits/demo/trait.toml", None),
             None
         );
+    }
+
+    /// P0253.4 blocker 1: a parked summons with a stored durable question
+    /// presents (and is answerable) without resolving the trait at all —
+    /// [`unresolvable_trait_session_fixture`]'s `trait_source: None` makes
+    /// `load_trait_for_session` fail deterministically, so this proves the
+    /// row summary never calls it when the stored record already answers.
+    fn ask_frame_fixture(item_id: &str) -> ctx_traits_core::procedure::runtime::SequenceFrame {
+        use ctx_traits_core::procedure::runtime::SequenceFrame;
+        use ctx_traits_core::procedure::runtime::SequenceFrameKind;
+        use ctx_traits_core::reference::Reference;
+
+        SequenceFrame {
+            kind: SequenceFrameKind::Ask,
+            run_id: "run".to_string(),
+            trait_id: "test-trait".to_string(),
+            sequence_index: Some(0),
+            run_index: Some(0),
+            item_id: Some(item_id.to_string()),
+            position_path: Vec::new(),
+            loop_context: None,
+            for_each_context: None,
+            guard_explanations: Vec::new(),
+            signal_payloads: Vec::new(),
+            title: "ask-owner".to_string(),
+            frame_text: String::new(),
+            prompt: None,
+            command: None,
+            available_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            requested_outputs: vec![ctx_traits_core::procedure::runtime::FrameOutputRequest {
+                slot_ref: Reference::parse("slot:ask-owner").expect("slot ref parses"),
+                operation: Default::default(),
+                schema_ref: Some("schema:text".to_string()),
+                optional: false,
+            }],
+            assigned_agent: None,
+            allowed_signals: Vec::new(),
+            derived_signals: Vec::new(),
+            call_template: None,
+            warnings: Vec::new(),
+        }
+    }
+
+    fn awaiting_owner_session_fixture(
+        run_id: &str,
+        frame_item_id: &str,
+        summons_step_id: &str,
+        question: &str,
+    ) -> ctx_traits_core::procedure::session::Session {
+        use ctx_traits_core::procedure::session::DriveOutcome;
+        use ctx_traits_core::procedure::session::DriveOutcomeKind;
+        use ctx_traits_core::procedure::session::Status;
+        use ctx_traits_core::procedure::session::SummonsRecord;
+
+        let mut session = unresolvable_trait_session_fixture(run_id, Some(0));
+        session.status = Status::WaitingOnHuman;
+        session.next_frame = Some(Box::new(ask_frame_fixture(frame_item_id)));
+        session.last_drive_outcome = Some(DriveOutcome {
+            outcome: DriveOutcomeKind::AwaitingOwner,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
+            summons: Some(SummonsRecord {
+                step_id: summons_step_id.to_string(),
+                title: "ask-owner".to_string(),
+                question: question.to_string(),
+                answer_slot: "slot:ask-owner".to_string(),
+                schema_ref: Some("schema:text".to_string()),
+            }),
+        });
+        session
+    }
+
+    #[test]
+    fn parked_ask_presentation_uses_stored_evidence_without_resolving_the_trait() {
+        let session = awaiting_owner_session_fixture(
+            "run-stored",
+            "ask-owner",
+            "ask-owner",
+            "What should I do next?",
+        );
+        let presentation = parked_ask_presentation(&session, None).expect("stored summons row");
+        assert!(
+            presentation.starts_with("summons: What should I do next? ("),
+            "unexpected presentation: {presentation}"
+        );
+    }
+
+    #[test]
+    fn parked_ask_presentation_returns_none_for_a_stale_stored_record() {
+        // The stored record names a step that is no longer the current
+        // frame (a fresh ask after a resumed-then-re-parked run) — the
+        // legacy-fallback branch then tries to resolve the trait, which
+        // fails deterministically for `unresolvable_trait_session_fixture`.
+        let session = awaiting_owner_session_fixture(
+            "run-stale",
+            "ask-owner",
+            "some-other-step",
+            "stale question",
+        );
+        assert_eq!(parked_ask_presentation(&session, None), None);
     }
 
     #[test]

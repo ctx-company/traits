@@ -310,6 +310,7 @@ fn ctx_traits_run_set_inner(request: SetRequest) -> crate::Result<Envelope<Value
         out: request.out.as_deref(),
         caller,
         existing_input_evidence: "existing mcp run-session input",
+        advance_command_frames: true,
     })?;
     match outcome {
         crate::run::SetOutcome::Session {

@@ -19,6 +19,7 @@ export type {
 } from "./registrars.js";
 export { defineStep, step } from "./step.js";
 export type {
+  AskStepFields,
   CheckStep,
   CheckStepFields,
   CommandStepFields,

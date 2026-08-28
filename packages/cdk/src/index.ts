@@ -40,6 +40,7 @@ export type {
   GuardMatchArms,
   LoopParam,
   ParParam,
+  AskStepFields,
   CheckStep,
   CheckStepFields,
   CommandStepFields,
@@ -247,6 +248,7 @@ export type {
 export { idFromTitle, sequence } from "./sequence.js";
 export type {
   ArgvItem,
+  AskSequenceFields,
   BranchSequenceFields,
   CheckSequenceFields,
   CommandSequenceFields,

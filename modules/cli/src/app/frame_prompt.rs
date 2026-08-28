@@ -481,6 +481,75 @@ pub(crate) fn resolved_human_question_body(
     }
 }
 
+/// The one accessor every reader of a parked `awaiting-owner` question goes
+/// through (P0253.4): prefers the durable
+/// [`SummonsRecord`](ctx_traits_core::procedure::session::SummonsRecord)
+/// stamped at park time (`session.last_drive_outcome.summons`) when it
+/// names the same frame, and falls back to live re-resolution via
+/// [`resolved_human_question_body`] for a ledger parked before that field
+/// existed, or whose stored record's `step_id` no longer matches the current
+/// frame (e.g. a fresh ask after a resumed-then-re-parked run). Keeping both
+/// paths behind one function is what stops the CLI verb, the dashboard row,
+/// and the answer modal from drifting on which question they show.
+pub(crate) fn summons_question(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    session: &ctx_traits_core::procedure::session::Session,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> crate::Result<String> {
+    if let Some(question) = stored_summons_question(session, frame) {
+        return Ok(question);
+    }
+    resolved_human_question_body(loaded, session, frame)
+}
+
+/// The stored half of [`summons_question`], split out (P0253.4 blocker 1) so
+/// a caller can consult the durable record BEFORE paying for
+/// `load_trait_for_session` — every current caller still loads the trait for
+/// the legacy-fallback branch, but a later caller that only needs to know
+/// "is there an answerable question, and what does it say" no longer has to.
+pub(crate) fn stored_summons_question(
+    session: &ctx_traits_core::procedure::session::Session,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> Option<String> {
+    session
+        .last_drive_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.summons.as_ref())
+        .filter(|summons| {
+            frame
+                .item_id
+                .as_deref()
+                .is_some_and(|item_id| item_id == summons.step_id)
+        })
+        .map(|summons| summons.question.clone())
+}
+
+/// The one authoritative check for "this frame is a live summons a caller may
+/// display or answer" (P0253.4 blocker 1): an Ask frame, AND the session's
+/// last recorded drive outcome is actually `AwaitingOwner` — not merely a raw
+/// `Status::WaitingOnHuman`, which a failed marker write (`drive.rs`'s
+/// best-effort demotion to `harness-failed`) can leave behind on a frame the
+/// drive itself already reported as a failure. Shared by the dashboard row,
+/// the answer modal, and the CLI verb's inspection and submission TOCTOU
+/// re-check, so none of them can present or accept an answer for a summons
+/// that was never durably recorded as one.
+pub(crate) fn is_live_summons(
+    session: &ctx_traits_core::procedure::session::Session,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> bool {
+    if frame.kind != ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask {
+        return false;
+    }
+    let outcome = session.last_drive_outcome.as_ref().map(|o| &o.outcome);
+    let state =
+        ctx_traits_core::procedure::activity::SessionState::derive(&session.status, outcome, false);
+    state == ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman
+        && matches!(
+            outcome,
+            Some(ctx_traits_core::procedure::session::DriveOutcomeKind::AwaitingOwner)
+        )
+}
+
 fn frame_summary_text(frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> String {
     frame
         .frame_text
@@ -2207,7 +2276,7 @@ mod inline_value_tests {
 
 #[cfg(test)]
 mod resolve_input_value_tokens_setting_tests {
-    use super::resolve_input_value_tokens;
+    use super::{is_live_summons, resolve_input_value_tokens, stored_summons_question};
     use ctx_traits_core::digest::Digest;
     use ctx_traits_core::procedure::run::Id as RunId;
     use ctx_traits_core::procedure::runtime::{
@@ -2215,7 +2284,7 @@ mod resolve_input_value_tokens_setting_tests {
         SettingSourceLayer, State,
     };
     use ctx_traits_core::procedure::session::{
-        CallerProvenance, Provenance, Session, SessionId, Status,
+        CallerProvenance, DriveOutcome, DriveOutcomeKind, Provenance, Session, SessionId, Status,
     };
     use ctx_traits_core::reference::Reference;
     use serde_json::json;
@@ -2391,6 +2460,107 @@ mod resolve_input_value_tokens_setting_tests {
 
         assert!(rendered.contains("missing-test"));
         assert!(rendered.contains("{signal:needs-review.other}"));
+    }
+
+    fn summons_outcome(step_id: &str, question: &str) -> DriveOutcome {
+        DriveOutcome {
+            outcome: DriveOutcomeKind::AwaitingOwner,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
+            summons: Some(ctx_traits_core::procedure::session::SummonsRecord {
+                step_id: step_id.to_string(),
+                title: "ask-owner".to_string(),
+                question: question.to_string(),
+                answer_slot: "slot:ask-owner".to_string(),
+                schema_ref: None,
+            }),
+        }
+    }
+
+    /// P0253.4 blocker 1: `stored_summons_question` is the accessor a caller
+    /// can consult BEFORE resolving the trait — it must return the durable
+    /// record's text when the record names the current frame, and `None`
+    /// (forcing the legacy live-resolution fallback) for a ledger with no
+    /// record at all or whose record names a different, since-superseded
+    /// frame.
+    #[test]
+    fn stored_summons_question_matches_by_current_frame_item_id() {
+        let mut session = test_session(Vec::new());
+        let mut frame = test_frame();
+        frame.item_id = Some("ask-owner".to_string());
+
+        assert_eq!(stored_summons_question(&session, &frame), None);
+
+        session.last_drive_outcome = Some(summons_outcome("ask-owner", "What next?"));
+        assert_eq!(
+            stored_summons_question(&session, &frame),
+            Some("What next?".to_string())
+        );
+
+        session.last_drive_outcome = Some(summons_outcome("some-other-step", "Stale question"));
+        assert_eq!(
+            stored_summons_question(&session, &frame),
+            None,
+            "a record naming a different step must not be surfaced as this frame's question"
+        );
+    }
+
+    /// P0253.4 blocker 1: `is_live_summons` is the shared refusal boundary —
+    /// a failed `record_drive_outcome` write demotes `report.status` to
+    /// `harness-failed` (`drive.rs`) BEFORE persisting, so a session whose
+    /// last recorded outcome is anything other than `AwaitingOwner` must
+    /// never be treated as an answerable summons, even while its raw
+    /// `Status` is still `WaitingOnHuman`.
+    #[test]
+    fn is_live_summons_requires_an_ask_frame_and_a_durably_recorded_awaiting_owner_outcome() {
+        let mut session = test_session(Vec::new());
+        let mut ask_frame = test_frame();
+        ask_frame.kind = SequenceFrameKind::Ask;
+        ask_frame.item_id = Some("ask-owner".to_string());
+
+        assert!(
+            !is_live_summons(&session, &ask_frame),
+            "no recorded outcome at all must not read as a live summons"
+        );
+
+        session.last_drive_outcome = Some(summons_outcome("ask-owner", "What next?"));
+        assert!(
+            is_live_summons(&session, &ask_frame),
+            "an Ask frame with a durably recorded AwaitingOwner outcome is a live summons"
+        );
+
+        let mut non_ask_frame = ask_frame.clone();
+        non_ask_frame.kind = SequenceFrameKind::Intro;
+        assert!(
+            !is_live_summons(&session, &non_ask_frame),
+            "a non-Ask frame is never a live summons regardless of the outcome"
+        );
+
+        // Simulates the write-failure demotion at `drive.rs`: the park never
+        // durably recorded `AwaitingOwner`, only a failure marker, even
+        // though `Status` is untouched.
+        session.last_drive_outcome = Some(DriveOutcome {
+            outcome: DriveOutcomeKind::from_wire("harness-failed".to_string()),
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
+            summons: None,
+        });
+        assert!(
+            !is_live_summons(&session, &ask_frame),
+            "a failed drive-outcome write must refuse the summons, not expose it as answerable"
+        );
     }
 }
 

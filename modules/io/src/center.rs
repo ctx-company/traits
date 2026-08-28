@@ -3939,10 +3939,15 @@ mod tests {
 
     #[test]
     fn discovery_preserves_every_settled_pause_outcome_and_clears_stale_metadata() {
-        for outcome in [
-            "paused",
-            "paused-provider-credits",
-            "paused-budget-exhausted",
+        // P0253.4: `awaiting-owner` pairs with `waiting-on-human` status (a
+        // parked ask), unlike the other settled pauses, which all park on
+        // `awaiting-agent-output` — the real-world shape a summons leaves
+        // behind, not an arbitrary substitution.
+        for (status, outcome) in [
+            ("awaiting-agent-output", "paused"),
+            ("awaiting-agent-output", "paused-provider-credits"),
+            ("awaiting-agent-output", "paused-budget-exhausted"),
+            ("waiting-on-human", "awaiting-owner"),
         ] {
             let root = scratch(&format!("settled-pause-{outcome}"));
             let paths = paths(root.clone());
@@ -3951,7 +3956,7 @@ mod tests {
                 .expect("create repository store");
             crate::run_session::write_run_session(
                 &ledger,
-                &fixture_session_with_outcome("awaiting-agent-output", outcome),
+                &fixture_session_with_outcome(status, outcome),
             )
             .expect("write paused ledger");
             let lock_path = crate::run_control::driver_lock_path(&ledger);

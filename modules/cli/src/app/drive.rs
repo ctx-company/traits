@@ -13,7 +13,7 @@ use crate::app::agent_dispatch;
 use crate::app::frame_prompt::{
     RequestedSlotKey, ResolvedFramePrompt, frame_prompt, mcp_frame_prompt,
     requested_output_contract_section, requested_output_schema, requested_outputs,
-    resolved_frame_prompt,
+    resolved_frame_prompt, resolved_human_question_body,
 };
 use crate::app::presentation::{Panel, PanelRow, PanelStatus, RowTone, emit_human};
 use crate::app::{harness_stream, run_view, surface::cli, tui};
@@ -1008,6 +1008,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     crate::app::interrupt::install();
     let session = input.session;
     let session_store = input.session_store;
+    let trait_file_override = input.file;
     let mut input = input;
     // ONE deadline for this whole invocation, computed here before anything
     // else (lease wait, then execution) spends any of it — see P402
@@ -1501,12 +1502,37 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         *tokens_by_model_map.entry(model).or_insert(0) += tokens;
     }
     let tokens_by_model = (!tokens_by_model_map.is_empty()).then_some(tokens_by_model_map);
+    // P0253.4 blocker 1: the durable question, composed once at the park
+    // point through the same `resolved_human_question_body` every other
+    // reader (dashboard row, answer modal, `ctx traits answer`, static
+    // preview) shares. A NEW `awaiting-owner` park is required to carry it —
+    // a park with `summons: None` is exactly the shape blocker 1 flagged
+    // (a raw waiting frame with no durable evidence a reader can trust
+    // without re-resolving the trait). Composition failing here demotes the
+    // report to a failure BEFORE the outcome is recorded, rather than
+    // persisting a successful park with nothing behind it.
+    let summons = if report.status == "awaiting-owner" {
+        match compose_summons_record(session, session_store, trait_file_override) {
+            Some(summons) => Some(summons),
+            None => {
+                report.status = "harness-failed".to_string();
+                report.warnings.push(
+                    "awaiting-owner park demoted: could not compose durable summons evidence"
+                        .to_string(),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     let evidence = ctx_traits_core::procedure::session::DriveTerminalEvidence {
         effective_budget: Some(budget_evidence(&budget)),
         token_usage,
         exit_code: Some(drive_report_exit_code(&report.status)),
         rate_limit: report.rate_limit.clone(),
         tokens_by_model: tokens_by_model.clone(),
+        summons,
     };
     // Stamp why the conductor exited; the ledger status alone cannot tell a
     // timed-out drive from one that is still running. Best-effort: a marker
@@ -1524,6 +1550,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         if report.credits_pause.is_some()
             || report.budget_pause.is_some()
             || report.status == "paused"
+            || report.status == "awaiting-owner"
         {
             report.status = "harness-failed".to_string();
             report.credits_pause = None;
@@ -1561,6 +1588,39 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
 /// no equivalent table anywhere in the tree today. Only ever `None` when the
 /// driver crashed before reaching this point at all, which is the signal
 /// P512's typed CANCELLED outcome is built on.
+/// Compose the durable [`SummonsRecord`](ctx_traits_core::procedure::session::SummonsRecord)
+/// for a run that just parked `awaiting-owner` on an ask frame. Re-reads the
+/// session ledger (this drive's own in-memory session may be one frame
+/// stale by the time terminal evidence is assembled) and the trait file,
+/// then composes the question with the same `resolved_human_question_body`
+/// every other reader shares. Returns `None` on any failure; for a NEW
+/// `awaiting-owner` park the caller (above) treats that as mandatory and
+/// demotes the report to `harness-failed` before recording anything, rather
+/// than persisting a park with no durable evidence behind it. `None` only
+/// degrades a reader's convenience for an OLDER ledger whose `summons_question`
+/// accessor falls back to live re-resolution when no stored record names the
+/// current frame.
+fn compose_summons_record(
+    session: &str,
+    session_store: Option<&str>,
+    file: Option<&str>,
+) -> Option<ctx_traits_core::procedure::session::SummonsRecord> {
+    let current = ctx_traits_io::run::read_session(session, session_store).ok()?;
+    let frame = current.next_frame.as_ref().filter(|frame| {
+        frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
+    })?;
+    let output = frame.requested_outputs.first()?;
+    let loaded = ctx_traits_io::run::load_trait_for_session(file, None, &current, "drive").ok()?;
+    let question = resolved_human_question_body(&loaded, &current, frame).ok()?;
+    Some(ctx_traits_core::procedure::session::SummonsRecord {
+        step_id: frame.item_id.clone().unwrap_or_default(),
+        title: frame.title.clone(),
+        question,
+        answer_slot: output.slot_ref.to_string(),
+        schema_ref: output.schema_ref.clone(),
+    })
+}
+
 fn drive_report_exit_code(status: &str) -> u8 {
     if status == "completed" {
         0
@@ -2393,6 +2453,7 @@ fn drive_loop(
                         out: None,
                         caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
                         existing_input_evidence: "ctx traits run (live modal)",
+                        advance_command_frames: true,
                     });
                     if let Err(error) = set_result {
                         panel.note(format!("input rejected for {port_ref}: {error}"));
@@ -2403,7 +2464,7 @@ fn drive_loop(
                 return Ok(report);
             }
             ctx_traits_core::procedure::session::Status::WaitingOnHuman => {
-                report.status = "waiting-on-human".to_string();
+                report.status = "awaiting-owner".to_string();
                 return Ok(report);
             }
             ctx_traits_core::procedure::session::Status::Blocked

@@ -1276,21 +1276,31 @@ fn human_terminal_failure(
         human_output,
         drive.credits_pause.is_some(),
         drive.budget_pause.is_some(),
+        drive.status == "awaiting-owner",
         session.status.clone(),
         drive.final_session_status.clone(),
     )
 }
 
+/// `summons_parked` is keyed on the drive's own reported outcome string
+/// (`report.status`, downgraded to `"harness-failed"` if the drive-outcome
+/// marker failed to persist, mirroring `credits_paused`/`budget_paused`) —
+/// never the session's raw `Status::WaitingOnHuman`, which reflects frame
+/// readiness independent of whether the terminal outcome was actually
+/// recorded. A summons whose evidence failed to write must still report a
+/// failure (P0253.4).
 fn human_terminal_failure_values(
     human_output: bool,
     credits_paused: bool,
     budget_paused: bool,
+    summons_parked: bool,
     session_status: ctx_traits_core::procedure::session::Status,
     drive_status: Option<ctx_traits_core::procedure::session::Status>,
 ) -> bool {
     human_output
         && !credits_paused
         && !budget_paused
+        && !summons_parked
         && !run_completed_status(session_status, drive_status)
 }
 
@@ -2457,6 +2467,7 @@ pub(crate) fn handle_set(input: SetInputs<'_>) -> crate::Result<CommandOutput<()
         caller: ctx_traits_core::procedure::session::CallerProvenance::cli()
             .with_agent(input.agent.map(str::to_string)),
         existing_input_evidence: "existing run-session input",
+        advance_command_frames: true,
     })?;
     match outcome {
         ctx_traits_io::run::SetOutcome::Session {
@@ -2642,12 +2653,14 @@ mod completion_disposition_tests {
             false,
             false,
             false,
+            false,
             Status::Failed,
             Some(Status::Failed),
         ));
         assert!(!human_terminal_failure_values(
             true,
             true,
+            false,
             false,
             Status::Failed,
             Some(Status::Failed),
@@ -2656,11 +2669,13 @@ mod completion_disposition_tests {
             true,
             false,
             true,
+            false,
             Status::Failed,
             Some(Status::Failed),
         ));
         assert!(!human_terminal_failure_values(
             true,
+            false,
             false,
             false,
             Status::Completed,
@@ -2670,8 +2685,37 @@ mod completion_disposition_tests {
             true,
             false,
             false,
+            false,
             Status::Failed,
             Some(Status::Failed),
+        ));
+    }
+
+    #[test]
+    fn terminal_failure_exempts_a_recorded_summons_park_but_not_a_failed_write() {
+        // The outcome-write marker succeeded: `report.status == "awaiting-owner"`
+        // exempts the run, even though the raw session status also reads
+        // `WaitingOnHuman` (P0253.4).
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
+            false,
+            true,
+            Status::WaitingOnHuman,
+            Some(Status::WaitingOnHuman),
+        ));
+        // The outcome-write marker failed: `drive.rs` downgrades
+        // `report.status` away from `"awaiting-owner"`, but the session's raw
+        // status can still read `WaitingOnHuman` since frame readiness is
+        // independent of the marker write. This must NOT be exempted — an
+        // unpersisted summons is a failed run, not a resumable park.
+        assert!(human_terminal_failure_values(
+            true,
+            false,
+            false,
+            false,
+            Status::WaitingOnHuman,
+            Some(Status::WaitingOnHuman),
         ));
     }
 

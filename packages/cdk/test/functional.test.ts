@@ -32,7 +32,7 @@ import {
   useVariant,
 } from "@ctx-traits/cdk";
 import { defineVariant, isTraitFamilyHandle, resolveTraitFamily, variant } from "@ctx-traits/cdk";
-import type { FieldRef, JsonObject, ParameterizedStep, SlotHandle } from "@ctx-traits/cdk";
+import type { AskStepFields, FieldRef, JsonObject, ParameterizedStep, SlotHandle } from "@ctx-traits/cdk";
 import { describe, expect, it } from "vitest";
 
 describe("functional layer build rules (0106)", () => {
@@ -544,6 +544,107 @@ describe("functional layer build rules (0106)", () => {
   });
 });
 
+describe("step.ask / defineStep.ask (0253.4)", () => {
+  it("step.ask lowers to kind ask with a signal guard and mints a virtual slot for a bare-schema output", () => {
+    const sig = signal({
+      id: "ask-lower-signal",
+      description: "d",
+      schema: schema.object("ask-lower-payload", { reason: schema.text() }),
+    });
+    const proc = procedure.from({ description: "d" }, () => {
+      const ask = step.ask("What now", { when: sig, input: input.prompt`What next?`, output: schema.text() });
+      step.command("Echo answer", { cmd: "echo hi", input: [ask.result] });
+    });
+    const built = toDraftJson(trait("ask-lower-fixture", { name: "Ask Lower", summary: "s", procedure: proc })) as {
+      procedure: { sequence: readonly { id: string; kind: string; when?: unknown }[] };
+    };
+    const item = built.procedure.sequence.find((entry) => entry.id === "what-now");
+    expect(item).toMatchObject({ kind: "ask", when: "signal:ask-lower-signal" });
+  });
+
+  it("defineStep.ask({...}) declares a reusable, static ask step, reachable from the package root", () => {
+    const sig = signal({
+      id: "ask-static-signal",
+      description: "d",
+      schema: schema.object("ask-static-payload", { reason: schema.text() }),
+    });
+    const summon: AskStepFields = {
+      when: sig,
+      input: input.prompt`What now?`,
+      output: schema.text(),
+    };
+    const ask = defineStep.ask(summon);
+    const proc = procedure.from({ description: "d" }, () => {
+      ask("Static Summon");
+    });
+    const built = toDraftJson(trait("ask-static-fixture", { name: "Ask Static", summary: "s", procedure: proc })) as {
+      procedure: { sequence: readonly { id: string; kind: string }[] };
+    };
+    expect(built.procedure.sequence).toMatchObject([{ id: "static-summon", kind: "ask" }]);
+  });
+
+  it("defineStep.ask((sig) => ...) declares a reusable, parameterized ask step", () => {
+    const sig = signal({
+      id: "ask-factory-signal",
+      description: "d",
+      schema: schema.object("ask-factory-payload", { reason: schema.text() }),
+    });
+    const summon = defineStep.ask((s: typeof sig) => ({
+      when: s,
+      input: input.prompt`Why: ${s.reason}`,
+      output: schema.text(),
+    }));
+    const proc = procedure.from({ description: "d" }, () => {
+      summon("Summon Owner", sig);
+    });
+    const built = toDraftJson(trait("ask-factory-fixture", { name: "Ask Factory", summary: "s", procedure: proc })) as {
+      procedure: { sequence: readonly { id: string; kind: string }[] };
+    };
+    expect(built.procedure.sequence).toMatchObject([{ id: "summon-owner", kind: "ask" }]);
+  });
+
+  it("a signal field read in an ask's own body is legal without an enclosing flow.when — the ask's own `when` is the guard", () => {
+    const sig = signal({
+      id: "ask-own-guard-signal",
+      description: "d",
+      schema: schema.object("ask-own-guard-payload", { reason: schema.text() }),
+    });
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        step.ask("Self Guarded", { when: sig, input: input.prompt`Why: ${sig.reason}`, output: schema.text() });
+      }),
+    ).not.toThrow();
+  });
+
+  it("a signal field read from a DIFFERENT signal than an ask's own guard is still a build error", () => {
+    const sig = signal({
+      id: "ask-mismatched-guard-signal",
+      description: "d",
+      schema: schema.object("ask-mismatched-guard-payload", { reason: schema.text() }),
+    });
+    const other = signal({ id: "ask-mismatched-other-signal", description: "d" });
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        step.ask("Mismatched Ask", { when: other, input: input.prompt`Why: ${sig.reason}`, output: schema.text() });
+      }),
+    ).toThrow(/"Mismatched Ask".*"signal:ask-mismatched-guard-signal" field "reason" is readable only inside/);
+  });
+
+  it("step.ask registered after loop.until in its own loop is a build error", () => {
+    const sig = signal({ id: "ask-until-signal", description: "d" });
+    const gate = slot.text("ask-until-gate");
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.loop("Loop", (loop) => {
+          loop.maxIterations(2);
+          loop.until(condition.not(condition.empty(gate)));
+          step.ask("Late Ask", { when: sig, input: input.prompt`Why?`, output: schema.text() });
+        });
+      }),
+    ).toThrow(/step\.ask registered after loop\.until/);
+  });
+});
+
 describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   it("defineTrait never called is a build error", () => {
     expect(() => evaluateTraitFunction(() => undefined)).toThrow(/defineTrait\(\.\.\.\) was never called/);
@@ -668,6 +769,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   });
 
   it("a parameterized step factory's arity and ref kind are checked at the instantiation call site (typecheck only)", () => {
+    // oxlint-disable-next-line no-constant-condition -- gated typecheck-only block, never executed.
     if (false) {
       const textTarget = slot.text("factory-typed-target");
       const numberTarget = slot.number("factory-typed-number");
@@ -686,6 +788,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   });
 
   it("a factory-declared prompt or command exposes .result with the full augmented handle (typecheck only)", () => {
+    // oxlint-disable-next-line no-constant-condition -- gated typecheck-only block, never executed.
     if (false) {
       const commandStep = defineStep.command(() => ({
         input: input.command`git status --porcelain`,
@@ -694,7 +797,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       const placedCommand = commandStep("Status");
       placedCommand.result satisfies SlotHandle<string>;
       placedCommand.result.optional().optional satisfies true;
-      placedCommand.result.with; // present on the type — the augmented handle, not a bare SlotHandle
+      void placedCommand.result.with; // present on the type — the augmented handle, not a bare SlotHandle
       // The virtual slot is consumable by a later step, exactly like a hand-declared one.
       step.command("Log", { cmd: "log", input: [placedCommand.result] });
 
@@ -726,6 +829,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   });
 
   it("a declared/factory step with no output: never types .result (typecheck only)", () => {
+    // oxlint-disable-next-line no-constant-condition -- gated typecheck-only block, never executed.
     if (false) {
       // `.result` alone would still type-check as `unknown` through `CdkObject`'s
       // index signature — calling `.optional()` is the check that actually

@@ -60,6 +60,7 @@ AI Assistance:
   critique    Use a model to write an advisory design critique of a canonical trait
 Execute:
   run         Run a trait end to end through configured harnesses
+  answer      Answer a run parked `awaiting-owner` on an authored `ask` step
   merge       Land a completed `--worktree` run (--park-on-overlap restores strict overlap handling, --deep uses a judgment-capable merger)
 Options:
       --session <SESSION>  Run-session ID or ledger path for commands such as `set`
@@ -855,6 +856,48 @@ pub enum TraitsCommand {
         /// Include merge diagnostics such as lock and overlap evidence.
         #[arg(long)]
         verbose: bool,
+    },
+    /// Answer a run parked `awaiting-owner` on an authored `ask` step.
+    ///
+    /// With no `--value`/`--value-json`, prints the question, its answer
+    /// slot and schema, and the exact command to answer. With one of them,
+    /// submits the answer through the same path
+    /// `session frame set`/the dashboard's answer modal use, then resumes
+    /// the run in-process (skip with `--no-resume`).
+    Answer {
+        /// Run-id, full session ID, unambiguous session-ID prefix, or
+        /// ledger path of the parked session.
+        #[arg(value_name = "SESSION")]
+        session: String,
+
+        /// Plain-text answer, always submitted as a JSON string. For a
+        /// `schema:text` (or unset) slot this is the value itself; for any
+        /// other schema, use `--value-json` instead — `--value` cannot
+        /// submit a non-string JSON value.
+        #[arg(long, conflicts_with = "value_json")]
+        value: Option<String>,
+
+        /// JSON-encoded answer, parsed against the answer slot's schema.
+        #[arg(long = "value-json", conflicts_with = "value")]
+        value_json: Option<String>,
+
+        /// Run-session store directory to resolve `SESSION` from. Defaults
+        /// to this repository's global per-repository runs root.
+        #[arg(long)]
+        session_store: Option<String>,
+
+        /// Trait file to resolve the question against, when the ledger's
+        /// recorded source path does not resolve from the current directory.
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Record the answer without resuming the run.
+        #[arg(long = "no-resume")]
+        no_resume: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Check a trait for validation, audit, and drift.
     Check {

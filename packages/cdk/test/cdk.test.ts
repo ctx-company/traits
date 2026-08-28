@@ -408,6 +408,7 @@ describe("prompt sequence intent", () => {
   });
 
   it("rejects intent on every non-prompt builder at typecheck and runtime", () => {
+    // oxlint-disable-next-line no-constant-condition -- gated typecheck-only block, never executed.
     if (false) {
       // @ts-expect-error intent is prompt-only.
       sequence.command("typed-illegal-intent", { cmd: "true", intent: {} });
@@ -567,6 +568,7 @@ describe("prompt sequence behavior", () => {
   });
 
   it("non-prompt sequence builders reject behavior at typecheck and evaluated runtime", () => {
+    // oxlint-disable-next-line no-constant-condition -- gated typecheck-only block, never executed.
     if (false) {
       // @ts-expect-error behavior is prompt-only.
       sequence.command("typed-illegal-behavior", { cmd: "true", behavior: {} });
@@ -1624,6 +1626,7 @@ describe("input.prompt / output.text / output.of (0045)", () => {
   });
 
   it("a step with no output:, a named-slot output, or a raw non-schema output string never types .result (typecheck only)", () => {
+    // oxlint-disable-next-line no-constant-condition -- gated typecheck-only block, never executed.
     if (false) {
       // `.result`/`.result.optional` alone would still type-check as `unknown`
       // through `CdkObject`'s index signature — calling `.optional()` is the
@@ -3580,7 +3583,7 @@ describe("signals: the third reference kind (0253.2)", () => {
     const review = signal({ id: "typed-field-review", description: "d", schema: payload });
     expectTypeOf(review).toMatchTypeOf<DeclaredSignalWithFields<{ readonly reason: string }>>();
     expectTypeOf(review.reason).toMatchTypeOf<SignalFieldRef<string>>();
-    input.prompt`Reason: ${review.reason}`;
+    void input.prompt`Reason: ${review.reason}`;
     expect(condition.signal(review)).toEqual({ signal: "signal:typed-field-review" });
     // An unschema'd signal is still accepted everywhere a SignalHandle is.
     const plain = signal({ id: "typed-field-plain", description: "d" });
@@ -3590,7 +3593,7 @@ describe("signals: the third reference kind (0253.2)", () => {
   it("rejects an unknown signal field and an unrelated CDK value as a signal field interpolation, at author time", () => {
     const payload = schema.object("field-boundary-payload", { reason: schema.text() });
     const review = signal({ id: "field-boundary-review", description: "d", schema: payload });
-    input.prompt`Reason: ${review.reason}`;
+    void input.prompt`Reason: ${review.reason}`;
     // Not invoked: `review.notAField` throws at the proxy's own `get` trap
     // (asserted separately above), before the interpolation type error below
     // would ever be reached at runtime.
@@ -3611,7 +3614,7 @@ describe("signals: the third reference kind (0253.2)", () => {
     void interpolateSlotFieldRef;
 
     // @ts-expect-error an unrelated CDK handle (a schema declaration itself) is not a signal field prompt interpolation.
-    input.prompt`Reason: ${payload}`;
+    void input.prompt`Reason: ${payload}`;
   });
 
   it("a NAMED prompt() containing a signal field interpolation keeps the token in text but excludes the signal from its own input contract", () => {

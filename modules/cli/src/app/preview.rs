@@ -20,6 +20,22 @@ pub(crate) struct PreviewReport {
     pub(crate) trait_id: String,
     pub(crate) session: Option<String>,
     pub(crate) frames: Vec<PreviewFrame>,
+    /// Every `ask` step in the trait — a property of the trait, not of the
+    /// current `--step` selection, so it is populated the same way whether
+    /// or not `--step`/`--session` narrows `frames`.
+    pub(crate) summons: Vec<SummonPoint>,
+}
+
+/// One authored summon point (0253.4): the guard that exposes it and the
+/// slot its answer fills, independent of any particular run's frame state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct SummonPoint {
+    pub(crate) step: String,
+    pub(crate) title: String,
+    pub(crate) guard: String,
+    pub(crate) answer_slot: Option<String>,
+    pub(crate) schema: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,11 +170,57 @@ fn static_preview(file: &str, step: Option<&str>) -> crate::Result<PreviewReport
         .iter()
         .map(|frame| build_static_frame(&loaded, &session, frame))
         .collect::<crate::Result<Vec<_>>>()?;
+    let summons = summon_points(&loaded, &state)?;
     Ok(PreviewReport {
         trait_id: loaded.trait_ref.id.as_str().to_string(),
         session: None,
         frames: preview_frames,
+        summons,
     })
+}
+
+/// Every `ask` step in the trait, with its guard and answer slot — one
+/// unfiltered `preview_sequence_frames` walk (`step: None`), so `--step`
+/// narrowing a report's `frames` never narrows its `summons`.
+fn summon_points(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    state: &ctx_traits_core::procedure::runtime::State,
+) -> crate::Result<Vec<SummonPoint>> {
+    let frames = ctx_traits_core::procedure::runtime::preview_sequence_frames(
+        &loaded.trait_ref,
+        state,
+        None,
+    )?;
+    frames
+        .iter()
+        .filter(|frame| frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask)
+        .map(|frame| {
+            let guard = resolve_declared_item(loaded, frame)
+                .and_then(|item| item.when.as_ref())
+                .map_or_else(|| "always".to_string(), guard_expr_text);
+            let requested = requested_outputs(frame, loaded)?;
+            let answer = requested.iter().find(|output| !output.is_signal);
+            Ok(SummonPoint {
+                step: frame_step_label(frame),
+                title: frame.title.clone(),
+                guard,
+                answer_slot: answer.map(|output| output.ref_text.clone()),
+                schema: answer.and_then(|output| output.schema_ref.clone()),
+            })
+        })
+        .collect()
+}
+
+/// Renders a guard for display. The canonical ask validator requires `when`
+/// to be a bare `signal:<id>` ref (`Ref`), so `Any`/`Predicate` are not
+/// reachable through an authored ask — rendered defensively rather than
+/// treated as unreachable, since a future guard kind could relax that.
+fn guard_expr_text(guard: &ctx_traits_core::r#trait::condition::GuardExpr) -> String {
+    use ctx_traits_core::r#trait::condition::GuardExpr;
+    match guard {
+        GuardExpr::Ref(ref_text) => ref_text.clone(),
+        GuardExpr::Any(_) | GuardExpr::Predicate(_) => "always".to_string(),
+    }
 }
 
 fn frame_step_label(frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> String {
@@ -288,6 +350,16 @@ fn build_static_frame(
     }
     let pending_inputs = pending_inputs_for(loaded, frame);
     let context = resolved_frame_prompt(loaded, session, frame, &pending_inputs)?;
+    if frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask {
+        return Ok(PreviewFrame {
+            step: frame_step_label(frame),
+            title: frame.title.clone(),
+            transport: "human".to_string(),
+            prompt: Some(human_frame_prompt(PREVIEW_ID, frame, &context)),
+            command: None,
+            note: Some("human-owned frame; no agent or harness dispatch".to_string()),
+        });
+    }
     let requested = requested_outputs(frame, loaded)?;
     let schema = requested_output_schema(&requested, loaded);
     let prompt = frame_prompt(&context, &schema, None);
@@ -368,17 +440,21 @@ fn session_preview(
             frame
         }
         (None, None) => {
+            let summons = summon_points(&loaded, &session.ledger)?;
             return Ok(PreviewReport {
                 trait_id: loaded.trait_ref.id.as_str().to_string(),
                 session: Some(session_path.to_string()),
                 frames: Vec::new(),
+                summons,
             });
         }
     };
+    let summons = summon_points(&loaded, &session.ledger)?;
     Ok(PreviewReport {
         trait_id: loaded.trait_ref.id.as_str().to_string(),
         session: Some(session_path.to_string()),
         frames: vec![preview_frame],
+        summons,
     })
 }
 
@@ -482,6 +558,17 @@ fn print_report(report: &PreviewReport) {
         }
         if let Some(prompt) = frame.prompt.as_deref() {
             println!("{prompt}");
+        }
+    }
+    if !report.summons.is_empty() {
+        println!("--- SUMMONS ---");
+        for summon in &report.summons {
+            let slot = summon.answer_slot.as_deref().unwrap_or("none");
+            let schema = summon.schema.as_deref().unwrap_or("none");
+            println!(
+                "  {} [{}] guard={} answer-slot={} schema={}",
+                summon.step, summon.title, summon.guard, slot, schema
+            );
         }
     }
 }

@@ -368,6 +368,13 @@ pub struct SetRequest<'a> {
     pub out: Option<&'a str>,
     pub caller: ctx_traits_core::procedure::session::CallerProvenance,
     pub existing_input_evidence: &'a str,
+    /// Whether a `CurrentFrameCall` submission may synchronously execute a
+    /// following `command` frame (`rebuild_call_response_after_command_advance`).
+    /// `true` for every pre-existing caller. `false` for `ctx traits answer
+    /// --no-resume` (P0253.4 blocker 2): a summons answer must not run a
+    /// trailing command before the caller's own no-resume check runs, since
+    /// the advance happens inside this call, before `set` even returns.
+    pub advance_command_frames: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2300,6 +2307,7 @@ mod startup_observer_tests {
             out: None,
             caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
             existing_input_evidence: "must not replace existing evidence",
+            advance_command_frames: true,
         })
         .expect("missing input is accepted");
         let SetOutcome::Session { session, .. } = outcome else {
@@ -3109,15 +3117,20 @@ pub fn set(request: SetRequest<'_>) -> crate::Result<SetOutcome> {
             if response.persist_session {
                 crate::run_session::write_run_session(&write_path, &response.session)?;
             }
-            let (response, _command_failure) = rebuild_call_response_after_command_advance(
-                &loaded.trait_ref,
-                &loaded.trait_root,
-                response,
-                &write_path,
-                restored_execution_dir.as_deref(),
-                &BTreeMap::new(),
-                None,
-            )?;
+            let response = if request.advance_command_frames {
+                let (response, _command_failure) = rebuild_call_response_after_command_advance(
+                    &loaded.trait_ref,
+                    &loaded.trait_root,
+                    response,
+                    &write_path,
+                    restored_execution_dir.as_deref(),
+                    &BTreeMap::new(),
+                    None,
+                )?;
+                response
+            } else {
+                response
+            };
             let resource_supported =
                 ctx_traits_core::procedure::session::declared_resource_evidence_supported(
                     &response.session.resource_evidence,

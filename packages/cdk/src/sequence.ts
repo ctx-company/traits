@@ -303,7 +303,7 @@ export type PromptRegistrarOptions = Omit<
 > & { readonly output?: SequenceOutputValue | readonly SequenceOutputValue[]; readonly id?: string };
 /** A human-owned prompt. The required signal guard decides whether the frame
  * is exposed; its one local slot output is supplied through `session frame set`. */
-type AskSequenceFields = Omit<
+export type AskSequenceFields = Omit<
   SequenceCommonFields,
   "agent" | "format" | "onComplete" | "onFailure" | "input" | "when"
 > & {
@@ -311,7 +311,7 @@ type AskSequenceFields = Omit<
   readonly behavior?: never;
   readonly kind: "ask";
   readonly when: RefHandle<"signal">;
-  readonly output: SlotHandle;
+  readonly output: SequenceOutputValue | readonly SequenceOutputValue[];
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
   readonly agent?: never;
@@ -875,8 +875,12 @@ export interface SequenceFunction {
     fields: Omit<CheckSequenceFields, "id" | "kind">,
   ): SequenceHandle & { readonly pass: SlotWithFields<CheckResultValue> };
   /** Declares a signal-gated question that is answered by a human through the
-   * normal current-frame submission path. */
-  ask(id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle;
+   * normal current-frame submission path. A bare schema as `output:` declares
+   * a virtual slot, same as `sequence.command`/`sequence.prompt`. */
+  ask<const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
+    id: string,
+    fields: Omit<AskSequenceFields, "id" | "kind" | "output"> & { readonly output: RawOutput },
+  ): SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
   /**
    * Repeats a producing step until a human approves or edits its proposal.
    * `reject` leaves the gate unsettled, so the bounded blocking loop reruns
@@ -1112,6 +1116,16 @@ function sequenceCommand(
   return sequenceOf(idOrFields as CommandSequenceFields);
 }
 
+function sequenceAsk<
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
+  id: string,
+  fields: Omit<AskSequenceFields, "id" | "kind" | "output"> & { readonly output: RawOutput },
+): SequenceHandle & VirtualSlotSurfaceOf<RawOutput> {
+  return sequenceOf({ ...fields, id, kind: "ask" } as AskSequenceFields) as SequenceHandle &
+    VirtualSlotSurfaceOf<RawOutput>;
+}
+
 function sequenceForEach(id: string, fields: Omit<ForEachSequenceFields, "id" | "kind">): SequenceHandle;
 function sequenceForEach<Item = unknown>(
   id: string,
@@ -1279,8 +1293,7 @@ export const sequence: SequenceFunction = {
       // exposed, and a bare `SlotHandle` left that access at `unknown`.
       fields.output as unknown as SlotWithFields<CheckResultValue>,
     ),
-  ask: (id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle =>
-    sequenceOf({ ...fields, id, kind: "ask" } as AskSequenceFields),
+  ask: sequenceAsk,
   gate: sequenceGate,
   project: (id: string, fields: Omit<ProjectSequenceFields, "id" | "kind">): SequenceHandle =>
     sequenceOf({ ...fields, id, kind: "project" }),

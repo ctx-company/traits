@@ -703,6 +703,7 @@ pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "refine",
     "critique",
     "run",
+    "answer",
     "merge",
     "trust",
     // `state` is visible again: it is the step the quickstart walkthrough
@@ -736,7 +737,7 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
     let presentation = match name {
         "doctor" | "init" | "create" | "fork" | "list" | "build" | "generate" | "refine"
         | "critique" | "merge" | "trust" | "state" | "import" | "cache" | "check" | "diff"
-        | "run" | "dependency" | "sessions" => Panel,
+        | "run" | "answer" | "dependency" | "sessions" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \

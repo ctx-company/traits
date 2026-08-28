@@ -646,6 +646,7 @@ pub fn record_drive_outcome(
         rate_limit: evidence.rate_limit,
         budget_pause,
         tokens_by_model: evidence.tokens_by_model,
+        summons: evidence.summons,
     });
     write_run_session(&path, &loaded)
 }
@@ -675,6 +676,7 @@ pub fn record_interrupted_outcome_in_session(
         rate_limit: None,
         budget_pause: None,
         tokens_by_model: None,
+        summons: None,
     });
     write_run_session(path, loaded)
 }
