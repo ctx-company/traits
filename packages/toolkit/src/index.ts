@@ -55,3 +55,5 @@ export type {
   GuardedProductionRole,
 } from "./sequence/guarded-production.ts";
 export { deriveParkReportStep } from "./sequence/park-report.ts";
+export { needsOwnerSchema, needsOwnerSignal } from "./signal.ts";
+export type { NeedsOwnerValue } from "./signal.ts";

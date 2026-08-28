@@ -78,7 +78,7 @@ ts-build:
 ts-typecheck:
 	pnpm --dir packages/cdk run typecheck && pnpm --dir packages/cdk run typecheck:test
 	pnpm --dir packages/config run typecheck && pnpm --dir packages/config run typecheck:test
-	pnpm --dir packages/toolkit run typecheck
+	pnpm --dir packages/toolkit run typecheck && pnpm --dir packages/toolkit run typecheck:test
 	pnpm --dir packages/agents run typecheck
 	pnpm --dir packages/rust run typecheck
 	pnpm --dir packages/harness-client run typecheck
