@@ -218,7 +218,6 @@ These bound the outcome regardless of the route taken.
 - The three public helper signatures keep their names, parameter order and
   return types — they have consumers outside this task. No public symbol
   is removed.
-- No product-code change (see "Out of scope").
 
 ## Suggested approach — guidance, not a boundary
 
