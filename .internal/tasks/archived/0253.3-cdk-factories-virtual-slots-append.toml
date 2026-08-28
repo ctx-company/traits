@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0253.3"
 title = "CDK: parameterized factories, virtual slots, and Append"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-89d2febf76bb112779049f9ebe7cef8843daa438df1424e09ee259854340c828 merged as c99c82a29a126510d42028d6fb03cfa27b86fe70"
 content = """
 The ergonomics trio. Pure CDK and lowering — no core changes.
 
@@ -40,3 +42,7 @@ appending to one text slot yield both entries in order. Static form
 [relations]
 depends-on = ["0253.2"]
 parent = "0253"
+
+[closure]
+mode = "merge"
+commit = "c99c82a29a126510d42028d6fb03cfa27b86fe70"

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0253.1"
 title = "Signals carry payloads"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-a94e6ef022538cf6342b82c4dc398c78c1a7c55b33ccac3761c3bc75468a20ee merged as 239af6e5b4c3f80b834e73bfef1b58a5c1706d09"
 content = """
 Core + runtime. Today a signal is a bare name: emitted by a step, guarded
 on by conditions, cleared per iteration. This slice gives it a value
@@ -47,3 +49,7 @@ canonical and ledger. `cargo test --workspace` green.
 
 [relations]
 parent = "0253"
+
+[closure]
+mode = "merge"
+commit = "239af6e5b4c3f80b834e73bfef1b58a5c1706d09"

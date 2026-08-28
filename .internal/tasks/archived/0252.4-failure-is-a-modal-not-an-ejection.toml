@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0252.4"
 title = "Failure is a modal, not an ejection"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-896a7f365e494de538fbe893a7ee3a72d5a60ae50973c766b16fd8022d28d51e merged as 5504e00df8e22605816efcb24334bca4af914cc4"
 content = """
 Runs are resumable and re-drivable; the surface must show that instead of
 ejecting on every failure. Parent ruling 5.
@@ -589,3 +591,31 @@ expect = "kill-note-retained"
 name = "the failure modal passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "5504e00df8e22605816efcb24334bca4af914cc4"
+
+[[closure.checks]]
+name = "the five representative failure-modal behaviours hold end to end"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "modal, choice and restart-boundary unit invariants hold"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "the compact failure output and 0252.9's exit note are untouched"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style && rg -q 'run killed; terminal restored' modules/cli/src && echo kill-note-retained"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "the failure modal passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

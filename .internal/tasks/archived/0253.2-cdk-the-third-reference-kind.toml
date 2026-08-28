@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0253.2"
 title = "CDK: signals are the third reference kind"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-b802ef2728d6517782f378ae1a218eff07238027e64549721239f504232feab3 merged as a37a22e752393d84361ed51d387152f8d562dd9b"
 content = """
 The CDK surface for 0253.1, built on machinery that already exists.
 
@@ -39,3 +41,7 @@ byte-identically. `just ts-test` and typecheck green.
 [relations]
 depends-on = ["0253.1"]
 parent = "0253"
+
+[closure]
+mode = "merge"
+commit = "a37a22e752393d84361ed51d387152f8d562dd9b"
