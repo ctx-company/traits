@@ -43,7 +43,7 @@ fn failing_two_member_queue_fixture() -> Fixture {
     fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/authored/demo/generated/index.toml"),
-        format!("id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"Demo\"\ndescription = \"Demo trait with a task-board resource and a child-backed failing step.\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task to implement.\"\n\n[[agent]]\nid = \"worker\"\ndescription = \"Fixture worker\"\nsummary = \"Fixture worker\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[procedure]\ndescription = \"Run agent\"\n\n[[procedure.sequence]]\nid = \"agent\"\ntitle = \"Run agent\"\nagent = \"agent:worker\"\nprompt = \"Fail after spawning.\"\noutput = [\"slot:notified\"]\n"),
+        "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"Demo\"\ndescription = \"Demo trait with a task-board resource and a child-backed failing step.\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task to implement.\"\n\n[[agent]]\nid = \"worker\"\ndescription = \"Fixture worker\"\nsummary = \"Fixture worker\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[procedure]\ndescription = \"Run agent\"\n\n[[procedure.sequence]]\nid = \"agent\"\ntitle = \"Run agent\"\nagent = \"agent:worker\"\nprompt = \"Fail after spawning.\"\noutput = [\"slot:notified\"]\n",
     )
     .unwrap();
     fs::write(

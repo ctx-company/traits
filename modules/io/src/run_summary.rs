@@ -104,6 +104,17 @@ pub struct RunSummary {
     /// clients instead of vanishing from aggregate answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parse_error: Option<String>,
+    /// 0262: facts `Stats` and `StandingWall` need that were previously read
+    /// from a retained `Session`, so those handlers can answer from this
+    /// projection alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<ctx_traits_core::procedure::runtime::StopReason>,
+    #[serde(default)]
+    pub tokens_by_model: std::collections::BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict_rounds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub park_wall_id: Option<String>,
 }
 
 impl RunSummary {
@@ -223,6 +234,21 @@ impl RunSummary {
             }),
             trait_source: session.provenance.trait_source.clone(),
             parse_error: None,
+            stop_reason: session.stop_reason.clone(),
+            tokens_by_model: session
+                .last_drive_outcome
+                .as_ref()
+                .and_then(|outcome| outcome.tokens_by_model.clone())
+                .unwrap_or_default(),
+            verdict_rounds: ctx_traits_core::procedure::stats::verdict_slot_rounds(
+                &session.slot_revisions,
+            ),
+            park_wall_id: crate::run_session::session_park_report(session).and_then(|report| {
+                report
+                    .get("wall-id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            }),
         }
     }
 
@@ -262,6 +288,10 @@ impl RunSummary {
             interrupted: false,
             trait_source: None,
             parse_error: Some(error),
+            stop_reason: None,
+            tokens_by_model: std::collections::BTreeMap::new(),
+            verdict_rounds: None,
+            park_wall_id: None,
         }
     }
 }
@@ -324,6 +354,10 @@ mod tests {
         assert_eq!(summary.task_value.as_deref(), Some("preceding-task-value"));
         assert!(summary.last_terminal_merge_frame.is_none());
         assert!(!summary.blocked_with_park_report);
+        assert!(summary.stop_reason.is_none());
+        assert!(summary.tokens_by_model.is_empty());
+        assert!(summary.verdict_rounds.is_none());
+        assert!(summary.park_wall_id.is_none());
     }
 
     #[test]

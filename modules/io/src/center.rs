@@ -75,7 +75,10 @@ const NOTIFIER_BACKOFF_MAX: Duration = Duration::from_secs(2);
 const CENTER_SCHEMA_VERSION: i64 = 1;
 // RunSummary is a separately versioned JSON projection. Newer centers can
 // rebuild it without making a concurrent v1 center reject the shared index.
-const CENTER_PROJECTION_VERSION: i64 = 2;
+// Version 3 dropped the cached `center_sessions` payload table: every row
+// surviving a marker-gated rebuild was written by the metadata-only
+// projection, so fingerprint match alone is a sound `unchanged` signal.
+const CENTER_PROJECTION_VERSION: i64 = 3;
 static NEXT_SUBSCRIBER: AtomicU64 = AtomicU64::new(1);
 
 /// One bounded, correlated JSON-lines request.  Keeping the protocol types at
@@ -545,6 +548,15 @@ pub struct CenterPaths {
     pub spawn_lock: Utf8PathBuf,
     pub runs_root: Utf8PathBuf,
     pub index: Utf8PathBuf,
+    /// Where `run_liveness::read_index`/`upsert_row` recover a repository-
+    /// local, no-driver-event ledger (0262 defect 5). Production always
+    /// resolves this to the single machine-wide `run_control::runtime_root`,
+    /// exactly where every real driver registers, regardless of the
+    /// override below — that sharing is what makes recovery possible at
+    /// all. The override exists only so an isolated private tuple (a test
+    /// fixture) does not read whatever unrelated drivers left behind at the
+    /// shared path.
+    pub liveness_root: Utf8PathBuf,
 }
 
 /// Resolve the one private configuration tuple shared by every client and the
@@ -552,6 +564,8 @@ pub struct CenterPaths {
 /// test endpoint with production state.
 fn center_paths() -> crate::Result<CenterPaths> {
     let configured = |name: &str| std::env::var(name).ok().map(Utf8PathBuf::from);
+    let liveness_root =
+        configured("CTX_CENTER_LIVENESS_ROOT").unwrap_or_else(crate::run_control::runtime_root);
     match (
         configured("CTX_CENTER_SOCKET"),
         configured("CTX_CENTER_SPAWN_LOCK"),
@@ -563,6 +577,7 @@ fn center_paths() -> crate::Result<CenterPaths> {
             spawn_lock,
             runs_root,
             index,
+            liveness_root,
         }),
         (None, None, None, None) => production_paths(),
         _ => Err(protocol_error("incomplete private center configuration")),
@@ -592,6 +607,7 @@ fn versioned_paths(uid: u32, version: &str, runs_root: Utf8PathBuf) -> CenterPat
         spawn_lock: Utf8PathBuf::from(format!("{stem}.spawn.lock")),
         index: runs_root.join("index.sqlite3"),
         runs_root,
+        liveness_root: crate::run_control::runtime_root(),
     }
 }
 
@@ -1214,6 +1230,41 @@ fn prepare_spawn(paths: &CenterPaths, handshake_timeout: Duration) -> crate::Res
         return Ok(true);
     }
     let _ = std::fs::remove_file(marker.as_std_path());
+    // The serving owner lock is the same proof `run_server_at` requires
+    // before it will bind. Route the stale-socket unlink through it too: a
+    // failed handshake here is inconclusive about a live server that is
+    // merely slow to answer, and unlinking its pathname while it still holds
+    // the owner lock would shadow it with a socket nothing is listening on
+    // (`acquire_owner_lock`'s own recovery only runs for its own process).
+    // Acquire momentarily, unlink, then release immediately — the spawned
+    // child acquires this same lock itself once it reaches `run_server_at`.
+    match acquire_owner_lock_for_unlink(paths)? {
+        OwnerLockProbe::Acquired => Ok(false),
+        OwnerLockProbe::Contended => {
+            // A live owner holds the serving lock even though the handshake
+            // above did not succeed. Never unlink or spawn a competitor.
+            Ok(true)
+        }
+    }
+}
+
+enum OwnerLockProbe {
+    Acquired,
+    Contended,
+}
+
+/// Momentarily prove exclusive ownership of the socket path, unlink a stale
+/// uid-owned socket under that proof, then release — the caller does not
+/// retain the lock, unlike `acquire_owner_lock`'s serving-lifetime hold.
+fn acquire_owner_lock_for_unlink(paths: &CenterPaths) -> crate::Result<OwnerLockProbe> {
+    let lock_path = owner_lock_path(paths);
+    let lock = crate::file_lock::open_lock_file_no_follow(&lock_path)
+        .map_err(|source| io_error(&lock_path, source))?;
+    if !crate::file_lock::try_lock_exclusive(&lock)
+        .map_err(|source| io_error(&lock_path, source))?
+    {
+        return Ok(OwnerLockProbe::Contended);
+    }
     if let Ok(metadata) = std::fs::symlink_metadata(paths.socket.as_std_path()) {
         if metadata.file_type().is_socket() && metadata.uid() == unsafe { libc::getuid() } {
             std::fs::remove_file(paths.socket.as_std_path())
@@ -1225,7 +1276,8 @@ fn prepare_spawn(paths: &CenterPaths, handshake_timeout: Duration) -> crate::Res
             )));
         }
     }
-    Ok(false)
+    drop(lock);
+    Ok(OwnerLockProbe::Acquired)
 }
 
 fn spawn_center(
@@ -1249,6 +1301,7 @@ fn spawn_center(
             ("CTX_CENTER_SPAWN_LOCK", paths.spawn_lock.as_str()),
             ("CTX_CENTER_RUNS_ROOT", paths.runs_root.as_str()),
             ("CTX_CENTER_INDEX", paths.index.as_str()),
+            ("CTX_CENTER_LIVENESS_ROOT", paths.liveness_root.as_str()),
         ],
     )
 }
@@ -1350,9 +1403,6 @@ fn abort_spawn<C: SpawnControl>(
 #[derive(Debug, Clone)]
 struct CenterRow {
     summary: crate::run_summary::RunSummary,
-    /// Parsed only during reconciliation and retained so serving queries never
-    /// reopens the authoritative ledger.
-    session: Option<ctx_traits_core::procedure::session::Session>,
     repo_key: String,
     repo_path: String,
     ledger_path: Utf8PathBuf,
@@ -1370,7 +1420,35 @@ struct CenterModel {
     // cache data is derived, while an unprobeable driver lock is authoritative.
     uncertain: bool,
     pending_starts: HashMap<String, PendingStart>,
+    // A bounded warming scan in progress. `None` when idle; a caller that
+    // needs the whole corpus reconciled synchronously (every existing test,
+    // and the per-request freshness barrier when no scan is running) keeps
+    // using `discover`, which is unaffected by this field. `run_server_at`'s
+    // accept loop is the only driver of `warm_step`/`drain_warm_queue`.
+    warm: Option<WarmScan>,
 }
+
+/// State for one enumerate-then-drain-then-retain scan, spread across many
+/// bounded `drain_warm_queue` calls instead of one monolithic pass. Mirrors
+/// `discover_inner`'s two phases (flat-store scan, then repository-local
+/// reconciliation) so every invariant it already proved stays true; only the
+/// pacing changes.
+struct WarmScan {
+    queue: VecDeque<Utf8PathBuf>,
+    // `None` until the primary queue drains — the repository-local
+    // reconciliation set can only be computed once `present` is complete.
+    pending_unscanned: Option<VecDeque<Utf8PathBuf>>,
+    present: HashSet<Utf8PathBuf>,
+    unscanned_roots: HashSet<String>,
+    incomplete_directory_listing: bool,
+    repo_paths: Option<HashMap<String, String>>,
+}
+
+/// Ledgers reconciled per `drain_warm_queue` call from the accept loop. Tuned
+/// by measurement against the 600MB/2,500-ledger corpus proof; see the
+/// work summary for the measured steady-state and cold-start cost at this
+/// value.
+const WARM_SLICE: usize = 4;
 
 struct PendingStart {
     notify: mpsc::SyncSender<String>,
@@ -1420,40 +1498,59 @@ impl CenterModel {
         ))
     }
 
+    /// SQLite contention (another center starting, or a long-running
+    /// maintenance transaction) is not corruption. Route every
+    /// SQLite-sourced `open` failure through this classifier so a locked
+    /// index is diagnosed as busy — never as invalid data needing removal —
+    /// while genuine SQLite-level failures (a garbage, non-database file;
+    /// disk errors) still fall through to the removable-index diagnosis.
+    fn sqlite_error(paths: &CenterPaths, context: &str, source: rusqlite::Error) -> crate::Error {
+        if let rusqlite::Error::SqliteFailure(inner, _) = &source
+            && matches!(
+                inner.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+        {
+            return protocol_error(format!(
+                "center index {} is busy: {context}: another center is starting or holding it; retry shortly",
+                paths.index
+            ));
+        }
+        Self::cache_error(paths, format!("{context}: {source}"))
+    }
+
     fn open(paths: &CenterPaths) -> crate::Result<Self> {
         std::fs::create_dir_all(paths.runs_root.as_std_path())
             .map_err(|source| io_error(&paths.runs_root, source))?;
         let db = Connection::open(paths.index.as_std_path())
-            .map_err(|source| Self::cache_error(paths, format!("open failed: {source}")))?;
+            .map_err(|source| Self::sqlite_error(paths, "open failed", source))?;
         db.busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MS))
-            .map_err(|source| {
-                Self::cache_error(paths, format!("configure busy timeout: {source}"))
-            })?;
-        db.execute_batch("CREATE TABLE IF NOT EXISTS center_meta (version INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS center_projection_meta (version INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS center_rows (ledger TEXT PRIMARY KEY, repo_key TEXT NOT NULL, repo_path TEXT NOT NULL, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, summary TEXT NOT NULL); CREATE TABLE IF NOT EXISTS center_sessions (ledger TEXT PRIMARY KEY, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, session TEXT NOT NULL);")
-            .map_err(|source| Self::cache_error(paths, format!("initialize schema: {source}")))?;
+            .map_err(|source| Self::sqlite_error(paths, "configure busy timeout", source))?;
+        db.execute_batch("CREATE TABLE IF NOT EXISTS center_meta (version INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS center_projection_meta (version INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS center_rows (ledger TEXT PRIMARY KEY, repo_key TEXT NOT NULL, repo_path TEXT NOT NULL, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, summary TEXT NOT NULL);")
+            .map_err(|source| Self::sqlite_error(paths, "initialize schema", source))?;
         let version: Option<i64> = db
             .query_row("SELECT version FROM center_meta LIMIT 1", [], |r| r.get(0))
             .optional()
-            .map_err(|source| Self::cache_error(paths, format!("read schema: {source}")))?;
+            .map_err(|source| Self::sqlite_error(paths, "read schema", source))?;
         match version {
             None => {
                 db.execute(
                     "INSERT INTO center_meta(version) VALUES (?1)",
                     [CENTER_SCHEMA_VERSION],
                 )
-                .map_err(|source| Self::cache_error(paths, format!("write schema: {source}")))?;
+                .map_err(|source| Self::sqlite_error(paths, "write schema", source))?;
             }
             Some(CENTER_SCHEMA_VERSION) => {}
             // An earlier 0243.4 build used this shared marker for the widened
             // JSON projection. Downgrade that marker in place: table layout is
-            // unchanged and projection_version below retains the v2 meaning.
+            // unchanged and projection_version below retains the v3 meaning.
             Some(CENTER_PROJECTION_VERSION) => {
                 db.execute(
                     "UPDATE center_meta SET version = ?1",
                     [CENTER_SCHEMA_VERSION],
                 )
                 .map_err(|source| {
-                    Self::cache_error(paths, format!("restore legacy schema marker: {source}"))
+                    Self::sqlite_error(paths, "restore legacy schema marker", source)
                 })?;
             }
             Some(_) => return Err(Self::cache_error(paths, "unsupported legacy schema")),
@@ -1465,39 +1562,40 @@ impl CenterModel {
                 |r| r.get(0),
             )
             .optional()
+            .map_err(|source| Self::sqlite_error(paths, "read projection schema", source))?;
+        if projection_version != Some(CENTER_PROJECTION_VERSION) {
+            // Either a fresh v1 index (no marker at all — its cached full
+            // sessions are the payload goal 1's migration half must reclaim)
+            // or a preceding projection version's rows. Either way every row
+            // in `center_rows` is stale-shaped: wipe it, drop the payload
+            // cache table this version never writes, and reclaim the freed
+            // pages so the physical file actually shrinks rather than merely
+            // marking pages free. This is marker-gated, so it runs once, not
+            // on every open, and after it runs every row surviving in
+            // `center_rows` was written by the current projection — making
+            // fingerprint match alone a sound `unchanged` signal.
+            db.execute_batch(
+                "DELETE FROM center_rows; DELETE FROM center_projection_meta; DROP TABLE IF EXISTS center_sessions;",
+            )
+            .map_err(|source| Self::sqlite_error(paths, "rebuild projection", source))?;
+            // VACUUM must run outside a transaction; DELETE/DROP only return
+            // pages to the free list, they do not shrink the file. The
+            // projection marker is written only after VACUUM succeeds, so a
+            // process that dies or fails mid-reclamation leaves no marker
+            // behind and the next open retries the whole rebuild rather than
+            // recording a migration that never reclaimed its pages.
+            db.execute_batch("VACUUM")
+                .map_err(|source| Self::sqlite_error(paths, "vacuum rebuilt index", source))?;
+            db.execute(
+                "INSERT INTO center_projection_meta(version) VALUES (?1)",
+                [CENTER_PROJECTION_VERSION],
+            )
             .map_err(|source| {
-                Self::cache_error(paths, format!("read projection schema: {source}"))
+                Self::sqlite_error(paths, "write rebuilt projection schema", source)
             })?;
-        match projection_version {
-            None => {
-                // A v1 index has no projection marker. Its cached full session
-                // rows are enough to reproject below, without changing the
-                // marker that a concurrently running v1 center requires.
-                db.execute(
-                    "INSERT INTO center_projection_meta(version) VALUES (?1)",
-                    [CENTER_PROJECTION_VERSION],
-                )
-                .map_err(|source| {
-                    Self::cache_error(paths, format!("write projection schema: {source}"))
-                })?;
-            }
-            Some(CENTER_PROJECTION_VERSION) => {}
-            Some(_) => {
-                // Projection rows are derived. This marker is deliberately
-                // separate from center_meta so this rebuild never bricks v1.
-                db.execute_batch("DELETE FROM center_sessions; DELETE FROM center_rows; DELETE FROM center_projection_meta;")
-                    .map_err(|source| Self::cache_error(paths, format!("rebuild projection: {source}")))?;
-                db.execute(
-                    "INSERT INTO center_projection_meta(version) VALUES (?1)",
-                    [CENTER_PROJECTION_VERSION],
-                )
-                .map_err(|source| {
-                    Self::cache_error(paths, format!("write rebuilt projection schema: {source}"))
-                })?;
-            }
         }
         let mut rows = HashMap::new();
-        let mut statement = db.prepare("SELECT ledger, repo_key, repo_path, mtime_secs, mtime_nanos, size, summary FROM center_rows").map_err(|source| Self::cache_error(paths, format!("prepare rows: {source}")))?;
+        let mut statement = db.prepare("SELECT ledger, repo_key, repo_path, mtime_secs, mtime_nanos, size, summary FROM center_rows").map_err(|source| Self::sqlite_error(paths, "prepare rows", source))?;
         let cached = statement
             .query_map([], |r| {
                 Ok((
@@ -1510,11 +1608,11 @@ impl CenterModel {
                     r.get::<_, String>(6)?,
                 ))
             })
-            .map_err(|source| Self::cache_error(paths, format!("read rows: {source}")))?;
+            .map_err(|source| Self::sqlite_error(paths, "read rows", source))?;
         for item in cached {
             let (ledger, repo_key, repo_path, secs, nanos, size, summary) =
-                item.map_err(|source| Self::cache_error(paths, format!("read row: {source}")))?;
-            let mut summary = serde_json::from_str(&summary)
+                item.map_err(|source| Self::sqlite_error(paths, "read row", source))?;
+            let summary = serde_json::from_str(&summary)
                 .map_err(|source| Self::cache_error(paths, format!("decode summary: {source}")))?;
             let secs = u64::try_from(secs)
                 .map_err(|_| Self::cache_error(paths, "negative mtime seconds"))?;
@@ -1528,24 +1626,10 @@ impl CenterModel {
             let modified = UNIX_EPOCH
                 .checked_add(Duration::new(secs, nanos))
                 .ok_or_else(|| Self::cache_error(paths, "overflowing mtime"))?;
-            let session: Option<String> = db.query_row("SELECT session FROM center_sessions WHERE ledger = ?1 AND mtime_secs = ?2 AND mtime_nanos = ?3 AND size = ?4", params![ledger, secs as i64, nanos as i64, size as i64], |row| row.get(0)).optional().map_err(|source| Self::cache_error(paths, format!("read session: {source}")))?;
-            let session = session.and_then(|text| serde_json::from_str(&text).ok());
-            // Summary fields grow independently of the shared SQLite schema.
-            // A preceding center may have written a valid, defaulted summary;
-            // when its matching cached ledger is available, rebuild the current
-            // projection rather than serving those defaults until a file changes.
-            if let Some(session) = &session {
-                summary = crate::run_summary::RunSummary::from_session(session);
-                if summary.title.is_none() {
-                    summary.title =
-                        crate::activity_sidecar::read_session_title(Utf8Path::new(&ledger));
-                }
-            }
             rows.insert(
                 Utf8PathBuf::from(ledger.clone()),
                 CenterRow {
                     summary,
-                    session,
                     repo_key,
                     repo_path,
                     ledger_path: Utf8PathBuf::from(ledger),
@@ -1563,7 +1647,245 @@ impl CenterModel {
             subscribers: HashMap::new(),
             uncertain: false,
             pending_starts: HashMap::new(),
+            warm: None,
         })
+    }
+
+    /// Advance the bounded warming scan by up to `limit` ledgers, starting a
+    /// new scan if none is in progress. Every ledger interpretation still
+    /// flows through `refresh_ledger_inner`; only the pacing across many
+    /// calls is new. Reused by `run_server_at`'s accept loop for both the
+    /// initial cold-start build and periodic rescans.
+    fn warm_step(&mut self, paths: &CenterPaths, limit: usize) -> crate::Result<()> {
+        if self.warm.is_none() {
+            self.begin_scan(paths)?;
+        }
+        self.drain_warm_queue(paths, limit)
+    }
+
+    fn is_warming(&self) -> bool {
+        self.warm.is_some()
+    }
+
+    /// Enumerate cheaply (no ledger reads) and seed the scan queue. Seeding
+    /// from `run_liveness::read_index` first recovers a live driver with no
+    /// pending notification and no flat-store presence (a repository-local
+    /// ledger) before the flat-store walk even begins — the fix for defect 5.
+    fn begin_scan(&mut self, paths: &CenterPaths) -> crate::Result<()> {
+        self.uncertain = false;
+        let repo_paths = match crate::state::read_repo_index() {
+            Ok(repos) => Some(repo_paths(repos)),
+            Err(_) => {
+                self.uncertain = true;
+                None
+            }
+        };
+        let mut queue = VecDeque::new();
+        let mut present = HashSet::new();
+        let mut unscanned_roots = HashSet::new();
+        let mut incomplete_directory_listing = false;
+
+        // No PID/timestamp authority is consulted here or anywhere
+        // downstream: seeding only enqueues a ledger for the same
+        // `refresh_ledger_inner` -> `run_control::probe` path every other
+        // ledger takes. The kernel flock alone decides liveness.
+        for row in crate::run_liveness::read_index(&paths.liveness_root).unwrap_or_default() {
+            let ledger = Utf8PathBuf::from(row.ledger_path);
+            if present.insert(ledger.clone()) {
+                queue.push_back(ledger);
+            }
+        }
+
+        let directories = match std::fs::read_dir(paths.runs_root.as_std_path()) {
+            Ok(entries) => Some(entries),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(io_error(&paths.runs_root, error)),
+        };
+        // A missing runs root has nothing to reconcile against last-good
+        // rows either; skip the repository-local reconciliation phase so
+        // finalization clears every row immediately, matching a fresh store.
+        let pending_unscanned = match directories {
+            Some(directories) => {
+                for entry in directories {
+                    let Ok(entry) = entry else {
+                        self.uncertain = true;
+                        incomplete_directory_listing = true;
+                        continue;
+                    };
+                    let Ok(kind) = entry.file_type() else {
+                        self.uncertain = true;
+                        incomplete_directory_listing = true;
+                        continue;
+                    };
+                    if !kind.is_dir() {
+                        continue;
+                    }
+                    let Some(repo_key) = entry.file_name().to_str().map(str::to_owned) else {
+                        continue;
+                    };
+                    let root = paths.runs_root.join(&repo_key);
+                    let ledgers = match crate::run_session::session_store_paths(Some(root.as_str()))
+                    {
+                        Ok(ledgers) => ledgers,
+                        Err(_) => {
+                            self.uncertain = true;
+                            unscanned_roots.insert(repo_key);
+                            continue;
+                        }
+                    };
+                    for ledger in ledgers {
+                        if present.insert(ledger.clone()) {
+                            queue.push_back(ledger);
+                        }
+                    }
+                }
+                None
+            }
+            None => Some(VecDeque::new()),
+        };
+
+        self.warm = Some(WarmScan {
+            queue,
+            pending_unscanned,
+            present,
+            unscanned_roots,
+            incomplete_directory_listing,
+            repo_paths,
+        });
+        Ok(())
+    }
+
+    /// Reconcile up to `budget` ledgers from the active scan's queue, then
+    /// its repository-local reconciliation set once the queue drains.
+    /// Finalizes (retain + `persist_all`) only once both are empty — running
+    /// `retain` against a partially-warmed model would delete rows the scan
+    /// has not reached yet.
+    fn drain_warm_queue(&mut self, paths: &CenterPaths, mut budget: usize) -> crate::Result<()> {
+        // `refresh_ledger_inner` persists each ledger through its own
+        // autocommit `persist_row`/`persist_removal` call — correct in
+        // isolation, but a fresh fsync-backed commit per ledger made a
+        // multi-hundred-ledger slice slow enough to blow the per-request
+        // freshness barrier past `STREAM_TIMEOUT`. Wrapping the whole slice
+        // in one transaction reduces that to one commit per slice without
+        // touching any single-ledger persistence path or its rollback
+        // contract — SQLite does not distinguish a plain `BEGIN`/`COMMIT`
+        // from a `Transaction` guard once one is open on the connection.
+        // Committed before `finalize`'s own `persist_all` transaction opens,
+        // since SQLite transactions cannot nest.
+        self.db
+            .execute_batch("BEGIN")
+            .map_err(|source| protocol_error(source.to_string()))?;
+        loop {
+            if budget == 0 {
+                break;
+            }
+            let next = {
+                let scan = self
+                    .warm
+                    .as_mut()
+                    .expect("drain_warm_queue requires a scan");
+                if let Some(ledger) = scan.queue.pop_front() {
+                    Some((ledger, false))
+                } else if let Some(pending) = scan.pending_unscanned.as_mut() {
+                    pending.pop_front().map(|ledger| (ledger, true))
+                } else {
+                    None
+                }
+            };
+            match next {
+                Some((ledger, is_unscanned)) => {
+                    let repo_paths = self.warm.as_ref().unwrap().repo_paths.clone();
+                    let refreshed = self
+                        .refresh_ledger_inner(paths, &ledger, true, repo_paths.as_ref(), None)
+                        .is_ok();
+                    if !refreshed {
+                        self.uncertain = true;
+                    }
+                    if is_unscanned && refreshed && self.rows.contains_key(&ledger) {
+                        self.warm.as_mut().unwrap().present.insert(ledger);
+                    }
+                    budget -= 1;
+                }
+                None => {
+                    let scan = self
+                        .warm
+                        .as_mut()
+                        .expect("drain_warm_queue requires a scan");
+                    if scan.pending_unscanned.is_some() {
+                        // Both phases are exhausted; nothing left to compute.
+                        break;
+                    }
+                    // The primary queue just drained: every present ledger
+                    // is now known, so the repository-local reconciliation
+                    // set (settled-or-deleted local ledgers the flat scan
+                    // never enumerates) can finally be computed.
+                    let present = scan.present.clone();
+                    let unscanned_roots = scan.unscanned_roots.clone();
+                    let pending: VecDeque<_> = self
+                        .rows
+                        .iter()
+                        .filter(|(ledger, row)| {
+                            !present.contains(*ledger)
+                                && !unscanned_roots.contains(&row.repo_key)
+                                && (ledger.starts_with(&paths.runs_root)
+                                    || ledger_repository_path(ledger).is_some())
+                        })
+                        .map(|(ledger, _)| ledger.clone())
+                        .collect();
+                    self.warm.as_mut().unwrap().pending_unscanned = Some(pending);
+                }
+            }
+        }
+        self.db
+            .execute_batch("COMMIT")
+            .map_err(|source| protocol_error(source.to_string()))?;
+        let done = {
+            let scan = self
+                .warm
+                .as_ref()
+                .expect("drain_warm_queue requires a scan");
+            scan.queue.is_empty()
+                && scan
+                    .pending_unscanned
+                    .as_ref()
+                    .is_some_and(VecDeque::is_empty)
+        };
+        if done {
+            let scan = self.warm.take().expect("scan just proven present");
+            if !scan.incomplete_directory_listing {
+                // Every surviving row was already persisted individually by
+                // `persist_row` during the drain above. Finalizing a
+                // multi-hundred-ledger scan must stay bounded too, so only
+                // the ledgers retain is about to drop get an explicit
+                // `persist_removal` here — never a whole-set `persist_all`
+                // rewrite, which would resurrect exactly the monolithic,
+                // request-blocking cost this scan exists to avoid.
+                let removed: Vec<Utf8PathBuf> = self
+                    .rows
+                    .keys()
+                    .filter(|path| {
+                        !scan.present.contains(*path)
+                            && !scan.unscanned_roots.contains(
+                                &self.rows.get(*path).expect("key from self.rows").repo_key,
+                            )
+                    })
+                    .cloned()
+                    .collect();
+                self.rows.retain(|path, row| {
+                    scan.present.contains(path) || scan.unscanned_roots.contains(&row.repo_key)
+                });
+                self.db
+                    .execute_batch("BEGIN")
+                    .map_err(|source| protocol_error(source.to_string()))?;
+                for ledger in &removed {
+                    self.persist_removal(ledger)?;
+                }
+                self.db
+                    .execute_batch("COMMIT")
+                    .map_err(|source| protocol_error(source.to_string()))?;
+            }
+        }
+        Ok(())
     }
 
     fn discover(&mut self, paths: &CenterPaths) -> crate::Result<()> {
@@ -1666,7 +1988,7 @@ impl CenterModel {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(previous) = self.rows.remove(ledger) {
-                    if let Err(error) = self.persist() {
+                    if let Err(error) = self.persist_removal(ledger) {
                         self.rows.insert(ledger.to_path_buf(), previous);
                         return Err(error);
                     }
@@ -1685,14 +2007,15 @@ impl CenterModel {
             .map_err(|source| io_error(ledger, source))?;
         let size = metadata.len();
         run_after_refresh_stat();
-        let unchanged = self.rows.get(ledger).is_some_and(|row| {
-            row.modified == modified
-                && row.size == size
-                // A parse error is an accepted cache entry just like a parsed
-                // session. Rows with neither are legacy/incomplete and must be
-                // rehydrated from the authoritative ledger.
-                && (row.session.is_some() || row.summary.parse_error.is_some())
-        });
+        // A marker-gated rebuild (see `CenterModel::open`) guarantees every
+        // row surviving in `center_rows` was written by the current
+        // metadata-only projection, so fingerprint match alone is a sound
+        // `unchanged` signal — no legacy/incomplete row class exists to
+        // distinguish here anymore.
+        let unchanged = self
+            .rows
+            .get(ledger)
+            .is_some_and(|row| row.modified == modified && row.size == size);
         let repository = ledger_repository_path(ledger)
             .map(|repo| {
                 let canonical = crate::state::canonical_repo_root(&repo)?;
@@ -1717,24 +2040,27 @@ impl CenterModel {
             .or_else(|| repo_paths.and_then(|paths| paths.get(&repo_key).cloned()))
             .or_else(|| previous.as_ref().map(|row| row.repo_path.clone()))
             .unwrap_or_default();
+        // Threaded into `refresh_liveness` below so orphan repair, when it
+        // fires in the same cycle a changed fingerprint was just parsed,
+        // reuses this parse instead of reopening the ledger a second time —
+        // preserving "parse at most once per changed fingerprint".
+        let mut freshly_parsed: Option<ctx_traits_core::procedure::session::Session> = None;
         if !unchanged {
-            let (summary, session) = match read_session(ledger) {
+            let summary = match read_session(ledger) {
                 Ok(session) => {
                     let mut summary = crate::run_summary::RunSummary::from_session(&session);
                     if summary.title.is_none() {
                         summary.title = crate::activity_sidecar::read_session_title(ledger);
                     }
-                    (summary, Some(session))
+                    freshly_parsed = Some(session);
+                    summary
                 }
                 Err(error) => {
                     let session_id = ledger
                         .file_stem()
                         .map(str::to_owned)
                         .unwrap_or_else(|| ledger.to_string());
-                    (
-                        crate::run_summary::RunSummary::unreadable(session_id, error.to_string()),
-                        None,
-                    )
+                    crate::run_summary::RunSummary::unreadable(session_id, error.to_string())
                 }
             };
             // A live driver may replace its atomic ledger between the initial
@@ -1754,7 +2080,6 @@ impl CenterModel {
                 ledger.to_path_buf(),
                 CenterRow {
                     summary,
-                    session,
                     repo_key,
                     repo_path,
                     ledger_path: ledger.to_path_buf(),
@@ -1768,7 +2093,8 @@ impl CenterModel {
             row.repo_key = repo_key;
             row.repo_path = repo_path;
         }
-        if let Err(error) = self.refresh_liveness(ledger, unchanged) {
+        if let Err(error) = self.refresh_liveness(paths, ledger, unchanged, freshly_parsed.as_ref())
+        {
             self.restore_verified_row(ledger, previous);
             return Err(error);
         }
@@ -1778,7 +2104,7 @@ impl CenterModel {
             row.live = true;
             row.live_holder = Some(holder.clone());
         }
-        if let Err(error) = self.persist() {
+        if let Err(error) = self.persist_row(ledger) {
             self.restore_verified_row(ledger, previous);
             return Err(error);
         }
@@ -1828,7 +2154,7 @@ impl CenterModel {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 self.rows.clear();
-                return self.persist();
+                return self.persist_all();
             }
             Err(error) => return Err(io_error(&paths.runs_root, error)),
         };
@@ -1903,7 +2229,7 @@ impl CenterModel {
                 present.contains(path) || unscanned_roots.contains(&row.repo_key)
             });
         }
-        self.persist()?;
+        self.persist_all()?;
         Ok(())
     }
 
@@ -2059,16 +2385,24 @@ impl CenterModel {
         });
     }
 
-    fn refresh_liveness(&mut self, ledger: &Utf8Path, unchanged: bool) -> crate::Result<()> {
+    fn refresh_liveness(
+        &mut self,
+        paths: &CenterPaths,
+        ledger: &Utf8Path,
+        unchanged: bool,
+        freshly_parsed: Option<&ctx_traits_core::procedure::session::Session>,
+    ) -> crate::Result<()> {
         let probe = crate::run_control::probe(ledger)?;
-        self.refresh_after_probe(ledger, unchanged, probe)
+        self.refresh_after_probe(paths, ledger, unchanged, probe, freshly_parsed)
     }
 
     fn refresh_after_probe(
         &mut self,
+        paths: &CenterPaths,
         ledger: &Utf8Path,
         unchanged: bool,
         probe: crate::run_control::DriverProbe,
+        freshly_parsed: Option<&ctx_traits_core::procedure::session::Session>,
     ) -> crate::Result<()> {
         let Some(row) = self.rows.get_mut(ledger) else {
             return Ok(());
@@ -2084,27 +2418,36 @@ impl CenterModel {
                 // before registration. Publish the same liveness row a driver
                 // publishes at start, so removing dashboard sweeps does not
                 // make `internal running` forget a held ledger.
-                if let (Some(holder), Some(session)) = (holder.as_ref(), row.session.as_ref()) {
+                // Adoption used to require a retained parsed session; now it
+                // reads the same worktree facts off the summary the center
+                // already projects, so an unparsed-but-held ledger (no
+                // summary yet, or a `parse_error` row) still publishes
+                // liveness rather than being silently skipped.
+                if let Some(holder) = holder.as_ref() {
+                    let worktree_path = row
+                        .summary
+                        .worktree
+                        .as_ref()
+                        .and_then(|worktree| worktree.path.clone())
+                        .or_else(|| row.summary.worktree_path.clone());
+                    let branch = row
+                        .summary
+                        .worktree
+                        .as_ref()
+                        .map(|worktree| worktree.branch.clone())
+                        .or_else(|| row.summary.worktree_branch.clone());
                     let facts = crate::run_liveness::LiveRunFacts {
                         session_id: row.summary.session_id.clone(),
                         run_id: row.summary.run_id.clone(),
                         repo_key: row.repo_key.clone(),
                         repo_path: row.repo_path.clone(),
                         ledger_path: row.ledger_path.clone(),
-                        worktree_path: session
-                            .provenance
-                            .worktree
-                            .as_ref()
-                            .and_then(|worktree| worktree.path.clone()),
-                        branch: session
-                            .provenance
-                            .worktree
-                            .as_ref()
-                            .map(|worktree| worktree.branch.clone()),
+                        worktree_path,
+                        branch,
                         log_path: None,
                     };
                     let _ = crate::run_liveness::upsert_row(
-                        &crate::run_control::runtime_root(),
+                        &paths.liveness_root,
                         &facts,
                         holder.pid,
                         holder.started_at_epoch_secs,
@@ -2134,7 +2477,14 @@ impl CenterModel {
                                 .map_err(|source| io_error(ledger, source))?;
                         let unchanged_under_maintenance =
                             unchanged && fingerprint_matches_under_maintenance;
-                        if unchanged_under_maintenance && terminal(&row.summary) {
+                        // A settled pause is as complete a projection as a
+                        // terminal outcome: `record_interrupted_outcome_in_session`
+                        // only fires for a summary that is neither, so an
+                        // unchanged settled-pause row needs no reparse either —
+                        // only the stale holder metadata needs clearing.
+                        if unchanged_under_maintenance
+                            && (terminal(&row.summary) || settled_pause(&row.summary))
+                        {
                             maintenance.clear_stale_metadata()?;
                             row.live = false;
                             row.live_holder = None;
@@ -2152,8 +2502,16 @@ impl CenterModel {
                         // A corrupt ledger remains a visible, non-live row. It cannot
                         // be repaired without parsed session data, but must still flow
                         // through the same probe/persist/delta transaction as rows that
-                        // can be parsed.
-                        let Some(mut session) = row.session.clone() else {
+                        // can be parsed. The center no longer retains a parsed session
+                        // across cycles; reuse this cycle's own parse when the
+                        // fingerprint just changed, otherwise read it here — after
+                        // maintenance ownership and the fingerprint re-check above
+                        // have already proven the ledger unheld and reparse-safe.
+                        let read_result = match freshly_parsed {
+                            Some(session) => Ok(session.clone()),
+                            None => read_session(ledger),
+                        };
+                        let Ok(mut session) = read_result else {
                             row.live = false;
                             row.live_holder = None;
                             return Ok(());
@@ -2175,7 +2533,6 @@ impl CenterModel {
                             .modified()
                             .map_err(|source| io_error(ledger, source))?;
                         row.summary = summary;
-                        row.session = Some(session);
                         row.modified = modified;
                         row.size = metadata.len();
                         row.live = false;
@@ -2187,7 +2544,69 @@ impl CenterModel {
         Ok(())
     }
 
-    fn persist(&mut self) -> crate::Result<()> {
+    fn row_params(row: &CenterRow) -> crate::Result<(i64, i64, i64, String)> {
+        let elapsed = row.modified.duration_since(UNIX_EPOCH).map_err(|_| {
+            protocol_error(format!(
+                "center row {} predates UNIX_EPOCH",
+                row.ledger_path
+            ))
+        })?;
+        let summary = serde_json::to_string(&row.summary).map_err(|source| {
+            crate::parse::Error::JsonSerialize {
+                context: "serialize center summary".to_string(),
+                source,
+            }
+        })?;
+        Ok((
+            i64::try_from(elapsed.as_secs())
+                .map_err(|_| protocol_error("mtime overflows SQLite"))?,
+            elapsed.subsec_nanos() as i64,
+            i64::try_from(row.size).map_err(|_| protocol_error("ledger size overflows SQLite"))?,
+            summary,
+        ))
+    }
+
+    /// One row upsert. This is the persistence path for every per-ledger
+    /// reconciliation (`refresh_ledger_inner`'s success path) — a cold build
+    /// over N ledgers must not rewrite the whole growing table N times.
+    fn persist_row(&mut self, ledger: &Utf8Path) -> crate::Result<()> {
+        let Some(row) = self.rows.get(ledger) else {
+            return Ok(());
+        };
+        let (secs, nanos, size, summary) = Self::row_params(row)?;
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO center_rows VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    row.ledger_path.as_str(),
+                    row.repo_key,
+                    row.repo_path,
+                    secs,
+                    nanos,
+                    size,
+                    summary
+                ],
+            )
+            .map_err(|source| protocol_error(source.to_string()))?;
+        Ok(())
+    }
+
+    /// One row delete. This is the persistence path for a ledger that has
+    /// disappeared — `refresh_ledger_inner`'s not-found branch.
+    fn persist_removal(&mut self, ledger: &Utf8Path) -> crate::Result<()> {
+        self.db
+            .execute(
+                "DELETE FROM center_rows WHERE ledger = ?1",
+                [ledger.as_str()],
+            )
+            .map_err(|source| protocol_error(source.to_string()))?;
+        Ok(())
+    }
+
+    /// Whole-set rewrite. Retained only for the paths that genuinely replace
+    /// the whole set: a missing runs root, and discovery's post-retain
+    /// sweep. Must not run once per ledger.
+    fn persist_all(&mut self) -> crate::Result<()> {
         let transaction = self
             .db
             .transaction()
@@ -2196,18 +2615,7 @@ impl CenterModel {
             .execute("DELETE FROM center_rows", [])
             .map_err(|source| protocol_error(source.to_string()))?;
         for row in self.rows.values() {
-            let elapsed = row.modified.duration_since(UNIX_EPOCH).map_err(|_| {
-                protocol_error(format!(
-                    "center row {} predates UNIX_EPOCH",
-                    row.ledger_path
-                ))
-            })?;
-            let summary = serde_json::to_string(&row.summary).map_err(|source| {
-                crate::parse::Error::JsonSerialize {
-                    context: "serialize center summary".to_string(),
-                    source,
-                }
-            })?;
+            let (secs, nanos, size, summary) = Self::row_params(row)?;
             transaction
                 .execute(
                     "INSERT INTO center_rows VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -2215,48 +2623,14 @@ impl CenterModel {
                         row.ledger_path.as_str(),
                         row.repo_key,
                         row.repo_path,
-                        i64::try_from(elapsed.as_secs())
-                            .map_err(|_| protocol_error("mtime overflows SQLite"))?,
-                        elapsed.subsec_nanos() as i64,
-                        i64::try_from(row.size)
-                            .map_err(|_| protocol_error("ledger size overflows SQLite"))?,
+                        secs,
+                        nanos,
+                        size,
                         summary
                     ],
                 )
                 .map_err(|source| protocol_error(source.to_string()))?;
-            if let Some(session) = &row.session {
-                let serialized = serde_json::to_string(session).map_err(|source| {
-                    crate::parse::Error::JsonSerialize {
-                        context: "serialize cached center session".to_string(),
-                        source,
-                    }
-                })?;
-                transaction
-                    .execute(
-                        "INSERT OR REPLACE INTO center_sessions VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![
-                            row.ledger_path.as_str(),
-                            i64::try_from(elapsed.as_secs())
-                                .map_err(|_| protocol_error("mtime overflows SQLite"))?,
-                            elapsed.subsec_nanos() as i64,
-                            i64::try_from(row.size)
-                                .map_err(|_| protocol_error("ledger size overflows SQLite"))?,
-                            serialized
-                        ],
-                    )
-                    .map_err(|source| protocol_error(source.to_string()))?;
-            }
         }
-        // `center_sessions` is an additive cache table, so older center
-        // versions do not depend on it. Keep it bounded to the ledgers that
-        // survived this model-owned rebuild rather than retaining stale full
-        // sessions forever after retention deletes their ledger rows.
-        transaction
-            .execute(
-                "DELETE FROM center_sessions WHERE NOT EXISTS (SELECT 1 FROM center_rows WHERE center_rows.ledger = center_sessions.ledger)",
-                [],
-            )
-            .map_err(|source| protocol_error(source.to_string()))?;
         transaction
             .commit()
             .map_err(|source| protocol_error(source.to_string()))?;
@@ -2268,6 +2642,10 @@ impl CenterModel {
             || !self.subscribers.is_empty()
             || !self.pending_starts.is_empty()
             || self.rows.values().any(|row| row.live)
+            // A cold center with a large corpus and no client attached must
+            // not exit idle before finishing its first build: warming is
+            // work, even though `last_work` only advances on accept/job.
+            || self.warm.is_some()
     }
 }
 
@@ -2345,6 +2723,50 @@ pub fn run_server() -> crate::Result<()> {
     run_server_at(center_paths()?, idle, scan_interval)
 }
 
+/// The path of the flock a serving center holds for its entire lifetime,
+/// distinct from `spawn_lock` (launch arbitration only, released before
+/// serving begins). Deriving it from the socket path means isolated private
+/// tuples automatically get isolated owner locks.
+fn owner_lock_path(paths: &CenterPaths) -> Utf8PathBuf {
+    paths.socket.with_extension("owner")
+}
+
+/// Acquire the serving-lifetime owner lock, or prove a live owner already
+/// answers `paths.socket` and this process should exit as a no-op. Returns
+/// the held lock file on success; the caller must keep it alive for the
+/// whole serving lifetime. `Ok(None)` means: do not bind, exit 0.
+fn acquire_owner_lock(paths: &CenterPaths) -> crate::Result<Option<std::fs::File>> {
+    let lock_path = owner_lock_path(paths);
+    let lock = crate::file_lock::open_lock_file_no_follow(&lock_path)
+        .map_err(|source| io_error(&lock_path, source))?;
+    if crate::file_lock::try_lock_exclusive(&lock).map_err(|source| io_error(&lock_path, source))? {
+        // The pathname is unowned: a stale socket left by a prior owner may
+        // now safely be unlinked, using the same uid + is_socket guard
+        // `prepare_spawn` uses for the identical situation.
+        if let Ok(metadata) = std::fs::symlink_metadata(paths.socket.as_std_path()) {
+            if metadata.file_type().is_socket() && metadata.uid() == unsafe { libc::getuid() } {
+                std::fs::remove_file(paths.socket.as_std_path())
+                    .map_err(|source| io_error(&paths.socket, source))?;
+            } else {
+                return Err(protocol_error(format!(
+                    "refusing to remove unowned non-socket {}",
+                    paths.socket
+                )));
+            }
+        }
+        return Ok(Some(lock));
+    }
+    // Contended: a live owner may already be serving this socket. Never
+    // unlink or bind while ownership is unproven either way.
+    match UnixStream::connect(paths.socket.as_std_path()) {
+        Ok(mut stream) => match handshake_with_timeout(&mut stream, STREAM_TIMEOUT) {
+            Ok(()) => Ok(None),
+            Err(_) => Ok(None),
+        },
+        Err(_) => Ok(None),
+    }
+}
+
 fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) -> crate::Result<()> {
     if let Ok(marker) = std::env::var("CTX_CENTER_LAUNCH_MARKER") {
         // Private test instrumentation: each sentinel process records exactly
@@ -2356,21 +2778,19 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             .and_then(|mut file| file.write_all(b"center\n"))
             .map_err(|source| io_error(&paths.socket, source))?;
     }
-    if paths.socket.exists() {
-        return Err(protocol_error(format!(
-            "center socket already exists: {}",
-            paths.socket
-        )));
-    }
-    // Do the potentially slow reconstruction before publishing the listener.
-    // Spawn arbitration uses a successful handshake as its readiness signal,
-    // so a bound socket must always be able to service that handshake.
+    let Some(_owner_lock) = acquire_owner_lock(&paths)? else {
+        // Another process already owns this socket path, or may be in the
+        // process of proving it. Exit as an idempotent no-op start.
+        return Ok(());
+    };
+    // Opening the index reads only `center_rows`, metadata-only and small
+    // after the projection rebuild — not the cold-start cost. Binding ahead
+    // of `open` would instead mean a client can handshake a center that then
+    // dies on an invalid index, worse than today's failure. The corpus scan
+    // itself is the slow part, and it is deliberately left for the accept
+    // loop below: a client must be able to handshake and receive a partial
+    // answer while it is still running.
     let mut model = CenterModel::open(&paths)?;
-    if model.discover(&paths).is_err() {
-        // The disk cache is derived, but a failed scan cannot prove that a
-        // driver disappeared. Keep the process alive and retry on cadence.
-        model.uncertain = true;
-    }
     let listener = UnixListener::bind(paths.socket.as_std_path())
         .map_err(|source| io_error(&paths.socket, source))?;
     let _guard = SocketGuard::for_listener(paths.socket.clone())?;
@@ -2378,6 +2798,11 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
     listener
         .set_nonblocking(true)
         .map_err(|source| io_error(&paths.socket, source))?;
+    // The corpus build starts only once the listener is bound and can
+    // already service a handshake. `begin_scan` is cheap directory
+    // enumeration only (no ledger reads); every actual ledger read happens
+    // in bounded slices from the accept loop below, never here.
+    model.begin_scan(&paths)?;
     let mut last_work = Instant::now();
     let mut last_scan = Instant::now();
     // Connection workers own every potentially slow socket operation. Jobs are
@@ -2394,14 +2819,32 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(error) => return Err(io_error(&paths.socket, error)),
         }
+        // Advance any in-progress warming scan (cold-start build or a
+        // periodic rescan below) by one bounded slice per loop tick, so the
+        // pathname stays serviced throughout instead of only at start/end.
+        if model.is_warming() && model.warm_step(&paths, WARM_SLICE).is_err() {
+            model.uncertain = true;
+        }
         while let Ok(job) = job_receiver.try_recv() {
             match job {
                 ModelCommand::Request { request, reply } => {
                     // Queries take a center-owned freshness barrier before
                     // reading the model, including unnotified store changes.
-                    if snapshot_request(&request)
-                        && let Err(error) = model.discover(&paths)
-                    {
+                    // While a scan is already warming the model, draining one
+                    // more bounded slice keeps the barrier itself bounded —
+                    // serving the rows indexed so far is what bind-before-
+                    // build means; a full corpus-sized discover here would
+                    // block the very first query on the whole corpus.
+                    let barrier_result = if snapshot_request(&request) {
+                        if model.is_warming() {
+                            model.warm_step(&paths, WARM_SLICE)
+                        } else {
+                            model.discover(&paths)
+                        }
+                    } else {
+                        Ok(())
+                    };
+                    if let Err(error) = barrier_result {
                         let _ = reply.send(Err(error));
                         continue;
                     }
@@ -2462,15 +2905,21 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             }
             last_work = Instant::now();
         }
-        if last_scan.elapsed() >= scan_interval {
-            if model.discover(&paths).is_err() {
+        // A periodic rescan starts a new bounded scan rather than blocking
+        // the loop for one corpus-sized pass; already-warming scans (e.g.
+        // the cold-start build) are left to keep draining above.
+        if last_scan.elapsed() >= scan_interval && !model.is_warming() {
+            if model.warm_step(&paths, WARM_SLICE).is_err() {
                 model.uncertain = true;
             }
             last_scan = Instant::now();
         }
         if last_work.elapsed() >= idle {
             prune_pending_starts(&mut model);
-            if model.discover(&paths).is_err() {
+            // `has_live` below already treats an in-progress scan as live,
+            // so idle exit cannot fire mid-warm; still avoid starting a new
+            // full discover here while one is already advancing per tick.
+            if !model.is_warming() && model.discover(&paths).is_err() {
                 model.uncertain = true;
             }
             if !model.has_live() {
@@ -3076,10 +3525,16 @@ fn handle_request(
             repo_key,
             ..
         } => match select_row(model, &wanted, repo_key.as_deref()) {
-            RowSelection::One(row) => Ok(ResponseResult::Get(match &row.session {
-                Some(session) => GetWireResult::Session(Box::new(session.clone())),
-                None => GetWireResult::Missing,
-            })),
+            // `select_row` only resolves which ledger answers this request; the
+            // center no longer retains a parsed session, so `Get` reads the
+            // ledger on demand and a read failure is an error naming the
+            // ledger, never a row-resolution `Missing`.
+            RowSelection::One(row) => {
+                let session = read_session(&row.ledger_path)?;
+                Ok(ResponseResult::Get(GetWireResult::Session(Box::new(
+                    session,
+                ))))
+            }
             RowSelection::Missing => Ok(ResponseResult::Get(GetWireResult::Missing)),
             RowSelection::Ambiguous(rows) => Ok(ResponseResult::Get(GetWireResult::Ambiguous(
                 rows.into_iter()
@@ -3131,8 +3586,8 @@ fn handle_request(
                 .collect();
             let records: Vec<_> = rows
                 .iter()
-                .filter_map(|row| row.session.as_ref())
-                .map(ctx_traits_core::procedure::stats::RunRecord::from_session)
+                .filter(|row| row.summary.parse_error.is_none())
+                .map(|row| run_record(&row.summary))
                 .collect();
             let report = ctx_traits_core::procedure::stats::aggregate(
                 &records,
@@ -3157,13 +3612,19 @@ fn handle_request(
             // Store scans were lexical by ledger name; retain that selection rule
             // rather than exposing HashMap insertion order to dispatch refusal.
             rows.sort_by(|left, right| left.ledger_path.cmp(&right.ledger_path));
-            let sessions: Vec<_> = rows
+            let facts: Vec<_> = rows
                 .into_iter()
-                .filter_map(|row| row.session.clone())
+                .map(|row| crate::dispatch_preflight::WallFacts {
+                    status: row.summary.status.clone(),
+                    task_value: row.summary.task_value.clone(),
+                    terminal_epoch: row.summary.terminal_epoch,
+                    run_id: row.summary.run_id.clone(),
+                    park_wall_id: row.summary.park_wall_id.clone(),
+                })
                 .collect();
             Ok(ResponseResult::StandingWall(
-                crate::dispatch_preflight::standing_wall_in_sessions(
-                    &sessions,
+                crate::dispatch_preflight::standing_wall_in_facts(
+                    &facts,
                     &wall_id,
                     &dispatched_task,
                 ),
@@ -3198,6 +3659,37 @@ pub struct CenterPublicRow {
     /// The ledger mtime is part of the center-owned fingerprint and is exposed
     /// for recency projections without reopening the ledger client-side.
     pub modified_epoch_secs: u64,
+}
+
+/// Project a [`RunSummary`] into `stats::RunRecord` at the center boundary,
+/// so `Stats` never needs a retained `Session`. Only `canonical_digest` needs
+/// a lossy-free round trip — every value stored here was produced by
+/// [`Digest::parse`] on the way in, so re-parsing it back is infallible in
+/// practice; a value that fails to parse is treated as absent rather than as
+/// a query failure.
+fn run_record(
+    summary: &crate::run_summary::RunSummary,
+) -> ctx_traits_core::procedure::stats::RunRecord {
+    ctx_traits_core::procedure::stats::RunRecord {
+        trait_id: summary.trait_id.clone(),
+        canonical_digest: summary
+            .canonical_digest
+            .as_deref()
+            .and_then(|digest| ctx_traits_core::digest::Digest::parse(digest).ok()),
+        status: summary.status.clone(),
+        stop_reason: summary.stop_reason.clone(),
+        drive_outcome_kind: summary
+            .last_drive_outcome
+            .clone()
+            .map(ctx_traits_core::procedure::session::DriveOutcomeKind::from_wire),
+        outcome: summary.last_drive_outcome.clone(),
+        recorded_at_epoch: summary.terminal_epoch,
+        work_tokens: summary.work_tokens,
+        narrator_tokens: summary.narrator_tokens,
+        guide_tokens: summary.guide_tokens,
+        tokens_by_model: summary.tokens_by_model.clone(),
+        verdict_rounds: summary.verdict_rounds,
+    }
 }
 
 fn public_row(row: &CenterRow) -> CenterPublicRow {
@@ -3335,6 +3827,13 @@ mod tests {
             spawn_lock: root.join("center.lock"),
             runs_root: root.clone(),
             index: root.join("index.sqlite3"),
+            // Every unit test gets its own scratch root, so its liveness
+            // index must live under that same root too — never the real
+            // machine-global `run_control::runtime_root()`, which is shared
+            // process-wide state that would otherwise leak unrelated
+            // drivers' entries (including stale ones left by an earlier,
+            // unrelated test run) into this test's model.
+            liveness_root: root.join("liveness"),
         }
     }
 
@@ -3790,6 +4289,7 @@ mod tests {
             spawn_lock: root.join("center.lock"),
             runs_root: root.join("flat-runs"),
             index: root.join("index.sqlite3"),
+            liveness_root: root.join("liveness"),
         };
         std::fs::create_dir_all(paths.runs_root.as_std_path()).expect("create flat runs root");
         let repository = root.join("repository");
@@ -3980,6 +4480,113 @@ mod tests {
             );
             let _ = std::fs::remove_dir_all(root.as_std_path());
         }
+    }
+
+    #[test]
+    fn unchanged_settled_pause_fingerprint_does_not_reparse_on_second_scan() {
+        for outcome in [
+            "paused",
+            "paused-provider-credits",
+            "paused-budget-exhausted",
+        ] {
+            let root = scratch(&format!("unchanged-settled-pause-{outcome}"));
+            let paths = paths(root.clone());
+            let ledger = root.join("repository").join("session-fixture.json");
+            std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+                .expect("create repository store");
+            crate::run_session::write_run_session(
+                &ledger,
+                &fixture_session_with_outcome("awaiting-agent-output", outcome),
+            )
+            .expect("write paused ledger");
+            let mut model = CenterModel::open(&paths).expect("open index");
+            model.discover(&paths).expect("initial discovery");
+            assert!(!terminal(
+                &model.rows.get(&ledger).expect("paused row").summary
+            ));
+            LEDGER_READS.with(|reads| reads.set(0));
+            model.discover(&paths).expect("unchanged discovery");
+            LEDGER_READS.with(|reads| {
+                assert_eq!(
+                    reads.get(),
+                    0,
+                    "{outcome}: unchanged settled pause must not reopen the ledger"
+                )
+            });
+            assert_eq!(
+                model
+                    .rows
+                    .get(&ledger)
+                    .expect("cached row")
+                    .summary
+                    .last_drive_outcome
+                    .as_deref(),
+                Some(outcome)
+            );
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+        }
+    }
+
+    #[test]
+    fn run_record_carries_non_default_projected_stats_facts_through_a_stats_query() {
+        let root = scratch("stats-non-default");
+        let paths = paths(root.clone());
+        let mut model = CenterModel::open(&paths).expect("open index");
+        let mut summary = crate::run_summary::RunSummary::unreadable(
+            "session-fixture".to_string(),
+            "unused".to_string(),
+        );
+        summary.parse_error = None;
+        summary.trait_id = "fixture-trait".to_string();
+        summary.status = ctx_traits_core::procedure::session::Status::Blocked;
+        summary.stop_reason = Some(ctx_traits_core::procedure::runtime::StopReason {
+            reason: "max-iterations-exhausted".to_string(),
+            at: Vec::new(),
+            last_check: None,
+            message: None,
+        });
+        summary.tokens_by_model =
+            std::collections::BTreeMap::from([("fixture-model".to_string(), 42)]);
+        summary.verdict_rounds = Some(3);
+        model.rows.insert(
+            root.join("session-fixture.json"),
+            CenterRow {
+                summary,
+                repo_key: "repository".to_string(),
+                repo_path: "/repository".to_string(),
+                ledger_path: root.join("session-fixture.json"),
+                modified: SystemTime::now(),
+                size: 0,
+                live_holder: None,
+                live: false,
+            },
+        );
+
+        let report = match handle_request(
+            &mut model,
+            &paths,
+            Request::Stats {
+                id: next_id("test"),
+                since_epoch: None,
+                trait_id: None,
+                repo_key: None,
+            },
+        )
+        .expect("stats request succeeds")
+        {
+            ResponseResult::Stats(report) => report,
+            other => panic!("expected Stats response, got {other:?}"),
+        };
+        assert_eq!(
+            report.outcomes.exhausted_unapproved, 1,
+            "stop_reason must classify a blocked+max-iterations row as exhausted-unapproved"
+        );
+        assert_eq!(
+            report.tokens_by_model.get("fixture-model").copied(),
+            Some(42),
+            "tokens_by_model must survive the projection into the aggregate"
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     #[test]
@@ -4993,6 +5600,36 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_migration_retries_the_full_rebuild_instead_of_recording_completion() {
+        let root = scratch("interrupted-migration");
+        let paths = paths(root.clone());
+        let model = CenterModel::open(&paths).expect("open index");
+        // Simulate a crash between the rebuild's DELETE/DROP and its
+        // marker write (which now happens only after VACUUM succeeds): the
+        // rows and payload table are already gone, but no projection marker
+        // was ever recorded for this rebuild.
+        model
+            .db
+            .execute_batch("DELETE FROM center_rows; DELETE FROM center_projection_meta; DROP TABLE IF EXISTS center_sessions;")
+            .expect("simulate the pre-marker half of a rebuild");
+        drop(model);
+
+        // Retrying `open` after this crash must not error — `DROP TABLE IF
+        // EXISTS` and `DELETE` are idempotent — and it must still end with
+        // the current marker recorded, proving a failed/interrupted
+        // reclamation is retried rather than silently treated as done.
+        let model = CenterModel::open(&paths).expect("retry the interrupted rebuild");
+        let projection_version: i64 = model
+            .db
+            .query_row("SELECT version FROM center_projection_meta", [], |row| {
+                row.get(0)
+            })
+            .expect("read projection marker after retry");
+        assert_eq!(projection_version, CENTER_PROJECTION_VERSION);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
     fn prior_projection_marker_is_migrated_back_to_the_v1_shared_marker() {
         let root = scratch("prior-projection-marker");
         let paths = paths(root.clone());
@@ -5050,14 +5687,20 @@ mod tests {
             params![ledger.as_str(), secs, nanos, size, serde_json::to_string(&session).expect("encode session")],
         )
         .expect("write cached session");
+        let index_size_before = std::fs::metadata(paths.index.as_std_path())
+            .expect("stat v1 index")
+            .len();
         drop(db);
 
-        let model = CenterModel::open(&paths).expect("reopen and reproject");
-        let row = model.rows.get(&ledger).expect("reprojected row");
-        assert_eq!(row.summary.run_id, "run-fixture");
-        assert_eq!(row.summary.task_key.as_deref(), Some("0243.4"));
-        assert!(row.summary.parse_error.is_none());
-        assert!(row.session.is_some());
+        // A v1-shaped index has no projection marker at all. `open` wipes
+        // the stale-shaped rows, drops the payload `center_sessions` table,
+        // and reclaims the freed pages; the metadata-only row is rebuilt by
+        // the next discovery pass reading the authoritative ledger.
+        let mut model = CenterModel::open(&paths).expect("reopen and rebuild");
+        assert!(
+            model.rows.is_empty(),
+            "marker-gated rebuild must not carry over stale-shaped rows"
+        );
         let schema_version: i64 = model
             .db
             .query_row("SELECT version FROM center_meta", [], |row| row.get(0))
@@ -5070,6 +5713,30 @@ mod tests {
             })
             .expect("read projection marker");
         assert_eq!(projection_version, CENTER_PROJECTION_VERSION);
+        let no_payload_table: i64 = model
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'center_sessions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master");
+        assert_eq!(no_payload_table, 0, "payload table must be dropped");
+        let index_size_after = std::fs::metadata(paths.index.as_std_path())
+            .expect("stat rebuilt index")
+            .len();
+        assert!(
+            index_size_after <= index_size_before,
+            "VACUUM must reclaim, not grow, the physical index: before={index_size_before} after={index_size_after}"
+        );
+
+        model
+            .discover(&paths)
+            .expect("rebuild projection from ledger");
+        let row = model.rows.get(&ledger).expect("reprojected row");
+        assert_eq!(row.summary.run_id, "run-fixture");
+        assert_eq!(row.summary.task_key.as_deref(), Some("0243.4"));
+        assert!(row.summary.parse_error.is_none());
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
@@ -5133,7 +5800,6 @@ mod tests {
         let mut model = CenterModel::open(&paths).expect("open center");
         model.discover(&paths).expect("discover corrupt ledger");
         let row = model.rows.get(&ledger).expect("retain unreadable row");
-        assert!(row.session.is_none());
         assert!(row.summary.parse_error.is_some());
         assert!(!model.has_live());
         drop(model);
@@ -5155,7 +5821,7 @@ mod tests {
             model
                 .rows
                 .get(&ledger)
-                .is_some_and(|row| row.session.is_none() && row.summary.parse_error.is_some())
+                .is_some_and(|row| row.summary.parse_error.is_some())
         );
 
         LEDGER_READS.with(|reads| reads.set(0));
@@ -5327,7 +5993,6 @@ mod tests {
             ledger.clone(),
             CenterRow {
                 summary: serde_json::from_str(&cached_summary()).expect("summary"),
-                session: None,
                 repo_key: "repo".to_string(),
                 repo_path: "/repo".to_string(),
                 ledger_path: ledger.clone(),
@@ -5337,7 +6002,7 @@ mod tests {
                 live: false,
             },
         );
-        model.persist().expect("persist row");
+        model.persist_row(&ledger).expect("persist row");
         drop(model);
         let reopened = CenterModel::open(&paths).expect("reopen index");
         let row = reopened.rows.get(&ledger).expect("row restored");
@@ -5391,8 +6056,8 @@ mod tests {
     }
 
     #[test]
-    fn persistence_removes_only_deleted_session_cache_entries() {
-        let root = scratch("session-cache-retention");
+    fn persistence_removes_only_deleted_ledger_rows() {
+        let root = scratch("row-scoped-retention");
         let paths = paths(root.clone());
         let removed = write_fixture_ledger(&root, "removed", "completed");
         let retained = write_fixture_ledger(&root, "retained", "completed");
@@ -5401,9 +6066,9 @@ mod tests {
         assert_eq!(
             model
                 .db
-                .query_row("SELECT COUNT(*) FROM center_sessions", [], |row| row
+                .query_row("SELECT COUNT(*) FROM center_rows", [], |row| row
                     .get::<_, i64>(0))
-                .expect("count cached sessions"),
+                .expect("count cached rows"),
             2
         );
 
@@ -5413,34 +6078,32 @@ mod tests {
             model
                 .db
                 .query_row(
-                    "SELECT COUNT(*) FROM center_sessions WHERE ledger = ?1",
+                    "SELECT COUNT(*) FROM center_rows WHERE ledger = ?1",
                     params![removed.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
-                .expect("deleted cache entry is gone"),
+                .expect("deleted row is gone"),
             0
         );
         assert_eq!(
             model
                 .db
                 .query_row(
-                    "SELECT COUNT(*) FROM center_sessions WHERE ledger = ?1",
+                    "SELECT COUNT(*) FROM center_rows WHERE ledger = ?1",
                     params![retained.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
-                .expect("surviving cache entry remains"),
+                .expect("surviving row remains"),
             1
         );
         drop(model);
 
         let reopened = CenterModel::open(&paths).expect("reopen index");
         assert!(
-            reopened
-                .rows
-                .get(&retained)
-                .is_some_and(|row| row.session.is_some()),
-            "the surviving cached session remains queryable after restart"
+            reopened.rows.contains_key(&retained),
+            "the surviving row remains queryable after restart"
         );
+        assert!(!reopened.rows.contains_key(&removed));
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
@@ -5469,6 +6132,64 @@ mod tests {
         );
         assert!(paths.socket.exists(), "inconclusive listener was unlinked");
         server.join().expect("listener exits");
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn prepare_spawn_never_unlinks_a_socket_while_its_serving_owner_lock_is_held() {
+        let root = Utf8PathBuf::from(format!(
+            "/tmp/ctx-center-owner-unlink-{}-{}",
+            std::process::id(),
+            epoch_millis()
+        ));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+        std::fs::create_dir_all(root.as_std_path()).expect("create scratch directory");
+        let paths = paths(root.clone());
+        // A dangling socket with nothing listening: `connect` fails with
+        // ECONNREFUSED, which is the fallthrough case `prepare_spawn` reaches
+        // when deciding whether the pathname is safe to reclaim.
+        drop(UnixListener::bind(paths.socket.as_std_path()).expect("bind dangling socket"));
+        // Simulate a live owner: `run_server_at` holds this same lock for its
+        // whole serving lifetime.
+        let owner_lock_file = crate::file_lock::open_lock_file_no_follow(&owner_lock_path(&paths))
+            .expect("open owner lock file");
+        assert!(
+            crate::file_lock::try_lock_exclusive(&owner_lock_file).expect("attempt owner lock"),
+            "test must hold the owner lock itself to simulate a live owner"
+        );
+
+        assert!(
+            prepare_spawn(&paths, STREAM_TIMEOUT).expect("prepare_spawn under a held owner lock"),
+            "a held owner lock must be treated as an already-running center"
+        );
+        assert!(
+            paths.socket.exists(),
+            "prepare_spawn must never unlink a socket while its owner lock is held"
+        );
+        drop(owner_lock_file);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn prepare_spawn_unlinks_a_dangling_socket_once_the_owner_lock_is_free() {
+        let root = Utf8PathBuf::from(format!(
+            "/tmp/ctx-center-owner-free-{}-{}",
+            std::process::id(),
+            epoch_millis()
+        ));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+        std::fs::create_dir_all(root.as_std_path()).expect("create scratch directory");
+        let paths = paths(root.clone());
+        drop(UnixListener::bind(paths.socket.as_std_path()).expect("bind dangling socket"));
+
+        assert!(
+            !prepare_spawn(&paths, STREAM_TIMEOUT).expect("prepare_spawn with no owner"),
+            "no owner lock is held, so spawning a new center is safe"
+        );
+        assert!(
+            !paths.socket.exists(),
+            "an unowned dangling socket must be reclaimed once no owner lock is held"
+        );
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
@@ -5540,6 +6261,7 @@ mod tests {
             spawn_lock: root.join("center.lock"),
             runs_root: root.join("flat-runs"),
             index: root.join("index.sqlite3"),
+            liveness_root: root.join("liveness"),
         };
         std::fs::create_dir_all(paths.runs_root.as_std_path()).expect("create flat runs root");
         let ledger = root
@@ -5611,7 +6333,7 @@ mod tests {
     }
 
     #[test]
-    fn model_queries_never_reopen_a_constructed_ledger() {
+    fn only_get_reopens_a_constructed_ledger() {
         let root = scratch("model-queries");
         let paths = paths(root.clone());
         let _ledger = write_fixture_ledger(&root, "repository", "completed");
@@ -5652,12 +6374,14 @@ mod tests {
         ] {
             handle_request(&mut model, &paths, request).expect("cached query");
         }
-        LEDGER_READS.with(|reads| assert_eq!(reads.get(), 0));
+        // `Get` is the one query in this list that reads its selected
+        // ledger on demand; every other metadata-only query stays at zero.
+        LEDGER_READS.with(|reads| assert_eq!(reads.get(), 1));
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     #[test]
-    fn fingerprint_matching_session_cache_serves_every_query_without_ledger_reads() {
+    fn metadata_only_queries_serve_every_unchanged_pass_without_ledger_reads() {
         let root = scratch("restart-query-cache");
         let paths = paths(root.clone());
         let _ledger = write_fixture_ledger(&root, "repository", "completed");
@@ -5666,16 +6390,17 @@ mod tests {
         drop(initial);
 
         let mut reopened = CenterModel::open(&paths).expect("reopen cached index");
-        assert!(reopened.rows.values().all(|row| row.session.is_some()));
+        assert!(!reopened.rows.is_empty());
         LEDGER_READS.with(|reads| reads.set(0));
+        // A second discovery pass over an unchanged store: the marker-gated
+        // rebuild guarantees every cached row was written by the current
+        // projection, so fingerprint match alone is enough — no ledger read.
+        reopened.discover(&paths).expect("unchanged discovery");
+        LEDGER_READS
+            .with(|reads| assert_eq!(reads.get(), 0, "unchanged discovery reopened a ledger"));
         for request in [
             Request::List {
                 id: next_id("test"),
-                repo_key: Some("repository".to_string()),
-            },
-            Request::Get {
-                id: next_id("test"),
-                session_id: "session-fixture".to_string(),
                 repo_key: Some("repository".to_string()),
             },
             Request::Resolve {
@@ -5700,9 +6425,23 @@ mod tests {
                 repo_key: Some("repository".to_string()),
             },
         ] {
-            handle_request(&mut reopened, &paths, request).expect("cached query");
+            handle_request(&mut reopened, &paths, request).expect("metadata-only query");
         }
-        LEDGER_READS.with(|reads| assert_eq!(reads.get(), 0));
+        LEDGER_READS
+            .with(|reads| assert_eq!(reads.get(), 0, "metadata-only query reopened a ledger"));
+
+        // `Get` is the one query that always reads the selected ledger.
+        handle_request(
+            &mut reopened,
+            &paths,
+            Request::Get {
+                id: next_id("test"),
+                session_id: "session-fixture".to_string(),
+                repo_key: Some("repository".to_string()),
+            },
+        )
+        .expect("get reads the ledger");
+        LEDGER_READS.with(|reads| assert_eq!(reads.get(), 1));
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
@@ -6271,11 +7010,13 @@ mod tests {
         crate::file_lock::lock_exclusive_blocking(&lock).expect("driver wins lock");
         model
             .refresh_after_probe(
+                &paths,
                 &ledger,
                 true,
                 crate::run_control::DriverProbe::Unheld {
                     stale_metadata: None,
                 },
+                None,
             )
             .expect("maintenance handoff");
         assert!(model.rows.get(&ledger).expect("row").live);
@@ -6430,6 +7171,54 @@ mod tests {
             assert!(error.to_string().contains("remove"));
             let _ = std::fs::remove_dir_all(root.as_std_path());
         }
+    }
+
+    #[test]
+    fn locked_index_is_diagnosed_as_contention_not_corruption() {
+        let root = scratch("busy-index");
+        let paths = paths(root.clone());
+        // Establish the schema first so the busy connection below contends
+        // on an already-initialized database rather than racing `open`'s
+        // own schema creation.
+        drop(CenterModel::open(&paths).expect("initialize index"));
+
+        let contender =
+            Connection::open(paths.index.as_std_path()).expect("open contending connection");
+        contender
+            .execute_batch("BEGIN EXCLUSIVE")
+            .expect("hold an exclusive transaction");
+
+        let error = match CenterModel::open(&paths) {
+            Ok(_) => panic!("busy index accepted as immediately openable"),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        assert!(message.contains(paths.index.as_str()));
+        assert!(message.contains("busy"));
+        assert!(!message.contains("invalid"));
+        assert!(!message.contains("corrupt"));
+        assert!(!message.contains("remove"));
+
+        drop(contender);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn a_non_sqlite_file_still_names_the_removable_index() {
+        let root = scratch("garbage-index");
+        let paths = paths(root.clone());
+        std::fs::create_dir_all(paths.runs_root.as_std_path()).expect("create runs root");
+        std::fs::write(paths.index.as_std_path(), b"not a sqlite database at all")
+            .expect("write garbage index");
+
+        let error = match CenterModel::open(&paths) {
+            Ok(_) => panic!("garbage file accepted as a valid index"),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        assert!(message.contains(paths.index.as_str()));
+        assert!(message.contains("remove"));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     #[test]

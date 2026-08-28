@@ -3,7 +3,7 @@ key = "0262"
 title = "The center is a daemon in the middle"
 status = "ready"
 raised = "2026-08-28"
-content = '''
+content = """
 The center's contract, in the owner's words: one daemon in the middle,
 decoupling any number of dashboards from any number of orchestrators.
 2026-08-28 proved the implementation does not hold that contract. All
@@ -156,8 +156,8 @@ sessions without any driver event, and it is the only path that can
 recover a registered repository-local ledger the flat runs-root
 enumeration cannot see. No PID authority, no timestamp authority, and no
 recency cutoff — a long in-flight frame is legitimately live.
-'''
-scope = '''
+"""
+scope = """
 ## Binding outcomes and exclusions
 
 These bound the OUTCOME regardless of the route taken. They are stated
@@ -495,8 +495,8 @@ cleanliness half; the single-commit shape is guidance).
 - Archived-history browsing; `runs-archive/` restore stays a manual op.
 - Any recency or PID-based liveness heuristic (Correction 5).
 - 0243.5's center-mediated spawn/pause/interrupt.
-'''
-validation = '''
+"""
+validation = """
 ## Done when — binding goals, each with the existing command that decides it
 
 1. The index holds no ledger content and is physically small. Over a
@@ -590,7 +590,7 @@ judgement call.
   design, not a reason to weaken the assertion.
 - A finding in 0261's or 0263's area is advisory board material, never
   an extra cell here.
-'''
+"""
 
 [[checks]]
 name = "center model, busy-vs-corrupt and metadata-only regressions pass"
