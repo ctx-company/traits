@@ -5,7 +5,7 @@ import type { AgentHandle, SequenceHandle } from "./handles.js";
 import { withDeclaration, withHiddenField } from "./meta.js";
 import { collectMany, compact, slugFromName, validateSlug } from "./normalize.js";
 import { normalizeBehavior, normalizeIntent } from "./normalize.js";
-import type { PromptRegistrarOptions } from "./sequence.js";
+import type { PromptRegistrarFn, PromptRegistrarOptions } from "./sequence.js";
 import type { SessionBinding } from "./session.js";
 import { sessionFieldOf } from "./session.js";
 import type { Behavior, Intent } from "./trait.js";
@@ -92,10 +92,17 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
   // `itemIds`) — the functional layer's `agent.prompt(title, opts)`
   // registrar (0106), reachable from every mint path: `agent(...)`,
   // `agent.worker(...)`/other templates, and the deprecated bare templates.
+  // `dispatchAgentPrompt` already returns whatever `sequenceOf` built —
+  // `.result`/`.results` included at runtime for a bare-schema `output:`
+  // (0253.3) — so only the STATIC type needs to widen to `PromptRegistrarFn`;
+  // a plain single-signature arrow can't itself satisfy an overloaded target
+  // (its return type isn't provably `SequenceHandle & { result }` for the
+  // schema-output overload), so this is the one cast bridging that gap.
   return withHiddenField(
     handle,
     "prompt",
-    (title: string, opts: PromptRegistrarOptions) => dispatchAgentPrompt(handle, title, opts) as SequenceHandle,
+    ((title: string, opts: PromptRegistrarOptions) =>
+      dispatchAgentPrompt(handle, title, opts) as SequenceHandle) as unknown as PromptRegistrarFn,
   );
 }
 

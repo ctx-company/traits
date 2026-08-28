@@ -18,7 +18,15 @@ export type {
   ParParam,
 } from "./registrars.js";
 export { defineStep, step } from "./step.js";
-export type { CheckStep, CheckStepFields, CommandStepFields, PromptStepFields, Step, StepFields } from "./step.js";
+export type {
+  CheckStep,
+  CheckStepFields,
+  CommandStepFields,
+  ParameterizedStep,
+  PromptStepFields,
+  Step,
+  StepFields,
+} from "./step.js";
 export {
   defineTrait,
   defineVariant,

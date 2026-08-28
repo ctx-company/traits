@@ -4,6 +4,7 @@ import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
 import type {
   DeclaredSlotHandle,
   DeclaredSlotWithFields,
+  OptionalSlotRead,
   OutputSinkHandle,
   SequenceHandle,
   SlotHandle,
@@ -137,7 +138,17 @@ export function isLiteralProjectionSource(value: unknown): value is LiteralProje
 }
 
 export interface OperationFunction {
-  /** The `.with` write mode that appends to a list slot. */
+  /**
+   * The `.with` write mode that appends to a list slot: accumulation is a
+   * WRITE MODE, never a read-format-rewrite. Two steps each writing
+   * `findings.with(operation.Append)` yield both entries, in order — never
+   * a step reading the slot's current value, string-concatenating its own
+   * addition, and writing the whole thing back (a race under replay, and a
+   * format every producer must agree on by convention). A `schema:text`
+   * slot cannot take `Append` (core requires an array slot schema) — accumulate
+   * text as `slot.list(schema.text(), ...)`, one formatted entry per append.
+   * @example `findings.with(operation.Append)`
+   */
   readonly Append: "append";
   /** The `.with` write mode that merges an object into an object slot. */
   readonly Merge: "merge";
@@ -270,7 +281,70 @@ function slotWithSchema(value: string | Omit<SlotFields, "schema">, schemaRef: S
   return slotOf({ ...(typeof value === "string" ? { id: value } : value), schema: schemaRef });
 }
 
-function slotOf(fields: SlotFields): DeclaredSlotHandle {
+/**
+ * Attaches the `.optional()`/`.forEach()`/`.with()` augmentation every
+ * declared slot handle carries — non-enumerably, so none of it reaches the
+ * canonical declaration. Shared by `slotOf` and `mintAutoSlot` (the
+ * virtual-slot mint, `sequence.ts`), the third and prior duplicate this
+ * factored out (0253.3): a named slot and an auto-named one must not drift.
+ */
+/**
+ * The `.optional()` closure every slot reference carries — a bare
+ * `ref.slot(...)` (`lazyForEachItem`'s proxy, before the real item slot
+ * exists) or a fully declared handle (`augmentSlotHandle`) alike, so the two
+ * paths cannot drift on what "optional" means for a slot.
+ */
+function slotOptionalClosure(target: SlotHandle): () => OptionalSlotRead {
+  return () => optionalSlotInput(target);
+}
+/**
+ * The `.with(...)` closure every slot reference carries — the authoring-form
+ * spelling of `operation.over(slot, op)` (0210, 0207 ruling 4), shared the
+ * same way as {@link slotOptionalClosure}.
+ */
+function slotWithClosure(target: SlotHandle): SlotSink<unknown> {
+  return ((op?: WriteOperation) => operationOver(target, op as never)) as SlotSink<unknown>;
+}
+
+function augmentSlotHandle(resolved: SlotHandle): DeclaredSlotHandle {
+  // `.optional()` is the per-SITE optionality wrapper, identical in output to
+  // `input.optional(slot)` — optionality has never been a property of the slot
+  // itself, so the same slot stays required at one step and optional at
+  // another. Attached non-enumerably so it can never serialize into the
+  // canonical, and defined here (not on the proxy path alone) so object-schema
+  // and scalar slots both carry it.
+  const withOptional = withHiddenField(resolved, "optional", slotOptionalClosure(resolved));
+  // `.forEach` is the functional layer's `items.forEach` spelling (0106,
+  // 0102) — attached the same way as `.optional`, non-enumerable so it never
+  // reaches the canonical declaration.
+  const withForEach = withHiddenField(
+    withOptional,
+    "forEach",
+    (title: string, body: (item: SlotHandle, loop: ForEachParam) => void) =>
+      dispatchSlotForEach(withOptional, title, body) as SequenceHandle,
+  );
+  // `.with` is the authoring-form spelling of `operation.over(slot, op)`
+  // (0210, 0207 ruling 4) — a pure delegation, not a new declaration path,
+  // attached the same non-enumerable way so it never reaches the canonical.
+  return withHiddenField(withForEach, "with", slotWithClosure(resolved));
+}
+
+/**
+ * The one slot declaration path: builds the canonical declaration, mints the
+ * handle (with its object-schema field-ref proxy, when the schema is one),
+ * and augments it with `.optional()`/`.forEach()`/`.with()`. This IS `slotOf`
+ * (an author's hand-declared slot) — its body stays inline here, not behind a
+ * separate `declareSlot` wrapper, so every pre-existing named-slot mint keeps
+ * the exact call-stack depth it had before 0253.3, between the author's mint
+ * site and `withDeclaration`'s `captureSourceAnchor()`. `mintAutoSlot` (the
+ * virtual-slot lowering behind `output: schema.text()`, 0253.3) calls this
+ * directly too, one frame deeper — acceptable, since a virtual slot is a new
+ * mint path with no pre-existing depth to preserve. `recordMint: false` is
+ * the only behavioral difference: `functional/trait.ts`'s
+ * `checkNeverReferenced` diffs author mints against merged declarations, and
+ * an auto slot is not an author mint.
+ */
+function slotOf(fields: SlotFields, options: { readonly recordMint?: boolean } = {}): DeclaredSlotHandle {
   const id = slugFromName(fields.id, "slot.id");
   const declaration = compact({
     id,
@@ -289,7 +363,7 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   const handle = withDeclaration("slot", `slot:${id}`, declaration, {} as JsonObject, {
     declarations: collectMany([fields.schema]),
   });
-  recordTraitMint("slot", id, `slot:${id}`, declaration);
+  if (options.recordMint !== false) recordTraitMint("slot", id, `slot:${id}`, declaration);
   const objectFields = objectSchemaFields(fields.schema);
   const declarations = collectMany([handle]);
   const resolved =
@@ -299,27 +373,16 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
           fieldRef: { slotRef: `slot:${id}`, field: nextPath.join(".") },
           declarations: decls,
         })) as SlotHandle);
-  // `.optional()` is the per-SITE optionality wrapper, identical in output to
-  // `input.optional(slot)` — optionality has never been a property of the slot
-  // itself, so the same slot stays required at one step and optional at
-  // another. Attached non-enumerably so it can never serialize into the
-  // canonical, and defined here (not on the proxy path alone) so object-schema
-  // and scalar slots both carry it.
-  const withOptional = withHiddenField(resolved, "optional", () => optionalSlotInput(resolved));
-  // `.forEach` is the functional layer's `items.forEach` spelling (0106,
-  // 0102) — attached the same way as `.optional`, non-enumerable so it never
-  // reaches the canonical declaration.
-  const withForEach = withHiddenField(
-    withOptional,
-    "forEach",
-    (title: string, body: (item: SlotHandle, loop: ForEachParam) => void) =>
-      dispatchSlotForEach(withOptional, title, body) as SequenceHandle,
-  );
-  // `.with` is the authoring-form spelling of `operation.over(slot, op)`
-  // (0210, 0207 ruling 4) — a pure delegation, not a new declaration path,
-  // attached the same non-enumerable way so it never reaches the canonical.
-  return withHiddenField(withForEach, "with", ((op?: WriteOperation) =>
-    operationOver(resolved, op as never)) as SlotSink<unknown>);
+  return augmentSlotHandle(resolved);
+}
+
+/**
+ * Mints an auto-named slot handle WITHOUT recording an author mint — see
+ * {@link slotOf}.
+ * @see {@link SlotFunction}
+ */
+export function mintAutoSlot<Value>(id: string, schemaValue: SchemaValue<Value>): DeclaredSlotWithFields<Value> {
+  return slotOf({ id, schema: schemaValue }, { recordMint: false }) as DeclaredSlotWithFields<Value>;
 }
 
 /**
@@ -344,8 +407,8 @@ export function lazyForEachItem(
     get(target, prop, receiver) {
       if (real !== undefined) return Reflect.get(real as object, prop, receiver);
       if (typeof prop === "symbol" || Object.hasOwn(target, prop)) return Reflect.get(target, prop, receiver);
-      if (prop === "optional") return () => optionalSlotInput(itemRef);
-      if (prop === "with") return (op?: WriteOperation) => operationOver(itemRef, op as never);
+      if (prop === "optional") return slotOptionalClosure(itemRef);
+      if (prop === "with") return slotWithClosure(itemRef);
       return onFieldAccess(prop);
     },
   }) as SlotHandle;

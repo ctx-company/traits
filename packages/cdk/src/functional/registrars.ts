@@ -30,8 +30,11 @@ import type {
   ParallelBranchFailurePolicy,
   ParallelOptions,
   ProjectSequenceFields,
+  PromptPlacementFn,
   PromptRegistrarOptions,
+  SequenceOutputValue,
   SignalOutputValue,
+  VirtualSlotSurfaceOf,
 } from "../sequence.js";
 import { metaOf } from "../meta.js";
 import type { SchemaValue } from "../schema.js";
@@ -174,37 +177,64 @@ export interface IdOverride {
  * by `./step.ts` — which owns the declaration form — so this module never has
  * to import back from it.
  */
+/**
+ * `step.prompt`: an agent turn, placed inline like every other step.
+ *
+ * `<agent>.prompt(title, opts)` already existed and does the same thing
+ * with the agent as the subject. Both are wanted: the handle form reads
+ * naturally when a role is doing several things in a row, and this one
+ * keeps the call site parallel with its neighbours when a procedure is a
+ * list of steps of mixed kinds. They lower identically — this forwards to
+ * the same registrar — so the two spellings cannot drift.
+ *
+ * Without it `step.*` was command/check/project while `defineStep.*` was
+ * prompt/command/check: you could DECLARE a reusable prompt step but not
+ * PLACE one, which is an asymmetry with no reason behind it.
+ *
+ * Typed as {@link PromptPlacementFn} — the same shared conditional type
+ * (`VirtualSlotSurfaceOf`) every prompt-placement entry point routes its
+ * `.result`/`.results` typing for a bare-schema `output:` through (0253.3) —
+ * rather than a hand-rolled overload set that could drift from it. A plain
+ * single-signature arrow can't itself satisfy an overloaded generic target
+ * (its return type isn't provably `SequenceHandle & VirtualSlotSurfaceOf<...>`
+ * for every `RawOutput`), so the cast below bridges that gap, the same
+ * pattern `agent.ts`'s `.prompt` uses.
+ */
+function stepPromptRegistrarImpl(
+  title: string,
+  opts: PromptRegistrarOptions & { readonly agent: AgentHandle },
+): SequenceHandle {
+  requireBuild(`step.prompt(${JSON.stringify(title)})`);
+  const { agent, ...rest } = opts;
+  return dispatchAgentPrompt(agent, title, rest as PromptRegistrarOptions) as SequenceHandle;
+}
+const stepPromptRegistrar = stepPromptRegistrarImpl as unknown as PromptPlacementFn<{ readonly agent: AgentHandle }>;
+
+/** `step.command`'s placement shape: the same {@link VirtualSlotSurfaceOf}-derived `.result`/`.results` typing as {@link stepPromptRegistrar}, plus the `id:` override every `step.*` registrar accepts. */
+type CommandPlacementFn = <
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
+  title: string,
+  opts?: Omit<CommandSequenceFields, "id" | "kind" | "title" | "output"> & IdOverride & { readonly output?: RawOutput },
+) => SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
+
+/** `step.command`: same shared-typing approach as {@link stepPromptRegistrar}, for the command placement path. */
+function stepCommandRegistrarImpl(
+  title: string,
+  opts: Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride = {} as never,
+): SequenceHandle {
+  requireBuild(`step.command(${JSON.stringify(title)})`);
+  const id = opts.id ?? mintId(title);
+  const fields = withPositionalWhen({ ...opts, title });
+  const item = sequence.command(id, fields as Omit<CommandSequenceFields, "id" | "kind">);
+  registerItem(`step.command(${JSON.stringify(title)})`, item, title);
+  return item;
+}
+const stepCommandRegistrar = stepCommandRegistrarImpl as unknown as CommandPlacementFn;
+
 export const stepRegistrars = {
-  /**
-   * `step.prompt`: an agent turn, placed inline like every other step.
-   *
-   * `<agent>.prompt(title, opts)` already existed and does the same thing
-   * with the agent as the subject. Both are wanted: the handle form reads
-   * naturally when a role is doing several things in a row, and this one
-   * keeps the call site parallel with its neighbours when a procedure is a
-   * list of steps of mixed kinds. They lower identically — this forwards to
-   * the same registrar — so the two spellings cannot drift.
-   *
-   * Without it `step.*` was command/check/project while `defineStep.*` was
-   * prompt/command/check: you could DECLARE a reusable prompt step but not
-   * PLACE one, which is an asymmetry with no reason behind it.
-   */
-  prompt(title: string, opts: PromptRegistrarOptions & { readonly agent: AgentHandle }): SequenceHandle {
-    requireBuild(`step.prompt(${JSON.stringify(title)})`);
-    const { agent, ...rest } = opts;
-    return dispatchAgentPrompt(agent, title, rest as PromptRegistrarOptions) as SequenceHandle;
-  },
-  command(
-    title: string,
-    opts: Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride = {} as never,
-  ): SequenceHandle {
-    requireBuild(`step.command(${JSON.stringify(title)})`);
-    const id = opts.id ?? mintId(title);
-    const fields = withPositionalWhen({ ...opts, title });
-    const item = sequence.command(id, fields as Omit<CommandSequenceFields, "id" | "kind">);
-    registerItem(`step.command(${JSON.stringify(title)})`, item, title);
-    return item;
-  },
+  prompt: stepPromptRegistrar,
+  command: stepCommandRegistrar,
   check(
     title: string,
     opts: Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride,
