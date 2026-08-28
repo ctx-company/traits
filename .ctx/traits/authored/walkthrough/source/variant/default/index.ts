@@ -1,10 +1,15 @@
-// walkthrough-default: one bounded investigation pass producing the typed
-// node tree, a single-reviewer grind loop until the tree is grounded and
-// well-shaped, then a deterministic render tail. Lean like research-quick:
-// no dual review, no commit tail — the artifact lands gitignored under
-// .hidden/walkthroughs, so git semantics never enter the procedure.
+// walkthrough-default (0.2, exhaustive): the lowest level ends at code, and
+// completeness is ARITHMETIC, not judgment. A survey proposes the topic's
+// file closure and the upper tree; symbols.py deterministically enumerates
+// every symbol in that closure (ground truth the model cannot wiggle out
+// of); one for-each frame per file describes EVERY enumerated symbol,
+// appending its batch; the covering loop cannot exit while the computed
+// uncovered set is non-empty; a reviewer then samples quality; revisions are
+// append-only, last id wins. The render tail is deterministic. No commit
+// tail — the artifact lands gitignored under .hidden/walkthroughs, so runs
+// want --no-worktree (the artifact strands in an isolation worktree).
 import { reviewerRole, workerRole } from "@ctx-traits/agents";
-import { condition, defineVariant, flow, input, intent, signal, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, input, intent, operation, signal, step, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
 
@@ -12,10 +17,10 @@ export default function () {
   defineVariant("Default", {
     name: "Walkthrough (Default)",
     summary:
-      "Investigate a codebase topic into a typed flat node tree (coarse to fine, every node code-anchored), review it until grounded, then render a self-contained interactive treemap HTML.",
+      "Exhaustive codebase walkthrough: survey the topic's file closure, deterministically enumerate every symbol in it, describe every single one in per-file frames under a computed coverage gate, review a sample for quality, then render a self-contained interactive treemap HTML.",
     metadata: { tag: shared.metadata.defaultTag },
     description:
-      "Explain one codebase topic top-to-bottom: an investigator surveys the repository with its own tools and returns a flat node list (one overview root, at most three levels below, every node carrying verified file:line refs); a reviewer grinds until the tree is honest; a command step renders the interactive treemap walkthrough.",
+      "Explain one codebase topic top-to-bottom, ending at code: a survey fixes the dependency-closure file set and the upper tree; a deterministic script enumerates every fn/struct/enum/trait/mod in those files; per-file frames describe each enumerated symbol (typed nodes, verbatim coverage keys, verified line spans); a coverage loop grinds until the computed uncovered set is empty; a reviewer samples grounding and register; a command step renders the zoomable treemap walkthrough.",
   });
   useBehavior(shared.behavior.family);
   useIntent({
@@ -25,51 +30,108 @@ export default function () {
 
   const investigator = workerRole(
     "investigator",
-    "Explores the repository with its own tools and produces the walkthrough node tree.",
+    "Explores the repository with its own tools, fixes the closure, and describes every enumerated symbol.",
   );
   const reviewer = reviewerRole(
     "smart-1",
-    "Sole reviewer: verifies every ref against the actual files and the tree's shape and register.",
+    "Sole reviewer: samples refs against the actual files and judges register and horizon honesty — never re-litigates computed coverage.",
     "Review role.",
   );
 
   shared.step.derive.deriveTopicSlugStep();
   shared.step.derive.deriveHtmlPathStep();
 
-  flow.loop("Investigating", (loop) => {
+  flow.loop("Surveying", (loop) => {
     loop.maxIterations(3, { onExhausted: signal.Abort });
 
-    investigator.prompt("Investigating Produce", {
+    investigator.prompt("Survey the topic", {
       input: input.prompt`
-                Investigate ${shared.data.topic} in THIS repository with your own tools (search, read files) and return the complete walkthrough node list. Follow ${shared.resource.walkthroughStandards} exactly.
-                Shape: exactly one root node with no parent (kind "overview") explaining the topic at architecture level; children partition their parent's territory without overlap; at most three levels below the root; every id kebab-case and unique; every parent an existing id.
-                Grounding: every node carries at least one ref whose path and line span you VERIFIED by opening the file — the treemap derives tile sizes from these spans, so spans must honestly cover the code the node explains. A ref you did not open is a fabrication.
-                Register: the root narrates intent and architecture; mid nodes narrate responsibilities and collaborations; leaves narrate the actual mechanics precisely. Explanations are plain prose paragraphs; inline backtick code allowed.
-                No reviewer verdict attached means this is round 1: survey first, then write the tree. On every later round a verdict IS attached — fix every blocker it names and return the corrected COMPLETE list.
-                Also return nothing else: the node list is the deliverable.`,
-      output: shared.data.walkthroughNodes,
-      include: [shared.data.verdict1.optional(), shared.data.walkthroughNodes.optional()],
+                Survey ${shared.data.topic} in THIS repository with your own tools (search, read files). Follow ${shared.resource.walkthroughStandards} exactly. Deliver three things.
+                1. The FILE CLOSURE: every source file the topic's code lives in, plus every same-workspace file it directly or transitively depends on (follow imports/use declarations), stopping only at the horizon. Each entry: the repo-relative path (verify it exists) and one sentence why it belongs. This list is the coverage contract — a deterministic script will enumerate EVERY symbol in these files and the run cannot finish until every one is described.
+                2. The HORIZON: plain prose naming where traversal deliberately stopped and why (std/third-party, unrelated subsystems, generated code). Honesty here is part of the deliverable.
+                3. The SKELETON NODES: the upper tree only — one root (id "root", kind "overview", no parent) narrating architecture and intent; area nodes for the module groupings; ONE file node per closure entry with kind "file", parent set to its area (or the root), and id "f-" plus the path slugified (lowercase, every character outside a-z0-9 becomes "-", runs collapsed, ends trimmed — e.g. modules/io/src/mcp.rs becomes f-modules-io-src-mcp-rs); optional flow nodes for cross-cutting paths. NO type or function nodes here — those are produced per-file later. Every node carries verified refs.
+                On a later round your previous closure and skeleton are attached — extend and correct them rather than starting over.`,
+      output: [shared.data.fileClosure, shared.data.horizon, shared.data.skeletonNodes],
+      include: [shared.data.fileClosure.optional(), shared.data.horizon.optional(), shared.data.skeletonNodes.optional()],
     });
 
-    investigator.prompt("Investigating Summarize", {
+    loop.until(
+      condition.all([condition.count(shared.data.fileClosure).atLeast(1), condition.count(shared.data.skeletonNodes).atLeast(2)]),
+    );
+  });
+
+  shared.step.render.enumerateSymbolsStep();
+
+  // Seeds the guaranteed empty batch list the per-file loop appends into:
+  // production inside a for-each body is only "possible" to the validator,
+  // so the guaranteed producer every later reader needs sits before it.
+  step.project("Seed the batches", {
+    id: "seed-batches",
+    projections: [{ source: operation.literal([]), destination: shared.data.nodeBatches }],
+  });
+
+  shared.data.fileClosure.forEach("Describe each file", (file, loop) => {
+    loop.limit(64);
+    investigator.prompt("Describe the file", {
       input: input.prompt`
-                Summarize the investigation you just delivered for ${shared.data.topic}: what you explored, how you verified refs, coverage decisions you made, and open concerns. A few sentences of plain prose.`,
-      output: shared.data.workSummary,
-      include: [shared.data.walkthroughNodes.optional(), shared.data.workSummary.optional()],
+                Describe exactly one closure file — ${file} — for the walkthrough of ${shared.data.topic}. Other files run in their own frames; touch only this one.
+                The deterministic symbol index is ${shared.data.symbolIndex}. Find THIS file's entry and emit one node for EVERY symbol listed for it — every single one, including test helpers and private items. For each: id "s-" plus the symbol name plus "-" plus its line (kebab-case); parent = this file's node id ("f-" plus the slugified path, same formula the skeleton used); kind exactly as the index says (function or type); symbol = the index entry's key copied VERBATIM (path:line:name) — coverage joins on this string, so any deviation counts as undescribed; refs = one span you verified by OPENING the file, from the definition line to its real end; summary one glanceable sentence; explanation the precise mechanics at leaf register per ${shared.resource.walkthroughStandards} — what it does, what it refuses, the edges it guards, naming real identifiers.
+                Return ONLY this file's new symbol nodes as the batch. An empty index entry for this file returns an empty batch.`,
+      output: shared.data.nodeBatches.with(operation.Append),
+    });
+  });
+
+  flow.loop("Covering", (loop) => {
+    loop.maxIterations(4, { onExhausted: signal.Abort });
+
+    shared.step.render.coverageReportStep("loop");
+    shared.step.render.coverageStatusStep("loop");
+
+    investigator.prompt("Cover the gaps", {
+      input: input.prompt`
+                The deterministic coverage report for the walkthrough of ${shared.data.topic} is ${shared.data.coverageReport}.
+                If it shows zero uncovered entries, zero unknown symbol keys, zero orphan parents, exactly one root, and no missing files: return an empty batch [] and nothing else.
+                Otherwise return one batch fixing EVERYTHING it names: a node per uncovered index entry (same rules as per-file description — verbatim symbol key, verified span, leaf register); corrected re-emissions for nodes with unknown symbol keys or orphaned parents (re-emitting an id replaces that node — keep its content, fix the broken field); if the report names missing files, they were misspelled in the closure — re-emit nothing for them, they fall out of scope by the survey's own correction.
+                Follow ${shared.resource.walkthroughStandards}.`,
+      output: shared.data.nodeBatches.with(operation.Append),
     });
 
-    reviewer.prompt("Investigating Review", {
+    loop.until(condition.equals(shared.data.coverageStatus, "complete"));
+  });
+
+  flow.loop("Reviewing", (loop) => {
+    loop.maxIterations(3, { onExhausted: signal.Abort });
+
+    reviewer.prompt("Review the walkthrough", {
       input: input.prompt`
-                Review the walkthrough node list ${shared.data.walkthroughNodes} delivered for ${shared.data.topic} against ${shared.resource.walkthroughStandards}. Investigator summary: ${shared.data.workSummary}.
-                Verify with your OWN tools: open a sample of every node's refs and confirm the path exists and the span covers what the explanation claims; confirm exactly one parentless root, no orphan parents, no cycle, depth at most three below the root; confirm children partition parents and the register matches the layer.
-                A BLOCKER is: a ref whose file or span does not support the explanation, a missing/duplicated id, an orphaned or cyclic parent link, more than one root, depth beyond three, a layer whose explanation is at the wrong register, or a major area of the topic with no node.
-                Everything else is advisory. Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+                Review the walkthrough of ${shared.data.topic}: skeleton ${shared.data.skeletonNodes}, horizon ${shared.data.horizon}, and the described batches in ${shared.data.nodeBatches} (flatten in order; a later node with a seen id replaces the earlier one). Coverage is COMPUTED and already complete — do not re-litigate it.
+                Verify with your OWN tools on a meaningful sample (at least a dozen symbol nodes across different files, plus every skeleton node): open the ref, confirm the span covers the symbol it claims, confirm the explanation matches the actual code and sits at its layer's register per ${shared.resource.walkthroughStandards}, and confirm the horizon note honestly matches where the closure stops.
+                A BLOCKER is: a span that does not cover its symbol, an explanation contradicting the code or at the wrong register, a skeleton node ungrounded, or a horizon claim the closure contradicts. Everything else is advisory. Name every blocker with the node id.
+                Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
                 Set status to revise while any blocker remains, approved when none do.`,
       output: shared.data.verdict1,
       include: [shared.data.verdict1.optional()],
     });
 
-    loop.until(condition.equals(shared.data.verdict1.status, "approved"));
+    flow.when("Apply review fixes", condition.fieldEquals(shared.data.verdict1, "status", "revise"), () => {
+      investigator.prompt("Fix reviewed nodes", {
+        input: input.prompt`
+                The reviewer's verdict for the walkthrough of ${shared.data.topic} is ${shared.data.verdict1}. For every blocker it names, re-emit the corrected node in one batch: same id (re-emission replaces), same VERBATIM symbol key where the node had one (coverage must not regress), the named defect actually fixed against the real file. Nodes without blockers are not re-emitted.
+                Follow ${shared.resource.walkthroughStandards}.`,
+        output: shared.data.nodeBatches.with(operation.Append),
+      });
+    });
+
+    loop.until(condition.fieldEquals(shared.data.verdict1, "status", "approved"));
+  });
+
+  shared.step.render.coverageStatusStep("final");
+
+  investigator.prompt("Summarize the walkthrough", {
+    input: input.prompt`
+                Summarize the delivered walkthrough of ${shared.data.topic} in a few plain sentences: the closure size and horizon, how coverage was driven to complete, how refs were verified, and open concerns.`,
+    output: shared.data.workSummary,
+    include: [shared.data.horizon.optional(), shared.data.workSummary.optional()],
   });
 
   shared.step.render.renderWalkthroughStep();
@@ -77,6 +139,7 @@ export default function () {
   return {
     walkthroughPathPort: shared.data.walkthroughPathPort,
     walkthroughSummaryPort: shared.data.walkthroughSummaryPort,
+    coveragePort: shared.data.coveragePort,
     renderReportPort: shared.data.renderReportPort,
   };
 }

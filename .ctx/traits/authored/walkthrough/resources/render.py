@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Deterministic walkthrough renderer.
 
-argv[1] — the walkthrough node list: JSON text (the runtime substitutes the
+argv[1] — the skeleton node list: JSON text (the runtime substitutes the
           typed slot value), or, as a hedge, a path to a JSON file.
-argv[2] — repo-relative output path for the self-contained HTML.
+argv[2] — the node batches (list of lists of nodes, appended per frame),
+          same JSON-or-path convention. Flattened in order and deduped by
+          id, last occurrence winning (append-only revisions).
+argv[3] — repo-relative output path for the self-contained HTML.
 
 No model output enters this file's logic: the HTML shell is fixed, the data
 is embedded verbatim, and tile sizes derive from the nodes' own line spans.
@@ -402,11 +405,41 @@ var DATA = __DATA__;
 """
 
 
+def merge_inputs(skeleton_arg: str, batches_arg: str):
+    skeleton = load_nodes(skeleton_arg)
+    text = batches_arg
+    if len(batches_arg) < 512 and os.path.exists(batches_arg) and not batches_arg.lstrip().startswith(("[", "{")):
+        with open(batches_arg, encoding="utf-8") as fh:
+            text = fh.read()
+    try:
+        batches = json.loads(text)
+    except json.JSONDecodeError as e:
+        fail(f"argv[2] is neither JSON nor a readable JSON file: {e}")
+    flat = list(skeleton)
+    if isinstance(batches, list):
+        for batch in batches:
+            if isinstance(batch, dict) and isinstance(batch.get("nodes"), list):
+                flat.extend(n for n in batch["nodes"] if isinstance(n, dict))
+            elif isinstance(batch, list):
+                flat.extend(n for n in batch if isinstance(n, dict))
+            elif isinstance(batch, dict):
+                flat.append(batch)
+    by_id, order = {}, []
+    for n in flat:
+        nid = str(n.get("id", "")).strip()
+        if not nid:
+            continue
+        if nid not in by_id:
+            order.append(nid)
+        by_id[nid] = n
+    return [by_id[nid] for nid in order]
+
+
 def main() -> None:
-    if len(sys.argv) < 3:
-        fail("usage: render.py <nodes-json-or-path> <output-html-path>")
-    nodes, root_id = normalize(load_nodes(sys.argv[1]))
-    out_path = sys.argv[2].strip()
+    if len(sys.argv) < 4:
+        fail("usage: render.py <skeleton-json-or-path> <batches-json-or-path> <output-html-path>")
+    nodes, root_id = normalize(merge_inputs(sys.argv[1], sys.argv[2]))
+    out_path = sys.argv[3].strip()
     if not out_path:
         fail("empty output path")
 

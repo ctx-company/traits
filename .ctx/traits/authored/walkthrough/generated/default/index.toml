@@ -1,9 +1,9 @@
 id = "walkthrough"
 schema-version = "0.5"
-version = "0.1.0"
+version = "0.2.0"
 name = "Walkthrough (Default)"
-description = "Explain one codebase topic top-to-bottom: an investigator surveys the repository with its own tools and returns a flat node list (one overview root, at most three levels below, every node carrying verified file:line refs); a reviewer grinds until the tree is honest; a command step renders the interactive treemap walkthrough."
-summary = "Investigate a codebase topic into a typed flat node tree (coarse to fine, every node code-anchored), review it until grounded, then render a self-contained interactive treemap HTML."
+description = "Explain one codebase topic top-to-bottom, ending at code: a survey fixes the dependency-closure file set and the upper tree; a deterministic script enumerates every fn/struct/enum/trait/mod in those files; per-file frames describe each enumerated symbol (typed nodes, verbatim coverage keys, verified line spans); a coverage loop grinds until the computed uncovered set is empty; a reviewer samples grounding and register; a command step renders the zoomable treemap walkthrough."
+summary = "Exhaustive codebase walkthrough: survey the topic's file closure, deterministically enumerate every symbol in it, describe every single one in per-file frames under a computed coverage gate, review a sample for quality, then render a self-contained interactive treemap HTML."
 variant = "default"
 
 [metadata]
@@ -42,6 +42,15 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
+id = "coverage"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "Deterministic coverage verdict at the end of the run."
+title = "Coverage"
+value = "slot:coverage-status"
+
+[[port]]
 id = "output-dir"
 direction = "input"
 schema = "schema:text"
@@ -61,7 +70,7 @@ value = "slot:render-log"
 id = "topic"
 direction = "input"
 schema = "schema:text"
-description = 'The codebase topic to walk through: a file, a module, a subsystem, or a question (e.g. "the task provider", "modules/io/src/dispatch_preflight.rs", "how does dispatch refuse a claimed task").'
+description = 'The codebase topic to walk through: a file, a module, a subsystem, or a question (e.g. "center", "modules/io/src/dispatch_preflight.rs", "how does dispatch refuse a claimed task").'
 
 [[port]]
 id = "walkthrough-path"
@@ -77,14 +86,44 @@ id = "walkthrough-summary"
 direction = "output"
 schema = "schema:text"
 optional = true
-description = "Final investigator summary: coverage, verification method, open concerns."
+description = "Final investigator summary: closure, horizon, verification method, open concerns."
 title = "Walkthrough Summary"
 value = "slot:work-summary"
+
+[[slot]]
+id = "coverage-report"
+schema = "schema:text"
+description = "Deterministic JSON coverage report (from symbols.py coverage): uncovered index entries, duplicate ids, orphaned parents, counts. The repair prompt consumes it verbatim."
+
+[[slot]]
+id = "coverage-status"
+schema = "schema:text"
+description = 'Deterministic coverage verdict (from symbols.py status): exactly "complete" when every index key is described and links are sound, else "incomplete:<n>".'
+
+[[slot]]
+id = "describe-each-file-item"
+schema = "schema:closure-entry"
+description = "Per-item value for the describe-each-file loop."
+
+[[slot]]
+id = "file-closure"
+schema = "[schema:closure-entry]"
+description = "The topic's complete file closure: every file the topic's code lives in plus every same-workspace file it depends on, traversed until the declared horizon. The symbol index — and therefore the coverage gate — is computed from exactly this list."
+
+[[slot]]
+id = "horizon"
+schema = "schema:text"
+description = "Where traversal deliberately stopped and why: std/third-party crates, unrelated subsystems, generated code. Honesty about the boundary is part of the deliverable and is rendered into the walkthrough root."
 
 [[slot]]
 id = "html-path"
 schema = "schema:text"
 description = "Deterministic repo-relative path of the generated walkthrough HTML, derived by a command step."
+
+[[slot]]
+id = "node-batches"
+schema = "[schema:node-batch]"
+description = "Append-only batches of described nodes: one batch per for-each file frame, plus one batch per repair or review-fix round. Consumers flatten the batches' nodes in order and dedupe by id, last occurrence winning."
 
 [[slot]]
 id = "render-log"
@@ -94,7 +133,17 @@ description = "Output evidence from the render command step: the written path an
 [[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict"
-description = "Reviewer's verdict for the current walkthrough node list."
+description = "Reviewer's verdict for the current walkthrough state."
+
+[[slot]]
+id = "skeleton-nodes"
+schema = "[schema:walkthrough-node]"
+description = 'The upper tree from the survey: the root overview, area nodes, one file node per closure entry (id "f-" + slugified path), and any flow nodes. Never contains type/function nodes — those are produced per-file.'
+
+[[slot]]
+id = "symbol-index"
+schema = "schema:text"
+description = "Deterministic JSON symbol index over the file closure (from symbols.py enumerate): every fn/struct/enum/trait/mod/type/class/interface definition with its coverage key path:line:name. Ground truth for the coverage gate — never edited by a model."
 
 [[slot]]
 id = "topic-slug"
@@ -102,27 +151,29 @@ schema = "schema:text"
 description = "Deterministic kebab-case slug for the topic, derived by a command step — never agent prose — so the output path is predictable from the topic alone."
 
 [[slot]]
-id = "walkthrough-nodes"
-schema = "[schema:walkthrough-node]"
-description = "The complete flat node list for the walkthrough: exactly one root (no parent), every other node linked to an existing parent, every node grounded in verified code refs."
-
-[[slot]]
 id = "work-summary"
 schema = "schema:text"
-description = "Investigator's cumulative account: what was explored, how refs were verified, coverage decisions, open concerns."
+description = "Investigator's cumulative account: what was explored, how the closure and horizon were chosen, how refs were verified, open concerns."
 
 [[resource]]
 id = "render-script"
 path = "resources/render.py"
-digest = "sha256:d5556d3d0aa1b9545a4ab4d95e404257a71ca987ae5fa9b6a6fa33ffee23bc2c"
+digest = "sha256:48f2c4568853108916380cc6105bdb6ce1d28aaed10b01e2bb0463de700623e4"
 hint = "Deterministic treemap renderer the render command step executes; never read by a model seat."
+trigger = "on-demand"
+
+[[resource]]
+id = "symbols-script"
+path = "resources/symbols.py"
+digest = "sha256:20664fbc444a20de6508873396228aff6708ff9bb08c37c55c4b92daad122a60"
+hint = "Deterministic symbol enumerator and coverage checker (enumerate | coverage | status); ground truth for the exhaustiveness gate; never read by a model seat."
 trigger = "on-demand"
 
 [[resource]]
 id = "walkthrough-standards"
 path = "resources/walkthrough-standards.md"
-digest = "sha256:721b9bde27a6663e81aac47ed8662a65fffc02c295f3aad2df409fe603ad14dd"
-hint = "Node-quality doctrine: layer registers, ref discipline, tree shape rules, kind taxonomy, sizing honesty."
+digest = "sha256:9942637d1a4651d55e2f8a07aa5e7fd5295625bf2a13749e272b0dbfb2510ecb"
+hint = "Exhaustive-walkthrough doctrine: closure and horizon rules, id/parent conventions, coverage-key discipline, layer registers, last-wins revisions."
 trigger = "on-demand"
 
 [[schema]]
@@ -195,6 +246,20 @@ required = true
 description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
 [[schema]]
+id = "closure-entry"
+description = "One file of the topic's dependency closure, with the reason it belongs."
+
+[schema.fields.path]
+schema = "schema:text"
+required = true
+description = "Repo-relative path of one source file in the topic's dependency closure. Must exist."
+
+[schema.fields.role]
+schema = "schema:text"
+required = true
+description = "One sentence: why this file is in the closure (owns the topic / direct dependency via which import)."
+
+[[schema]]
 id = "code-ref"
 description = "One code anchor grounding a node: a file and the line span the node's prose actually explains."
 
@@ -207,6 +272,15 @@ description = 'Line span "start-end" (1-indexed, inclusive) inside path that thi
 schema = "schema:text"
 required = true
 description = "Repo-relative file path this node's explanation is grounded in. Must exist in the repository."
+
+[[schema]]
+id = "node-batch"
+description = "One appended batch of described nodes — a per-file frame's output, or a repair/review-fix round's."
+
+[schema.fields.nodes]
+schema = "[schema:walkthrough-node]"
+required = true
+description = "The described nodes this frame contributes. Empty when the frame has nothing to add."
 
 [[schema]]
 id = "owner-item"
@@ -294,43 +368,48 @@ description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" 
 
 [[schema]]
 id = "walkthrough-node"
-description = "One node of the walkthrough tree, flat with a parent link. Least specific at the root, most specific at the leaves."
+description = "One node of the walkthrough tree, flat with a parent link. Least specific at the root, ending at actual code symbols at the leaves."
 
 [schema.fields.explanation]
 schema = "schema:text"
 required = true
-description = "The thorough narration for this node's layer, in the register of its depth: the root explains architecture and intent, mid nodes explain responsibilities and collaborations, leaves explain the actual mechanics precisely. Plain prose paragraphs separated by blank lines; inline `code` backticks allowed."
+description = "The thorough narration for this node's layer, in the register of its depth: the root explains architecture and intent, areas explain responsibilities and collaborations, files explain what lives there and why, type/function leaves explain the actual mechanics precisely — what it does, what it refuses, the edges it guards. Plain prose paragraphs separated by blank lines; inline `code` backticks allowed."
 
 [schema.fields.id]
 schema = "schema:text"
 required = true
-description = "Stable kebab-case slug, unique across the whole node list."
+description = 'Stable kebab-case slug, unique across the whole walkthrough. Conventions: the root is "root"; a file node is "f-" plus the slugified path; a symbol node is "s-" plus the symbol name plus "-" plus its definition line. Re-emitting an existing id REPLACES that node (last-wins revision).'
 
 [schema.fields.kind]
 schema = "schema:text"
 required = true
-description = "overview = the single root; subsystem = a major area; component = a file or cohesive unit; symbol = a function/type/impl; flow = a cross-cutting path through the code (a request, a lifecycle)."
+description = "overview = the single root; area = a module/subsystem grouping; file = one source file from the closure; type = a struct/enum/trait/interface/class/type-alias; function = a fn/method/macro; flow = a cross-cutting path through the code."
 allowed = [
     "overview",
-    "subsystem",
-    "component",
-    "symbol",
+    "area",
+    "file",
+    "type",
+    "function",
     "flow",
 ]
 
 [schema.fields.parent]
 schema = "schema:text"
-description = "The id of this node's parent. Absent on exactly one node — the root overview. Every other node names an existing id; the tree is at most three levels deep below the root."
+description = "The id of this node's parent. Absent on exactly one node — the root overview. Every other node names an existing id."
 
 [schema.fields.refs]
 schema = "[schema:code-ref]"
 required = true
-description = "At least one code anchor per node. Children's spans should live inside the territory their parent's spans cover."
+description = "At least one code anchor per node. A symbol node's span covers that symbol's definition; a file node's span covers the file; children's spans live inside the territory their parent's spans cover."
 
 [schema.fields.summary]
 schema = "schema:text"
 required = true
 description = "One or two sentences shown at a glance — what this node is and why it exists."
+
+[schema.fields.symbol]
+schema = "schema:text"
+description = "REQUIRED on every type/function node, absent elsewhere: the coverage key of the symbol-index entry this node describes, copied VERBATIM (format path:line:name). This is how deterministic coverage joins descriptions to enumerated code."
 
 [schema.fields.title]
 schema = "schema:text"
@@ -339,94 +418,229 @@ description = "Short human title rendered on the treemap tile."
 
 [[agent]]
 id = "investigator"
-description = "Explores the repository with its own tools and produces the walkthrough node tree."
+description = "Explores the repository with its own tools, fixes the closure, and describes every enumerated symbol."
 summary = "Implementation role."
 
 [[agent]]
 id = "smart-1"
-description = "Sole reviewer: verifies every ref against the actual files and the tree's shape and register."
+description = "Sole reviewer: samples refs against the actual files and judges register and horizon honesty — never re-litigates computed coverage."
 summary = "Review role."
 
-[prompt.investigating-produce]
+[prompt.cover-the-gaps]
 text = """
-Investigate {port:topic} in THIS repository with your own tools (search, read files) and return the complete walkthrough node list. Follow {resource:walkthrough-standards} exactly.
-Shape: exactly one root node with no parent (kind "overview") explaining the topic at architecture level; children partition their parent's territory without overlap; at most three levels below the root; every id kebab-case and unique; every parent an existing id.
-Grounding: every node carries at least one ref whose path and line span you VERIFIED by opening the file — the treemap derives tile sizes from these spans, so spans must honestly cover the code the node explains. A ref you did not open is a fabrication.
-Register: the root narrates intent and architecture; mid nodes narrate responsibilities and collaborations; leaves narrate the actual mechanics precisely. Explanations are plain prose paragraphs; inline backtick code allowed.
-No reviewer verdict attached means this is round 1: survey first, then write the tree. On every later round a verdict IS attached — fix every blocker it names and return the corrected COMPLETE list.
-Also return nothing else: the node list is the deliverable."""
+The deterministic coverage report for the walkthrough of {port:topic} is {slot:coverage-report}.
+If it shows zero uncovered entries, zero unknown symbol keys, zero orphan parents, exactly one root, and no missing files: return an empty batch [] and nothing else.
+Otherwise return one batch fixing EVERYTHING it names: a node per uncovered index entry (same rules as per-file description — verbatim symbol key, verified span, leaf register); corrected re-emissions for nodes with unknown symbol keys or orphaned parents (re-emitting an id replaces that node — keep its content, fix the broken field); if the report names missing files, they were misspelled in the closure — re-emit nothing for them, they fall out of scope by the survey's own correction.
+Follow {resource:walkthrough-standards}."""
 input = [
     "port:topic",
+    "slot:coverage-report",
     "resource:walkthrough-standards",
 ]
-output = ["slot:walkthrough-nodes"]
+output = ["slot:node-batches"]
 
-[prompt.investigating-review]
+[prompt.describe-the-file]
 text = """
-Review the walkthrough node list {slot:walkthrough-nodes} delivered for {port:topic} against {resource:walkthrough-standards}. Investigator summary: {slot:work-summary}.
-Verify with your OWN tools: open a sample of every node's refs and confirm the path exists and the span covers what the explanation claims; confirm exactly one parentless root, no orphan parents, no cycle, depth at most three below the root; confirm children partition parents and the register matches the layer.
-A BLOCKER is: a ref whose file or span does not support the explanation, a missing/duplicated id, an orphaned or cyclic parent link, more than one root, depth beyond three, a layer whose explanation is at the wrong register, or a major area of the topic with no node.
-Everything else is advisory. Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+Describe exactly one closure file — {slot:describe-each-file-item} — for the walkthrough of {port:topic}. Other files run in their own frames; touch only this one.
+The deterministic symbol index is {slot:symbol-index}. Find THIS file's entry and emit one node for EVERY symbol listed for it — every single one, including test helpers and private items. For each: id "s-" plus the symbol name plus "-" plus its line (kebab-case); parent = this file's node id ("f-" plus the slugified path, same formula the skeleton used); kind exactly as the index says (function or type); symbol = the index entry's key copied VERBATIM (path:line:name) — coverage joins on this string, so any deviation counts as undescribed; refs = one span you verified by OPENING the file, from the definition line to its real end; summary one glanceable sentence; explanation the precise mechanics at leaf register per {resource:walkthrough-standards} — what it does, what it refuses, the edges it guards, naming real identifiers.
+Return ONLY this file's new symbol nodes as the batch. An empty index entry for this file returns an empty batch."""
+input = [
+    "slot:describe-each-file-item",
+    "port:topic",
+    "slot:symbol-index",
+    "resource:walkthrough-standards",
+]
+output = ["slot:node-batches"]
+
+[prompt.fix-reviewed-nodes]
+text = """
+The reviewer's verdict for the walkthrough of {port:topic} is {slot:review-verdict-1}. For every blocker it names, re-emit the corrected node in one batch: same id (re-emission replaces), same VERBATIM symbol key where the node had one (coverage must not regress), the named defect actually fixed against the real file. Nodes without blockers are not re-emitted.
+Follow {resource:walkthrough-standards}."""
+input = [
+    "port:topic",
+    "slot:review-verdict-1",
+    "resource:walkthrough-standards",
+]
+output = ["slot:node-batches"]
+
+[prompt.review-the-walkthrough]
+text = """
+Review the walkthrough of {port:topic}: skeleton {slot:skeleton-nodes}, horizon {slot:horizon}, and the described batches in {slot:node-batches} (flatten in order; a later node with a seen id replaces the earlier one). Coverage is COMPUTED and already complete — do not re-litigate it.
+Verify with your OWN tools on a meaningful sample (at least a dozen symbol nodes across different files, plus every skeleton node): open the ref, confirm the span covers the symbol it claims, confirm the explanation matches the actual code and sits at its layer's register per {resource:walkthrough-standards}, and confirm the horizon note honestly matches where the closure stops.
+A BLOCKER is: a span that does not cover its symbol, an explanation contradicting the code or at the wrong register, a skeleton node ungrounded, or a horizon claim the closure contradicts. Everything else is advisory. Name every blocker with the node id.
+Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
 Set status to revise while any blocker remains, approved when none do."""
 input = [
-    "slot:walkthrough-nodes",
     "port:topic",
+    "slot:skeleton-nodes",
+    "slot:horizon",
+    "slot:node-batches",
     "resource:walkthrough-standards",
-    "slot:work-summary",
 ]
 output = ["slot:review-verdict-1"]
 
-[prompt.investigating-summarize]
-text = "Summarize the investigation you just delivered for {port:topic}: what you explored, how you verified refs, coverage decisions you made, and open concerns. A few sentences of plain prose."
+[prompt.summarize-the-walkthrough]
+text = "Summarize the delivered walkthrough of {port:topic} in a few plain sentences: the closure size and horizon, how coverage was driven to complete, how refs were verified, and open concerns."
 input = ["port:topic"]
 output = ["slot:work-summary"]
 
-[[sequence.investigating-body.sequence]]
-id = "investigating-produce"
-title = "Investigating Produce"
-agent = "agent:investigator"
-prompt = "prompt:investigating-produce"
+[prompt.survey-the-topic]
+text = """
+Survey {port:topic} in THIS repository with your own tools (search, read files). Follow {resource:walkthrough-standards} exactly. Deliver three things.
+1. The FILE CLOSURE: every source file the topic's code lives in, plus every same-workspace file it directly or transitively depends on (follow imports/use declarations), stopping only at the horizon. Each entry: the repo-relative path (verify it exists) and one sentence why it belongs. This list is the coverage contract — a deterministic script will enumerate EVERY symbol in these files and the run cannot finish until every one is described.
+2. The HORIZON: plain prose naming where traversal deliberately stopped and why (std/third-party, unrelated subsystems, generated code). Honesty here is part of the deliverable.
+3. The SKELETON NODES: the upper tree only — one root (id "root", kind "overview", no parent) narrating architecture and intent; area nodes for the module groupings; ONE file node per closure entry with kind "file", parent set to its area (or the root), and id "f-" plus the path slugified (lowercase, every character outside a-z0-9 becomes "-", runs collapsed, ends trimmed — e.g. modules/io/src/mcp.rs becomes f-modules-io-src-mcp-rs); optional flow nodes for cross-cutting paths. NO type or function nodes here — those are produced per-file later. Every node carries verified refs.
+On a later round your previous closure and skeleton are attached — extend and correct them rather than starting over."""
 input = [
     "port:topic",
     "resource:walkthrough-standards",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:walkthrough-nodes", optional = true },
 ]
-output = ["slot:walkthrough-nodes"]
+output = [
+    "slot:file-closure",
+    "slot:horizon",
+    "slot:skeleton-nodes",
+]
 
-[[sequence.investigating-body.sequence]]
-id = "investigating-summarize"
-title = "Investigating Summarize"
+[[sequence.covering-body.sequence]]
+id = "coverage-report-loop"
+title = "Coverage report loop"
+input = [
+    "resource:symbols-script",
+    "slot:symbol-index",
+    "slot:skeleton-nodes",
+    "slot:node-batches",
+]
+output = ["slot:coverage-report"]
+
+[sequence.covering-body.sequence.command]
+argv = [
+    "python3",
+    "{resource:symbols-script}",
+    "coverage",
+    "{slot:symbol-index}",
+    "{slot:skeleton-nodes}",
+    "{slot:node-batches}",
+]
+
+[[sequence.covering-body.sequence]]
+id = "coverage-status-loop"
+title = "Coverage status loop"
+input = [
+    "resource:symbols-script",
+    "slot:symbol-index",
+    "slot:skeleton-nodes",
+    "slot:node-batches",
+]
+output = ["slot:coverage-status"]
+
+[sequence.covering-body.sequence.command]
+argv = [
+    "python3",
+    "{resource:symbols-script}",
+    "status",
+    "{slot:symbol-index}",
+    "{slot:skeleton-nodes}",
+    "{slot:node-batches}",
+]
+
+[[sequence.covering-body.sequence]]
+id = "cover-the-gaps"
+title = "Cover the gaps"
 agent = "agent:investigator"
-prompt = "prompt:investigating-summarize"
+prompt = "prompt:cover-the-gaps"
 input = [
     "port:topic",
-    { slot = "slot:walkthrough-nodes", optional = true },
-    { slot = "slot:work-summary", optional = true },
+    "slot:coverage-report",
+    "resource:walkthrough-standards",
 ]
-output = ["slot:work-summary"]
 
-[[sequence.investigating-body.sequence]]
-id = "investigating-review"
-title = "Investigating Review"
+[[sequence.covering-body.sequence.output]]
+slot = "slot:node-batches"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-14-reviewing-body-18-apply-review-fixes-then.sequence]]
+id = "fix-reviewed-nodes"
+title = "Fix reviewed nodes"
+agent = "agent:investigator"
+prompt = "prompt:fix-reviewed-nodes"
+input = [
+    "port:topic",
+    "slot:review-verdict-1",
+    "resource:walkthrough-standards",
+]
+
+[[sequence.ctx-branch-arm-s-14-reviewing-body-18-apply-review-fixes-then.sequence.output]]
+slot = "slot:node-batches"
+operation = "append"
+
+[[sequence.describe-each-file-body.sequence]]
+id = "describe-the-file"
+title = "Describe the file"
+agent = "agent:investigator"
+prompt = "prompt:describe-the-file"
+input = [
+    "slot:describe-each-file-item",
+    "port:topic",
+    "slot:symbol-index",
+    "resource:walkthrough-standards",
+]
+
+[[sequence.describe-each-file-body.sequence.output]]
+slot = "slot:node-batches"
+operation = "append"
+
+[[sequence.reviewing-body.sequence]]
+id = "review-the-walkthrough"
+title = "Review the walkthrough"
 agent = "agent:smart-1"
-prompt = "prompt:investigating-review"
+prompt = "prompt:review-the-walkthrough"
 input = [
-    "slot:walkthrough-nodes",
     "port:topic",
+    "slot:skeleton-nodes",
+    "slot:horizon",
+    "slot:node-batches",
     "resource:walkthrough-standards",
-    "slot:work-summary",
     { slot = "slot:review-verdict-1", optional = true },
 ]
 output = ["slot:review-verdict-1"]
 
+[[sequence.reviewing-body.sequence]]
+id = "apply-review-fixes"
+title = "Apply review fixes"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-14-reviewing-body-18-apply-review-fixes-then"
+
+[sequence.reviewing-body.sequence.when]
+slot = "slot:review-verdict-1"
+field = "status"
+equals = "revise"
+
+[[sequence.surveying-body.sequence]]
+id = "survey-the-topic"
+title = "Survey the topic"
+agent = "agent:investigator"
+prompt = "prompt:survey-the-topic"
+input = [
+    "port:topic",
+    "resource:walkthrough-standards",
+    { slot = "slot:file-closure", optional = true },
+    { slot = "slot:horizon", optional = true },
+    { slot = "slot:skeleton-nodes", optional = true },
+]
+output = [
+    "slot:file-closure",
+    "slot:horizon",
+    "slot:skeleton-nodes",
+]
+
 [procedure]
-description = "Explain one codebase topic top-to-bottom: an investigator surveys the repository with its own tools and returns a flat node list (one overview root, at most three levels below, every node carrying verified file:line refs); a reviewer grinds until the tree is honest; a command step renders the interactive treemap walkthrough."
+description = "Explain one codebase topic top-to-bottom, ending at code: a survey fixes the dependency-closure file set and the upper tree; a deterministic script enumerates every fn/struct/enum/trait/mod in those files; per-file frames describe each enumerated symbol (typed nodes, verbatim coverage keys, verified line spans); a coverage loop grinds until the computed uncovered set is empty; a reviewer samples grounding and register; a command step renders the zoomable treemap walkthrough."
 input = [
     "port:output-dir",
     "port:topic",
 ]
 output = [
+    "port:coverage",
     "port:render-report",
     "port:walkthrough-path",
     "port:walkthrough-summary",
@@ -465,10 +679,76 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "investigating"
-title = "Investigating"
+id = "surveying"
+title = "Surveying"
 kind = "loop"
-sequence = "sequence:investigating-body"
+sequence = "sequence:surveying-body"
+max-iterations = 3
+on-exhausted = "abort"
+
+[[procedure.sequence.until.all]]
+count = "slot:file-closure"
+at-least = 1
+
+[[procedure.sequence.until.all]]
+count = "slot:skeleton-nodes"
+at-least = 2
+
+[[procedure.sequence]]
+id = "enumerate-symbols"
+title = "Enumerate symbols"
+input = [
+    "resource:symbols-script",
+    "slot:file-closure",
+]
+output = ["slot:symbol-index"]
+
+[procedure.sequence.command]
+argv = [
+    "python3",
+    "{resource:symbols-script}",
+    "enumerate",
+    "{slot:file-closure}",
+]
+
+[[procedure.sequence]]
+id = "seed-batches"
+title = "Seed the batches"
+kind = "project"
+output = ["slot:node-batches"]
+
+[[procedure.sequence.projection]]
+destination = "slot:node-batches"
+
+[procedure.sequence.projection.source]
+literal = []
+
+[[procedure.sequence]]
+id = "describe-each-file"
+title = "Describe each file"
+kind = "for-each"
+sequence = "sequence:describe-each-file-body"
+over = "slot:file-closure"
+item = "slot:describe-each-file-item"
+max-items = 64
+
+[[procedure.sequence]]
+id = "covering"
+title = "Covering"
+kind = "loop"
+sequence = "sequence:covering-body"
+max-iterations = 4
+on-exhausted = "abort"
+
+[procedure.sequence.until]
+slot = "slot:coverage-status"
+equals = "complete"
+
+[[procedure.sequence]]
+id = "reviewing"
+title = "Reviewing"
+kind = "loop"
+sequence = "sequence:reviewing-body"
 max-iterations = 3
 on-exhausted = "abort"
 
@@ -478,11 +758,45 @@ field = "status"
 equals = "approved"
 
 [[procedure.sequence]]
+id = "coverage-status-final"
+title = "Coverage status final"
+input = [
+    "resource:symbols-script",
+    "slot:symbol-index",
+    "slot:skeleton-nodes",
+    "slot:node-batches",
+]
+output = ["slot:coverage-status"]
+
+[procedure.sequence.command]
+argv = [
+    "python3",
+    "{resource:symbols-script}",
+    "status",
+    "{slot:symbol-index}",
+    "{slot:skeleton-nodes}",
+    "{slot:node-batches}",
+]
+
+[[procedure.sequence]]
+id = "summarize-the-walkthrough"
+title = "Summarize the walkthrough"
+agent = "agent:investigator"
+prompt = "prompt:summarize-the-walkthrough"
+input = [
+    "port:topic",
+    { slot = "slot:horizon", optional = true },
+    { slot = "slot:work-summary", optional = true },
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
 id = "render-walkthrough"
 title = "Render walkthrough"
 input = [
     "resource:render-script",
-    "slot:walkthrough-nodes",
+    "slot:skeleton-nodes",
+    "slot:node-batches",
     "slot:html-path",
 ]
 output = ["slot:render-log"]
@@ -491,6 +805,7 @@ output = ["slot:render-log"]
 argv = [
     "python3",
     "{resource:render-script}",
-    "{slot:walkthrough-nodes}",
+    "{slot:skeleton-nodes}",
+    "{slot:node-batches}",
     "{slot:html-path}",
 ]

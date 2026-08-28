@@ -1,6 +1,6 @@
 [package]
 id = "walkthrough"
-version = "0.1.0"
+version = "0.2.0"
 name = "Walkthrough"
 status = "ready"
 
@@ -18,11 +18,11 @@ name = "@ctx-traits/walkthrough"
 access = "public"
 
 [budget]
-max-frames = 24
+max-frames = 120
 frame-seconds = 1800
-total-seconds = 7200
+total-seconds = 21600
 max-retries = 3
-idle-seconds = 600
+idle-seconds = 900
 
 [defaults.port]
 output-dir = ".hidden/walkthroughs"
