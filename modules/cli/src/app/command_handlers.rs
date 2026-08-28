@@ -873,6 +873,11 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     None => crate::app::lifecycle_handlers::handle_lifecycle_status(&target, json),
                 }
             }
+            Some(cli::TraitsCommand::Sessions { subcommand }) => match subcommand {
+                cli::SessionsCommand::Delete { failed } => {
+                    crate::app::session_delete::handle_sessions_delete(failed)
+                }
+            },
             Some(cli::TraitsCommand::Internal { subcommand }) => {
                 handle_internal(subcommand, session)
             }

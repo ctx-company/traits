@@ -600,6 +600,21 @@ fn import_default_output_matches_the_panel_registry_shape() {
 }
 
 #[test]
+fn sessions_delete_default_output_matches_the_panel_registry_shape() {
+    let scratch = ScratchRoot::new("p467-sessions-delete-panel-shape");
+    let repo = scratch_repo(&scratch);
+
+    let stdout = require_success(
+        "`ctx traits sessions delete --failed` over an empty run-session store",
+        &["traits", "sessions", "delete", "--failed"],
+        &repo,
+        &scratch.home(),
+    );
+
+    assert_matches_registry_claim("sessions", "ctx", "sessions delete", &stdout);
+}
+
+#[test]
 fn activate_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-activate-panel-shape", "fixture-activate-panel");
     let stdout = require_success(

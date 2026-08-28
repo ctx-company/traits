@@ -12,8 +12,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use support::{
-    ScratchRoot, assert_exit_code, controlled_command, ctx_bin, git_init, require_success, run_ctx,
-    utf8,
+    ScratchRoot, active_repo_key, assert_exit_code, controlled_command, ctx_bin, git_init,
+    require_success, run_ctx, utf8,
 };
 
 const TRAIT_CANONICAL: &str = r#"id = "fixture-p451-repo-smart"
@@ -147,30 +147,6 @@ fn value_json(output: &std::process::Output) -> serde_json::Value {
     serde_json::from_str(&json_text).unwrap_or_else(|error| {
         panic!("stdout was not a JSON envelope: {error}\nstdout:\n{stdout}\nstderr:\n{stderr}")
     })
-}
-
-/// Discover the P451 active repo-qualifier key `doctor --config` reports for
-/// `repo` — the same key an operator would copy into `[repo."<key>"]` — by
-/// running doctor before any `[repo.*]` block exists, so the discovery
-/// itself never depends on the behavior under test.
-fn active_repo_key(repo: &Path, home: &Path) -> String {
-    let stdout = require_success(
-        "p451-repo-qualifier-proof discover active repo key",
-        &["traits", "doctor", "--config"],
-        repo,
-        home,
-    );
-    let line = stdout
-        .lines()
-        .find(|line| line.trim_start().starts_with("repo.active-key:"))
-        .unwrap_or_else(|| panic!("doctor --config printed no repo.active-key row: {stdout}"));
-    let after_colon = line.split_once(':').unwrap().1;
-    after_colon
-        .split('[')
-        .next()
-        .unwrap_or(after_colon)
-        .trim()
-        .to_string()
 }
 
 fn worker_row(ledger: &Path) -> serde_json::Value {

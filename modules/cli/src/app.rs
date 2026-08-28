@@ -59,6 +59,7 @@ mod running;
 mod schema_synth_build;
 mod sdk_generate;
 mod search;
+mod session_delete;
 mod stats;
 mod story;
 mod story_view;

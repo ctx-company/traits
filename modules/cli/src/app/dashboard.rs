@@ -45,6 +45,7 @@ use super::merge::{MergeInputs, merge};
 use super::merge_story;
 use super::report_check::sequence_kind_label;
 use super::run_view;
+use super::session_delete::{self, ConfirmedDelete, DeletePlan};
 use super::trust_story;
 use super::tui;
 use super::tui_kit::{
@@ -925,6 +926,13 @@ enum SessionAction {
         plan: DeletePlan,
         eligibility: DeleteEligibility,
     },
+    /// `d` on a SESSIONS group header (0252.5): every target was captured
+    /// (probed, planned) when the modal opened; the applier re-resolves each
+    /// by `ledger_path` and re-checks its own `eligibility` before deleting.
+    DeleteGroup {
+        group: SessionGroup,
+        targets: Vec<GroupDeleteTarget>,
+    },
     Answer {
         session_id: String,
         state_digest: String,
@@ -973,46 +981,6 @@ enum MergeAction {
         plan: DeletePlan,
         eligibility: DeleteEligibility,
     },
-}
-
-/// The exact artifact list a DELETE confirms before touching anything, and a
-/// pure function of already-resolved inputs (§3.4): the caller does the git
-/// probing (`plan_delete_for_ledger`) and passes the resolved worktree location
-/// in, so this function itself does no IO and is directly unit-testable.
-#[derive(Clone)]
-struct DeletePlan {
-    ledger_path: camino::Utf8PathBuf,
-    driver_lock_path: Option<camino::Utf8PathBuf>,
-    sidecars_root: Option<camino::Utf8PathBuf>,
-    /// `(repo_root, worktree_path, branch)`, present only when provenance
-    /// named a worktree AND its registration was verified in the current
-    /// repository.
-    worktree: Option<(camino::Utf8PathBuf, camino::Utf8PathBuf, String)>,
-    /// Explains why a provenance-named worktree/branch is NOT in `worktree`
-    /// above (foreign repository, or registration failed) — rendered
-    /// verbatim in the confirm modal so it never implies a cleaner sweep
-    /// than what will actually happen.
-    worktree_note: Option<String>,
-}
-
-impl DeletePlan {
-    fn artifact_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("ledger: {}", self.ledger_path)];
-        if let Some(path) = &self.driver_lock_path {
-            lines.push(format!("driver lock: {path}"));
-        }
-        if let Some(root) = &self.sidecars_root {
-            lines.push(format!("sidecars: {root}"));
-        }
-        if let Some((_, path, branch)) = &self.worktree {
-            lines.push(format!("worktree: {path}"));
-            lines.push(format!("branch: {branch}"));
-        }
-        if let Some(note) = &self.worktree_note {
-            lines.push(note.clone());
-        }
-        lines
-    }
 }
 
 struct State {
@@ -1950,6 +1918,21 @@ impl SessionGroup {
             SessionGroup::Completed => "completed",
         }
     }
+}
+
+/// Liveness-free `(status, outcome) -> SessionGroup` (decision 6, 0252.5):
+/// the single derivation both a group DELETE's capture and its confirmed
+/// recheck ([`DeleteEligibility::matches`]) must share. A row's *display*
+/// class can be [`SessionClass::Live`] (a held lock at projection time) while
+/// its persisted ledger belongs to a different liveness-free group — capturing
+/// the display group there would make the recheck, which can never reproduce
+/// `Live`, refuse an unchanged target outright.
+fn liveness_free_group(
+    status: &ctx_traits_core::procedure::session::Status,
+    outcome: Option<&ctx_traits_core::procedure::session::DriveOutcomeKind>,
+) -> SessionGroup {
+    let class = classify_session(false, status, outcome);
+    session_group(class, Some(status), outcome)
 }
 
 /// Pure `(class, status) -> SessionGroup` mapping (P506 §3.1, §1.1), decided
@@ -4711,10 +4694,22 @@ fn open_resume_modal(state: &mut State) {
     );
 }
 
-/// `d`: opens the DELETE confirm modal for the selected row, listing every
-/// artifact it will remove by exact path/ref first. Refuses outright on a
-/// `Live` or `Resumable` row — DELETE is scoped to terminal sessions only.
+/// `d`: dispatches SESSIONS' DELETE by what is actually selected (0252.5) —
+/// a group header opens the group DELETE, a session row opens the existing
+/// per-row DELETE. `selected_session` itself is untouched, so it keeps
+/// returning `None` on a header regardless of this seam.
 fn open_delete_modal(state: &mut State) {
+    match state.sessions_visible.get(state.list_sessions.selected()) {
+        Some(VisibleRow::GroupHeader { group, .. }) => open_group_delete_modal(state, *group),
+        Some(VisibleRow::Session(_)) => open_row_delete_modal(state),
+        None => {}
+    }
+}
+
+/// Opens the DELETE confirm modal for the selected row, listing every
+/// artifact it will remove by exact path/ref first. Refuses outright on a
+/// held driver lock — DELETE is scoped to a session whose lock is unheld.
+fn open_row_delete_modal(state: &mut State) {
     let Some(row) = selected_session(state) else {
         return;
     };
@@ -4737,7 +4732,11 @@ fn open_delete_modal(state: &mut State) {
             return;
         }
     }
-    let plan = plan_delete_for_ledger(&ledger_path, repo_path.as_deref(), row.worktree.as_ref());
+    let plan = session_delete::plan_delete_for_ledger(
+        &ledger_path,
+        repo_path.as_deref(),
+        row.worktree.as_ref(),
+    );
     let warning = if row.class == SessionClass::Resumable {
         "Deleting discards resumable state.\n\n"
     } else if row.class == SessionClass::Unreadable {
@@ -4766,207 +4765,128 @@ fn open_delete_modal(state: &mut State) {
     );
 }
 
-/// Resolves the delete plan's worktree location with exactly one git probe
-/// (§3.4/§3.6), then hands off to the pure [`plan_delete`] to build the
-/// artifact list. Only reached from `open_delete_modal` — an action edge,
-/// never the draw path.
-/// Resolves a DELETE/DROP plan's worktree location with exactly one git
-/// probe (§3.4/§3.6), then hands off to the pure [`plan_delete`] to build the
-/// artifact list. Narrowed to `(ledger_path, repo_path)` rather than
-/// `&SessionRow` (P472 §3.5) so both SESSIONS' DELETE and MERGES' DROP call
-/// it — a genuine extraction, not a copy.
-fn plan_delete_for_ledger(
-    ledger_path: &camino::Utf8Path,
-    repo_path: Option<&str>,
-    worktree: Option<&ctx_traits_core::procedure::session::WorktreeProvenance>,
-) -> DeletePlan {
-    let driver_lock = ctx_traits_io::run_control::driver_lock_path(ledger_path);
-    let driver_lock_path = driver_lock.as_std_path().exists().then_some(driver_lock);
-    let sidecars = ctx_traits_io::run_branch::sidecars_root(ledger_path);
-    let sidecars_root = sidecars.as_std_path().exists().then_some(sidecars);
-    let Some(worktree) = worktree else {
-        return plan_delete(
-            ledger_path,
-            driver_lock_path,
-            sidecars_root,
-            None,
-            true,
-            None,
+/// Joins every id (decision 9: every skip/refusal names its session — a
+/// pre-confirm skip list must not drop any member behind an anonymous count).
+fn named_tail(ids: &[String]) -> String {
+    ids.join(", ")
+}
+
+/// One member of a captured `SessionAction::DeleteGroup` (0252.5, decision
+/// 7): re-resolved by `ledger_path` — the key the center itself uses —
+/// never by session id alone or by index.
+#[derive(Clone)]
+struct GroupDeleteTarget {
+    session_id: String,
+    ledger_path: camino::Utf8PathBuf,
+    plan: DeletePlan,
+    eligibility: DeleteEligibility,
+}
+
+/// `d` on a SESSIONS group header: walks every member of that group (never
+/// the header's cached, display-only `count`), skips a held or unprobeable
+/// lock, and opens exactly ONE confirm naming the count — never a per-child
+/// confirmation. Zero targets sets a footer message and opens no modal,
+/// which is the ordinary outcome for `live` (every row there normally
+/// probes `Held`) and for an empty header.
+fn open_group_delete_modal(state: &mut State, group: SessionGroup) {
+    let mut targets = Vec::new();
+    // Named (decision 9), not just counted: `state_short_session` display ids
+    // for every row this group DELETE skips before it ever opens a modal.
+    let mut skipped_live_ids: Vec<String> = Vec::new();
+    let mut unprobeable_ids: Vec<String> = Vec::new();
+    for row in &state.sessions {
+        if session_group(row.class, row.status.as_ref(), row.outcome.as_ref()) != group {
+            continue;
+        }
+        match ctx_traits_io::run_control::probe(&row.ledger_path) {
+            Ok(ctx_traits_io::run_control::DriverProbe::Held(_)) => {
+                skipped_live_ids.push(diagnostic_session_name(state, row));
+                continue;
+            }
+            Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. }) => {}
+            Err(_) => {
+                unprobeable_ids.push(diagnostic_session_name(state, row));
+                continue;
+            }
+        }
+        let eligibility = if row.class == SessionClass::Unreadable {
+            DeleteEligibility::Session(SessionClass::Unreadable)
+        } else {
+            // Liveness-free, same as the confirmed recheck (decision 6): a
+            // row displayed under a `Live` header still captures the group
+            // its persisted status actually belongs to, so an unheld
+            // stale-live target stays eligible instead of being refused by
+            // an unsatisfiable `SessionGroup::Live` expectation.
+            let status = row
+                .status
+                .as_ref()
+                .expect("readable row (class != Unreadable) always carries a status");
+            DeleteEligibility::Group(liveness_free_group(status, row.outcome.as_ref()))
+        };
+        let plan = session_delete::plan_delete_for_ledger(
+            &row.ledger_path,
+            row.repo_path.as_deref(),
+            row.worktree.as_ref(),
         );
-    };
-    let repo_root = ctx_traits_io::repository::discover_repo_root().ok();
-    let same_repo =
-        repo_path.is_none() || repo_root.as_ref().map(|root| root.as_str()) == repo_path;
-    let verified = if same_repo {
-        repo_root.as_ref().and_then(|root| {
-            let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
-            ctx_traits_io::worktree::verify_worktree_registration(
-                &worktree.id,
-                &worktree.branch,
-                &mut warnings,
-            )
-            .ok()
-            .map(|path| (root.clone(), path))
-        })
-    } else {
-        None
-    };
-    plan_delete(
-        ledger_path,
-        driver_lock_path,
-        sidecars_root,
-        Some((worktree.id.as_str(), worktree.branch.as_str())),
-        same_repo,
-        verified,
-    )
-}
+        targets.push(GroupDeleteTarget {
+            session_id: row.session_id.clone(),
+            ledger_path: row.ledger_path.clone(),
+            plan,
+            eligibility,
+        });
+    }
 
-/// Pure artifact-list builder (§3.4, test-covered): `worktree_provenance` is
-/// `None` when the ledger names no worktree; `verified` is the resolved
-/// `(repo_root, worktree_path)` only when `same_repo` AND registration was
-/// confirmed. No IO — every input is already resolved by the caller.
-fn plan_delete(
-    ledger_path: &camino::Utf8Path,
-    driver_lock_path: Option<camino::Utf8PathBuf>,
-    sidecars_root: Option<camino::Utf8PathBuf>,
-    worktree_provenance: Option<(&str, &str)>,
-    same_repo: bool,
-    verified: Option<(camino::Utf8PathBuf, camino::Utf8PathBuf)>,
-) -> DeletePlan {
-    let (worktree, worktree_note) = match worktree_provenance {
-        None => (None, None),
-        Some((id, branch)) => {
-            if !same_repo {
-                (
-                    None,
-                    Some(format!(
-                        "worktree {id} (branch {branch}) belongs to a different repository; left behind"
-                    )),
-                )
-            } else if let Some((repo_root, path)) = verified {
-                (Some((repo_root, path, branch.to_string())), None)
-            } else {
-                (
-                    None,
-                    Some(format!(
-                        "worktree {id} (branch {branch}) is not registered; left behind"
-                    )),
-                )
-            }
+    if targets.is_empty() {
+        let mut message = format!("no deletable sessions in the {} group", group.label());
+        if !skipped_live_ids.is_empty() {
+            message.push_str(&format!(
+                " ({} live: {})",
+                skipped_live_ids.len(),
+                named_tail(&skipped_live_ids)
+            ));
         }
-    };
-    DeletePlan {
-        ledger_path: ledger_path.to_path_buf(),
-        driver_lock_path,
-        sidecars_root,
-        worktree,
-        worktree_note,
+        if !unprobeable_ids.is_empty() {
+            message.push_str(&format!(
+                " ({} unprobeable: {})",
+                unprobeable_ids.len(),
+                named_tail(&unprobeable_ids)
+            ));
+        }
+        state.message = Some(message);
+        return;
     }
-}
 
-/// Executes a confirmed [`DeletePlan`]: `remove_worktree` then `delete_branch`
-/// (which uses `-d`, so git itself refuses an unmerged branch rather than
-/// this code forcing `-D`), then the ledger and its known-orphaned siblings.
-/// Reports every artifact's own outcome so a partial failure never claims
-/// more than actually happened.
-fn execute_delete(plan: &DeletePlan) -> String {
-    let mut messages = Vec::new();
-    if let Some((repo_root, path, branch)) = &plan.worktree {
-        let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
-        match ctx_traits_io::worktree::remove_worktree(repo_root, path, &mut warnings) {
-            Ok(()) => {
-                messages.push(format!("worktree {path} removed"));
-                let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
-                match ctx_traits_io::worktree::delete_branch(repo_root, branch, &mut warnings) {
-                    Ok(()) => messages.push(format!("branch {branch} deleted")),
-                    Err(error) => {
-                        messages.push(format!("branch {branch} left in place: {error}"));
-                    }
-                }
-            }
-            Err(error) => {
-                messages.push(format!("worktree {path} left in place: {error}"));
-                messages.push(format!(
-                    "branch {branch} left in place (worktree removal failed)"
-                ));
-            }
-        }
+    let mut body = format!(
+        "Delete {} session(s) in the {} group?",
+        targets.len(),
+        group.label()
+    );
+    if !skipped_live_ids.is_empty() {
+        body.push_str(&format!(
+            "\n{} live session(s) skipped: {}.",
+            skipped_live_ids.len(),
+            named_tail(&skipped_live_ids)
+        ));
     }
-    match std::fs::remove_file(plan.ledger_path.as_std_path()) {
-        Ok(()) => messages.push("ledger deleted".to_string()),
-        Err(error) => messages.push(format!("ledger left in place: {error}")),
+    if !unprobeable_ids.is_empty() {
+        body.push_str(&format!(
+            "\n{} session(s) could not be probed and were skipped: {}.",
+            unprobeable_ids.len(),
+            named_tail(&unprobeable_ids)
+        ));
     }
-    // Keep the lock file's inode stable. Removing it while holding flock would
-    // let a new driver lock a replacement inode before this guard drops.
-    if plan.driver_lock_path.is_some() {
-        messages.push("driver lock retained (stable lock inode)".to_string());
-    }
-    if let Some(root) = &plan.sidecars_root {
-        match std::fs::remove_dir_all(root.as_std_path()) {
-            Ok(()) => messages.push("sidecars deleted".to_string()),
-            Err(error) => messages.push(format!("sidecars left in place: {error}")),
-        }
-    }
-    ctx_traits_io::activity_sidecar::remove_activity_for_ledger(&plan.ledger_path);
-    messages.join("; ")
-}
 
-/// Rebuild a destructive plan while maintenance ownership prevents a driver
-/// from replacing its ledger. The modal's plan must still describe the same
-/// artifacts; otherwise the user must review the newly authoritative plan.
-fn execute_confirmed_delete(
-    ledger_path: &camino::Utf8Path,
-    repo_path: Option<&str>,
-    session_id: &str,
-    expected_eligibility: DeleteEligibility,
-    confirmed: &DeletePlan,
-) -> crate::Result<String> {
-    let Some(mut maintenance) = ctx_traits_io::run_control::try_acquire_maintenance(ledger_path)?
-    else {
-        return Ok("delete refused: driver lock is now held".to_string());
-    };
-    let current = match ctx_traits_io::run_session::read_run_session(ledger_path) {
-        Ok(session) => session,
-        // Only a modal opened on an unreadable SESSIONS row may use the
-        // known-artifacts-only branch. A later center projection must not
-        // relax the readable modal's identity and eligibility checks.
-        Err(_) if expected_eligibility.allows_unreadable_ledger() => {
-            let mut refreshed = plan_delete_for_ledger(ledger_path, repo_path, None);
-            // Acquiring maintenance may have created the otherwise absent lock
-            // file. It is our own stable inode, not a newly discovered user
-            // artifact, in this known-artifacts-only branch as well.
-            if confirmed.driver_lock_path.is_none() {
-                refreshed.driver_lock_path = None;
-            }
-            // An unreadable ledger cannot verify identity or reconstruct
-            // provenance. It may only delete the exact artifacts the user saw
-            // when confirming; newly discovered paths require a new review.
-            if refreshed.artifact_lines() != confirmed.artifact_lines() {
-                return Ok("delete plan changed; review the refreshed artifact list".to_string());
-            }
-            maintenance.clear_stale_metadata()?;
-            return Ok(execute_delete(&refreshed));
-        }
-        Err(error) => return Err(error.into()),
-    };
-    if current.session_id.as_str() != session_id {
-        return Ok("delete refused: session changed; reopen it".to_string());
-    }
-    if !expected_eligibility.matches(&current) {
-        return Ok("delete refused: session eligibility changed; reopen it".to_string());
-    }
-    let mut refreshed =
-        plan_delete_for_ledger(ledger_path, repo_path, current.provenance.worktree.as_ref());
-    // Acquiring maintenance may have created the otherwise absent lock file.
-    // It is our own stable inode, not a newly discovered user artifact.
-    if confirmed.driver_lock_path.is_none() {
-        refreshed.driver_lock_path = None;
-    }
-    if refreshed.artifact_lines() != confirmed.artifact_lines() {
-        return Ok("delete plan changed; review the refreshed artifact list".to_string());
-    }
-    maintenance.clear_stale_metadata()?;
-    Ok(execute_delete(&refreshed))
+    state.modal_host.open(
+        Action::Session(SessionAction::DeleteGroup { group, targets }),
+        Modal::buttons(
+            "delete sessions",
+            body,
+            vec![
+                Button::new("Delete", ModalOutcome::Confirmed).destructive(),
+                Button::new("Cancel", ModalOutcome::Cancelled),
+            ],
+        ),
+    );
 }
 
 /// The modal's action eligibility is a reviewed fact. Recompute it from the
@@ -4975,6 +4895,18 @@ fn execute_confirmed_delete(
 enum DeleteEligibility {
     Session(SessionClass),
     Merge(MergeClass),
+    /// Decision 6 (0252.5): a whole SESSIONS group header's DELETE, rechecked
+    /// WITHOUT liveness — `session_group` never returns `Live` when
+    /// `class != Live`, and `classify_session(false, …)` can never produce
+    /// `Live`, so a `SessionGroup::Live` expectation would be unsatisfiable
+    /// and would refuse every live-header target unconditionally. Computing
+    /// the expectation the same liveness-free way at capture time makes the
+    /// recheck reproducible for every group, and still catches a target that
+    /// changed group between confirm and execution — the case a
+    /// `SessionClass`-valued recheck misses, since `AwaitingAgentOutput` and
+    /// `AwaitingInput` share `SessionClass::Resumable` but sit in different
+    /// groups.
+    Group(SessionGroup),
 }
 
 impl DeleteEligibility {
@@ -5005,6 +4937,13 @@ impl DeleteEligibility {
                         .as_ref()
                         .is_some_and(|outcome| outcome.outcome.is_completed());
                 classify_merge(last_terminal_frame, drive_completed) == Some(expected)
+            }
+            Self::Group(expected) => {
+                let outcome = session
+                    .last_drive_outcome
+                    .as_ref()
+                    .map(|outcome| &outcome.outcome);
+                liveness_free_group(&session.status, outcome) == expected
             }
         }
     }
@@ -5308,13 +5247,79 @@ fn apply_session_action(
                 ));
                 return Ok(());
             };
-            state.message = Some(execute_confirmed_delete(
-                &row.ledger_path,
-                row.repo_path.as_deref(),
-                &session_id,
-                eligibility,
-                &plan,
-            )?);
+            state.message = Some(
+                session_delete::execute_confirmed_delete(
+                    &row.ledger_path,
+                    row.repo_path.as_deref(),
+                    &session_id,
+                    |session| eligibility.matches(session),
+                    eligibility.allows_unreadable_ledger(),
+                    &plan,
+                )?
+                .render(),
+            );
+            state.reload();
+        }
+        SessionAction::DeleteGroup { group, targets } => {
+            let total = targets.len();
+            let (mut deleted, mut lines) = (0usize, Vec::<String>::new());
+            for target in targets {
+                // An unreadable target's `session_id` is only the center's
+                // synthesized ledger file stem, not a persisted identity
+                // (decision 9) — name it by ledger path instead, same rule
+                // `diagnostic_session_name` applies pre-confirm.
+                let id = if target.eligibility.allows_unreadable_ledger() {
+                    target.ledger_path.to_string()
+                } else {
+                    state_short_session(state, &target.session_id)
+                };
+                // Re-resolve by LEDGER PATH — the key the center itself uses
+                // (decision 7) — never by session id alone or by index.
+                let Some(row) = state
+                    .sessions
+                    .iter()
+                    .find(|row| row.ledger_path == target.ledger_path)
+                else {
+                    lines.push(format!("{id}: no longer listed"));
+                    continue;
+                };
+                match session_delete::execute_confirmed_delete(
+                    &row.ledger_path,
+                    row.repo_path.as_deref(),
+                    &target.session_id,
+                    |session| target.eligibility.matches(session),
+                    target.eligibility.allows_unreadable_ledger(),
+                    &target.plan,
+                ) {
+                    Ok(ConfirmedDelete::Executed(report)) => {
+                        if report.removed_ledger {
+                            deleted += 1;
+                        }
+                        // One target = one diagnostic entry (decision 8: counts
+                        // and the bounded "+N more" tail count sessions, not
+                        // artifact lines), even when a session carries both
+                        // execution residue and a plan-time worktree note.
+                        let residue: Vec<&str> = report
+                            .execution_residue
+                            .iter()
+                            .map(String::as_str)
+                            .chain(report.worktree_note.as_deref())
+                            .collect();
+                        if !residue.is_empty() {
+                            lines.push(format!("{id}: {}", residue.join("; ")));
+                        }
+                    }
+                    Ok(other) => lines.push(format!("{id}: {}", other.render())),
+                    Err(error) => lines.push(format!("{id}: {error}")),
+                }
+            }
+            // Decision 9: every refusal or note names its session — no
+            // anonymous "(+N more)" tail may drop one behind a bare count.
+            let mut message = format!("deleted {deleted} of {total} in {}", group.label());
+            if !lines.is_empty() {
+                message.push_str(&format!(" — {}", lines.join("; ")));
+            }
+            state.message = Some(message);
             state.reload();
         }
     }
@@ -5404,7 +5409,7 @@ fn open_merge_drop_modal(state: &mut State) {
         ));
         return;
     }
-    let plan = plan_delete_for_ledger(
+    let plan = session_delete::plan_delete_for_ledger(
         &row.ledger_path,
         row.repo_path.as_deref(),
         row.worktree.as_ref(),
@@ -5497,13 +5502,17 @@ fn apply_merge_action(
                 ));
                 return Ok(());
             }
-            state.message = Some(execute_confirmed_delete(
-                &row.ledger_path,
-                row.repo_path.as_deref(),
-                &session_id,
-                eligibility,
-                &plan,
-            )?);
+            state.message = Some(
+                session_delete::execute_confirmed_delete(
+                    &row.ledger_path,
+                    row.repo_path.as_deref(),
+                    &session_id,
+                    |session| eligibility.matches(session),
+                    eligibility.allows_unreadable_ledger(),
+                    &plan,
+                )?
+                .render(),
+            );
             state.reload();
         }
     }
@@ -8129,6 +8138,19 @@ fn state_short_session(state: &State, session_id: &str) -> String {
     short_session(session_id, &all_ids)
 }
 
+/// Names a `SessionRow` for a diagnostic (decision 9): an unreadable row's
+/// `session_id` is only the center's synthesized ledger file stem
+/// (`center.rs`'s `read_session` error branch), not a persisted identity, so
+/// the ledger path itself is the session's name. Every other row is named by
+/// its display id, same as every other diagnostic in this module.
+fn diagnostic_session_name(state: &State, row: &SessionRow) -> String {
+    if row.class == SessionClass::Unreadable {
+        row.ledger_path.to_string()
+    } else {
+        state_short_session(state, &row.session_id)
+    }
+}
+
 fn list_field(text: &str, width: usize) -> String {
     let text = tui::truncate_display_width_end(text, width);
     let padding = width.saturating_sub(tui::display_width(&text));
@@ -10243,8 +10265,11 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-delete-original", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write original session");
-        let confirmed =
-            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let confirmed = session_delete::plan_delete_for_ledger(
+            &ledger_path,
+            None,
+            session.provenance.worktree.as_ref(),
+        );
 
         let mut replacement = unresolvable_trait_session_fixture("run-delete-replacement", Some(0));
         replacement.session_id = ctx_traits_core::procedure::session::SessionId::new(
@@ -10254,21 +10279,24 @@ argv = ["git", "commit", "-m", "fixture"]
         ctx_traits_io::run_session::write_run_session(&ledger_path, &replacement)
             .expect("replace ledger after confirmation");
 
-        let message = execute_confirmed_delete(
+        let eligibility = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+        let message = session_delete::execute_confirmed_delete(
             &ledger_path,
             None,
             session.session_id.as_str(),
-            DeleteEligibility::Session(classify_session(
-                false,
-                &session.status,
-                session
-                    .last_drive_outcome
-                    .as_ref()
-                    .map(|outcome| &outcome.outcome),
-            )),
+            |s| eligibility.matches(s),
+            eligibility.allows_unreadable_ledger(),
             &confirmed,
         )
-        .expect("replacement refusal");
+        .expect("replacement refusal")
+        .render();
 
         assert_eq!(message, "delete refused: session changed; reopen it");
         let retained = ctx_traits_io::run_session::read_run_session(&ledger_path)
@@ -10282,24 +10310,30 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-delete-unchanged", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write session");
-        let confirmed =
-            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let confirmed = session_delete::plan_delete_for_ledger(
+            &ledger_path,
+            None,
+            session.provenance.worktree.as_ref(),
+        );
 
-        let message = execute_confirmed_delete(
+        let eligibility = DeleteEligibility::Session(classify_session(
+            false,
+            &session.status,
+            session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+        ));
+        let message = session_delete::execute_confirmed_delete(
             &ledger_path,
             None,
             session.session_id.as_str(),
-            DeleteEligibility::Session(classify_session(
-                false,
-                &session.status,
-                session
-                    .last_drive_outcome
-                    .as_ref()
-                    .map(|outcome| &outcome.outcome),
-            )),
+            |s| eligibility.matches(s),
+            eligibility.allows_unreadable_ledger(),
             &confirmed,
         )
-        .expect("unchanged confirmation succeeds");
+        .expect("unchanged confirmation succeeds")
+        .render();
 
         assert!(message.contains("ledger deleted"), "{message}");
         assert!(
@@ -10314,8 +10348,11 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-delete-eligibility", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write original session");
-        let confirmed =
-            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let confirmed = session_delete::plan_delete_for_ledger(
+            &ledger_path,
+            None,
+            session.provenance.worktree.as_ref(),
+        );
         let expected = DeleteEligibility::Session(classify_session(
             false,
             &session.status,
@@ -10330,14 +10367,16 @@ argv = ["git", "commit", "-m", "fixture"]
         ctx_traits_io::run_session::write_run_session(&ledger_path, &changed)
             .expect("change eligibility after confirmation");
 
-        let message = execute_confirmed_delete(
+        let message = session_delete::execute_confirmed_delete(
             &ledger_path,
             None,
             session.session_id.as_str(),
-            expected,
+            |s| expected.matches(s),
+            expected.allows_unreadable_ledger(),
             &confirmed,
         )
-        .expect("eligibility refusal");
+        .expect("eligibility refusal")
+        .render();
 
         assert_eq!(
             message,
@@ -10416,21 +10455,27 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-unreadable-delete", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write session");
-        let confirmed =
-            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let confirmed = session_delete::plan_delete_for_ledger(
+            &ledger_path,
+            None,
+            session.provenance.worktree.as_ref(),
+        );
         let sidecars = ctx_traits_io::run_branch::sidecars_root(&ledger_path);
         std::fs::create_dir_all(sidecars.as_std_path()).expect("add sidecars after confirmation");
         std::fs::write(ledger_path.as_std_path(), "not a session ledger")
             .expect("make ledger unreadable");
 
-        let message = execute_confirmed_delete(
+        let eligibility = DeleteEligibility::Session(SessionClass::Unreadable);
+        let message = session_delete::execute_confirmed_delete(
             &ledger_path,
             None,
             session.session_id.as_str(),
-            DeleteEligibility::Session(SessionClass::Unreadable),
+            |s| eligibility.matches(s),
+            eligibility.allows_unreadable_ledger(),
             &confirmed,
         )
-        .expect("unreadable confirmation returns refusal");
+        .expect("unreadable confirmation returns refusal")
+        .render();
 
         assert_eq!(
             message,
@@ -10449,19 +10494,22 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-unreadable-unchanged", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write session");
-        let confirmed = plan_delete_for_ledger(&ledger_path, None, None);
+        let confirmed = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         assert!(confirmed.driver_lock_path.is_none(), "no pre-existing lock");
         std::fs::write(ledger_path.as_std_path(), "not a session ledger")
             .expect("make ledger unreadable");
 
-        let message = execute_confirmed_delete(
+        let eligibility = DeleteEligibility::Session(SessionClass::Unreadable);
+        let message = session_delete::execute_confirmed_delete(
             &ledger_path,
             None,
             session.session_id.as_str(),
-            DeleteEligibility::Session(SessionClass::Unreadable),
+            |s| eligibility.matches(s),
+            eligibility.allows_unreadable_ledger(),
             &confirmed,
         )
-        .expect("unchanged unreadable confirmation succeeds");
+        .expect("unchanged unreadable confirmation succeeds")
+        .render();
 
         assert!(message.contains("ledger deleted"), "{message}");
         assert!(
@@ -10476,7 +10524,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-unreadable-action", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write session");
-        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         std::fs::write(ledger_path.as_std_path(), "not a session ledger")
             .expect("make ledger unreadable");
         let mut state = State::new_without_worker();
@@ -10648,8 +10696,11 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-readable-delete", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write session");
-        let confirmed =
-            plan_delete_for_ledger(&ledger_path, None, session.provenance.worktree.as_ref());
+        let confirmed = session_delete::plan_delete_for_ledger(
+            &ledger_path,
+            None,
+            session.provenance.worktree.as_ref(),
+        );
         let eligibility = DeleteEligibility::Session(classify_session(
             false,
             &session.status,
@@ -10662,11 +10713,12 @@ argv = ["git", "commit", "-m", "fixture"]
             .expect("make ledger unreadable after modal open");
 
         assert!(
-            execute_confirmed_delete(
+            session_delete::execute_confirmed_delete(
                 &ledger_path,
                 None,
                 session.session_id.as_str(),
-                eligibility,
+                |s| eligibility.matches(s),
+                eligibility.allows_unreadable_ledger(),
                 &confirmed,
             )
             .is_err(),
@@ -10684,7 +10736,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-delete-action-readable", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write readable session");
-        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         let eligibility = DeleteEligibility::Session(classify_session(
             false,
             &session.status,
@@ -10729,7 +10781,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-delete-action-eligibility", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write original session");
-        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         let eligibility = DeleteEligibility::Session(classify_session(
             false,
             &session.status,
@@ -10786,7 +10838,7 @@ argv = ["git", "commit", "-m", "fixture"]
         });
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write parked merge session");
-        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         let mut changed = session.clone();
         changed
             .provenance
@@ -10831,7 +10883,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let session = unresolvable_trait_session_fixture("run-delete-action-unchanged", Some(0));
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write readable session");
-        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         let eligibility = DeleteEligibility::Session(classify_session(
             false,
             &session.status,
@@ -10888,7 +10940,7 @@ argv = ["git", "commit", "-m", "fixture"]
         });
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write parked merge session");
-        let plan = plan_delete_for_ledger(&ledger_path, None, None);
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
         let mut state = State::new_without_worker();
         state.merges = vec![MergeRow {
             session_id: session.session_id.as_str().to_string(),
@@ -10917,6 +10969,621 @@ argv = ["git", "commit", "-m", "fixture"]
             state.message
         );
         assert!(!ledger_path.exists(), "the reviewed ledger must be deleted");
+    }
+
+    /// A scratch-rooted [`SessionRow`] (0252.5 risk R4): `row_with_id`'s
+    /// `/tmp/{id}.json` default is not hermetic for these group-selection
+    /// tests, since a stale sibling `.driver-lock` on a developer machine
+    /// would let `probe` observe ambient state.
+    fn scratch_group_row(
+        dir: &camino::Utf8Path,
+        id: &str,
+        class: SessionClass,
+        status: ctx_traits_core::procedure::session::Status,
+    ) -> SessionRow {
+        SessionRow {
+            ledger_path: dir.join(format!("{id}.json")),
+            status: Some(status),
+            ..row_with_id(id, class)
+        }
+    }
+
+    #[test]
+    fn open_group_delete_modal_selects_only_rows_of_its_own_group() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-selection")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            scratch_group_row(&dir, "failed-one", SessionClass::Terminal, Status::Failed),
+            scratch_group_row(
+                &dir,
+                "completed-one",
+                SessionClass::Terminal,
+                Status::Completed,
+            ),
+        ];
+
+        open_group_delete_modal(&mut state, SessionGroup::Failed);
+
+        assert!(state.modal_host.is_open());
+        let confirmed = state
+            .modal_host
+            .handle_key(&crossterm::event::KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ))
+            .expect("modal resolves");
+        let Action::Session(SessionAction::DeleteGroup { group, targets }) = confirmed.0 else {
+            panic!("expected a DeleteGroup action");
+        };
+        assert_eq!(group, SessionGroup::Failed);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].session_id, "failed-one");
+    }
+
+    /// Blocker (review round 1, `live-group-eligibility-is-unsatisfiable`):
+    /// a row displayed under the `live` header because its class was `Live`
+    /// at projection time, but whose driver has since died (probe now
+    /// `Unheld`) and whose persisted ledger belongs to a *different*
+    /// liveness-free group, must still be deletable — the confirmed recheck
+    /// can never reproduce `SessionGroup::Live` (decision 6), so capturing
+    /// that literal header group would refuse every such target.
+    #[test]
+    fn live_group_delete_target_uses_liveness_free_eligibility() {
+        let dir = scratch_ledger_path("group-delete-stale-live")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let ledger_path = dir.join("stale-live.json");
+        // Default fixture status is `AwaitingAgentOutput` with no recorded
+        // outcome — liveness-free that classifies `Resumable`/`Resumable`
+        // group, distinct from the row's displayed `Live` group.
+        let session = unresolvable_trait_session_fixture("run-group-stale-live", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write stale-live session");
+
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Live,
+            status: Some(ctx_traits_core::procedure::session::Status::AwaitingAgentOutput),
+            outcome: None,
+            ..row_with_id("stale-live", SessionClass::Live)
+        }];
+
+        open_group_delete_modal(&mut state, SessionGroup::Live);
+
+        assert!(
+            state.modal_host.is_open(),
+            "an unheld stale-live row must still be captured as a target: {:#?}",
+            state.message
+        );
+        let confirmed = state
+            .modal_host
+            .handle_key(&crossterm::event::KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ))
+            .expect("modal resolves");
+        let Action::Session(action @ SessionAction::DeleteGroup { .. }) = confirmed.0 else {
+            panic!("expected a DeleteGroup action");
+        };
+        let mut pane = RatatuiPane::new_detached_for_test();
+        apply_session_action(&mut pane, &mut state, action, ModalOutcome::Confirmed)
+            .expect("group delete action succeeds");
+
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("deleted 1 of 1")),
+            "an unchanged stale-live target must be deleted, not refused: {:#?}",
+            state.message
+        );
+        assert!(
+            !ledger_path.exists(),
+            "the liveness-free-eligible target must be deleted"
+        );
+    }
+
+    #[test]
+    fn open_group_delete_modal_on_an_empty_group_opens_no_modal() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-empty")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let mut state = State::new_without_worker();
+        state.sessions = vec![scratch_group_row(
+            &dir,
+            "completed-one",
+            SessionClass::Terminal,
+            Status::Completed,
+        )];
+
+        open_group_delete_modal(&mut state, SessionGroup::Failed);
+
+        assert!(!state.modal_host.is_open());
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("failed")),
+            "{:#?}",
+            state.message
+        );
+    }
+
+    /// Blocker (review round 1, `bulk-diagnostics-are-not-session-keyed`):
+    /// a held row skipped before the modal even opens must be named, not
+    /// just counted — decision 9. Holds a real kernel lock, the same
+    /// hermetic pattern `proof_center.rs` uses, so no timing assumption is
+    /// needed.
+    #[test]
+    fn open_group_delete_modal_names_a_held_pre_confirm_skip() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-named-skip")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let held_row =
+            scratch_group_row(&dir, "failed-held", SessionClass::Terminal, Status::Failed);
+        let lock_path = ctx_traits_io::run_control::driver_lock_path(&held_row.ledger_path);
+        let lock =
+            ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold lock");
+
+        let mut state = State::new_without_worker();
+        state.sessions = vec![held_row];
+
+        open_group_delete_modal(&mut state, SessionGroup::Failed);
+
+        assert!(
+            !state.modal_host.is_open(),
+            "the only member of the group is held; there is nothing left to confirm"
+        );
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("failed-held")),
+            "the skipped session must be named, not just counted: {:#?}",
+            state.message
+        );
+
+        drop(lock);
+    }
+
+    /// Blocker (review round 2, `bulk-diagnostics-are-not-session-keyed`):
+    /// `named_tail` used to bound a skip list to `"first (+N more)"`, which
+    /// left every skip after the first unnamed. Two held rows must both be
+    /// named on the same skip.
+    #[test]
+    fn open_group_delete_modal_names_every_held_pre_confirm_skip() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-named-skips-plural")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let held_one = scratch_group_row(
+            &dir,
+            "failed-held-one",
+            SessionClass::Terminal,
+            Status::Failed,
+        );
+        let held_two = scratch_group_row(
+            &dir,
+            "failed-held-two",
+            SessionClass::Terminal,
+            Status::Failed,
+        );
+        let locks: Vec<_> = [&held_one, &held_two]
+            .into_iter()
+            .map(|row| {
+                let lock_path = ctx_traits_io::run_control::driver_lock_path(&row.ledger_path);
+                let lock = ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path)
+                    .expect("open lock");
+                ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold lock");
+                lock
+            })
+            .collect();
+
+        let mut state = State::new_without_worker();
+        state.sessions = vec![held_one, held_two];
+
+        open_group_delete_modal(&mut state, SessionGroup::Failed);
+
+        assert!(!state.modal_host.is_open());
+        let message = state.message.as_deref().unwrap_or_default();
+        assert!(
+            message.contains("failed-held-one") && message.contains("failed-held-two"),
+            "both skipped sessions must be named, not truncated behind a count: {message:#?}"
+        );
+        assert!(
+            !message.contains("more"),
+            "no session may be dropped behind an anonymous tail: {message:#?}"
+        );
+
+        drop(locks);
+    }
+
+    /// Blocker (review round 2, `bulk-diagnostics-are-not-session-keyed`):
+    /// an unreadable row's `session_id` is only the center's synthesized
+    /// ledger file stem (`center.rs`'s `read_session` error branch), not a
+    /// persisted identity — its diagnostic must name the ledger path.
+    #[test]
+    fn open_group_delete_modal_names_an_unreadable_skip_by_ledger_path() {
+        let dir = scratch_ledger_path("group-delete-unreadable-skip")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let mut row = row_with_id("stale-stem-id", SessionClass::Unreadable);
+        row.ledger_path = dir.join("unreadable-held.json");
+        let lock_path = ctx_traits_io::run_control::driver_lock_path(&row.ledger_path);
+        let lock =
+            ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold lock");
+
+        let ledger_path = row.ledger_path.clone();
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row];
+
+        open_group_delete_modal(&mut state, SessionGroup::Failed);
+
+        assert!(!state.modal_host.is_open());
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains(ledger_path.as_str())),
+            "an unreadable row must be named by its ledger path: {:#?}",
+            state.message
+        );
+
+        drop(lock);
+    }
+
+    #[test]
+    fn delete_group_action_refuses_a_target_that_left_the_group() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-state-change")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let ledger_path = dir.join("changed.json");
+        let session = unresolvable_trait_session_fixture("run-group-delete-changed", Some(0));
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write failed session");
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
+        let target = GroupDeleteTarget {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            plan,
+            eligibility: DeleteEligibility::Group(SessionGroup::Failed),
+        };
+
+        let mut changed = session.clone();
+        changed.status = Status::Completed;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &changed)
+            .expect("change status after modal open");
+
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Terminal,
+            status: Some(Status::Completed),
+            ..row_with_id("group-delete-changed", SessionClass::Terminal)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::DeleteGroup {
+                group: SessionGroup::Failed,
+                targets: vec![target],
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("group delete action succeeds");
+
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("deleted 0 of 1")),
+            "{:#?}",
+            state.message
+        );
+        assert!(
+            ledger_path.exists(),
+            "a target whose group changed must be refused, ledger retained"
+        );
+    }
+
+    #[test]
+    fn delete_group_action_deletes_every_confirmed_target() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-full")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let mut targets = Vec::new();
+        let mut rows = Vec::new();
+        for name in ["one", "two"] {
+            let ledger_path = dir.join(format!("{name}.json"));
+            let mut session =
+                unresolvable_trait_session_fixture(&format!("run-group-{name}"), Some(0));
+            session.status = Status::Failed;
+            ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+                .expect("write failed session");
+            let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
+            targets.push(GroupDeleteTarget {
+                session_id: session.session_id.as_str().to_string(),
+                ledger_path: ledger_path.clone(),
+                plan,
+                eligibility: DeleteEligibility::Group(SessionGroup::Failed),
+            });
+            rows.push(SessionRow {
+                session_id: session.session_id.as_str().to_string(),
+                ledger_path: ledger_path.clone(),
+                class: SessionClass::Terminal,
+                status: Some(Status::Failed),
+                ..row_with_id(name, SessionClass::Terminal)
+            });
+        }
+        let ledger_paths: Vec<_> = targets.iter().map(|t| t.ledger_path.clone()).collect();
+        let mut state = State::new_without_worker();
+        state.sessions = rows;
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::DeleteGroup {
+                group: SessionGroup::Failed,
+                targets,
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("group delete action succeeds");
+
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("deleted 2 of 2")),
+            "{:#?}",
+            state.message
+        );
+        for path in ledger_paths {
+            assert!(!path.exists(), "every confirmed target must be deleted");
+        }
+    }
+
+    /// Blocker (review round 1, `bulk-diagnostics-are-not-session-keyed`,
+    /// step 3 — done, this covers it): a target that carries BOTH tiers of
+    /// residue (an execution failure removing its sidecars, and a plan-time
+    /// worktree note from an unregistered worktree) must collapse into ONE
+    /// diagnostic entry for that session — decision 8, counts sessions, not
+    /// artifact lines.
+    #[test]
+    fn delete_group_action_aggregates_one_targets_two_residue_tiers_into_one_entry() {
+        use ctx_traits_core::procedure::session::{Status, WorktreeProvenance};
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_ledger_path("group-delete-residue-aggregate")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let ledger_path = dir.join("residue.json");
+        let mut session = unresolvable_trait_session_fixture("run-group-residue", Some(0));
+        session.status = Status::Failed;
+        // Unregistered, so `plan_delete_for_ledger` leaves it out of
+        // `plan.worktree` and records a plan-time `worktree_note` instead —
+        // independent of the sidecars failure forced below.
+        session.provenance.worktree = Some(WorktreeProvenance {
+            id: "unregistered-worktree".to_string(),
+            branch: "unregistered-branch".to_string(),
+            seed_snapshots: Vec::new(),
+            path: None,
+        });
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write failed session");
+
+        // Force sidecars removal to fail (execution residue): a nested,
+        // unwritable subdirectory blocks `remove_dir_all` from unlinking its
+        // child, regardless of directory permissions elsewhere.
+        let sidecars_root = ctx_traits_io::run_branch::sidecars_root(&ledger_path);
+        let locked_subdir = sidecars_root.join("locked");
+        std::fs::create_dir_all(locked_subdir.as_std_path()).expect("sidecars scratch dir");
+        std::fs::write(locked_subdir.join("child").as_std_path(), b"x").expect("sidecar file");
+        std::fs::set_permissions(
+            locked_subdir.as_std_path(),
+            std::fs::Permissions::from_mode(0o500),
+        )
+        .expect("lock down sidecars subdir");
+
+        let plan = session_delete::plan_delete_for_ledger(
+            &ledger_path,
+            None,
+            session.provenance.worktree.as_ref(),
+        );
+        assert!(
+            plan.worktree_note.is_some(),
+            "an unregistered worktree must leave a plan-time note"
+        );
+        let target = GroupDeleteTarget {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            plan,
+            eligibility: DeleteEligibility::Group(SessionGroup::Failed),
+        };
+
+        let mut state = State::new_without_worker();
+        state.sessions = vec![SessionRow {
+            session_id: session.session_id.as_str().to_string(),
+            ledger_path: ledger_path.clone(),
+            class: SessionClass::Terminal,
+            status: Some(Status::Failed),
+            ..row_with_id("group-delete-residue", SessionClass::Terminal)
+        }];
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::DeleteGroup {
+                group: SessionGroup::Failed,
+                targets: vec![target],
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("group delete action succeeds");
+
+        // Restore permissions before any assertion can panic and leak an
+        // unremovable scratch directory into cleanup.
+        std::fs::set_permissions(
+            locked_subdir.as_std_path(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .expect("restore sidecars subdir permissions");
+
+        let message = state.message.clone().unwrap_or_default();
+        assert!(
+            message.contains("sidecars left in place") && message.contains("not registered"),
+            "both residue tiers for the one target must be reported: {message}"
+        );
+        assert!(
+            !message.contains("more)"),
+            "one target's two residue lines must collapse into one entry, not a bounded tail: {message}"
+        );
+    }
+
+    /// Blocker (review round 2, `bulk-diagnostics-are-not-session-keyed`,
+    /// open step 3): the applier used to name only the first post-confirm
+    /// refusal and hide the rest behind an anonymous `"(+N more)"` tail. Two
+    /// targets that both changed group between confirm and execution must
+    /// both be named in the closing footer message.
+    #[test]
+    fn delete_group_action_names_every_post_confirm_refusal() {
+        use ctx_traits_core::procedure::session::Status;
+
+        let dir = scratch_ledger_path("group-delete-post-confirm-plural")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let mut targets = Vec::new();
+        let mut rows = Vec::new();
+        for name in ["changed-one", "changed-two"] {
+            let ledger_path = dir.join(format!("{name}.json"));
+            let session = unresolvable_trait_session_fixture(&format!("run-{name}"), Some(0));
+            ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+                .expect("write failed session");
+            let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
+            targets.push(GroupDeleteTarget {
+                session_id: session.session_id.as_str().to_string(),
+                ledger_path: ledger_path.clone(),
+                plan,
+                eligibility: DeleteEligibility::Group(SessionGroup::Failed),
+            });
+            // Group changed after capture — the plan/eligibility recheck must
+            // refuse it, not the "no longer listed" branch.
+            let mut changed = session.clone();
+            changed.status = Status::Completed;
+            ctx_traits_io::run_session::write_run_session(&ledger_path, &changed)
+                .expect("change status after modal open");
+            rows.push(SessionRow {
+                session_id: session.session_id.as_str().to_string(),
+                ledger_path: ledger_path.clone(),
+                class: SessionClass::Terminal,
+                status: Some(Status::Completed),
+                ..row_with_id(name, SessionClass::Terminal)
+            });
+        }
+        let mut state = State::new_without_worker();
+        state.sessions = rows;
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::DeleteGroup {
+                group: SessionGroup::Failed,
+                targets,
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("group delete action succeeds");
+
+        let message = state.message.clone().unwrap_or_default();
+        assert!(
+            message.contains("changed-one") && message.contains("changed-two"),
+            "both post-confirm refusals must be named, not truncated behind a count: {message}"
+        );
+        assert!(
+            !message.contains("more)"),
+            "no session may be dropped behind an anonymous tail: {message}"
+        );
+    }
+
+    /// Blocker (review round 2, `bulk-diagnostics-are-not-session-keyed`,
+    /// open step 4): an unreadable target's `session_id` is only the
+    /// center's synthesized ledger file stem, not a persisted identity — its
+    /// post-confirm refusal must name the ledger path, same as the
+    /// pre-confirm skip does.
+    #[test]
+    fn delete_group_action_names_an_unreadable_post_confirm_refusal_by_ledger_path() {
+        let dir = scratch_ledger_path("group-delete-unreadable-post-confirm")
+            .parent()
+            .expect("scratch parent")
+            .to_path_buf();
+        let ledger_path = dir.join("unreadable-gone.json");
+        let plan = session_delete::plan_delete_for_ledger(&ledger_path, None, None);
+        let target = GroupDeleteTarget {
+            session_id: "stale-stem-id".to_string(),
+            ledger_path: ledger_path.clone(),
+            plan,
+            eligibility: DeleteEligibility::Session(SessionClass::Unreadable),
+        };
+
+        // No matching row in `state.sessions`: the applier's re-resolution by
+        // ledger path (decision 7) fails and the target is refused as
+        // "no longer listed" — the branch under test for identity.
+        let mut state = State::new_without_worker();
+        let mut pane = RatatuiPane::new_detached_for_test();
+
+        apply_session_action(
+            &mut pane,
+            &mut state,
+            SessionAction::DeleteGroup {
+                group: SessionGroup::Failed,
+                targets: vec![target],
+            },
+            ModalOutcome::Confirmed,
+        )
+        .expect("group delete action succeeds");
+
+        let message = state.message.clone().unwrap_or_default();
+        assert!(
+            message.contains(ledger_path.as_str()),
+            "an unreadable target must be named by its ledger path, not a synthesized id: {message}"
+        );
+        assert!(
+            !message.contains("stale-stem-id"),
+            "the synthesized file-stem id must not stand in for the ledger path: {message}"
+        );
     }
 
     #[test]
@@ -11577,7 +12244,7 @@ argv = ["git", "commit", "-m", "fixture"]
     // Test 7 (delete plan enumeration): the pure planner's three cases.
     #[test]
     fn delete_plan_ledger_only_without_worktree_provenance() {
-        let plan = plan_delete(
+        let plan = session_delete::plan_delete(
             camino::Utf8Path::new("/runs/s1.json"),
             None,
             None,
@@ -11590,7 +12257,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
     #[test]
     fn delete_plan_includes_worktree_when_registration_verified() {
-        let plan = plan_delete(
+        let plan = session_delete::plan_delete(
             camino::Utf8Path::new("/runs/s1.json"),
             None,
             None,
@@ -11613,7 +12280,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
     #[test]
     fn delete_plan_notes_unregistered_worktree_and_leaves_it_out() {
-        let plan = plan_delete(
+        let plan = session_delete::plan_delete(
             camino::Utf8Path::new("/runs/s1.json"),
             None,
             None,
@@ -11629,7 +12296,7 @@ argv = ["git", "commit", "-m", "fixture"]
 
     #[test]
     fn delete_plan_notes_foreign_repository_without_probing_git() {
-        let plan = plan_delete(
+        let plan = session_delete::plan_delete(
             camino::Utf8Path::new("/runs/s1.json"),
             None,
             None,

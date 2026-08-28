@@ -53,6 +53,7 @@ Manage:
   state       Report or set a trait's lifecycle state: <trait>, --active, --draft, --deprecated
   dependency  Packages this project depends on, and publishing your own: install (all declared), add <pkg>, remove, update, outdated, info, publish
   diff        Show layer-aware diff for a trait
+  sessions    Manage this repository's run sessions in bulk: delete --failed
 AI Assistance:
   generate    Use a model to draft a new trait from a brief
   refine      Use a model to revise an existing canonical trait
@@ -980,6 +981,11 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Manage this repository's run sessions in bulk.
+    Sessions {
+        #[command(subcommand)]
+        subcommand: SessionsCommand,
+    },
     /// Internals: the runtime's own dispatch surface and this project's
     /// tooling. Not a user-facing command group — `ctx traits internal
     /// <verb> --help` documents each one, and nothing here is part of the
@@ -995,6 +1001,21 @@ pub enum TraitsCommand {
     Internal {
         #[command(subcommand)]
         subcommand: InternalCommand,
+    },
+}
+
+/// `ctx traits sessions ...` subcommands (0252.5): bulk operations over this
+/// repository's run-session store, distinct from the hidden singular
+/// `internal session ...` namespace.
+#[derive(Subcommand, Debug)]
+pub enum SessionsCommand {
+    /// Delete run sessions selected by state, with their worktrees, branches
+    /// and sidecars. Requires a selector.
+    #[command(group = clap::ArgGroup::new("selector").required(true).multiple(true))]
+    Delete {
+        /// Select every session whose ledger records the `failed` status.
+        #[arg(long, group = "selector")]
+        failed: bool,
     },
 }
 
