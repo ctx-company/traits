@@ -1113,50 +1113,12 @@ fn call_fixture_frame(
     agent: &str,
     produced_slots: serde_json::Value,
 ) {
-    let ledger: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(ledger_path).expect("fixture session ledger readable"),
-    )
-    .expect("fixture session ledger is JSON");
-    let template = &ledger["next-frame"]["call-template"];
-    let mut data = serde_json::json!({
-        "session-id": template["session-id"],
-        "run-id": template["run-id"],
-        "state-digest": template["state-digest"],
-        "expected-sequence-item-id": template["expected-sequence-item-id"],
-        "expected-run-index": template["expected-run-index"],
-        "expected-source-index": template["expected-source-index"],
-        "produced-slots": produced_slots,
-    });
-    if let Some(position_path) = template["expected-position-path"].as_array() {
-        data.as_object_mut()
-            .expect("fixture call payload is an object")
-            .insert(
-                "expected-position-path".to_string(),
-                position_path.clone().into(),
-            );
-    }
-    let data_path = ledger_path.with_extension(format!("{agent}.call.json"));
-    fs::write(&data_path, data.to_string()).expect("fixture call payload writable");
-    let output = run_ctx(
-        &[
-            "traits",
-            "internal",
-            "call",
-            "--session",
-            ledger_path.to_str().unwrap(),
-            "--agent",
-            agent,
-            "--data",
-            data_path.to_str().unwrap(),
-            "--json",
-        ],
+    let _ = support::call_session_frame(
         repo,
         home,
-    );
-    assert!(
-        output.status.success(),
-        "{agent} call must preserve the output-port ledger contract: {:?}",
-        utf8(&output)
+        ledger_path,
+        Some(agent),
+        serde_json::json!({ "produced-slots": produced_slots }),
     );
 }
 

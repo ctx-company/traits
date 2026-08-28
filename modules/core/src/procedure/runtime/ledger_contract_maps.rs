@@ -801,6 +801,45 @@ fn validate_emitted_signal_collection(
 ) {
     let mut seen = BTreeSet::new();
     for signal in signals {
+        let declared_schema = if signal.signal_ref.is_qualified() {
+            None
+        } else {
+                trait_ref
+                    .signals
+                    .iter()
+                    .find(|declared| declared.id == signal.signal_ref.id())
+                    .and_then(|declared| declared.schema.as_ref())
+        };
+        if let Some(schema) = declared_schema
+            && signal.payload.is_none()
+        {
+            diagnostics.push(format!(
+                "emitted signal {} declares payload schema {schema} but has no payload",
+                signal.signal_ref
+            ));
+        }
+        match (&signal.payload, &signal.payload_digest) {
+            (Some(payload), Some(digest)) => match value_digest(payload) {
+                Ok(recomputed) if recomputed != *digest => diagnostics.push(format!(
+                    "emitted signal {} payload digest {:?} does not match recomputed {:?}",
+                    signal.signal_ref, digest, recomputed
+                )),
+                Err(error) => diagnostics.push(format!(
+                    "emitted signal {} payload digest could not be recomputed: {error}",
+                    signal.signal_ref
+                )),
+                _ => {}
+            },
+            (Some(_), None) => diagnostics.push(format!(
+                "emitted signal {} has payload without payload digest",
+                signal.signal_ref
+            )),
+            (None, Some(_)) => diagnostics.push(format!(
+                "emitted signal {} has payload digest without payload",
+                signal.signal_ref
+            )),
+            (None, None) => {}
+        }
         let key = (
             signal.sequence_index,
             signal.signal_ref.as_str(),

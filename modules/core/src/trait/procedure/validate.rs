@@ -1849,6 +1849,17 @@ fn validate_item_refs(
             &format!("{base}.on-complete[{j}]"),
             sets.signal_ids,
         )?;
+        // A for-each completion is emitted by the control runtime, whereas an
+        // ordinary completion is emitted by the caller with its step output.
+        if emit.when().is_some()
+            || matches!(item.kind.as_ref(), Some(SequenceKind::ForEach))
+        {
+            validate_runtime_authored_signal(
+                trait_ref,
+                emit.signal_ref(),
+                &format!("{base}.on-complete[{j}]"),
+            )?;
+        }
         if let Some(when) = emit.when() {
             crate::r#trait::condition::validate_guard_expr(
                 trait_ref,
@@ -1872,6 +1883,9 @@ fn validate_item_refs(
             FailureTarget::Route(_) => format!("{base}.on-failure.signal"),
         };
         validate_optional_signal(on_failure.signal_ref(), &signal_path, sets.signal_ids)?;
+        if let Some(signal_ref) = on_failure.signal_ref() {
+            validate_runtime_authored_signal(trait_ref, signal_ref, &signal_path)?;
+        }
     }
     Ok(())
 }
@@ -1986,11 +2000,21 @@ fn validate_loop_item(
         )?;
     }
     if let Some(on_exhausted) = item.on_exhausted.as_ref() {
-        validate_exhaustion_target(on_exhausted, &format!("{base}.on-exhausted"), signal_ids)?;
+        validate_exhaustion_target_with_trait(
+            trait_ref,
+            on_exhausted,
+            &format!("{base}.on-exhausted"),
+            signal_ids,
+        )?;
     }
     if let Some(on_abort) = item.on_abort.as_ref() {
         validate_on_abort_requires_abort_if(item, base)?;
-        validate_abort_signal_target(on_abort, &format!("{base}.on-abort"), signal_ids)?;
+        validate_abort_signal_target_with_trait(
+            trait_ref,
+            on_abort,
+            &format!("{base}.on-abort"),
+            signal_ids,
+        )?;
     }
     Ok(())
 }
@@ -2011,6 +2035,7 @@ fn validate_on_abort_requires_abort_if(item: &SequenceItem, base: &str) -> crate
 /// A loop's `on-abort` declaration: unlike `on-exhausted`, a `abort-if` match
 /// always halts the loop, so the `"continue"`/`"abort"` policy keywords are
 /// meaningless here and rejected — only signal refs are accepted.
+#[cfg(test)]
 fn validate_abort_signal_target(
     target: &ExhaustionTarget,
     field_path: &str,
@@ -2019,12 +2044,31 @@ fn validate_abort_signal_target(
     validate_signal_target(target, field_path, "on-abort", false, signal_ids)
 }
 
+fn validate_abort_signal_target_with_trait(
+    trait_ref: &Trait,
+    target: &ExhaustionTarget,
+    field_path: &str,
+    signal_ids: &BTreeSet<&str>,
+) -> crate::Result<()> {
+    validate_signal_target_with_trait(trait_ref, target, field_path, "on-abort", false, signal_ids)
+}
+
+#[cfg(test)]
 fn validate_exhaustion_target(
     target: &ExhaustionTarget,
     field_path: &str,
     signal_ids: &BTreeSet<&str>,
 ) -> crate::Result<()> {
     validate_signal_target(target, field_path, "on-exhausted", true, signal_ids)
+}
+
+fn validate_exhaustion_target_with_trait(
+    trait_ref: &Trait,
+    target: &ExhaustionTarget,
+    field_path: &str,
+    signal_ids: &BTreeSet<&str>,
+) -> crate::Result<()> {
+    validate_signal_target_with_trait(trait_ref, target, field_path, "on-exhausted", true, signal_ids)
 }
 
 /// Shared walk over an `ExhaustionTarget`'s One/Many entries, resolving
@@ -2086,6 +2130,27 @@ fn validate_signal_target(
                     .into());
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_signal_target_with_trait(
+    trait_ref: &Trait,
+    target: &ExhaustionTarget,
+    field_path: &str,
+    field_label: &str,
+    allow_policy_keywords: bool,
+    signal_ids: &BTreeSet<&str>,
+) -> crate::Result<()> {
+    validate_signal_target(target, field_path, field_label, allow_policy_keywords, signal_ids)?;
+    let values = match target {
+        ExhaustionTarget::One(value) => std::slice::from_ref(value),
+        ExhaustionTarget::Many(values) => values,
+    };
+    for value in values {
+        if value.starts_with("signal:") {
+            validate_runtime_authored_signal(trait_ref, value, field_path)?;
         }
     }
     Ok(())
@@ -4439,6 +4504,33 @@ fn validate_signal_ref(
     Ok(())
 }
 
+/// Runtime-authored emissions have no payload source. Refuse local schema'd
+/// targets during manifest validation instead of recording an impossible
+/// emission that a caller can never correct.
+fn validate_runtime_authored_signal(
+    trait_ref: &Trait,
+    ref_text: &str,
+    field_path: &str,
+) -> crate::Result<()> {
+    let parsed = Reference::parse(ref_text).expect("validated signal ref");
+    if !parsed.is_qualified()
+        && trait_ref
+            .signals
+            .iter()
+            .find(|signal| signal.id == parsed.id())
+            .is_some_and(|signal| signal.schema.is_some())
+    {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: field_path.to_string(),
+            message: format!(
+                "runtime-authored signal {ref_text:?} declares a payload schema but has no payload source"
+            ),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 fn validate_agent_ref(
     ref_text: &str,
     field_path: &str,
@@ -5485,6 +5577,84 @@ sequence = [
         item_from_toml(
             "id = \"per-item\"\ntitle = \"Per item\"\nkind = \"for-each\"\nsequence = \"sequence:body\"\n",
         )
+    }
+
+    #[test]
+    fn schema_signal_is_refused_for_runtime_for_each_completion_but_allowed_for_caller_completion() {
+        let mut trait_ref = checklist_for_each_fixture_trait("slot:verdicts");
+        trait_ref.signals.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "payload",
+                "description": "Carries a caller payload.",
+                "schema": "schema:text"
+            }))
+            .expect("signal fixture decodes"),
+        );
+        let empty = BTreeSet::new();
+        let signal_ids = BTreeSet::from(["payload"]);
+        let sets = SequenceValidationSets {
+            input_port_ids: &empty,
+            output_port_ids: &empty,
+            slot_ids: &empty,
+            signal_ids: &signal_ids,
+            agent_ids: &empty,
+            resource_ids: &empty,
+        };
+
+        let caller_item = item_from_toml(
+            "id = \"answer\"\ntitle = \"Answer\"\nkind = \"prompt\"\nprompt = \"Answer.\"\non-complete = [\"signal:payload\"]\n",
+        );
+        validate_item_refs(&trait_ref, &caller_item, "procedure.sequence[0]", &sets)
+            .expect("caller completion can supply the schema payload");
+
+        let runtime_item = item_from_toml(
+            "id = \"per-item\"\ntitle = \"Per item\"\nkind = \"for-each\"\nsequence = \"sequence:body\"\non-complete = [\"signal:payload\"]\n",
+        );
+        let error = validate_item_refs(&trait_ref, &runtime_item, "procedure.sequence[1]", &sets)
+            .expect_err("for-each completion has no payload source");
+        assert!(error.to_string().contains("procedure.sequence[1].on-complete[0]"));
+    }
+
+    #[test]
+    fn schema_signal_is_refused_for_derived_and_failure_runtime_emissions() {
+        let mut trait_ref = checklist_for_each_fixture_trait("slot:verdicts");
+        trait_ref.signals.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "payload",
+                "description": "Carries a caller payload.",
+                "schema": "schema:text"
+            }))
+            .expect("signal fixture decodes"),
+        );
+        let empty = BTreeSet::new();
+        let signal_ids = BTreeSet::from(["payload"]);
+        let sets = SequenceValidationSets {
+            input_port_ids: &empty,
+            output_port_ids: &empty,
+            slot_ids: &empty,
+            signal_ids: &signal_ids,
+            agent_ids: &empty,
+            resource_ids: &empty,
+        };
+
+        for (item, path) in [
+            (
+                item_from_toml(
+                    "id = \"derived\"\ntitle = \"Derived\"\nkind = \"prompt\"\nprompt = \"Answer.\"\non-complete = [{ signal = \"signal:payload\", when = { equals = [\"slot:verdicts\", \"ok\"] } }]\n",
+                ),
+                "procedure.sequence[2].on-complete[0]",
+            ),
+            (
+                item_from_toml(
+                    "id = \"failure\"\ntitle = \"Failure\"\nkind = \"prompt\"\nprompt = \"Answer.\"\non-failure = \"signal:payload\"\n",
+                ),
+                "procedure.sequence[3].on-failure",
+            ),
+        ] {
+            let error = validate_item_refs(&trait_ref, &item, path.rsplit_once('.').unwrap().0, &sets)
+                .expect_err("runtime-authored signal has no payload source");
+            assert!(error.to_string().contains(path), "{error}");
+        }
     }
 
     #[test]

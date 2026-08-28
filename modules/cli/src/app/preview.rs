@@ -288,7 +288,7 @@ fn build_static_frame(
     }
     let pending_inputs = pending_inputs_for(loaded, frame);
     let context = resolved_frame_prompt(loaded, session, frame, &pending_inputs)?;
-    let requested = requested_outputs(frame)?;
+    let requested = requested_outputs(frame, loaded)?;
     let schema = requested_output_schema(&requested, loaded);
     let prompt = frame_prompt(&context, &schema, None);
     Ok(PreviewFrame {
@@ -450,7 +450,7 @@ fn build_session_frame(
             })
         }
         _ => {
-            let requested = requested_outputs(frame)?;
+            let requested = requested_outputs(frame, loaded)?;
             let schema = requested_output_schema(&requested, loaded);
             let prompt = frame_prompt(&context, &schema, None);
             Ok(PreviewFrame {

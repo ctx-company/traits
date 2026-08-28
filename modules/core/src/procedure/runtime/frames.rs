@@ -243,6 +243,9 @@ pub struct SequenceCallTemplate {
 pub struct SequenceSignalTemplate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Schema required for a caller-authored payload, when this signal carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_schema: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -258,7 +261,7 @@ pub struct SequenceCallerTemplate {
 }
 
 /// Bounded frame data for intro/procedure or a concrete step.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub struct SequenceFrame {
@@ -295,6 +298,8 @@ pub struct SequenceFrame {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub guard_explanations: Vec<ConditionEvaluation>,
+    #[serde(default, rename = "signal-payloads", skip_serializing_if = "Vec::is_empty")]
+    pub signal_payloads: Vec<FrameSignalPayload>,
     pub title: String,
     pub frame_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -327,6 +332,69 @@ pub struct SequenceFrame {
     pub warnings: Vec<String>,
 }
 
+/// An accepted signal payload visible at this frame's control position.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct FrameSignalPayload {
+    pub signal_ref: Reference,
+    pub payload: JsonValue,
+}
+
+impl SequenceFrame {
+    /// Look up a visible signal payload or one of its dotted object fields.
+    pub fn signal_payload_field(&self, signal_ref: &str, field: Option<&str>) -> Option<&JsonValue> {
+        let payload = self
+            .signal_payloads
+            .iter()
+            .find(|payload| payload.signal_ref.as_str() == signal_ref)
+            .map(|payload| &payload.payload)?;
+        field.map_or(Some(payload), |field| crate::shared::resolve_field_path(payload, field))
+    }
+}
+
+#[cfg(test)]
+mod signal_payload_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn signal_payload_field_resolves_nested_fields_without_coercion() {
+        let frame = SequenceFrame {
+            kind: SequenceFrameKind::Step,
+            run_id: "run".to_string(),
+            trait_id: "trait".to_string(),
+            sequence_index: Some(0),
+            run_index: Some(0),
+            item_id: Some("step".to_string()),
+            position_path: Vec::new(),
+            loop_context: None,
+            for_each_context: None,
+            guard_explanations: Vec::new(),
+            signal_payloads: vec![FrameSignalPayload {
+                signal_ref: Reference::parse("signal:review").unwrap(),
+                payload: json!({"detail": {"code": "missing-test"}}),
+            }],
+            title: "step".to_string(),
+            frame_text: String::new(),
+            prompt: None,
+            command: None,
+            available_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            requested_outputs: Vec::new(),
+            assigned_agent: None,
+            allowed_signals: Vec::new(),
+            derived_signals: Vec::new(),
+            call_template: None,
+            warnings: Vec::new(),
+        };
+
+        assert_eq!(frame.signal_payload_field("signal:review", Some("detail.code")), Some(&json!("missing-test")));
+        assert_eq!(frame.signal_payload_field("signal:review", Some("detail.missing")), None);
+        assert_eq!(frame.signal_payload_field("signal:review", Some("detail.code.value")), None);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
@@ -349,7 +417,7 @@ pub struct ForEachContext {
 }
 
 /// Result of asking for the next frame.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub enum NextSequenceFrameResult {
@@ -396,7 +464,7 @@ pub struct StepSlotOutput {
 }
 
 /// Caller/model-supplied signal emission inside a step-output envelope.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub struct StepSignalOutput {
@@ -404,6 +472,8 @@ pub struct StepSignalOutput {
     pub ref_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<JsonValue>,
     #[serde(
         default,
         rename = "producer-agent",
@@ -440,13 +510,19 @@ pub struct StepOutputEnvelope {
 }
 
 /// Validated runtime signal emission.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub struct SignalEmission {
     pub signal_ref: Reference,
     pub sequence_index: usize,
     pub evidence_digest: Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<JsonValue>,
+    #[serde(default, rename = "payload-digest", skip_serializing_if = "Option::is_none")]
+    pub payload_digest: Option<Digest>,
+    #[serde(default, rename = "schema-validation", skip_serializing_if = "Vec::is_empty")]
+    pub schema_validation: Vec<SchemaValidation>,
     #[serde(
         default,
         rename = "position-path",

@@ -423,7 +423,8 @@ fn format_signals(
                     } else { None }
                 }).collect::<Vec<_>>()
             }).unwrap_or_default();
-            let body = format!("Meaning: {}\nStatic note: allowed runtime/trace fact, not an arbitrary text match\nEmitted by: {}", description, if emitted_by.is_empty() { "none declared".to_string() } else { emitted_by.join(", ") });
+            let payload = s.schema.as_ref().map(|schema| format!("\nPayload: {schema}")).unwrap_or_default();
+            let body = format!("Meaning: {}\nStatic note: allowed runtime/trace fact, not an arbitrary text match\nEmitted by: {}{}", description, if emitted_by.is_empty() { "none declared".to_string() } else { emitted_by.join(", ") }, payload);
             leaf_element(
                 "signal",
                 &[("id", s.id.as_str())],

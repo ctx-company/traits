@@ -1459,10 +1459,19 @@ fn signal_matched_in_scope(
     signal_ref: &str,
     repeated_scope: &[RepeatedActivation],
 ) -> bool {
-    visible_emitted_signals(state).into_iter().any(|signal| {
+    !visible_signal_emissions_in_scope(state, signal_ref, repeated_scope).is_empty()
+}
+
+/// Accepted emissions visible at this control position and repeated activation.
+fn visible_signal_emissions_in_scope<'a>(
+    state: &'a State,
+    signal_ref: &str,
+    repeated_scope: &[RepeatedActivation],
+) -> Vec<&'a SignalEmission> {
+    visible_emitted_signals(state).into_iter().filter(|signal| {
         let signal_scope = repeated_activation_scope(&signal.position_path);
         signal.acceptance == AcceptanceStatus::Accepted
-            && signal.signal_ref.as_str() == signal_ref
+            && (signal_ref.is_empty() || signal.signal_ref.as_str() == signal_ref)
             && signal_scope
                 .iter()
                 .zip(repeated_scope)
@@ -1471,7 +1480,7 @@ fn signal_matched_in_scope(
                         && emitted.iteration == current.iteration
                         && emitted.item_index == current.item_index
                 })
-    })
+    }).collect()
 }
 
 /// Emitted-signal evidence visible from the current control position: the

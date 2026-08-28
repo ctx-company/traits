@@ -17,6 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::reference::Reference;
+use crate::schema::form::Schema;
 
 /// A `[[signal]]` declaration: a named event identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -28,10 +29,17 @@ pub struct Signal {
 
     /// Human-readable description of when this signal fires.
     pub description: String,
+
+    /// Optional schema required for an emitted payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Schema>,
 }
 
 /// Validate a list of signal declarations.
-pub fn validate_signals(signals: &[Signal]) -> crate::Result<()> {
+pub fn validate_signals(
+    signals: &[Signal],
+    declared_schema_ids: &BTreeSet<&str>,
+) -> crate::Result<()> {
     let mut seen_ids = BTreeSet::new();
 
     for (i, signal) in signals.iter().enumerate() {
@@ -51,6 +59,13 @@ pub fn validate_signals(signals: &[Signal]) -> crate::Result<()> {
                 message: "must not be empty".to_string(),
             }
             .into());
+        }
+        if let Some(schema) = &signal.schema {
+            crate::schema::form::validate(
+                schema,
+                &format!("signal[{i}].schema"),
+                declared_schema_ids,
+            )?;
         }
     }
 
@@ -131,5 +146,39 @@ impl SignalTraceEvidence {
             .iter()
             .map(|e| e.signal_ref.to_string())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::{Signal, validate_signals};
+
+    #[test]
+    fn schema_signal_validates_declared_schema_reference() {
+        let signals: Vec<Signal> = serde_json::from_value(serde_json::json!([{
+            "id": "needs-review",
+            "description": "Review is needed.",
+            "schema": "schema:review-note"
+        }]))
+        .expect("signal fixture decodes");
+        let schemas = BTreeSet::from(["review-note"]);
+
+        validate_signals(&signals, &schemas).expect("declared schema is accepted");
+    }
+
+    #[test]
+    fn schema_signal_rejects_undeclared_schema_reference_at_signal_path() {
+        let signals: Vec<Signal> = serde_json::from_value(serde_json::json!([{
+            "id": "needs-review",
+            "description": "Review is needed.",
+            "schema": "schema:missing"
+        }]))
+        .expect("signal fixture decodes");
+
+        let error = validate_signals(&signals, &BTreeSet::new())
+            .expect_err("undeclared signal schema must fail");
+        assert!(error.to_string().contains("signal[0].schema"));
     }
 }

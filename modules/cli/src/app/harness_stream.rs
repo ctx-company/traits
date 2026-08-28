@@ -1634,23 +1634,58 @@ pub(crate) fn find_nested_object<T>(
     matcher: &mut impl FnMut(&serde_json::Map<String, Value>) -> Option<T>,
     on_text_value: &mut impl FnMut(&Value),
 ) -> Option<T> {
+    find_nested_object_with_order(
+        value,
+        matcher,
+        on_text_value,
+        NestedObjectMatchOrder::MatcherFirst,
+    )
+}
+
+/// Selects whether an event wrapper or its contents has precedence when both
+/// have keys that could satisfy an output matcher.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NestedObjectMatchOrder {
+    MatcherFirst,
+    WrapperFirst,
+}
+
+/// Like [`find_nested_object`], with explicit precedence for harness-event
+/// wrappers. Enveloped output must use [`NestedObjectMatchOrder::WrapperFirst`]
+/// so a wrapper key such as `result` cannot shadow a model output named
+/// `result`; direct raw model JSON remains matcher-first.
+pub(crate) fn find_nested_object_with_order<T>(
+    value: &Value,
+    matcher: &mut impl FnMut(&serde_json::Map<String, Value>) -> Option<T>,
+    on_text_value: &mut impl FnMut(&Value),
+    order: NestedObjectMatchOrder,
+) -> Option<T> {
     match value {
         Value::Object(object) => {
-            if let Some(result) = matcher(object) {
+            if order == NestedObjectMatchOrder::MatcherFirst
+                && let Some(result) = matcher(object)
+            {
                 return Some(result);
             }
             for key in NESTED_OBJECT_WRAPPER_KEYS {
                 if let Some(nested) = object.get(*key)
-                    && let Some(result) = find_nested_object(nested, matcher, on_text_value)
+                    && let Some(result) =
+                        find_nested_object_with_order(nested, matcher, on_text_value, order)
                 {
                     return Some(result);
                 }
             }
-            None
+            if order == NestedObjectMatchOrder::WrapperFirst {
+                matcher(object)
+            } else {
+                None
+            }
         }
         Value::Array(items) => {
             for item in items {
-                if let Some(result) = find_nested_object(item, matcher, on_text_value) {
+                if let Some(result) =
+                    find_nested_object_with_order(item, matcher, on_text_value, order)
+                {
                     return Some(result);
                 }
             }
@@ -1660,7 +1695,12 @@ pub(crate) fn find_nested_object<T>(
             // JSON parsed out of message text is model-authored: when it
             // fails to match, its keys are what the model chose to send.
             if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-                if let Some(result) = find_nested_object(&parsed, matcher, on_text_value) {
+                if let Some(result) = find_nested_object_with_order(
+                    &parsed,
+                    matcher,
+                    on_text_value,
+                    NestedObjectMatchOrder::MatcherFirst,
+                ) {
                     return Some(result);
                 }
                 on_text_value(&parsed);
@@ -1669,7 +1709,12 @@ pub(crate) fn find_nested_object<T>(
                 .into_iter()
                 .filter_map(|item| serde_json::from_str::<Value>(&item).ok())
             {
-                if let Some(result) = find_nested_object(&candidate, matcher, on_text_value) {
+                if let Some(result) = find_nested_object_with_order(
+                    &candidate,
+                    matcher,
+                    on_text_value,
+                    NestedObjectMatchOrder::MatcherFirst,
+                ) {
                     return Some(result);
                 }
                 on_text_value(&candidate);

@@ -1807,6 +1807,10 @@ export type CanonicalSignal = {
    * Signal identifier (e.g. `"needs-tests"`, `"missing-credentials"`).
    */
   readonly "id": string;
+  /**
+   * Optional schema required for an emitted payload.
+   */
+  readonly "schema"?: CanonicalSchemaForm | undefined;
 };
 
 /**
