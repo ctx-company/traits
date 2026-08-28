@@ -70,31 +70,31 @@ export default function () {
     projections: [{ source: operation.literal([]), destination: shared.data.nodeBatches }],
   });
 
-  shared.data.fileClosure.forEach("Describe each file", (file, loop) => {
-    loop.limit(64);
-    investigator.prompt("Describe the file", {
+  shared.data.symbolChunks.forEach("Describe each chunk", (chunk, loop) => {
+    loop.limit(96);
+    investigator.prompt("Describe the chunk", {
       input: input.prompt`
-                Describe exactly one closure file — ${file} — for the walkthrough of ${shared.data.topic}. Other files run in their own frames; touch only this one.
-                The deterministic symbol index is ${shared.data.symbolIndex}. Find THIS file's entry and emit one node for EVERY symbol listed for it — every single one, including test helpers and private items. For each: id "s-" plus the symbol name plus "-" plus its line (kebab-case); parent = this file's node id ("f-" plus the slugified path, same formula the skeleton used); kind exactly as the index says (function or type); symbol = the index entry's key copied VERBATIM (path:line:name) — coverage joins on this string, so any deviation counts as undescribed; refs = one span you verified by OPENING the file, from the definition line to its real end; summary one glanceable sentence; explanation the precise mechanics at leaf register per ${shared.resource.walkthroughStandards} — what it does, what it refuses, the edges it guards, naming real identifiers.
-                Return ONLY this file's new symbol nodes as the batch. An empty index entry for this file returns an empty batch.`,
+                Describe exactly one symbol chunk — ${chunk} — for the walkthrough of ${shared.data.topic}. The chunk names its file and lists the enumerated symbols you owe; other chunks run in their own frames.
+                OPEN the chunk's file and emit EXACTLY ONE node per listed symbol — the batch's nodes length must equal the chunk's symbols length; no symbol may be skipped, merged, or invented. For each: id "s-" plus the symbol name plus "-" plus its line (kebab-case); parent = the file's node id ("f-" plus the slugified path: lowercase, non-alphanumerics to "-", runs collapsed, ends trimmed); kind copied from the entry (function or type); symbol = the entry's key copied VERBATIM — coverage joins on this exact string; refs = one span from the definition line to its real end, read from the file; summary one glanceable sentence; explanation the precise mechanics at leaf register per ${shared.resource.walkthroughStandards} — one tight paragraph for small items, up to three for load-bearing ones.
+                Never emit null for any field; omit optional fields entirely when unused. Return only this chunk's nodes.`,
       output: shared.data.nodeBatches.with(operation.Append),
     });
   });
 
   flow.loop("Covering", (loop) => {
-    loop.maxIterations(4, { onExhausted: signal.Abort });
+    loop.maxIterations(8, { onExhausted: signal.Abort });
 
     shared.step.render.coverageReportStep("loop");
-    shared.step.render.coverageStatusStep("loop");
 
     investigator.prompt("Cover the gaps", {
       input: input.prompt`
                 The deterministic coverage report for the walkthrough of ${shared.data.topic} is ${shared.data.coverageReport}.
-                If it shows zero uncovered entries, zero unknown symbol keys, zero orphan parents, exactly one root, and no missing files: return an empty batch [] and nothing else.
-                Otherwise return one batch fixing EVERYTHING it names: a node per uncovered index entry (same rules as per-file description — verbatim symbol key, verified span, leaf register); corrected re-emissions for nodes with unknown symbol keys or orphaned parents (re-emitting an id replaces that node — keep its content, fix the broken field); if the report names missing files, they were misspelled in the closure — re-emit nothing for them, they fall out of scope by the survey's own correction.
-                Follow ${shared.resource.walkthroughStandards}.`,
+                If it shows zero uncovered entries, zero unknown symbol keys, and zero orphan parents with exactly one root: return an empty batch (nodes: []) and nothing else.
+                Otherwise return one batch making progress on what it names, AT MOST 40 nodes this round — the loop runs again for the rest. Priority order: first corrected re-emissions for nodes with unknown symbol keys or orphaned parents (re-emitting an id replaces that node — keep its content, fix the broken field, never drop a valid symbol key); then a node per uncovered entry, same rules as chunk description — verbatim symbol key, verified span, leaf register per ${shared.resource.walkthroughStandards}. Never emit null for any field.`,
       output: shared.data.nodeBatches.with(operation.Append),
     });
+
+    shared.step.render.coverageStatusStep("loop");
 
     loop.until(condition.equals(shared.data.coverageStatus, "complete"));
   });

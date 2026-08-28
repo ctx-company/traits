@@ -11,8 +11,8 @@
   },
   "port:coverage": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 181,
-    "end": 181
+    "start": 215,
+    "end": 215
   },
   "port:output-dir": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
@@ -21,8 +21,8 @@
   },
   "port:render-report": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 188,
-    "end": 188
+    "start": 222,
+    "end": 222
   },
   "port:topic": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
@@ -31,20 +31,20 @@
   },
   "port:walkthrough-path": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 167,
-    "end": 167
+    "start": 201,
+    "end": 201
   },
   "port:walkthrough-summary": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 174,
-    "end": 174
+    "start": 208,
+    "end": 208
   },
   "prompt:cover-the-gaps": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 91,
-    "end": 91
+    "start": 90,
+    "end": 90
   },
-  "prompt:describe-the-file": {
+  "prompt:describe-the-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
     "start": 76,
     "end": 76
@@ -119,6 +119,16 @@
     "start": 322,
     "end": 322
   },
+  "schema:symbol-chunk": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 146,
+    "end": 146
+  },
+  "schema:symbol-entry": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 128,
+    "end": 128
+  },
   "schema:walkthrough-node": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
     "start": 40,
@@ -126,53 +136,53 @@
   },
   "sequence:covering-body/cover-the-gaps": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 90,
-    "end": 90
+    "start": 89,
+    "end": 89
   },
   "sequence:covering-body/coverage-report-loop": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
-    "start": 22,
-    "end": 22
+    "start": 24,
+    "end": 24
   },
   "sequence:covering-body/coverage-status-loop": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
-    "start": 31,
-    "end": 31
+    "start": 33,
+    "end": 33
   },
   "sequence:ctx-branch-arm-s-14-reviewing-body-18-apply-review-fixes-then/fix-reviewed-nodes": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
     "start": 117,
     "end": 117
   },
-  "sequence:describe-each-file-body/describe-the-file": {
+  "sequence:describe-each-chunk-body/describe-the-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
     "start": 75,
     "end": 75
   },
   "sequence:procedure/coverage-status-final": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
-    "start": 31,
-    "end": 31
+    "start": 33,
+    "end": 33
   },
   "sequence:procedure/covering": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
     "start": 84,
     "end": 84
   },
-  "sequence:procedure/describe-each-file": {
+  "sequence:procedure/describe-each-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
     "start": 73,
     "end": 73
   },
   "sequence:procedure/enumerate-symbols": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
-    "start": 13,
-    "end": 13
+    "start": 15,
+    "end": 15
   },
   "sequence:procedure/render-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
-    "start": 44,
-    "end": 44
+    "start": 46,
+    "end": 46
   },
   "sequence:procedure/reviewing": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -221,15 +231,15 @@
   },
   "slot:coverage-report": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 133,
-    "end": 133
+    "start": 167,
+    "end": 167
   },
   "slot:coverage-status": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 138,
-    "end": 138
+    "start": 172,
+    "end": 172
   },
-  "slot:describe-each-file-item": {
+  "slot:describe-each-chunk-item": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
     "start": 73,
     "end": 73
@@ -246,8 +256,8 @@
   },
   "slot:html-path": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 148,
-    "end": 148
+    "start": 182,
+    "end": 182
   },
   "slot:node-batches": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
@@ -256,33 +266,33 @@
   },
   "slot:render-log": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 152,
-    "end": 152
+    "start": 186,
+    "end": 186
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 161,
-    "end": 161
+    "start": 195,
+    "end": 195
   },
   "slot:skeleton-nodes": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
     "start": 106,
     "end": 106
   },
-  "slot:symbol-index": {
+  "slot:symbol-chunks": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 128,
-    "end": 128
+    "start": 161,
+    "end": 161
   },
   "slot:topic-slug": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 143,
-    "end": 143
+    "start": 177,
+    "end": 177
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
-    "start": 156,
-    "end": 156
+    "start": 190,
+    "end": 190
   },
   "trait:walkthrough": {
     "file": "[eval1]",
