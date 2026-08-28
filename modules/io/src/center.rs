@@ -1775,6 +1775,12 @@ impl CenterModel {
         self.db
             .execute_batch("BEGIN")
             .map_err(|source| protocol_error(source.to_string()))?;
+        // Deltas are buffered rather than broadcast inline (`emit = false`
+        // below) and only published once this slice's `COMMIT` below has
+        // actually succeeded — a subscriber must never observe a row a later
+        // commit failure in the same slice could still roll back.
+        let mut pending_deltas: Vec<(Option<CenterPublicRow>, Option<CenterPublicRow>)> =
+            Vec::new();
         loop {
             if budget == 0 {
                 break;
@@ -1795,11 +1801,16 @@ impl CenterModel {
             match next {
                 Some((ledger, is_unscanned)) => {
                     let repo_paths = self.warm.as_ref().unwrap().repo_paths.clone();
+                    let before = self.rows.get(&ledger).map(public_row);
                     let refreshed = self
-                        .refresh_ledger_inner(paths, &ledger, true, repo_paths.as_ref(), None)
+                        .refresh_ledger_inner(paths, &ledger, false, repo_paths.as_ref(), None)
                         .is_ok();
                     if !refreshed {
                         self.uncertain = true;
+                    }
+                    let after = self.rows.get(&ledger).map(public_row);
+                    if before != after {
+                        pending_deltas.push((before, after));
                     }
                     if is_unscanned && refreshed && self.rows.contains_key(&ledger) {
                         self.warm.as_mut().unwrap().present.insert(ledger);
@@ -1839,6 +1850,9 @@ impl CenterModel {
         self.db
             .execute_batch("COMMIT")
             .map_err(|source| protocol_error(source.to_string()))?;
+        for (before, after) in pending_deltas {
+            self.emit_delta(before, after);
+        }
         let done = {
             let scan = self
                 .warm
@@ -1993,9 +2007,7 @@ impl CenterModel {
                         return Err(error);
                     }
                     if emit {
-                        self.broadcast(CenterDelta::Ended {
-                            row: Box::new(public_row(&previous)),
-                        });
+                        self.emit_delta(Some(public_row(&previous)), None);
                     }
                 }
                 return Ok(());
@@ -2109,9 +2121,18 @@ impl CenterModel {
             return Err(error);
         }
         let after = self.rows.get(ledger).map(public_row);
-        if !emit {
-            return Ok(());
+        if emit {
+            self.emit_delta(before, after);
         }
+        Ok(())
+    }
+
+    /// Publish the one delta a before/after row pair implies, or nothing if
+    /// unchanged. Shared by every single-ledger refresh path and by
+    /// `drain_warm_queue`, which defers this call until after the slice's
+    /// transaction commits so a subscriber never observes a row that a later
+    /// commit failure could still roll back.
+    fn emit_delta(&mut self, before: Option<CenterPublicRow>, after: Option<CenterPublicRow>) {
         match (before, after) {
             (None, Some(row)) => self.broadcast(CenterDelta::Appeared { row: Box::new(row) }),
             (Some(previous), Some(row)) if previous != row => {
@@ -2122,7 +2143,6 @@ impl CenterModel {
             }),
             _ => {}
         }
-        Ok(())
     }
 
     fn restore_verified_row(&mut self, ledger: &Utf8Path, previous: Option<CenterRow>) {
@@ -5897,6 +5917,52 @@ mod tests {
             }
             _ => panic!("expected appeared delta"),
         }
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn warm_scan_publishes_deltas_only_after_its_slice_commits() {
+        // `drain_warm_queue` buffers each ledger's before/after row and only
+        // calls `emit_delta` once the slice's `COMMIT` has actually
+        // succeeded (center.rs `drain_warm_queue`) — a subscriber must never
+        // observe a row a later commit failure in the same slice could
+        // still roll back. This drives the real accept-loop path
+        // (`begin_scan` + `warm_step`) rather than `refresh_ledger_inner`
+        // directly, so it exercises the buffering, not just the emission.
+        let root = scratch("warm-scan-buffered-emit");
+        let paths = paths(root.clone());
+        let _first = write_fixture_ledger(&root, "repo-a", "completed");
+        let _second = write_fixture_ledger(&root, "repo-b", "completed");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (outbound, receiver) = mpsc::sync_channel(8);
+        model.subscribers.insert(
+            1,
+            Subscriber {
+                repo_key: None,
+                outbound,
+                snapshot: None,
+                pending_deltas: VecDeque::new(),
+            },
+        );
+        model.begin_scan(&paths).expect("begin warm scan");
+        assert!(model.is_warming(), "a fresh scan starts warming");
+        // No delta may reach the subscriber before a slice large enough to
+        // reconcile every ledger and finalize the scan has actually run.
+        assert!(
+            receiver.try_recv().is_err(),
+            "enumeration alone must not publish anything"
+        );
+        while model.is_warming() {
+            model.warm_step(&paths, 8).expect("drain warm queue");
+        }
+        let mut appeared = 0;
+        while let Ok(Outbound::Delta(CenterDelta::Appeared { .. })) = receiver.try_recv() {
+            appeared += 1;
+        }
+        assert_eq!(
+            appeared, 2,
+            "both ledgers must publish exactly one Appeared each, after the scan finalizes"
+        );
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 

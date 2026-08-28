@@ -3351,12 +3351,11 @@ fn cold_start_binds_and_answers_a_partial_query_before_the_corpus_finishes_index
     // `Stats` is a bounded aggregate (unlike a non-subscription `List`, which
     // would serialize every row into one line and risk exceeding
     // `MAX_LINE_BYTES`), so it is the natural "how many rows are indexed so
-    // far" observation. A single client-side read timeout under heavy
-    // sibling-test CPU contention (e.g. inside `cargo test --workspace`) is
-    // retried rather than treated as a hard failure: the binding property is
-    // that the socket answers before the corpus finishes, not that every
-    // individual round trip lands inside `STREAM_TIMEOUT` under load this
-    // proof does not control.
+    // far" observation. Later completion polling below may retry under
+    // sibling-test contention, but the *first* query is the one goal 2 binds:
+    // "a connection refusal or client timeout is not [acceptable]", so it
+    // must be a single request that fails hard on a timeout rather than
+    // silently retrying past it.
     fn poll_stats_with_retry(deadline: Instant) -> ctx_traits_core::procedure::stats::StatsReport {
         loop {
             match ctx_traits_io::center::stats(None, None, None) {
@@ -3370,7 +3369,8 @@ fn cold_start_binds_and_answers_a_partial_query_before_the_corpus_finishes_index
     }
 
     let query_started = Instant::now();
-    let first_report = poll_stats_with_retry(query_started + Duration::from_secs(30));
+    let first_report = ctx_traits_io::center::stats(None, None, None)
+        .expect("the first cold-corpus query must be answered, not refused or timed out");
     eprintln!(
         "corpus proof: first query answered in {:?} with {}/{CORPUS_LEDGER_COUNT} rows indexed",
         query_started.elapsed(),
@@ -3410,5 +3410,123 @@ fn cold_start_binds_and_answers_a_partial_query_before_the_corpus_finishes_index
 
     child.0.kill().expect("stop corpus center");
     child.0.wait().expect("reap corpus center");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Same v1 schema shape as `center::tests::a_version_one_index_is_reprojected_by_the_current_center`,
+/// scaled up to a genuinely large `center_sessions` payload rather than one
+/// row — a small-payload `VACUUM` proves nothing about a real ~500MB index
+/// on disk, which is what goal 1's migration half exists to catch.
+fn build_v1_payload_bearing_index(index: &std::path::Path, ledgers: &[Utf8PathBuf]) -> u64 {
+    let db = rusqlite::Connection::open(index).expect("create v1 index");
+    db.execute_batch(
+        "CREATE TABLE center_meta (version INTEGER NOT NULL); \
+         CREATE TABLE center_rows (ledger TEXT PRIMARY KEY, repo_key TEXT NOT NULL, repo_path TEXT NOT NULL, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, summary TEXT NOT NULL); \
+         CREATE TABLE center_sessions (ledger TEXT PRIMARY KEY, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, session TEXT NOT NULL);",
+    )
+    .expect("create v1 tables");
+    // `CENTER_SCHEMA_VERSION` is a private center.rs constant; 1 is its only
+    // value that has ever shipped, so it is safe to hardcode from this
+    // external process-proof binary.
+    db.execute("INSERT INTO center_meta(version) VALUES (1)", [])
+        .expect("write v1 marker");
+    // Payload per row large enough that 2,500 rows clear 600MB — its content
+    // is irrelevant, since the migration drops this table outright rather
+    // than reading it; only its on-disk size before reclamation matters.
+    let payload = "x".repeat(CORPUS_LEDGER_FILLER_BYTES);
+    db.execute_batch("BEGIN").expect("begin v1 fixture insert");
+    for ledger in ledgers {
+        let metadata = std::fs::metadata(ledger.as_std_path()).expect("stat corpus ledger");
+        let secs = metadata
+            .modified()
+            .expect("ledger mtime")
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("mtime after epoch")
+            .as_secs() as i64;
+        let size = i64::try_from(metadata.len()).expect("ledger size fits sqlite");
+        let summary = serde_json::json!({
+            "session_id": format!("corpus-session-{ledger}", ledger = ledger.file_stem().expect("ledger stem")),
+            "run_id": "corpus-run",
+            "trait_id": "corpus-trait",
+            "status": "awaiting-agent-output",
+            "has_merge_frames": false,
+        })
+        .to_string();
+        db.execute(
+            "INSERT INTO center_rows(ledger, repo_key, repo_path, mtime_secs, mtime_nanos, size, summary) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+            rusqlite::params![ledger.as_str(), "corpus", "/corpus", secs, 0, summary],
+        )
+        .expect("write v1 cached row");
+        db.execute(
+            "INSERT INTO center_sessions(ledger, mtime_secs, mtime_nanos, size, session) VALUES (?1, ?2, 0, ?3, ?4)",
+            rusqlite::params![ledger.as_str(), secs, size, payload],
+        )
+        .expect("write v1 cached payload");
+    }
+    db.execute_batch("COMMIT")
+        .expect("commit v1 fixture insert");
+    drop(db);
+    std::fs::metadata(index)
+        .expect("stat v1 fixture index")
+        .len()
+}
+
+#[test]
+fn migrated_v1_index_over_the_corpus_is_reclaimed_to_the_same_physical_bound() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("corpus-migration");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    // Ledgers themselves stay small here — goal 1's migration half binds the
+    // pre-existing v1 INDEX's on-disk payload, not the ledger corpus size
+    // (already proved by the fresh-index sibling test above); the empty
+    // filler keeps fixture setup fast without weakening that bound.
+    let ledgers: Vec<Utf8PathBuf> = (0..CORPUS_LEDGER_COUNT)
+        .map(|index| write_corpus_ledger(&root, index, ""))
+        .collect();
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let v1_bytes = build_v1_payload_bearing_index(&index, &ledgers);
+    eprintln!("migration proof: v1 fixture index is {v1_bytes} bytes before takeover");
+    assert!(
+        v1_bytes >= 600_000_000,
+        "the v1 fixture index must itself total at least 600MB, got {v1_bytes} bytes"
+    );
+
+    // Generous idle so idle exit is never the thing under test.
+    let mut child = spawn_sentinel(&root, &socket, &index, "120000");
+    let _environment = CenterEnvironment::install(&root);
+    drop(await_socket(&socket));
+
+    let completion_deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        match ctx_traits_io::center::stats(None, None, None) {
+            Ok(report) if report.total_runs == CORPUS_LEDGER_COUNT as u64 => break,
+            Ok(report) => eprintln!(
+                "migration proof: {}/{CORPUS_LEDGER_COUNT} rows reprojected so far",
+                report.total_runs
+            ),
+            Err(error) => eprintln!("migration proof: retrying a stats query after {error}"),
+        }
+        assert!(
+            Instant::now() < completion_deadline,
+            "the migrated corpus did not finish reprojecting in time"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let physical_bytes = physical_index_bytes(&index);
+    eprintln!(
+        "migration proof: physical index size after takeover is {physical_bytes} bytes (was {v1_bytes})"
+    );
+    assert!(
+        physical_bytes <= 10_000_000,
+        "the migrated index must be reclaimed to the same metadata-only bound as a fresh build: {physical_bytes} bytes on disk"
+    );
+
+    child.0.kill().expect("stop migration center");
+    child.0.wait().expect("reap migration center");
     let _ = std::fs::remove_dir_all(&root);
 }
