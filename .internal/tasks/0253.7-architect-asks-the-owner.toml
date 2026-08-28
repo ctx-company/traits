@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0253.7"
+title = "Architect asks the owner: the plan-approval loop"
+status = "draft"
+raised = "2026-08-28"
+content = """
+Owner ruling 2026-08-28: an architect run does not finish by declaring
+its plan ready — it finishes when the OWNER accepts the plan. The run
+loops: rewrite, critic, then present the plan to the owner and wait.
+Corrections feed the next rewrite iteration; approval exits the loop and
+the run merges as usual. No merge-gate variant, no separate review
+command — acceptance happens inside the run, through the ask machinery
+this family builds (0253.4).
+
+This is the first real consumer of the summons primitives, and the
+owner's own use case: "I want to see the final plan and accept it
+myself or add corrections — in a loop, until approved."
+"""
+scope = """
+## Goals (binding)
+
+1. The architect trait's refinement loop gains an owner step after the
+   critic approves an iteration: the run presents a review card and
+   parks on an ask (0253.4 semantics) until the owner answers.
+2. The review card is a compact owner-facing digest, not the raw task
+   file: the binding goals verbatim; the suggested approach in a few
+   lines; what changed since the previous iteration the owner saw;
+   named risks and exclusions.
+3. An approval answer exits the loop; the run proceeds to its normal
+   commit/merge tail unchanged. A corrections answer (free text) is fed
+   into the next rewrite iteration as owner input with the same
+   authority as the critic verdict; the critic still reviews every
+   iteration before the owner sees it.
+4. The loop is unbounded by iteration count — it runs until approval —
+   and bounded only by the run budget. Waiting on the owner must not
+   burn frame or idle budget (ask-park semantics, 0253.4).
+5. While parked on the ask, the session is visible and answerable from
+   the dashboard's answer flow.
+
+## Out of scope
+
+- Changing critic behavior or plan doctrine (goals-bind /
+  approach-suggests stands as landed).
+- Any approval surface outside the ask machinery (no merge-park
+  acceptance, no side files).
+- Implement-trait asks (later family members own worker-side summons).
+
+## Notes for grounding
+
+- Depends on the ask/park machinery (0253.4) and the CDK reference and
+  factory groundwork (0253.2, 0253.3) as landed by the time this is
+  planned; ground against their actual shapes, not this draft's
+  assumptions.
+"""
+
+[relations]
+parent = "0253"
+depends-on = ["0253.4"]
