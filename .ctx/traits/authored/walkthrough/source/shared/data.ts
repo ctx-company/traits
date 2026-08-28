@@ -125,10 +125,44 @@ export const nodeBatches = slot({
   description:
     "Append-only batches of described nodes: one batch per for-each file frame, plus one batch per repair or review-fix round. Consumers flatten the batches' nodes in order and dedupe by id, last occurrence winning.",
 });
-export const symbolIndex = slot.text({
-  id: "symbol-index",
+export const symbolEntrySchema: SchemaHandle = schema.object(
+  "symbol-entry",
+  {
+    key: schema.field(schema.text(), {
+      description: "The coverage key path:line:name — copied VERBATIM onto the describing node's symbol field.",
+    }),
+    kind: schema.field(schema.enum(["function", "type"] as const), {
+      description: "The node kind the describing node must carry, exactly as enumerated.",
+    }),
+    "raw-kind": schema.field(schema.text(), {
+      description: "The source-language item kind (fn, struct, enum, trait, mod, impl, macro, class, ...): context, never copied.",
+    }),
+    name: schema.field(schema.text(), { description: "The symbol's identifier as written in the source." }),
+    line: schema.field(schema.text(), { description: "The 1-indexed definition line, as text." }),
+  },
+  { description: "One deterministically enumerated symbol a chunk frame owes a described node for." },
+);
+
+export const symbolChunkSchema: SchemaHandle = schema.object(
+  "symbol-chunk",
+  {
+    id: schema.field(schema.text(), { description: "Deterministic chunk id: c-<path-slug>-<ordinal>." }),
+    path: schema.field(schema.text(), { description: "The repo-relative file every symbol in this chunk lives in." }),
+    part: schema.field(schema.text(), {
+      description: 'Which slice of the file this chunk is, as "i/n" — a file with many symbols yields several chunks.',
+    }),
+    symbols: schema.field(schema.list(symbolEntrySchema), {
+      description: "At most ~25 enumerated symbols; the describing frame owes exactly one node per entry.",
+    }),
+  },
+  { description: "One bounded unit of exhaustive description work: a file slice with its enumerated symbols inline." },
+);
+
+export const symbolChunks = slot({
+  id: "symbol-chunks",
+  schema: schema.list(symbolChunkSchema),
   description:
-    "Deterministic JSON symbol index over the file closure (from symbols.py enumerate): every fn/struct/enum/trait/mod/type/class/interface definition with its coverage key path:line:name. Ground truth for the coverage gate — never edited by a model.",
+    "Deterministic chunked symbol index over the file closure (from symbols.py enumerate, via typed command output): every fn/struct/enum/trait/mod definition, sliced into bounded chunks the describe loop iterates. Ground truth for the coverage gate — never edited by a model.",
 });
 export const coverageReport = slot.text({
   id: "coverage-report",

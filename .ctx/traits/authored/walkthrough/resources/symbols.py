@@ -3,15 +3,18 @@
 
 Modes:
   enumerate <closure-json-or-path>
-      Print the JSON symbol index over the closure's files: every
+      Print the TYPED chunk list over the closure's files: every
       fn/struct/enum/trait/mod/impl/type/class/interface definition with its
-      coverage key "path:line:name". Ground truth for exhaustiveness.
-  coverage <index> <skeleton-nodes> <node-batches>
-      Print the JSON coverage report: uncovered index entries, unknown
-      symbol keys, orphaned parents, roots, missing files, counts.
-  status <index> <skeleton-nodes> <node-batches>
-      Print exactly "complete" when every index key is described and the
-      tree is sound, else "incomplete:<n>".
+      coverage key "path:line:name", sliced into chunks of at most 25
+      symbols (a chunk is one bounded describe frame's work). A closure
+      path that does not exist fails loudly — closure entries are verified
+      claims. Ground truth for exhaustiveness.
+  coverage <chunks> <skeleton-nodes> <node-batches>
+      Print the JSON coverage report: uncovered entries, unknown symbol
+      keys, orphaned parents, roots, counts.
+  status <chunks> <skeleton-nodes> <node-batches>
+      Print exactly "complete" when every enumerated key is described and
+      the tree is sound, else "incomplete:<n>".
 
 Every payload argv element is JSON text (the runtime substitutes typed slot
 values) or, as a hedge, a path to a JSON file. Same input, same output —
@@ -113,6 +116,16 @@ def file_symbols(path: str):
     return symbols
 
 
+CHUNK_SIZE = 25
+
+
+def slugify(path: str) -> str:
+    out = "".join(c if c.isalnum() else "-" for c in path.lower())
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out.strip("-")
+
+
 def enumerate_mode(closure_arg: str) -> None:
     closure = load_json(closure_arg, "closure")
     if not isinstance(closure, list):
@@ -128,8 +141,33 @@ def enumerate_mode(closure_arg: str) -> None:
             missing.append(path)
         else:
             files.append({"path": path, "symbols": symbols})
-    total = sum(len(f["symbols"]) for f in files)
-    print(json.dumps({"files": files, "missing": missing, "total": total}, ensure_ascii=False))
+    if missing:
+        fail(
+            "closure names files that do not exist (closure entries are verified claims): " + ", ".join(missing)
+        )
+    chunks = []
+    for f in files:
+        symbols = f["symbols"]
+        parts = [symbols[i : i + CHUNK_SIZE] for i in range(0, len(symbols), CHUNK_SIZE)] or []
+        for i, part in enumerate(parts, 1):
+            chunks.append(
+                {
+                    "id": f"c-{slugify(f['path'])}-{i}",
+                    "path": f["path"],
+                    "part": f"{i}/{len(parts)}",
+                    "symbols": [
+                        {
+                            "key": s["key"],
+                            "kind": s["kind"],
+                            "raw-kind": s["raw-kind"],
+                            "name": s["name"],
+                            "line": str(s["line"]),
+                        }
+                        for s in part
+                    ],
+                }
+            )
+    print(json.dumps(chunks, ensure_ascii=False))
 
 
 def merged_nodes(skeleton_arg: str, batches_arg: str):
@@ -158,12 +196,14 @@ def merged_nodes(skeleton_arg: str, batches_arg: str):
     return [by_id[nid] for nid in order]
 
 
-def analyze(index_arg: str, skeleton_arg: str, batches_arg: str):
-    index = load_json(index_arg, "symbol-index")
+def analyze(chunks_arg: str, skeleton_arg: str, batches_arg: str):
+    chunks = load_json(chunks_arg, "symbol-chunks")
+    if not isinstance(chunks, list):
+        fail("symbol-chunks must be a JSON list")
     nodes = merged_nodes(skeleton_arg, batches_arg)
     index_entries = []
-    for f in index.get("files", []):
-        index_entries.extend(f.get("symbols", []))
+    for c in chunks:
+        index_entries.extend(c.get("symbols", []))
     index_keys = {e["key"] for e in index_entries}
     covered, unknown = set(), []
     for n in nodes:
@@ -184,7 +224,6 @@ def analyze(index_arg: str, skeleton_arg: str, batches_arg: str):
         "unknown-symbol-keys": unknown[:100],
         "orphan-parents": orphans,
         "roots": roots,
-        "missing-files": index.get("missing", []),
         "described": len(covered),
         "indexed": len(index_keys),
         "nodes": len(nodes),
@@ -202,7 +241,7 @@ def main() -> None:
         return
     if mode in ("coverage", "status"):
         if len(sys.argv) != 5:
-            fail(f"usage: symbols.py {mode} <index> <skeleton> <batches>")
+            fail(f"usage: symbols.py {mode} <chunks> <skeleton> <batches>")
         report = analyze(sys.argv[2], sys.argv[3], sys.argv[4])
         if mode == "coverage":
             print(json.dumps(report, ensure_ascii=False))
@@ -211,7 +250,6 @@ def main() -> None:
                 report["uncovered-count"]
                 + len(report["unknown-symbol-keys"])
                 + len(report["orphan-parents"])
-                + len(report["missing-files"])
                 + (0 if len(report["roots"]) == 1 else 1)
             )
             print("complete" if problems == 0 else f"incomplete:{problems}")
