@@ -1,0 +1,38 @@
+schema-version = "0.2"
+key = "0263"
+title = "Fixture centers die with their tests"
+status = "draft"
+raised = "2026-08-28"
+content = """
+Isolated fixture centers (0252.8's tuple isolation) spawn correctly but
+never exit: 586 leaked `__ctx-center` daemons and hundreds of
+`/tmp/ctx-501-0.4.0-<hash>.{sock,log,spawn.lock}` triples accumulated
+across two days of proof runs, surviving their tests, their sessions,
+and their worktrees. A leaked daemon population also amplifies index
+churn (every kill mid-write fattens the next rebuild's journal —
+2026-08-28's 336MB journal).
+
+Owner contract: a test-spawned center's lifetime is its test's
+lifetime. Nothing test-spawned survives the proof battery.
+"""
+scope = """
+## Goals (binding)
+
+1. A fixture center exits when its spawning context ends: parent-death
+   detection, an idle timeout measured in seconds, or explicit reaping
+   by the test harness — chosen by grounding; any mechanism satisfying
+   the proof below is acceptable.
+2. Fixture center runtime files (socket/log/spawn.lock triples) are
+   removed on that exit.
+3. Proof: run the full PTY/teardown proof battery, then assert zero
+   surviving `__ctx-center` processes and zero new `/tmp` triples —
+   an executable check, not an inspection.
+
+## Out of scope
+
+- Production center lifecycle (0262 owns the production daemon).
+- Sweeping existing debris (one-time manual op, already performed).
+"""
+
+[relations]
+depends-on = ["0252.8"]

@@ -1,0 +1,77 @@
+schema-version = "0.2"
+key = "0262"
+title = "The center is a daemon in the middle"
+status = "draft"
+raised = "2026-08-28"
+content = """
+The center's contract, in the owner's words: one daemon in the middle,
+decoupling any number of dashboards from any number of orchestrators.
+2026-08-28 proved the implementation does not hold that contract. All
+evidence below was measured live on the owner's machine.
+
+1. The index is a copy, not an index. `center_sessions.session TEXT`
+   (modules/io/src/center.rs:1432) stores every session ledger's full
+   content. Over ~2,430 ledgers / 617MB of history the index reached
+   ~500MB and a cold rebuild ran 40+ minutes at 95% CPU without
+   binding. After archiving history to a 3MB corpus the same code bound
+   in five seconds — the column is the entire cost.
+2. Rebuild-before-serve meets a 10s client window. The daemon binds its
+   socket only after the full index build; every client (dashboard,
+   `ctx traits merge`) waits 10 seconds and reports "center
+   unavailable". With any real history, the center is structurally
+   unable to cold-start as far as clients can tell.
+3. Busy is misdiagnosed as corrupt. A second center opening the locked
+   database reports "center index ... is invalid: initialize schema:
+   database is locked; remove ... to rebuild" — advising deletion of a
+   healthy index mid-rebuild.
+4. Socket ownership is a free-for-all. Test-spawned and bare-spawned
+   centers claim or shadow the production socket (586 leaked daemons
+   observed in one morning; 16 fresh squatters within minutes while a
+   pre-0252.8 worktree ran gates). The spawn-lock guards one spawn
+   path, not the socket.
+5. Liveness dies with the center instance. A drive registers with the
+   center it found at start and never re-registers; after any center
+   restart a running session (driver-lock held, ledger heartbeating)
+   is not shown as live. Observed with session 7f20dbc6 (0253.1):
+   indexed correctly, invisible under "live".
+"""
+scope = """
+## Goals (binding)
+
+1. Metadata-only index: the index holds session id, repo key/path, task
+   key, status, outcome, ledger path, mtimes, and the projected summary
+   row — never ledger content. Detail queries read the ledger file on
+   demand. Bounds, measured in proofs: index ≤ 10MB over a
+   600MB/2,500-ledger corpus fixture; cold start to bound socket ≤ 1s
+   on that corpus.
+2. Bind before build: the socket accepts connections before indexing
+   completes; queries during build serve what is indexed so far or a
+   clearly-marked warming response — never a connection refusal.
+3. Busy is busy: opening a locked index waits/retries or exits stating
+   another center is starting; the corruption message and its deletion
+   advice appear only on verified corruption.
+4. Exclusive ownership: exactly one center serves a given socket path;
+   a second starter (any spawn path, including bare `__ctx-center`)
+   detects the live owner and exits cleanly or defers. Test/fixture
+   centers on isolated tuples are unaffected.
+5. Restart-proof liveness: a session with a held driver-lock and a
+   recently-written ledger is classified live by any center instance,
+   registration or not — or drives re-register on reconnect; either
+   mechanism satisfies the goal, chosen by grounding.
+
+## Out of scope
+
+- Dashboard UI changes beyond bucket classification correctness.
+- A disk-fallback resolution path for `ctx traits merge` (with a ≤1s
+  cold start the center dependency stands; a second path is
+  duplication).
+- Archived-history browsing (runs-archive/ restore stays a manual op).
+
+## Evidence pointers
+
+- Schema: modules/io/src/center.rs:1432 (center_sessions.session).
+- Introduced via 4319940b and db8f8958 (0243.4 hand-land).
+- Cold-start measurements and squatter counts: owner session
+  2026-08-28 (240MB→323MB at ~6-8MB/min, 95% CPU; 744MB archive →
+  5s bind; 586 and 16-in-minutes leaked daemons).
+"""
