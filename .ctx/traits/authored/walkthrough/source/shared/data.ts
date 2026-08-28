@@ -129,16 +129,12 @@ export const symbolEntrySchema: SchemaHandle = schema.object(
   "symbol-entry",
   {
     key: schema.field(schema.text(), {
-      description: "The coverage key path:line:name — copied VERBATIM onto the describing node's symbol field.",
+      description:
+        "The coverage key path:line:name — copied VERBATIM onto the describing node's symbol field. The name and 1-indexed definition line are read out of this key; they are not repeated as separate fields (the enumeration must fit one command capture).",
     }),
     kind: schema.field(schema.enum(["function", "type"] as const), {
       description: "The node kind the describing node must carry, exactly as enumerated.",
     }),
-    "raw-kind": schema.field(schema.text(), {
-      description: "The source-language item kind (fn, struct, enum, trait, mod, impl, macro, class, ...): context, never copied.",
-    }),
-    name: schema.field(schema.text(), { description: "The symbol's identifier as written in the source." }),
-    line: schema.field(schema.text(), { description: "The 1-indexed definition line, as text." }),
   },
   { description: "One deterministically enumerated symbol a chunk frame owes a described node for." },
 );

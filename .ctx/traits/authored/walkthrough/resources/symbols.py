@@ -155,19 +155,16 @@ def enumerate_mode(closure_arg: str) -> None:
                     "id": f"c-{slugify(f['path'])}-{i}",
                     "path": f["path"],
                     "part": f"{i}/{len(parts)}",
-                    "symbols": [
-                        {
-                            "key": s["key"],
-                            "kind": s["kind"],
-                            "raw-kind": s["raw-kind"],
-                            "name": s["name"],
-                            "line": str(s["line"]),
-                        }
-                        for s in part
-                    ],
+                    "symbols": [{"key": s["key"], "kind": s["kind"]} for s in part],
                 }
             )
-    print(json.dumps(chunks, ensure_ascii=False))
+    out = json.dumps(chunks, ensure_ascii=False, separators=(",", ":"))
+    if len(out.encode("utf-8")) > 300_000:
+        fail(
+            f"chunk list is {len(out.encode('utf-8'))} bytes — over the command-capture safety margin; "
+            "the closure is too wide for one walkthrough. Narrow the topic or split it, then rerun."
+        )
+    print(out)
 
 
 def merged_nodes(skeleton_arg: str, batches_arg: str):
@@ -244,7 +241,7 @@ def main() -> None:
             fail(f"usage: symbols.py {mode} <chunks> <skeleton> <batches>")
         report = analyze(sys.argv[2], sys.argv[3], sys.argv[4])
         if mode == "coverage":
-            print(json.dumps(report, ensure_ascii=False))
+            print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         else:
             problems = (
                 report["uncovered-count"]
