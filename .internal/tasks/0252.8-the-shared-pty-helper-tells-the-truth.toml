@@ -3,7 +3,7 @@ key = "0252.8"
 title = "The shared PTY helper tells the truth"
 status = "ready"
 raised = "2026-08-27"
-content = """
+content = '''
 0252.4's 12-hour run died with four mandatory proofs permanently red, and
 all four traced to the shared PTY test helper rather than product code —
 the run's reviewer wrote the exact defect list (session 28f2ba9f22, final
@@ -73,7 +73,7 @@ Defects 1 and 3 are confirmed verbatim in the code:
   deleted for them — they stay forbidden. The current key API is already
   `steps: &[(&str, &str)]`, and
   `ctrl_c_during_a_live_run_restores_the_screen_before_the_kill_note`
-  already transmits ETX through it (`"\\u{3}"`, one byte 0x03), so no
+  already transmits ETX through it (`"\u{3}"`, one byte 0x03), so no
   raw-key variant is needed.
 
 ## Correction 1 — `in-progress {role}@{harness}` is NOT a post-spawn marker
@@ -177,8 +177,8 @@ Dashboard specifics: group counts and session rows come from the same
 group of one is evidence that a live session row exists. An initial
 `live (0)` paint is legitimate — it precedes Center's discovery of the run
 — and must never be asserted against.
-"""
-scope = """
+'''
+scope = '''
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -213,12 +213,11 @@ These bound the outcome regardless of the route taken.
   between adjacent characters (content Correction 5), in-flight and
   post-hoc, from one shared authority so the marker text is declared once.
 - `PtyKey` and `run_pty_raw_keys_after_markers` stay absent; ETX stays one
-  byte 0x03 spelled in Rust as `"\\u{3}"`, never a four-character raw
+  byte 0x03 spelled in Rust as `"\u{3}"`, never a four-character raw
   string.
 - The three public helper signatures keep their names, parameter order and
   return types — they have consumers outside this task. No public symbol
   is removed.
-- No product-code change (see "Out of scope").
 
 ## Suggested approach — guidance, not a boundary
 
@@ -349,7 +348,7 @@ constants, `ExitFixture`'s fields and the trust/activate calls stay.
   bounded marker wait. The suggested marker is the painted live group with
   one row, compiled through the escape-tolerant pattern function, plus the
   matching post-hoc assertion through the tolerant predicate — one literal
-  constant feeding both. Keep `kkkkkkkkj\\r`: it still clamps to the top
+  constant feeding both. Keep `kkkkkkkkj\r`: it still clamps to the top
   live-group header, moves to the first session and attaches. Do NOT
   assert the absence of `live (0)` (content Correction 5), and do not
   present this swap as evidence about the Center tuple — both sides of this
@@ -388,8 +387,8 @@ constants, `ExitFixture`'s fields and the trust/activate calls stay.
   `ctx-traits-cli` integration test that already exercises it.
 - Adding a dependency to `modules/cli/tests/support/Cargo.toml`.
 - Reading `/dev/tty` for readiness in any form. It is dead and stays absent.
-"""
-validation = """
+'''
+validation = '''
 ## Owner note (2026-08-28, verified against session ab3b64e4's worktree)
 
 A run of this task observed `proof_output_style` failing its sequential
@@ -425,7 +424,7 @@ baseline defect and not an owner item.
    none, which is the change most likely to move unrelated output:
    `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown`
 5. The forbidden artifacts stay absent and readiness is not a fixed sleep:
-   `! rg -n 'PtyKey|run_pty_raw_keys_after_markers' modules && ! rg -n '/dev/tty' modules/cli/tests && ! rg -n 'sleep\\(Duration::from_secs' modules/cli/tests/proof_run_view_exit_teardown.rs`
+   `! rg -n 'PtyKey|run_pty_raw_keys_after_markers' modules && ! rg -n '/dev/tty' modules/cli/tests && ! rg -n 'sleep\(Duration::from_secs' modules/cli/tests/proof_run_view_exit_teardown.rs`
    (The last predicate targets the whole-second readiness sleep;
    `ledger_session_id`'s bounded `from_millis(100)` ledger poll survives.
    Whether the deadline is genuinely enforced is criteria 1 and 3's job —
@@ -474,7 +473,7 @@ condition, not a judgement call.
 - Test-helper metadata is out of band for every later PTY proof. A finding
   about helper bytes in an asserted stream is a defect in this task, not an
   acceptable filter in the caller.
-"""
+'''
 
 [relations]
 parent = "0252"
@@ -482,18 +481,18 @@ parent = "0252"
 [[checks]]
 name = "PTY teardown proofs pass with the truthful helper"
 command = "cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
-expect = "test result: ok\\. ([6-9]|[1-9][0-9]+) passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. ([6-9]|[1-9][0-9]+) passed'
 
 [[checks]]
 name = "the other shared-PTY-helper callers stay green under the converged environment"
 command = "cargo test -p ctx-traits-cli --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "no raw-key artifacts, no /dev/tty readiness, no fixed readiness sleep"
-command = "! rg -n 'PtyKey|run_pty_raw_keys_after_markers' modules && ! rg -n '/dev/tty' modules/cli/tests && ! rg -n 'sleep\\(Duration::from_secs' modules/cli/tests/proof_run_view_exit_teardown.rs && echo pty-helper-clean"
+command = '''! rg -n 'PtyKey|run_pty_raw_keys_after_markers' modules && ! rg -n '/dev/tty' modules/cli/tests && ! rg -n 'sleep\(Duration::from_secs' modules/cli/tests/proof_run_view_exit_teardown.rs && echo pty-helper-clean'''
 expect = "pty-helper-clean"
 
 [[checks]]

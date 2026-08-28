@@ -68,6 +68,47 @@ pub fn strip_escapes(raw: &str) -> String {
     text
 }
 
+/// Build an Expect ERE that permits terminal escape sequences between every
+/// painted character, without accepting a different printable payload.
+pub fn painted_pattern(literal: &str) -> String {
+    const ESCAPE_RUN: &str = r"(\x1b\[[0-9;?]*[@-~])*";
+    let mut pattern = String::new();
+    for (index, character) in literal.chars().enumerate() {
+        if index > 0 {
+            pattern.push_str(ESCAPE_RUN);
+        }
+        match character {
+            // Differential terminal renders may leave a blank cell untouched
+            // while moving the cursor across it, so painted whitespace need
+            // not be emitted as a byte in the PTY stream.
+            character if character.is_whitespace() => {
+                pattern.push_str(r"(?:[[:space:]]|\x1b\[[0-9;?]*[@-~])*")
+            }
+            '{' => pattern.push_str(r"\173"),
+            '}' => pattern.push_str(r"\175"),
+            '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '|' => {
+                pattern.push('\\');
+                pattern.push(character);
+            }
+            _ => pattern.push(character),
+        }
+    }
+    pattern
+}
+
+/// Check the printable form of a PTY stream using the same literal supplied
+/// to [`painted_pattern`].
+pub fn painted_text_present(raw: &str, literal: &str) -> bool {
+    let text = strip_escapes(raw);
+    text.contains(literal)
+        || text.contains(
+            &literal
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>(),
+        )
+}
+
 pub fn ctx_bin() -> PathBuf {
     PathBuf::from(
         std::env::var("CARGO_BIN_EXE_ctx")
@@ -610,6 +651,121 @@ pub fn pin_volatile_ledger_fields(text: &str) -> String {
     pinned
 }
 
+const READY_BUDGET_MS: i64 = 30_000;
+const CHILD_EXIT_GRACE_SECS: i64 = 60;
+const PTY_TIMEOUT: &str = "__PTY_TIMEOUT__";
+const PTY_EOF_BEFORE: &str = "__PTY_EOF_BEFORE__";
+const PTY_CHILD_HANG: &str = "__PTY_CHILD_HANG__";
+const CHILD_EXIT: &str = "__CHILD_EXIT__";
+
+fn pty_prelude() -> String {
+    format!(
+        r#"
+                set child_status {{}}
+                set deadline [expr {{[clock milliseconds] + {READY_BUDGET_MS}}}]
+                proc remaining {{what}} {{
+                    set left [expr {{($::deadline - [clock milliseconds] + 999) / 1000}}]
+                    if {{$left <= 0}} {{ puts stderr "__PTY_TIMEOUT__${{what}}__"; exit 2 }}
+                    return $left
+                }}
+        "#
+    )
+}
+
+fn marker_wait(pattern: &str, action: &str) -> String {
+    format!(
+        r#"
+                set marker {{{pattern}}}
+                set timeout [remaining $marker]
+                expect {{
+                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue -continue_timer }}
+                    -re $marker {{ {action} }}
+                    timeout {{ puts stderr "__PTY_TIMEOUT__${{marker}}__"; exit 2 }}
+                    eof {{ puts stderr "__PTY_EOF_BEFORE__${{marker}}__"; exit 2 }}
+                }}
+        "#
+    )
+}
+
+fn child_lifetime_wait(resignal: Option<(&str, &str, usize)>) -> String {
+    let resignal_arm = resignal.map_or_else(String::new, |(pattern, signal, repeat)| {
+        format!(
+            r#"
+                    -re {{{pattern}}} {{ for {{set i 0}} {{$i < {repeat}}} {{incr i}} {{ exec kill -{signal} [exp_pid] }}; exp_continue -continue_timer }}
+            "#
+        )
+    });
+    format!(
+        r#"
+                set timeout {CHILD_EXIT_GRACE_SECS}
+                expect {{
+                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue -continue_timer }}
+                    {resignal_arm}
+                    timeout {{ puts stderr "__PTY_CHILD_HANG__"; exit 2 }}
+                    eof {{ set child_status [wait] }}
+                }}
+                puts stderr "__CHILD_EXIT__[lindex $child_status 3]__"
+        "#
+    )
+}
+
+fn pty_record(stderr: &str, prefix: &str) -> Option<String> {
+    stderr.lines().find_map(|line| {
+        if line == prefix {
+            Some(String::new())
+        } else {
+            line.strip_prefix(prefix)
+                .and_then(|payload| payload.strip_suffix("__"))
+                .map(str::to_owned)
+        }
+    })
+}
+
+fn run_expect(script: &str, binary: &Path, cwd: &Path, home: &Path) -> (i32, String) {
+    let output = controlled_command(Path::new("expect"), &["-c", script], cwd, home)
+        // `expect` propagates its environment; TUI capability rejects any NO_COLOR value.
+        .env_remove("NO_COLOR")
+        .env("TERM", "xterm-256color")
+        .env("CTX_STARTUP_BIN", binary)
+        .output()
+        .unwrap_or_else(|error| panic!("cannot execute expect: {error}"));
+    let stdout = String::from_utf8(output.stdout)
+        .unwrap_or_else(|error| panic!("PTY stdout was not valid UTF-8: {error}"));
+    let stderr = String::from_utf8(output.stderr)
+        .unwrap_or_else(|error| panic!("PTY stderr was not valid UTF-8: {error}"));
+    let diagnostic = format!(
+        "stdout:\n{}\nstderr:\n{}",
+        strip_escapes(&stdout),
+        strip_escapes(&stderr)
+    );
+
+    if let Some(marker) = pty_record(&stderr, PTY_TIMEOUT) {
+        panic!(
+            "PTY readiness marker {marker:?} did not appear within {READY_BUDGET_MS}ms\n{diagnostic}"
+        );
+    }
+    if let Some(marker) = pty_record(&stderr, PTY_EOF_BEFORE) {
+        panic!("PTY child exited before readiness marker {marker:?}\n{diagnostic}");
+    }
+    if pty_record(&stderr, PTY_CHILD_HANG).is_some() {
+        panic!(
+            "PTY child did not exit within {CHILD_EXIT_GRACE_SECS}s after the last key/signal\n{diagnostic}"
+        );
+    }
+    assert!(
+        output.status.success(),
+        "PTY driver failed with {:?}\n{diagnostic}",
+        output.status.code()
+    );
+    let exit_code = pty_record(&stderr, CHILD_EXIT)
+        .unwrap_or_else(|| panic!("expect never reported the child's exit code\n{diagnostic}"))
+        .parse()
+        .unwrap_or_else(|error| {
+            panic!("invalid child exit code in Expect stderr: {error}\n{diagnostic}")
+        });
+    (exit_code, stdout)
+}
+
 /// Runs `ctx <args>` under `expect` on a sized PTY, answering every
 /// crossterm `ESC[6n` cursor-position query with a synthetic reply so the
 /// surface that still issues it never stalls, then reports the child's own
@@ -627,40 +783,16 @@ pub fn run_pty_with_cursor_reply(
     marker: &str,
     termios_file: &str,
 ) -> (i32, String) {
-    let output = Command::new("expect")
-        .args([
-            "-c",
-            &format!(
-                r#"
-                set timeout 30
-                set child_status {{}}
+    let script = format!(
+        r#"
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_BIN) {args}; status=\$?; stty -a > {termios_file}; printf '{marker}\n'; exit \$status"
-                expect {{
-                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue }}
-                    eof {{ set child_status [wait] }}
-                }}
-                puts "__CHILD_EXIT__[lindex $child_status 3]__"
-            "#
-            ),
-        ])
-        .current_dir(cwd)
-        .env_clear()
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", home)
-        .env("XDG_CACHE_HOME", home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", binary)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "PTY driver failed: {output:?}");
-    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-    let exit_tag_start = raw
-        .find("__CHILD_EXIT__")
-        .unwrap_or_else(|| panic!("expect never reported the child's exit code: {raw:?}"));
-    let after_tag = &raw[exit_tag_start + "__CHILD_EXIT__".len()..];
-    let exit_code: i32 = after_tag[..after_tag.find("__").unwrap()].parse().unwrap();
-    (exit_code, raw)
+                {}
+                {}
+        "#,
+        pty_prelude(),
+        child_lifetime_wait(None)
+    );
+    run_expect(&script, binary, cwd, home)
 }
 
 /// Runs a PTY child directly, waits for a painted marker, then signals that
@@ -674,42 +806,20 @@ pub fn run_pty_signal_after_marker(
     signal: &str,
     repeat: usize,
 ) -> (i32, String) {
-    let output = Command::new("expect")
-        .args([
-            "-c",
-            &format!(
-                r#"
-                set timeout 30
-                set child_status {{}}
+    let signal_child =
+        format!("for {{set i 0}} {{$i < {repeat}}} {{incr i}} {{ exec kill -{signal} [exp_pid] }}");
+    let script = format!(
+        r#"
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) {args}"
-                expect {{
-                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue }}
-                    -re {{{ready_pattern}}} {{ for {{set i 0}} {{$i < {repeat}}} {{incr i}} {{ exec kill -{signal} [exp_pid] }}; exp_continue }}
-                    timeout {{ puts "__PTY_TIMEOUT__{ready_pattern}__"; exit 2 }}
-                    eof {{ set child_status [wait] }}
-                }}
-                puts "__CHILD_EXIT__[lindex $child_status 3]__"
-            "#
-            ),
-        ])
-        .current_dir(cwd)
-        .env_clear()
-        .env("HOME", home)
-        .env("XDG_CONFIG_HOME", home)
-        .env("XDG_CACHE_HOME", home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", binary)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "PTY driver failed: {output:?}");
-    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-    let exit_tag_start = raw
-        .find("__CHILD_EXIT__")
-        .unwrap_or_else(|| panic!("expect never reported the child's exit code: {raw:?}"));
-    let after_tag = &raw[exit_tag_start + "__CHILD_EXIT__".len()..];
-    let exit_code: i32 = after_tag[..after_tag.find("__").unwrap()].parse().unwrap();
-    (exit_code, raw)
+                {}
+                {}
+                {}
+        "#,
+        pty_prelude(),
+        marker_wait(ready_pattern, &signal_child),
+        child_lifetime_wait(Some((ready_pattern, signal, repeat)))
+    );
+    run_expect(&script, binary, cwd, home)
 }
 
 /// Runs a PTY child directly and sends each key only after its ready marker.
@@ -722,44 +832,19 @@ pub fn run_pty_keys_after_markers(
 ) -> (i32, String) {
     let mut waits = String::new();
     for (pattern, key) in steps {
-        waits.push_str(&format!(
-            r#"
-                expect {{
-                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue }}
-                    -re {{{pattern}}} {{ send -- {{{key}}} }}
-                    timeout {{ puts "__PTY_TIMEOUT__{pattern}__"; exit 2 }}
-                    eof {{ puts "__PTY_EOF_BEFORE__{pattern}__"; exit 2 }}
-                }}
-            "#
-        ));
+        waits.push_str(&marker_wait(pattern, &format!("send -- {{{key}}}")));
     }
     let script = format!(
         r#"
-                set timeout 30
-                set child_status {{}}
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) {args}"
+                {}
                 {waits}
-                expect {{
-                    -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue }}
-                    timeout {{ puts "__PTY_TIMEOUT__eof__"; exit 2 }}
-                    eof {{ set child_status [wait] }}
-                }}
-                puts "__CHILD_EXIT__[lindex $child_status 3]__"
-            "#
+                {}
+            "#,
+        pty_prelude(),
+        child_lifetime_wait(None)
     );
-    let output = controlled_command(Path::new("expect"), &["-c", script.as_str()], cwd, home)
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", binary)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "PTY driver failed: {output:?}");
-    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-    let exit_tag_start = raw
-        .find("__CHILD_EXIT__")
-        .unwrap_or_else(|| panic!("expect never reported the child's exit code: {raw:?}"));
-    let after_tag = &raw[exit_tag_start + "__CHILD_EXIT__".len()..];
-    let exit_code: i32 = after_tag[..after_tag.find("__").unwrap()].parse().unwrap();
-    (exit_code, raw)
+    run_expect(&script, binary, cwd, home)
 }
 
 /// Slicing after the restore paired with the final alternate-screen entry
