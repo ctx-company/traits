@@ -1,9 +1,9 @@
 schema-version = "0.2"
 key = "0262"
 title = "The center is a daemon in the middle"
-status = "draft"
+status = "ready"
 raised = "2026-08-28"
-content = """
+content = '''
 The center's contract, in the owner's words: one daemon in the middle,
 decoupling any number of dashboards from any number of orchestrators.
 2026-08-28 proved the implementation does not hold that contract. All
@@ -34,44 +34,573 @@ evidence below was measured live on the owner's machine.
    restart a running session (driver-lock held, ledger heartbeating)
    is not shown as live. Observed with session 7f20dbc6 (0253.1):
    indexed correctly, invisible under "live".
-"""
-scope = """
-## Goals (binding)
 
-1. Metadata-only index: the index holds session id, repo key/path, task
-   key, status, outcome, ledger path, mtimes, and the projected summary
-   row — never ledger content. Detail queries read the ledger file on
-   demand. Bounds, measured in proofs: index ≤ 10MB over a
-   600MB/2,500-ledger corpus fixture; cold start to bound socket ≤ 1s
-   on that corpus.
-2. Bind before build: the socket accepts connections before indexing
-   completes; queries during build serve what is indexed so far or a
-   clearly-marked warming response — never a connection refusal.
-3. Busy is busy: opening a locked index waits/retries or exits stating
-   another center is starting; the corruption message and its deletion
-   advice appear only on verified corruption.
-4. Exclusive ownership: exactly one center serves a given socket path;
-   a second starter (any spawn path, including bare `__ctx-center`)
-   detects the live owner and exits cleanly or defers. Test/fixture
-   centers on isolated tuples are unaffected.
-5. Restart-proof liveness: a session with a held driver-lock and a
-   recently-written ledger is classified live by any center instance,
-   registration or not — or drives re-register on reconnect; either
-   mechanism satisfies the goal, chosen by grounding.
+## How to read this plan
+
+Goals and approach are separated, and only goals bind. `validation`'s
+Done-when list, together with the binding outcomes and exclusions at the
+top of `scope`, is the contract: each states an observable outcome and
+the existing command that decides it. Those binding outcomes are stated
+without prescribing internals — where one cites today's code it cites it
+as evidence of the behaviour to preserve, never as a required route.
+
+Everything else is guidance. The corrections and the HEAD grounding
+below are measured evidence; everything under "Suggested approach" —
+expected files, symbol and signature choices, schema and migration
+shape, edit order, the commands to run, corpus construction and proof
+mechanics — is the architect's best route from that evidence, not a
+boundary. Deviate from any of it whenever a binding goal requires it and
+report the deviation in the work summary; that is not a violation and
+not an owner escalation.
+
+## Grounded at HEAD 249c1a30 (clean worktree)
+
+`git diff be592de9..HEAD` over `center.rs`, `run_liveness.rs` and
+`proof_center.rs` is empty, so every defect above is still exactly as
+recorded. Each was re-read at HEAD:
+
+- Defect 1 is confirmed twice over. `CenterRow.session:
+  Option<Session>` (center.rs:1350-1363) is retained in memory;
+  `CenterModel::open` creates `center_sessions(..., session TEXT NOT
+  NULL)` and reads/deserializes each matching row to reproject its
+  summary (center.rs:1424-1553); `persist` re-serializes every retained
+  session into it (center.rs:2226-2249).
+- Defect 2 is confirmed with its own comment: `run_server_at` checks
+  `paths.socket.exists()`, opens SQLite, runs the complete synchronous
+  `model.discover`, and only then calls `UnixListener::bind` — under a
+  comment that states the ordering deliberately (center.rs:2358-2377).
+- Defect 3 is confirmed: `busy_timeout` is 2s (center.rs:66,
+  1428-1432), but EVERY error from open, timeout configuration, schema
+  creation, marker reads/writes and cached-row decoding is wrapped by
+  `CenterModel::cache_error` into "center index … is invalid: …; remove
+  … to rebuild" (center.rs:1416-1421 and its ~20 call sites). No
+  `DatabaseBusy`/`DatabaseLocked` classification exists anywhere.
+- Defect 4 is confirmed: the spawn flock covers launch arbitration only
+  and is dropped before serving (center.rs:1099-1186); the daemon never
+  acquires it (center.rs:2348-2483); `ctx __ctx-center` reaches
+  `run_server()` directly from `modules/cli/src/app/bin/ctx.rs:13-25`,
+  bypassing arbitration entirely; and `prepare_spawn`, holding only the
+  launch lock, unlinks a uid-owned socket after a failed handshake
+  (center.rs:1188-1228) — which on Unix leaves the old listener alive on
+  a now-unnamed inode while a new process binds the pathname. That is
+  the observed shadowing.
+- Defect 5 is confirmed, and its FIX IS NOT NOTIFIER RECONNECT.
+  `DriverNotifier` re-registers only when it next has an event to send
+  and the write detects a dead connection (center.rs:394-488); after a
+  successful registration it blocks on producer events with no
+  center-death heartbeat. `restarted_center_accepts_the_next_driver_
+  registration_and_frame` (proof_center.rs:2762) proves only the
+  event-triggered path. An idle-but-running session is therefore exactly
+  the case reconnect cannot cover.
+
+## Correction 1 — the payload is not the only cold-start cost
+
+Removing `center_sessions` is necessary and not sufficient. `persist`
+opens a transaction, does `DELETE FROM center_rows`, and reinserts EVERY
+row (center.rs:2190-2225). It is called from `refresh_ledger_inner` once
+per reconciled ledger (center.rs:1781) and again by `discover_inner`
+after the whole scan (center.rs:1906). A cold build over N ledgers
+therefore rewrites the whole growing table N+1 times — quadratic in row
+count independently of payload size. A metadata-only index that keeps
+whole-table rewrites will still fail the ≤1s and warming goals on a
+2,500-ledger corpus.
+
+## Correction 2 — deleting rows does not shrink a SQLite file
+
+`DELETE`/`DROP TABLE` returns pages to the free list; the file keeps its
+physical size. An installed ~500MB index will still measure ~500MB after
+the payload table is emptied. The size goal is stated as PHYSICAL bytes
+precisely so a fresh-index-only proof cannot pass while every real
+machine keeps a half-gigabyte file. Reclamation (VACUUM, or building a
+fresh index and replacing it atomically) is part of this task.
+
+## Correction 3 — the `unchanged` predicate depends on the payload
+
+`refresh_ledger_inner` treats a row as unchanged only when the
+fingerprint matches AND `row.session.is_some() || row.summary
+.parse_error.is_some()` (center.rs:1688-1694) — the retained session is
+what distinguishes a complete cached projection from a legacy or
+incomplete one. Deleting the field without replacing that discriminator
+makes every row permanently "changed", so the center reparses the entire
+corpus on every discovery pass. That would replace one payload cache
+with an unbounded rescan and would silently pass a size proof. The
+existing `LEDGER_READS` counter (center.rs:30-34) is the instrument that
+catches it.
+
+## Correction 4 — `List` is one JSON line under a 1MiB cap
+
+`MAX_LINE_BYTES` is 1MiB (center.rs:51) and non-subscription `List`
+serializes all matching rows into a single line (center.rs:3070-3073,
+619-628), while subscriptions stream one row per line behind
+`SnapshotEnd` (center.rs:1395-1413, 1910-2060). 2,500 projected
+summaries plausibly exceed 1MiB even with no payload at all. So `List`
+must NOT be the query used to prove ≤1s service, nor the observation
+used to detect "all rows indexed" — subscription streaming or an
+aggregate response is. Whether `List` itself survives the corpus is a
+measurement this task reports; see the Watch clause.
+
+## Correction 5 — the recovery mechanism for defect 5 already exists
+
+Kernel flock is already the authority and already correct: `run_control
+::probe` classifies a contended driver lock as `Held` even when holder
+metadata is absent or malformed (run_control.rs:316-331, 514-560), and
+center discovery sets `row.live = true` for `Held` (center.rs:2077-2081).
+Separately, drivers write a compact pointer row —
+`LiveIndexRow` (session/run/repo/ledger/worktree, no payload) — into
+`<runtime_root>/live-index.toml` immediately on lock acquisition, and
+`run_liveness::read_index`/`classify` (run_liveness.rs:194-260) already
+model row+held, row+free, rowless+held and unknown-root. The center
+WRITES that index after discovering a held ledger (center.rs:2085-2110)
+and never READS it. Reading it is the grounded fix: it recovers live
+sessions without any driver event, and it is the only path that can
+recover a registered repository-local ledger the flat runs-root
+enumeration cannot see. No PID authority, no timestamp authority, and no
+recency cutoff — a long in-flight frame is legitimately live.
+'''
+scope = '''
+## Binding outcomes and exclusions
+
+These bound the OUTCOME regardless of the route taken. They are stated
+as observable behaviour; the code references are evidence of what exists
+today, not an instruction to keep a particular symbol.
+
+- The center's SQLite index holds ledger METADATA and the compact
+  projected summary row only — never serialized ledger content. Detail
+  (`Get`) reads the selected ledger on demand; `List`, `Resolve`,
+  `FindByRunId`, `Stats` and `StandingWall` are answered from
+  projections without reopening ledgers.
+- `Get` keeps its current selection semantics: an exact session-id match
+  wins before a prefix match, `Missing` still means row-resolution
+  absence, and `Ambiguous` still returns the candidate session ids (the
+  behaviour center.rs:3236-3295 has today). A ledger read or parse
+  failure on a resolved row is an ERROR naming the ledger, never
+  `Missing`.
+- Every existing refresh invariant survives: parse at most once per
+  changed fingerprint, re-stat after parse, roll back the in-memory
+  candidate when liveness probing or persistence fails, preserve
+  last-good rows when a directory or repository scan is uncertain, and
+  publish deltas only after successful persistence
+  (center.rs:1660-1800). Exactly one ledger-interpretation path exists
+  when the task is done — the reconciliation logic is reused, never
+  duplicated into a second reader.
+- Kernel flock stays the sole liveness authority (Correction 5). No PID
+  liveness, no timestamp liveness, no recency cutoff, and registration
+  stays a freshness optimization over what disk proves (0243).
+- Interrupted-outcome repair reuses the existing outcome-recording
+  logic rather than reimplementing it, still runs only under maintenance
+  ownership after the fingerprint re-check (the sequence at
+  center.rs:2114-2183), and still leaves a corrupt ledger as a visible,
+  non-live `parse_error` row.
+- Exactly one process serves a given socket path, including a direct
+  `ctx __ctx-center`. A second starter that finds a live owner exits 0
+  or defers; it never replaces the owner's socket. Fully isolated
+  private tuples (all four of `CTX_CENTER_SOCKET`,
+  `CTX_CENTER_SPAWN_LOCK`, `CTX_CENTER_RUNS_ROOT`, `CTX_CENTER_INDEX` —
+  center.rs:550-569) remain independently startable.
+- A stale socket may only be unlinked once it is PROVEN that no live
+  center owns the inode, and a center's own teardown removes only the
+  exact dev/inode that process created:
+  `socket_guard_does_not_remove_replacement` (center.rs:6462) stays
+  green.
+- Query clients and drivers keep sharing ONE launch-arbitration path
+  (center.rs:528-539, 1041-1258 today). No second launcher is
+  introduced.
+- Deletion advice ("remove … to rebuild") is reserved for verified
+  invalid or corrupt index data. Contention is reported as busy /
+  another center starting, and contains none of "invalid", "corrupt",
+  "remove".
+- No direct-reader fallback is added anywhere. Stats, tasks, merge
+  lookup and the dashboard stay center-backed and fail-loud (0243.4).
+
+## Suggested approach — guidance, not a boundary
+
+### Expected files
+
+- `modules/io/src/center.rs`
+- `modules/io/src/run_summary.rs`
+- `modules/io/src/dispatch_preflight.rs`
+- `modules/cli/tests/proof_center.rs`
+
+Touching files beyond this list is legitimate whenever a binding goal
+requires it — report it. `modules/io/src/run_liveness.rs` is expected
+NOT to need a change (`read_index`/`classify` are already public and
+already shaped for the consumer this task adds);
+`modules/core/src/procedure/stats.rs` is expected NOT to need a change
+(`RunRecord`'s fields are public and constructible without a session).
+If either does change, say why.
+
+### Step 0 — read before editing
+
+center.rs:1350-1363 (`CenterRow`), :1416-1567 (`cache_error`, `open`),
+:1644-1811 (`refresh_ledger_inner`), :1813-1905 (`discover_inner`),
+:2062-2187 (`refresh_after_probe`), :2190-2263 (`persist`), :2348-2483
+(`run_server_at` and the accept/model loop), :3070-3175 (the query
+handlers), :1099-1279 (`prepare_spawn`, spawn flock, `SocketGuard`).
+Then run_liveness.rs end to end and proof_center.rs:1-120, 728-800
+(the harness).
+
+### Step 1 — widen the projection so no query needs a session
+
+Every query but `Get` already reads only `CenterRow.summary` plus
+metadata, except two:
+
+- `Stats` builds `stats::RunRecord::from_session` from retained sessions
+  (center.rs:3121-3145). `RunSummary` already carries trait id, digest,
+  status, last outcome, terminal epoch and the three token totals;
+  `RunRecord` additionally needs `stop_reason`, `tokens_by_model` and
+  `verdict_rounds` (stats.rs:64-108).
+- `StandingWall` clones every retained session (center.rs:3146-3171) for
+  `dispatch_preflight::standing_wall_in_sessions`, whose derivation uses
+  status, task value, terminal epoch, run id and the blocked park
+  report's `wall-id` (dispatch_preflight.rs:356-420). `RunSummary`
+  carries all but the wall id.
+
+So add those four facts to `RunSummary` and project them once in
+`RunSummary::from_session` — the single existing projection point.
+Follow the file's established wire discipline: `#[serde(default,
+skip_serializing_if = "Option::is_none")]` so an older binary reading
+the shared index still deserializes (run_summary.rs:23-107 is full of
+that precedent, and the `phase` rename at :30-34 shows how a wire key is
+pinned).
+
+Then rewrite the two consumers to read projections:
+- `Stats`: construct `RunRecord` from `RunSummary`. Preserve today's
+  readable/unreadable split exactly — unreadable becomes "rows whose
+  `summary.parse_error.is_some()`", which is the same set the current
+  `rows.len() - records.len()` counts.
+- `StandingWall`: give `standing_wall_in_sessions` a facts-shaped
+  sibling (or refactor it to take the five facts it already uses) so the
+  clear-by-later-completion semantics, the lexical `ledger_path`
+  ordering (center.rs:3155-3158) and the no-terminal-epoch branch stay in
+  ONE place. Do not fork the derivation.
+
+Build after this step:
+`cargo test -p ctx-traits-io --no-run`
+
+### Step 2 — metadata-only model, scoped persistence, real reclamation
+
+- Remove `CenterRow.session`. Replace the `unchanged` discriminator
+  (Correction 3) with something that cannot silently degrade into a full
+  rescan. The cheapest honest shape: make "row loaded from a current
+  projection" true by construction — `open` accepts a cached row only
+  when the index carries the current projection marker, and the
+  fingerprint match alone then decides `unchanged`. Whatever is chosen,
+  it needs a unit test asserting `LEDGER_READS` does not grow across a
+  second discovery pass over an unchanged store.
+- `persist` becomes row-scoped: upsert the one changed ledger, delete the
+  one removed ledger, instead of `DELETE FROM center_rows` + reinsert-all
+  (Correction 1). Keep the transaction, keep `restore_verified_row` on
+  failure, keep "publish deltas only after successful persistence". A
+  full-model write may remain for the paths that genuinely replace the
+  whole set (`discover_inner`'s retain), but it must not run once per
+  ledger.
+- Schema and migration. `center_meta` must stay at
+  `CENTER_SCHEMA_VERSION = 1` — an already-installed v1 center rejects
+  any other value (center.rs:1436-1465). The existing
+  `center_projection_meta` mechanism is the reuse point: its
+  `Some(_) =>` arm already rebuilds derived rows by deleting
+  `center_sessions`, `center_rows` and the marker
+  (center.rs:1485-1503). Recommended route: bump
+  `CENTER_PROJECTION_VERSION` past 2 and, in that same rebuild arm, drop
+  `center_sessions` and RECLAIM the freed pages (Correction 2) — a
+  `VACUUM` after the drop, or build the new index beside the old one and
+  rename it into place. Either way the reclamation is marker-gated so it
+  runs once, not on every open.
+  Compatibility boundary, stated rather than solved here: with the table
+  dropped, a concurrently running installed v1 center's `INSERT OR
+  REPLACE INTO center_sessions` fails. If a named existing test proves
+  that coexistence must not break, retaining an empty
+  `center_sessions` the current center never writes is a permitted
+  alternative — the binding property is that THIS center never stores
+  ledger content and the index it owns measures ≤10MB. Record which was
+  chosen and why. Redesigning the two-marker rollout scheme is 0261's.
+
+### Step 3 — `Get` reads the ledger; adoption and repair read summaries
+
+- `Get` (center.rs:3074-3089): keep `select_row`; on
+  `RowSelection::One(row)` call the existing symlink-safe
+  `read_session(&row.ledger_path)` (center.rs:30-34 →
+  `run_session::read_run_session`). `GetWireResult` is unchanged.
+- Held-lock adoption (center.rs:2085-2110) builds `LiveRunFacts` from
+  `row.summary`'s worktree facts (`worktree`, or the flattened
+  `worktree_path`/`worktree_branch` kept for the shared index) instead
+  of `session.provenance.worktree`. Note the consequence and state it:
+  today the upsert is skipped when `row.session` is `None`, so an
+  unparsed-but-held ledger publishes no liveness row; with summaries it
+  becomes unconditional on a holder. That is a fix consistent with 0243,
+  not scope creep.
+- Orphan repair (center.rs:2151-2183): read the ledger only after
+  maintenance ownership and the fingerprint re-check already prove it is
+  unheld and reparse-safe, then
+  `record_interrupted_outcome_in_session`, then re-project the summary
+  through `RunSummary::from_session`. The corrupt-ledger branch keeps
+  clearing liveness and leaving a `parse_error` row.
+
+### Step 4 — busy is busy
+
+Classify `rusqlite::Error::SqliteFailure` with `ErrorCode::DatabaseBusy`
+/ `DatabaseLocked` before `cache_error` wraps it, across open, busy
+-timeout configuration, schema creation and marker reads/writes
+(center.rs:1424-1500). The busy diagnosis names contention — another
+center starting — and carries no deletion advice. Everything that is
+genuinely a decoding or semantic failure keeps today's removable
+message: `corrupt_cached_fingerprint_is_removable_not_a_panic`
+(center.rs:4949) and `every_invalid_cached_field_names_the_removable_
+index` (center.rs:6407) stay green and are the reuse point. Add the
+missing case at the other end — a file that is not a SQLite database at
+all — so the removable advice is proven for real corruption, not only
+for impossible cached values. Persistence errors already use generic
+protocol errors (center.rs:2190-2263) and are not the misdiagnosis site.
+
+### Step 5 — one owner per socket, for the serving lifetime
+
+The materials all exist; what is missing is ownership that outlives the
+launch window. Suggested shape: before binding, `run_server_at` acquires
+and RETAINS an exclusive flock for the whole serving lifetime — on a
+file dedicated to serving ownership, sibling to the socket. Reusing the
+spawn lock itself would deadlock the launcher, which holds it across
+handshake; a distinct owner lock composes with the existing arbitration
+instead of replacing it. That arbitration is the reuse point to compose
+with, not to fork: `ensure_connected` / `start_for_driver` →
+`try_spawn` / `try_spawn_detached` → `prepare_spawn`, the spawn flock
+and the launch marker (center.rs:528-539, 1041-1258). `paths.socket.exists()` (center.rs:2359-2364)
+is then replaced by: take the owner lock; if it is contended, handshake
+the existing socket with `handshake_with_timeout` (center.rs:697) and
+exit 0 when a live center answers (defer otherwise); if it is taken, the
+pathname is unowned and a stale socket may be unlinked before bind.
+Because `ctx __ctx-center` reaches `run_server_at` through
+`run_server()` (bin/ctx.rs:13-25), covering it here covers the bypass
+path without touching the CLI entry. `prepare_spawn`'s unlink
+(center.rs:1217-1226) becomes safe for the same reason: no live owner
+can hold the lock at that moment. Keep the spawn marker's fork-to-bind
+recovery (center.rs:1211-1217, 2377) intact.
+
+### Step 6 — bind first, then build incrementally
+
+- Move `UnixListener::bind` and `SocketGuard::for_listener` ahead of
+  `CenterModel::open`'s discovery, and delete the comment that asserts
+  the old ordering (center.rs:2365-2375). Spawn arbitration treats a
+  successful handshake as readiness, so the accept loop must answer
+  hello immediately — binding first plus the existing non-blocking
+  accept is what delivers that.
+- Binding first is not sufficient on its own: the same thread runs
+  `listener.accept`, model jobs and `model.discover`
+  (center.rs:2386-2482), so a monolithic discovery leaves the pathname
+  connectable but unserved. Turn the startup build and the periodic scan
+  into BOUNDED units driven from that loop: enumerate with the existing
+  metadata-only `run_session::session_store_paths`
+  (run_session.rs:262-272), hold a queue of ledgers still to reconcile,
+  and reconcile at most a bounded slice per iteration through the
+  existing `refresh_ledger_inner` so every invariant above is reused
+  rather than reimplemented.
+- The per-request freshness barrier is the second blocker: every `List`,
+  `Get`, `Resolve`, `FindByRunId`, `Stats` and `StandingWall` currently
+  runs a full synchronous `model.discover` before being answered
+  (center.rs:2399-2408, 3020-3029). During warming that must not run as
+  one corpus-sized operation. Serving the rows indexed so far is
+  explicitly acceptable.
+- Seed the queue from `run_liveness::read_index` FIRST, so held ledgers
+  — including repository-local ones the flat enumeration cannot reach —
+  are indexed before the cold tail. This is the same read that satisfies
+  the liveness goal, which is why it is one mechanism and not two.
+- Protocol posture: keep the existing response types. A partial answer
+  during warming is what the goal permits; a warming response type is
+  optional and should not be added unless a binding goal needs it.
+
+### Step 7 — proofs
+
+Reuse proof_center.rs's `SENTINEL_TEST_LOCK` (:15), `PROCESS_DEADLINE`
+(:16), `ChildGuard` (:18), `scratch` (:29), `await_socket` (:40),
+`await_socket_removal` (:72), `CenterEnvironment` (:84),
+`spawn_sentinel` (:728) and the existing ledger writers. Do not build a
+second process harness.
+
+- Corpus proof: no pre-existing index, 2,500 valid ledgers totalling at
+  least 600MB under a `/tmp` scratch root. Prove a completed center
+  handshake AND an answered query within one second of process start —
+  `await_socket` only proves `connect` (proof_center.rs:40-55), so a
+  bound-but-blocked listener would pass it falsely. Then wait for full
+  indexing through a per-row-streaming or aggregate observation (not
+  `List` — Correction 4) and measure the PHYSICAL index file, counting
+  any `-wal`/`-journal` sidecar present at rest, at ≤10MB. Generate the
+  corpus cheaply (one large body varied per session id) so the measured
+  cost is the center's parse, not the fixture's writes. Remove the
+  scratch root on exit.
+- Migration proof: the same corpus with a payload-bearing, v1-shaped
+  index in place (the `center_sessions` fixture idiom already exists at
+  center.rs:5019). After the current center owns it, the physical file
+  is ≤10MB — this is the assertion free pages would otherwise hide.
+- Ownership proof: one direct sentinel, handshake verified; a second
+  process on the same tuple exits 0 without replacing the first (assert
+  the socket's dev/inode is unchanged and the first still answers); then
+  one launcher path (`ensure_connected`) against that owner reuses it.
+  proof_center.rs:1228-1469 covers concurrent `ensure_connected`,
+  driver/query launch sharing, delayed bind and stale-listener recovery
+  — none of them two direct sentinels.
+- Busy proof (center.rs unit tests): hold `BEGIN EXCLUSIVE` on the index
+  past the 2s busy timeout from a second `Connection`; assert the
+  diagnosis names contention and contains none of "invalid", "corrupt",
+  "remove". Paired with the not-a-database case from Step 4.
+- Restart-liveness proof: hold a genuine driver lock, kill and restart
+  the center, and assert the recovered `CenterPublicRow.live` is `true`
+  with NO new registration and no driver frame, before releasing the
+  lock. `sigkill_center_leaves_held_driver_and_restart_reconstructs_it`
+  (proof_center.rs:1472) is adjacent but never queries `live`.
+
+Existing tests that conflict, and what replaces them:
+- `cached_center_queries_do_not_reopen_a_discovered_ledger`
+  (proof_center.rs:1750) expects `Get` to succeed after `chmod 000`. It
+  must invert: `Get` fails naming the ledger while list/find/stats and
+  the subscription stay summary-backed — the shape
+  `center_backed_readers_serve_an_unreadable_ledger_warm_and_after_
+  restart` (proof_center.rs:2972) and its helper
+  `assert_center_backed_readers_serve` (:236) already assert. Reuse it.
+- `fingerprint_matching_session_cache_serves_every_query_without_ledger_
+  reads` (center.rs:5660), `persistence_removes_only_deleted_session_
+  cache_entries` (center.rs:5394) and `a_version_one_index_is_
+  reprojected_by_the_current_center` (center.rs:5019) assert retained
+  `row.session` / `center_sessions` behaviour. Replace with the
+  metadata-only and migration equivalents above; keep their fixtures.
+- `independent_socket_versions_share_the_disposable_sqlite_index`
+  (proof_center.rs:1521) edits an old summary and relies on the cached
+  session to reproject it; the reprojection source is now the ledger.
+  Preserve only what stays valid — do not grow it into 0261's two-binary
+  project.
+- Every race, rollback, liveness, subscription-ordering, idle-exit and
+  launcher test stays green.
+
+### Step 8 — gates and delivery
+
+Run the Done-when commands in order, then fold every edit into one
+task-scoped commit and leave the worktree clean (goal 9 decides the
+cleanliness half; the single-commit shape is guidance).
 
 ## Out of scope
 
+- 0261's remainder: simultaneous two-version center coverage, the
+  symmetric shared-index versioning redesign, reconnect-delay parity,
+  and subscription polish beyond keeping today's behaviours green. Step
+  2 makes only the schema decision that eliminating payload requires,
+  and documents the boundary.
+- 0263's fixture-center lifecycle: parent-death detection, idle reaping
+  of test-spawned centers, and sweeping `/tmp` debris. Step 5 governs
+  who may SERVE a socket, not when a fixture daemon dies.
 - Dashboard UI changes beyond bucket classification correctness.
-- A disk-fallback resolution path for `ctx traits merge` (with a ≤1s
-  cold start the center dependency stands; a second path is
-  duplication).
-- Archived-history browsing (runs-archive/ restore stays a manual op).
+- A disk-fallback resolution path for `ctx traits merge`. With a ≤1s
+  cold start the center dependency stands; a second path is duplication.
+- Archived-history browsing; `runs-archive/` restore stays a manual op.
+- Any recency or PID-based liveness heuristic (Correction 5).
+- 0243.5's center-mediated spawn/pause/interrupt.
+'''
+validation = '''
+## Done when — binding goals, each with the existing command that decides it
 
-## Evidence pointers
+1. The index holds no ledger content and is physically small. Over a
+   fresh 600MB / 2,500-ledger corpus with no pre-existing index, the
+   fully built index measures ≤10MB on disk; and the same bound holds
+   after the current center takes over a payload-bearing v1-shaped index
+   over that corpus, so reclaimed pages are actually returned:
+   `cargo test -p ctx-traits-cli --test proof_center`
+2. The daemon binds before it builds. From a cold start on that corpus,
+   a client completes the center handshake and receives an answer to a
+   query within one second of process start — an answer covering only
+   the rows indexed so far is acceptable; a connection refusal or a
+   client timeout is not. Same command as 1.
+3. Contention is never diagnosed as corruption. With the index held
+   under `BEGIN EXCLUSIVE` past the busy timeout, the center's
+   diagnosis names contention (another center starting) and contains
+   none of "invalid", "corrupt", "remove"; a genuinely corrupt index
+   file still gets the removable-index advice:
+   `cargo test -p ctx-traits-io center`
+4. Exactly one process serves a socket path. With one center serving a
+   tuple, a second `ctx __ctx-center` on that same tuple exits without
+   replacing the owner — the socket's dev/inode is unchanged and the
+   first center still answers — and a launcher path against that owner
+   reuses it rather than unlinking and rebinding. Isolated private
+   tuples still start independently. Same command as 1.
+5. Liveness survives center replacement. With a genuine driver lock
+   held, the serving center is killed and restarted; the replacement
+   reports that row with `live == true` without any new driver
+   registration and without a driver frame. Same command as 1.
+6. Metadata-only queries and the unchanged-fingerprint contract hold:
+   `List`, `Resolve`, `FindByRunId`, `Stats` and `StandingWall` answer
+   from projections without reopening ledgers, `Get` reads its selected
+   ledger and errors naming it when unreadable, and a second discovery
+   pass over an unchanged store performs no additional ledger reads.
+   Same command as 3.
+7. The per-round gate is green: `just test`
+8. The landing gate is green: `just test-full`
+9. Nothing is left uncommitted or stray when the change lands:
+   `git status --short` is empty.
 
-- Schema: modules/io/src/center.rs:1432 (center_sessions.session).
-- Introduced via 4319940b and db8f8958 (0243.4 hand-land).
-- Cold-start measurements and squatter counts: owner session
-  2026-08-28 (240MB→323MB at ~6-8MB/min, 95% CPU; 744MB archive →
-  5s bind; 586 and 16-in-minutes leaked daemons).
-"""
+## Order and bounded refinement
+
+Run Step 1's `cargo test -p ctx-traits-io --no-run` before starting Step
+2, so a projection or borrow error surfaces next to the edit that caused
+it. Then run the Done-when commands in this order: 3 (io center), 1/2/4/5
+(proof_center), 7 (`just test`), 8 (`just test-full`). `just test`
+deliberately does not compile the integration proof binaries
+(Justfile:111-147), so `proof_center` must be run explicitly before it,
+not inferred from it.
+
+Then review once against goals 1-6, each read as the observable outcome
+its command decides — not as an invitation to widen. Repair any failed
+outcome, rerun that command AND every later command in the list. Permit
+at most two repair rounds. If a third would be needed, stop and report
+the failing command with its output; that is the stop condition, not a
+judgement call.
+
+## Watch
+
+- A size proof that passes on a fresh index proves nothing about the
+  ~500MB indexes already on disk (content Correction 2). If goal 1's
+  migration half is dropped, the task has not shipped.
+- If the corpus indexes fast and the index is small but `LEDGER_READS`
+  grows on a second pass, the `unchanged` discriminator regressed
+  (content Correction 3) — the payload cache was replaced by an
+  unbounded rescan. Goal 6 is what catches it.
+- Measure and REPORT whether a non-subscription `List` over the fully
+  indexed corpus stays inside `MAX_LINE_BYTES` (content Correction 4).
+  If it does not, that is a real center defect and a number worth
+  recording; making `List` chunk or stream is in scope only if it blocks
+  a binding goal, and is otherwise board material.
+- The corpus proof adds real wall-clock to `cargo test --workspace` and
+  therefore to `just test-full`. Report the measured duration. Do not
+  quietly `#[ignore]` it or shrink the corpus below 600MB / 2,500
+  ledgers to make the gate faster — that is the owner's call with the
+  number in hand, not the run's.
+- If defect 5 is "fixed" by making `DriverNotifier` heartbeat or
+  reconnect proactively, the goal is not met: an idle running session
+  sends no events, which is exactly the observed case
+  (content Correction 5). The lock plus the pointer index is the
+  mechanism.
+- A busy diagnosis reached by widening the busy timeout instead of
+  classifying the error still fails goal 3 under a long-running
+  rebuild. Classify, do not wait longer.
+- Under the new owner lock, a genuinely busy index should become rare —
+  the owner is the only writer. If the busy proof cannot be constructed
+  without defeating Step 5's ownership, say so: it is evidence about the
+  design, not a reason to weaken the assertion.
+- A finding in 0261's or 0263's area is advisory board material, never
+  an extra cell here.
+'''
+
+[[checks]]
+name = "center model, busy-vs-corrupt and metadata-only regressions pass"
+command = "cargo test -p ctx-traits-io center"
+timeout-ms = 900000
+
+[[checks]]
+name = "center daemon process proofs pass (corpus size, cold bind, ownership, restart liveness)"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 2400000
+
+[[checks]]
+name = "per-round workspace gate passes"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "landing gate stays green"
+command = "just test-full"
+timeout-ms = 2700000
