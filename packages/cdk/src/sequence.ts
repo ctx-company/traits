@@ -15,9 +15,11 @@ import type {
   JsonValue,
   WriteOperation,
 } from "./generated.js";
+import { isSchemaRefLiteral } from "./handles.js";
 import type {
   AgentHandle,
   CheckResultValue,
+  DeclaredSlotWithFields,
   InstructionOutputHandle,
   OptionalSlotRead,
   OutputSinkHandle,
@@ -27,7 +29,6 @@ import type {
   PromptTemplate,
   RefHandle,
   ResourceHandle,
-  SchemaHandle,
   SequenceHandle,
   SequenceLinearHandle,
   SettingHandle,
@@ -70,7 +71,8 @@ import type { Behavior, Intent } from "./trait.js";
 import { OUTPUT_RENDER_V1 } from "./output.js";
 import { refText } from "./ref.js";
 import { schema } from "./schema.js";
-import { isLiteralProjectionSource, slot } from "./slot.js";
+import type { SchemaValue } from "./schema.js";
+import { isLiteralProjectionSource, mintAutoSlot, slot } from "./slot.js";
 import { operation } from "./slot.js";
 import type { LiteralProjectionSource } from "./slot.js";
 
@@ -93,14 +95,110 @@ export type SequenceInputValue<Value = unknown> =
   | ResourceHandle<Value>
   | ConditionalResourceInputValue<Value>
   | OptionalSlotInputValue<Value>;
+/**
+ * A bare schema (`schema.text()`, `schema.object(...)`, ...) used directly
+ * as a step's `output:` declares a VIRTUAL slot (0253.3): lowering mints an
+ * ordinary auto-named slot (ledger/replay unchanged), and the instantiation
+ * handle's `.result` is the only way to address it — no named slot is
+ * declared for another step to reference by id. Doctrine: named slot =
+ * shared state, virtual slot = local plumbing.
+ */
 export type SequenceOutputValue<Value = unknown> =
   | PortHandle<Value>
   | SlotHandle<Value>
-  | SchemaHandle<Value>
+  | SchemaValue<Value>
   | OutputSinkHandle<Value>
   | InstructionOutputHandle<Value>
   | OptionalSlotRead<Value>
   | OutputTemplateHandle;
+/**
+ * A step handle's `.result`: the ONLY way to address a virtual slot (0253.3)
+ * — the same full augmented handle a hand-declared slot carries
+ * (`.optional()`, `.with()`, object-schema field refs), never a bare
+ * `SlotHandle`. Every prompt/command placement path that accepts a
+ * bare-schema `output:` (`sequence.*`, `step.*`, `agent.*.prompt`,
+ * `defineStep.*`) routes its return type through this one alias so a missing
+ * overload can't silently downgrade the exposed surface.
+ */
+export type VirtualSlotResult<Value> = DeclaredSlotWithFields<Value>;
+/** `.results`: the same, for a step declaring more than one virtual output. */
+export type VirtualSlotResults = readonly DeclaredSlotWithFields<unknown>[];
+/**
+ * Filters a (possibly mixed) `output:` tuple down to just its bare-schema
+ * (virtual-slot) members, in author order, each mapped to the
+ * {@link VirtualSlotResult} it lowers to — a named slot, port, or other
+ * `SequenceOutputValue` member contributes nothing here, so a mixed tuple's
+ * non-virtual entries are silently skipped rather than breaking the
+ * recursion. Each element keeps its OWN inferred schema value type, so a
+ * heterogeneous tuple (`[schema.text(), schema.number()]`) does not collapse
+ * to `DeclaredSlotWithFields<unknown>`.
+ */
+type VirtualSlotsOf<T> = T extends readonly [infer Head, ...infer Tail]
+  ? Head extends SchemaValue<infer Value>
+    ? readonly [VirtualSlotResult<Value>, ...VirtualSlotsOf<Tail>]
+    : VirtualSlotsOf<Tail>
+  : readonly [];
+/**
+ * The ONE conditional type every prompt/command placement path routes its
+ * return type through for a bare-schema (or bare-schema-containing) `output:`
+ * value (0253.3): a single bare schema types `.result`; an output tuple
+ * containing exactly one virtual (bare-schema) member ALSO types `.result`
+ * (matching `sequenceOf`'s runtime attachment, which exposes `.result` for
+ * the sole virtual slot regardless of how many named outputs sit alongside
+ * it); a tuple with more than one virtual member types `.results`, tuple-
+ * typed so each member keeps its own schema value type; an output with no
+ * virtual member at all (a named slot, no `output:`, or the wide
+ * non-`const`-inferred `SequenceOutputValue` default) adds nothing. One
+ * shared type closes the gap a per-call-site overload split otherwise
+ * reopens at every new placement path.
+ */
+export type VirtualSlotSurfaceOf<RawOutput> = [RawOutput] extends [SchemaValue<infer Value>]
+  ? { readonly result: VirtualSlotResult<Value> }
+  : [RawOutput] extends [readonly unknown[]]
+    ? VirtualSlotsOf<RawOutput> extends readonly []
+      ? unknown
+      : VirtualSlotsOf<RawOutput> extends readonly [infer Only]
+        ? { readonly result: Only }
+        : { readonly results: VirtualSlotsOf<RawOutput> }
+    : unknown;
+/**
+ * Recovers the represented output VALUE type `sequence.prompt`'s `Output`
+ * generic carried pre-0253.3 (`SequenceHandle<Input, Output>`), now that
+ * `output:` is typed through the wider `RawOutput` (needed for
+ * {@link VirtualSlotSurfaceOf}) instead of the narrower `SequenceOutputValue
+ * <Output>` the old overloads inferred `Output` from directly. Recurses
+ * through an array/tuple to the union of its members' represented types —
+ * a heterogeneous tuple (`[verdictSlot, otherSlot]`) now yields the (more
+ * precise) union of both, not one shared `Output` forced across every
+ * entry — and falls back to `unknown` for anything that isn't a
+ * `SequenceOutputValue` (a bare schema/virtual slot, which carries its own
+ * type through `.result`/`.results` instead).
+ */
+type RepresentedOutputOf<RawOutput> = RawOutput extends readonly (infer Item)[]
+  ? RepresentedOutputOf<Item>
+  : RawOutput extends SequenceOutputValue<infer Value>
+    ? Value
+    : unknown;
+/**
+ * The overloaded shape every prompt-placement entry point (`sequence.prompt`,
+ * `step.prompt`, `agent.*.prompt`) shares: a `const`-inferred `output:` value
+ * types `.result`/`.results` through {@link VirtualSlotSurfaceOf}; an
+ * `output:` with no virtual member (or none at all) stays a plain
+ * `SequenceHandle`. `ExtraOpts` folds in the placement-specific fields
+ * (`step.prompt`'s required `agent`) without duplicating the split per call
+ * site. ONE generic overload, not a schema/array/plain three-way split, so
+ * every accepted `output:` shape — a lone schema, a mixed tuple, a
+ * heterogeneous schema tuple — is derived from the same conditional type
+ * instead of drifting per call site.
+ */
+export type PromptPlacementFn<ExtraOpts = unknown> = <
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
+  title: string,
+  opts: PromptRegistrarOptions & ExtraOpts & { readonly output?: RawOutput },
+) => SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
+/** {@link PromptPlacementFn} with no extra placement-specific fields — `agent.*.prompt`'s shape. */
+export type PromptRegistrarFn = PromptPlacementFn;
 export type ArgvItem = string | SlotHandle | PortHandle | SettingHandle | ResourceHandle;
 export type SignalOutputValue =
   | string
@@ -687,30 +785,37 @@ export interface SequenceFunction {
    * });
    * ```
    */
-  prompt<Input, Output = unknown>(
+  prompt<Input, const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
     fields: Omit<InputPromptSequenceFields, "input" | "output"> & {
       readonly input: PromptTemplate<Input>;
-      readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+      readonly output?: RawOutput;
     },
-  ): SequenceHandle<Input, Output>;
-  prompt<Input, Output = unknown>(
+  ): SequenceHandle<Input, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+  prompt<Input, const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
     fields: Omit<PromptSequenceFields, "prompt" | "input" | "output"> & {
       readonly prompt: PromptTemplate<Input>;
       readonly input?: SequenceInputValue<Input> | readonly SequenceInputValue<Input>[];
-      readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+      readonly output?: RawOutput;
     },
-  ): SequenceHandle<Input, Output>;
-  prompt<Input, Output = unknown>(
+  ): SequenceHandle<Input, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+  prompt<Input, const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
     fields: Omit<TextPromptSequenceFields, "text" | "input" | "output"> & {
       readonly text: PromptTemplate<Input>;
       readonly input?: SequenceInputValue<Input> | readonly SequenceInputValue<Input>[];
-      readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+      readonly output?: RawOutput;
     },
-  ): SequenceHandle<Input, Output>;
-  prompt(
+  ): SequenceHandle<Input, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+  /** The two-argument (`id`, `fields`) placement form — same {@link VirtualSlotSurfaceOf} typing as the single-object form above. */
+  prompt<const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
     id: string,
-    fields: Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind">,
-  ): SequenceHandle;
+    fields: Omit<
+      PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields,
+      "id" | "kind" | "output"
+    > & {
+      readonly output?: RawOutput;
+    },
+  ): SequenceHandle<unknown, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+  /** @deprecated Pass the id positionally (`sequence.prompt(id, fields)`) or as `fields.id`, typed as the overloads above. */
   prompt(fields: PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields): SequenceHandle;
   /**
    * Declares a shell-command sequence step: runs `cmd` (parsed as a plain
@@ -722,10 +827,26 @@ export interface SequenceFunction {
    * staging, committing, running a gate — where an agent has nothing to
    * decide.
    * @example `sequence.command("commit", { argv: ["git", "commit", "-m", "Apply review fixes"] })`
+   *
+   * A bare schema (not a named `slot(...)`) as `output:` declares a VIRTUAL
+   * slot instead (0253.3): lowering mints an ordinary auto-named slot, and
+   * the returned handle's `.result` is the only way to address it — no
+   * named slot exists for another step to reference by id. Named slot =
+   * shared state, virtual slot = local plumbing.
+   * @example
+   * ```ts
+   * const status = sequence.command("status", { cmd: "git status --porcelain", output: schema.text() });
+   * sequence.command("log", { cmd: "log", input: [status.result] });
+   * ```
    */
-  command(id: string, fields: Omit<CommandSequenceFields, "id" | "kind">): SequenceHandle;
+  command<const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
+    id: string,
+    fields: Omit<CommandSequenceFields, "id" | "kind" | "output"> & { readonly output?: RawOutput },
+  ): SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
   /** @deprecated Pass the id positionally: `sequence.command(id, fields)`. */
-  command(fields: CommandSequenceFields): SequenceHandle;
+  command<const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue>(
+    fields: Omit<CommandSequenceFields, "output"> & { readonly output?: RawOutput },
+  ): SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
   /**
    * Declares a check step: runs `cmd`/`argv` like `sequence.command`, but
    * writes a verdict record to `output` instead of the command's raw result
@@ -901,30 +1022,46 @@ export interface SequenceFunction {
   parallel(id: string, branches: readonly SequenceRefValue[], options: ParallelOptions): SequenceHandle;
 }
 
-function sequencePrompt<Input, Output = unknown>(
+function sequencePrompt<
+  Input,
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
   fields: Omit<InputPromptSequenceFields, "input" | "output"> & {
     readonly input: PromptTemplate<Input>;
-    readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+    readonly output?: RawOutput;
   },
-): SequenceHandle<Input, Output>;
-function sequencePrompt<Input, Output = unknown>(
+): SequenceHandle<Input, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+function sequencePrompt<
+  Input,
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
   fields: Omit<PromptSequenceFields, "prompt" | "input" | "output"> & {
     readonly prompt: PromptTemplate<Input>;
     readonly input?: SequenceInputValue<Input> | readonly SequenceInputValue<Input>[];
-    readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+    readonly output?: RawOutput;
   },
-): SequenceHandle<Input, Output>;
-function sequencePrompt<Input, Output = unknown>(
+): SequenceHandle<Input, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+function sequencePrompt<
+  Input,
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
   fields: Omit<TextPromptSequenceFields, "text" | "input" | "output"> & {
     readonly text: PromptTemplate<Input>;
     readonly input?: SequenceInputValue<Input> | readonly SequenceInputValue<Input>[];
-    readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+    readonly output?: RawOutput;
   },
-): SequenceHandle<Input, Output>;
-function sequencePrompt(
+): SequenceHandle<Input, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
+function sequencePrompt<
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
   id: string,
-  fields: Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind">,
-): SequenceHandle;
+  fields: Omit<
+    PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields,
+    "id" | "kind" | "output"
+  > & {
+    readonly output?: RawOutput;
+  },
+): SequenceHandle<unknown, RepresentedOutputOf<RawOutput>> & VirtualSlotSurfaceOf<RawOutput>;
 function sequencePrompt(
   fields: PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields,
 ): SequenceHandle;
@@ -943,11 +1080,26 @@ function sequencePrompt(
   );
 }
 
-function sequenceCommand(id: string, fields: Omit<CommandSequenceFields, "id" | "kind">): SequenceHandle;
-function sequenceCommand(fields: CommandSequenceFields): SequenceHandle;
+function sequenceCommand<
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
+  id: string,
+  fields: Omit<CommandSequenceFields, "id" | "kind" | "output"> & { readonly output?: RawOutput },
+): SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
+function sequenceCommand<
+  const RawOutput extends SequenceOutputValue | readonly SequenceOutputValue[] = SequenceOutputValue,
+>(
+  fields: Omit<CommandSequenceFields, "output"> & { readonly output?: RawOutput },
+): SequenceHandle & VirtualSlotSurfaceOf<RawOutput>;
 function sequenceCommand(
-  idOrFields: string | CommandSequenceFields,
-  maybeFields?: Omit<CommandSequenceFields, "id" | "kind">,
+  idOrFields:
+    | string
+    | (Omit<CommandSequenceFields, "output"> & {
+        readonly output?: SequenceOutputValue | readonly SequenceOutputValue[];
+      }),
+  maybeFields?: Omit<CommandSequenceFields, "id" | "kind" | "output"> & {
+    readonly output?: SequenceOutputValue | readonly SequenceOutputValue[];
+  },
 ): SequenceHandle {
   if (typeof idOrFields === "string") {
     return sequenceOf({ ...(maybeFields as object), id: idOrFields, kind: "command" } as CommandSequenceFields);
@@ -957,7 +1109,7 @@ function sequenceCommand(
     `sequence.${idOrFields.id}`,
     "object-only sequence.command(fields) is deprecated; use sequence.command(id, fields)",
   );
-  return sequenceOf(idOrFields);
+  return sequenceOf(idOrFields as CommandSequenceFields);
 }
 
 function sequenceForEach(id: string, fields: Omit<ForEachSequenceFields, "id" | "kind">): SequenceHandle;
@@ -1308,10 +1460,14 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   const terminal = isSequenceKind(fields, kind, "terminal") ? fields : undefined;
   const terminalPayload = terminal === undefined ? undefined : normalizeTerminalPayload(terminal);
   const agentRef = fields.agent === undefined ? undefined : refText(fields.agent, `sequence.${fields.id}.agent`);
-  const instructionOutputRender = attachInstructionOutputs(fields.id, kind, fields.output);
+  const {
+    outputValue,
+    instructionRender: instructionOutputRender,
+    virtualSlots,
+  } = attachAutoSlotOutputs(fields.id, kind, fields.output);
   const promptWithInstructionOutputs =
     instructionOutputRender === undefined ? prompt : mergePromptInstructionOutputs(prompt, instructionOutputRender);
-  const outputTemplateRender = attachOutputTemplates(fields.id, kind, agentRef, fields.output);
+  const outputTemplateRender = attachOutputTemplates(fields.id, kind, agentRef, outputValue);
   const promptWithOutputTemplates =
     outputTemplateRender === undefined
       ? promptWithInstructionOutputs
@@ -1323,9 +1479,9 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
           refs: [],
           optionalRefs: [],
         });
-  const output = projections === undefined ? outputList(fields.output) : projections.map((entry) => entry.output);
+  const output = projections === undefined ? outputList(outputValue) : projections.map((entry) => entry.output);
   const outputRefs =
-    projections === undefined ? outputRefList(fields.output) : projections.map((entry) => entry.destination);
+    projections === undefined ? outputRefList(outputValue) : projections.map((entry) => entry.destination);
   const promptDeps =
     kind === "prompt" || kind === "ask"
       ? mergeCommandDeps(promptInputTemplate === undefined ? fields.input : undefined, rawFields.include)
@@ -1564,7 +1720,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     fields.input,
     (fields as Partial<CommandSequenceFields | CheckSequenceFields | PromptSequenceFields | TextPromptSequenceFields>)
       .include,
-    fields.output,
+    outputValue,
     fields.onComplete,
     fields.sequence,
     controlFields.iterations,
@@ -1587,7 +1743,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     ...(parallelFields.branchFailure ?? []).map((entry) => entry.branch),
     ...(project?.projections ?? []).flatMap((entry) => [entry.source, entry.destination]),
   ];
-  return withMeta(compactAs<CanonicalSequenceItem>(canonical), {
+  const item: SequenceHandle = withMeta(compactAs<CanonicalSequenceItem>(canonical), {
     kind: "sequence-step",
     declarations:
       implicitPrompt === undefined
@@ -1596,6 +1752,20 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     ...(inlineBranchArms === undefined ? {} : { inlineBranchArms }),
     ...(inlineBody === undefined ? {} : { inlineBody }),
   });
+  if (virtualSlots.length === 0) return item;
+  // `.result`/`.results` (0253.3): the ONLY way to address a virtual slot's
+  // auto-named slot — `CanonicalSequenceItem` already has an `output` key
+  // (the sink list), so exposing this as `.output` the way `sequence.check`
+  // exposes `.pass` would overwrite it and hide it from `normalizeValue`'s
+  // `Object.entries` serialization; `result`/`results` are not canonical
+  // keys, so `withHiddenField` here is exactly `.pass`'s proven pattern.
+  // Cardinality is exclusive — one virtual output attaches `.result` ONLY,
+  // several attach `.results` ONLY — matching `VirtualSlotSurfaceOf`'s typed
+  // surface exactly, so a multi-output handle cannot carry an undocumented
+  // singular property alongside its plural one.
+  return virtualSlots.length === 1
+    ? withHiddenField(item, "result", virtualSlots[0] as SlotHandle)
+    : withHiddenField(item, "results", virtualSlots);
 }
 function sequenceLinear(
   id: string,
@@ -1894,29 +2064,56 @@ function isPromptTemplateValue(value: unknown): value is PromptTemplate {
   return metaOf(value)?.kind === "template";
 }
 /**
- * Auto-attaches every `output.text`/`output.of(...)` instruction-output
- * listed in a step's `output:` to a slot (id: the step id, then
- * `<step-id>-2`... for later ones on the same step), erroring if the
- * auto-assigned id collides with a hand-declared slot in the same list.
- * Returns the rendered instruction/return-format text (plus any refs the
- * instruction text itself interpolated) to append onto the step's prompt
- * body, or `undefined` if the step declares no instruction-outputs.
+ * True for a bare schema (`schema.text()`, `schema.object(...)`, `schema.
+ * list(...)`, ...) used directly as an `output:` item — the virtual-slot
+ * form (0253.3). Every such value's `meta.ref` (or, for the primitive-string
+ * builtins, the value itself) is a `schema:*` ref; no other `output:` member
+ * ever carries one (slots are `slot:*`, ports `port:*`, and so on), so this
+ * check cannot false-positive on a hand-declared slot referenced by ref.
  */
-function attachInstructionOutputs(
+function isVirtualSlotOutputItem(item: unknown): boolean {
+  if (typeof item === "string") return isSchemaRefLiteral(item);
+  const ref = metaOf(item)?.ref;
+  return ref === undefined ? false : isSchemaRefLiteral(ref);
+}
+/**
+ * Auto-attaches every `output.text`/`output.of(...)` instruction-output AND
+ * every virtual-slot (bare-schema) item listed in a step's `output:` to a
+ * slot — id: the step id, then `<step-id>-2`... for later ones on the same
+ * step, ONE shared counter across both kinds so a step declaring both an
+ * `output.text` and a virtual slot never mints the same id twice — erroring
+ * if an auto-assigned id collides with a hand-declared slot in the same
+ * list. Returns the rewritten `output:` list (virtual-schema items replaced
+ * by their minted slot handles — an ordinary slot output from here on,
+ * ledger/replay unchanged), the rendered instruction/return-format text
+ * (plus any refs the instruction text itself interpolated) to append onto
+ * the step's prompt body, and the minted virtual slots in author order (the
+ * attaching step handle's `.result`/`.results`).
+ */
+function attachAutoSlotOutputs(
   stepId: string,
   kind: SequenceFields["kind"],
   outputValue: SequenceOutputValue | readonly SequenceOutputValue[] | undefined,
-): { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[] } | undefined {
-  if (outputValue === undefined) return undefined;
+): {
+  readonly outputValue: SequenceOutputValue | readonly SequenceOutputValue[] | undefined;
+  readonly instructionRender:
+    | { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[] }
+    | undefined;
+  readonly virtualSlots: readonly SlotHandle[];
+} {
+  if (outputValue === undefined) return { outputValue, instructionRender: undefined, virtualSlots: [] };
   const items = Array.isArray(outputValue) ? outputValue : [outputValue];
-  const instructionOutputs = items.filter((item) => isInstructionOutputHandle(item));
-  if (instructionOutputs.length === 0) return undefined;
-  if (kind !== "prompt" && kind !== "ask") {
+  const hasInstructionOutputs = items.some((item) => isInstructionOutputHandle(item));
+  const hasVirtualSlots = items.some((item) => isVirtualSlotOutputItem(item));
+  if (!hasInstructionOutputs && !hasVirtualSlots) {
+    return { outputValue, instructionRender: undefined, virtualSlots: [] };
+  }
+  if (hasInstructionOutputs && kind !== "prompt" && kind !== "ask") {
     throw new Error(`procedure.sequence ${stepId}: output.text/output.of is valid only on prompt/ask steps`);
   }
   const usedIds = new Set(
     items
-      .filter((item) => !isInstructionOutputHandle(item))
+      .filter((item) => !isInstructionOutputHandle(item) && !isVirtualSlotOutputItem(item))
       .map((item) => outputText(item, `sequence.${stepId}.output`))
       .filter((ref) => ref.startsWith("slot:"))
       .map((ref) => ref.slice("slot:".length)),
@@ -1924,36 +2121,57 @@ function attachInstructionOutputs(
   let text = "";
   const refs: string[] = [];
   const optionalRefs: string[] = [];
+  const virtualSlots: SlotHandle[] = [];
   let counter = 1;
-  for (const handle of instructionOutputs) {
+  const mintAutoId = (): string => {
     const autoId = counter === 1 ? stepId : `${stepId}-${counter}`;
     counter += 1;
     if (usedIds.has(autoId)) {
       throw new Error(
-        `procedure.sequence ${stepId}: output.text/output.of auto-declared slot ${autoId} collides with the ` +
-          `hand-declared slot ${autoId} in the same output: list — rename the hand-declared slot`,
+        `procedure.sequence ${stepId}: output auto-declared slot ${autoId} collides with the hand-declared ` +
+          `slot ${autoId} in the same output: list — rename the hand-declared slot`,
       );
     }
     usedIds.add(autoId);
-    const content = instructionOutputContent(handle);
-    if (content === undefined) {
-      throw new Error(`procedure.sequence ${stepId}: expected an output.text/output.of value in output:`);
+    return autoId;
+  };
+  const rewrittenItems = items.map((item) => {
+    if (isInstructionOutputHandle(item)) {
+      const autoId = mintAutoId();
+      const content = instructionOutputContent(item);
+      if (content === undefined) {
+        throw new Error(`procedure.sequence ${stepId}: expected an output.text/output.of value in output:`);
+      }
+      const slotDeclaration = compact({
+        id: autoId,
+        schema: content.schemaRef ?? "schema:text",
+        description: `Runtime slot ${autoId}.`,
+      });
+      attachInstructionOutput(item, `slot:${autoId}`, slotDeclaration);
+      text +=
+        (text === "" ? "" : "\n\n") +
+        (content.schemaRef === undefined
+          ? OUTPUT_RENDER_V1.text(content.text)
+          : OUTPUT_RENDER_V1.of(content.text, content.schemaRef));
+      refs.push(...(content.refs ?? []));
+      optionalRefs.push(...(content.optionalRefs ?? []));
+      return item;
     }
-    const slotDeclaration = compact({
-      id: autoId,
-      schema: content.schemaRef ?? "schema:text",
-      description: `Runtime slot ${autoId}.`,
-    });
-    attachInstructionOutput(handle, `slot:${autoId}`, slotDeclaration);
-    text +=
-      (text === "" ? "" : "\n\n") +
-      (content.schemaRef === undefined
-        ? OUTPUT_RENDER_V1.text(content.text)
-        : OUTPUT_RENDER_V1.of(content.text, content.schemaRef));
-    refs.push(...(content.refs ?? []));
-    optionalRefs.push(...(content.optionalRefs ?? []));
-  }
-  return { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs) };
+    if (isVirtualSlotOutputItem(item)) {
+      const autoId = mintAutoId();
+      const virtualSlot = mintAutoSlot(autoId, item as SchemaValue);
+      virtualSlots.push(virtualSlot);
+      return virtualSlot;
+    }
+    return item;
+  });
+  return {
+    outputValue: rewrittenItems as readonly SequenceOutputValue[],
+    instructionRender: hasInstructionOutputs
+      ? { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs) }
+      : undefined,
+    virtualSlots,
+  };
 }
 /**
  * Appends an instruction-output render block onto the attaching step's

@@ -1,7 +1,7 @@
 import type { SchemaValue } from "./authoring-types.js";
 import { schemaForms } from "./generated.js";
 import type { JsonObject, JsonValue, SchemaBuiltin } from "./generated.js";
-import type { SchemaHandle, SchemaRef } from "./handles.js";
+import type { SchemaHandle, SchemaRef, SchemaRefLiteral } from "./handles.js";
 import { attachMeta, metaOf, withDeclaration, withMeta } from "./meta.js";
 import type { CdkObject } from "./meta.js";
 import { collectMany, compact, stableObject, validateSlug } from "./normalize.js";
@@ -64,7 +64,7 @@ export type SchemaObjectFields = Record<string, SchemaObjectField>;
  * field (see `SchemaObjectHandle`).
  */
 export interface SchemaFieldRecord {
-  readonly schema: string;
+  readonly schema: SchemaRefLiteral;
   readonly required?: boolean;
   readonly description?: string;
   readonly hint?: string;
@@ -807,7 +807,13 @@ function schemaFieldDeclarationSources(field: SchemaObjectField): unknown[] {
 
 function schemaFieldDeclaration(field: SchemaObjectField, fieldPath: string): SchemaFieldRecord {
   if (metaOf(field)?.ref !== undefined || typeof field === "string") {
-    return { schema: refText(field as SchemaValue, `${fieldPath}.schema`), required: true };
+    // `refText` returns a plain `string`; this branch only ever runs on a value
+    // already known to carry a `schema:*`/`[...]`/`(...)` ref (a `meta.ref` or a
+    // bare string field), so the narrowing is audited, not asserted blind.
+    return {
+      schema: refText(field as SchemaValue, `${fieldPath}.schema`) as SchemaRefLiteral,
+      required: true,
+    };
   }
   const fieldObject = field as SchemaFieldFields | SchemaEnumSpec;
   const enumSpec = schemaEnumSpecValue(fieldObject.schema);

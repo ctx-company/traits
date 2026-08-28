@@ -32,7 +32,7 @@ import {
   useVariant,
 } from "@ctx-traits/cdk";
 import { defineVariant, isTraitFamilyHandle, resolveTraitFamily, variant } from "@ctx-traits/cdk";
-import type { JsonObject } from "@ctx-traits/cdk";
+import type { FieldRef, JsonObject, ParameterizedStep, SlotHandle } from "@ctx-traits/cdk";
 import { describe, expect, it } from "vitest";
 
 describe("functional layer build rules (0106)", () => {
@@ -606,6 +606,146 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       "check-working-tree-status",
       "show-the-current-ref",
     ]);
+  });
+
+  it("a parameterized defineStep.command factory binds a fresh ref per instantiation", () => {
+    const first = slot.text("factory-command-first");
+    const second = slot.text("factory-command-second");
+    const status = defineStep.command((target: SlotHandle<string>) => ({
+      input: input.command`git log ${target}`,
+      output: target,
+    }));
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("factory-command", { description: "parameterized command factory." });
+      status("Log first", first);
+      status("Log second", second);
+    });
+    const draft = envelope.draft as {
+      readonly procedure?: { readonly sequence?: readonly { readonly id?: string; readonly output?: unknown }[] };
+    };
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual(["slot:factory-command-first"]);
+    expect(draft.procedure?.sequence?.[1]?.output).toEqual(["slot:factory-command-second"]);
+  });
+
+  it("a parameterized defineStep.prompt factory's unannotated param interpolates with no cast", () => {
+    const target = slot.text("factory-prompt-target");
+    const notes = slot.text("factory-prompt-notes");
+    const surveyStep = defineStep.prompt((subject) => ({
+      agent: agent.worker("factory-worker"),
+      input: input.prompt`Survey ${subject}.`,
+      output: notes,
+    }));
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("factory-prompt", { description: "parameterized prompt factory." });
+      surveyStep("Survey the target", target);
+    });
+    const draft = envelope.draft as {
+      readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[] }>;
+    };
+    expect(draft.prompt?.["survey-the-target"]?.input).toEqual(["slot:factory-prompt-target"]);
+    expect(draft.prompt?.["survey-the-target"]?.text).toBe("Survey {slot:factory-prompt-target}.");
+  });
+
+  it("a parameterized defineStep.check factory keeps .pass typing through gate.pass.ok", () => {
+    const marker = slot.text("factory-check-marker");
+    const verdict = slot({
+      id: "factory-check-verdict",
+      schema: schema.object("factory-check-result", {
+        ok: schema.field(schema.boolean()),
+        argv: schema.field(schema.list(schema.text())),
+      }),
+    });
+    const gate = defineStep.check((cmdTarget: SlotHandle<string>) => ({
+      input: input.command`test -f ${cmdTarget}`,
+      output: verdict,
+    }));
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("factory-check", { description: "parameterized check factory." });
+      const placed = gate("Check marker", marker);
+      expect(placed.pass.ok).toBeDefined();
+    });
+    expect(envelope.draft).toBeDefined();
+  });
+
+  it("a parameterized step factory's arity and ref kind are checked at the instantiation call site (typecheck only)", () => {
+    if (false) {
+      const textTarget = slot.text("factory-typed-target");
+      const numberTarget = slot.number("factory-typed-number");
+      const status = defineStep.command((target: SlotHandle<string>) => ({
+        input: input.command`git log ${target}`,
+        output: target,
+      }));
+      // @ts-expect-error too few refs — the factory declares one positional ref.
+      status("Missing ref");
+      // @ts-expect-error too many refs — the factory declares exactly one positional ref.
+      status("Extra ref", textTarget, textTarget);
+      // @ts-expect-error wrong kind — the factory's ref is annotated SlotHandle<string>, not SlotHandle<number>.
+      status("Wrong kind", numberTarget);
+      status("Right shape", textTarget);
+    }
+  });
+
+  it("a factory-declared prompt or command exposes .result with the full augmented handle (typecheck only)", () => {
+    if (false) {
+      const commandStep = defineStep.command(() => ({
+        input: input.command`git status --porcelain`,
+        output: schema.text(),
+      }));
+      const placedCommand = commandStep("Status");
+      placedCommand.result satisfies SlotHandle<string>;
+      placedCommand.result.optional().optional satisfies true;
+      placedCommand.result.with; // present on the type — the augmented handle, not a bare SlotHandle
+      // The virtual slot is consumable by a later step, exactly like a hand-declared one.
+      step.command("Log", { cmd: "log", input: [placedCommand.result] });
+
+      const promptStep = defineStep.prompt((subject: SlotHandle<string>) => ({
+        agent: agent.worker("factory-result-worker"),
+        input: input.prompt`Survey ${subject}.`,
+        output: schema.text(),
+      }));
+      const placedPrompt = promptStep("Survey", slot.text("factory-result-subject"));
+      placedPrompt.result satisfies SlotHandle<string>;
+
+      // `ParameterizedStep` is importable from the package root, not just the internal functional module path —
+      // `commandStep` (a real `defineStep.command((...refs) => ...)` factory) satisfies it directly, no cast.
+      const rootImported: ParameterizedStep<readonly [], typeof placedCommand> = commandStep;
+      void rootImported;
+
+      // A factory-declared step with a HETEROGENEOUS schema tuple output routes
+      // through the same VirtualSlotSurfaceOf as a static-fields step (0253.3) —
+      // `.results` keeps each member's own inferred type, not `unknown`.
+      const findingSchema = schema.object("factory-result-finding", { file: schema.text(), summary: schema.text() });
+      const multiStep = defineStep.command(() => ({
+        input: input.command`find-issue`,
+        output: [schema.text(), findingSchema] as const,
+      }));
+      const placedMulti = multiStep("Find");
+      placedMulti.results[0] satisfies SlotHandle<string>;
+      placedMulti.results[1].file satisfies FieldRef<string>;
+    }
+  });
+
+  it("a declared/factory step with no output: never types .result (typecheck only)", () => {
+    if (false) {
+      // `.result` alone would still type-check as `unknown` through `CdkObject`'s
+      // index signature — calling `.optional()` is the check that actually
+      // needs a real virtual-slot handle to compile.
+      const noOutputDeclared = defineStep.command({ input: input.command`git status --porcelain` });
+      const placedNoOutput = noOutputDeclared("Status");
+      // @ts-expect-error no output: at all — a plain SequenceHandle, no .result promised.
+      placedNoOutput.result.optional();
+
+      const noOutputFactory = defineStep.command(() => ({ input: input.command`git status --porcelain` }));
+      const placedFactoryNoOutput = noOutputFactory("Status");
+      // @ts-expect-error same guard through the factory overload.
+      placedFactoryNoOutput.result.optional();
+
+      const named = slot.text("factory-named-only");
+      const namedOutputDeclared = defineStep.command({ input: input.command`git log`, output: named });
+      const placedNamed = namedOutputDeclared("Log");
+      // @ts-expect-error a hand-declared named slot output is not virtual — no .result promised.
+      placedNamed.result.optional();
+    }
   });
 
   it("defineTrait derives the canonical id from a display name and keeps the name", () => {

@@ -2,7 +2,7 @@ import type { SettingHandle as ConfigSettingHandle } from "@ctx-traits/config";
 import type { ForEachParam } from "./functional/registrars.js";
 import type { CanonicalGuardPredicate, JsonValue, RefKind, WriteOperation } from "./generated.js";
 import type { CdkObject } from "./meta.js";
-import type { PromptRegistrarOptions } from "./sequence.js";
+import type { PromptRegistrarFn } from "./sequence.js";
 
 declare const HANDLE_BRAND: unique symbol;
 declare const HANDLE_VALUE: unique symbol;
@@ -160,11 +160,42 @@ export type ResourceHandle<Value = unknown> = Handle<"resource", Value>;
  * builder and carries the registrar.
  */
 export type AgentHandle = Handle<"agent"> & {
-  readonly prompt: (title: string, opts: PromptRegistrarOptions) => SequenceHandle;
+  readonly prompt: PromptRegistrarFn;
 };
 export type SchemaHandle<Value = unknown> = Handle<"schema", Value>;
-/** A built-in or collection schema reference with its represented value type. */
-export type SchemaRef<Value = unknown> = string & { readonly __ctxTraitSchemaValue?: Value };
+/**
+ * The three ref shapes lowering ever actually produces — `schema:*`
+ * (builtins, enums, objects), `[...]` (`schema.list`), `(...)`
+ * (`schema.union`) — the same family {@link SchemaForm} names for the
+ * canonical side. Unbranded (no phantom `Value` property), so an already-
+ * lowered field record's `.schema` (genuinely just one of these three
+ * shapes, but not itself tagged with a represented-value type) stays
+ * structurally assignable into `SchemaRef<Value>` for any `Value`, the same
+ * way a bare `string` used to.
+ */
+export type SchemaRefLiteral = `schema:${string}` | `[${string}]` | `(${string})`;
+/**
+ * A built-in or collection schema reference with its represented value type.
+ * Branded to {@link SchemaRefLiteral} — narrower than a bare `string`, so an
+ * arbitrary string (a `slot:*`/`port:*` ref, a typo) cannot type-check as a
+ * virtual-slot `output:` member (`isVirtualSlotOutputItem`, sequence.ts) and
+ * then attach nothing at runtime.
+ */
+export type SchemaRef<Value = unknown> = SchemaRefLiteral & { readonly __ctxTraitSchemaValue?: Value };
+/**
+ * Runtime counterpart of {@link SchemaRefLiteral} — true for a `schema:*`
+ * builtin ref, a `[...]` list ref, or a `(...)` union ref, and only those.
+ * The one place lowering (`isVirtualSlotOutputItem`, sequence.ts) decides
+ * whether an `output:` string is a virtual-slot schema ref; keep this in
+ * sync with `SchemaRefLiteral`'s three shapes rather than re-deriving it.
+ */
+export function isSchemaRefLiteral(value: string): value is SchemaRefLiteral {
+  return (
+    value.startsWith("schema:") ||
+    (value.startsWith("[") && value.endsWith("]")) ||
+    (value.startsWith("(") && value.endsWith(")"))
+  );
+}
 export type SequenceHandle<Input = unknown, Output = unknown> = CdkHandle<
   "sequence-step",
   { readonly input: Input; readonly output: Output }

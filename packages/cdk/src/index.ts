@@ -43,6 +43,7 @@ export type {
   CheckStep,
   CheckStepFields,
   CommandStepFields,
+  ParameterizedStep,
   ProcedureFromFields,
   ProcedureFromFunction,
   PromptStepFields,

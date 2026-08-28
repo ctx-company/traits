@@ -25,6 +25,7 @@ import {
   signal,
   slot,
   snippet,
+  step,
   steps,
   table,
   toDraftJson,
@@ -51,6 +52,7 @@ import type {
   SchemaHandle,
   SchemaUnionHandle,
   SchemaValue,
+  SequenceHandle,
   SessionBinding,
   SessionHandle,
   SignalFieldRef,
@@ -1435,6 +1437,244 @@ describe("input.prompt / output.text / output.of (0045)", () => {
     expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-multi", "slot:io-multi-2"] });
   });
 
+  it("a bare schema as output: lowers to a virtual slot, addressed only via the handle's .result", () => {
+    const step = sequence.command("io-virtual-status", { cmd: "git status --porcelain", output: schema.text() });
+    const draft = toDraftJson(
+      trait({
+        id: "io-virtual-slot",
+        name: "IO Virtual Slot",
+        description: "virtual slot fixture.",
+        procedure: procedure({ description: "Status.", sequence: [step] }),
+      }),
+    ) as {
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+      readonly slot?: readonly { readonly id?: string; readonly schema?: string }[];
+    };
+
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-virtual-status"] });
+    expect(draft.slot).toContainEqual(expect.objectContaining({ id: "io-virtual-status", schema: "schema:text" }));
+    expect(step.result).toBeDefined();
+    expect(step.result.optional().optional).toBe(true);
+    expectTypeOf(step.result.with).toBeFunction();
+  });
+
+  it("a virtual slot's .result carries the full augmented handle — object-schema field refs included", () => {
+    const findingSchema = schema.object("io-virtual-finding", { file: schema.text(), summary: schema.text() });
+    const step = sequence.command("io-virtual-object", { cmd: "find-issue", output: findingSchema });
+
+    expectTypeOf(step.result.file).toMatchTypeOf<FieldRef<string>>();
+    expectTypeOf(step.result.summary).toMatchTypeOf<FieldRef<string>>();
+    expectTypeOf(step.result.optional).toBeFunction();
+    expectTypeOf(step.result.with).toBeFunction();
+  });
+
+  it("a virtual slot never records an author mint — a functional trait reading only .result never triggers checkNeverReferenced", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("io-virtual-slot-functional", { description: "virtual slot, functional layer." });
+      const status = step.command("Status", { cmd: "git status --porcelain", output: schema.text() });
+      step.command("Log", { cmd: "log", input: [status.result] });
+    });
+    expect(envelope.draft).toBeDefined();
+  });
+
+  it("a second virtual output on the same step takes the <step-id>-2 auto id, and .results lists both in order", () => {
+    const step = sequence.command("io-virtual-multi", {
+      cmd: "produce",
+      output: [schema.text(), schema.number()],
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "io-virtual-multi",
+        name: "IO Virtual Multi",
+        description: "multi virtual slot fixture.",
+        procedure: procedure({ description: "Multi.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
+
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({
+      output: ["slot:io-virtual-multi", "slot:io-virtual-multi-2"],
+    });
+    const results = step.results;
+    expect(results).toHaveLength(2);
+    // Cardinality is exclusive: a multi-output step owns `.results` ONLY —
+    // no stray singular `.result` left over from attaching it first.
+    expect(Object.hasOwn(step, "result")).toBe(false);
+  });
+
+  it("a schema.list(...) or schema.union(...) virtual output types .result and lowers to an auto-named slot ref", () => {
+    const listStep = sequence.command("io-virtual-list", {
+      cmd: "produce",
+      output: schema.list(schema.text()),
+    });
+    expectTypeOf(listStep.result).toMatchTypeOf<SlotHandle<readonly string[]>>();
+    expect(listStep.result).toBeDefined();
+    expect(listStep.result.optional().optional).toBe(true);
+
+    const unionStep = sequence.command("io-virtual-union", {
+      cmd: "produce",
+      output: schema.union([schema.text(), schema.number()]),
+    });
+    expectTypeOf(unionStep.result).toMatchTypeOf<SlotHandle<string | number>>();
+    expect(unionStep.result).toBeDefined();
+
+    const draft = toDraftJson(
+      trait({
+        id: "io-virtual-collection",
+        name: "IO Virtual Collection",
+        description: "list/union virtual slot fixture.",
+        procedure: procedure({ description: "Collection.", sequence: [listStep, unionStep] }),
+      }),
+    ) as {
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+      readonly slot?: readonly { readonly id?: string; readonly schema?: string }[];
+    };
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-virtual-list"] });
+    expect(draft.procedure?.sequence?.[1]).toMatchObject({ output: ["slot:io-virtual-union"] });
+    expect(draft.slot).toContainEqual(expect.objectContaining({ id: "io-virtual-list", schema: "[schema:text]" }));
+    expect(draft.slot).toContainEqual(
+      expect.objectContaining({ id: "io-virtual-union", schema: "(schema:text|schema:number)" }),
+    );
+  });
+
+  it("a virtual output colliding with a hand-declared slot of the same auto id throws", () => {
+    const clashing = slot.text("io-virtual-clash");
+    expect(() => sequence.command("io-virtual-clash", { cmd: "produce", output: [clashing, schema.text()] })).toThrow(
+      /collides with the hand-declared slot/,
+    );
+  });
+
+  it("a virtual slot alongside an output.text on the same prompt step shares one auto-id counter", () => {
+    const step = sequence.prompt("io-virtual-and-instruction", {
+      input: input.prompt`Do the work.`,
+      output: [output.text`Summary.`, schema.number()],
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "io-virtual-and-instruction",
+        name: "IO Virtual And Instruction",
+        description: "mixed auto-slot fixture.",
+        procedure: procedure({ description: "Mixed.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
+
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({
+      output: ["slot:io-virtual-and-instruction", "slot:io-virtual-and-instruction-2"],
+    });
+  });
+
+  it("the positional sequence.prompt(id, fields) form types .result the same as the object-only form", () => {
+    const step = sequence.prompt("io-virtual-positional", {
+      input: input.prompt`Summarize the diff.`,
+      output: schema.text(),
+    });
+    expectTypeOf(step.result.optional).toBeFunction();
+    expectTypeOf(step.result.with).toBeFunction();
+    expect(step.result).toBeDefined();
+  });
+
+  it("the deprecated object-only sequence.command(fields) form types .result for a bare-schema output", () => {
+    const step = sequence.command({
+      id: "io-virtual-object-only",
+      cmd: "git status --porcelain",
+      output: schema.text(),
+    });
+    expectTypeOf(step.result.optional).toBeFunction();
+    expect(step.result).toBeDefined();
+  });
+
+  it("a one-element schema array types .result, not .results — cardinality matches the runtime attachment", () => {
+    const step = sequence.command("io-virtual-single-array", { cmd: "produce", output: [schema.text()] });
+    expectTypeOf(step.result.optional).toBeFunction();
+    // `.result` is the ONLY virtual-slot property the type exposes here — a
+    // `.results` read would be a compile error, matching `sequenceOf`'s
+    // runtime attachment (one virtual slot => `.result`, not `.results`).
+    expect((step as unknown as { readonly results?: unknown }).results).toBeUndefined();
+    expect(step.result).toBeDefined();
+  });
+
+  it("a mixed named-slot/schema output array still types .result for the sole virtual member", () => {
+    const named = slot.text("io-virtual-mixed-named");
+    const step = sequence.command("io-virtual-mixed", { cmd: "produce", output: [named, schema.number()] });
+    expectTypeOf(step.result.optional).toBeFunction();
+    const draft = toDraftJson(
+      trait({
+        id: "io-virtual-mixed-trait",
+        name: "IO Virtual Mixed",
+        description: "mixed named/virtual output fixture.",
+        procedure: procedure({ description: "Mixed.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({
+      output: ["slot:io-virtual-mixed-named", "slot:io-virtual-mixed"],
+    });
+    expect(step.result).toBeDefined();
+  });
+
+  it("a heterogeneous schema tuple's .results keeps each member's own inferred type, object fields included", () => {
+    const findingSchema = schema.object("io-virtual-tuple-finding", { file: schema.text(), summary: schema.text() });
+    const step = sequence.command("io-virtual-tuple", {
+      cmd: "produce",
+      output: [schema.text(), schema.number(), findingSchema],
+    });
+    expectTypeOf(step.results[0]).toMatchTypeOf<SlotHandle<string>>();
+    expectTypeOf(step.results[1]).toMatchTypeOf<SlotHandle<number>>();
+    expectTypeOf(step.results[2].file).toMatchTypeOf<FieldRef<string>>();
+    expectTypeOf(step.results[2].summary).toMatchTypeOf<FieldRef<string>>();
+    expect(step.results).toHaveLength(3);
+  });
+
+  it("a step with no output:, a named-slot output, or a raw non-schema output string never types .result (typecheck only)", () => {
+    if (false) {
+      // `.result`/`.result.optional` alone would still type-check as `unknown`
+      // through `CdkObject`'s index signature — calling `.optional()` is the
+      // check that actually needs a real virtual-slot handle to compile.
+      const noOutput = sequence.command("io-no-output", { cmd: "produce" });
+      // @ts-expect-error no output: at all — StepResultOf must fall to plain SequenceHandle, not `never extends SchemaValue`.
+      noOutput.result.optional();
+
+      const named = slot.text("io-named-only");
+      const namedOutput = sequence.command("io-named-output", { cmd: "produce", output: named });
+      // @ts-expect-error a hand-declared named slot is not a virtual slot — no .result promised.
+      namedOutput.result.optional();
+
+      // A raw string is no longer assignable to output: at all — SchemaRef is
+      // branded to the schema:*/[...]/(...) family a real schema builder
+      // produces, so a `slot:*` (or any other) ref string cannot masquerade
+      // as a bare schema and then attach nothing at runtime.
+      // @ts-expect-error "slot:existing" is not a SequenceOutputValue.
+      sequence.command("io-garbage-output", { cmd: "produce", output: "slot:existing" });
+    }
+  });
+
+  it("a literal schema:* builtin and a builder-produced object schema still type .result with no cast", () => {
+    const builtin = sequence.command("io-builtin-result", { cmd: "produce", output: schema.text() });
+    expectTypeOf(builtin.result).toMatchTypeOf<SlotHandle<string>>();
+    expect(builtin.result).toBeDefined();
+
+    const findingSchema = schema.object("io-builder-result-finding", { file: schema.text() });
+    const built = sequence.command("io-builder-result", { cmd: "produce", output: findingSchema });
+    expectTypeOf(built.result.file).toMatchTypeOf<FieldRef<string>>();
+    expect(built.result).toBeDefined();
+  });
+
+  it("a named-slot sequence.prompt output still types the represented Output — the 0253.3 virtual-slot overload rewrite must not regress it", () => {
+    const verdict = slot.text("io-prompt-output-regression-verdict");
+    const named = sequence.prompt("io-prompt-output-regression", {
+      input: input.prompt`Review.`,
+      output: verdict,
+    });
+    expectTypeOf(named).toMatchTypeOf<SequenceHandle<unknown, string>>();
+    // A bare-schema (virtual-slot) output keeps typing `.result` alongside —
+    // the two concerns (represented Output, virtual-slot surface) must not
+    // trade off against each other.
+    const bare = sequence.prompt("io-prompt-output-regression-virtual", {
+      input: input.prompt`Review.`,
+      output: schema.text(),
+    });
+    expectTypeOf(bare.result).toMatchTypeOf<SlotHandle<string>>();
+    expect(bare.result).toBeDefined();
+  });
+
   it("an interpolated instruction-output resolves to the attaching step's slot once authored produce-then-consume", () => {
     const summary = output.text`A one-paragraph summary.`;
     const producer = sequence.prompt("io-produce", {
@@ -2766,6 +3006,27 @@ describe("slot.with (0210)", () => {
 
     const listSlot = slot.texts("findings");
     expect(draftFor(listSlot.with(operation.Append))).toEqual(draftFor(operation.over(listSlot, operation.Append)));
+  });
+
+  it("two steps each appending to one list-of-text slot both land as ordered output-sink entries (0253.3 accumulation proof)", () => {
+    const findings = slot.list(schema.text(), "owner-decisions");
+    const draft = toDraftJson(
+      trait({
+        id: "append-accumulation",
+        name: "Append Accumulation",
+        description: "Two steps append into the same slot.",
+        procedure: procedure({
+          description: "Accumulate.",
+          sequence: [
+            sequence.command("first-decision", { cmd: "echo first", output: findings.with(operation.Append) }),
+            sequence.command("second-decision", { cmd: "echo second", output: findings.with(operation.Append) }),
+          ],
+        }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown }[] } };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual([{ slot: "slot:owner-decisions", operation: "append" }]);
+    expect(draft.procedure?.sequence?.[1]?.output).toEqual([{ slot: "slot:owner-decisions", operation: "append" }]);
   });
 
   it("never serializes .with itself into the canonical slot declaration", () => {
