@@ -43,6 +43,13 @@ export const commitMessage = cdk.slot.text({
   description: "Commit message for the completed task; injected directly into the git commit command step.",
 });
 
+export const ownerDecisions = cdk.slot.texts({
+  id: "owner-decisions",
+  description:
+    "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message.",
+  hint: "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences.",
+});
+
 export const gitStatus = cdk.slot.text({
   id: "git-status",
   description: "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
@@ -75,6 +82,7 @@ export const slot = {
   verdict1,
   verdict2,
   commitMessage,
+  ownerDecisions,
   gitStatus,
   stageOutput,
 };

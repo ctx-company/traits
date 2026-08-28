@@ -23,6 +23,7 @@ export const commitMessage = cdk.defineStep.prompt({
   input: cdk.input.prompt`
     The work for ${port.task} is being committed.
     Write a concise commit message from the work summary into ${slot.workSummary}.
+    Owner rulings made during this run (if any): ${slot.ownerDecisions.optional()} — when one shaped the work, cite what the owner decided in the message body.
   `,
   output: cdk.output.prompt`
     Return exactly the finished commit message into (${slot.commitMessage}).

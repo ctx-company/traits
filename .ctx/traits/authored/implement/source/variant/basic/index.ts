@@ -1,4 +1,5 @@
 import * as cdk from "@ctx-traits/cdk";
+import * as agents from "@ctx-traits/agents";
 import * as shared from "#trait/shared/index.ts";
 
 export default function () {
@@ -13,7 +14,12 @@ export default function () {
   cdk.flow.loop("Reviewed refinement", (loop) => {
     shared.step.work.implement("Implement the task");
     shared.step.diff.capture("Capture the changed files");
-    shared.step.review.primary("Review the implementation");
+    shared.step.review.primarySummoning("Review the implementation");
+
+    cdk.flow.when("Owner ruling", cdk.condition.signal(agents.needsOwnerSignal), () => {
+      const ruling = shared.step.summon.ask("Summon the owner", agents.needsOwnerSignal);
+      shared.step.summon.record("Record the owner's ruling", agents.needsOwnerSignal, ruling.result);
+    });
 
     // No round ceiling: the loop ends when the reviewer approves, and the
     // run's own frame/time budgets are the outer stop. A ceiling here only
