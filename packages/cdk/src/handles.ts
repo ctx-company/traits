@@ -7,6 +7,7 @@ import type { PromptRegistrarOptions } from "./sequence.js";
 declare const HANDLE_BRAND: unique symbol;
 declare const HANDLE_VALUE: unique symbol;
 declare const FIELD_REF_BRAND: unique symbol;
+declare const SIGNAL_FIELD_REF_BRAND: unique symbol;
 
 /** Phantom identity carried by every CDK handle. */
 export type Brand<K extends string> = { readonly [HANDLE_BRAND]: K };
@@ -34,19 +35,47 @@ export type WithHandleValue<T extends object, Value> = T & { readonly [HANDLE_VA
 export type FieldRef<Value = unknown> = CdkObject & { readonly [FIELD_REF_BRAND]?: Value };
 
 /**
- * Maps an inferred object-schema value type to the field-ref proxy an
- * object-schema slot exposes: one `FieldRef<Value[K]>` per declared field.
- * When a field's own value is itself an object (not a list), the field ref
- * recurses and re-exposes `ObjectFieldRefs<Value[K]>` too, so `slot.a.b.c`
- * typechecks — mirroring `slot.a` minting a dotted `fieldRef.field` instead
- * of a plain name. Lists stop the recursion: a path is a sequence of object
- * field names only (task 0085's decision), no list indexing/wildcards.
+ * A typed reference to one payload field of a schema'd signal, produced by
+ * `signal.foo` field access — the signal analogue of {@link FieldRef}, kept
+ * a distinct branded type (not `FieldRef` itself) so `PromptInterpolation`
+ * can accept a signal field ref without also accepting a slot `FieldRef`,
+ * which carries no `meta.ref` and is not a legal prompt interpolation site.
+ * Carries `meta.ref = "signal:<id>.<dotted.path>"` (see `Meta.ref`), so
+ * `${signal.reason}` type-checks and resolves through the identical
+ * `promptTemplate`/`resolvePromptRef` machinery a plain ref handle does —
+ * unlike `FieldRef`, which resolves only through `Meta.fieldRef` for
+ * `condition.equals`.
  */
-export type ObjectFieldRefs<Value> = {
-  readonly [K in keyof Value]-?: FieldRef<Value[K]> &
+// The brand is REQUIRED (not `?:`), unlike `FieldRef`/`Handle`'s optional
+// phantoms: an optional unique-symbol property is satisfied by mere absence,
+// so plain `CdkObject` — and every other handle/`FieldRef` built on it —
+// would structurally match this type for free and silently pass
+// `PromptInterpolation`'s union check. Only a value actually minted through
+// the signal field-ref path (cast at the mint site, never satisfied
+// structurally) carries this key.
+export type SignalFieldRef<Value = unknown> = CdkObject & { readonly [SIGNAL_FIELD_REF_BRAND]: Value };
+
+/**
+ * Maps an inferred object-schema value type to the field-ref proxy an
+ * object-schema slot/signal exposes: one `Ref<Value[K]>` per declared field,
+ * where `Ref` is `FieldRef` for a slot (`Kind` defaults to `"field"`) or
+ * `SignalFieldRef` for a schema'd signal (`Kind: "signal-field"`). When a
+ * field's own value is itself an object (not a list), the field ref
+ * recurses and re-exposes `ObjectFieldRefs<Value[K], Kind>` too, so
+ * `slot.a.b.c`/`signal.a.b.c` typecheck — mirroring the parent minting a
+ * dotted path instead of a plain name. Lists stop the recursion: a path is a
+ * sequence of object field names only (task 0085's decision), no list
+ * indexing/wildcards.
+ */
+export type ObjectFieldRefs<Value, Kind extends "field" | "signal-field" = "field"> = {
+  readonly [K in keyof Value]-?: (Kind extends "signal-field" ? SignalFieldRef<Value[K]> : FieldRef<Value[K]>) &
     // `unknown` here is the intersection identity (`T & unknown` = `T`) — a list or scalar field
-    // contributes no extra field-ref surface beyond `FieldRef<Value[K]>` above.
-    (Value[K] extends readonly unknown[] ? unknown : Value[K] extends object ? ObjectFieldRefs<Value[K]> : unknown);
+    // contributes no extra field-ref surface beyond the ref type above.
+    (Value[K] extends readonly unknown[]
+      ? unknown
+      : Value[K] extends object
+        ? ObjectFieldRefs<Value[K], Kind>
+        : unknown);
 };
 
 /** A typed opaque reference emitted by a CDK builder. */
@@ -179,10 +208,20 @@ export type PromptInterpolation<Value = unknown> =
   | ResourceHandle<Value>
   | InstructionOutputHandle<Value>
   | OptionalSlotRead<Value>
-  | PromptTemplate<Value>;
+  | PromptTemplate<Value>
+  | SignalHandle<Value>
+  | SignalFieldRef<Value>;
 
-/** One `output.prompt` interpolation site: a slot or an optional slot read. Lives here for the same anti-cycle reason; output.ts re-exports. */
-export type OutputPromptInterpolation<Value = unknown> = SlotHandle<Value> | OptionalSlotRead<Value>;
+/**
+ * One `output.prompt` interpolation site: a slot, an optional slot read, or
+ * a signal — interpolating a signal itself IS that step's may-emit
+ * declaration (0253.2), lowered to `on-complete` rather than to an output
+ * sink. Lives here for the same anti-cycle reason; output.ts re-exports.
+ */
+export type OutputPromptInterpolation<Value = unknown> =
+  | SlotHandle<Value>
+  | OptionalSlotRead<Value>
+  | SignalHandle<Value>;
 
 /**
  * `.extend`'s callable shape — an INTERFACE so the mutual
@@ -245,4 +284,24 @@ export type OutputTemplateHandle = CdkHandle<"output-template"> & {
 /** A typed reference to a declared `[[session]]`, returned by `session(id, opts)`. */
 export type SessionHandle = Handle<"session">;
 /** A typed reference to a declared `[[signal]]`, returned by `signal(fields)`. */
-export type SignalHandle = Handle<"signal">;
+export type SignalHandle<Value = unknown> = Handle<"signal", Value>;
+/**
+ * A declared object-schema signal handle: the signal analogue of
+ * {@link DeclaredSlotWithFields} — `SignalHandle`'s plain surface plus
+ * {@link SignalWithFields}'s per-field `SignalFieldRef` access, what
+ * `signal(...)` returns when its `schema` is a declared object schema.
+ */
+export type DeclaredSignalWithFields<Value = unknown> = SignalHandle<Value> & SignalWithFields<Value>;
+/**
+ * A signal handle whose payload is an object schema: exposes one
+ * `SignalFieldRef` per declared field (`signal.reason`,
+ * `signal["exit-code"]`) alongside the plain `SignalHandle<Value>` surface.
+ * Scalar/list/unschema'd signals stay a bare `SignalHandle`.
+ */
+export type SignalWithFields<Value = unknown> = SignalHandle<Value> &
+  // `unknown` here is the intersection identity — a list or scalar value adds no field-ref surface.
+  (Value extends readonly unknown[]
+    ? unknown
+    : Value extends object
+      ? ObjectFieldRefs<Value, "signal-field">
+      : unknown);

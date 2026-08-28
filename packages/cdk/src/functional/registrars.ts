@@ -8,7 +8,7 @@
  */
 import type { BranchCheckValue, GuardValue } from "../condition.js";
 import { CONDITION_FALSE, CONDITION_OTHERWISE, CONDITION_TRUE, condition, lowerCheckGuard } from "../condition.js";
-import type { JsonValue } from "../generated.js";
+import type { JsonObject, JsonValue } from "../generated.js";
 import type {
   AgentHandle,
   CheckResultValue,
@@ -47,6 +47,7 @@ import {
   currentScope,
   declareSessionTitleSink,
   dispatchAgentPrompt,
+  guardedSignalsInScope,
   installAgentPromptLowering,
   installSlotForEachLowering,
   nearestScope,
@@ -231,8 +232,60 @@ export const stepRegistrars = {
 // agent.prompt / items.forEach lowering (installed into context.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Enforces 0253.2's compose-time scope rule at the one funnel every prompt
+ * step's body passes through (`step.prompt` and `agent.*.prompt` both
+ * forward to `installAgentPromptLowering`): a signal field ref
+ * (`signal:<id>.<field>`, minted by `${sig.field}` interpolation) is legal
+ * only when `signal:<id>` is in `guardedSignalsInScope()` — the union across
+ * every currently open `flow.when` guarded on `condition.signal(sig)`.
+ * Whole-signal interpolation (`${sig}`, no dot) is NOT gated here — the
+ * emitting step interpolating the signal itself IS the may-emit
+ * declaration. Checked on the leaf's OWN prompt body (`input`/`text`/
+ * `prompt`), never on a composed container item, whose refs belong to the
+ * parent scope's deliberately narrower view.
+ */
+function requireSignalFieldsGuarded(
+  promptOpts: PromptRegistrarOptions,
+  title: string,
+  frame: AuthorFrame | undefined,
+): void {
+  const probe = promptOpts as {
+    readonly input?: unknown;
+    readonly text?: unknown;
+    readonly prompt?: unknown;
+    readonly output?: unknown;
+  };
+  const guarded = guardedSignalsInScope();
+  const outputCandidates = Array.isArray(probe.output) ? probe.output : [probe.output];
+  const refSources = [
+    ...[probe.input, probe.text, probe.prompt].map((candidate) => metaOf(candidate)?.refs ?? []),
+    // `output.text`/`output.of` instruction outputs carry the refs their OWN
+    // interpolated text collected under `Meta.instructionOutput.refs`, not
+    // top-level `Meta.refs` — a signal field ref here is just as much a
+    // prompt read as one in `input`/`prompt`, so it needs the same gate.
+    ...outputCandidates.map((candidate) => metaOf(candidate)?.instructionOutput?.refs ?? []),
+  ];
+  for (const refs of refSources) {
+    for (const ref of refs) {
+      if (!ref.startsWith("signal:") || !ref.includes(".")) continue;
+      const dot = ref.indexOf(".");
+      const signalRef = ref.slice(0, dot);
+      const field = ref.slice(dot + 1);
+      if (guarded.has(signalRef)) continue;
+      throw buildError(
+        title,
+        `${JSON.stringify(signalRef)} field ${JSON.stringify(field)} is readable only inside a flow.when block ` +
+          `guarded on condition.signal(${signalRef.slice("signal:".length)})`,
+        frame,
+      );
+    }
+  }
+}
+
 installAgentPromptLowering((agentHandle, title, promptOpts) => {
   requireBuild(`agent.prompt(${JSON.stringify(title)})`);
+  requireSignalFieldsGuarded(promptOpts, title, captureAuthorFrame());
   const id = promptOpts.id ?? mintId(title);
   const fields = withPositionalWhen({ ...promptOpts, title, agent: agentHandle });
   const item = sequence.prompt({ ...fields, id } as never);
@@ -487,6 +540,99 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
 
 const LOOP_ABORT_ARM_VERBS: Readonly<Partial<Record<SignalVerbName, "abort">>> = { abort: "abort" };
 
+/**
+ * Walks a `flow.when` guard for the signals it observes (0253.2): every
+ * `condition.signal(...)`-built `{ signal: "signal:x" }` leaf, recursed
+ * through `all`/`any`/`not`, plus a bare `"signal:x"` string or typed
+ * `ref.signal(...)`/declared-signal-handle guard. Also recurses into a LOCAL
+ * named condition (`condition.all("id", [...])`/`condition.any(...)`), at any
+ * nesting depth: `normalizeGuard` lowers a nested named-condition handle to
+ * an opaque `"condition:<id>"` string in its parent's predicate JSON, so the
+ * predicate walk alone can't see through it. A first pass collects every
+ * locally reachable condition declaration (keyed by id) off `Meta.declarations
+ * .condition` — populated transitively by `collectMany` at each
+ * `condition.all`/`condition.any` call site, so it already holds every
+ * declaration reachable from `cond` regardless of depth — and the second pass
+ * resolves `"condition:<id>"` refs against that map (cycle-safe via
+ * `visitedConditionIds`). An OPAQUE EXTERNAL `condition:*` reference
+ * (`ref.condition(id)`, or a bare `"condition:id"` string with no matching
+ * local declaration) is never treated as a proven guard, since this module
+ * cannot see what it points at. Feeds `runInScope`'s `guardedSignals`, so a
+ * signal field read (`${sig.reason}`) inside the block's body is legal. A
+ * `sequence.check(...)` gate value (`SequenceHandle & { pass }`) carries no
+ * signal to collect and is silently skipped.
+ */
+function collectGuardedSignals(cond: BranchCheckValue): ReadonlySet<string> {
+  const signals = new Set<string>();
+  const conditionDeclarationsById = new Map<string, JsonObject>();
+  const registerDeclaration = (declaration: JsonObject | undefined): void => {
+    if (declaration === undefined) return;
+    const id = (declaration as { readonly id?: unknown }).id;
+    if (typeof id === "string" && !conditionDeclarationsById.has(id)) conditionDeclarationsById.set(id, declaration);
+  };
+  const collectDeclarations = (value: unknown, seen: Set<object>): void => {
+    if (value === undefined || value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => collectDeclarations(item, seen));
+      return;
+    }
+    if (seen.has(value)) return;
+    seen.add(value);
+    const meta = metaOf(value);
+    if (meta?.kind === "condition") registerDeclaration(meta.declaration as JsonObject | undefined);
+    for (const declaration of meta?.declarations?.condition ?? []) registerDeclaration(declaration);
+  };
+  collectDeclarations(cond, new Set());
+
+  const visitedConditionIds = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (value === undefined || value === null) return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value === "string") {
+      if (value.startsWith("signal:")) {
+        signals.add(value);
+        return;
+      }
+      if (value.startsWith("condition:")) {
+        const id = value.slice("condition:".length);
+        if (visitedConditionIds.has(id)) return;
+        visitedConditionIds.add(id);
+        const declaration = conditionDeclarationsById.get(id);
+        if (declaration !== undefined) visit(declaration);
+      }
+      return;
+    }
+    if (typeof value !== "object") return;
+    const meta = metaOf(value);
+    const ref = meta?.ref;
+    if (typeof ref === "string" && ref.startsWith("signal:")) signals.add(ref);
+    const predicate = value as {
+      readonly signal?: string;
+      readonly all?: readonly unknown[];
+      readonly any?: readonly unknown[];
+      readonly not?: unknown;
+    };
+    if (typeof predicate.signal === "string") signals.add(predicate.signal);
+    if (predicate.all !== undefined) visit(predicate.all);
+    if (predicate.any !== undefined) visit(predicate.any);
+    if (predicate.not !== undefined) visit(predicate.not);
+    // A local named `condition.all`/`condition.any` handle: its own items live
+    // in the declaration (see doc comment above), not as own-enumerable
+    // `all`/`any` properties on the handle itself.
+    const declaration = meta?.declaration as
+      | { readonly all?: readonly unknown[]; readonly any?: readonly unknown[]; readonly not?: unknown }
+      | undefined;
+    if (declaration?.all !== undefined) visit(declaration.all);
+    if (declaration?.any !== undefined) visit(declaration.any);
+    if (declaration?.not !== undefined) visit(declaration.not);
+  };
+  visit(cond);
+  return signals;
+}
+
 function flowWhen(title: string, cond: BranchCheckValue, arm: SignalVerb<"abort">): void;
 function flowWhen(title: string, cond: BranchCheckValue, body: () => void): SequenceHandle;
 function flowWhen(title: string, cond: BranchCheckValue, opts: IdOverride, body: () => void): SequenceHandle;
@@ -512,7 +658,7 @@ function flowWhen(
   const body = typeof thirdArg === "function" ? thirdArg : maybeBody!;
   const id = idOverride ?? mintId(title);
   const label = `flow.when(${JSON.stringify(title)})`;
-  const { scope } = runInScope("when", label, body);
+  const { scope } = runInScope("when", label, body, collectGuardedSignals(cond));
   checkDuplicateTitles(scope.items, label);
   if (scope.items.length === 0) throw buildError(title, "flow.when block registered no steps", frame);
   // Success-only block: an object-layer `branch` has no `when` of its own, so the positional

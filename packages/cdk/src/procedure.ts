@@ -9,7 +9,15 @@ import type {
   ResourceRoot,
   ResourceTrigger,
 } from "./generated.js";
-import type { ProcedureHandle, ResourceHandle, SchemaHandle, SequenceHandle, SignalHandle } from "./handles.js";
+import { fieldRefProxy, objectSchemaFields } from "./field-refs.js";
+import type {
+  DeclaredSignalWithFields,
+  ProcedureHandle,
+  ResourceHandle,
+  SchemaHandle,
+  SequenceHandle,
+  SignalHandle,
+} from "./handles.js";
 import { withDeclaration, withMeta } from "./meta.js";
 import {
   collectDiagnostics,
@@ -21,7 +29,9 @@ import {
   sourceMapForSequenceItems,
   validateSlug,
 } from "./normalize.js";
+import { refText } from "./ref.js";
 import { schema } from "./schema.js";
+import type { SchemaValue } from "./schema.js";
 import { materializeSequenceItem, normalizeMaterializedSequenceItem, validateNoDuplicateTitles } from "./sequence.js";
 import { SIGNAL_ABORT, SIGNAL_CONTINUE, SIGNAL_PARK, SIGNAL_SKIP } from "./signal-verb.js";
 import type { SignalVerb } from "./signal-verb.js";
@@ -59,6 +69,14 @@ export interface RuleFields {
 export interface SignalFields {
   readonly id: string;
   readonly description: string;
+  /**
+   * The signal's payload schema (0253.1/0253.2): when given, `signal(...)`
+   * returns a {@link DeclaredSignalWithFields}, one typed `SignalFieldRef`
+   * per declared field — `${sig.reason}` — usable in a prompt interpolation
+   * anywhere `condition.signal(sig)` guards the enclosing `flow.when`.
+   * Absent, the returned handle is a bare `SignalHandle`, exactly as before.
+   */
+  readonly schema?: SchemaValue;
 }
 
 /** A dependency resolved from a local path relative to the depending package. */
@@ -510,6 +528,22 @@ export function rule(fields: RuleFields): CanonicalRule {
  * rejects one, since a verb is raised, not observed.
  */
 export interface SignalFunction {
+  /**
+   * Full-form schema'd signal declaration: the returned handle also exposes
+   * one typed `SignalFieldRef` per declared payload field —
+   * `sig.reason`/`sig["exit-code"]` — for `${...}` prompt interpolation
+   * inside a `flow.when` block guarded on `condition.signal(sig)`. Tried
+   * before the two bare overloads below — TS resolves overloads in
+   * declaration order, and `schema` is optional on `SignalFields`, so this
+   * schema'd form must come first or a call site that DOES pass `schema`
+   * would still resolve to the bare `SignalHandle` overload.
+   * @example `signal("Review", { description: "...", schema: reviewPayloadSchema })`
+   */
+  <Value>(
+    name: string,
+    fields: Omit<SignalFields, "id"> & { readonly schema: SchemaValue<Value> },
+  ): DeclaredSignalWithFields<Value>;
+  <Value>(fields: SignalFields & { readonly schema: SchemaValue<Value> }): DeclaredSignalWithFields<Value>;
   (name: string, fields: Omit<SignalFields, "id">): SignalHandle;
   (fields: SignalFields): SignalHandle;
   /** Fail the enclosing structure (loop/parallel branch) and propagate — not a run-terminal `flow.error`. */
@@ -539,13 +573,45 @@ export interface SignalFunction {
  */
 function signalFn(name: string, fields: Omit<SignalFields, "id">): SignalHandle;
 function signalFn(fields: SignalFields): SignalHandle;
-function signalFn(first: string | SignalFields, second?: Omit<SignalFields, "id">): SignalHandle {
+function signalFn<Value>(
+  name: string,
+  fields: Omit<SignalFields, "id"> & { readonly schema: SchemaValue<Value> },
+): DeclaredSignalWithFields<Value>;
+function signalFn<Value>(
+  fields: SignalFields & { readonly schema: SchemaValue<Value> },
+): DeclaredSignalWithFields<Value>;
+function signalFn(
+  first: string | SignalFields,
+  second?: Omit<SignalFields, "id">,
+): SignalHandle | DeclaredSignalWithFields {
   const fields = typeof first === "string" ? ({ ...second, id: first } as SignalFields) : first;
   const id = slugFromName(fields.id, "signal.id");
-  const declaration = compact({ ...fields, id });
-  const handle = withDeclaration("signal", `signal:${id}`, declaration, {});
+  // An explicit record, not `compact({ ...fields, id })`: `fields.schema`
+  // (when present) is a `SchemaValue` handle, not the canonical `schema:*`
+  // ref string the declaration must carry — spreading it verbatim would leak
+  // the handle into the built trait instead of its resolved ref.
+  const declaration = compact({
+    id,
+    description: fields.description,
+    schema: fields.schema === undefined ? undefined : refText(fields.schema, "signal.schema"),
+  });
+  const handle = withDeclaration(
+    "signal",
+    `signal:${id}`,
+    declaration,
+    {},
+    {
+      declarations: collectMany([fields.schema]),
+    },
+  );
   recordTraitMint("signal", id, `signal:${id}`, declaration);
-  return handle;
+  const objectFields = fields.schema === undefined ? undefined : objectSchemaFields(fields.schema);
+  if (objectFields === undefined) return handle as SignalHandle;
+  const declarations = collectMany([handle]);
+  return fieldRefProxy(handle as SignalHandle, "signal", id, [], objectFields, declarations, (nextPath, decls) => ({
+    ref: `signal:${id}.${nextPath.join(".")}`,
+    declarations: decls,
+  })) as DeclaredSignalWithFields;
 }
 
 // `Object.assign`'s typing doesn't preserve the merged value's call signature

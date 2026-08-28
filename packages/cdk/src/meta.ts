@@ -126,6 +126,13 @@ export interface Meta {
     readonly refs: readonly string[];
     readonly optionalRefs?: readonly string[];
     readonly slots: readonly (SlotHandle | undefined)[];
+    /**
+     * Signals this `output.prompt` interpolated, in interpolation order — a
+     * SEPARATE list from `refs` (0253.2): interpolating a signal IS that
+     * step's may-emit declaration, appended into `on-complete`, not a slot
+     * output-sink entry.
+     */
+    readonly signals?: readonly string[];
   };
   /**
    * CDK-only provenance recording which step's `output.prompt` first

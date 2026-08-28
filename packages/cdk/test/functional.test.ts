@@ -13,8 +13,10 @@ import {
   flow,
   input,
   intent,
+  output,
   port,
   procedure,
+  ref,
   resource,
   schema,
   seats,
@@ -1537,5 +1539,203 @@ describe("items.forEach typed item slots (0153) + loop scope param (0211)", () =
     expect((flow as { readonly until?: unknown }).until).toBeUndefined();
     expect((flow as { readonly untilAll?: unknown }).untilAll).toBeUndefined();
     expect((flow as { readonly untilAny?: unknown }).untilAny).toBeUndefined();
+  });
+});
+
+describe("signal field scope rule (0253.2)", () => {
+  it("a signal field read inside a flow.when guarded on condition.signal(sig) lowers to {signal:<id>.<field>}, out of the step's input", () => {
+    const worker = agent.worker("signal-scope-worker");
+    const sig = signal({
+      id: "signal-scope-review",
+      description: "d",
+      schema: schema.object("signal-scope-payload", { reason: schema.text() }),
+    });
+    const proc = procedure.from({ description: "d" }, () => {
+      flow.when("Handle Review", condition.signal(sig), () => {
+        step.prompt("Consume", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+      });
+    });
+    const built = toDraftJson(
+      trait("signal-scope-fixture", { name: "Signal Scope Fixture", summary: "s", procedure: proc }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: unknown }> };
+
+    expect(built.prompt?.consume?.text).toBe("Reason: {signal:signal-scope-review.reason}");
+    expect(built.prompt?.consume?.input).toBeUndefined();
+  });
+
+  it("a signal field read outside any guard is a build error naming the signal, the field, and the step", () => {
+    const worker = agent.worker("signal-scope-worker-2");
+    const sig = signal({
+      id: "signal-scope-review-2",
+      description: "d",
+      schema: schema.object("signal-scope-payload-2", { reason: schema.text() }),
+    });
+
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        step.prompt("Unguarded", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+      }),
+    ).toThrow(
+      /"Unguarded".*"signal:signal-scope-review-2" field "reason" is readable only inside a flow\.when block guarded on condition\.signal\(signal-scope-review-2\)/,
+    );
+  });
+
+  it("a signal field read inside a flow.when guarded on a DIFFERENT signal is still a build error", () => {
+    const worker = agent.worker("signal-scope-worker-3");
+    const sig = signal({
+      id: "signal-scope-review-3",
+      description: "d",
+      schema: schema.object("signal-scope-payload-3", { reason: schema.text() }),
+    });
+    const other = signal({ id: "signal-scope-other-3", description: "d" });
+
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.when("Wrong Guard", condition.signal(other), () => {
+          step.prompt("Mismatched", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+        });
+      }),
+    ).toThrow(/"Mismatched".*"signal:signal-scope-review-3" field "reason" is readable only inside a flow\.when/);
+  });
+
+  it("an unguarded signal field read inside an output.text/output.of instruction-output throws too, not just input/prompt/text", () => {
+    const worker = agent.worker("signal-scope-worker-4");
+    const sig = signal({
+      id: "signal-scope-review-4",
+      description: "d",
+      schema: schema.object("signal-scope-payload-4", { reason: schema.text() }),
+    });
+    const proposal = slot.text("signal-scope-output-proposal-4");
+
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        step.prompt("Unguarded Output", {
+          agent: worker,
+          input: input.prompt`Produce a proposal.`,
+          output: [proposal, output.text`Reason: ${sig.reason}`],
+        });
+      }),
+    ).toThrow(
+      /"Unguarded Output".*"signal:signal-scope-review-4" field "reason" is readable only inside a flow\.when block guarded on condition\.signal\(signal-scope-review-4\)/,
+    );
+  });
+
+  it("a guarded signal field read inside an output.text instruction-output is legal", () => {
+    const worker = agent.worker("signal-scope-worker-5");
+    const sig = signal({
+      id: "signal-scope-review-5",
+      description: "d",
+      schema: schema.object("signal-scope-payload-5", { reason: schema.text() }),
+    });
+    const proposal = slot.text("signal-scope-output-proposal-5");
+    const proc = procedure.from({ description: "d" }, () => {
+      flow.when("Handle Review Output", condition.signal(sig), () => {
+        step.prompt("Consume Output", {
+          agent: worker,
+          input: input.prompt`Produce a proposal.`,
+          output: [proposal, output.text`Reason: ${sig.reason}`],
+        });
+      });
+    });
+    const built = toDraftJson(
+      trait("signal-scope-output-fixture", { name: "Signal Scope Output Fixture", summary: "s", procedure: proc }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string }> };
+
+    expect(built.prompt?.["consume-output"]?.text).toContain("Reason: {signal:signal-scope-review-5.reason}");
+  });
+
+  it("a signal field read inside a flow.when guarded through a LOCAL named condition.all(...) wrapping condition.signal(sig) is legal", () => {
+    const worker = agent.worker("signal-scope-worker-6");
+    const sig = signal({
+      id: "signal-scope-review-6",
+      description: "d",
+      schema: schema.object("signal-scope-payload-6", { reason: schema.text() }),
+    });
+    const proc = procedure.from({ description: "d" }, () => {
+      flow.when(
+        "Handle Review Named Guard",
+        condition.all("signal-scope-named-guard-6", [condition.signal(sig)]),
+        () => {
+          step.prompt("Consume Named Guard", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+        },
+      );
+    });
+    const built = toDraftJson(
+      trait("signal-scope-named-guard-fixture", {
+        name: "Signal Scope Named Guard Fixture",
+        summary: "s",
+        procedure: proc,
+      }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string }> };
+
+    expect(built.prompt?.["consume-named-guard"]?.text).toBe("Reason: {signal:signal-scope-review-6.reason}");
+  });
+
+  it("a signal field read inside a flow.when guarded through a NESTED chain of local named conditions is legal", () => {
+    const worker = agent.worker("signal-scope-worker-7");
+    const sig = signal({
+      id: "signal-scope-review-7",
+      description: "d",
+      schema: schema.object("signal-scope-payload-7", { reason: schema.text() }),
+    });
+    const inner = condition.all("signal-scope-inner-guard-7", [condition.signal(sig)]);
+    const outer = condition.all("signal-scope-outer-guard-7", [inner]);
+    const proc = procedure.from({ description: "d" }, () => {
+      flow.when("Handle Review Nested Guard", outer, () => {
+        step.prompt("Consume Nested Guard", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+      });
+    });
+    const built = toDraftJson(
+      trait("signal-scope-nested-guard-fixture", {
+        name: "Signal Scope Nested Guard Fixture",
+        summary: "s",
+        procedure: proc,
+      }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string }> };
+
+    expect(built.prompt?.["consume-nested-guard"]?.text).toBe("Reason: {signal:signal-scope-review-7.reason}");
+  });
+
+  it("a signal field read inside a flow.when guarded on condition.not(localNamedCondition) is legal", () => {
+    const worker = agent.worker("signal-scope-worker-8");
+    const sig = signal({
+      id: "signal-scope-review-8",
+      description: "d",
+      schema: schema.object("signal-scope-payload-8", { reason: schema.text() }),
+    });
+    const named = condition.all("signal-scope-not-guard-8", [condition.signal(sig)]);
+    const proc = procedure.from({ description: "d" }, () => {
+      flow.when("Handle Review Not Guard", condition.not(named), () => {
+        step.prompt("Consume Not Guard", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+      });
+    });
+    const built = toDraftJson(
+      trait("signal-scope-not-guard-fixture", {
+        name: "Signal Scope Not Guard Fixture",
+        summary: "s",
+        procedure: proc,
+      }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string }> };
+
+    expect(built.prompt?.["consume-not-guard"]?.text).toBe("Reason: {signal:signal-scope-review-8.reason}");
+  });
+
+  it("a signal field read guarded only by an OPAQUE external condition ref remains unauthorized", () => {
+    const worker = agent.worker("signal-scope-worker-9");
+    const sig = signal({
+      id: "signal-scope-review-9",
+      description: "d",
+      schema: schema.object("signal-scope-payload-9", { reason: schema.text() }),
+    });
+
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.when("Opaque Guard", ref.condition("signal-scope-external-condition-9"), () => {
+          step.prompt("Consume Opaque Guard", { agent: worker, input: input.prompt`Reason: ${sig.reason}` });
+        });
+      }),
+    ).toThrow(
+      /"Consume Opaque Guard".*"signal:signal-scope-review-9" field "reason" is readable only inside a flow\.when block guarded on condition\.signal\(signal-scope-review-9\)/,
+    );
   });
 });
