@@ -1,0 +1,162 @@
+{
+  "agent:investigator": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 11,
+    "end": 11
+  },
+  "agent:smart-1": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "port:output-dir": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 14,
+    "end": 14
+  },
+  "port:render-report": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 114,
+    "end": 114
+  },
+  "port:topic": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 9,
+    "end": 9
+  },
+  "port:walkthrough-path": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 100,
+    "end": 100
+  },
+  "port:walkthrough-summary": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 107,
+    "end": 107
+  },
+  "prompt:investigating-produce": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 43,
+    "end": 43
+  },
+  "prompt:investigating-review": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 62,
+    "end": 62
+  },
+  "prompt:investigating-summarize": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 55,
+    "end": 55
+  },
+  "resource:render-script": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/resource.ts",
+    "start": 8,
+    "end": 8
+  },
+  "resource:walkthrough-standards": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/resource.ts",
+    "start": 3,
+    "end": 3
+  },
+  "schema:blocker": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 125,
+    "end": 125
+  },
+  "schema:blocker-step": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 91,
+    "end": 91
+  },
+  "schema:code-ref": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 21,
+    "end": 21
+  },
+  "schema:owner-item": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 238,
+    "end": 238
+  },
+  "schema:review-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 322,
+    "end": 322
+  },
+  "schema:walkthrough-node": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 35,
+    "end": 35
+  },
+  "sequence:investigating-body/investigating-produce": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 42,
+    "end": 42
+  },
+  "sequence:investigating-body/investigating-review": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:investigating-body/investigating-summarize": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 54,
+    "end": 54
+  },
+  "sequence:procedure/investigating": {
+    "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
+    "start": 39,
+    "end": 39
+  },
+  "sequence:procedure/render-walkthrough": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
+    "start": 14,
+    "end": 14
+  },
+  "sequence:procedure/topic-slug": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/step/derive.ts",
+    "start": 12,
+    "end": 12
+  },
+  "sequence:procedure/walkthrough-path": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/step/derive.ts",
+    "start": 31,
+    "end": 31
+  },
+  "slot:html-path": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 81,
+    "end": 81
+  },
+  "slot:render-log": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 85,
+    "end": 85
+  },
+  "slot:review-verdict-1": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 94,
+    "end": 94
+  },
+  "slot:topic-slug": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 76,
+    "end": 76
+  },
+  "slot:walkthrough-nodes": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 70,
+    "end": 70
+  },
+  "slot:work-summary": {
+    "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",
+    "start": 89,
+    "end": 89
+  },
+  "trait:walkthrough": {
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
+  }
+}
