@@ -102,8 +102,8 @@ per reconciled ledger (center.rs:1781) and again by `discover_inner`
 after the whole scan (center.rs:1906). A cold build over N ledgers
 therefore rewrites the whole growing table N+1 times — quadratic in row
 count independently of payload size. A metadata-only index that keeps
-whole-table rewrites will still fail the ≤1s and warming goals on a
-2,500-ledger corpus.
+whole-table rewrites will still fail the bind-before-build and warming
+goals on a 2,500-ledger corpus.
 
 ## Correction 2 — deleting rows does not shrink a SQLite file
 
@@ -134,7 +134,7 @@ serializes all matching rows into a single line (center.rs:3070-3073,
 619-628), while subscriptions stream one row per line behind
 `SnapshotEnd` (center.rs:1395-1413, 1910-2060). 2,500 projected
 summaries plausibly exceed 1MiB even with no payload at all. So `List`
-must NOT be the query used to prove ≤1s service, nor the observation
+must NOT be the query used to prove warming service, nor the observation
 used to detect "all rows indexed" — subscription streaming or an
 aggregate response is. Whether `List` itself survives the corpus is a
 measurement this task reports; see the Watch clause.
@@ -417,9 +417,12 @@ second process harness.
 
 - Corpus proof: no pre-existing index, 2,500 valid ledgers totalling at
   least 600MB under a `/tmp` scratch root. Prove a completed center
-  handshake AND an answered query within one second of process start —
-  `await_socket` only proves `connect` (proof_center.rs:40-55), so a
-  bound-but-blocked listener would pass it falsely. Then wait for full
+  handshake AND an answered query while corpus indexing is still in
+  progress — no wall-clock ceiling from process start; a test binary's
+  load time is not the center's latency. `await_socket` only proves
+  `connect` (proof_center.rs:40-55), so a bound-but-blocked listener
+  would pass it falsely — the proof must receive an actual answer before
+  indexing completes. Then wait for full
   indexing through a per-row-streaming or aggregate observation (not
   `List` — Correction 4) and measure the PHYSICAL index file, counting
   any `-wal`/`-journal` sidecar present at rest, at ≤10MB. Generate the
@@ -486,8 +489,9 @@ cleanliness half; the single-commit shape is guidance).
   of test-spawned centers, and sweeping `/tmp` debris. Step 5 governs
   who may SERVE a socket, not when a fixture daemon dies.
 - Dashboard UI changes beyond bucket classification correctness.
-- A disk-fallback resolution path for `ctx traits merge`. With a ≤1s
-  cold start the center dependency stands; a second path is duplication.
+- A disk-fallback resolution path for `ctx traits merge`. With a
+  bind-before-build cold start the center dependency stands; a second
+  path is duplication.
 - Archived-history browsing; `runs-archive/` restore stays a manual op.
 - Any recency or PID-based liveness heuristic (Correction 5).
 - 0243.5's center-mediated spawn/pause/interrupt.
@@ -503,9 +507,12 @@ validation = '''
    `cargo test -p ctx-traits-cli --test proof_center`
 2. The daemon binds before it builds. From a cold start on that corpus,
    a client completes the center handshake and receives an answer to a
-   query within one second of process start — an answer covering only
+   query while indexing is still in progress — an answer covering only
    the rows indexed so far is acceptable; a connection refusal or a
-   client timeout is not. Same command as 1.
+   client timeout is not. No wall-clock bound from process start is
+   imposed: the binding property is that the socket binds and answers
+   before discovery completes, not how fast a test-profile binary
+   loads. Same command as 1.
 3. Contention is never diagnosed as corruption. With the index held
    under `BEGIN EXCLUSIVE` past the busy timeout, the center's
    diagnosis names contention (another center starting) and contains
