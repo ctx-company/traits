@@ -390,6 +390,19 @@ constants, `ExitFixture`'s fields and the trust/activate calls stay.
 - Reading `/dev/tty` for readiness in any form. It is dead and stays absent.
 """
 validation = """
+## Owner note (2026-08-28, verified against session ab3b64e4's worktree)
+
+A run of this task observed `proof_output_style` failing its sequential
+JSON comparison and classified it as an unchanged baseline test outside
+the task surface. That classification is wrong: clean main passes the
+whole suite (29/29), and the failure is caused by this task's own diff —
+`.env_remove("NO_COLOR")` added to the SHARED controlled environment,
+which un-controls every non-PTY proof that spawns through it. The fix is
+in-scope: scope the NO_COLOR removal to the PTY child spawn that needs
+it, never to the shared `controlled_command` seam. A red
+`proof_output_style` under this task is this task's fallout, not a
+baseline defect and not an owner item.
+
 ## Done when — binding goals, each with the existing command that decides it
 
 1. The teardown suite passes with the truthful helper — no test lost from
