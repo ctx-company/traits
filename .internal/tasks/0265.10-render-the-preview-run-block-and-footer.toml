@@ -1,51 +1,712 @@
 schema-version = "0.2"
 key = "0265.10"
 title = "Render the preview run block and footer"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Open the 380-wide preview column on the Sessions screen with the two blocks that bracket it: the identity block at the top and the provenance footer at the bottom, per grammar rule 13's column order.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it wherever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-The **`run`** block is key/value (rule 7): trait and variant (`implement · basic`), run id and elapsed (`run-ab12ef · 42m`), task and its state (`0243.4 · in review`). All `data:`, and each half has a source. The run id and elapsed come from the compact center row (`RunSummary.run_id`, `elapsed_seconds`); the trait identity comes from the run's own trait provenance as the center carries it, taking the variant from the selected run's reconstruction where the compact row does not name it; the task id and its state come from the center-served claimed-task answer `0265.2` added.
+This cut opens the 380-wide preview column with the two blocks that bracket it:
+the `run` identity block at the top and the provenance footer at the bottom.
+Grammar rule 13 fixes the column at w 380 and orders identity → state → fact →
+consequence → spacer → provenance footer (`grammar.md:117-124`); `tokens.md:79`
+fixes its padding at [18,22] and `tokens.md:82` fixes block gap 8 with bottom
+padding 20. The export measures the same shape: a full-height column, a `Run
+Block` column with gap 8 and bottom padding 20 whose first child is a lowercase
+`run` heading in IBM Plex Mono 11 `#585d68` (`text-muted`), followed by three
+full-width `space-between`, `align-items: center` rows
+(`reference/sessions.html:633-697`); then, at the column's foot, a `flex: 1 1 0`
+spacer and a full-width right-aligned footer in IBM Plex Mono 10 `#4d525c`
+(`text-faint`) (`reference/sessions.html:868-877`). Grammar rule 12 gives the
+footer's semantic shape `<run id> · started <time>` (`grammar.md:110-115`), and
+rule 7 fixes keys at sans 11.5 `text-secondary` and values at mono 10.5 `text`,
+"state-colored only when the value IS a state" (`grammar.md:68-72`).
 
-The **footer** is `run-ab12ef · started 13:44` — grammar rule 12's provenance line, right-aligned mono 10 `text-faint` — from the run id and `RunSummary.started_at_epoch`.
+Building these two first is what makes the column a column. Three primitives
+land here and three siblings compose into them: `0265.11` inserts the
+`in progress` and `verdict` blocks, `0265.12` the `slots` block and `0265.15`
+the `landing` block, all between this cut's identity block and its spacer; the
+Traits and Config previews reuse the same column, key/value row and footer
+rather than copying them. So the column must expose ordered content slots, not
+two hardcoded children.
 
-Building these two first is what makes the column a column: the key/value row primitive rule 7 describes and the right-aligned preview footer rule 12 describes both land here, and the three remaining blocks slot between them.
-"""
-scope = """
-## Decisions
+## Six corrections to the draft this plan replaces
 
-- In scope: the 380-wide preview column's frame and order, the `run` key/value block, the provenance footer, and the key/value row and preview-footer primitives the later blocks and screens compose.
-- **Reconstruction is selection-triggered only.** No preview read fires per list row, on hover, or on delta arrival for an unselected run — the ledger is authoritative and the compact rows must stay read-free.
-- **Every leaf here is `data:`.** The spec authorises no placeholder in this block, so nothing in it is served from the `placeholders` module; each value renders from the source named above.
-- Out of scope: the `in progress` and `verdict` blocks (`0265.11`), the `slots` and `landing` blocks (`0265.12`), and the main pane.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+**Correction 1 — `in review` is not a task state, and the draft made it the
+contract.** The draft's block text named `0243.4 · in review` and its Watch item
+said "the task's `in review` qualifies" for state colouring. Stored status is
+the closed set `ready|done|cancelled` (`modules/core/src/task/mod.rs:22-31`;
+`task::parse` rejects anything else at `mod.rs:208-220` and `FilesTaskBoard::
+load` then records a parse failure and skips the document,
+`modules/io/src/task_files.rs:186-250`); `blocked` is derived, and only for open
+leaves (`task/graph.rs:115-177`). Parent Correction 2 resolves this explicitly:
+render the served state word, and if the owner wants `in review` literally that
+is a board-schema finding, not a string typed into the desktop (`0265:32-38`).
+The design string is an illustration. This plan binds the served evidence
+instead, and goal 6 carries the whole of it, including the three absences the
+draft never mentioned — no stored status, no claimed task, and a failed or
+refused answer.
 
-## Prerequisites
+**Correction 2 — `42m` is an example, not a format, and there is exactly one
+compact duration formatter in this repository's future.** The only compact
+helper today is CLI-private `tui::human_elapsed_text`, which renders `4s`,
+`3m 12s`, `Nh Nm Ns` and always retains seconds
+(`modules/cli/src/app/tui.rs:35-47`); an exact-minute input therefore renders
+`42m 0s` under its contract, not `42m`. It is `pub(crate)` inside
+`ctx-traits-cli` and the desktop may not import it (`0265:61-63`). `0265.5`
+plans the same extraction, "lifted to shared code if and only if a second
+consumer exists" — and this cut is that second consumer. Goal 5 is therefore
+written order-independently: consume the shared formatter if a prerequisite
+already landed one, otherwise perform that one extraction here with the CLI
+retained as a consumer. Either order yields exactly one formatter, so no
+`depends-on` edge to `0265.5` is added: the edge would force an ordering that
+neither task's semantics require, and the anti-duplication outcome is carried by
+the goal rather than by the board graph. What is forbidden either way is a
+preview-private `42m` branch, a fork, or the zero-padded story clock
+`elapsed_text`. Any desired zero-elision is a change to the one shared formatter
+and all its consumers, raised as a finding rather than branched locally.
 
-`0265.3` (the screen shell this column sits beside), `0265.2` (the center-served claimed-task answer the `task` row's id and state come from) and `0257` (the selected run's authoritative reconstruction the variant and the column's detail read arrive on).
-"""
-validation = """
+**Correction 3 — the draft's footer time has no boundary policy, and the field
+is optional.** `RunSummary.started_at_epoch` is `Option<u64>`
+(`modules/io/src/run_summary.rs:37-38`) and `Provenance` documents `None` for
+ledgers written before the field existed
+(`modules/core/src/procedure/session.rs:284-290`). "`<run id> · started
+<time>`" unconditionally is not renderable. Goal 7 binds the honest form: the
+run id renders, and the whole ` · started <time>` segment is omitted when there
+is no start epoch — never epoch zero, never a current clock, never a dangling
+`·`. It also fixes the two things the draft left undefined: minute precision
+`HH:MM`, and the timezone policy. Existing `epoch_clock` renders `HH:MM:SS`
+with a labelled UTC fallback and `local_utc_offset_seconds` resolves the offset
+at the stamp being rendered via `libc::localtime_r`
+(`modules/cli/src/app/run_view/render.rs:181-214`); both are `pub(super)` and
+neither matches minute precision, so this cut consumes a shared start-clock
+presentation if a prerequisite landed one and otherwise makes the smallest
+shared extraction with the CLI retained as consumer. The footer primitive itself
+receives already-presented text and knows nothing about epochs or timezones.
+
+**Correction 4 — the variant is not in the compact row, and must not be
+guessed.** `Session` carries `trait_id` and no variant field
+(`session.rs:1424-1515`); native family identity is deliberately split, so every
+generated `implement` member carries `id = "implement"` while the selected
+member carries `variant = "basic"`
+(`.ctx/traits/authored/implement/generated/basic/index.toml:1-6`). `Trait.
+variant` is the native family member identity and is optional
+(`modules/core/src/trait/mod.rs:350-365,495-515`), while legacy
+`Metadata.variant` is documented as display-only
+(`modules/core/src/trait/metadata.rs:12-32`). Splitting a hyphenated trait id is
+not a substitute: hyphens are valid identity content, and the only existing
+suffix inference, `harness_config::resolve_run_variant`
+(`modules/io/src/harness_config.rs:3185-3230`), is private config-qualified
+routing logic, not display authority. Goal 4 binds the trait id from the row and
+the variant only from `0257`'s authoritative reconstruction, native before
+legacy, with no dangling `·` when it is absent.
+
+**Correction 5 — an unreadable row is not a run with zero elapsed.**
+`RunSummary::unreadable` stays list-visible with empty `run_id` and `trait_id`,
+`elapsed_seconds = 0`, no start epoch, no task and `parse_error = Some(...)`
+(`run_summary.rs:255-295`). Rendering those fields as data produces a preview
+that reads as a real run that took no time and claims no task — a plausible lie,
+which is worse than an omitted leaf. Goal 8 makes `parse_error` an inspected
+branch.
+
+**Correction 6 — the draft named the robustness invariants in Watch but bound
+none of them, and had no stop condition.** Selection-triggered reads, UI-thread
+isolation, fail-loud posture and restart identity were prose; atomicity across
+the three rows and the footer under out-of-order selection responses was absent
+entirely, and it is the defect this composition invites, because the block joins
+three independently-arriving sources under one selection. Goal 9 binds all of
+it against the landed transaction precedent, and goal 11 supplies the bounded
+close that `0265:137-141` and the rewritten siblings already use.
+
+## Grounded at HEAD 351ee444d
+
+Nothing this task edits exists yet. Root `Cargo.toml:1-12` lists only the
+existing workspace crates and excludes only `packages/cdk`; no manifest or
+lockfile in the tree names gpui; there is no desktop directory, no desktop
+recipe in `Justfile` and no desktop lane in `.github/workflows/ci.yml`. The
+prerequisite chain has not landed either: `0265.2`, `0265.3` and `0257` are all
+still `ready`, and `0256.1` — the task that establishes the standalone project,
+its manifest, lockfile, asset mechanism and documented non-interactive
+build-and-test command — is `ready` too.
+
+Every desktop path, module name, component name, symbol, signature, gpui API and
+command named below is therefore a guess to be replaced by discovery against
+what `0256.1`, `0265.1`, `0265.2`, `0265.3` and `0257` actually landed. Binding
+them here would be fabrication.
+
+The desktop lane is nonetheless guaranteed to exist *when this cell runs*, and
+the guarantee is a code fact. An open leaf derives `Blocked` while any
+`depends-on` target is not `Done` (`modules/core/src/task/graph.rs:115-177`);
+this task depends on `0265.3`, which depends on `0265.1`, which carries the
+whole of item `0256` including `0256.1`. So this cell cannot dispatch until the
+standalone shell, the token/font entry point, the Sessions mount and the bottom
+bar have landed. The first act of this cell is to locate that lane's documented
+non-interactive command and record it verbatim in the work summary. If no such
+command is found, the prerequisite chain has not in fact landed: stop and report
+that, rather than substituting a workspace command for rendered-behaviour proof.
+It is deliberately *not* declared as a `[[checks]]` entry, because a check must
+exist in the repository at the moment the plan is written and this one does not.
+
+What that lane will cover is unknown here, so this plan promises none of it and
+pins no coverage mechanics onto it. **Rendered-preview evidence**, the phrase
+the goals use, means two things taken together: the landed lane's documented
+command, run as it exists and exiting 0; and, for every outcome that command
+does not itself decide, the run's own observation of the running frame and the
+composed element tree, by whatever means that harness already supports. Which of
+the two decided which outcome, and the mechanics used, are named in the work
+summary. Adding coverage inside the landed harness is right where a goal needs
+it; standing up a second validation lane beside it is not.
+
+What *is* readable today, and what the goals lean on, is the data side. The
+compact facts this block needs already exist on `RunSummary`: `run_id`,
+`trait_id`, `started_at_epoch`, `elapsed_seconds`, `task_key`, `trait_source`
+and `parse_error` (`run_summary.rs:23-118`), projected from the session at
+`run_summary.rs:131-145,187-201,235`. `elapsed_seconds` is durable ledger
+evidence, so a live value moves only when an accepted center update carries a
+newer row and reopening a finished run reproduces it. The claimed-task answer
+does not exist yet and is exactly what `0265.2` adds — a typed answer carrying
+canonical key, title, description, stored `Option<TaskStatus>` and the
+document's `auto-close` override, with missing/ambiguous sessions, empty or
+relative repository paths, provider failures, unparseable or absent documents
+and "claims no task" all typed loud outcomes (`0265.2:28-64`). The authoritative
+reconstruction is `0257`'s; `run::load_trait_for_session` is the existing IO
+choke point that prefers the pinned `TraitSource.document` and verifies trait id
+and digests before accepting it (`modules/io/src/run.rs:3819-3900`;
+`session.rs:539-550`), and the desktop consumes whatever projection `0257`
+landed on top of it rather than decoding source itself.
+
+One protocol note for discovery rather than for binding: `center::get` today
+reads the selected ledger synchronously inside the center's model owner
+(`modules/io/src/center.rs:916-935,3649-3663`), while `Start` and `Control`
+resolve briefly through `ModelCommand::ResolveRow` and do blocking work in the
+connection worker (`center.rs:3278-3333,3380-3429`). The second is the
+precedent. Bind to the one selected-detail contract `0257` actually lands; do
+not add a second detail protocol, and do not inherit the model-owner blocking
+shape merely because it exists now.
+'''
+scope = '''
+## GOALS — binding
+
+1. **One reusable preview column, ordered, with slots the siblings fill.** The
+   Sessions preview renders as a full-height column of width 380 at padding
+   [18,22], composing an ordered sequence of body blocks, then a flex spacer
+   that consumes the remaining height, then the footer as the last child. The
+   column takes an ordered list of body blocks rather than hardcoding this
+   cut's one; `0265.11`, `0265.12` and `0265.15` insert between the identity
+   block and the spacer without editing the frame, and the Traits and Config
+   previews reuse this same frame.
+   Decided by rendered-preview evidence for the geometry and the
+   identity → spacer → footer order, plus the closing diff read against
+   `grammar.md:117-124`, `tokens.md:79-82` and
+   `reference/sessions.html:633-641,868-877` showing the body sequence is a
+   parameter, not two fixed children.
+   Excluded: a second preview frame beside the landed Sessions composition; a
+   screen framework, layout engine, component registry or theme abstraction; a
+   scroll, clip or fade behaviour, which is `0265.7`'s; any width, padding or
+   gap literal at a call site; any light-column value.
+
+2. **The `run` identity block renders in the artifacts' shape.** A full-width
+   column with internal gap 8 and bottom padding 20, whose first child is the
+   lowercase heading `run` in IBM Plex Mono 11 `text-muted`, followed by three
+   full-width rows in the order trait, run, task. The named-block form is
+   reusable enough for the identity blocks the sibling previews name, and no
+   wider.
+   Decided by rendered-preview evidence showing the heading text, family, size
+   and tone, the block gap and bottom padding, and the three rows in that
+   order, plus the closing diff read against
+   `reference/sessions.html:642-697` and `tokens.md:82`.
+   Excluded: a status dot in this block — rule 4 restricts dots to stateful
+   lists and this column is prose and key/value (`grammar.md:39-47`); any pill,
+   badge, chip, icon, fill, border or corner radius; any glyph outside the
+   closed set, of which this cut needs only `·`; a heading abstraction built
+   for blocks no cut renders yet.
+
+3. **The key/value row primitive supports mixed-tone values.** One row form:
+   `space-between`, `align-items: center`, full width, key in IBM Plex Sans
+   11.5 `text-secondary`, value in IBM Plex Mono 10.5 `text`. The value is a
+   sequence of segments, each carrying its own tone, so a compound value can
+   render neutral identity, a neutral `·` separator and a semantically coloured
+   state word in one row — rule 7 colours the value "only when the value IS a
+   state", and `0267.3` requires exactly that mixed form.
+   Decided by rendered-preview evidence showing a compound value whose identity
+   and separator segments carry the neutral value tone while only the state
+   segment carries its semantic role, plus the closing diff read against
+   `grammar.md:68-72`.
+   Excluded: colouring a whole compound value, which would make identity read
+   as state; a row variant per screen; a screen-private copy of this row in
+   `0265.11`, `0265.12`, `0265.15`, `0266` or `0267`; wrapping, truncation or
+   ellipsis behaviour the artifacts do not specify.
+
+4. **The trait row renders authoritative identity, and never a guessed
+   variant.** The value is the selected row's `trait_id`, with ` · <variant>`
+   appended only when the authoritative reconstruction `0257` serves supplies
+   one; native `Trait.variant` takes precedence over display-only
+   `Metadata.variant`. When no variant is served, the trait id renders alone
+   with no trailing separator. The whole value is neutral: no segment of it is
+   a state.
+   Decided by rendered-preview evidence for a run whose reconstruction supplies
+   a variant and for one that does not, plus the closing diff read for any
+   suffix split, family-table re-resolution or desktop-side trait decoding.
+   Excluded: inferring a variant by splitting a hyphenated trait id;
+   re-resolving the family alias table in the renderer; the desktop reading or
+   decoding `TraitSource.document`, opening a trait file, or calling
+   `load_trait_for_session` itself rather than consuming `0257`'s projection;
+   preferring legacy `Metadata.variant` over native `Trait.variant`; a
+   `-basic`-shaped literal anywhere.
+
+5. **The run row renders the run id and durable elapsed through one shared
+   formatter.** The value is `RunSummary.run_id`, a neutral `·`, and
+   `RunSummary.elapsed_seconds` rendered by exactly one shared compact-duration
+   formatter with at least one retained non-GUI consumer: consume it if a
+   prerequisite landed it, otherwise perform that one extraction from
+   `tui::human_elapsed_text`'s behaviour here and move the CLI onto it. The
+   elapsed segment is neutral — it is not a state. The value changes only when
+   an accepted center update carries a newer row.
+   Decided by the declared `just test` check for the shared formatter and its
+   retained consumer still green, by rendered-preview evidence that a selected
+   run's elapsed renders from the served row through that formatter, and by the
+   closing diff read showing one formatter and no preview-private branch.
+   Excluded: a preview-only or desktop-only duration formatter; a `42m`-shaped
+   special case, minute-only branch or local zero-elision — the shared
+   formatter's contract governs even where it renders `42m 0s`, and changing it
+   is a change to it and all its consumers, raised as a finding; the
+   zero-padded story clock `elapsed_text`; deriving elapsed from a render-time
+   clock, `SystemTime::now`, file mtime, a process-local `Instant`, a timer or
+   frame spans; importing the CLI-private helper.
+
+6. **The task row renders the served claimed-task answer, with only a real
+   stored status coloured, and every absence visible.** The value composes the
+   answer's canonical key as a neutral segment and, when the answer carries a
+   stored status, a neutral `·` and that status word carrying its semantic
+   role through the landed shared state presentation. Four boundaries are
+   bound, and each is observable: a stored status renders coloured while the
+   key stays neutral; a `None` status renders the key alone with no status
+   segment and no dangling separator; a run that claims no task renders that
+   absence visibly rather than blank; and a failed or refused answer — missing
+   or ambiguous session, empty or relative repository path, provider error,
+   absent or unparseable document — renders loud. In none of them does the
+   previously selected run's task remain visible.
+   Decided by rendered-preview evidence over those four boundaries and by the
+   closing diff read for a task-status colour mapping local to this block.
+   Excluded: the string `in review` or any other unrepresentable status word
+   (content Correction 1); turning `None` into `ready`, `blocked` or any
+   default; deriving board status, which `0265.2` explicitly does not serve;
+   substituting `RunSummary.title`, `RunSummary.task_key`, the session title, a
+   cached board document, `task_board_cache` or the desktop cwd for a failed
+   answer; any direct board, file or store read from the desktop process; a
+   second claimed-task request or protocol; a status-to-tone mapping owned by
+   this block rather than by the landed shared state presentation.
+
+7. **The footer is a reusable primitive rendering served provenance, with an
+   honest missing-start form.** A full-width, right-aligned line in IBM Plex
+   Mono 10 `text-faint`, last child of the column after the flex spacer,
+   reading `<run id> · started <time>` where `<time>` is `HH:MM` derived from
+   `RunSummary.started_at_epoch` alone. When there is no start epoch the run id
+   renders and the entire ` · started <time>` segment is omitted — no epoch
+   zero, no current clock, no dangling separator, no invented stamp. Minute
+   precision and the timezone policy — the reader's offset at the stamp being
+   rendered, with a labelled UTC fallback when the offset cannot be resolved —
+   resolve through a shared start-clock presentation: consumed if a
+   prerequisite landed one, otherwise the smallest extraction made here with a
+   retained non-GUI consumer. The footer primitive receives already-presented
+   text and knows nothing about epochs, offsets or formatting.
+   Decided by rendered-preview evidence for a run with a start epoch and for
+   one without, plus the declared `just test` check for the shared presentation
+   and its retained consumer, plus the closing diff read against
+   `grammar.md:110-115` and `reference/sessions.html:868-877`.
+   Excluded: rendering `13:44` or any other design literal for a run that does
+   not carry it; `HH:MM:SS` in this footer; reading `SystemTime::now`, an
+   `Instant`, a timer or a file mtime on this path; importing `epoch_clock` or
+   `local_utc_offset_seconds`, which are `pub(super)` CLI-private; a timezone
+   database, `chrono` or `time` dependency; a footer that formats epochs
+   itself; a screen-private footer copy in a later preview.
+
+8. **An unreadable row renders as unreadable, not as a run.** When the selected
+   row carries `parse_error`, the preview says so and does not present the
+   row's empty `run_id`/`trait_id`, its `elapsed_seconds = 0` or its absent
+   task as evidence about a real run.
+   Decided by rendered-preview evidence for a selected unreadable row showing
+   the unreadable outcome and no `0s`, no empty identity value and no invented
+   task, plus the closing diff read for an unconditional read of those fields.
+   Excluded: hiding the row from the list, which `run_summary.rs:255-295`
+   deliberately does not do; rendering `0s`, `—`, a dash or a blank where the
+   evidence is a parse failure; the desktop reopening the ledger to recover it.
+
+9. **The selected model is composed once, atomically, and only from an explicit
+   selection.** The compact row, the authoritative detail/variant and the
+   claimed-task answer are joined under one stable selection identity and
+   committed as a whole: a complete candidate is staged, projected and
+   committed only on success, the prior accepted model is retained only behind
+   an explicit stale marker, and a fresh complete snapshot is requested after
+   rejection — the landed transaction precedent
+   (`modules/cli/src/app/dashboard/worker.rs:254-415`). A rapid A-then-B
+   selection whose A responses arrive last leaves B intact. No update ever
+   combines one run's identity with another's variant, task or footer, and no
+   one of the three rows commits alone. All reads fire from an explicit
+   selection only, off gpui's UI thread through the landed desktop bridge, and
+   a failed center, detail or task request is visible rather than covered.
+   Decided by rendered-preview evidence over out-of-order A/B selection, a
+   rejected candidate, a detail failure arriving against a newer selection, and
+   the stale/disconnected posture after center loss or subscriber eviction;
+   by the `0256.2`-`0256.5` and `0257.3` proofs passing unmodified inside the
+   landed lane; and by the closing diff read for any per-row, hover, unselected
+   delta or eager read, any timer or poll, any blocking receive on the UI
+   thread, and any direct ledger/trait-source/board/sidecar/cwd/cache
+   fallback.
+   Excluded: a second selection model, second detail request or second
+   subscription; a preview-private state system; partial commit of one of the
+   three rows; presenting last-accepted content as current after the stream
+   becomes uncertain; any change to center subscription semantics, the delta
+   reducer, run controls or the center protocol; any rendered fact that exists
+   only in GUI memory — a finished run reopened after the application closes
+   reproduces the same trait/variant, run/elapsed, task/status and footer from
+   durable evidence.
+
+10. **Every presentation value comes from the one token entry point, and this
+    cut stays inside its own scope.** All colours, sizes, spacings, families
+    and weights resolve through `0265.1`'s dark token and font entry point —
+    including the column's 380 and [18,22], the block gap 8 and bottom padding
+    20, `text-muted` mono 11, sans 11.5 `text-secondary`, mono 10.5 `text` and
+    mono 10 `text-faint`. Every leaf here is `data:`, so there is no call site
+    into the `placeholders` module. No file under `.internal/docs/design/` is
+    modified, no light-column value is touched, no sibling-owned region is
+    edited, and the workspace does not learn about gpui: root Cargo resolution
+    and the root `Cargo.lock` stay gpui-free and the per-round gate's cost does
+    not move. A rule, token or example that looks wrong — including the
+    export's `0243.4 · in review` and its `42m` — is reported as an owner
+    correction against the source design, never edited here.
+    Decided by the four declared checks for the workspace side, and by the
+    closing diff read against `tokens.md:6-85` for call-site literals, a
+    `placeholders` call, a light-column value, a design-artifact edit, a
+    CLI-private or ratatui import, and any edit to `0265.11`/`.12`/`.15`
+    content or the main pane. No board check can decide the scope half,
+    because a check runs in a clean detached worktree of the merged sha with no
+    base to diff against.
+    Excluded: a second token module, palette wrapper or theme abstraction; a
+    second `placeholders` module; adding the desktop project to root workspace
+    members; adding gpui cost to `just test`, `just test-full` or the existing
+    CI lanes; a grep forbidding the string `gpui` in `Justfile` or
+    `.github/workflows/`, since a *separate* desktop lane there is sanctioned
+    and such a check would red on the sanctioned outcome.
+
+11. **The pass is reviewed once and bounded.** The completed diff is read
+    against `grammar.md:49-72,110-124`, `screens/sessions.md:36-49`,
+    `tokens.md:6-85` and `reference/sessions.html:633-697,868-877` before the
+    task is called done. Exactly one targeted repair cycle is allowed; if a
+    second would be needed, stop and report the exact failing command or the
+    unresolved data/render contract rather than iterating. The work summary
+    names the discovered desktop path and the exact desktop command verbatim,
+    which shared formatters were consumed versus extracted and where their
+    retained non-GUI consumers are, the missing-start-epoch and no-claimed-task
+    forms actually rendered, the proof mechanics used where they differ from
+    the suggested route, every owner correction raised against the design
+    artifacts, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256.1`, `0265.1`, `0265.2`, `0265.3` and `0257` landed; do not carry a
+guess from this file into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level listing, then its manifest, README, justfile or CI lane, for the
+  documented non-interactive build-and-test command. Record it verbatim before
+  any edit. If no such lane exists, the prerequisite chain has not landed:
+  report that rather than substituting workspace commands.
+- Read `0257`'s landed selected-detail contract — what it serves, whether it
+  carries the reconstructed trait and its `variant`, and how the desktop
+  requests it. Extend that one contract if the variant is not on it; a second
+  detail request is a defect. Note the model-owner-versus-connection-worker
+  precedent in content above before deciding where blocking work runs.
+- Read `0265.2`'s landed claimed-task answer and its typed failure/refusal
+  cases, and consume them as typed outcomes rather than flattening them to
+  `Option`.
+- Read whether a shared compact-duration formatter and a shared start-clock
+  presentation already exist (`0265.5` may have landed the first). Consume
+  what exists; extract only what does not, once, with a retained non-GUI
+  consumer.
+- Read `0265.3`'s landed state presentation and extend it minimally for a
+  stored task status rather than mapping statuses here;
+  `tasks::status_tone`'s done→pass, cancelled→fail, ready→default
+  (`modules/cli/src/app/tasks.rs:29-44`) is the semantics to match, not code to
+  import.
+- Read `0265.1`'s token and font entry point and take every value from it, and
+  `0265.3`'s Sessions mount for where the preview column attaches.
+
+### Edit order
+
+1. The shared formatting first, so the render side has something to consume:
+   the compact-duration formatter and the start-clock presentation, each
+   extracted only if absent, each with its CLI consumer moved onto it.
+2. The shared state presentation extended for stored task status.
+3. The presentation primitives: the preview column frame with ordered body
+   slots plus spacer plus footer; the named block form; the key/value row with
+   tone-carrying value segments; the footer line.
+4. The selected preview projection: joining row, detail/variant and
+   claimed-task answer under one selection identity, with the staged-candidate
+   commit and the stale marker.
+5. The Sessions `run` block composition and the provenance footer, mounted into
+   the landed Sessions preview position.
+6. The focused desktop proofs, then the workspace proofs, then the declared
+   checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `preview_column(blocks, footer)` frame, a
+`preview_block(heading, rows)` form, a `kv_row(key, segments)` where a segment
+carries text plus a tone, and a `preview_footer(text)`; a shared
+`human_elapsed_text`-shaped formatter and a shared `epoch_clock`-shaped
+presentation with a minute-precision form, both in core or IO beside the types
+they format; and a selected-preview projection type joining the three sources.
+Names, module paths and signatures follow whatever conventions `0256.1`,
+`0265.1`, `0265.3` and `0257` established. The behaviours goals 1-9 fix are not
+suggestions; where they live and what they are called are.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- A 380-wide column at padding [18,22] whose children are, in order, the
+  identity block, the flex spacer and the footer — and whose body sequence
+  accepts additional blocks between identity and spacer.
+- The `run` heading in mono 11 `text-muted` above three space-between rows in
+  the order trait, run, task, with block gap 8 and bottom padding 20.
+- A compound value rendering neutral identity, neutral `·` and one semantically
+  coloured state segment — and no case where the whole value takes the state
+  colour.
+- A trait id with a served variant, and one without, with no dangling `·`.
+- Elapsed rendering from the served row through the shared formatter, and not
+  moving without a newer accepted row.
+- Stored status coloured with the key neutral; `None` status rendering the key
+  alone; no claimed task rendering a visible absence; a failed or refused
+  answer rendering loud — and none of the four leaving the previous run's task
+  visible.
+- A run with a start epoch rendering `<run id> · started HH:MM`, and one
+  without rendering the run id with no dangling ` · started`.
+- A selected row carrying `parse_error` rendering unreadable, with no `0s` and
+  no empty identity value presented as data.
+- Selecting A then B with A's responses arriving last leaving B's three rows
+  and footer intact; a rejected candidate leaving the previously accepted
+  preview whole; a detail failure never combining with a prior run's variant,
+  task or footer.
+- Center loss and subscriber eviction leaving the preview visibly stale rather
+  than current.
+- No read fired for an unselected row, a hover or a delta for another run.
+- A finished run's block and footer identical after the application closes and
+  reopens.
+- The `0256.2`-`0256.5` and `0257.3` proofs still passing unmodified.
+
+### Reuse points
+
+`0265.1`'s token and font entry point for every colour, size, spacing, family
+and weight; `0265.3`'s Sessions mount, its bar/state presentation extended
+minimally for stored task status, and its single `placeholders` module — which
+this cut does not call; `0265.2`'s claimed-task answer and its typed failure
+outcomes; `0257`'s selected-detail contract, its authoritative reconstruction
+over `run::load_trait_for_session` (`modules/io/src/run.rs:3819-3900`) and its
+identity/freshness gate; `0256`'s accepted subscription model, desktop bridge
+and test harness; `0265.5`'s shared compact-duration formatter if landed, else
+`tui::human_elapsed_text`'s behaviour (`modules/cli/src/app/tui.rs:35-47`) as
+the semantics to extract; `epoch_clock`/`local_utc_offset_seconds`'s
+offset-at-the-stamp and labelled-UTC-fallback semantics
+(`modules/cli/src/app/run_view/render.rs:181-214`) as the semantics to extract
+at minute precision, never to import; `RunSummary`'s `run_id`, `trait_id`,
+`started_at_epoch`, `elapsed_seconds` and `parse_error`
+(`run_summary.rs:23-118`); and the accepted-model transaction shape at
+`modules/cli/src/app/dashboard/worker.rs:254-415` as the semantics to match. If
+any prerequisite surface is absent at execution time, report an unmet
+prerequisite rather than replacing it locally.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml`, and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The `in progress` and `verdict` blocks (`0265.11`), the `slots` block
+  (`0265.12`), the `landing` block and its auto-close resolution (`0265.15`),
+  the header (`0265.13`), the frame counter (`0265.14`), the frame-row forms
+  (`0265.5`), the rail (`0265.8`), the title bar (`0265.9`), the bottom bar
+  (`0265.3`) and the whole main pane.
+- The later screens' previews (`0266.4`, `0266.5`, `0267.3`, `0267.4`), which
+  reuse these primitives rather than being built for here.
+- Overflow, clip and fade behaviour (`0265.7`); scrolling this column.
+- Any center protocol change beyond consuming what `0265.2` and `0257` landed;
+  any change to subscription semantics, the delta reducer, run controls
+  (`0258`), summons (`0259`) or packaging (`0260`).
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`
+  or any pencil artifact.
+- A design-system phase: component registry, theme abstraction, generic screen
+  framework, or primitives extracted for `0266`-`0269` before one of them
+  consumes them.
+- A board check that executes the desktop lane. No such command exists in this
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **Compact list rows must never trigger the reconstruction.** Full reconstruction happens only on selection; a preview that fetches eagerly for the whole list breaks the family's read posture.
-- **A finished run's view must be identical after closing and reopening the window.** The ledger is authoritative, so reconstruction must not depend on in-process state that dies with the window.
-- **Blocking work stays off gpui's UI thread** — the reconstruction especially, which is the heaviest read this screen performs.
-- **No poll loop.** Live-follow of the selected run arrives as center deltas; the column never re-reads on a timer.
-- **Fail-loud, no direct-reader fallback.** A failed center request leaves the column fail-loud rather than silently re-reading the filesystem; stale content is never presented as current.
-- **Key/value rows are space-between with the key in sans 11.5 `text-secondary` and the value in mono 10.5 `text`**, state-coloured only when the value is a state — the task's `in review` qualifies, the elapsed time does not.
-- **Status dots belong to stateful lists** — this column is prose and key/value, so it carries none. No corner radius inside the canvas; the glyph set is closed.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered column is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`grammar.md` and `screens/sessions.md` are the specification; the export is
+  measurement.** Take the column, block, row and footer geometry from
+  `reference/sessions.html:633-697,868-877`; take content from the rules with
+  the parent's corrections applied. `0243.4 · in review`, `implement · basic`,
+  `run-ab12ef · 42m` and `started 13:44` are illustrations. A leaf that renders
+  one of them for a run that does not carry it is worse than an omitted leaf,
+  because it reads as evidence.
+- **`in review` is not a task state and never reaches the screen** (content
+  Correction 1; `0265:32-38`; `modules/core/src/task/mod.rs:22-31`). Stored
+  status is `ready|done|cancelled`, `blocked` is derived only for open leaves,
+  and `0265.2` does not derive board status at all. If the owner wants
+  `in review` literally, raise it as a board-schema finding.
+- **Absence is rendered, not defaulted.** No stored status, no claimed task, no
+  variant and no start epoch are four distinct absences with four distinct
+  honest forms, and none of them is a guessed default, a blank field, a
+  dangling `·`, or the previously selected run's value left on screen.
+- **`parse_error` is inspected before any field is read as data.**
+  `RunSummary::unreadable` carries empty ids, `elapsed_seconds = 0` and no task
+  by design (`run_summary.rs:255-295`); rendering those as a run is a plausible
+  lie.
+- **One formatter, one clock presentation, both shared, both with a non-GUI
+  consumer.** `tui::human_elapsed_text` and `epoch_clock`/
+  `local_utc_offset_seconds` are CLI-private and may not be imported. A
+  preview-private `42m` branch is the failure mode this cut invites; `42m 0s`
+  under the shared contract is the correct outcome, and changing it is a change
+  to the shared formatter and all its consumers.
+- **The variant comes from the reconstruction or not at all.** Hyphens are
+  valid trait-id content, so a suffix split is not an inference — it is a
+  fabrication. `harness_config::resolve_run_variant` is private routing logic,
+  not display authority.
+- **Three sources, one commit.** The block joins the compact row, the
+  authoritative detail and the claimed-task answer; the defect this shape
+  invites is a preview showing run B's id beside run A's variant, task or
+  footer. Stage the whole candidate, commit on success only, retain the prior
+  model behind an explicit stale marker, request a fresh snapshot after
+  rejection (`worker.rs:254-415`).
+- **Compact rows stay compact.** No reconstruction or board read fires per list
+  row, on hover, on a delta for an unselected run, or as a prefetch. If a
+  rendering leaf tempts a read during list projection, that leaf belongs to the
+  selected-run reconstruction instead.
+- **Blocking work stays off gpui's UI thread.** The center subscription's
+  synchronous receiver already runs on a background thread
+  (`modules/io/src/center.rs:1038-1069`); reuse the landed desktop bridge
+  rather than blocking a render or update handler, and do not inherit
+  `center::get`'s model-owner blocking shape.
+- **Fail-loud, no direct-reader fallback, no poll.** A failed center, detail or
+  task request leaves the column visibly failed; there is no ledger,
+  trait-source, board, sidecar, cwd or cache read in the desktop process, and
+  live-follow arrives as center deltas rather than on a timer.
+- **No dots, no pills, no radius.** Rule 4 restricts dots to stateful lists and
+  this column is prose and key/value; the glyph set is closed and this cut
+  needs only `·` (`grammar.md:31-47`).
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full` or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like
+  a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's
+  desktop behaviour.** They decide the shared formatting and its retained
+  consumers, the reconstruction and center-wire contracts staying green, and
+  that the workspace stayed gpui-free. The rendered column, block, rows and
+  footer are decided by rendered-preview evidence in the lane `0256.1`
+  establishes. What that lane covers is unknown at authoring time, so claim
+  only what it actually verifies and observe the remainder directly — an
+  outcome asserted as "covered" without having been observed is the defect this
+  watch item exists for. Its exact non-interactive command becomes declarable
+  as a check on this task once `0256.1` lands.
 
 ## Done when
 
-Selecting a run opens a 380-wide preview column carrying the `run` key/value block — trait and variant, run id and elapsed, task id and task state, each from the source named in this task — above a right-aligned mono 10 `text-faint` footer reading `<run id> · started <time>`, in the tokens `screens/sessions.md` names. The reconstruction fires only on selection, off the UI thread, with no timer; a finished run's block and footer are identical after closing and reopening the window. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- The desktop lane's documented non-interactive build-and-test command, landed
+  through `0265.3` → `0265.1` → `0256.1` and therefore present before this task
+  can dispatch (`graph.rs:115-177`), was located first, recorded verbatim in
+  the work summary, and exits 0 with the preview column, the `run` block and
+  the footer in the tree and the `0256.2`-`0256.5` and `0257.3` proofs it
+  already runs left unmodified. If that command cannot be found, the
+  prerequisite chain has not landed: the task stops and reports that, and no
+  workspace command is offered in its place.
+- Rendered-preview evidence — that command for what it decides, and the run's
+  own observation of the running frame and composed tree for the rest, with
+  which decided what named in the work summary — shows goals 1-9's observable
+  outcomes: the 380/[18,22] column with identity → spacer → footer order and an
+  open body sequence; the `run` heading and its three rows in shape and order;
+  a mixed-tone compound value with only its state segment coloured; trait id
+  with and without a served variant and no dangling separator; elapsed from the
+  served row through the one shared formatter; stored status coloured, `None`
+  status, no claimed task, and a failed or refused answer, none of them leaving
+  a prior run's task visible; footer with and without a start epoch; an
+  unreadable row rendering unreadable; out-of-order A/B selection, a rejected
+  candidate and a detail failure all leaving the accepted model whole; the
+  stale/disconnected posture after center loss; no read fired for an unselected
+  row; and a finished run identical after the application closes and reopens.
+- All four declared checks exit 0, covering the shared side: the compact
+  duration formatter and start-clock presentation with their retained non-GUI
+  consumers green under `just test`; the authoritative reconstruction semantics
+  green under the `run_view` filter, showing they were consumed rather than
+  forked; the center wire and claimed-task contract green under `proof_center`,
+  showing this cut reshaped neither; and root workspace resolution plus the
+  root lockfile still gpui-free.
+- The closing diff read shows: every colour, size, spacing, family and weight
+  resolving through `0265.1`'s entry point with no call-site literal; no second
+  formatter, clock presentation, selection model, detail request, placeholder
+  module, token module or preview frame; no `placeholders` call site; no
+  CLI-private or ratatui import; no direct ledger, trait-source, board,
+  sidecar, cwd or cache read in the desktop process; no timer, interval,
+  spawned tick or UI-thread block on this path; no suffix-split variant
+  inference; no light-column value; no edit under `.internal/docs/design/`; and
+  no edit to `0265.11`/`.12`/`.15` content, the main pane, run controls or
+  center subscription semantics.
+- The work summary names the discovered desktop path and command verbatim,
+  which shared pieces were consumed versus extracted and where their retained
+  non-GUI consumers live, the rendered forms chosen for the four absences, the
+  proof mechanics used where they differ from the suggested route, the owner
+  corrections raised against the design artifacts, and any deviation from the
+  approach.
+
+## Bounded refinement
+
+Run the discovered desktop command, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view`, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`,
+then `CARGO_TARGET_DIR=target just test`, then the root gpui-free check, then
+the closing diff read. Permit at most one targeted repair-and-rerun round:
+repair one named defect, then rerun the failed command and every command after
+it in that order. If a second round would be needed, stop and report the exact
+failing command with its evidence, or the unresolved data or render contract,
+rather than iterating. That is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0265"
 depends-on = ["0265.2", "0265.3", "0257"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "shared formatting extractions and their retained consumers keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "authoritative selected-run reconstruction semantics stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
+timeout-ms = 900000
+
+[[checks]]
+name = "center wire and claimed-task contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1800000
