@@ -63,7 +63,10 @@ const RETRY_DELAY: Duration = Duration::from_millis(50);
 const SPAWN_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const SPAWN_ABORT_TIMEOUT: Duration = Duration::from_secs(10);
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
-const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
+// Production default: the dashboard closes and reopens within seconds all
+// day; a 15s lifetime forced a respawn-and-rewarm on nearly every open.
+// Fixtures that need fast reaping set CTX_CENTER_IDLE_MS explicitly.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 2_000;
 const NOTIFIER_QUEUE: usize = 32;
 const SUBSCRIBER_QUEUE: usize = 64;
@@ -2362,24 +2365,48 @@ impl CenterModel {
         let mut remove = false;
         if let Some(subscriber) = self.subscribers.get_mut(&id) {
             if let Some(snapshot) = subscriber.snapshot.as_mut() {
-                let next = match snapshot.pop_front() {
-                    Some(row) => Outbound::SnapshotRow(Box::new(row)),
-                    None => Outbound::SnapshotEnd,
-                };
-                let completed = matches!(&next, Outbound::SnapshotEnd);
-                if subscriber.outbound.try_send(next).is_err() {
-                    remove = true;
-                } else if completed {
-                    // This credit is sent by the writer only after SnapshotEnd
-                    // reaches the peer, so a queued delta follows it on wire.
-                    subscriber.snapshot = None;
-                    if let Some(delta) = subscriber.pending_deltas.pop_front()
-                        && subscriber
-                            .outbound
-                            .try_send(Outbound::Delta(delta))
-                            .is_err()
-                    {
-                        remove = true;
+                // Fill the bounded outbound channel on every credit instead
+                // of releasing one row per credit: a per-row credit costs one
+                // owner-loop tick per row (the loop tail sleeps between
+                // iterations), which made snapshot latency O(rows × tick) —
+                // 93 rows measured at ~2.3s. The channel's capacity stays the
+                // backpressure bound; a full channel simply defers the rest
+                // to the next write credit, and a stalled peer is still
+                // evicted through the pending-delta bound and the writer's
+                // deadline.
+                loop {
+                    let next = match snapshot.pop_front() {
+                        Some(row) => Outbound::SnapshotRow(Box::new(row)),
+                        None => Outbound::SnapshotEnd,
+                    };
+                    let completed = matches!(&next, Outbound::SnapshotEnd);
+                    match subscriber.outbound.try_send(next) {
+                        Ok(()) => {
+                            if completed {
+                                // The end marker is queued; queued deltas
+                                // follow it on the wire in channel order.
+                                subscriber.snapshot = None;
+                                if let Some(delta) = subscriber.pending_deltas.pop_front()
+                                    && subscriber
+                                        .outbound
+                                        .try_send(Outbound::Delta(delta))
+                                        .is_err()
+                                {
+                                    remove = true;
+                                }
+                                break;
+                            }
+                        }
+                        Err(mpsc::TrySendError::Full(unsent)) => {
+                            if let Outbound::SnapshotRow(row) = unsent {
+                                snapshot.push_front(*row);
+                            }
+                            break;
+                        }
+                        Err(mpsc::TrySendError::Disconnected(_)) => {
+                            remove = true;
+                            break;
+                        }
                     }
                 }
             } else if let Some(delta) = subscriber.pending_deltas.pop_front()
