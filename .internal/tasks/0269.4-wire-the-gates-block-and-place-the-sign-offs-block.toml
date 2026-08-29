@@ -1,52 +1,909 @@
 schema-version = "0.2"
 key = "0269.4"
-title = "Wire the gates block and place the sign-offs block"
-status = "draft"
+title = "Place the placeholder gates and sign-offs blocks"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Complete the Merges preview column with its two remaining blocks — the one region on this screen that has real evidence behind it, and the one that has none at all.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-The **`gates`** block is key/value, one row per gate (cargo test, drift · embed, ts-format, worktree) with a `pass` or `clean` value in ok. `screens/merges.md` tags it `data:` and adds "gate results exist per run; wiring optional in v1, else `placeholder:`". Wire it wherever the selected run's center-served detail actually reaches those results — the same selection-triggered reconstruction the Sessions preview reads through — and leave placeholder-tagged only the gate rows that detail does not cover. The optional exit is a permission for what is unreachable, not a preference for skipping what is reachable.
+`screens/merges.md:33-45` orders the Merges preview column `merge`, `gates`,
+`sign-offs`, `landing`, spacer, footer. `0269.2` renders the frame, the `merge`
+block, the `landing` consequence, the spacer and the footer, and leaves the two
+middle positions as ordered insertion points with nothing of either visible —
+not a heading, not an empty block, not a gap (`0269.2:376-397`). This cut fills
+exactly those two positions and touches nothing else on the screen.
 
-The **`sign-offs`** block is rows rather than pairs: the agent identity on the left in mono 10.5 at its identity colour and 0.8 opacity — `architect@1.4`, `security@0.9`, the owner's `@oskar` in the session tone — with role and time on the right in mono 10 `text-faint`. The spec tags it `placeholder: until sign-offs exist`, and no sign-off store exists, so every entry comes from the shared `placeholders` module. Identity colouring is still normative: the review agent renders in review-purple per grammar rule 1, at the 0.8 opacity the rule specifies for small mono handles, because a placeholder must be design-faithful.
-"""
-scope = """
-## Decisions
+Both blocks are placeholder-served in full. `sign-offs` was always placeholder —
+`screens/merges.md:40-42` tags it `placeholder: until sign-offs exist` and no
+sign-off type or store exists anywhere under `modules/**`. `gates` is
+placeholder by parent election: `screens/merges.md:37-39` tags it `data:` and
+then says, in the same sentence, "wiring optional in v1, else `placeholder:`",
+and parent Correction 3 exercises that option once for the whole family and
+states that the election binds (`0269:55-68`). So this cut reads no evidence at
+all. It renders two static design illustrations through vocabulary that already
+landed, from the one shared `placeholders` module.
 
-- In scope: the `gates` block wired from the selected run's center-served detail wherever it reaches per-run gate results, with unreachable rows placeholder-tagged; and the `sign-offs` block served in full from the shared `placeholders` module at the spec's identity colours and opacities.
-- **Wire what is reachable.** A gate result the reconstruction supplies renders as data; taking the spec's optional exit for a region the read actually reaches would hide real coverage and poison the later wiring grep.
-- **Invent nothing for sign-offs.** There is no sign-off store; deriving plausible-looking entries from run evidence would fake state that does not exist.
-- **Identity colour is normative, not decorative**: the review agent in review-purple, the owner's handle in the session tone, both at 0.8 opacity — `tokens.md` constants, not judgement calls.
-- **Reads are selection-triggered**, through the same sanctioned reconstruction path the rest of the family uses; nothing here reads while rendering compact list rows.
-- Out of scope: the `merge`, `landing` and footer blocks and the chrome (`0269.2`), the main pane, building a sign-off mechanism, and every shared primitive `0265` built.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+The export fixes the geometry: both blocks are full-width columns at internal
+gap 8 and bottom padding 20 inside the 380-wide preview padded `[18,22]`, with
+lowercase mono 11 `text-muted` headings (`reference/merges.html:661-667`,
+`734-812`, `813-874`; `tokens.md:80-82`). `gates` is four rule-7 key/value rows —
+sans 11.5 `text-secondary` keys, mono 10.5 values, `ok` on the value because the
+value IS a state (`grammar.md:68-72`; `tokens.md:43`, `62-65`). `sign-offs` is
+not key/value at all: three space-between rows with a mono 10.5 identity on the
+left at its identity colour and 0.8 opacity, and mono 10 `text-faint` role and
+time on the right (`grammar.md:6-22`; `tokens.md:29`, `40`, `47`, `64-65`).
 
-## Prerequisite
+## Five corrections to the draft this plan replaces
 
-`0269.2` — the preview column, its selection model and the shared placeholder region structure these blocks continue.
-"""
-validation = """
+**Correction 1 — the gates block is placeholder-served, and this file's
+wire-wherever-reachable rule is dropped.** The draft this replaces calls `gates`
+"the one region on this screen that has real evidence behind it" and instructs
+the run to "wire it wherever the selected run's center-served detail actually
+reaches those results", placeholder-tagging only the unreachable rows. That
+direction is stale: it originated in `34092799e` and parent `0269` was
+substantively rewritten afterwards in `833f1edea`, electing the entire block into
+placeholder form (`0269:11`, `0269:55-68`, `0269:136-145`, `0269:198-205`,
+`0269:218-228`). Sibling `0269.2` records the same, calls this file's text stale,
+and reserves the slot without rendering it (`0269.2:99-111`, `0269.2:795-800`).
+
+The election is also what the backend supports. `[merge] gate` is an optional
+ordered list of arbitrary literal argv arrays, replaced wholesale across config
+layers and empty by default (`modules/io/src/harness_config.rs:1280-1314`), so
+`EffectiveMergePolicy.gate` is `Vec<Vec<String>>` and is empty when undeclared
+(`harness_config.rs:1484-1502`). Gate labels are generated generically from argv
+— leading dashes stripped, parts joined, path-safe characters retained,
+truncated to 40, falling back to `gate-{index}` (`modules/cli/src/app/merge.rs:2428-2450`)
+— so no backend code knows `cargo test`, `drift · embed`, `ts-format` or
+`worktree` as fixed identities. The runner records
+`gate=<label> argv=<...> exit=<...> timed-out=<...>` with an optional
+`gate-output=<path>` (`merge.rs:2606-2689`), and an empty declared gate records
+an advisory before every run performs the tracked-worktree cleanliness check
+(`merge.rs:2552-2556`, `2692-2719`). Outcomes are not uniformly green: the
+existing translation distinguishes passed, failed with an exit code, timed out
+and killed by signal (`modules/cli/src/app/merge_story.rs:67-80`, `811-895`).
+Successful evidence lands on a nonterminal `GatesPassed` frame
+(`merge.rs:2720-2735`), and terminal statuses are `Merged`, `Parked`,
+`PostMergeCleanupFailure` and `RecoveryFailure`
+(`modules/core/src/procedure/session.rs:617-670`), so a landed run's compact
+`last_terminal_merge_frame` normally does not carry it. `RunSummary` exposes
+`has_merge_frames`, `last_merge_status`, terminal `landing` and only that compact
+frame (`modules/io/src/run_summary.rs:48-68`, `169-193`) — no ordered gate
+history at all.
+
+Ruling: **the whole `gates` block, all four labels and all four values, is
+placeholder content from the one shared module.** Only the heading is fixed
+interface text. The draft's rule would have produced a renderer that maps
+arbitrary argv labels onto four design-named rows and prints every reachable
+result as `pass` — a screen that reads as evidence and is wrong. Later real
+wiring is out of this task and, per parent guidance, would extract
+`merge_story::gate_rows`' pure parser and typed presentation into shared core/IO
+and inspect the ordered `provenance.merge_frames` history rather than the compact
+terminal frame (`0269:64-68`). Neither happens here.
+
+**Correction 2 — sign-offs are placeholder because nothing exists to derive them
+from, and the gap is named precisely.** A focused search under `modules/**` finds
+no `signoff`, `sign-off` or `sign-offs` type or store; the `approval` matches are
+unrelated trust, procedure-input and owner-input concepts. The center protocol's
+requests cover register/frame/activity/end, subscribe, start/control,
+list/get/resolve, run lookup, stats and the standing wall, and its deltas cover
+appeared/changed/ended rows and activity — no merge-queue order, no
+awaiting-approval state, no sign-off response, no queue count
+(`modules/io/src/center.rs:84-281`). Ruling: **every identity, role and time in
+this block is placeholder content.** Deriving entries from merge frames, trust
+approvals, task ownership or run evidence would fabricate state that does not
+exist. And the gap is stated narrowly wherever this cut's code, comments or
+commit message state it — no merge-queue order, no awaiting-approval state, no
+sign-off record, no queue counts — never "no merge surface exists", because
+`ctx traits merge <run-id>`, the TUI Merges screen and durable merge frames all
+exist (`0269:34-42`).
+
+**Correction 3 — "no inline placeholder literals" governs placeholder facts, not
+the two block headings.** The draft's Watch says "no inline placeholder literals"
+without the distinction parent Correction 5 draws (`0269:80-84`). Read literally
+it routes the fixed lowercase headings `gates` and `sign-offs` through the
+placeholders module, turning interface chrome into fake placeholder facts and
+poisoning the grep the rule exists to enable. Ruling: the shared module carries
+**exactly what the `placeholder:` tags authorise** — the four gate labels and
+their four values, and the three sign-off identities with their roles and times —
+one small replaceable entry per rendered region, each traceable to
+`screens/merges.md:37-39` and `40-42`. The two headings are ordinary interface
+text at mono 11 `text-muted` per rule 5 (`grammar.md:49-56`). No registry, trait,
+macro layer or second placeholders module.
+
+**Correction 4 — the export omits opacity on `@oskar` and the specification wins.**
+`reference/merges.html:858-874` renders the owner's handle at `text-session`
+`#a7abb5` with no `opacity` property, while the two agent identities above it
+carry `opacity: 0.8` (`824-857`). `screens/merges.md:40-42` states
+"rows agent mono 10.5 identity-color 0.8 left" for the whole block, and grammar
+rule 1 states the 0.8 rule for small mono handles generally
+(`grammar.md:16-19`); parent Correction 6 resolves the conflict toward the
+specification (`0269:86-96`). Ruling: **all three identities render at 0.8
+opacity**, `@oskar` included. The export is measurement; the rules are the
+specification. The conflict is reported as an owner correction against the design
+source, never edited into `.internal/docs/design/**`. A further conflict found
+during implementation resolves the same way and is reported.
+
+**Correction 5 — no selected-detail read is needed, and today's `Get` path is not
+the one to reach for anyway.** The draft requires reads through "the same
+selection-triggered reconstruction the Sessions preview reads through", off the
+UI thread, reconstructing identically after the window is closed and reopened.
+With both blocks placeholder-served that requirement has no subject: **this cut
+performs no read of any kind.** The reading is recorded only so nobody reaches
+for one. `center::get(session_id, repo_key)` does return the complete shared
+`Session` (`center.rs:916-935`), but at this HEAD `Request::Get` resolves the row
+and calls `read_session` **synchronously inside `handle_request`**
+(`center.rs:3595-3669`), which parent Correction 9 states is not the sanctioned
+off-owner-path posture (`0269:119-129`). The current TUI merge preview is not a
+model either: it rebuilds on selection but derives gate rows from the compact
+last terminal frame and performs direct repository and worktree Git reads
+(`modules/cli/src/app/dashboard.rs:4277-4407`), and it is `ctx-traits-cli`-private
+beside ratatui rendering. `CenterPublicRow` carries compact summary, `repo_key`,
+`repo_path`, ledger path, live flag and ledger mtime (`center.rs:3778-3788`), and
+the center's own two-second reconciliation scan (`center.rs:65`) is not
+permission for a GUI timer. The robustness posture still binds even though
+nothing here exercises it: no compact-row read, no poll loop, no desktop ledger,
+store, sidecar, worktree, gate-output-file or Git read, no GUI-only durable
+state, and no blocking work on gpui's UI thread.
+
+## Why the declared edge is already sufficient
+
+The draft depends only on `0269.2` and that edge is correct, so `depends-on` is
+unchanged. Dependencies are not inherited from a parent — `derived_status`
+evaluates `depends-on` for the open leaf itself
+(`modules/core/src/task/graph.rs:115-176`) — so the closure was checked rather
+than assumed. It is `0269.4 → 0269.2 → {0269.1, 0265.13, 0265.15}`, with
+`0265.15 → 0265.12 → 0265.10 → {0265.2, 0265.3, 0257}`, `0265.13 → {0265.2,
+0265.3}`, `0265.3 → 0265.1 → 0256.1`, and `0269.1 → {0265.5, 0265.7, 0265.9,
+0258}`. Every component this cut consumes is inside it: the one `placeholders`
+module and the token/font entry point (`0265.3`, `0265.1`), the preview frame,
+block shell, key/value row, spacer and footer (`0265.10`, `0265.12`, `0265.15`),
+the clip-and-fade component (`0265.7`), the assembled Merges preview with its two
+reserved positions and its single selection (`0269.2`, `0269.1`), and the desktop
+project and its lane (`0256.1`). No edge is added, because none is missing.
+
+## Grounded against HEAD 11c7badbf
+
+Nothing this task edits exists yet. Root `Cargo.toml` names only the seven
+existing Rust workspace members and excludes only `packages/cdk`; root
+`Cargo.lock` contains no `gpui` package; there is no desktop manifest, no desktop
+lockfile, no gpui source tree, no `placeholders.rs`, no desktop recipe in
+`Justfile` and no desktop CI lane anywhere in the repository. Every desktop path,
+module name, symbol, signature and gpui API named below is therefore a guess to
+be replaced by reading what `0256.1`, `0265.1`, `0265.3`, `0265.7`, `0265.10`,
+`0265.12`, `0265.15`, `0269.1` and `0269.2` actually landed.
+
+Every prerequisite is still open at this HEAD: `0256.1`, `0265.1`, `0265.3`,
+`0265.7`, `0265.10`, `0269.1` and `0269.2` are `ready`, and `0265.12` and
+`0265.15` are `draft`. Note that `draft` is not a storable status — `TaskStatus`
+is the closed set `ready|done|cancelled` (`modules/core/src/task/mod.rs:22-31`),
+so `FilesTaskBoard::load` records the parse rejection and skips the document
+(`modules/io/src/task_files.rs:186-250`). Activating a sibling or prerequisite
+draft is board bookkeeping outside this cut's code scope, and no test may assert
+on this repository's own board.
+
+**The desktop lane exists by the time this task is dispatchable, and that is a
+dependency fact rather than a hope.** The chain above reaches `0256.1`, which
+establishes the standalone desktop project and does not close until "its
+documented independent build and test commands pass from a clean checkout"
+(`0256.1:17`). The lane and its non-interactive command are therefore a dispatch
+precondition, not a discovery gamble. The command cannot be written into this
+file because it does not exist at the HEAD this plan was authored against, and a
+named command that does not exist is a fabrication a board check would execute as
+if it were evidence. Goal 0 resolves that by making the command's resolution and
+a baseline run of it the run's **first** action, ahead of every edit: if the
+chain has not in fact landed, the run stops there, writes no code, and reports an
+unmet dependency on `0256.1`.
+
+**Static review decides the structural half and cannot decide the runtime half.**
+The closing reads of `git diff main...HEAD`, `git diff --name-only main...HEAD`
+and `git status --short` establish what a running harness does not show cheaply —
+a second placeholders module, inline placeholder facts, headings misfiled as
+placeholder data, copied block, key/value or sign-off layout logic, token or
+geometry literals at call sites, a gate parser or read, a `merge_story`
+extraction or copy, a CLI-private or ratatui import, a filesystem or Git read, a
+timer, a write path, a queue inference, a light-column value, an edit under
+`.internal/docs/design/**`, and sibling-owned work. They do not establish that
+four gate rows rendered in `ok` or that three identities rendered at 0.8; the
+desktop lane decides those.
+
+The root-isolation command this file already declared was executed at this HEAD
+and exited 0 with no output, so it is a live command rather than a guess. It
+proves workspace isolation only, never rendered desktop behaviour.
+'''
+scope = '''
+## GOALS — binding
+
+### What decides these goals
+
+Three mechanisms decide the goals below, and each is used only for what it can
+actually observe.
+
+**The desktop lane, executed.** The rendered blocks, their order, their content,
+their tones and opacities, the selection behaviour and the overflow behaviour are
+runtime outcomes; they are decided by focused coverage run in the desktop
+build-and-test lane that the dependency chain `0269.4 → 0269.2 → 0269.1 →
+0265.5 → 0265.3 → 0265.1 → 0256.1` guarantees has landed before this task is
+dispatchable. Goal 0 resolves that lane's exact documented non-interactive
+command and runs it before any edit; goal 11 runs the same command again over
+this cut's added cases and requires exit 0.
+
+No goal writes that command as a literal and no check declares it, because it
+does not exist at the HEAD this plan was authored against and a board check must
+already exist and run repo-root-relative in a clean detached worktree — writing
+one now would fabricate it. Unnameable here is not unrunnable there: goal 0 pins
+resolution to the landed project's own documentation, gives that resolution a
+definite two-way outcome, and makes the absent-lane case a hard stop before a
+line is written rather than a Done-when clause left hanging.
+
+**The two declared checks**, which exist in this repository today: `just test`,
+the per-round workspace gate whose recipe runs the SDK and builtin drift checks,
+the TypeScript format and type checks, Rust format and clippy and the workspace
+library tests (`Justfile:111-146`); and the root gpui-free resolution and
+lockfile check, which was run at authoring HEAD and exited 0.
+
+**The closing static read** of the diff printed by `git diff main...HEAD`,
+`git diff --name-only main...HEAD` and `git status --short` — commands that exist
+today — against `screens/merges.md:33-45`, `grammar.md:6-72`, `117-124`,
+`tokens.md:3-85` and `reference/merges.html:661-667`, `734-812`, `813-874`,
+applying Correction 4. Its inspection list is fixed by goal 12. It decides code
+shape and forbidden constructs, never that something rendered; wherever a goal
+names a runtime outcome the desktop lane decides it and this read only
+supplements. It cannot be a board check, because a check runs in a clean detached
+worktree of the merged sha with no base to diff against.
+
+0. **The desktop lane's command is resolved and run green before anything is
+   edited.** The run's first action, ahead of every edit, is to locate the
+   standalone desktop project the chain through `0256.1` landed and to run its
+   documented non-interactive build-and-test command unchanged, from the location
+   that documentation gives, on the untouched tree. Resolution is not open-ended:
+   the command is read out of that landed project's own documentation — its
+   manifest, README, justfile or CI lane — and the outcome is two-way. Either
+   exactly one such documented command is found and it runs, or none is.
+   Decided by that command running to a result on the unmodified tree and exiting
+   0, reported verbatim with its outcome. That is the baseline every later run of
+   it in goal 11 is compared against, so a later red is attributable to this
+   cut's code rather than to an inherited one.
+   If no such command exists, or it fails because the manifest, lane or command
+   is absent rather than because of anything this cut did, the prerequisite chain
+   was not honoured: the run stops here, writes no code, and reports an unmet
+   dependency on `0256.1`. That report is the whole task outcome, not a warning
+   to proceed past — a plan whose primary proof cannot run must not produce a
+   diff.
+   Excluded: standing up a desktop lane, manifest or command of the run's own;
+   editing any file before this step returns; repairing an inherited red baseline,
+   which belongs to the task that owns the lane; treating a green `just test`, a
+   green root-resolution check or a clean diff read as a substitute for it.
+
+1. **Both blocks fill `0269.2`'s two reserved positions and nothing else moves.**
+   The Merges preview column renders, in order, `merge` → `gates` → `sign-offs` →
+   `landing` → spacer → footer (`screens/merges.md:33-45`;
+   `grammar.md:117-124`). The two new blocks are inserted at the ordered
+   insertion points `0269.2` left between `merge` and `landing`
+   (`0269.2:376-397`); the header, the bottom bar, the preview frame, the `merge`
+   block, the `landing` consequence, the spacer, the footer, the menu, the
+   sections, the rows and the selection model are consumed as they landed and are
+   not restructured, restyled or re-created.
+   Decided by focused coverage in the landed desktop lane (goal 11) observing
+   that rendered order with both new blocks present between `merge` and
+   `landing`; and by the closing static read showing the insertion made in
+   `0269.2`'s assembly with no change to the surrounding regions.
+   Excluded: reordering the column; a Merges-local preview frame, block shell,
+   key/value row, spacer or footer; touching the header, bar, `merge` block,
+   `landing` block, footer, sections, rows, menu or selection — those are
+   `0269.1`'s and `0269.2`'s; a slot framework, registry or generic block-plugin
+   layer in place of ordinary assembly order.
+
+2. **The `gates` block renders the design's four rows through the shared
+   key/value vocabulary, in `ok`.** Under the fixed lowercase heading `gates` in
+   mono 11 `text-muted`, four rule-7 key/value rows render in the design's order:
+   `cargo test` → `pass`, `drift · embed` → `pass`, `ts-format` → `pass`,
+   `worktree` → `clean`. Keys are sans 11.5 `text-secondary`, values are mono
+   10.5, and **every value takes `ok`** because each value IS a state
+   (`grammar.md:24-29`, `68-72`; `tokens.md:43`, `62-65`;
+   `reference/merges.html:734-812`). The block is a full-width column at internal
+   gap 8 and bottom padding 20 through the shared block shell (`tokens.md:82`).
+   Decided by focused coverage in the landed desktop lane (goal 11) observing the
+   heading, the four rows in that order with those labels and values, the keys
+   and values at their families, sizes and tones, and all four values in `ok`;
+   and by the closing static read showing the shared block shell and key/value
+   row consumed, with the four labels and four values resolved through the shared
+   `placeholders` module (goal 4) and no colour, size or spacing literal at the
+   call site.
+   Excluded: reading, parsing, translating or rendering any gate evidence (goal
+   5); a fifth row, a reordered row or an omitted row; a value in any tone other
+   than `ok`; a status dot in this block — rule 4 excludes key/value blocks; a
+   Merges-local key/value row or block shell; treating the four labels as a
+   schema anything is matched against.
+
+3. **The `sign-offs` block renders three identity rows at 0.8 opacity with no
+   dots.** Under the fixed lowercase heading `sign-offs` in mono 11 `text-muted`,
+   three space-between rows render `architect@1.4 | author · 14:49`,
+   `security@0.9 | review · 14:47` and `@oskar | approved · 15:12`. Each left
+   identity is mono 10.5 at its identity colour — `architect@1.4` in `accent`
+   `#7fb2ff`, `security@0.9` in `review` `#c49af0`, `@oskar` in `text-session`
+   `#a7abb5` (`tokens.md:29`, `40`, `47`) — and **all three render at 0.8
+   opacity**, the owner's handle included, resolving the export's omission toward
+   the specification (Correction 4; `screens/merges.md:40-42`;
+   `grammar.md:16-19`; `0269:86-96`). Each right side is mono 10 `text-faint`
+   (`tokens.md:34`, `65`). The block uses the same shared block shell as `gates`
+   at internal gap 8 and bottom padding 20, but its rows are **not** key/value
+   rows and are not forced into that shape.
+   Decided by focused coverage in the landed desktop lane (goal 11) observing the
+   heading, the three rows in that order with those identities, roles and times,
+   each identity's colour and 0.8 opacity including `@oskar`'s, each right side
+   at mono 10 `text-faint`, the space-between layout, and no dot on any row; and
+   by the closing static read showing one lean row renderer over one small data
+   shape, the shared block shell and token entry point consumed, and the entries
+   resolved through the shared `placeholders` module (goal 4).
+   Excluded: a status dot on any sign-off row — rule 4 excludes sign-offs
+   explicitly (`grammar.md:39-47`); the export's missing opacity on `@oskar`;
+   forcing these rows through the key/value primitive or through the `gates`
+   renderer; a pill, icon, checkmark, badge or corner radius; a fourth row or an
+   invented per-selection roster; a general sign-off row abstraction beyond the
+   three rows this block renders.
+
+4. **Both blocks' content comes from the one shared `placeholders` module; the
+   two headings do not.** The four gate labels, the four gate values and the
+   three sign-off entries resolve through the single `placeholders` module
+   `0265.3` created, as small replaceable entries beside its existing ones, each
+   traceable to `screens/merges.md:37-39` or `40-42`, so wiring either region
+   later is a grep rather than an archaeology dig. The headings `gates` and
+   `sign-offs` are ordinary interface text and stay out of that module
+   (Correction 3; `0269:80-84`).
+   Decided by the closing static read of `git diff main...HEAD` showing the
+   entries added to that one module and resolved at the call sites, with no
+   inline placeholder literal, no duplicated literal, no second `placeholders`
+   module and no heading routed through it; and by focused coverage in the landed
+   desktop lane (goal 11) that the rendered content resolves through the module
+   rather than an inline copy.
+   Excluded: a second placeholders module; a registry, lookup framework, trait or
+   macro layer; entries this cut does not render; touching the entries `0269.1`
+   or `0269.2` added; presenting any of these illustrations as center-derived
+   evidence.
+
+5. **No gate evidence is read, parsed, translated or rendered anywhere.** The
+   desktop performs no gate-related read, request or parse; `merge_story::gate_rows`
+   and its typed presentation are neither extracted, copied, re-derived nor
+   contradicted, and `merge_story`'s landed passed, failed, timed-out and
+   unknown-token wording is unchanged; no `MergeFrame`, `MergeStatus`,
+   `EffectiveMergePolicy`, `RunSummary` merge leaf, ledger, gate-output file or
+   `provenance.merge_frames` history is consulted; and the CLI merge command and
+   the TUI dashboard's merge projection and actions are untouched (Correction 1;
+   `0269:55-68`, `0269:136-145`).
+   Decided by the declared `just test` check staying green and unchanged in cost,
+   by the closing static read for a gate parser, a gate read, a `merge_story`
+   import or copy, a new served shape in `modules/io/src/center.rs` or any change
+   under `modules/cli/src/app/`, and by focused coverage in the landed desktop
+   lane (goal 11) observing that rendering these blocks and changing the
+   selection fire no read and no request.
+   Excluded: extracting `merge_story::gate_rows` into shared core/IO — that is
+   later work when the block is genuinely wired, not this cut's; a second gate
+   parser inside gpui, which is the capability-in-one-face defect even when it
+   compiles; matching the four design labels against generated argv labels;
+   rendering any reachable command result as `pass`.
+
+6. **No sign-off mechanism is invented, and the gap is named narrowly.** No
+   sign-off type, store, registry, backend, approval flow or trust-derived
+   roster is added on any face, and no entry is derived from merge frames, trust
+   approvals, task ownership or run evidence. Wherever this cut's code, comments
+   or commit message state the gap, they state it as **no merge-queue order, no
+   awaiting-approval state, no sign-off record, no queue counts** — never "no
+   merge surface exists", because `ctx traits merge <run-id>`, the TUI Merges
+   screen and durable merge frames all exist (Correction 2; `0269:34-42`).
+   Decided by the closing static read for a sign-off type, store, trait, request,
+   response or derivation, for a new center capability, and for an overclaimed
+   gap sentence in code, comment or commit message.
+   Excluded: building sign-offs, approvals, a queue or any mutation; adding a
+   center request, response or delta; a diffstat or default-branch-history
+   capability; a placeholder shaped as a backend interface or trait boundary,
+   which would be the speculative extraction `0269:144` forbids.
+
+7. **Selection changes preserve the same single static illustration and fire
+   nothing.** The design supplies exactly one preview illustration, so both new
+   blocks render the same content for every selected merge row, including a
+   selection change that crosses a section boundary; no alternate gate row set
+   and no alternate sign-off roster is invented for the other rows. The
+   selected-region input stays structured so real per-row data can replace the
+   static content later without restructuring the column. `0269.1`'s single
+   selection and `0269.2`'s preview assembly are consumed unchanged.
+   Decided by focused coverage in the landed desktop lane (goal 11) moving the
+   selection within a section and across a section boundary and observing both
+   blocks present, unchanged in content, with no read and no request fired by
+   either move; and by the closing static read showing no preview-local,
+   per-section or second selection model and no per-row placeholder table.
+   Excluded: invented per-row gate or sign-off content; a second selection model;
+   changing `0269.1`'s selection semantics or `0269.2`'s assembly beyond the two
+   insertions; a per-row cache or memo that exists only to serve static content.
+
+8. **Adding the two blocks keeps overflow correct through the shared component.**
+   Where the two added blocks push the preview column's content past its
+   viewport, the clip-and-fade component `0265.7` landed and `0269.2` already
+   wrapped the preview content in decides the outcome: content that fits —
+   including content whose height exactly equals the viewport — gets no overlay
+   and no hint, and only strictly overflowing content gets the 100px
+   full-pane-width canvas gradient with a centred mono 10.5 `text-faint`
+   `scroll to end` that is plain text, not a control (`grammar.md:86-91`;
+   `tokens.md:84`).
+   Decided by focused coverage in the landed desktop lane (goal 11) with the two
+   blocks added under content that fits, content that exactly fits and content
+   that overflows, observing no fade in the first two cases and the fade with its
+   centred hint in the third; and by the closing static read showing the shared
+   component still consumed with no Merges-local fade and no fade decision made
+   from a block or row count.
+   Excluded: a Merges-local clip-and-fade; a fade shown when content fits or
+   exactly fits; a fade decision derived from a row count; making `scroll to end`
+   focusable, hoverable or clickable; changing the shared component's geometry
+   for this screen.
+
+9. **This cut reads nothing, polls nothing and writes nothing.** It performs no
+   center request, no full-session reconstruction, no ledger, store, sidecar,
+   worktree, gate-output-file or Git read and no filesystem access at render
+   time; it installs no timer, interval, animation clock or spawned tick and
+   performs no blocking receive on gpui's UI thread; and it adds no write path,
+   lock, queue mutation or merge action. Selection change triggers none of those
+   either — a static placeholder projection gives no reason to read. Where
+   surrounding screen state consumes the landed snapshot/delta model it consumes
+   it rather than adding a second reducer
+   (`modules/cli/src/app/dashboard/worker.rs:254-415`, `418-457`), and no queue
+   position, queue order, active landing, awaiting-approval state, landing
+   chronology or landed-this-week count is inferred from center rows, run
+   summaries or frame history.
+   Decided by the closing static read of `git diff main...HEAD` for a timer,
+   interval, spawned tick, blocking receive on the UI thread, direct filesystem
+   or Git path, second reducer, write path or new served shape in
+   `modules/io/src/center.rs`; by the declared `just test` check staying green;
+   and by focused coverage in the landed desktop lane (goal 11) that rendering
+   both blocks and changing the selection trigger no read and no request.
+   Excluded: consuming today's `center::get`, which reads the selected ledger
+   synchronously inside `handle_request` (`center.rs:916-935`, `3595-3669`) and
+   is not the sanctioned off-owner-path shape (Correction 5); a desktop-side
+   fallback reader; a GUI-only durable state file; the center's two-second scan
+   (`center.rs:65`) read as permission for a client timer.
+
+10. **Every value comes from the shared token and font entry point.** No colour,
+    size, spacing, weight, opacity or family literal appears at a call site in
+    this cut. `text-muted #585d68`, `text-secondary #8b909c`,
+    `text-faint #4d525c`, `text-session #a7abb5`, `accent #7fb2ff`,
+    `review #c49af0` and `ok #7fc79a` (`tokens.md:29`, `33-34`, `40`, `43`,
+    `47`), the type scale (`tokens.md:62-65`) and the block geometry
+    (`tokens.md:80-82`) are that entry point's contents. IBM Plex Sans and Mono
+    are normative and `0265.1` owns resolving the faces; this cut consumes what
+    it landed. The dark column only — `tokens.md:3-4` records the light values
+    for later and they stay untouched. The glyph set is closed — `↰ ↳ → · ∷` —
+    and this cut needs only `·`. No corner radius inside the canvas and no status
+    dot in either block.
+    Decided by the closing static read against `tokens.md:3-85` and
+    `grammar.md:31-47` for literals at call sites, a Merges-local colour, size or
+    opacity table, a system font fallback, a light-column value, a dot, a radius
+    or a glyph outside the set; and by focused coverage in the landed desktop
+    lane (goal 11) observing the tones, sizes and opacities goals 2 and 3 name.
+    Excluded: a hex, px, family, weight or opacity literal at a call site — a hex
+    inside a primitive is the same defect as a hex inside a screen; a silent
+    system font fallback; touching the light column of `tokens.md`; an icon,
+    emoji or checkmark; colour used for emphasis rather than meaning.
+
+11. **The landed desktop lane runs green over this cut's cases, and the
+    workspace does not learn about gpui.** The command goal 0 already resolved
+    and ran green on the untouched tree is now the gate for this cut: its harness
+    is extended with focused coverage of the outcomes goals 1-10 assign to it —
+    the rendered order `merge` → `gates` → `sign-offs` → `landing` → spacer →
+    footer; the four gate rows in order with their labels and their `ok` values;
+    the three sign-off rows with their identities, roles and times, each identity
+    at its colour and 0.8 opacity including `@oskar`, each right side mono 10
+    `text-faint`, and no dot; content resolving through the shared module; a
+    cross-section selection change leaving both blocks unchanged with no read
+    fired; and fit, exact-fit and overflow behaviour with the two blocks added —
+    run, and green. It exits 0, and the work summary names it verbatim with its
+    outcome. Separately, root Cargo resolution and the root `Cargo.lock` stay
+    gpui-free, the desktop project is not a workspace member, and the per-round
+    workspace gate stays green and unchanged in cost.
+    Decided by that command's exit status, reported verbatim, against the goal 0
+    baseline, and by the two declared checks. The desktop command is not declared
+    as a board check because it does not exist at the HEAD this plan was written
+    against and a check must already exist; that is a naming limit, not a
+    relaxation, and goal 0 is what converts it into a command that has
+    demonstrably run before this goal depends on it. The absent-lane case cannot
+    reach this goal — goal 0 stops the run first.
+    Excluded: standing up a parallel desktop lane of the run's own; substituting
+    the workspace checks or the closing diff read for it; weakening the coverage
+    to compile-only; declaring it as a board check; adding the desktop project to
+    root workspace members or adding gpui cost to `just test`, `just test-full`
+    or the existing CI lanes; a grep forbidding the word `gpui` in `Justfile` or
+    `.github/workflows/` — a *separate* desktop lane there is sanctioned, so such
+    a check would red on the sanctioned outcome; a path, word or file-existence
+    inventory test, and any test that depends on this repository's committed
+    board, trait set, runtime document or design files.
+
+12. **The normative artifacts are untouched, and the pass is reviewed once and
+    bounded.** No file under `.internal/docs/design/` is modified, and no
+    sibling-owned region appears in this cut's changes. Correction 4's export
+    conflict — the missing 0.8 opacity on `@oskar` — is raised as an owner
+    correction against the design source, never edited into it, as is any further
+    conflict found during implementation. Before the task is called done, the
+    diff printed by `git diff main...HEAD` is read against
+    `screens/merges.md:33-45`, `grammar.md:6-72`, `117-124`, `tokens.md:3-85` and
+    `reference/merges.html:661-667`, `734-812`, `813-874`, leaf by leaf,
+    specifically inspecting for: a second `placeholders` module; an inline
+    placeholder fact; either fixed heading routed through the shared module;
+    copied block, key/value or sign-off layout logic; a token, geometry or
+    opacity literal at a call site; a gate parser, gate read or center request; a
+    `merge_story` extraction or copy; a CLI-private or ratatui import; a desktop
+    filesystem or Git read; a timer, interval or spawned tick; a write path, lock
+    or queue mutation; a queue, landing or chronology inference; a light-column
+    value; an edit under `.internal/docs/design/**`; and a hunk building a region
+    `0269.1` or `0269.2` owns. The tree it was read from is the tree that lands:
+    `git status --short` prints nothing.
+    Decided for the path exclusion by `git diff --name-only main...HEAD`
+    containing no path under `.internal/docs/design/`, and for sibling-owned work
+    by the read of the full diff itself: `0269.1` and `0269.2` own regions — the
+    menu, sections, rows and selection, and the header, bar, frame, `merge`,
+    `landing`, spacer and footer — not established files, so the region test is
+    what the changed hunks show, and sharing a Merges screen file with a sibling
+    cut is expected rather than a violation. No board check can decide this,
+    because a check runs in a clean detached worktree of the merged sha with no
+    base to diff against; if the run branched from something other than `main`,
+    substitute that base (`git merge-base` resolves it).
+    Exactly one targeted repair cycle is allowed: run the commands in the order
+    given under Bounded refinement, repair one named defect, and rerun that
+    command and everything after it. If a second cycle would be needed, stop and
+    report the exact failing command — or the unresolved visual or data contract —
+    with its evidence, rather than iterating.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against, and
+every prerequisite is still open. Read what they landed; do not carry a guess
+from this file into an edit.
+
+- Root `Cargo.toml`'s exclude list and the top-level listing are the suggested
+  way to locate the desktop project; its manifest, README, justfile or CI lane is
+  where its documented command is likely written. Goals 0 and 11 bind that
+  command and the order it runs in; this bullet only suggests where to look.
+  Resolve and run it before reading anything else below — a lane that is absent
+  ends the run, and every discovery step after this one would then be wasted.
+- Read `0269.2`'s assembled Merges preview column and find the two ordered
+  insertion points it left between `merge` and `landing`. Insert there; do not
+  build a second column.
+- Read the block shell, key/value row, spacer and footer that `0265.10`,
+  `0265.12` and `0265.15` landed. `gates` is that block shell plus four of that
+  key/value row. `sign-offs` is that block shell plus one small row renderer this
+  cut adds.
+- Read `0265.3`'s `placeholders` module and add exactly this cut's entries beside
+  its existing ones.
+- Read `0265.1`'s token and font entry point and take every colour, size, family
+  and opacity from it. If 0.8 opacity for identity handles has no entry there
+  because `0265` had no consumer for it, adding one small entry to that entry
+  point is the correct move; a Merges-local opacity constant is not.
+- Read `0265.7`'s clip-and-fade as `0269.2` wrapped it, and confirm the two added
+  blocks flow inside that wrapper rather than beside it.
+- Read `0269.1`'s selection so the blocks consume it rather than observing it a
+  second way.
+
+### Edit order
+
+1. The placeholder entries for the two regions — four gate labels, four gate
+   values, three sign-off entries — each traceable to `screens/merges.md:37-39`
+   or `40-42`.
+2. The `gates` block at the first reserved position: shared block shell, shared
+   heading treatment, four shared key/value rows resolved from the module.
+3. The sign-off row renderer, then the `sign-offs` block at the second reserved
+   position: same shared block shell, its own three rows.
+4. The focused proofs in the desktop lane, then that lane's command, then the
+   declared checks, then the closing diff read. Goal 0's baseline run of that
+   same command precedes step 1, not step 4.
+
+Doing `gates` first is deliberate: it needs no new renderer at all, so it proves
+the insertion points and the shared block shell work before the sign-off row
+shape is introduced.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `gates_block()` that folds the module's four label/value
+pairs over the shared key/value row, and a `signoffs_block()` over a
+`SignOff { identity, identity_tone, role_and_time }`-shaped entry rendered by one
+small space-between row function. One data shape and one row renderer is the
+whole sign-off surface; a trait, a registry, an identity-resolution service or a
+generic two-column-row abstraction would be the speculative extraction
+`0269:144-145` forbids. The identity tone is a token reference carried on the
+entry, not a colour literal and not a string parsed out of the handle. Names,
+module paths and signatures follow whatever conventions `0256`, `0265`, `0269.1`
+and `0269.2` established.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the landed harness is the run's call.
+
+- Rendered block order `merge` → `gates` → `sign-offs` → `landing` → spacer →
+  footer, with the footer still pinned to the bottom by the spacer.
+- Four gate rows in order: `cargo test`/`pass`, `drift · embed`/`pass`,
+  `ts-format`/`pass`, `worktree`/`clean`; keys sans 11.5 `text-secondary`, values
+  mono 10.5, all four values in `ok`.
+- Three sign-off rows in order with their identities, roles and times; identity
+  tones `accent`, `review`, `text-session`; 0.8 opacity on all three, `@oskar`
+  included; right sides mono 10 `text-faint`; no dot anywhere in the block.
+- A selection change within a section and across a section boundary leaves both
+  blocks' content identical and fires no read and no request.
+- Content that fits and content that exactly fits render no fade; content that
+  overflows once the two blocks are added renders the 100px fade with its centred
+  `scroll to end`.
+
+### Reuse points
+
+`0265.3`'s single `placeholders` module; `0265.10`, `0265.12` and `0265.15`'s
+preview frame, block shell, key/value row, spacer and footer; `0265.7`'s
+clip-and-fade; `0265.1`'s token and font entry point for every value; `0269.2`'s
+assembled preview column and its two reserved positions; `0269.1`'s Merges pane
+and its single selection. The landed snapshot/delta reducer is the semantics to
+consume where surrounding state needs it, never to reimplement
+(`modules/cli/src/app/dashboard/worker.rs:254-415`, `418-457`). Named so nothing
+re-derives or contradicts them, though this cut renders through none of them:
+`merge_story::gate_rows` and its typed presentation
+(`modules/cli/src/app/merge_story.rs:405-411`, `811-895`), core `MergeFrame` and
+`MergeStatus::is_terminal` (`modules/core/src/procedure/session.rs:617-670`,
+`1040-1066`), `EffectiveMergePolicy.gate`
+(`modules/io/src/harness_config.rs:1484-1502`), `RunSummary`'s merge leaves
+(`modules/io/src/run_summary.rs:48-68`, `169-193`), and the CLI merge command and
+TUI Merges keymap (`modules/cli/src/app/merge.rs:1-16`;
+`dashboard/keymap.rs:90-111`).
+
+### Reporting mechanics — suggestions
+
+What must be reported is fixed by GOALS and Done when; this subsection only
+suggests how. Quoting each executed command in a fenced block with its exit
+status beside it reads better than prose. Naming the discovered desktop path next
+to that lane's command helps whoever declares it as a board check later. Stating
+the owner correction under its own heading — the export's missing 0.8 opacity on
+`@oskar` against `screens/merges.md:40-42` and grammar rule 1 — keeps it from
+reading as commentary, as does stating any prerequisite gap if one bites.
+Deviations from this approach are reported in the work summary as deviations;
+that is a report, not a violation and not an escalation.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml` and the desktop directory inherits that pin unless `0256.1`
+gave it its own toolchain file. Keep any repair scoped to the one red command and
+preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The menu entry and switch, the three sections, the five rows and the selection
+  model (`0269.1`); the header, the bottom bar, the preview frame, the `merge`
+  block, the `landing` consequence, the spacer and the footer (`0269.2`).
+- Reading, parsing, translating or rendering gate evidence; extracting or copying
+  `merge_story::gate_rows`; any change to `modules/cli/src/app/merge.rs`,
+  `merge_story.rs` or the dashboard's merge projection and actions.
+- Building a merge queue, an approval flow, a sign-off mechanism, a sign-off
+  store or any queue mutation; a center request, response, delta,
+  default-branch-history or diffstat capability.
+- Every shared primitive `0265` built — block shell, key/value rows, preview
+  frame, spacer, footer, overflow, tokens, fonts, the `placeholders` module — is
+  consumed, never re-created Merges-locally, and a second `placeholders` module,
+  registry, trait or macro framework is not created.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Any ledger, store, sidecar, worktree, gate-output-file, Git or filesystem read
+  on the desktop side; a GUI poll loop or timer; a blocking receive on gpui's UI
+  thread; a second reducer; a GUI-only durable state file.
+- A `[[checks]]` entry that executes the desktop lane. No such command exists in
+  the repository today, so declaring one now would be a fabrication. The lane
+  still binds through goals 0 and 11.
+- The other three new screens (`0266`, `0267`, `0268`), packaging (`0260`), the
+  summons surface (`0259`), and pencil work of any kind.
+- Anything discovered beyond these goals: that is board material, not a cell here.
+'''
+validation = '''
 ## Watch
 
-- **Do not placeholder a reachable gate result, and do not fabricate an unreachable one.** Both directions defeat the doctrine; an unreachable gate row is placeholder-tagged, never a fabricated `pass`.
-- **No inline placeholder literals** — sign-off entries and any unreachable gate row come from the one shared module.
-- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A GUI-only gate or receipt reader is the capability-in-one-face defect; gate results arrive through the center-served detail, not a desktop-side file read.
-- **Compact list rows must never trigger the reconstruction** — only selection does — and the read stays off gpui's UI thread.
-- **The ledger is authoritative**: a finished merge's gates block must reconstruct identically after the window is closed and reopened.
-- **No poll loop.** The column updates on selection and on center deltas for the selected row.
-- **Fail-loud, no silent staleness, no direct-reader fallback.** An unreachable read states the gap in the column rather than falling back to the filesystem or showing stale values as current.
-- **Sign-offs carry no status dots** — rule 4 excludes sign-off rows explicitly — and no corner radius exists inside the canvas.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the wired gates block and the placeholder-served sign-offs are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Do not wire the gates block.** The still-stale filename of this task and the
+  draft text it replaces said to wire every reachable gate result. Parent
+  Correction 3 elected the whole block into placeholder form and that election
+  binds (`0269:11`, `0269:55-68`). Reaching for gate evidence because something
+  looks reachable widens the leaf; it does not complete it.
+- **The four gate labels are an illustration, never a schema.** `[merge] gate` is
+  an ordered list of arbitrary argv arrays, empty by default
+  (`modules/io/src/harness_config.rs:1280-1314`, `1484-1502`), and gate labels are
+  generated generically from argv with a `gate-{index}` fallback
+  (`modules/cli/src/app/merge.rs:2428-2450`). Nothing in the backend knows
+  `cargo test`, `drift · embed`, `ts-format` or `worktree`. Matching a generated
+  label onto a design-named row would fake a mapping that does not exist.
+- **Results are not uniformly green, so a wired block could not honestly say
+  `pass` four times.** The existing translation distinguishes passed, failed with
+  an exit code, timed out and killed by signal
+  (`modules/cli/src/app/merge_story.rs:67-80`, `811-895`), successful evidence
+  lands on a nonterminal `GatesPassed` frame (`merge.rs:2720-2735`;
+  `session.rs:617-670`), and `RunSummary` exposes only the compact
+  `last_terminal_merge_frame` with no ordered gate history
+  (`run_summary.rs:48-68`, `169-193`). That is the reason for the election, not a
+  detail to work around.
+- **Invent nothing for sign-offs.** No `signoff`, `sign-off` or `sign-offs` type
+  or store exists under `modules/**`, and the center protocol carries no
+  merge-queue order, awaiting-approval state, sign-off response or queue count
+  (`modules/io/src/center.rs:84-281`). Deriving entries from merge frames, trust
+  approvals, task ownership or run evidence fabricates state that does not exist.
+- **Do not overclaim the gap.** The merge command, the TUI Merges screen and
+  durable merge frames exist. What is missing is the queue order, the approval
+  state, the sign-off record and the queue counts. Saying "no merge surface
+  exists" in code, comment or commit message is the wrong claim.
+- **No inline placeholder literal, and neither heading misfiled as a
+  placeholder.** The shared module carries exactly what the `placeholder:` tags
+  authorise — four gate labels, four gate values, three sign-off entries — one
+  small replaceable entry per region. `gates` and `sign-offs` are ordinary
+  interface text at mono 11 `text-muted`.
+- **Identity colour and opacity are normative, not decorative.** `architect@1.4`
+  in `accent`, `security@0.9` in `review`, `@oskar` in `text-session`, all three
+  at 0.8 opacity. The export omits opacity on `@oskar`
+  (`reference/merges.html:858-874`); the specification wins
+  (`screens/merges.md:40-42`; `grammar.md:16-19`; `0269:86-96`), and the conflict
+  is raised as an owner correction, never edited into `.internal/docs/design/**`.
+- **Sign-offs are not key/value rows.** They are space-between identity rows with
+  a mono 10 `text-faint` right side. Forcing them through the key/value primitive
+  to save a renderer produces the wrong sizes and the wrong left tone.
+- **Colour only where the value is a state.** In `gates` every value IS a state,
+  so all four take `ok`; rule 7 is explicit (`grammar.md:68-72`).
+- **Dots belong to stateful lists only.** Rule 4 excludes sign-offs by name
+  (`grammar.md:39-47`), and key/value blocks carry none either. Neither block
+  gains a dot, pill, icon, checkmark, badge or corner radius, and the glyph set
+  stays closed — `↰ ↳ → · ∷`.
+- **No literal values at a call site.** Every colour, size, weight, spacing,
+  family and opacity comes from `0265.1`'s token entry point; a hex inside a
+  primitive is the same defect as a hex inside a screen. `tokens.md` names IBM
+  Plex Sans and Mono and this screen must not silently fall back to a system
+  face. The light column stays untouched (`tokens.md:3-4`).
+- **Insert, do not reassemble.** `0269.2` left two ordered insertion points and
+  requires no visible empty heading or gap before this cut fills them
+  (`0269.2:376-397`). Rebuilding the column, reordering it, or restyling the
+  header, bar, `merge`, `landing`, spacer or footer is sibling-owned work.
+- **One illustration, not five.** The design supplies exactly one preview
+  illustration; inventing per-row gate sets or sign-off rosters for the other
+  rows would be fabricating design content.
+- **No poll loop**, no timer, no animation clock, no spawned tick, no blocking
+  read on gpui's UI thread, and no ledger, store, sidecar, worktree, gate-file or
+  Git read — including on selection change, which a static placeholder projection
+  gives no reason to read for. The center's own two-second scan (`center.rs:65`)
+  is not permission for a client timer.
+- **Do not consume today's `center::get`.** It resolves the row and reads the
+  ledger synchronously inside `handle_request` (`center.rs:916-935`,
+  `3595-3669`), which is not the sanctioned off-owner-path shape
+  (`0269:119-129`). This cut needs no selected detail at all.
+- **The TUI merge preview is not the model.** It derives gate rows from the
+  compact last terminal frame and performs direct repository and worktree Git
+  reads (`modules/cli/src/app/dashboard.rs:4277-4407`); it is
+  `ctx-traits-cli`-private and sits beside ratatui rendering. Its parser, cache,
+  filesystem reads and Git calls are not copied.
+- **Snapshot-then-delta ordering is the contract** for whatever surrounding state
+  this pane sits inside: no lost, duplicated or partially committed visible
+  state, and a fresh snapshot after a rejected candidate. Consume the landed
+  reducer; do not add a second one.
+- **Overflow clips with a bottom fade and a centred `scroll to end`, and only
+  when content strictly overflows** — through `0265.7`'s component as `0269.2`
+  wrapped it. Equal height is fit. The hint is plain text, not a control. If that
+  component has not landed, report an unmet prerequisite; do not write a
+  Merges-local replacement.
+- **The export is measurement, the rules are the specification.** Copy geometry
+  from `reference/merges.html:661-667`, `734-812`, `813-874`; take content and
+  colour semantics from `grammar.md` and `screens/merges.md`.
+- **No test may depend on committed repo content.** Prove behaviour with
+  synthetic accepted rows and harness fixtures — never against this repository's
+  own board, its own trait set, its own `.ctx/traits/runtime.toml` or its own
+  design files. Path, word and file-existence inventories are banned
+  workspace-wide.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom
+  "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this cut's
+  desktop behaviour.** They show the workspace stayed gpui-free and green. The
+  rendered outcome is decided by executing the desktop lane `0256.1` establishes
+  (goals 0 and 11); the closing diff read is code-shape review and is
+  supplementary wherever a goal names a runtime outcome. Resolve and run that lane
+  first, before any edit: an absent lane is an unmet dependency that ends the run
+  with no diff, not a clause to discover after the code is written.
 
 ## Done when
 
-The Merges preview column carries a `gates` block whose rows render `pass` or `clean` in ok from the selected run's center-served detail wherever that detail reaches them, with only the rows it does not reach placeholder-tagged, and a `sign-offs` block whose identities render in mono 10.5 at identity colour and 0.8 opacity (review agent in review-purple, `@oskar` in the session tone) against role and time in mono 10 `text-faint`, served entirely from the one shared `placeholders` module with no inline literal. A finished merge's gates block reconstructs identically after closing and reopening the window; reads fire only on selection, off the UI thread, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- Every command the run executed is green, and the work summary names each one
+  verbatim with its outcome. Nothing is called done over a red command.
+- Before any file was edited, the desktop lane's exact documented non-interactive
+  build-and-test command was resolved from what the chain through `0256.1` landed
+  and run unchanged on the untouched tree, exiting 0; the work summary names it
+  verbatim with that baseline outcome. If no such command existed, or it failed
+  because the manifest, lane or command was absent, that is the terminal outcome:
+  no code was written, an unmet dependency on `0256.1` is reported, and the task
+  does not pass. No workspace command and no diff read substitutes for it.
+- That same command, its harness extended with this cut's cases, exits 0, and the
+  work summary names it verbatim with its outcome. Its coverage observes, by
+  running the desktop: the rendered preview order `merge` → `gates` →
+  `sign-offs` → `landing` → spacer → footer with the footer still pinned by the
+  spacer; the `gates` heading over four rows reading `cargo test`/`pass`,
+  `drift · embed`/`pass`, `ts-format`/`pass` and `worktree`/`clean`, keys sans
+  11.5 `text-secondary`, values mono 10.5, all four values in `ok`; the
+  `sign-offs` heading over three rows reading `architect@1.4 | author · 14:49`,
+  `security@0.9 | review · 14:47` and `@oskar | approved · 15:12`, identities
+  mono 10.5 in `accent`, `review` and `text-session` at 0.8 opacity including
+  `@oskar`, right sides mono 10 `text-faint`, space-between, with no dot in the
+  block; both blocks' content resolving through the one shared `placeholders`
+  module; a selection change within a section and across a section boundary
+  leaving both blocks identical with no read and no request fired; and content
+  that fits, content that exactly fits and content that overflows with the two
+  blocks added, with the 100px fade and its centred `scroll to end` in the third
+  case only.
+- The closing static read of the diff printed by `git diff main...HEAD`, read
+  against `screens/merges.md:33-45`, `grammar.md:6-72`, `117-124`,
+  `tokens.md:3-85` and `reference/merges.html:661-667`, `734-812`, `813-874`,
+  shows the structural half the lane does not observe: the shared block shell,
+  key/value row, token entry point and clip-and-fade consumed with no
+  Merges-local reimplementation of any of them; both blocks placed at `0269.2`'s
+  reserved positions with the surrounding regions unchanged; placeholder content
+  resolved through the single `placeholders` module with one small entry per
+  region, no inline literal, no second module, and neither heading routed through
+  it; one lean sign-off row renderer over one small data shape carrying a token
+  reference rather than a colour literal; no colour, size, spacing, weight,
+  family or opacity literal at a call site and no light-column value; no gate
+  parser, gate read, `merge_story` extraction or copy, center request or new
+  served shape in `modules/io/src/center.rs`; no read of `MergeFrame`,
+  `MergeStatus`, `EffectiveMergePolicy`, `RunSummary`, `merges_from_center_rows`,
+  `MergeLive` or ledger mtime; no sign-off type, store or derivation and no
+  overclaimed gap sentence; no CLI-private or ratatui import; no desktop ledger,
+  store, sidecar, worktree, gate-file, Git or filesystem read; no timer,
+  interval, animation clock or spawned tick; no blocking receive on the UI
+  thread; no write path, lock or queue mutation, with the CLI merge command and
+  TUI Merges keymap unmodified; no status dot and no corner radius inside the
+  canvas; and no hunk building a region `0269.1` or `0269.2` owns, which the
+  changed hunks decide, not the file list.
+- `git diff --name-only main...HEAD` lists no path under `.internal/docs/design/`.
+  Substitute the run's actual base branch if it is not `main`.
+- The work summary states the owner correction raised against the design artifacts
+  — the export's missing 0.8 opacity on `@oskar` against `screens/merges.md:40-42`
+  and grammar rule 1 — as a correction rather than an edit to
+  `.internal/docs/design/**`, together with the discovered desktop path and lane
+  command, and any prerequisite component gap that was hit.
+- `just test` exits 0, unchanged in cost, showing the workspace stayed green while
+  this cut landed entirely outside it.
+- The declared root-resolution check, run verbatim from the repository root, exits
+  0: root Cargo resolution and the root `Cargo.lock` contain no gpui and the
+  desktop project is not a workspace member.
+- `git status --short` prints nothing, and the closing diff was read from the tree
+  that lands.
+
+## Bounded refinement
+
+Run, in order: goal 0's baseline — the resolved desktop lane command, unchanged,
+on the untouched tree, before any edit — then, after the edits, that same command
+over this cut's cases as goal 11 requires, then the root-resolution check, then
+`just test`, then the closing diff read. The reason for that shape is cheap
+evidence first, so a rendering, content or ordering defect surfaces next to the
+block that owns it rather than inside a long gate, and so an inherited red is
+separated from one this cut caused before any code is written.
+
+Goal 0's stop is not part of the refinement budget. If the lane or its command is
+absent, the run ends there with an unmet-dependency report; it does not spend a
+repair round standing one up.
+
+Permit at most one targeted repair-and-rerun round: repair one named defect, then
+rerun the failed command and every command after it in that order. If a second
+round would be needed, stop and report the exact failing command — or the
+unresolved visual or data contract — with its evidence rather than iterating. That
+is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0269"
 depends-on = ["0269.2"]
 
 [[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
