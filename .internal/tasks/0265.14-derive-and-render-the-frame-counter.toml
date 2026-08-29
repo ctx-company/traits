@@ -1,43 +1,590 @@
 schema-version = "0.2"
 key = "0265.14"
 title = "Derive and render the frame counter"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-`frame 5 of 9` appears twice on the Sessions screen — in the bottom bar's detail (`running · frame 5 of 9 · review round 2`) and in the header's narrated summary — and both are tagged `data:`. This cut derives that one counter and fills it into both slots.
+`frame 5 of 9` appears twice on the Sessions screen — inside the bottom bar's
+detail (`running · frame 5 of 9 · review round 2`, rule 8,
+`.internal/docs/design/grammar.md:74-84`, `screens/sessions.md:32-34`) and
+inside the header's single narrated summary element (rule 6,
+`grammar.md:58-66`, `screens/sessions.md:14-18`). Both are tagged `data:`; only
+the surrounding prose is `placeholder:`. This cut derives that one value once
+and fills it into the two composition slots `0265.3` and `0265.13` already
+reserved for it.
 
-**Where it comes from is the whole of this task.** `Session.current_run_index` is not the ordinal: it indexes the run's current sequence, and a session executing inside a loop or a for-each moves along `active_path` and `control_stack` without that index describing progress. The honest derivation already exists on the TUI side: `render_ledger_run_view`'s projection builds the reconstructed step list from the resolved trait plan plus the ledger, marks which items count with `counts_progress` (prompt and command items, not containers), and computes `done` and `total` as the counted steps that are finished against all counted steps (`modules/cli/src/app/run_view/projection.rs`). Nested control is handled where it belongs: `container_progress_text` reports a loop's `iteration k/max` and a for-each's `item k/total` against the resolved list length, rather than flattening either into the top-level counter.
+Where it comes from is the whole of the task. `Session.current_run_index` is not
+the ordinal — it indexes the current sequence, and a session inside a loop or a
+for-each moves along `active_path`, `next_frame.position_path` and
+`control_stack` without that index describing progress
+(`modules/cli/src/app/run_view/planned.rs:285-299`, `608-629`;
+`modules/core/src/procedure/session.rs:1424-1514`). Nor is it a ledger frame
+count. It is a fact about the *resolved structural plan* joined to the run's
+current position, which is why it lands after the bar, the header and the
+selected-run reconstruction exist rather than being guessed by any of them.
 
-So the counter is a fact about the reconstructed structural plan and the active path, not about a row field — which is why it lands here, after the bar and the header exist and once the selected run's reconstruction is being read, rather than being guessed by either of them.
+## Five corrections to the draft this plan replaces
+
+**Correction 1 — `done/total` is not `frame N of M`, and the draft conflated
+them.** The draft said the derivation "already exists" and pointed at
+`RunHeader.done`/`total`. It does not exist. `done` counts flattened steps where
+`counts_progress && state == StepState::Done`; `total` counts where
+`counts_progress` (`projection.rs:156-168`), and the TUI renders that as
+`progress {done}/{total}` (`modules/cli/src/app/render.rs:1397-1404`). A run
+executing its fifth counted step has `done == 4`, so relabelling the ratio
+`frame 5 of 9` is off by one on every live run. `StepState::Done` also excludes
+a `Rejected` or stopped current step and any running step
+(`planned.rs:29-54`, `708-741`), so a failed run's ratio names the frame *before*
+the one that failed. Downstream `0266.4` asks for "the claiming run's frame
+ordinal and total" (`0266.4:11`). N is therefore bound below as a reached
+ordinal, not a completed count, and both values are projections of one
+enumeration so the TUI's existing ratio is not disturbed.
+
+**Correction 2 — the enumeration is incomplete for parallel plans, and N is
+underivable without fixing it.** `PlannedSequenceItem.parallel_branches` keeps a
+parallel item's branch children separate and, by its own doc comment, "never
+merged into `children`" (`modules/core/src/procedure/run/model.rs:139-150`); the
+planner fills it (`planner.rs:312-356`, `550-577`). `flatten_step` walks
+`children` and `otherwise_children` only (`planned.rs:34-84`), so `run_view`'s
+step list omits every parallel branch child. `done`/`total` therefore already
+understate parallel plans, and worse for this cut: when the run's current
+position is inside a parallel branch, that step is not in the enumeration at all
+and a reached ordinal cannot be computed. Completing the enumeration is
+load-bearing here, not an opportunistic fix, and it moves the TUI's own
+`progress` numbers for parallel plans — that consequence is accepted and its
+tests are updated to the corrected counts rather than the correction being
+skipped.
+
+**Correction 3 — "the counter advances as frames land, from deltas" is not
+supported by the wire contract as it stands.** `CenterDelta::RowChanged` carries
+only a compact `CenterPublicRow`, and `ActivityLine` adds one `ActivityRecord`
+(`modules/io/src/center.rs:265-281`). `RunSummary` carries no `active_path`, no
+`control_stack`, no `current_run_index`, no plan and no progress field
+(`modules/io/src/run_summary.rs:23-118`) — verified field by field. `FrameDone`
+refreshes the ledger and can emit `RowChanged` (`center.rs:1996-2053`,
+`3624-3627`), but that delta alone cannot recompute structural progress, and
+`center::get` is a one-shot full-`Session` request served by a `read_session`
+inside the sole model owner's `handle_request` (`center.rs:916-935`,
+`3649-3669`) — not a structural detail stream. The counter therefore advances by
+*exactly the mechanism that advances `0257`'s native frame tree*, whatever that
+landed as, and adds no read path of its own. If the landed detail model cannot
+express the current structural position, that is an unmet prerequisite — handled
+by `validation`'s unmet-prerequisite section, which is not a completion path —
+never a licence to add a poll, a timer or a per-frame ledger read.
+
+**Correction 4 — the zero-counted-frame and not-yet-started cases were
+undecided.** The draft specified omission only when the plan cannot be resolved.
+But a successfully resolved plan can legitimately contain zero Prompt/Command
+items, and a run can be sitting on an `Ask`, a `Check` or a container header
+before any counted frame is reached. `frame 0 of 0`, `frame 0 of 9`, an omitted
+segment and an error are four observably different outcomes. Goal 2 binds all of
+them under one typed result.
+
+**Correction 5 — the draft had no closing review and no stop condition.** Its
+`## Watch` and `## Done when` described the outcome but never required the diff
+to be read or bounded the repair. Siblings `0265.3`, `0265.5`, `0265.6` and
+`0265.13` all carry one targeted repair-and-rerun cycle and then stop. This plan
+carries the same, in `validation`.
+
+## Grounded at HEAD 1fd7702a5
+
+Nothing this task edits exists yet. There is no tracked desktop project,
+manifest, lockfile, gpui source tree, desktop recipe in `Justfile` or desktop CI
+lane; root `Cargo.toml:1-12` lists seven workspace members and excludes only
+`packages/cdk`; the root `Cargo.lock` has no `gpui` package. `0256` and its five
+children, `0257` and its three children, `0265.3` and `0265.13` are all `ready`
+rather than done, so no shared structural projection, selected-run detail model,
+reducer, bar detail slot, header component or `placeholders` module exists in
+production Rust. Every desktop path, module name, type, signature and command
+named under `## APPROACH` is a guess to be replaced by discovery against what
+those tasks actually landed; binding them here would be fabrication. What is
+checkable from the repository root today — and the only board coverage this task
+can honestly declare — is that the workspace stayed gpui-free, that the
+per-round gate stayed green, and that the CLI's own run-view projection stayed
+green through the extraction.
+
+## What proves the desktop side, and what this file will not pretend
+
+Nothing in this repository can execute a desktop render today. So no command
+stands in for that proof here: the desktop goals below are stated as observable
+rendered outcomes, no symbolic "deciding command" is named as their gate, and no
+`[[checks]]` entry is declared that would execute a lane which does not exist.
+The three declared checks are workspace-side invariants that run today and are
+labelled as such.
+
+Where those outcomes get observed is approach, not boundary. The standalone
+desktop project carries its own non-interactive build-and-test lane by the time
+this leaf dispatches — establishing and documenting one is `0256.1`'s own
+Done-when clause (`0256.1:7-17`), and the chain `0265.14` → `0265.3` → `0265.1`
+→ `0256.1` is hard: an open leaf derives `Blocked` while any `depends-on` target
+is not `Done` (`modules/core/src/task/graph.rs:115-177`). No further edge is
+added here.
+
+Finding that lane is mechanical — root `Cargo.toml`'s exclude list and the
+top-level listing give the desktop project; its manifest, README, justfile or CI
+lane gives the command `0256.1` documented. Extending it with this cut's
+coverage rather than standing up a parallel one, and recording its
+repo-root-relative path and exact invocation in the work summary, is the
+suggested route; deviate where a goal requires it and say so. What is not a
+deviation but a fabrication: inventing a command and writing it into this file,
+declaring a board check that executes a lane that does not exist, or
+substituting `just test` for desktop proof. Once `0256.1` has landed a command,
+it becomes declarable as a `[[checks]]` entry on this task.
 """
 scope = """
-## Decisions
+## Goals and approach are separate
 
-- In scope: deriving `frame N of M` from the selected run's center-served reconstruction — the resolved plan's progress-counting steps and the session's active path — and rendering it into the bottom bar's caller-supplied detail slot and the header's narrated summary, so both show one value from one derivation.
-- **One derivation, two renders.** A second computation for the header is a second answer that can disagree with the bar.
-- **Nested control is not flattened.** A run inside a loop or a for-each reports its container progress the way the existing projection states it (`iteration k/max`, `item k/total` against the resolved list length); the top-level counter counts the plan's progress-counting steps and nothing else.
-- **Reuse the existing derivation rather than re-deriving it.** Whether it is lifted to a shared crate or served by the center is the architect's call; two independent implementations of the same counter is not.
-- Out of scope: the bar itself (`0265.3`), the header (`0265.13`), the frame rows (`0265.5`), and the preview column.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+Everything under `## GOALS` is binding: each names an observable outcome, how it
+is observed, and what it excludes. Everything under `## APPROACH` — the
+discovery order, expected files, symbols, signatures, edit order, which commands
+to run and in what order, when to baseline them, the proof mechanics and the
+commit topology — is the architect's suggested route from the grounding and
+never a boundary. Deviate from any of it wherever a goal requires it and record
+the deviation in the work summary; a deviation is not a violation, needs no
+escalation, and nothing elsewhere in this file overrides that. The only binding
+mechanism in the whole file is the refinement bound in `validation`.
 
-## Prerequisites
+## GOALS — binding
 
-`0265.3` (the bar's detail slot), `0265.13` (the header summary the counter completes) and `0257` (the selected run's authoritative reconstruction the counter is derived from).
+1. **One structural enumeration, in shared code, complete over the resolved
+   plan.** The counted-frame enumeration lives once in shared core/IO code that
+   both faces consume — not imported from `ctx-traits-cli` (its `run_view`
+   modules and types are `pub(super)`/`pub(crate)` presentation code,
+   `modules/cli/src/app/run_view.rs:1-5`, `25-56`), and not copied into gpui.
+   Over the plan **as it resolved**, it enumerates in structural order every
+   progress-counting step — `Prompt` and `Command` only; `Ask`, `Check`,
+   `Project`, `Sequence`, `Branch`, `Loop`, `ForEach`, `Parallel` and `Terminal`
+   do not count, matching `counts_progress` (`planned.rs:600-606`) — including
+   the children of `parallel_branches`, which today's `flatten_step` omits
+   (Correction 2). Only a decided branch's selected arm is enumerated; before a
+   decision neither arm is (`planned.rs:55-83`, `179-199`). A loop or for-each
+   body is enumerated once and never multiplied by iterations or list items.
+   The CLI's existing `RunHeader.done`/`total` become projections of this one
+   enumeration rather than a second walk, so the two faces cannot disagree; the
+   TUI's rendered `progress {done}/{total}` keeps its completed-count meaning
+   and changes only where Correction 2 corrects it for parallel plans.
+   Decided by the extraction's own focused tests under the workspace gate, plus
+   the declared `run_view` check staying green with its parallel-plan
+   expectations updated to the corrected counts.
+   Excluded: a desktop copy of `planned.rs`/`projection.rs` semantics; importing
+   any CLI-private type into the desktop; a second walk of the plan for the
+   header or for `0266`; extracting anything beyond what this cut and the CLI
+   demonstrably consume — no generic progress framework, trait layer or
+   projection registry; changing what counts as progress-counting anywhere
+   without changing it everywhere; multiplying body steps by iterations.
+
+2. **N and M are bound, and every state has exactly one answer.** From that
+   enumeration plus the run's current structural position — the position
+   `active_position_path` resolves, preferring `session.next_frame.position_path`
+   over `session.active_path` and matching iteration- and item-stamped structural
+   paths, not `current_run_index` (`planned.rs:285-299`, `317-419`, `608-629`) —
+   the derivation yields **one typed result**:
+   - **M** is the number of counted steps in the enumeration.
+   - **N** is the one-based ordinal, in enumeration order, of the counted step
+     the run has *reached*: the current step's own ordinal when the current item
+     is a counted step; the number of counted steps preceding it when the current
+     item is non-counting; M when the run has completed; and, when the run
+     stopped or its current counted step failed, that step's own ordinal — the
+     frame it died on, never one less. N never exceeds M.
+   - The result is **present** only when `1 <= N <= M`. Otherwise it is one
+     typed absence naming its reason: the plan could not be resolved; the
+     resolved plan has no counted steps; or no counted step has been reached
+     yet. Every absence renders no counter segment at all.
+   Decided by the extraction's focused tests over first-active, middle-active,
+   completed, stopped/failed-current, current-non-counting, and zero-counted-step
+   runs, under the workspace gate.
+   Excluded: rendering `frame 0 of 0` or `frame 0 of M`; deriving N from
+   `current_run_index`, from a ledger frame count, from a row field, from list
+   position or from a completed-count ratio; flattening a container's
+   `iteration k/max` or `item k/total` into N or M — those stay the separate
+   structural fact `container_progress_text` already reports
+   (`planned.rs:632-661`, off `ControlFrame`'s `iteration_index`,
+   `max_iterations`, `item_index`, `item_total`, `runtime/state.rs:349-389`);
+   collapsing the distinct absence reasons into one silent `None` at the
+   derivation boundary, which `0266.4` needs to tell apart.
+
+3. **One value, two renders, one field.** The result of goal 2 is carried as a
+   single authoritative optional progress field on the accepted selected-run
+   model `0257`/`0256` landed. The bar's caller-supplied detail slot and the
+   header's single summary element both format or consume that exact field.
+   Neither render site walks a plan, resolves a trait, reads a ledger or derives
+   the value itself.
+   Observed by both sites carrying the same N and M from one accepted model, and
+   by the closing diff read finding no second derivation call on either path. No
+   command in this repository decides this today; it is observed in the desktop
+   project's own test lane, and no board check is declared for it.
+   Excluded: a header-private or bar-private derivation, request, subscription,
+   reducer, cache or model; recomputing for the header what the bar already has;
+   any change to the reusable bar (`0265.3`) or the reusable header component
+   (`0265.13`) — both stay source-agnostic and this cut fills their reserved
+   slots without touching them.
+
+4. **Source resolution and formatting stay separate, and both slots compose
+   cleanly.** Plan/session projection yields the typed result; a small shared or
+   presentation-side formatter yields the `frame N of M` shape. In the bar the
+   segment sits ahead of the optional review round, `·`-separated per rule 8; in
+   the header it sits inside the one italic summary element per rule 6. Every
+   combination of present and absent state, counter, review round and run
+   description renders with no blank, doubled or dangling `·`, and the header
+   still renders exactly one summary element, never two and never zero.
+   Observed over the present/absent combinations at both sites, and by the
+   closing diff read. No board check is declared for it.
+   Excluded: hardcoding `frame 5 of 9`, `review round 2`, the exported summary
+   sentence or any other design example as a literal — they are illustrative
+   shapes (`screens/sessions.md:14-18`, `32-34`, `grammar.md:58-66`, `74-84`);
+   an inline prose literal at the call site where `0265.3`'s `placeholders`
+   module owns the phrasing; a second summary element; teaching the shared bar
+   or header component about a row, an answer or a reconstruction.
+
+5. **The counter advances by the landed detail mechanism, and nothing else.**
+   It updates as frames land through exactly the contract `0257` landed for
+   keeping the native frame tree current — no timer, interval, spawned tick,
+   poll loop, periodic center query, per-frame ledger reread, second center
+   protocol or widened `center::get`. Trait, plan and ledger work stays off
+   gpui's UI thread.
+   Observed over a live run whose counter advances as frames land, with
+   `0256.2`-`0256.5` and `0257`'s own proofs passing unmodified, and by the
+   closing diff read finding no timer, interval, spawned tick, blocking receive
+   on the UI thread, or private read path. No board check is declared for it.
+   (If the landed detail contract carries no structural evidence sufficient to
+   re-derive the current position, that is an unmet prerequisite, not an
+   outcome — see `validation`'s unmet-prerequisite section and Correction 3.)
+   Excluded: any center protocol change; a second detail reducer, subscription
+   or accepted model beside the landed one; a desktop-side filesystem, ledger,
+   store, sidecar, board, task-file or cwd read; cwd inference for a run's
+   repository — the recorded `TraitSource` repository is authoritative, not the
+   caller's cwd (`modules/io/src/run.rs:3819-3900`).
+
+6. **Nothing commits partially, and a superseded selection cannot render.** A
+   candidate selected-detail update derives the counter before commit: on
+   acceptance both sites move together; on rejection both retain the same prior
+   complete accepted model under the landed stale treatment, or both show no
+   counter — one must never commit N while the other holds M from an older
+   model. Last-accepted progress is shown as current only behind the explicit
+   stale/outage marker `0256.5` landed. Rapid selection changes discard late
+   detail for the superseded selection using the stable selection identity the
+   landed model established.
+   Observed over an accepted structural update moving both sites, a rejected
+   candidate leaving both unchanged, center loss not leaving the counter looking
+   current, and a rapid A-then-B selection whose late A detail is discarded; and
+   by the closing diff read. No board check is declared for it.
+   Excluded: a partially committed model; presenting stale progress unmarked;
+   pairing a counter from one selection with a bar state or header title from
+   another.
+
+7. **Failure yields no counter, and a finished run reconstructs the same one.**
+   A run whose recorded or pinned trait, or whose plan, cannot be resolved
+   renders no counter in either site and no partial or plausible number
+   assembled from the row — the degraded path today is a dashboard fallback
+   (`modules/cli/src/app/dashboard.rs:3592-3638`), and here it maps to goal 2's
+   typed absence. Compact rows stay compact: selection may trigger the one
+   authoritative reconstruction off the UI thread, and visible-list projection
+   resolves no trait and reads no plan or ledger per row. A finished run closed
+   and reopened derives the same final N and M from durable plan and session
+   evidence.
+   Observed over a resolution failure rendering no counter at either site, a
+   compact list rendering without any per-row reconstruction, and a finished
+   run's reopened counter matching its final live value; and by the closing diff
+   read. No board check is declared for it.
+   Excluded: a row-derived fallback counter; a placeholder or last-known number
+   presented as current; a process-local `Instant`, GUI-only cache or
+   increment-only counter as the authority; any per-row trait/plan/ledger read.
+
+8. **The workspace does not learn about gpui, and inherited contracts stay
+   green.** Root Cargo resolution and the root `Cargo.lock` stay gpui-free, the
+   desktop project stays outside workspace membership, the per-round workspace
+   gate stays green, and the CLI's run-view projection stays green through the
+   extraction.
+   Decided by the three declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing macOS and Linux CI lanes (`.github/workflows/ci.yml:12-60`
+   run `just test-full`); a grep forbidding the word `gpui` in `Justfile` or
+   `.github/workflows/` — a *separate* desktop lane there is sanctioned, so such
+   a check would red on the sanctioned outcome; declaring a board check that
+   executes the desktop lane before `0256.1` has landed one; substituting
+   `just test` for desktop proof; deleting or narrowing `run_view`'s existing
+   tests to make the declared filter pass.
+
+9. **The normative artifacts are untouched.** No file under
+   `.internal/docs/design/` is modified. A rule, token or example that looks
+   wrong is reported in the work summary as an owner correction against the
+   source design, never edited here.
+   Observed by the changed-file list; no board check can decide this,
+   because a check runs in a clean detached worktree of the merged sha with no
+   base to diff against.
+
+10. **The pass is reviewed once and bounded.** The completed diff is read leaf
+    by leaf against `grammar.md:58-66`, `grammar.md:74-84`,
+    `screens/sessions.md:14-18` and `32-34` before the task is called done.
+    Exactly one targeted repair cycle is allowed, per the stop condition in
+    `validation`. The work summary names the discovered desktop path, the exact
+    desktop command, where the shared enumeration landed, whether `0257` already
+    provided it, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256`, `0257`, `0265.1`, `0265.3` and `0265.13` actually landed; do not
+carry a guess from this file into an edit.
+
+- Locate the desktop project's non-interactive test lane by the mechanical route
+  in `content`, run it unedited first for a baseline, and extend that same
+  harness with the focused rendering and reducer coverage rather than standing
+  up a parallel lane. All of that — including running it before editing — is
+  suggestion; the honesty rule it serves (no invented command, no fabricated
+  check, no `just test` substituted for desktop proof) is what the goals carry.
+- **Check first whether `0257` already extracted this.** `0257.1`/`0257.2`
+  promise an authoritative reconstruction and a shared native frame tree built
+  from shared semantics. If they already lifted frame state, structural path and
+  progress out of CLI-private code, extend that one result and add nothing
+  beside it. If they lifted the frame tree but not progress, add progress to the
+  same shared module. Only if neither exists does this cut do the extraction,
+  and then only as wide as goal 1 allows. Report which branch was taken.
+- Read the landed selected-run detail model, its delta/reducer contract and its
+  selection identity before writing goals 3, 5 and 6's code; read `0265.3`'s
+  detail slot and `placeholders` module and `0265.13`'s summary composition
+  before filling either slot.
+
+### Edit order
+
+1. The shared counted-frame enumeration and typed progress result (goals 1-2),
+   with the parallel-branch completion, plus its focused tests.
+2. The CLI moved onto it: `RunHeader.done`/`total` become projections of the one
+   enumeration; `run_view`'s parallel-plan expectations updated to the corrected
+   counts; TUI rendering otherwise unchanged.
+3. The progress field carried on the accepted selected-run model, derived before
+   commit.
+4. The shared formatter and the two call sites: the bar's detail slot ahead of
+   the review round; the header's single summary element.
+5. The focused desktop coverage.
+6. The desktop project's test lane, then the three declared checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a shared `run_progress(plan, session) -> RunProgress` in
+core or IO, where `RunProgress` is an enum with one present variant carrying
+`(n, m)` and typed absence variants for unresolved plan / no counted steps / none
+reached; a small `frame N of M` formatter beside the presentation boundary; one
+optional field on the landed selected-detail model; the bar's existing detail
+composition gaining a leading segment and the header's existing summary
+composition gaining a trailing one. Names, module paths and signatures follow
+whatever conventions `0256`, `0257`, `0265.1`, `0265.3` and `0265.13`
+established.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each inside the existing harnesses is the run's call.
+
+- Kind classification: `Prompt` and `Command` count; `Ask`, `Check`, `Project`,
+  `Sequence`, `Branch`, `Loop`, `ForEach`, `Parallel` and `Terminal` do not.
+- N for a first active counted frame, a middle active counted frame, a completed
+  run, a stopped or failed current counted frame, a current non-counting control
+  item, and a valid plan with zero counted frames.
+- A decided branch's selected arm counted and the unselected arm not; an
+  undecided branch counting neither.
+- Loop iteration rollover not advancing M; bounded and unbounded loops; for-each
+  with and without a resolved `item_total`; nested loop/for-each paths; a
+  current position inside a parallel branch child.
+- Container progress still reported as `iteration k/max` and `item k/total`
+  separately from N and M.
+- Trait/plan resolution success and failure, failure yielding no counter at
+  either site and no row-derived fallback.
+- The same value composing into the bar ahead of an optional review round and
+  into the header's one summary element, across present/absent combinations,
+  with no dangling `·`.
+- An accepted structural update moving both sites together; a rejected candidate
+  leaving both unchanged; stale/disconnect posture not presenting last-accepted
+  progress as current; a late A response discarded after selection B.
+- A compact list rendering with no per-row reconstruction, and no timer anywhere.
+- A finished run reconstructed fresh matching its final accepted live value.
+- `0256.2`-`0256.5` and `0257`'s own proofs passing unmodified.
+
+### Reuse points
+
+`counts_progress` (`planned.rs:600-606`) as the classification to lift verbatim.
+`active_position_path` and `structural_path_matches` (`planned.rs:285-299`,
+`317-419`) as the current-position semantics to lift, including the iteration and
+item stamping that stops a prior iteration's accepted status satisfying the
+current one. `flatten_step` (`planned.rs:34-84`) as the traversal to lift *and
+complete* for `parallel_branches`. `container_progress_text`
+(`planned.rs:632-661`) as the separate container fact that stays separate.
+`ctx_traits_io::run::load_trait_for_session` plus `plan_procedure_run` as the
+existing digest-verified resolution path (`modules/io/src/run.rs:3819-3900`,
+`dashboard.rs:3578-3656`) — its failure is goal 7's typed absence. The landed
+TUI reducer's transaction boundary — stage, project the complete candidate,
+commit only on success, retain last-accepted behind an explicit stale marker
+(`modules/cli/src/app/dashboard/worker.rs:254-415`) — as the semantics goal 6
+matches. `0265.3`'s `placeholders` module and detail slot; `0265.13`'s summary
+composition; `0265.1`'s token entry point for any value this cut renders.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The bar itself (`0265.3`), the header component (`0265.13`), the frame rows
+  (`0265.5`), loop narration and the activity block (`0265.6`), clip-and-fade
+  (`0265.7`), the rail (`0265.8`), the title bar (`0265.9`), the preview column
+  (`0265.10`-`.12`, `.15`), the claimed-task answer (`0265.2`), the verbs
+  (`0258`), and the reconstruction itself (`0257`).
+- The Tasks board's rendering and its board join (`0266`). Its reuse of this
+  value is evidence for exposing the result at a shared core/IO or center-answer
+  boundary; it is not licence to build Tasks behaviour here.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Center, core or IO semantic changes beyond the one extraction goal 1 names; a
+  second projection of the compact row; a widened `center::get`; a GUI poll loop;
+  a blocking receive on gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, or primitives
+  extracted for `0266`-`0269` before one of them consumes them.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run executes
+  the discovered command and reports its output in the work summary.
+- Packaging and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **`current_run_index` is not an ordinal.** Rendering it as one, or counting ledger frames as if the plan were flat, produces a counter that lies inside every loop and every for-each — the two shapes the dogfood loop uses constantly.
-- **Compact list rows must never trigger the reconstruction.** The counter belongs to the selected run; a bar that reconstructs per visible row breaks the family's read posture and the ledger-is-authoritative rule.
-- **A run whose plan cannot be resolved renders no counter**, not a partial one. Fail-loud beats a plausible number.
-- **No poll loop.** The counter advances from center deltas as frames land, never from a timer, and the reconstruction read stays off gpui's UI thread.
-- **Snapshot-then-delta ordering is the contract**: a rejected projection must not leave the bar and the header disagreeing about N.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and that the existing projection's own tests still pass; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`done/total` is not `frame N of M`.** The existing ratio is a completed
+  count and is off by one on every live run, and names the wrong frame on a
+  failed one. Relabelling it is the single most likely way this task ships a
+  wrong number that every gate passes.
+- **`current_run_index` is not an ordinal**, and ledger frames are not the plan.
+  Either substitution lies inside every loop and every for-each — the two shapes
+  the dogfood loop uses constantly.
+- **A current position inside a parallel branch has no ordinal until the
+  enumeration is completed.** `flatten_step` walks `children` and
+  `otherwise_children` only; `parallel_branches` is by construction never merged
+  into `children`. Completing it changes the TUI's parallel-plan numbers — update
+  those expectations to the corrected values rather than skipping the correction
+  or special-casing the desktop.
+- **Container progress is a separate fact.** `iteration k/max` and `item k/total`
+  belong where the projection already reports them; folding them into N or M, or
+  multiplying body steps by iterations or list items, breaks both.
+- **One derivation, two renders.** Two calls that independently walk a plan are
+  two answers, and they disagree the moment a candidate is rejected or the
+  selection changes.
+- **`frame 0 of 0` and `frame 0 of M` are not outcomes.** Absent is absent, and
+  the three absence reasons stay distinguishable at the derivation boundary
+  because `0266.4` needs to tell them apart.
+- **Compact list rows must never trigger the reconstruction.** The counter
+  belongs to the selected run; a per-row reconstruction breaks the family's read
+  posture and the ledger-is-authoritative rule.
+- **A run whose plan cannot be resolved renders no counter, not a partial one.**
+  Fail-loud beats a plausible number, and no fallback is assembled from the row.
+- **No poll loop, and no new read path.** The counter advances by the mechanism
+  `0257` landed for the frame tree. No timer, interval, spawned tick, periodic
+  query, per-frame ledger reread or widened `center::get`; reconstruction work
+  stays off gpui's UI thread. If the landed contract cannot carry the current
+  structural position, stop and report the unmet prerequisite.
+- **Snapshot-then-delta transactionality is the contract**: a rejected candidate
+  must not leave the bar and the header disagreeing about N, and last-accepted
+  progress is visible only behind the explicit stale marker.
+- **Late A must not overwrite B.** Detail for a superseded selection is discarded
+  against the stable selection identity, never rendered.
+- **No design example is a literal.** `frame 5 of 9`, `review round 2` and the
+  exported summary sentence illustrate one run; they are shapes, not data to
+  ship. Prose phrasing resolves through the shared `placeholders` module.
+- **No dangling separator, and exactly one summary element.** Every combination
+  of present and absent state, counter, round and description must compose
+  cleanly at both sites without touching the shared bar or header.
+- **Do not import CLI-private types.** `run_view`'s modules and types are
+  `pub(super)`/`pub(crate)` presentation code sitting next to ratatui rendering;
+  extract the pure semantics and move the CLI onto it, and never copy it into
+  gpui — copying is a defect even when it compiles.
+- **Extraction stops at demonstrated consumers.** This cut and the CLI are the
+  consumers; `0266` is a named future one and is not a licence to widen.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes.
+  Isolate with `CARGO_TARGET_DIR=target` if a failure looks like a phantom
+  "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's
+  desktop behaviour.** They show the workspace stayed gpui-free, the per-round
+  gate stayed green and the CLI's projection survived the extraction; the
+  rendered outcome is verified in the desktop lane `0256.1` establishes, whose
+  exact non-interactive command becomes declarable as a check on this task once
+  `0256.1` lands it.
 
 ## Done when
 
-The Sessions bottom bar reads `<state> · frame N of M · review round R` and the header's narrated summary carries the same `frame N of M`, both filled from one derivation over the selected run's reconstructed plan — progress-counting steps against total progress-counting steps, with loop and for-each progress reported as the existing projection reports it rather than flattened, and no counter at all when the plan cannot be resolved. The counter advances as frames land, from deltas, with no timer and no reconstruction fired from a compact row. `just test` passes and root workspace resolution and the root lockfile remain gpui-free.
+Every clause below is a completed observable outcome. None of them is satisfied
+by stopping, reporting, or choosing an alternative; that case is the separate
+section after this one, and it is not completion.
+
+- One shared counted-frame enumeration exists in core/IO code both faces consume,
+  complete over the resolved plan including `parallel_branches` children, with
+  the CLI's `RunHeader.done`/`total` reduced to projections of it, and its
+  focused tests establish: the `Prompt`/`Command`-only classification against all
+  other kinds; N for first-active, middle-active, completed, stopped/failed, and
+  current-non-counting runs; the typed absence for an unresolvable plan, for a
+  resolved plan with zero counted steps, and for none-reached-yet; selected and
+  unselected branch arms and an undecided branch; loop rollover, bounded and
+  unbounded loops, for-each with and without a resolved `item_total`, nested
+  paths, and a current position inside a parallel branch child; and container
+  `iteration k/max` / `item k/total` still reported separately from N and M.
+- The counter is carried on one field of the accepted selected-run model and
+  rendered at both sites, and the desktop project's own test lane — extended
+  with this cut's coverage and passing — shows: the bar's detail reading `<state> · frame N of M · review round R` with
+  the same N and M the header's single summary element carries; every
+  present/absent combination of state, counter, round and description composing
+  with no blank, doubled or dangling `·` and exactly one summary element; the
+  counter advancing as frames land through the landed detail mechanism with no
+  timer; an accepted update moving both sites together and a rejected candidate
+  leaving both unchanged; center loss not leaving the counter looking current; a
+  late A response discarded after selection B; a resolution failure rendering no
+  counter at either site with no row-derived fallback; a compact list rendering
+  with no per-row reconstruction; and a finished run reopened deriving the same
+  final N and M. The `0256.2`-`0256.5` and `0257` proofs pass unmodified.
+- The closing diff read shows: no second plan walk on either render path; no
+  CLI-private import or copied projection in the desktop; no `current_run_index`,
+  ledger-frame-count, row-field or list-position derivation; no `frame 0 of 0` or
+  `frame 0 of M`; no collapsed absence reasons; no container progress folded into
+  N or M; no design-example or inline prose literal; no change to the shared bar
+  or header component; no timer, interval or spawned tick; no blocking receive on
+  the UI thread; no desktop-side filesystem, ledger, store, sidecar, board,
+  task-file or cwd read; no widened center request or second detail model; no
+  light-column value; and no gpui in root resolution.
+- The three declared checks exit 0, with `run_view`'s existing tests retained
+  under their filter and updated only where Correction 2 corrects their expected
+  counts.
+- No file under `.internal/docs/design/`, no sibling-owned screen region and no
+  center protocol is modified.
+- The work summary names the discovered desktop path and its exact invocation,
+  where the shared enumeration landed, whether `0257` had already provided it,
+  any owner correction raised against the design artifacts, and any deviation
+  from the approach. (A clean worktree and one task-scoped commit are the
+  suggested workflow, not a completion criterion.)
+
+## If a prerequisite is unmet
+
+This is not a completion path and satisfies no Done-when clause; it is what to
+do when the work cannot be started as specified. If the dependency chain reports
+closed and the desktop project nonetheless carries no non-interactive test lane,
+or the landed `0257` detail contract carries no structural evidence sufficient
+to re-derive the current position, stop and report that unmet prerequisite with
+its evidence. Do not substitute `just test` for desktop proof, stand up a
+parallel lane, invent a command, or add a poll, timer or per-frame ledger read
+to route around a missing contract. A prerequisite reported honestly leaves this
+task unfinished, and that is the correct outcome in that case.
+
+## Bounded refinement
+
+The bound is the binding part; the order is a suggestion. Suggested order: the
+desktop project's test lane, then the `run_view` projection check, then
+`just test`, then the root-resolution check. At most one targeted
+repair-and-rerun round: repair one named defect, then rerun the failed command
+and every command after it. If a second round would be needed, stop and report
+the exact failing command with its evidence, or the exact unresolved contract,
+rather than iterating. That bound is the stop condition, not a judgement call.
 """
 [relations]
 parent = "0265"
@@ -46,14 +593,15 @@ depends-on = ["0265.3", "0265.13", "0257"]
 [[checks]]
 name = "per-round workspace gate remains green"
 command = "just test"
-timeout-ms = 1200000
+timeout-ms = 1800000
 
 [[checks]]
-name = "the reconstructed run-view projection stays green"
+name = "the run-view projection survives the extraction"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
-timeout-ms = 900000
+timeout-ms = 1200000
 expect = "test result: ok\\. [1-9]"
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
