@@ -1,43 +1,108 @@
 schema-version = "0.2"
 key = "0265.2"
 title = "Serve a run's claimed task through the center"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-`screens/sessions.md` opens the screen with grammar rule 6's header: a title that is the claimed task's id and title (`0243.4 — everyone asks the center`). Both halves are tagged `data:`, and only half of that is served today.
+`screens/sessions.md:14-18` opens the screen with grammar rule 6's header: a title that is the claimed task's id and title (`0243.4 — everyone asks the center`). Both halves are tagged `data:`, and only half of that is served today.
 
-`CenterPublicRow` carries `RunSummary`, and `RunSummary.task_key` is the claimed task's id — verified `data:`. `RunSummary.title` is not the task's title: `RunSummary::from_session` fills it from `Provenance::session_title`'s resolved narrator title, which is optional and may be absent or in flight. The claimed task's title, description and stored status live in the board, and the board is not center-served: the CLI reaches it through `modules/cli/src/app/tasks.rs` over `ctx-traits-io::{task_files, task_board_cache}`, and the TUI's `Screen::Tasks` reaches the same path in-process. A separate desktop binary reaches none of it.
+`CenterPublicRow` carries `RunSummary` (`modules/io/src/center.rs:3778-3788`), and `RunSummary.task_key` is the claimed task's id, copied from `Provenance.task_key` at dispatch (`modules/io/src/run_summary.rs:61-68,187-192`) — verified `data:`. `RunSummary.title` is not the task's title: `RunSummary::from_session` fills it from `Provenance.session_title.resolved_title()` (`run_summary.rs:204-209`), which is optional and may be absent or still in flight (`modules/core/src/procedure/session.rs:295-301`). The claimed task's title, prose and stored status live in the board, and the board is not center-served: the CLI reaches it through `modules/cli/src/app/tasks.rs` over `ctx-traits-io::task_files`, and the TUI's `Screen::Tasks` reaches the same path in-process (`modules/cli/src/app/dashboard.rs:6140-6361`). A separate desktop binary reaches none of it.
 
-The plan document's mechanism is not negotiable here — "if a face needs something the center does not serve, the center learns to serve it and every face gets it in the same release" — so this cut teaches the center to answer the task a run claims and lands a second, non-GUI consumer of that same answer. It is deliberately the whole of this task: no window, no rendering, no placeholder module. The Sessions header that consumes the answer is `0265.13`, and every later screen's board work (`0266`) widens this same capability from one task to the listing.
+The plan document's mechanism is not negotiable here — "if a face needs something the center does not serve, the center learns to serve it and every face gets it in the same release" (`.internal/docs/gpui-desktop-face-plan.md:11-18,22-30,90-98`) — so this cut teaches the center to answer the task a run claims and lands a second, non-GUI consumer of that same answer. It is deliberately the whole of this task: no window, no rendering, no placeholder module. The Sessions header that consumes the answer is `0265.13`, and every later screen's board work (`0266`) widens this same capability from one task to the listing.
+
+Three grounded corrections the draft did not carry.
+
+**There is no task `description` field.** `TaskDocument` stores `title`, an optional `status`, and three prose fields `content`, `scope`, `validation` (`modules/core/src/task/mod.rs:135-185`); `TaskSummary` carries no prose at all (`modules/core/src/task/provider.rs:25-36`). The description this answer serves IS `TaskDocument.content`, verbatim. `0266`'s Correction 3 already rules that one projection of `content` is named and shared, and that a per-face variant or a newly stored description field is a defect. This cut names that projection once; it adds no schema field, and it does not truncate — truncation for width is layout, decided by the face that renders it.
+
+**Stored status is `Option<TaskStatus>`.** That is `ready|done|cancelled` or absent (`mod.rs:22-31,208-220`) — not `DerivedStatus`, which adds `Blocked` and applies child/dependency rules (`modules/core/src/task/graph.rs:16-31,115-177`). The screen export's `in review` is not representable in the schema and must not be invented or hardcoded. The answer carries the stored optional value as stored; deriving board state is `0266`'s listing work.
+
+**The second consumer is not a re-point.** `ctx tasks show` is task-addressed — key, exact filename, filename stem, key-like prefix, arbitrary `--board` (`modules/cli/src/app/surface/cli.rs:163-189`, `tasks.rs:573-679`) — and `0266`'s Correction 10 already rules that routing those one-shot reads through a socket would make a plain board read fail when no center is running, which is a regression rather than parity. A run-addressed answer therefore lands *beside* the existing task-addressed read, sharing the same handler and the same board authority, never replacing it.
 """
 scope = """
+## Goals and approach are separate
+
+Everything in this section, and the `## Done when` list at the end of it, is a GOAL: binding, observable, and decided by a command that exists in this repository today. Everything under `## Approach` in the validation section — expected files, symbols, signatures, edit order and proof mechanics — is APPROACH: the architect's suggested route from the grounding, and never a boundary. Deviate from any of it wherever a goal requires it, and record the deviation in the work summary. A deviation is not a violation and needs no escalation.
+
 ## Decisions
 
-- In scope: a center-served read of the task a run claims — its key, title, description, stored status, and its own `auto-close` override where the document declares one — reachable over the socket every face already speaks; plus one existing non-GUI face consuming that same answer in the same release.
-- **Which non-GUI surface consumes it is the architect's call** — the CLI's task read or the TUI dashboard's own Sessions projection are both legitimate — but a center capability that no non-GUI face calls has not preserved parity.
-- **The `auto-close` override rides this answer** because the Sessions preview's landing consequence (`0265.15`) needs it beside the resolved `[tasks]` policy; the task document already carries `auto_close` (`modules/core/src/task/mod.rs`), so serving it costs nothing extra here and avoids a second board read later.
+- **In scope**: a center-served, on-demand read of the task a run claims — its canonical key, title, description, stored status, and the document's own `auto-close` override where it declares one — reachable over the socket every face already speaks; plus one existing non-GUI face consuming that same answer in the same release.
+
+- **The non-GUI consumer is the CLI's task read, extended with a run-addressed mode.** `ctx tasks show` gains `--session <session-id>`: the run-addressed form asks the center for that run's claimed task and prints it; the task-addressed form is untouched. The compatibility contract, which is binding:
+  - `ctx tasks show <task>` keeps its direct `FilesTaskBoard` path, its accepted identifiers (key, filename, stem, key-like prefix), its `--board`, its live-before-archived resolution, its `--json` and human output, and its existing failure text. It opens no center connection, so it still works with no center running.
+  - `--session` and the positional task are mutually exclusive, and `--session` does not accept `--board` — a run's board is the board at the run's own repository, resolved center-side from the row, never from the caller's cwd.
+  - This is additive, so `0266`'s Correction 10 is satisfied rather than contradicted: nothing that reads the board directly today starts depending on a socket.
+  - The TUI Sessions projection was considered and rejected as the consumer for this cut: it has no existing task-title leaf to repoint (`dashboard.rs:2233-2347`, `8162-8261` render narrator title or phase), so consuming the answer there means new rendering — which is `0265.13`'s and `0266`'s work — or an unused fetch, which is not a consumer at all. The run may still choose the TUI if it can show a real production use with unchanged existing behaviour; it must then say so in the work summary.
+
+- **Description is `TaskDocument.content`, and the wire field is named `description`.** One projection type with one construction site from the document, shared by the center answer and every consumer. No new stored field, no second derivation, no truncation in the answer.
+
+- **The answer carries stored status and the document override only.** `Option<TaskStatus>` from the document and `Option<AutoClosePolicy>` from the document. It does not derive board status and does not resolve the `[tasks] auto-close` default — the effective policy is `0265.15`'s, and `EffectiveConfig::effective_auto_close` (`modules/io/src/harness_config.rs:1588-1593`) is already duplicated CLI-side twice (`task_proposals.rs:473-495`, `tasks.rs:300-305`); a third copy here would be wrong.
+
+- **The `auto-close` override rides this answer** because the Sessions preview's landing consequence (`0265.15`) needs it beside the resolved `[tasks]` policy; the document already carries `auto_close` (`mod.rs:64-79,177-184`), so serving it costs nothing here and avoids a second board read later.
+
 - **Not deferred to `0261`.** That task's scope admits no production behaviour beyond reconnect-delay parity, two-version coexistence, shared-index versioning and subscription regressions; assigning this capability to it would be assigning it to nothing.
-- Out of scope: all desktop rendering (`0265.13` renders the header from this answer), the `placeholders` module (`0265.3` creates it at its first placeholder leaf), the frame counter (`0265.14`), and the whole board-listing capability the Tasks screen needs (`0266.1`).
+
+- **Out of scope**: all desktop rendering (`0265.13` renders the header from this answer), the `placeholders` module (`0265.3` creates it at its first placeholder leaf), the frame counter (`0265.14`), effective `auto-close` resolution (`0265.15`), and the whole board-listing capability the Tasks screen needs — listing, board watches, board fingerprints/digests, task creation, and moving the TUI `Screen::Tasks` reader (`0266.1`, `0266.7`). Duplicate-key semantics and a second `sync` pass are also outside this cut.
 
 ## Prerequisite
 
-`0265.1` — the first `0265` leaf, which carries the whole of item `0256`. A charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs` evaluates dependencies only for open leaves), so every `0265` child chains through `0265.1` for the item gate.
-"""
-validation = """
-## Watch
-
-- **Do not substitute the session title for the task title.** They are different fields with different lifecycles; `Provenance::session_title` can be unresolved, and answering with it under a leaf that means "title of the claimed task" misreports the screen.
-- **No new board reader.** Reuse the `task_files` / `task_board_cache` path the existing faces use; a second walk of the tasks tree is a second answer that can disagree.
-- **The reads the center adds must not stall its own request loop.**
-- **Fail-loud.** A run whose claimed task cannot be read answers the failure; it does not answer a blank or invented title.
-- **The TUI and CLI must not regress**, and the existing task read's behaviour — row content, filtering, error text — survives whatever re-pointing this cut does.
-- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set**; the center-side task read must not pull CLI-level types or a new heavyweight dependency into the io crate, since the desktop lane inherits everything it drags in.
-- **No test may depend on committed repo content.** Prove behaviour with scratch task fixtures, never by asserting on this repository's own `.internal/tasks` — path/word/file-existence inventories are banned workspace-wide.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+`0265.1` — the first `0265` leaf, which carries the whole of item `0256`. A charter's `depends-on` is not inherited by its children (`graph.rs:115-177` evaluates dependencies only for open leaves), so every `0265` child chains through `0265.1` for the item gate.
 
 ## Done when
 
-The center answers, for a given run, the task that run claims — key, title, description, stored status and the document's own `auto-close` override — and an existing non-GUI face reads that task through the same answer with its behaviour unchanged. A run whose claimed task cannot be read answers a loud failure. No face gains a second board reader. `just test` passes, the center wire proof and the CLI task-read tests pass, and root workspace resolution and the root lockfile remain gpui-free.
+1. **The center answers a run-addressed claimed-task request** carrying the canonical key, the title, the description (the document's `content`), the stored status and the document's `auto-close` override, proven end to end over the real socket against a scratch repository and a scratch board. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`.
+
+2. **Every unresolvable case is a loud failure, never a blank field or an invented default.** At minimum: session missing, session ambiguous, the run claims no task, the row's repository path is empty or not absolute, the provider errors, the claimed key is absent from the board, and the claimed document is present but unparseable (which the loader skips, so it reaches the center layer as a missing key and must not become an empty answer). No cwd fallback in any of them. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center` and `just test`.
+
+3. **The board read runs off the sole model/SQLite owner**: the claimed-task request never reaches the model owner as a generic request, and no board I/O is added to the periodic scan or to any per-row projection. Decided by `just test`, which runs the io library tests where the existing `Start`/`Control` isolation coverage lives.
+
+4. **`ctx tasks show --session <id>` reads the claimed task through that same center answer, and `ctx tasks show <task>` is observably unchanged** — same identifiers, same `--board`, same `--json` and human output, same error text, and no center connection on that path. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks`.
+
+5. **The per-round workspace gate is green** and root workspace resolution plus the root lockfile remain gpui-free. Decided by `just test` and the metadata/lockfile check.
+
+6. **Board authority stays `FilesTaskBoard`/`TaskProvider` — no second reader on this path.** Observable as provider-only behaviour the served answer must reproduce: an archived claimed task still answers (live-then-archived resolution is `TaskProvider::get`'s, `provider.rs:242-249`); a claimed document the loader skips reaches the caller as the loud missing-key failure of Done-when 2, never as a partially parsed or half-filled answer; and the served fields do not change when `task_board_cache` is stale, corrupt, wrong-board or absent, since the cache is not authority here. A direct file read, a second parser, or a cache-backed answer fails at least one of those observations. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center` and `just test`.
+
+7. **The `.internal/tasks` convention is single-sourced, not copied into the center.** Observable as agreement between the two faces: for one repository root, the center-served read and the CLI's task-addressed read resolve the same board directory, so a document written at `<repo>/.internal/tasks/<key>.toml` is the same document both answer from, and neither path derives that directory from the center process cwd. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center` and `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks`.
+
+Both of the above are decided by the commands named. The bounded final review still reads the diff against them, but it is supplementary inspection, not their decision mechanism.
+"""
+validation = """
+## Approach
+
+Suggested route, not a boundary. Every symbol below is named because the grounding supports it; the run may take a different one whenever a goal requires it, and reports that in the work summary.
+
+**Reuse points, named.** `FilesTaskBoard::open_read(board_dir).get(canonical_key)` behind `TaskProvider` is the board authority (`modules/io/src/task_files.rs:787-856`, `186-282`) — the run already carries the canonical key, so `resolve` is unnecessary extra I/O. `resolve_row` plus `ModelCommand::ResolveRow` is the existing short model-owned session resolution (`center.rs:3380-3394`, `3001-3022`), built on `select_row`'s repository-scoped exact-before-prefix classification (`center.rs:3854-3912`) — do not write a second interpretation of session identity. `Start` and `Control` are the existing nonblocking shape: resolve briefly on the model owner, then do the blocking work in the connection worker (`center.rs:3278-3315`, `3380-3429`). `ledger_repository_path` is the existing repo-path recovery `run_start` uses before its absolute-path guard (`center.rs:3490-3512`).
+
+**Edit order.**
+
+1. **`modules/core/src/task/provider.rs`** — one public projection beside `TaskSummary`, suggested `ClaimedTask { key, title, description, stored_status: Option<TaskStatus>, auto_close: Option<AutoClosePolicy> }`, `Serialize`/`Deserialize`, with a single construction from `&TaskDocument` that documents `description`'s source as `content`. One construction site is the point: it is what keeps `0266`'s shared-projection ruling true when the listing arrives.
+2. **`modules/io/src/task_files.rs`** — single-source the board-directory convention (a `pub const` for `.internal/tasks`, or a small `repo_root -> board dir` helper) and have `modules/cli/src/app/tasks.rs:20-26` use it instead of its private copy. The center derives the board directory from the selected row's repository path through that one definition; it does not import CLI code and never touches the center process cwd.
+3. **`modules/io/src/center.rs`** — widen `ResolvedRow` with the row's `task_key` (`center.rs:1491-1498`, filled at `3001-3022` from `row.summary.task_key`); add `Request::ClaimedTask { id, session_id, repo_key }`, a `ResponseResult::ClaimedTask` arm and its wire result; add the early-return dispatch branch beside the `Start`/`Control` branches at `center.rs:3278-3315` so the request never becomes a `ModelCommand::Request`; add the worker function that resolves the row, guards the repository path, opens the board read-only and gets the claimed key. Suggested split of outcomes, mirroring `ControlWireResult`: deterministic typed results for missing session, ambiguous session, and "this run claims no task"; `ResponseResult::Error` with a message naming the key and the board directory for an unusable repository path, a provider error, or a claimed key the board does not yield — the client already turns that into `Err` (`center.rs:812-815`), which is the loud failure. Add the public client wrapper beside `control`/`resolve` (`center.rs:878-1003`) on `ACTION_TIMEOUT`, not the 2s `STREAM_TIMEOUT`, since it performs a directory walk.
+4. **`modules/cli/src/app/surface/cli.rs`** — `TasksCommand::Show` gains `session: Option<String>`; make the positional task `required_unless_present = "session"` and let clap refuse `--session` together with the task or `--board`, so misuse is a parser error rather than hand-rolled precedence.
+5. **`modules/cli/src/app/tasks.rs`** — `handle_tasks_show` grows the session branch: resolve the repository key the way `handle_tasks_proposals` already does (`ctx_traits_io::state::current_repo_key`, `tasks.rs:146-152`), call the new center wrapper, and render the answer through the existing `Panel`/`Envelope` idiom the task-addressed branch already uses. The existing branch is not restructured around the new one.
+6. **Wire the dispatch arm** in `modules/cli/src/app/command_handlers.rs`.
+
+**What must be proven** (mechanics are the run's choice; these are the observations):
+
+- A center unit test joining the existing typed-transport coverage (`center.rs:4001-4021`, `5180-5561`): the claimed-task request round-trips typed, and its board read happens in the connection worker — the model owner never receives it as a generic request, the same property the existing `Start`/`Control` isolation tests assert.
+- A `proof_center` wire proof over the real sentinel: a scratch repository, a scratch ledger carrying `task-key`, a scratch `<repo>/.internal/tasks/<key>.toml`, a center row whose repository path is that scratch repository — then all five fields answer. Separate cases for the failure classes in Done-when 2, and for an archived claimed task, which `TaskProvider::get` resolves deliberately (`provider.rs:242-249`).
+- CLI unit tests over the fake typed peer in `modules/cli/src/app/test_support.rs`: `--session` issues exactly one claimed-task request and renders (and fails) from its answer, while the task-addressed form opens no center connection and keeps its output and error text. `cargo test -p ctx-traits-cli --lib tasks` selects them.
+
+## Watch
+
+- **Do not substitute the session title for the task title.** They are different fields with different lifecycles; `Provenance.session_title` can be unresolved, and answering with it under a leaf that means "title of the claimed task" misreports the screen. `0265.13` combines the two and forbids either standing in for the other.
+- **No new board reader.** `FilesTaskBoard`/`TaskProvider` stays the authority. No direct file lookup, no second parser, and `task_board_cache` is never authority here — it declares itself discardable derived evidence and returns misses for corrupt, wrong-version or wrong-board records (`modules/io/src/task_board_cache.rs:1-10,64-109`).
+- **The reads the center adds must not stall its own request loop**, and must not land on any UI or event-loop thread.
+- **`CenterPublicRow` stays compact.** This is a selection-triggered on-demand read; it must not become per-row board I/O on the snapshot path or a client-side poll loop.
+- **Fail loud.** A run whose claimed task cannot be read answers the failure; it never answers a blank or invented title, status or policy. A missing board directory currently loads as an *empty* board (`task_files.rs:197-200`), so absence of the key is the signal that must fail — not absence of the directory.
+- **The TUI and CLI must not regress**, and the existing task read's behaviour — row content, identifiers, filtering, `--board`, error text — survives unchanged.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set** (`modules/io/Cargo.toml:12-29`); the center-side task read must not pull CLI-level types, a filesystem watcher, or any new heavyweight dependency into the io crate, since the desktop lane inherits everything it drags in.
+- **Do not truncate the description.** Center wire lines are bounded at 1 MiB (`center.rs:48-52,635-644`); an oversized document fails loudly at serialization, which is the correct outcome, not grounds for inventing a shortened value.
+- **No test may depend on committed repo content.** Prove behaviour with scratch repositories and scratch task fixtures, never by asserting on this repository's own `.internal/tasks` — path/word/file-existence inventories are banned workspace-wide.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+
+## Bounded review
+
+One final review pass: read the completed diff against the Done-when list and the watch items above, then run the four declared checks. At most one targeted repair-and-rerun cycle. If a second repair would be needed, stop and report the exact failing command and its output, or the exact unresolved consumer-contract mismatch — do not open a third cycle.
 """
 [relations]
 parent = "0265"
