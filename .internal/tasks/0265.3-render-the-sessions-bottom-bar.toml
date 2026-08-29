@@ -1,45 +1,414 @@
 schema-version = "0.2"
 key = "0265.3"
 title = "Render the Sessions bottom bar"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-Grammar rule 8 puts a bottom bar on every v1 screen: border-soft 1, pad [10,14], space-between; left a state word coloured per rule 1 plus a `· detail` string in mono 11 `text-secondary`; right the actions in mono 11, `·`-separated with `text-faint` bullets, primary in `text-bright`, ghost text throughout — no fills, no borders, no icons. `screens/sessions.md` names this screen's instance: `running` accent `· frame 5 of 9 · review round 2` on the left, `watch raw · pause` on the right.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-This cut builds the bar and the halves of its detail that the compact center row already carries: the state word follows `RunSummary.status` and `CenterPublicRow.live`, and the review round follows `RunSummary.verdict_rounds`. The `frame N of M` half is not on that row and is not guessed here — the bar's detail is one caller-supplied slot, and `0265.14` fills the structural counter into it once the selected run's reconstruction is being read.
+Grammar rule 8 puts a bar at the bottom of every v1 screen: border-soft 1, pad
+[10,14], space-between; left a state word coloured per rule 1 plus a `· detail`
+string in mono 11 `text-secondary`; right the actions in mono 11, `·`-separated
+with `text-faint` bullets, primary in `text-bright`, ghost text throughout — no
+fills, no borders, no icons (`.internal/docs/design/grammar.md:74-84`).
+`screens/sessions.md:32-34` names this screen's instance: a state word plus
+`· frame N of M · review round R` on the left, `watch raw · pause` on the
+right, with `watch raw` permitted to no-op in v1 and tagged `placeholder:`.
+The export agrees on the geometry — full-width flex, space-between, 8px gap in
+each half, mono 11, detail secondary, separator faint, `watch raw` secondary,
+`pause` bright (`reference/sessions.html:575-619`). Where an export and the
+rules disagree, the rules and the screen specification govern.
 
-`watch raw` opens the raw view, which `screens/sessions.md` explicitly permits to no-op in v1 and tags `placeholder:` when it does. That makes this the screen's first `placeholder:` leaf, so this cut creates the one `placeholders` module by seeding exactly that entry: design-faithful static content served from one greppable place rather than an inline literal. `pause` renders here as ghost text and is bound to the center's verb by `0265.4`.
+This cut builds that bar, the state presentation it needs, and the half of its
+detail the compact center row already carries. `frame N of M` is not on that
+row and is not guessed here: the bar's detail is one caller-supplied slot, and
+`0265.14` fills the structural counter into it once the selected run's
+reconstruction is being read. `pause` renders as the bright ghost action and is
+bound to the center's verb by `0265.4`.
+
+## Three corrections to the draft this plan replaces
+
+**Correction 1 — the state word is not always `accent`.** The draft's own
+Done-when sentence said `accent` unconditionally while its scope said "coloured
+per rule 1". Only a live/running state is accent: rule 1 assigns `ok` to
+settled good, `danger` to failure, `warn` to needs-the-owner
+(`grammar.md:6-22`), and the export's `#7fb2ff` is the running instance, not a
+constant. A selected non-live row painted accent asserts the run is happening
+right now, which is exactly the lie rule 1 exists to prevent. The state word is
+derived per row and coloured per rule 1, exhaustively over every
+`SessionState` variant. The artifacts fix `running` and `accent` and provide no
+table for the other six; this cut establishes that table and reports it.
+
+**Correction 2 — `verdict_rounds: None` is missing evidence, not round zero.**
+`verdict_slot_rounds` counts matching verdict-slot revisions and returns the
+highest count, documenting `None` as missing coverage rather than zero rounds
+(`modules/core/src/procedure/stats.rs:109-122`), surfaced verbatim as
+`RunSummary.verdict_rounds` (`run_summary.rs:243-245`). The draft left this
+boundary unstated. It is stated here: `Some(R)` renders the round segment,
+`None` renders no round segment at all — not `review round 0`, and not a
+failure. That matches the sibling convention `0265.5` already carries for
+absent sidecar evidence: nothing rendered, nothing invented.
+
+**Correction 3 — an unreadable row must not render a plausible word.** A
+summary that could not be parsed carries `parse_error = Some(...)`,
+`status = Failed` and `session_state = None`
+(`modules/io/src/run_summary.rs:255-294`). Deriving from `status` alone would
+paint `failed` — a word that reads as a fact about the run rather than as a
+failure of the projection. The draft's fail-loud clause is therefore concrete:
+the projection failure stays visible on the bar.
+
+## State-word ownership, between this cut and 0265.5
+
+The parent charter says this cut extracts state words (`0265:74-76`);
+`0265.1` and `0265.5` say the semantic roles, state words, dot and selection
+rule belong to `0265.5`. Both cannot be first. The resolution that duplicates
+nothing: this cut establishes exactly the state presentation the bar consumes —
+one word and one rule-1 colour role per `SessionState` — and `0265.5` extends
+that same primitive with the 5px dot, the selection rule and the row voices
+rather than creating a second mapping. No design system is built ahead of a
+consumer, and no primitive is widened past what the bar renders.
+
+## Grounded at HEAD d83d8c171
+
+Nothing this task edits exists yet. There is no standalone desktop
+`Cargo.toml`, no desktop lockfile, no gpui source tree, no desktop asset
+directory and no desktop command anywhere in the repository; no `0256` child
+has landed, and `0265.1` is `ready` rather than done. Every desktop path,
+module name, symbol, signature and command named below is therefore a guess to
+be replaced by discovery against what `0256` and `0265.1` actually landed —
+binding them here would be fabrication. What is checkable today, and the only
+board coverage this task can honestly declare, is that the workspace stayed
+gpui-free and its per-round gate stayed green.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: the bottom bar as rule 8 and `screens/sessions.md` specify it, the state word's semantic colour, the review-round detail, the ghost action list, and `watch raw`'s placeholder-served v1 no-op.
-- **The `placeholders` module is created here**, seeded with exactly this one entry, traceable to the `placeholder:` tag in `screens/sessions.md` that authorises it. It is not a framework, not a registry, and not pre-seeded with entries no cut renders yet. Every later placeholder leaf on every screen adds its entry to this module.
-- The bar's left detail is one caller-supplied slot. `0265.14` supplies the frame counter; the four later screens cite grammar rule 12's provenance (`.internal/tasks @ <sha>`, `skill-lock @ <sha>`, `runtime.toml`) through the same slot. The bar renders what it is given and never reads a source itself.
-- **Sources are named, not assumed**: the state word and the review round come from the compact center row. A leaf whose source is not that row does not belong on this bar in this cut.
-- Out of scope: the frame counter (`0265.14`), the verbs themselves and the `pause` binding (`0265.4`), the frame list, the preview column, the rail and title bar.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+1. **Rule 8's bar exists once, as a reusable component.** One desktop
+   component renders the bar: full-width row, 1px `border-soft`, padding
+   [10,14], `space-between`, no corner radius; a left half of state word plus
+   detail and a right half of actions, each an 8px-gap row; every string mono
+   11. Every colour, size, spacing and family comes from `0265.1`'s token
+   entry point — no colour, size, spacing, weight or family literal at a call
+   site in this cut. The component takes what it renders as arguments so the
+   four later screens compose it rather than re-deriving it.
+   Decided by the desktop lane's own non-interactive build-and-test command —
+   the one `0256.1` landed, discovered at execution time and named verbatim in
+   the work summary — exiting 0, plus the closing diff read against
+   `grammar.md:74-84`, `tokens.md:71-84` and `reference/sessions.html:575-619`.
+   Excluded: a filled, bordered or icon-bearing action; any corner radius
+   inside the canvas; sans anywhere in this bar; any glyph outside the closed
+   set `↰ ↳ → · ∷` (this bar uses only `·`); a generic component registry or
+   bar variants for screens that do not exist yet; the other screens' bars
+   (`0266`-`0269` consume this component).
 
-## Prerequisite
+2. **The state word is derived, semantic and exhaustive.** The displayed word
+   comes from `SessionState::derive(status, outcome, live)`
+   (`modules/core/src/procedure/activity.rs:13-52`) with the selected row's
+   authoritative `CenterPublicRow.live` passed as `live` and the wire outcome
+   decoded through the shared `DriveOutcomeKind::from_wire`
+   (`modules/core/src/procedure/session.rs:1089-1178`) — never from
+   `RunSummary.session_state`, which is projected with `live = false`
+   (`run_summary.rs:136-143`) and is not a live answer. Every one of the seven
+   `SessionState` variants maps to exactly one displayed word drawn from rule
+   2's vocabulary and exactly one rule-1 colour role, `Running` to `running` in
+   `accent` as the artifacts fix it and the other six justified against rule
+   1's own definitions and named in the work summary. The mapping is exhaustive
+   at the type level — no catch-all arm — so a new variant is a compile error
+   rather than a silent default.
+   Decided by that same desktop command, whose coverage must include a live
+   row deriving `running` and representative non-live rows deriving their own
+   word and role, plus the closing diff read showing no unconditional accent
+   and no use of `session_state` as the live answer.
+   Excluded: the 5px status dot, the one-bright-title selection rule and the
+   sans/mono row voices (`0265.5`, which extends this primitive rather than
+   adding a second mapping); a general palette or design-system abstraction
+   beyond the roles this bar renders; any light-column value; any import of
+   CLI-private projection code — `run_view::session_status` is `pub(crate)`
+   and maps raw `Status` rather than the live-aware state
+   (`modules/cli/src/app/run_view/session_text.rs:183-198`).
 
-`0265.1` — the token constants and loaded faces this bar renders in, and the leaf that carries the whole of item `0256` for every `0265` child (a charter's `depends-on` is not inherited).
+3. **An unresolvable state is visible as a failure, not as a word.** When the
+   selected row's summary carries `parse_error`, the bar shows that the
+   projection failed rather than the plausible word `failed`, in a rule-1
+   failure role.
+   Decided by the desktop command's coverage over an unreadable-summary row.
+   Excluded: swallowing the error into an ordinary state word; hiding the row
+   or blanking the bar; reading the ledger from the desktop process to recover
+   the state.
+
+4. **The review round renders only from evidence.** `verdict_rounds` of
+   `Some(R)` renders the round segment carrying R; `None` renders no round
+   segment at all.
+   Decided by the desktop command's coverage over both cases, plus the closing
+   diff read showing no default-to-zero on that field.
+   Excluded: `review round 0`; treating absent round evidence as a failure;
+   any re-derivation of the round from slot revisions inside the desktop —
+   `verdict_slot_rounds` already projected it onto the row.
+
+5. **The detail is one caller-supplied slot and the bar reads no source.** The
+   bar renders the detail it is given, `·`-separated per rule 8, and renders no
+   dangling separator when the detail is empty. Adding a leading `frame N of M`
+   segment later (`0265.14`) requires no change to the bar. Nothing inside the
+   bar performs a filesystem, ledger, store, sidecar or center read, and
+   nothing schedules a timer, interval or poll: the state word and the round
+   arrive on the accepted snapshot/delta model `0256` landed, and a rejected
+   projection leaves the previously accepted bar intact rather than a partially
+   committed one.
+   Decided by the desktop command, whose coverage must include the caller's
+   detail composed both with and without a leading frame segment, with the
+   existing `0256.2`-`0256.5` snapshot, delta and stale tests passing
+   unmodified; plus the closing diff read for any timer, interval, spawned
+   tick, or read on the bar or row path.
+   Excluded: teaching the bar about `CenterPublicRow`, `RunSummary` or a
+   reconstruction; a second reducer, subscription or accepted-row model beside
+   the one `0256` landed; deriving `frame N of M` here from list position, row
+   count or `current_run_index` (`0265.14`); any center protocol change — every
+   fact this bar shows is already on the row.
+
+6. **The `placeholders` module is created by seeding exactly one entry.** The
+   `watch raw` label and its permitted v1 no-op both resolve through that one
+   module, with no inline literal at the call site, traceable to the
+   `placeholder:` tag in `screens/sessions.md:32-34` that authorises it.
+   `pause` renders as the bright primary ghost action and is wired to nothing
+   here.
+   Decided by the desktop command's coverage showing `watch raw` resolving
+   through the module entry, plus the closing diff read for a duplicate literal
+   and for any action ordering, tone or separator other than `watch raw`
+   secondary, `·` faint, `pause` bright.
+   Excluded: a registry, a lookup framework, a trait or macro layer; entries no
+   cut renders yet (current-frame intent, loop phrasing, header phrasing,
+   in-progress narration, owner handle — each arrives with its consumer); any
+   binding of `pause` to a center verb or optimistic state change (`0265.4`).
+
+7. **The workspace does not learn about gpui.** Root Cargo resolution and the
+   root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+   member, and the per-round workspace gate stays green and unchanged in cost.
+   Decided by the two declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing macOS and Linux CI lanes
+   (`.github/workflows/ci.yml:12-60`); a grep forbidding the word `gpui` in
+   `Justfile` or `.github/workflows/` — a *separate* desktop lane there is
+   sanctioned, so such a check would red on the sanctioned outcome; declaring a
+   board check that executes the desktop lane before `0256.1` has landed one.
+
+8. **The normative artifacts are untouched.** No file under
+   `.internal/docs/design/` is modified. A rule, token or example that looks
+   wrong is reported in the work summary as an owner correction against the
+   source design, never edited here.
+   Decided by the task commit's own file list; no board check can decide this,
+   because a check runs in a clean detached worktree of the merged sha with no
+   base to diff against.
+
+9. **The pass is reviewed once and bounded.** The completed diff is read
+   against `grammar.md` rule 8, `screens/sessions.md:32-34`, `tokens.md` and
+   `reference/sessions.html:575-619` before the task is called done. Exactly
+   one targeted repair cycle is allowed: run the desktop command and the two
+   root checks, repair one named failure, rerun that command and everything
+   after it. If a second cycle would be needed, stop and report the exact
+   failing command with its evidence rather than iterating. The work summary
+   names the discovered desktop path, the exact desktop command, the state
+   word/role table chosen, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against.
+Read what `0256` and `0265.1` landed; do not carry a guess from this file into
+an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level directory listing, then its manifest, its README, its justfile or
+  its CI lane, for the documented non-interactive build-and-test command
+  `0256.1` established. Reusing that harness is suggested over standing up a
+  parallel lane.
+- Read `0265.1`'s token entry point and take every colour, size, gap, padding,
+  border and family from it. `border-soft #23262d`, `text-bright #eceef2`,
+  `text-secondary #8b909c`, `text-faint #4d525c`, `accent #7fb2ff`, mono 11 and
+  the bar's pad [10,14] / border 1 are `tokens.md:23-84`'s values, and they
+  belong in that module rather than at this call site.
+- Read `0256.3`'s row renderer and `0256.4`/`0256.5`'s delta and stale paths to
+  find the accepted selected-row model this bar subscribes to, and the test
+  harness those tasks' tests already run in.
+
+### Edit order
+
+1. The state presentation: an exhaustive `SessionState` to (word, role)
+   mapping, plus the derivation from the selected row that passes
+   `CenterPublicRow.live` and decodes the wire outcome, with the
+   `parse_error` case producing the visible projection failure of goal 3.
+2. The `placeholders` module, created by seeding the single `watch raw` entry.
+3. The bar component itself: the two halves, the separators, the tones.
+4. The Sessions mount and the caller-side detail composition, which today
+   contributes only the round segment from `RunSummary.verdict_rounds`.
+5. The focused proofs.
+6. The desktop command, then the two declared root checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `bottom_bar` component taking a rendered state (word
+plus role), an already-composed detail value, and an ordered list of actions
+carrying their own tone; a `state_presentation(SessionState)` returning the
+word and the rule-1 role; a `placeholders` module exposing the one `watch raw`
+entry. Names, module paths and signatures follow whatever conventions `0256`
+and `0265.1` established. Whether the detail arrives as one composed string or
+as ordered segments the bar joins is the run's call; either shape can satisfy
+goal 5, which is where the no-source-read outcome and `0265.14`'s
+insert-a-leading-segment outcome are stated.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- A live row derives `running` in `accent` through the row's `live`, and does
+  not take its answer from `RunSummary.session_state`.
+- Representative non-live rows derive their own word and rule-1 role, so no
+  non-live row is presented as accent.
+- An unreadable summary surfaces the projection failure rather than a state
+  word.
+- `Some(R)` renders the round segment; `None` renders no round segment.
+- The caller's detail composes correctly both with and without a leading frame
+  segment, and an empty detail renders no dangling separator.
+- The right half renders `watch raw` secondary, a faint `·`, then `pause`
+  bright, with no fill, border or icon on any action.
+- `watch raw` resolves through the single `placeholders` entry.
+- The `0256.2`-`0256.5` tests still pass unmodified, keeping the snapshot/delta
+  transaction boundary and the absence of a timer proven where it already is.
+
+### Reuse points
+
+`SessionState::derive` and `DriveOutcomeKind::from_wire` for the state;
+`RunSummary.verdict_rounds` for the round, already projected by
+`verdict_slot_rounds`; `CenterPublicRow.live` for liveness
+(`modules/io/src/center.rs:3778-3788`); `0265.1`'s token entry point for every
+value; `0256`'s accepted selected-row model, subscription and test harness. The
+landed TUI reducer is the semantics to match, not code to import: it stages a
+whole snapshot, clones accepted rows before applying a delta, commits only a
+successfully projected candidate, and reconnects while retaining the previous
+accepted map (`modules/cli/src/app/dashboard/worker.rs:254-415`). Where the
+desktop needs CLI-private semantics, the suggested route is extracting them into
+shared core/IO code rather than copying them into gpui; goal 2 is where the
+exclusion of CLI-private projection imports is stated.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1
+by `rust-toolchain.toml` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The frame counter (`0265.14`), the `pause` binding and any verb round-trip
+  (`0265.4`), the frame-row forms and their dot and selection rule (`0265.5`),
+  loop narration and the activity block (`0265.6`), overflow clip-and-fade
+  (`0265.7`), the rail (`0265.8`), the title bar and screen menu (`0265.9`),
+  the preview column (`0265.10`-`.12`, `.15`) and the header (`0265.13`).
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Center, core or IO semantic changes; a second projection of the compact row;
+  any ledger, store, sidecar or filesystem read on the bar or row path; a GUI
+  poll loop; a blocking receive on gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, or
+  primitives extracted for `0266`-`0269` before one of them consumes them.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Packaging and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **Ghost text only.** A filled or bordered button, or an icon on an action label, violates rules 3 and 8 together. The bar carries no corner radius; radius 10 exists only on the window frame.
-- **Do not invent the counter.** An ordinal derived from list position, row count or `current_run_index` alone is invented structure; the slot stays empty until `0265.14` fills it from the reconstruction.
-- **No poll loop.** The state word and round update from center deltas, never from a timer, and a rejected projection must not leave the bar showing partially committed state.
-- **No inline placeholder literal** for `watch raw`'s no-op — it is the module's first entry, and the module is created by seeding it, not by being designed ahead of a consumer.
-- **States are words, never icons or pills**; the glyph set is closed (`↰ ↳ → · ∷` only); sans is content and mono is machinery.
-- **Compact list rows must never trigger a ledger, store or sidecar read.** Everything this bar shows comes from the row the subscription already carries.
-- **Fail-loud.** A row whose state cannot be resolved shows the failure rather than a plausible word.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Accent is a pointer, not the bar's colour.** The export's `#7fb2ff`
+  captures a running instance. Painting every selected row's state word accent
+  asserts that the run is happening right now and breaks rule 1 for every
+  settled, blocked or cancelled run.
+- **Fail-loud.** A row whose state cannot be resolved shows the failure rather
+  than a plausible word; `parse_error` is the concrete case.
+- **Missing evidence renders nothing.** `verdict_rounds: None` is missing
+  coverage, not zero rounds. `review round 0` is invented structure.
+- **Do not invent the counter.** An ordinal derived from list position, row
+  count or `current_run_index` alone is invented structure; the slot stays
+  empty until `0265.14` fills it from the reconstruction.
+- **Ghost text only.** A filled or bordered action, or an icon on an action
+  label, violates rules 3 and 8 together. The bar carries no corner radius;
+  radius 10 exists only on the window frame.
+- **No inline placeholder literal** for `watch raw` — it is the module's first
+  entry, and the module is created by seeding it, not by being designed ahead
+  of a consumer.
+- **States are words, never icons or pills**; the glyph set is closed
+  (`↰ ↳ → · ∷` only); sans is content and mono is machinery.
+- **No poll loop.** The state word and round update from center deltas, never
+  from a timer, and a rejected projection must not leave the bar showing
+  partially committed state.
+- **Compact rows must never trigger a ledger, store or sidecar read.**
+  Everything this bar shows comes from the row the subscription already
+  carries, so no center protocol change is needed here.
+- **The export is measurement, the rules are the specification.** Copy geometry
+  from `reference/sessions.html:575-619`; take content and colour semantics
+  from `grammar.md` and `screens/sessions.md`. A fifth conflict beyond the
+  parent's Correction 1 is resolved the same way and reported.
+- **No design example string is hardcoded.** `frame 5 of 9` and `review round
+  2` are illustrations of one run, not literals.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like
+  a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this
+  task's desktop behaviour.** They show the workspace stayed gpui-free and
+  green; the rendered outcome is verified in the desktop lane `0256.1`
+  establishes, whose exact non-interactive command becomes declarable as a
+  check on this task once `0256.1` lands.
 
 ## Done when
 
-The Sessions screen carries a bottom bar whose left side shows the state word in `accent` followed by `· review round R` — both from the compact center row — and whose right side shows `watch raw · pause` as `·`-separated ghost actions, with `watch raw`'s v1 no-op served from the newly created `placeholders` module and no inline literal anywhere. The values update from deltas with no timer and no compact-row read, and the detail slot accepts a caller-supplied string without the bar reading any source itself. Root workspace resolution and the root lockfile remain gpui-free.
+- The desktop lane's documented non-interactive build-and-test command — named
+  verbatim in the work summary — exits 0 with the bar component, the state
+  presentation, the `placeholders` module and the Sessions mount in the tree,
+  and the `0256.2`-`0256.5` tests pass unmodified.
+- That command's coverage shows: a live row rendering `running` in `accent`
+  derived through `CenterPublicRow.live`; representative non-live rows
+  rendering their own word and rule-1 role; an unreadable summary surfacing the
+  projection failure rather than a state word; `Some(R)` rendering the round
+  segment and `None` rendering none; the caller's detail composing with and
+  without a leading frame segment and rendering no dangling separator when
+  empty; `watch raw` secondary, faint `·`, `pause` bright, with no fill, border
+  or icon; and `watch raw` resolving through the single `placeholders` entry.
+- The closing diff read shows: rule 8's border, padding, `space-between`, mono
+  11 and 8px half-gaps present with no colour, size, spacing, weight or family
+  literal at a call site; an exhaustive `SessionState` mapping with no
+  catch-all arm; no unconditional accent; no use of `RunSummary.session_state`
+  as the live answer; no default-to-zero on `verdict_rounds`; no timer,
+  interval or filesystem, ledger, store, sidecar or center read on the bar or
+  row path; no CLI-private import; no light-column value; no inline `watch raw`
+  literal; no `pause` binding; no frame-counter derivation; and no corner
+  radius on the bar or its actions.
+- The declared root-resolution check exits 0.
+- `just test` exits 0.
+- The task commit touches no file under `.internal/docs/design/`, no
+  sibling-owned screen region, and no center, core or IO semantics.
+- `git status --short` is empty, the work is in one task-scoped commit, and the
+  work summary names the desktop path, the exact desktop command, the state
+  word and colour-role table chosen for the six non-running variants with its
+  rule-1 justification, any owner correction raised against the design
+  artifacts, and any deviation from the approach.
+
+## Bounded refinement
+
+Run the desktop command, then the root-resolution check, then `just test`.
+Permit at most one targeted repair-and-rerun round: repair one named defect,
+then rerun the failed command and every command after it in that order. If a
+second round would be needed, stop and report the exact failing command with
+its evidence rather than iterating. That is the stop condition, not a
+judgement call.
 """
 [relations]
 parent = "0265"
@@ -47,4 +416,10 @@ depends-on = ["0265.1"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
