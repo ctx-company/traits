@@ -1,11 +1,11 @@
 schema-version = "0.2"
 key = "0264"
 title = "q means detach, not death"
-status = "draft"
+status = "ready"
 raised = "2026-08-28"
 content = """
 Quitting the live view with `q` prints "live view closed; run continues —
-reattach with ctx traits dashboard" (modules/cli/src/app/run_view.rs:1336)
+reattach with ctx traits dashboard" (modules/cli/src/app/run_view.rs:1428)
 and the run then dies. Proven live on 2026-08-28 with architect session
 c73eeda4d699 (an 0262 planning run parked on its plannotator approval
 gate): the owner pressed `q`, saw the message, and the session's last
@@ -28,41 +28,462 @@ delivering the opposite of the printed promise is not.
 the ledger keeps advancing, gates and waits (including an architect run
 parked on its plan-approval gate) keep running, and the session is
 reattachable from the dashboard. The printed message becomes true.
+
+## How to read this plan
+
+Goals and approach are separated, and only goals bind. `validation`'s
+Done-when list, together with the binding constraints and exclusions at
+the top of `scope` and the two-round stop condition, is the contract:
+each Done-when states an observable outcome and the existing command
+that decides it.
+
+Everything else in this task is a suggested route, wherever it appears —
+in the corrections below, under "Suggested approach", in "Order and
+bounded refinement", or in "Watch". That covers the expected files, the
+symbol names and signatures, the fixture shape, the blocking-step
+mechanism, the synchronization point, poll intervals and deadlines, the
+read/edit/check sequence, the order the commands are run in, and every
+other proof mechanic. All of it is the architect's best route from the
+grounding, not a boundary. Deviate from any of it whenever a goal
+requires it and report the deviation in the work summary; that is not a
+violation and not an owner escalation.
+
+## Grounded against HEAD 70662f259
+
+### Correction 1 — no q-to-death edge exists in the current source
+
+The draft assumes the mechanism is findable by reading. It is not. The
+whole confirmed-`q` path is:
+
+- `live_view_key_action` maps `q` (bare or modified) to `ConfirmQuit`
+  (`run_view.rs:1380-1393`); `poll_and_apply_keys` opens the confirm
+  modal (`:1519-1527`).
+- `ModalOutcome::Confirmed` clears the modal, calls `close_pane_locked`,
+  and prints the continuation notice for a non-observer
+  (`apply_open_modal_key`, `:1419-1432`).
+- `close_pane_locked` (`:1109-1119`) commits inline scrollback (a no-op
+  for an alternate-screen pane, which every production run pane is since
+  0252.7), calls `RatatuiPane::quit`, flushes decode diagnostics, and
+  marks the cadence inactive.
+- `RatatuiPane::quit` marks the pane detached and calls `leave`
+  (`tui_ratatui.rs:1002-1009`); `leave` stops the input pump, restores
+  terminal modes, clears the active pane generation and drops the
+  terminal handle (`:1179-1195`).
+
+That path sets no interrupt flag, signals no child, drops no driver lock
+and never exits the process: `interrupt::request_kill`, `request_stop`,
+`request_pause`, `process::exit` and `_exit` are all absent from it.
+Later `draw` calls return immediately once detached
+(`tui_ratatui.rs:904-910`) and `tick_locked` disables its timer
+(`run_view.rs:1273-1279`), so subsequent `RunPanel::close` calls are
+idempotent.
+
+So static reading and the recorded incident contradict each other. That
+contradiction is the plan's starting fact, not a detail: the run
+establishes a failing end-to-end reproduction FIRST and repairs the seam
+that reproduction exposes. Inventing a production change from an
+unobserved mechanism is forbidden by goal 1.
+
+### Correction 2 — a released flock is the proof that the process died
+
+`drive::drive` acquires `ctx_traits_io::run_control::DriverLockGuard`
+before `drive_loop` and keeps it as a local across the whole loop and the
+terminal outcome write (`drive.rs:1053-1097`, `:1160-1227`), dropping it
+only after `record_drive_outcome`, `notifier.ended` and final state
+derivation (`:1542-1578`). `DriverLockGuard::Drop` stops the control
+listener, removes the liveness-index row, clears metadata and only then
+releases the flock (`run_control.rs:113-182`).
+
+Therefore a post-q `DriverProbe::Unheld` on a run that has not genuinely
+ended proves the driving PROCESS unwound or exited. Pane detachment alone
+cannot release that lock. `run_control::probe` opens the sibling
+`.driver-lock` inode and tries a non-blocking exclusive flock: contention
+is `Held` regardless of metadata, acquisition is `Unheld` and any
+metadata is stale (`:514-562`). This is the one authority the proof may
+use. Lock-file existence, metadata PID, mtimes, liveness-index rows and
+the printed notice are display evidence, not liveness.
+
+### Correction 3 — a blocked command already survives view teardown structurally
+
+The architect owner gate is an ordinary command step wrapping
+`plannotator annotate ... --gate --json --require-approval`
+(`.ctx/traits/authored/architect/generated/default/index.toml:497-518`).
+Command frames already accept view input while blocked: `drive_loop`
+paints the step, then calls `advance_commands` passing
+`RunPanel::tick_observer` (`drive.rs:2344-2360`), and `command::run_raw`
+polls the child every 10ms, invoking that observer each pass
+(`command.rs:533-565`). Command children get null stdin, piped
+stdout/stderr and their own session/process group via the setsid shim
+(`:367-465`); only timeout or an explicit kill signals that group.
+
+Bounds matter for the proof's fixture: a command step that declares
+neither `timeout-ms` nor `idle-timeout-ms`, in a repo with no
+`command-seconds`/`command-idle-seconds` policy, inherits `run_raw`'s
+defaults — 600s idle, 4h wall (`command.rs:29-35`,
+`run.rs:4430-4468`). A silent gate held for a few seconds is therefore
+safe with no bound tuning at all.
+
+### Correction 4 — no dashboard change is indicated by reading
+
+Center rows carry `row.live`; `sessions_from_center_rows` feeds it to
+`classify_session`, which delegates to `SessionState::derive`, where a
+held lock overrides every persisted status and yields `Running`
+(`dashboard.rs:2233-2303`, `:1789-1811`,
+`core/procedure/activity.rs:23-48`). `session_driver_live` uses the same
+`run_control::probe` and is true only for `Held` (`dashboard.rs:3419-3431`).
+`attach_selected` records the row's ledger path and
+`run_attached_observer` rebuilds a `RunPanel::new_observer` from it
+(`:4526-4545`, `:2880-2945`).
+
+So if `q` leaves the driver and its flock alive, today's rows already
+classify the session live and today's observer path already reattaches.
+A dashboard edit is justified only if the end-to-end proof exposes a
+separate defect there. A second liveness classifier is forbidden.
+
+### Correction 5 — the center's detached-start machinery is not the route
+
+`center::start_trait`/`start_session` and `process::spawn_detached` start
+a NEW `ctx` process with null stdin and redirected logs. They cannot
+transfer an already-running drive, its in-memory harness state, or an
+in-flight command child from this process. The owner contract says `q`
+closes the view; it does not ask for the invoking shell back while a
+replacement daemon adopts the run.
+
+### Correction 6 — the existing PTY helper cannot observe the post-q window
+
+`run_pty_keys_after_markers` returns only after the child exits
+(`support/src/lib.rs:1174-1196` via `child_lifetime_wait`), so a test
+calling it directly cannot probe the flock while the run is still
+blocked — which is exactly the window this task's evidence lives in. Two
+existing constants bound whatever route is chosen: one 30s readiness
+deadline covers ALL marker waits from spawn (`pty_prelude`, `:1009-1021`),
+and `CHILD_EXIT_GRACE_SECS` gives 60s from the last key to child exit
+(`:1005`, `:1037-1057`). The mid-flight assertions must fit inside that
+60s.
 """
 scope = """
-## Goals (binding)
+## Binding constraints and exclusions
 
-1. After `q` (confirm-quit accepted) during a live run, the drive
-   continues to its normal outcome: frames advance, the ledger's
-   slot-revisions grow, and the driver-lock flock stays held by the
-   driving process until the run genuinely ends.
-2. The detached run is reattachable from the dashboard and its rows
-   classify correctly while detached.
-3. A run parked on a long-blocking step at q-time (the plannotator
-   approval gate is the live case) survives the detach and completes
-   when the step resolves.
-4. The teardown paths that SHOULD end the run (ctrl-c kill, SIGTERM,
-   completion) are unchanged — 0252.2's and 0252.7's landed contracts
-   stand.
+These bound the outcome regardless of the route taken.
 
-## Suggested starting points — guidance, not a boundary
-
-- `run_view.rs:1294-1340` (the `q` confirm-quit modal and the
-  continuation message), `tui_ratatui.rs` detach/teardown seams, and
-  wherever view teardown currently takes the drive loop down with it —
-  the architect grounds the actual mechanism; this draft deliberately
-  does not guess it.
-- Proof shape: a PTY test that q-quits a live run, then asserts with the
-  flock authority that the drive still holds the lock, that the ledger
-  advances afterward, and that the run reaches its normal outcome.
+- Reproduction precedes repair. The end-to-end proof is written and run
+  against unmodified production code first, and its verdict is reported.
+  A production edit ships only against an observed failure; if HEAD
+  passes the proof repeatedly, the outcome is the proof landed as a
+  regression guard plus a reported non-reproduction, and no speculative
+  fix (content Correction 1).
+- Survival is proven by `ctx_traits_io::run_control::probe` returning
+  `DriverProbe::Held` from a process other than the driver, taken after
+  confirmed `q` and while the run is still mid-flight (content
+  Correction 2). Driver-lock mtime, lock-file existence, metadata PID,
+  liveness-index rows, process-name search, a fixed sleep, and the
+  printed notice are each insufficient, alone or together.
+- The q under test is the DRIVING process's own confirm-quit modal, not
+  a dashboard observer's. The existing observer test
+  (`dashboard_attach_then_exit_leaves_no_run_frame`) proves a different
+  and weaker claim and does not satisfy this.
+- The moment `q` was accepted is established by an observation tied to
+  q's own effect (the continuation notice or the alternate-screen
+  restore reaching the PTY), never by elapsed time. A probe that could
+  run before `q` was applied proves nothing.
+- The run is parked in a step that cannot resolve until the test
+  releases it, the held-flock assertion happens while it is still
+  parked, and only then is it released — so the observation window is
+  the same shape as the incident's plannotator gate. A command that
+  finishes on its own does not satisfy this.
+- After the release, the ledger gains at least one slot revision whose
+  acceptance is after the q moment, and the run reaches its normal
+  terminal outcome with the driver lock released only at that genuine
+  end.
+- Dashboard visibility and reattachability of the detached run are
+  proven through the existing `row.live` / `SessionState::derive` /
+  observer-attach authorities (content Correction 4). No second liveness
+  classifier, and no new classification rule, unless the proof exposes a
+  defect there — in which case report it and keep the fix at that seam.
+- Every wait is bounded by an explicit deadline and decided by
+  re-observing its condition; expiry fails loudly naming the unmet
+  condition. No `sleep` stands in for evidence.
+- No test process may outlive its test, and no assertion path may leave
+  a run wedged on an unreleased gate. Release and reap on every path,
+  including panics, in the `BackgroundRun`-style idiom the file already
+  uses (`proof_run_view_exit_teardown.rs:237-259`).
+- Landed teardown contracts are unchanged: raw Ctrl-C still kills
+  immediately and retains the three-choice failure modal (0252.4),
+  SIGTERM/SIGINT still exit with only the rescue/interrupted panel
+  (0252.2), panic still leaves no frame rows, a clean run still
+  discards the live frame and prints the final panel on the restored
+  screen (0252.7), and `RunPanel::close` stays idempotent. No existing
+  test is deleted, renamed away, or weakened; every abnormal-exit test
+  in the battery still passes.
+- The three public PTY helper signatures, `ScratchRoot`'s public API and
+  `controlled_command`'s signature keep their names, parameter order and
+  return types (0263's constraint, still live). New support surface is
+  added alongside them, never by changing them, and it reuses the
+  existing Expect prelude, marker wait, environment isolation and
+  child-lifetime handling rather than becoming a fourth hand-rolled PTY
+  driver.
+- Production edits stay at the exact causal seam the failing proof
+  exposes. Static reading does not currently justify touching center
+  spawning, dashboard classification, command execution, or driver-lock
+  ownership (content Corrections 4 and 5).
 
 ## Out of scope
 
-- Changing ctrl-c/kill semantics (P551) or the alternate-screen
-  restore (0252.7).
-- The center's probe touching lock mtimes (cosmetic; noted in 0262's
-  world if ever needed).
+- Ctrl-C / kill semantics (0252.4) and the alternate-screen restore
+  contract (0252.7).
+- Returning the invoking shell by handing the drive to a new detached
+  process (content Correction 5). If detached handoff is ever wanted, it
+  is a separate task, not this one.
+- The center's probe touching lock mtimes (cosmetic; 0262's world).
+- 0263's fixture-center lifetime work. If a leaked center is observed
+  while proving this task, report it there rather than fixing it here.
+- Retuning command bounds, `frame-seconds`, or any budget default to
+  make the fixture work (content Correction 3 shows none is needed).
+- Rewriting the other PTY-driving proof files.
+
+## Suggested approach — guidance, not a boundary
+
+### Expected files
+
+- `modules/cli/tests/proof_run_view_exit_teardown.rs` — the new proof.
+- `modules/cli/tests/support/src/lib.rs` — a new PTY helper alongside the
+  three existing ones, only if the proof needs one (Step 2).
+- `modules/cli/src/app/run_view.rs` and/or
+  `modules/cli/src/app/tui_ratatui.rs` — only if the reproduction is red,
+  and only at the seam it exposes.
+
+Touching files beyond this list is legitimate whenever a binding goal
+requires it. Do it and report it.
+
+### Step 0 — read before editing
+
+`run_view.rs:1100-1130`, `:1260-1300`, `:1370-1440`, `:1500-1540`;
+`tui_ratatui.rs:900-915`, `:995-1015`, `:1170-1200`;
+`drive.rs:1040-1100`, `:1150-1230`, `:1520-1580`, `:2320-2375`;
+`run_control.rs:100-190` and `:500-565`; `command.rs:360-470` and
+`:486-570`; `support/src/lib.rs:1000-1200`; and
+`proof_run_view_exit_teardown.rs:1-120`, `:237-330`, `:400-460`.
+
+### Step 1 — the fixture shape
+
+A two-step command trait is the cheapest shape that makes "the ledger
+advanced AFTER q" unambiguous: step 1 blocks until the test releases it,
+step 2 writes a second slot. `command_trait_fixture(label, command)`
+already writes a one-step command trait with the command interpolated
+into TOML (`proof_run_view_exit_teardown.rs:71-92`) and
+`two_step_agent_trait_fixture` (`:93-141`) shows the two-step form — the
+reuse points are those fixture builders, `fixture_repo`,
+`commit_trust_and_activate`, `ledger_paths`/`ledger_session_id`
+(`:261-314`) and `painted_pattern`.
+
+A release-file gate is the simplest blocking step that the test controls
+from outside: a shell loop that waits for a path under the scratch HOME
+to appear. Two things to get right — the command is interpolated into a
+double-quoted TOML value, so keep its quoting trivial; and it should be
+silent while waiting, which is safe because an undeclared-bounds command
+step inherits a 600s idle window (content Correction 3). Any other
+externally-releasable gate is fine.
+
+### Step 2 — an observable q moment
+
+The test needs to act while the child is still running, which the
+existing helper cannot express (content Correction 6). Suggested route:
+add ONE new public helper in `support` next to
+`run_pty_keys_after_markers`, composed from the same private
+`pty_prelude` / `marker_wait` / `child_lifetime_wait` pieces, whose
+final step — after the confirm-modal Enter — waits for the continuation
+notice (or the alternate-screen leave) and then runs a Tcl `exec touch`
+of a caller-supplied path before entering the ordinary child-lifetime
+wait. `marker_wait`'s action is already arbitrary Tcl and
+`child_lifetime_wait` already uses `exec kill`, so this adds no new
+mechanism. The keys are `q` then Enter: `Modal::confirm` puts Confirm
+first in the button row (`tui_kit.rs:518-527`), so Enter takes it.
+
+The test then runs that helper on a thread, waits (bounded) for the sync
+path to appear, and does its mid-flight assertions on the main thread
+before releasing the gate. Any other route that gives a q-caused
+synchronization point is equally acceptable — report the substitution.
+Whatever the route, the mid-flight work must complete inside the 60s
+`CHILD_EXIT_GRACE_SECS` window, and the gate must be released even when
+an assertion panics (a drop guard, or assertions deferred until after
+release, both work).
+
+### Step 3 — the mid-flight assertions
+
+With the gate still held, from the test process:
+
+1. `ctx_traits_io::run_control::probe(&ledger)` is `DriverProbe::Held`.
+   `ctx-traits-io` is a normal dependency of the CLI crate, so an
+   integration test can call it directly — `proof_center.rs:64-65`
+   already uses `file_lock` this way.
+2. Record the ledger's slot-revision count / state digest at this point,
+   to compare after the release.
+3. Prove the detached run is dashboard-visible and reattachable through
+   the existing authorities: a center row for the session with
+   `row.live` true, or `SessionState::derive` classifying it `Running`
+   off the held lock, plus the existing observer-attach path being able
+   to open it. `proof_center.rs` has the center-subscription idiom
+   (`:348-370`) and `dashboard_attach_then_exit_leaves_no_run_frame`
+   (`proof_run_view_exit_teardown.rs:403-428`) has the attach-and-detach
+   idiom; reuse rather than invent.
+
+Then release the gate, join the PTY thread (child exit code 0), and
+assert the ledger gained at least one revision accepted after the q
+moment and reached its normal terminal outcome, with the driver lock
+`Unheld` only then.
+
+`proof_center.rs`'s bounded-poll idiom — a 20ms poll under an explicit
+`PROCESS_DEADLINE` (`:16`, `:39-93`, `:886-944`) — is the precedent for
+every wait here. Those numbers are precedent, not a requirement.
+
+### Step 4 — the reproduction verdict, then the repair
+
+Run the new proof against unmodified production code and record what
+happened.
+
+- Red: the failure names the seam. Fix it there and nowhere else. Read
+  the failure before theorising — a lock released while the run is
+  mid-flight means the driving process unwound (content Correction 2),
+  so the question is what unwound it, and the answer is in the child's
+  own exit and output, not in a guess.
+- Green on every one of the at least three runs Done-when 1 asks for:
+  report non-reproduction plainly, land the proof as the regression
+  guard, and ship no production change. Record the run count and note
+  the incident's open question. That is a legitimate completion of this
+  task, not a failure to finish it.
+
+### Build checkpoint
+
+Before writing the assertions out in full:
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --no-run`
 """
+validation = '''
+## Done when — binding goals, each with the existing command that decides it
+
+1. The reproduction verdict is established before any production edit
+   and recorded. The new proof is run against unmodified production code
+   at least three times, and the work summary records the command, the
+   number of runs, and the pass/fail result of each run. Two criteria
+   are then decided against that record:
+   - If any recorded run failed, the work summary quotes that failure
+     and names the seam it exposed, and every production edit in the
+     diff sits at that seam.
+   - If all recorded runs passed, the diff contains no production edit,
+     and the work summary records non-reproduction at this HEAD together
+     with the incident's still-open question.
+   The command that produces the verdict is the one in Done-when 2.
+2. Confirmed `q` on a live DRIVING run leaves the drive alive, and this
+   is proven end to end: a run parked in a step that only the test can
+   release; `q` accepted (observed by q's own effect, not by elapsed
+   time); with the step still parked,
+   `ctx_traits_io::run_control::probe` returns `DriverProbe::Held` from
+   the test process; the step is then released; the ledger gains at
+   least one slot revision accepted after the q moment; the run reaches
+   its normal terminal outcome and only then releases the lock. Neither
+   mtime, metadata PID, lock-file existence, process-name search, a
+   fixed sleep, nor the printed notice appears anywhere in the evidence
+   chain, and nothing is left running or wedged afterwards:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown`
+3. The detached run stays dashboard-visible and reattachable while it
+   is still driven, decided through the existing `row.live` /
+   `SessionState::derive` / observer-attach authorities rather than any
+   newly introduced liveness rule — a diff that adds a second
+   classifier fails this goal even with a green test. Same command as
+   Done-when 2, plus the unit-level classification coverage:
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib`
+4. Every teardown contract that SHOULD end a run is unchanged: raw
+   Ctrl-C kills immediately and keeps the three-choice failure modal,
+   repeated SIGINT and SIGTERM leave only the interrupted/rescue panel,
+   a panic leaves no frame rows, a clean run discards the live frame and
+   prints the final panel after the alternate-screen restore, the
+   dashboard observer's own q still detaches without killing an
+   independently owned driver, and `RunPanel::close` stays idempotent.
+   No test is deleted or weakened; the battery's test count does not
+   fall. Decided by the two commands above.
+5. The workspace is still green with the new proof and any seam repair
+   in place: `CARGO_TARGET_DIR=target just test-full`
+
+Exclusions, restated so they are checkable by reading the diff: Ctrl-C
+and SIGTERM semantics are untouched; no run is handed to a new detached
+process; no second liveness classifier is added; no command bound,
+frame budget or center default is retuned to make the proof pass; and
+the three public PTY helper signatures, `ScratchRoot`'s public API and
+`controlled_command`'s signature are unchanged.
+
+## Order and bounded refinement
+
+The suggested route: read (Step 0), build the fixture and the observable
+q moment (Steps 1-2), take the `--no-run` build checkpoint, write the
+assertions (Step 3), then run the proof against unmodified production
+code (Step 4) and record the verdict; repair only if it is red; then run
+the Done-when commands in the order 2, 3, 5 — the focused proof before
+the lib tests before the landing gate, so a seam defect surfaces next to
+the edit that caused it rather than inside a long gate. That sequence and
+that command order are guidance like everything else outside the goals; a
+different order that reaches the same goals is legitimate, reported in
+the work summary. One point is mechanics rather than preference: `just
+test` and `just test-full` do not run integration proof binaries and
+`just test` alone (Justfile:122-147) can never decide Done-when 2, so the
+focused proof has to be run explicitly for that goal to be decided at
+all.
+
+The stop condition binds: at most two targeted repair-and-rerun rounds. A
+round repairs one named failure, then reruns the failed command and every
+later command in whatever order the run is using. If a third round would
+be needed, stop and report the failing command with its output, or the
+outstanding review finding, rather than continuing — that is the stop
+condition, not a judgement call.
+
+Before calling it done, read the final diff against these goals: that the
+evidence chain uses only the flock authority, that no abnormal-exit test
+was weakened to make the new one pass, and that any production edit sits
+at the seam the failing proof named.
+
+## Watch
+
+- A green new proof on the FIRST run against unmodified code is the
+  likely outcome given content Correction 1, and it is a result, not a
+  reason to keep changing the test until it goes red. What it must not
+  be is a proof that passes vacuously: check that it really observed
+  `Held` while the gate was parked, and that the assertion would fail if
+  the driver had died — deliberately breaking it once (for instance by
+  probing after the run ends) is a cheap way to see that.
+- A probe taken before `q` was applied returns `Held` for the trivial
+  reason that nothing has happened yet. The synchronization point is
+  what makes the assertion mean anything; a fixed sleep in its place
+  silently converts this proof into a no-op.
+- If an assertion panics before the gate is released, the PTY child
+  hangs to `CHILD_EXIT_GRACE_SECS` and the real failure message can be
+  buried under a child-hang panic. Release on every path.
+- The 30s readiness deadline in `pty_prelude` is set ONCE at spawn and
+  covers every marker wait in the script (`support/src/lib.rs:1009-1021`).
+  A script that waits for a marker which only appears after the test
+  releases the gate will blow that deadline; keep all marker waits before
+  the release.
+- Probing must happen from a process other than the driver — the test
+  process qualifies, the driven child does not. A probe from inside the
+  driver would acquire its own lock and read `Unheld`.
+- If the reproduction IS red, resist the first plausible story. The lock
+  is dropped in exactly one place (`drive.rs:1542-1578`), so the child's
+  exit code and output say more than any reading of the key path does.
+- A leaked fixture center or a stray driver observed during this work
+  belongs to 0263 and to a report, not to an edit here.
+'''
 
 [relations]
 depends-on = ["0252.7"]
+
+[[checks]]
+name = "q on a live driving run leaves the drive alive, and every abnormal-exit contract still holds"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+timeout-ms = 1800000
+
+[[checks]]
+name = "run-view, terminal and dashboard classification unit coverage stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+timeout-ms = 1800000
+
+[[checks]]
+name = "landing gate stays green"
+command = "CARGO_TARGET_DIR=target just test-full"
+timeout-ms = 1800000
