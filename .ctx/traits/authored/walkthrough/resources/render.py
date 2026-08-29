@@ -3,10 +3,11 @@
 
 argv[1] — the skeleton node list: JSON text (the runtime substitutes the
           typed slot value), or, as a hedge, a path to a JSON file.
-argv[2] — the node batches (list of lists of nodes, appended per frame),
+argv[2] — the node batches (list of batch objects, appended per frame),
           same JSON-or-path convention. Flattened in order and deduped by
           id, last occurrence winning (append-only revisions).
-argv[3] — repo-relative output path for the self-contained HTML.
+argv[3] — the horizon note text (rendered on the root node's panel).
+argv[4] — repo-relative output path for the self-contained HTML.
 
 No model output enters this file's logic: the HTML shell is fixed, the data
 is embedded verbatim, and tile sizes derive from the nodes' own line spans.
@@ -241,6 +242,7 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
 <footer>click a tile to zoom into it; click a leaf to read it; Esc or Backspace goes up one level · tile area = lines of code the node covers</footer>
 <script>
 var DATA = __DATA__;
+var HORIZON = __HORIZON__;
 (function(){
   var byId = {};
   DATA.forEach(function(n){ byId[n.id] = n; });
@@ -371,6 +373,9 @@ var DATA = __DATA__;
       n.refs.forEach(function(r){ html += "<div>" + esc(r.path) + "<span>:" + esc(r.lines) + "</span></div>"; });
       html += "</div>";
     }
+    if (n.id === "__ROOT__" && HORIZON){
+      html += "<div class=\\"refs\\"><h3>horizon</h3><div class=\\"exp\\">" + prose(HORIZON) + "</div></div>";
+    }
     if (n.children.length){
       html += "<div class=\\"kids\\"><h3>inside</h3></div>";
     }
@@ -455,10 +460,11 @@ def merge_inputs(skeleton_arg: str, batches_arg: str):
 
 
 def main() -> None:
-    if len(sys.argv) < 4:
-        fail("usage: render.py <skeleton-json-or-path> <batches-json-or-path> <output-html-path>")
+    if len(sys.argv) < 5:
+        fail("usage: render.py <skeleton> <batches> <horizon-text> <output-html-path>")
     nodes, root_id = normalize(merge_inputs(sys.argv[1], sys.argv[2]))
-    out_path = sys.argv[3].strip()
+    horizon = sys.argv[3].strip()
+    out_path = sys.argv[4].strip()
     if not out_path:
         fail("empty output path")
 
@@ -474,6 +480,7 @@ def main() -> None:
     html = (
         TEMPLATE.replace("__TITLE__", root["title"].replace("<", "").replace(">", "") + " — walkthrough")
         .replace("__DATA__", data_json)
+        .replace("__HORIZON__", json.dumps(horizon, ensure_ascii=False).replace("</", "<\\/"))
         .replace("__ROOT__", root_id)
     )
 

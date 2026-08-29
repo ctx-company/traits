@@ -111,6 +111,7 @@ export default function () {
                 Verify with your OWN tools on a meaningful sample (at least a dozen symbol nodes across different files, plus every skeleton node): open the ref, confirm the span covers the symbol it claims, confirm the explanation matches the actual code and sits at its layer's register per ${shared.resource.walkthroughStandards}, and confirm the horizon note honestly matches where the closure stops.
                 A BLOCKER is: a span that does not cover its symbol, an explanation contradicting the code or at the wrong register, a skeleton node ungrounded, or a horizon claim the closure contradicts. Everything else is advisory. Name every blocker with the node id.
                 Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+                A blocker must be FIXABLE BY THIS LOOP: by re-emitting nodes, or by rewriting the horizon note. Never raise a blocker that demands changes to the repository, to the closure itself, or exact command-output inventories over source files. When the same blocker survives two fix rounds textually unchanged, stop repeating it: downgrade it to advisory, set escalation to needs-owner with the reason, and judge the remaining state on its merits.
                 Set status to revise while any blocker remains, approved when none do.`,
       output: shared.data.verdict1,
       include: [shared.data.verdict1.optional()],
@@ -120,9 +121,10 @@ export default function () {
       investigator.prompt("Fix reviewed nodes", {
         input: input.prompt`
                 The reviewer's verdict for the walkthrough of ${shared.data.topic} is ${shared.data.verdict1}. For every blocker it names, re-emit the corrected node in one batch: same id (re-emission replaces), same VERBATIM symbol key where the node had one (coverage must not regress), the named defect actually fixed against the real file. Nodes without blockers are not re-emitted.
+                Also return the horizon note: REWRITTEN when a blocker names the horizon (the current note is ${shared.data.horizon}), byte-identical otherwise — the horizon renders into the walkthrough, and this step is the only place review fixes can reach it.
                 Follow ${shared.resource.walkthroughStandards}.
                 READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading. Your ONLY deliverable is this step's structured output; submit it directly, never write it to a file, never wrap it in prose or explanation.`,
-        output: shared.data.nodeBatches.with(operation.Append),
+        output: [shared.data.nodeBatches.with(operation.Append), shared.data.horizon],
       });
     });
 

@@ -51,8 +51,8 @@
   },
   "prompt:fix-reviewed-nodes": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 121,
-    "end": 121
+    "start": 122,
+    "end": 122
   },
   "prompt:review-the-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -61,8 +61,8 @@
   },
   "prompt:summarize-the-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 135,
-    "end": 135
+    "start": 137,
+    "end": 137
   },
   "prompt:survey-the-topic": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -151,8 +151,8 @@
   },
   "sequence:ctx-branch-arm-s-14-reviewing-body-18-apply-review-fixes-then/fix-reviewed-nodes": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 120,
-    "end": 120
+    "start": 121,
+    "end": 121
   },
   "sequence:describe-each-chunk-body/describe-the-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -196,8 +196,8 @@
   },
   "sequence:procedure/summarize-the-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 134,
-    "end": 134
+    "start": 136,
+    "end": 136
   },
   "sequence:procedure/surveying": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -216,8 +216,8 @@
   },
   "sequence:reviewing-body/apply-review-fixes": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 119,
-    "end": 119
+    "start": 120,
+    "end": 120
   },
   "sequence:reviewing-body/review-the-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",

@@ -1,6 +1,6 @@
 import { input, step } from "@ctx-traits/cdk";
 
-import { coverageReport, coverageStatus, fileClosure, htmlPath, nodeBatches, renderLog, skeletonNodes, symbolChunks } from "../data.ts";
+import { coverageReport, coverageStatus, fileClosure, horizon, htmlPath, nodeBatches, renderLog, skeletonNodes, symbolChunks } from "../data.ts";
 import { renderScript, symbolsScript } from "../resource.ts";
 
 /**
@@ -45,7 +45,7 @@ export function coverageStatusStep(idSuffix: string): void {
 export function renderWalkthroughStep(): void {
   step.command("Render walkthrough", {
     id: "render-walkthrough",
-    input: input.command`python3 ${renderScript} ${skeletonNodes} ${nodeBatches} ${htmlPath}`,
+    input: input.command`python3 ${renderScript} ${skeletonNodes} ${nodeBatches} ${horizon} ${htmlPath}`,
     output: renderLog,
   });
 }
