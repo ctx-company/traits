@@ -1,44 +1,572 @@
 schema-version = "0.2"
 key = "0266.8"
 title = "Bind the board bar's new task action"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-`0266.2` rendered `new task` in the board bar's ghost-text grammar and `0266.3` made the center create the draft. This cut binds the one to the other, and gets the failure behaviour right.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-The observable outcome is end to end: press `new task`, and the new draft arrives in the `Draft` section — of this window and of every other face watching the board — because the board answer changed, not because the window inserted a row it hoped would be confirmed. A refused creation renders as a visible failure in the bar rather than as a press that appears to have done nothing.
-"""
-scope = """
-## Decisions
+`screens/tasks.md:24-25` renders the board bar as `synced ·
+.internal/tasks @ <sha> | new task`, tagging `new task` as data that creates a
+draft. `0266.2` lands that action as inert bright ghost text with no handler,
+no modal and no write path (`0266.2:272-283`). `0266.3` lands the center-served
+creation: one task protocol family over the board's own socket, hardened
+`TaskProviderMut::create`, per-board serialization with a typed occupied
+refusal, and an immediate board refresh/broadcast on success
+(`0266.3:179-283`). This cut is the one connection between them, and the
+failure and ordering behaviour that connection needs.
 
-- In scope: binding the board bar's `new task` action to the center-served creation, rendering the resulting row only through the board answer's own update, and rendering a refusal as a visible failure.
-- **No optimistic insertion.** A face that shows a draft the center has not confirmed is presenting invented state as real, and the row form it would have to invent is `0266.6`'s.
-- **No poll loop waiting for the row to appear** — the board answer's update is the signal.
-- Out of scope: the creation capability itself (`0266.3`), the bar's rendering (`0266.2`), any other task mutation, and the preview column.
+**The boundary with 0266.2 and 0266.3.** The bar's rendering, geometry and tone
+vocabulary are `0266.2`'s; every write semantic — key assignment, title
+validation, raised date, serialization, refusal vocabulary, the broadcast — is
+`0266.3`'s, and that cut edits no desktop code (`0266.3:19-25,460-471`).
+Standing up a second center client, a second board subscription, a second
+reducer, a second refusal vocabulary or a desktop-side write is duplication of
+those cuts, not completion of this one. The row form the created draft lands in
+is `0266.1`'s and `0266.6`'s.
 
-## Prerequisites
+## Five corrections to the draft this plan replaces
 
-`0266.2` (the bottom bar this action sits in) and `0266.3` (the center-served creation it calls and the board answer its result arrives through).
-"""
-validation = """
+**Correction 1 — the action has no payload, and collecting one is this cut's
+work.** The draft says "press `new task`" as though the press were the whole
+interaction. It is not: `0266.3` refuses an empty or whitespace-only title with
+`WriteError::InvalidField` before writing, and no default or placeholder title
+(`untitled`, `New task`) may ever be persisted (`0266.3:200-221`; parent
+Correction 7). A press that sends no title therefore creates nothing. The
+parent already ruled where the title comes from: an owner-supplied title
+collected by "the smallest thing the screen's grammar already allows — ghost
+text in the bar, no modal chrome, no corner radius inside the canvas", with the
+cut that builds it naming what it built in its work summary, because the spec
+does not decide it (`0266:66-70`). `screens/tasks.md:24-25` fixes no keyboard
+gesture, focus API, pending form or failure wording, and
+`reference/tasks.html:715-742` measures only the static bar. This is the one
+rendering decision this charter leaves to the run; it is not a licence to
+invent chrome.
+
+**Correction 2 — a create response is not a rendered row.** The draft's "no
+optimistic insertion" is right and incomplete. The stricter invariant: the
+successful response itself changes nothing visible about the board. `0266.3`
+invokes the single refresh/broadcast route on success, and the row arrives
+because the accepted board answer changed (`0266.3:260-283`). Rendering a row,
+or marking the board current, off the response is the same defect as an
+optimistic insertion with an extra round trip in front of it.
+
+**Correction 3 — response and board event have no guaranteed order.** Nothing
+in `0266.3` orders the create reply against the broadcast it triggers; a
+subscriber may accept the changed answer before its own reply returns. A
+binding written as "reply, then wait for the event" is a latent hang. Request
+result and accepted board update are independently ordered evidence: the
+pending affordance must terminate on either arriving, and must also terminate
+if the request fails, the subscription goes stale, or the originating board is
+no longer the active one. The center's two-second scan is recovery, not the
+success mechanism (`0266.3:142-154`), and must never be leaned on as one.
+
+**Correction 4 — one refusal is really a typed set plus a client error.** The
+draft says "a refused creation renders as a visible failure", singular.
+`0266.3` lands invalid title, occupied board, unknown or ambiguous parent, and
+`0266.1`'s absent/unreadable-board outcomes as distinct typed values in the
+action-specific result arm, while a generic `ResponseResult::Error` means
+transport or protocol failure only and surfaces as the outer `Err`
+(`0266.3:244-258`; the existing split at `center.rs:794-905`). A top-level
+desktop creation supplies no parent, but the landed result type is still
+matched exhaustively rather than through a catch-all or a parsed message
+string. All of them, plus the outer error, terminate visibly and clear the
+pending guard.
+
+**Correction 5 — correlation is per repository, not just per press.** The
+create round trip runs against a board selected by repository identity
+(`0266.3:179-198`), and the desktop can switch repositories while a request is
+outstanding. A result attributed to whichever board happens to be active is a
+lie about a different board. The identity captured at submit time — repository
+scope, and the created key returned on success — is what the result is
+correlated against, on the action-result surface `0258`/`0266.3` landed.
+
+## Grounded at HEAD 9f3ceeb9e
+
+No desktop project exists yet. Root `Cargo.toml` lists the existing workspace
+crates and excludes only `packages/cdk` (`Cargo.toml:1-12`); `cargo metadata
+--format-version 1 --no-deps` resolves no gpui package and the root
+`Cargo.lock` has no `gpui` entry. `0256.1`, `0266.1`, `0266.2` and `0266.3` are
+all `ready` rather than done: the center protocol is still run-only (`Request`,
+`ResponseResult`, `CenterDelta` at `center.rs:90-212,268-284`), `TaskStatus`
+has no `Draft` (`modules/core/src/task/mod.rs:22-31`), `NewTask` carries no
+serde derive (`modules/core/src/task/provider.rs:85-103`), and `Board::create`
+still writes without validating the title, without a raised date and without a
+serialization lock (`modules/io/src/task_files.rs:331-389`). Every desktop and
+center-task path, module, symbol, signature and command named below is
+therefore a guess to be replaced by discovery against what those tasks actually
+landed; binding them here would be fabrication. What is checkable today, and so
+all this task declares, is `0266.3`'s center-side creation coverage under
+`proof_center`, the per-round workspace gate, and a gpui-free root resolution
+and lockfile. Two of the three are hardened past exit status with the `expect`
+form sibling cuts already declare against the same commands — `test result:
+ok\. [1-9]` on the `proof_center` binary, and a positive line from the
+resolution check — so neither can pass while matching nothing (`0266.1`,
+`0266.2`, `[[checks]]`). The workspace gate keeps exit status alone, because
+`just test` has no single output line this repository has established as proof
+mechanics.
+
+That deferral is structural, not an omission, and the ordering that closes it
+is code-proven. An open leaf is `Blocked` while any `depends-on` target is not
+`Done` (`modules/core/src/task/graph.rs:161-169`), so this task cannot be
+dispatched until `0266.2` and `0266.3` are closed. The board's own edges put the
+desktop lane upstream of both: `0266.8` → `0266.2` → `0265.13` →
+`0265.3`/`0265.2` → `0265.1` → `0256.1`, the task that establishes the
+standalone desktop project and closes on "its documented independent build and
+test commands pass from a clean checkout" (`0266.2:616`; `0265.13:565`;
+`0265.3:415`; `0265.1:293`;
+`.internal/tasks/0256.1-establish-the-standalone-desktop-shell.toml:15,17`).
+By the time this cut is dispatched, the desktop project, its documented command,
+the bar and the create helper all exist; at the HEAD this plan is written
+against, not one of them does. Naming `0256.1` in this task's `depends-on` would
+be redundant against that chain, so the relations are unchanged.
+
+**What decides each goal.** Every behavioural goal below is decided by the
+closing diff read against the surfaces `0266.1`, `0266.2`, `0266.3` and `0258`
+actually landed — that read decides the properties visible in the code itself:
+the captured identity, the exhaustive match, the absence of a UI-thread create
+call, of an optimistic insert, of a defaulted title, of a poll or timer, of a
+pending state with no exit — and, for the behaviour those structures produce
+when run, by the landed desktop project's own documented non-interactive
+build-and-test command. Goal 3's center half, goal 6's center half and the
+"`0266.3`'s center coverage is unmoved" clause are decided by the declared
+`proof_center` check and nothing else: it drives a plain client call, so it
+never reaches the desktop lane. Goal 8 is decided by the declared workspace gate
+and root-resolution checks; goals 7 and 9 by the closing diff read alone.
+
+**The desktop lane has no declarable command yet, and this is the board-level
+escalation.** No such command exists anywhere in the repository to name:
+`rg -i 'desktop|gpui'` over the root `Justfile` matches nothing, `cargo metadata
+--format-version 1 --no-deps` resolves no gpui package, the root `Cargo.lock`
+has no `gpui` entry, and no sibling holds one — `0265.13`, `0266.1` and `0266.2`
+declare workspace-side checks only, and `0256.1`, the task that *establishes*
+the lane, states the condition outright: "no pre-existing exact desktop command
+exists to use as a board check" (`0256.1:15`). A `[[checks]]` entry written here
+now would either name a command that does not exist, failing on every dispatch,
+or name a stand-in that exits 0 while observing nothing — worse than declaring
+none. The run instead reads the landed desktop project's manifest and the
+documentation beside it, takes the command it documents verbatim, runs it, and
+names it in the work summary; reporting a desktop proof without having run it is
+a false report, and authoring a parallel lane is not this cut's work. If that
+project documents no non-interactive test command, the run stops before editing
+and reports an owner correction against `0256.1`. When `0256.1` lands that
+command (`0256.1:17`) it is added here verbatim as a fourth check, hardened with
+an `expect` on the line that lane prints — a board edit in the pass that closes
+`0256.1`, and the only thing about this plan that waits.
+'''
+scope = '''
+## GOALS — binding
+
+1. **Activating `new task` collects an owner-supplied title in the bar and
+   submits exactly one center-served creation, off the UI thread.** Activating
+   the bright ghost action puts the bar into an in-bar title entry — ghost text,
+   no modal, no chrome — and submitting a non-empty title issues exactly one
+   creation request through `0266.3`'s public client helper, carrying that
+   title, the active repository identity `0266.3` selects the board from, and
+   `0266.1`'s canonical `draft` status, dispatched on the background action
+   surface `0258`/`0266.3` landed. Activation is cancellable and returns the bar
+   to the inert action.
+   Decided by the closing diff read showing a single submit path that carries
+   the owner's typed title and the active repository identity, with no
+   UI-thread create call and no second transport; and by the landed desktop
+   project's documented command exiting 0 with coverage that one submit produces
+   exactly one such request.
+   Excluded: sending a default, generated or placeholder title, or any title the
+   owner did not supply; a desktop call into `TaskProviderMut::create`,
+   `Board::create`, `FilesTaskBoard::open_read_write`, a task file, the board
+   cache or `git`; a second center client, socket or protocol family; a blocking
+   call on gpui's UI thread — the action timeout is 600 seconds
+   (`center.rs:48-65`), so a UI-thread call is categorically unsafe; a modal,
+   dialog, popover or overlay; any task mutation other than create; a new CLI
+   command.
+
+2. **One outstanding submit at a time, with no automatic retry.** Repeated
+   activation or repeated submission while a request is outstanding issues no
+   additional creation. After every terminal outcome — success, typed refusal or
+   client error — the pending guard clears and the owner has a visible way to
+   act again; the binding never acts for them.
+   Decided by the closing diff read showing a guard that admits one outstanding
+   request and clears on every terminal arm, with no retry, backoff, timer,
+   interval or queue anywhere on the path; and by the desktop command's coverage
+   showing repeated submits while one request is in flight producing exactly one
+   request, and the pending guard observably cleared after a success, after a
+   typed refusal and after a client error.
+   Excluded: a retry, backoff, timer, interval or poll anywhere on this path; a
+   queue of pending creations; a pending state with no exit; a permanently
+   disabled action after a failure.
+
+3. **Nothing optimistic: the draft appears only through the changed board
+   answer.** The accepted board model is unchanged by the submit and unchanged
+   by the success response. The new row appears in `Draft` only once the changed
+   board answer `0266.3` broadcasts has been accepted by the reducer `0266.1`
+   landed, and a refused creation produces no board update at all.
+   Decided by the closing diff read showing the success arm writing nothing into
+   the accepted board model and no row synthesised or `synced` claim made off the
+   response; by the declared `proof_center` check, which holds `0266.3`'s
+   broadcast-on-success and no-update-on-refusal unmoved; and by the desktop
+   command, whose coverage must show the accepted model and rendered sections
+   identical before the submit and immediately after the success response,
+   changed only once the broadcast answer is accepted, and unchanged across a
+   refusal.
+   Excluded: inserting, synthesising or marking a row from the response; marking
+   the board `synced`/current off the response; a second board request issued to
+   observe the result; a poll, timer or re-request; re-deriving `draft` on the
+   client from anything other than what the answer carries.
+
+4. **Every typed refusal and every client error terminates visibly.** Each
+   variant of `0266.3`'s landed creation result — invalid title, occupied board,
+   unknown or ambiguous parent, and `0266.1`'s board-presence outcomes — plus an
+   outer client `Err` for transport or protocol failure, ends the interaction
+   with a visible failure in the bar, distinguished at the type level with no
+   catch-all arm and no message-string parsing. The provider's empty-title
+   refusal is exercised and rendered, not merely prevented client-side.
+   Decided by the desktop command's coverage over each landed typed result
+   variant and over a client error, each rendering a visible failure and
+   clearing pending; plus the closing diff read showing an exhaustive match and
+   no swallowed result.
+   Excluded: client-side title validation standing in for the rendered provider
+   refusal; a catch-all `_` arm over the landed result type; parsing a refusal
+   out of a message string; a second notification or failure framework beside
+   the one `0266.2`/`0258` landed; a fill, border, icon or spinner introduced to
+   show pending or failure (`grammar.md:74-84`), or a glyph outside the closed
+   set (`grammar.md:31-37`).
+
+5. **Results are scoped to the board they were issued for, and the binding
+   assumes no ordering between reply and broadcast.** A repository switch
+   between submit and result must not attach the old board's success or failure
+   to the new board's bar; correlation uses the repository identity captured at
+   submit time and, on success, the created key. The pending affordance
+   terminates whether the reply or the accepted board update arrives first, and
+   also terminates if the request fails, the subscription goes stale, or the
+   originating board is no longer the active one.
+   Decided by the closing diff read showing the repository identity captured at
+   submit time and compared before the result is applied, and a termination path
+   that does not depend on which of reply or accepted update arrives first; and
+   by the desktop command's coverage exercising a repository switch between
+   submit and result, showing the result attributed to the originating board and
+   not the newly active one, plus coverage of both arrival orders — reply first
+   and accepted board update first — each leaving no residual pending state.
+   Excluded: a global "last create result" slot with no identity; a bar-local
+   flag that survives a repository switch; a path that only terminates on one of
+   the two arrivals; leaning on the center's periodic scan as the success
+   mechanism; making a stale accepted board look current in order to carry a
+   result.
+
+6. **The effect is observable through a second independent center subscriber.**
+   Coverage in the desktop lane drives the landed bar handler and shows the same
+   changed board answer observed both by the desktop reducer and by a second
+   independent center subscription, so the creation is a center capability and
+   not a per-face one.
+   Decided by the declared `proof_center` check for the center half — that one
+   creation still reaches every independent subscriber as a changed answer — and
+   by the desktop command's coverage for the half `proof_center` cannot reach:
+   that the answer arriving at the second subscriber was produced by the landed
+   bar handler rather than by a plain client call.
+   Excluded: citing `0266.3`'s own `proof_center` coverage as evidence that the
+   bar is bound — it exercises a plain client call, not this handler; migrating
+   the TUI listing or preview onto the served board, which is `0266.7`'s;
+   introducing a third subscriber architecture; importing CLI-private dashboard
+   code to obtain parity.
+
+7. **The bar's grammar and geometry are untouched, and the entry affordance
+   stays inside them.** No geometry, tone or glyph on the bar `0266.2` landed
+   changes: 1px `border-soft`, padding [10,14], `space-between`, mono 11, the
+   action bright ghost text with no fill, border or icon (`grammar.md:74-84`),
+   the closed glyph set and no corner radius inside the canvas
+   (`grammar.md:31-37`), semantic colour reserved per rules 1-2 with danger for
+   failure only. The title entry, pending and failure presentations obey the
+   same rules and introduce no Tasks-private palette. Every value comes from
+   `0265.1`'s token entry point with no colour, size, spacing, weight or family
+   literal at a call site. No file under `.internal/docs/design/` is modified;
+   an artifact that looks wrong is reported as an owner correction.
+   Decided by the closing diff read against `screens/tasks.md:24-25` and grammar
+   rules 1, 2, 3 and 8, plus the task commit's own file list.
+   Excluded: reshaping the bar, adding a second action, changing the separator
+   or the left-hand provenance side; touching the light column of `tokens.md`;
+   any other region of the Tasks screen — sections and rows (`0266.1`,
+   `0266.6`), header (`0266.2`), preview (`0266.4`, `0266.5`).
+
+8. **The workspace does not learn about gpui.** Root Cargo resolution and the
+   root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+   member, and the per-round workspace gate stays green and unchanged in cost.
+   Decided by the declared root-resolution check and the declared per-round
+   workspace gate check.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing macOS and Linux CI lanes — a *separate* desktop lane is
+   sanctioned; declaring a board check that executes the desktop lane before
+   `0256.1` has landed one.
+
+9. **The pass is reviewed once and bounded.** The completed diff is read once
+   against `screens/tasks.md:24-25`, grammar rules 1, 2, 3 and 8, the landed
+   `0266.2` bar action API, the landed `0266.3` create helper, result type and
+   board event, and the accepted board reducer `0266.1` landed, looking
+   explicitly for: a desktop-side write, task-file, cache or `git` read; a
+   UI-thread create call; a placeholder or defaulted title; a row or `synced`
+   claim rendered off the response; a catch-all arm or parsed refusal string; a
+   poll, retry or timer; an unscoped or ordering-dependent result; a pending
+   state with no exit; altered bar geometry; and gpui entering root resolution.
+   Exactly one targeted repair cycle is allowed, per the Bounded refinement
+   section. The work summary names the discovered desktop path and command, the
+   title affordance actually built (the parent leaves this to the run,
+   `0266:66-70`), the `0266.2`/`0266.3`/`0258` surfaces reused, and every
+   deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+Nothing this cut binds exists at the HEAD this plan was written against. Read
+what actually landed; do not carry a guess from this file into an edit. If any
+of these is absent, stop as an unmet prerequisite and report it rather than
+implementing it locally — building the bar, the creation, the reducer or the
+lane here is another cut's work.
+
+- `0256.1`: the desktop project location, manifest, lockfile and documented
+  non-interactive build-and-test command. Use that command verbatim, per the
+  resolution rule above; reusing its harness is suggested over standing up a
+  parallel lane.
+- `0266.2`: the bar component's real signature, its action shape and callback,
+  its tone vocabulary and the desktop failure idiom it renders through.
+- `0266.3`: the creation payload, the public client helper, the typed
+  success/refusal result, the repository-scope input, and the board event
+  emitted on success. Names in that plan are provisional by its own statement
+  (`0266.3:340-400`).
+- `0266.1`: the accepted board model, its reducer and transaction boundary, and
+  the canonical `draft` representation the request carries.
+- `0258`/`0266.3`: the desktop background-action dispatch and its typed
+  action-result surface with identity correlation, plus whatever typed text
+  input primitive the desktop already has. These are the reuse points for goals
+  1, 2, 4 and 5. If no reusable dispatch landed, the invariant that still holds
+  is one background request with a UI-thread handoff of the typed result;
+  extend the existing surface rather than opening a second one, and report that
+  in the work summary.
+
+### Edit order
+
+1. The activation: the bar's action callback opens in-bar title entry, with
+   cancel returning to the inert action.
+2. The submit: capture the typed title and the active repository identity, guard
+   against a second outstanding request, and dispatch through the background
+   action surface with canonical `draft` status.
+3. The result: consume the typed result on the UI thread, exhaustively, matched
+   against the captured identity; render failure through the landed idiom and
+   clear the guard on every terminal outcome.
+4. The row: nothing — confirm the created draft appears solely through the
+   accepted board answer, including when that answer arrives before the reply.
+5. The focused proofs, including the second-subscriber observation and both
+   arrival orders.
+6. The desktop command, then the three declared checks in their declared order.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like an action handler on the Tasks mount receiving the bar's
+`new task` activation, a bar-local entry state holding the in-progress title and
+an outstanding-request marker, a request value carrying `(title, repository
+scope, draft status)`, and a result variant on the action-result type carrying
+the originating repository scope beside the landed create result. Names, module
+paths and signatures follow whatever `0256`, `0266.1`, `0266.2` and `0266.3`
+established. Whether identity rides on the request/result pair or in a
+per-request registry is the run's call; either shape can satisfy goal 5.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- One submit of an owner-typed title produces exactly one creation request
+  carrying that title, the active repository identity and canonical draft
+  status; repeated submits while outstanding produce no second request.
+- The accepted model and rendered sections are identical before the submit and
+  after the success response, and change only once the broadcast board answer is
+  accepted.
+- Each landed typed refusal — including the provider's empty-title refusal — and
+  a client error render visibly, distinguishably, and clear the pending guard.
+- A repository switch between submit and result attributes the result to the
+  originating board.
+- Reply-before-broadcast and broadcast-before-reply both leave no residual
+  pending state.
+- The changed answer produced by a real creation is observed both by the desktop
+  reducer and by a second independent center subscriber.
+- `0266.3`'s center coverage passes unmodified under `proof_center`, and
+  `0266.1`'s and `0266.2`'s desktop coverage passes unmodified under the
+  resolved desktop command.
+
+All coverage uses scratch repositories and boards with arbitrary keys; nothing
+reads or writes this repository's committed `.internal/tasks`.
+
+### Reuse points
+
+`0266.3`'s public create helper, creation payload, typed result vocabulary and
+board broadcast; `0266.2`'s bar component, action shape and failure idiom;
+`0266.1`'s accepted board model, reducer and canonical `draft`; `0258`'s
+background dispatch and action-result correlation; `0265.1`'s token entry point;
+`0256`'s desktop test harness. The io-side primitives —
+`TaskProviderMut::create`, `Board::create`, key allocation and slugification,
+`WriteError::InvalidField`, `audit_journal::today_date_utc`,
+`file_lock::try_lock_exclusive` — are `0266.3`'s to own and this cut's never to
+call directly. The TUI worker's background-action shape
+(`modules/cli/src/app/dashboard/worker.rs:119-160`) is the *semantics* to match,
+never code to import: it is CLI-private and sits beside ratatui.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1
+(`Cargo.toml:14-20`). Keep any repair scoped to the one red command and preserve
+every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The creation capability itself: the protocol family, the hardened provider
+  write, per-board serialization, the typed refusal vocabulary, the broadcast,
+  and the TUI Split migration (`0266.3`).
+- The bar's rendering, the header, provenance, digest and resolution instant
+  (`0266.2`); canonical `draft`, the one-pass board answer, sections,
+  navigation, selection and the accepted-model transaction (`0266.1`); the
+  preview column (`0266.4`, `0266.5`); the row state stack (`0266.6`); the TUI
+  move onto the served board (`0266.7`).
+- Any edit under `.internal/docs/design/**`, and the light column of
+  `tokens.md`.
+- Center, core or IO semantic changes; any task mutation beyond create; a new
+  CLI command; a second board subscription, reducer or client; a GUI poll loop;
+  a blocking receive or create call on gpui's UI thread.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **No desktop-side write.** The desktop process does not create, name or format a task file; it asks the center, exactly as it asks for everything else on this screen.
-- **Blocking work stays off gpui's UI thread**; the round-trip is background work and the UI reacts to the answer.
-- **Fail-loud.** A refusal is rendered; it is not absorbed into an unchanged-looking bar and not retried silently.
-- **A press that cannot be served must not look successful**, and must not leave the bar in a pending state with no exit.
-- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the pressed action and its rendered outcome are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Through the center, never desktop-side.** The desktop process does not
+  create, name or format a task file, and reads no task file, board cache or
+  `git`; it asks the center, exactly as it asks for everything else on this
+  screen.
+- **The title is the owner's.** No default, generated or placeholder title is
+  ever sent. Client-side prevention of an empty title is welcome but does not
+  replace exercising and rendering the provider's typed refusal.
+- **Never optimistic, and a reply is not a row.** The bar does not insert a row
+  on submit, and does not on success either. The draft appears because the board
+  answer changed. Marking the board current off a reply is the same defect.
+- **No assumed ordering.** The reply and the broadcast may arrive in either
+  order. A path that only terminates on one of them is a latent hang.
+- **Fail-loud over the whole landed result set plus client `Err`.** Every typed
+  refusal and every transport failure terminates visibly and distinguishably,
+  with no catch-all arm and no parsed message string. A swallowed result is
+  indistinguishable from a success.
+- **No pending state without an exit.** After success, refusal, client error,
+  stale subscription or a repository switch, the guard clears and the owner can
+  act again. No retry, poll or timer does it for them.
+- **Results are scoped.** A result that lands on whichever board happens to be
+  active is a lie about a different board.
+- **Ghost text only in the bar**, closed glyph set, no corner radius inside the
+  canvas, no fill, border, icon or spinner introduced to show entry, pending or
+  failure; danger is for failure only.
+- **No CLI-private import.** Match the TUI worker's semantics; do not copy it.
+- **Scratch boards only.** No coverage reads or writes this repository's
+  committed `.internal/tasks`.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a
+  phantom "cannot find X".
+- **Know what each declared check does and does not decide.** `proof_center`
+  decides that `0266.3`'s center-served creation, refusals and broadcast are
+  unmoved by this binding, and it reaches goal 6's center half — it never
+  decides that the bar handler is bound, because it drives a plain client call.
+  The workspace gate and root-resolution checks decide goal 8 only. A green
+  `just test` is never evidence that `new task` works: the desktop behaviour is
+  decided by the closing diff read against the landed surfaces together with the
+  desktop project's own documented command, run at dispatch. Declaring a
+  stand-in check to stand in for that command is a fabrication, not a
+  satisfaction of it. `proof_center` and the root-resolution check each carry an
+  `expect`, so neither can pass by matching nothing; do not weaken them to bare
+  exit status.
 
 ## Done when
 
-Pressing `new task` on the board bar issues the center-served creation, and the new draft appears in the `Draft` section of this window and of every other face watching the board because the board answer changed — with no optimistic insertion, no timer and no desktop-side file write. A refused creation renders as a visible failure rather than a press that appears to have done nothing. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- **Precondition, decided before any edit.** The landed tree contains the
+  desktop project with a documented non-interactive build-and-test command, the
+  `0266.2` bar action surface, and `0266.3`'s create helper, typed result and
+  board event. If any is absent, this task is not done and is not attempted: the
+  run stops and reports the owner correction against `0256.1` and the missing
+  sibling. Discovery is a stop gate on this clause, never the decider of a
+  behavioural clause below.
+- The landed desktop project's documented non-interactive build-and-test
+  command, run and named in the work summary, exits 0 with `new task` bound and
+  with `0266.1`'s and `0266.2`'s own desktop coverage passing unmodified. No
+  declared `[[checks]]` entry decides this clause, because no desktop command
+  exists in the repository to declare (`0256.1:15`); it is never satisfied by a
+  stand-in check or by a reported proof the run did not execute.
+- That command's coverage shows: an in-bar, ghost-text title entry that is
+  cancellable; one submit of an owner-supplied non-empty title issuing exactly
+  one background creation request carrying that title, the active repository
+  identity and canonical `draft`; repeated submits while outstanding issuing no
+  second request; the accepted model and rendered sections unchanged by the
+  submit and by the success response, changing only once the broadcast board
+  answer is accepted, and unchanged by a refusal; each landed typed refusal —
+  including the provider's empty-title refusal — and a client `Err` rendering
+  visibly, distinguishably, and clearing the pending guard; a repository switch
+  between submit and result attributing the result to the originating board;
+  both arrival orders of reply and broadcast leaving no residual pending state;
+  and the changed answer observed both by the desktop reducer and by a second
+  independent center subscriber.
+- The closing diff read shows: no desktop-side write, provider call, task-file,
+  board-cache or `git` read; no UI-thread create call; no defaulted or
+  placeholder title; no row or `synced` claim rendered off the response; no
+  catch-all arm over the landed result type and no parsed refusal string; no
+  poll, retry, timer or interval; no unscoped or ordering-dependent result; no
+  pending state without an exit; no second client, subscription, reducer or
+  failure framework; no change to the bar's geometry, tones, action order or
+  separator, and no colour, size, spacing, weight or family literal at a call
+  site; no CLI-private import; and no sibling-owned region touched.
+- The declared `proof_center` check exits 0, holding `0266.3`'s center-served
+  creation, its typed refusals, its per-board serialization and its changed
+  board answer unmoved by this binding. It decides nothing about the desktop
+  lane: `0266.1`'s and `0266.2`'s desktop coverage is decided by the desktop
+  command clause above, not by this check.
+- The declared per-round workspace gate check exits 0.
+- The declared root-resolution check exits 0.
+- The task commit touches no file under `.internal/docs/design/`, no
+  sibling-owned screen region, and no center, core or IO semantics.
+- `git status --short` is empty, the work is in one task-scoped commit, and the
+  work summary names the desktop path and command, the title affordance built,
+  the `0266.2`/`0266.3`/`0258` surfaces reused, any owner correction raised
+  against the design artifacts, and any deviation from the approach.
+
+## Bounded refinement
+
+Run the desktop command, then the three declared checks in their declared order
+— `proof_center` to confirm `0266.3`'s creation coverage is unmoved, the
+per-round workspace gate, then the root-resolution check. Permit at most one
+targeted repair-and-rerun round: repair one named defect, then rerun the failed
+command and every command after it in that order. If a second round would be
+needed, stop and report the exact failing command or the unmet observable
+boundary with its evidence rather than iterating. That is the stop condition,
+not a judgement call.
+'''
 [relations]
 parent = "0266"
 depends-on = ["0266.2", "0266.3"]
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "0266.3's center-served creation, its typed refusals and its changed board answer stay unmoved"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 600000
