@@ -38,7 +38,18 @@ fn scratch(name: &str) -> std::path::PathBuf {
 }
 
 fn await_socket(socket: &std::path::Path) -> UnixStream {
-    let deadline = Instant::now() + PROCESS_DEADLINE;
+    await_socket_within(socket, PROCESS_DEADLINE)
+}
+
+/// Same as [`await_socket`], but with a caller-supplied deadline. Bind
+/// itself happens before any corpus scan and is bounded by `PROCESS_DEADLINE`
+/// everywhere that's what is under test; a one-time, marker-gated `VACUUM`
+/// reclaiming a payload-bearing v1 index (goal 1's migration half) is a
+/// separate, explicitly-not-bind-timing cost (task risk R3) and needs a
+/// generous deadline of its own rather than a change to the production
+/// bind-before-migration ordering.
+fn await_socket_within(socket: &std::path::Path, deadline_from_now: Duration) -> UnixStream {
+    let deadline = Instant::now() + deadline_from_now;
     loop {
         match UnixStream::connect(socket) {
             Ok(stream) => return stream,
@@ -82,7 +93,7 @@ fn await_socket_removal(socket: &std::path::Path) {
 }
 
 struct CenterEnvironment {
-    names: [&'static str; 10],
+    names: [&'static str; 11],
     previous: Vec<Option<std::ffi::OsString>>,
 }
 
@@ -99,6 +110,7 @@ impl CenterEnvironment {
             "CTX_CENTER_LAUNCH_MARKER",
             "CTX_CENTER_FRAME_MARKER",
             "CTX_CENTER_REAL_EXE",
+            "CTX_CENTER_LIVENESS_ROOT",
         ];
         let previous = names.iter().map(std::env::var_os).collect();
         // Environment mutation is serialized by SENTINEL_TEST_LOCK for the
@@ -113,6 +125,12 @@ impl CenterEnvironment {
             std::env::set_var("CTX_CENTER_SCAN_MS", "20");
             std::env::set_var("CTX_CENTER_LAUNCH_MARKER", root.join("launches"));
             std::env::set_var("CTX_CENTER_FRAME_MARKER", root.join("frames"));
+            // Isolate this proof's driver-liveness index from the real
+            // machine-global one (`run_control::runtime_root`) and from
+            // whatever any other concurrently or previously run test left
+            // behind there — the same reasoning as the other four tuple
+            // paths above.
+            std::env::set_var("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"));
         }
         Self { names, previous }
     }
@@ -134,6 +152,11 @@ impl Drop for CenterEnvironment {
 fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
     let root = Utf8PathBuf::from_path_buf(root.to_path_buf()).expect("UTF-8 scratch root");
     let ledger = root.join("repository/session.json");
+    write_running_ledger_at(&ledger);
+    ledger
+}
+
+fn write_running_ledger_at(ledger: &Utf8PathBuf) {
     let session = serde_json::from_value(serde_json::json!({
         "schema-version": "0.1.0",
         "session-id": "center-proof-session",
@@ -168,8 +191,7 @@ fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
         "state-digest": "sha256:center-proof",
     }))
     .expect("fixture session");
-    ctx_traits_io::run_session::write_run_session(&ledger, &session).expect("write ledger");
-    ledger
+    ctx_traits_io::run_session::write_run_session(ledger, &session).expect("write ledger");
 }
 
 fn write_completed_ledger(ledger: &Utf8PathBuf) {
@@ -740,6 +762,7 @@ fn spawn_sentinel(
             .env("CTX_CENTER_INDEX", index)
             .env("CTX_CENTER_IDLE_MS", idle_ms)
             .env("CTX_CENTER_SCAN_MS", "20")
+            .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
             .spawn()
             .expect("spawn private sentinel"),
     )
@@ -775,6 +798,7 @@ fn sentinel_with_home_command(
         .env("CTX_CENTER_INDEX", index)
         .env("CTX_CENTER_IDLE_MS", idle_ms)
         .env("CTX_CENTER_SCAN_MS", "20")
+        .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home)
         .env("XDG_CACHE_HOME", home)
@@ -1141,6 +1165,135 @@ fn private_sentinel_serves_only_the_center_handshake() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// One direct sentinel handshake, bypassing `hello`/`ready` framing.
+fn handshake_ready(socket: &std::path::Path) {
+    let stream = await_socket(socket);
+    stream
+        .try_clone()
+        .expect("clone handshake stream")
+        .write_all(b"{\"kind\":\"hello\",\"id\":\"proof\"}\n")
+        .expect("write hello");
+    let mut ready = String::new();
+    BufReader::new(&stream)
+        .read_line(&mut ready)
+        .expect("read ready");
+    assert_eq!(ready, "{\"kind\":\"ready\",\"id\":\"proof\"}\n");
+}
+
+#[test]
+fn second_direct_sentinel_on_the_same_tuple_exits_without_replacing_the_owner() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("owner");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let spawn_lock = root.join("center.lock");
+    let index = root.join("index.sqlite3");
+    let mut first = ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", &socket)
+            .env("CTX_CENTER_SPAWN_LOCK", &spawn_lock)
+            .env("CTX_CENTER_RUNS_ROOT", &root)
+            .env("CTX_CENTER_INDEX", &index)
+            .env("CTX_CENTER_IDLE_MS", "5000")
+            .spawn()
+            .expect("spawn first direct sentinel"),
+    );
+    handshake_ready(&socket);
+    let owner_metadata = std::fs::symlink_metadata(&socket).expect("stat owner socket");
+    use std::os::unix::fs::MetadataExt;
+    let owner_dev_ino = (owner_metadata.dev(), owner_metadata.ino());
+
+    // A second direct `ctx __ctx-center` on the exact same tuple must not
+    // replace the owner: it contends the owner lock, proves a live answer,
+    // and exits without binding.
+    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+        .arg("__ctx-center")
+        .env("CTX_CENTER_SOCKET", &socket)
+        .env("CTX_CENTER_SPAWN_LOCK", &spawn_lock)
+        .env("CTX_CENTER_RUNS_ROOT", &root)
+        .env("CTX_CENTER_INDEX", &index)
+        .env("CTX_CENTER_IDLE_MS", "5000")
+        .spawn()
+        .expect("spawn second direct sentinel");
+    let status = await_exit(&mut second);
+    assert!(
+        status.success(),
+        "a second direct center on an owned tuple must exit without error, got {status}"
+    );
+
+    let after_metadata = std::fs::symlink_metadata(&socket).expect("stat socket after contender");
+    assert_eq!(
+        (after_metadata.dev(), after_metadata.ino()),
+        owner_dev_ino,
+        "the owner's socket inode must survive a contended second direct start"
+    );
+    // The original owner must still answer.
+    handshake_ready(&socket);
+
+    // A launcher path (`ensure_connected`) against the already-serving owner
+    // must reuse it rather than spawning a competitor: no new process is
+    // observable other than the reused socket, whose dev/inode must be
+    // unchanged after the launcher call.
+    let names = [
+        "CTX_CENTER_SOCKET",
+        "CTX_CENTER_SPAWN_LOCK",
+        "CTX_CENTER_RUNS_ROOT",
+        "CTX_CENTER_INDEX",
+        "CTX_CENTER_EXECUTABLE",
+    ];
+    let previous: Vec<Option<std::ffi::OsString>> = names.iter().map(std::env::var_os).collect();
+    // SAFETY: mutation is serialized by SENTINEL_TEST_LOCK for the whole proof.
+    unsafe {
+        std::env::set_var("CTX_CENTER_SOCKET", &socket);
+        std::env::set_var("CTX_CENTER_SPAWN_LOCK", &spawn_lock);
+        std::env::set_var("CTX_CENTER_RUNS_ROOT", &root);
+        std::env::set_var("CTX_CENTER_INDEX", &index);
+        std::env::set_var("CTX_CENTER_EXECUTABLE", env!("CARGO_BIN_EXE_ctx"));
+    }
+    let launcher_result = ctx_traits_io::center::ensure_connected();
+    unsafe {
+        for (name, previous) in names.iter().zip(previous.iter()) {
+            match previous {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+    launcher_result.expect("launcher reuses the already-serving owner");
+    let after_launcher_metadata =
+        std::fs::symlink_metadata(&socket).expect("stat socket after launcher call");
+    assert_eq!(
+        (after_launcher_metadata.dev(), after_launcher_metadata.ino()),
+        owner_dev_ino,
+        "a launcher reusing a live owner must never rebind its socket"
+    );
+
+    // An isolated private tuple (a distinct socket path) still starts
+    // independently in the same scratch root.
+    let other_socket = root.join("other.sock");
+    let mut isolated = ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", &other_socket)
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("other.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", &root)
+            .env("CTX_CENTER_INDEX", root.join("other-index.sqlite3"))
+            .env("CTX_CENTER_IDLE_MS", "5000")
+            .spawn()
+            .expect("spawn isolated sentinel"),
+    );
+    handshake_ready(&other_socket);
+
+    first.0.kill().expect("stop first sentinel");
+    first.0.wait().expect("reap first sentinel");
+    isolated.0.kill().expect("stop isolated sentinel");
+    isolated.0.wait().expect("reap isolated sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn private_sentinel_exits_after_its_bounded_idle_period() {
     let _serial = SENTINEL_TEST_LOCK
@@ -1157,6 +1310,7 @@ fn private_sentinel_exits_after_its_bounded_idle_period() {
             .env("CTX_CENTER_INDEX", root.join("index.sqlite3"))
             .env("CTX_CENTER_IDLE_MS", "100")
             .env("CTX_CENTER_SCAN_MS", "20")
+            .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
             .spawn()
             .expect("spawn private sentinel"),
     );
@@ -1209,6 +1363,7 @@ fn held_driver_lock_survives_center_idle_period() {
             .env("CTX_CENTER_INDEX", root.join("index.sqlite3"))
             .env("CTX_CENTER_IDLE_MS", "100")
             .env("CTX_CENTER_SCAN_MS", "20")
+            .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
             .spawn()
             .expect("spawn private sentinel"),
     );
@@ -1512,9 +1667,116 @@ fn sigkill_center_leaves_held_driver_and_restart_reconstructs_it() {
         root.join("center.sock").exists(),
         "restarted center lost the still-held driver lock"
     );
+    // The replacement center reconstructs liveness for the still-held ledger
+    // from the kernel flock alone: no driver re-registered and no driver
+    // frame was ever sent to this fresh process.
+    let rows = ctx_traits_io::center::list(None).expect("query restarted center");
+    let row = rows
+        .iter()
+        .find(|row| row.summary.session_id == "center-proof-session")
+        .expect("restarted center indexes the still-held ledger");
+    assert!(
+        row.live,
+        "restarted center must report the genuinely held ledger as live"
+    );
     drop(lock);
     await_socket_removal(&root.join("center.sock"));
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sigkill_center_leaves_a_pointer_only_ledger_held_and_restart_reconstructs_it() {
+    // Same shape as `sigkill_center_leaves_held_driver_and_restart_reconstructs_it`,
+    // except the held ledger lives entirely outside `CTX_CENTER_RUNS_ROOT` —
+    // a repository-local `.ctx/runs` ledger the flat-store walk in
+    // `begin_scan` can never enumerate — and is recoverable only because it
+    // was upserted into `run_liveness`'s pointer index. No
+    // `Request::Register` is ever sent and no `DriverNotifier` frame is ever
+    // written; the replacement center's only source for this session is
+    // `run_liveness::read_index`, seeded before the flat-store walk even
+    // begins (0262 defect 5).
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("pointer-only-sigkill-rebuild");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let repo = scratch("pointer-only-sigkill-repo");
+    std::fs::create_dir_all(&repo).expect("create scratch repo");
+    let repo = Utf8PathBuf::from_path_buf(repo).expect("UTF-8 scratch repo");
+    let ledger = repo.join(".ctx/runs/session.json");
+    write_running_ledger_at(&ledger);
+    // Overwrite the session/run identifiers so this fixture cannot collide
+    // with the flat-store fixture's `center-proof-session` in an assertion.
+    let mut session = serde_json::to_value(
+        ctx_traits_io::run_session::read_run_session(&ledger).expect("read fixture back"),
+    )
+    .expect("serialize fixture session");
+    session["session-id"] = serde_json::json!("pointer-only-session");
+    session["run-id"] = serde_json::json!("pointer-only-run");
+    session["ledger"]["run-id"] = serde_json::json!("pointer-only-run");
+    ctx_traits_io::run_session::write_run_session(
+        &ledger,
+        &serde_json::from_value(session).expect("re-deserialize fixture session"),
+    )
+    .expect("rewrite fixture session with pointer-only identifiers");
+
+    let mut activity = ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger);
+    activity.append_session_title("pointer-only, durable before crash".to_string());
+    let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+    let lock =
+        ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open driver lock");
+    ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold driver lock");
+
+    let liveness_root = root.join("liveness");
+    ctx_traits_io::run_liveness::upsert_row(
+        &Utf8PathBuf::from_path_buf(liveness_root.clone()).expect("UTF-8 liveness root"),
+        &ctx_traits_io::run_liveness::LiveRunFacts {
+            session_id: "pointer-only-session".to_string(),
+            run_id: "pointer-only-run".to_string(),
+            repo_key: "pointer-only-repo".to_string(),
+            repo_path: repo.to_string(),
+            ledger_path: ledger.clone(),
+            worktree_path: None,
+            branch: None,
+            log_path: None,
+        },
+        std::process::id(),
+        1000,
+    )
+    .expect("seed the liveness index with the pointer-only ledger");
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let mut first = spawn_sentinel(&root, &socket, &index, "100");
+    let stream = await_socket(&root.join("center.sock"));
+    drop(stream);
+    first.0.kill().expect("SIGKILL center");
+    assert!(!first.0.wait().expect("reap SIGKILL center").success());
+    std::fs::remove_file(&index).expect("delete disposable index before restart");
+
+    let _environment = CenterEnvironment::install(&root);
+    let stream = ctx_traits_io::center::ensure_connected().expect("restart through arbitration");
+    drop(stream);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        root.join("center.sock").exists(),
+        "restarted center lost the still-held pointer-only driver lock"
+    );
+    let rows = ctx_traits_io::center::list(None).expect("query restarted center");
+    let row = rows
+        .iter()
+        .find(|row| row.summary.session_id == "pointer-only-session")
+        .expect(
+            "restarted center recovers a repository-local ledger from the liveness index alone",
+        );
+    assert!(
+        row.live,
+        "restarted center must report the genuinely held pointer-only ledger as live"
+    );
+    drop(lock);
+    await_socket_removal(&root.join("center.sock"));
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(repo);
 }
 
 #[test]
@@ -1537,38 +1799,61 @@ fn independent_socket_versions_share_the_disposable_sqlite_index() {
     first.0.kill().expect("stop first center");
     first.0.wait().expect("reap first center");
 
-    // Simulate the preceding v1 projection. It had flattened worktree facts
-    // and none of the current nested or task/title/terminal additions. The next
-    // process reprojects it from cached sessions without changing the legacy
-    // marker that an installed v1 center still requires.
+    // Simulate a preceding v1 index: no projection marker at all. The
+    // metadata-only rebuild drops the stale-shaped `center_rows` payload and
+    // the payload cache table, and the next process reprojects directly from
+    // the authoritative ledger (not from an edited cached summary — that
+    // cache no longer exists) without changing the legacy marker an
+    // installed v1 center still requires.
     let db = rusqlite::Connection::open(&index).expect("open first center index");
-    let summary: String = db
-        .query_row("SELECT summary FROM center_rows LIMIT 1", [], |row| {
-            row.get(0)
-        })
-        .expect("read persisted summary");
-    let mut preceding: serde_json::Value =
-        serde_json::from_str(&summary).expect("decode persisted summary");
-    let object = preceding
-        .as_object_mut()
-        .expect("persisted summary is an object");
-    object.remove("task_key");
-    object.remove("task_digest");
-    object.remove("title");
-    object.remove("worktree");
-    object.remove("last_terminal_merge_frame");
-    db.execute(
-        "UPDATE center_rows SET summary = ?1",
-        [serde_json::to_string(&preceding).expect("encode preceding summary")],
-    )
-    .expect("write preceding summary shape");
     db.execute("DELETE FROM center_projection_meta", [])
         .expect("remove marker absent from the preceding center");
     drop(db);
 
     let mut second = spawn_sentinel(&root, &second_socket, &index, "5000");
     drop(await_socket(&second_socket));
-    std::thread::sleep(Duration::from_millis(100));
+    // `list` resolves its target from the process environment; point it at
+    // the second sentinel's socket explicitly rather than relying on
+    // whatever CTX_CENTER_SOCKET a previous test in this serialized suite
+    // happened to leave behind. Scoped so these four overrides cannot leak
+    // into a later test in this serialized suite even on an early return.
+    let names = [
+        "CTX_CENTER_SOCKET",
+        "CTX_CENTER_SPAWN_LOCK",
+        "CTX_CENTER_RUNS_ROOT",
+        "CTX_CENTER_INDEX",
+    ];
+    let previous: Vec<Option<std::ffi::OsString>> = names.iter().map(std::env::var_os).collect();
+    // SAFETY: mutation is serialized by SENTINEL_TEST_LOCK for the whole
+    // proof, so no concurrently executing test can observe it.
+    unsafe {
+        std::env::set_var("CTX_CENTER_SOCKET", &second_socket);
+        std::env::set_var("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"));
+        std::env::set_var("CTX_CENTER_RUNS_ROOT", &root);
+        std::env::set_var("CTX_CENTER_INDEX", &index);
+    }
+    let restore_env = || {
+        // SAFETY: same serialization as above.
+        unsafe {
+            for (name, previous) in names.iter().zip(previous.iter()) {
+                match previous {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    };
+    let list_result = ctx_traits_io::center::list(None);
+    restore_env();
+    for (name, previous) in names.iter().zip(previous.iter()) {
+        assert_eq!(
+            std::env::var_os(name).as_ref(),
+            previous.as_ref(),
+            "{name} must be restored after the scoped override"
+        );
+    }
+    list_result.expect("second center answers after rebuild");
+    std::thread::sleep(Duration::from_millis(200));
     let db = rusqlite::Connection::open(&index).expect("open shared index metadata");
     let version: i64 = db
         .query_row("SELECT version FROM center_projection_meta", [], |row| {
@@ -1576,8 +1861,8 @@ fn independent_socket_versions_share_the_disposable_sqlite_index() {
         })
         .expect("read shared index metadata");
     assert_eq!(
-        version, 2,
-        "the current center must mark the widened projection"
+        version, 3,
+        "the current center must mark the metadata-only projection"
     );
     let legacy_version: i64 = db
         .query_row("SELECT version FROM center_meta", [], |row| row.get(0))
@@ -1743,11 +2028,12 @@ fn one_driver_frame_notification_reaches_two_subscribers() {
 }
 
 /// Client requests must be served from the center's accepted model rather than
-/// reopening a ledger after discovery. Removing read permission after the
-/// initial snapshot makes an accidental client-side read fail deterministically
-/// while preserving the center's `(mtime, size)` fingerprint.
+/// reopening a ledger after discovery: they stay served from the projected
+/// summary. `Get` is the one query that always reads its selected ledger on
+/// demand, so a read failure there is a protocol error naming the ledger,
+/// never a silently served `Missing`.
 #[test]
-fn cached_center_queries_do_not_reopen_a_discovered_ledger() {
+fn metadata_only_queries_serve_an_unreadable_ledger_while_get_fails_naming_it() {
     let _serial = SENTINEL_TEST_LOCK
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
@@ -1779,16 +2065,20 @@ fn cached_center_queries_do_not_reopen_a_discovered_ledger() {
     let by_run =
         ctx_traits_io::center::find_by_run_id("center-proof-run", None).expect("cached run lookup");
     assert_eq!(by_run.len(), 1);
-    assert!(matches!(
-        ctx_traits_io::center::get("center-proof-session", None).expect("cached session lookup"),
-        ctx_traits_io::center::GetResult::Session(_)
-    ));
+
+    let error = ctx_traits_io::center::get("center-proof-session", None)
+        .expect_err("get must fail naming the unreadable ledger, not report Missing");
+    assert!(error.to_string().contains(ledger.as_str()));
 
     std::fs::set_permissions(
         ledger.as_std_path(),
         std::fs::Permissions::from_mode(original_mode),
     )
     .expect("restore ledger permissions");
+    assert!(matches!(
+        ctx_traits_io::center::get("center-proof-session", None).expect("restored session lookup"),
+        ctx_traits_io::center::GetResult::Session(_)
+    ));
     child.0.kill().expect("stop private sentinel");
     child.0.wait().expect("reap private sentinel");
     let _ = std::fs::remove_dir_all(root);
@@ -2782,9 +3072,24 @@ fn restarted_center_accepts_the_next_driver_registration_and_frame() {
         branch: None,
         log_path: None,
     };
-    let driver_lock = ctx_traits_io::run_control::try_acquire(&facts, std::sync::Arc::new(|_| {}))
-        .expect("acquire driver lock")
-        .expect("test owns driver lock");
+    // The center's own warming loop concurrently probes this same ledger's
+    // driver-lock file with a non-blocking flock (`run_control::probe`) to
+    // classify it as unheld; that probe and this acquire race on the same
+    // kernel lock, so a single non-blocking attempt can transiently lose to
+    // it. Retry within a short deadline rather than treating that race as
+    // ownership failure.
+    let acquire_deadline = Instant::now() + PROCESS_DEADLINE;
+    let driver_lock = loop {
+        match ctx_traits_io::run_control::try_acquire(&facts, std::sync::Arc::new(|_| {}))
+            .expect("acquire driver lock")
+        {
+            Some(lock) => break lock,
+            None if Instant::now() < acquire_deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            None => panic!("test owns driver lock"),
+        }
+    };
     // Establish the notifier connection before the crash. The later frame must
     // use this same worker, reconnecting and registering again on its own.
     let notifier =
@@ -3038,4 +3343,320 @@ fn center_backed_readers_serve_an_unreadable_ledger_warm_and_after_restart() {
     second.0.kill().expect("stop restarted center");
     second.0.wait().expect("reap restarted center");
     let _ = std::fs::remove_dir_all(root);
+}
+
+const CORPUS_LEDGER_COUNT: usize = 2500;
+/// Padding per ledger so the corpus totals well over 600MB, landing squarely
+/// inside goal 1's binding size proof rather than skirting its edge.
+const CORPUS_LEDGER_FILLER_BYTES: usize = 260_000;
+
+/// One large session body, built once and varied only by session/run id per
+/// file, so the measured cost is the center's parse and index build — never
+/// the fixture's own write cost or a repeated large-string allocation.
+fn write_corpus_ledger(root: &std::path::Path, index: usize, filler: &str) -> Utf8PathBuf {
+    let root = Utf8PathBuf::from_path_buf(root.to_path_buf()).expect("UTF-8 scratch root");
+    let ledger = root.join(format!("corpus/session-{index}.json"));
+    // The filler lives in a top-level key `Session` does not declare — never
+    // `deny_unknown_fields`, so `read_session` parses it and silently drops
+    // the extra key, and `RunSummary::from_session` never sees it at all.
+    // That is the point: this fixture must bulk up ledger CONTENT without
+    // being reachable by any field the metadata-only projection copies, or
+    // the corpus proof would trivially fail the very size bound it exists
+    // to prove.
+    let mut value = serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": format!("corpus-session-{index}"),
+        "run-id": format!("corpus-run-{index}"),
+        "trait-id": "corpus-trait",
+        "current-run-index": 0,
+        "status": "awaiting-agent-output",
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "proof-center-corpus"},
+            "state-source": "test",
+            "started-at-epoch": 1000,
+        },
+        "ledger": {
+            "run-id": format!("corpus-run-{index}"),
+            "trait-id": "corpus-trait",
+            "current-run-index": 0,
+            "final-state": "running",
+        },
+        "state-digest": format!("sha256:corpus-{index}"),
+    });
+    value["proof-corpus-filler"] = serde_json::Value::String(filler.to_string());
+    // A round trip through the typed `Session` would drop the unknown key
+    // (that is exactly what makes it safe), so it must not happen here:
+    // write the raw JSON bytes directly, the same shape `read_run_session`
+    // (plain `read_text` + `serde_json::from_str`) expects on the read side.
+    std::fs::create_dir_all(ledger.parent().expect("corpus ledger parent"))
+        .expect("create corpus ledger parent");
+    std::fs::write(
+        ledger.as_std_path(),
+        serde_json::to_string(&value).expect("serialize corpus fixture"),
+    )
+    .expect("write corpus ledger");
+    // Prove the fixture still parses as a valid `Session` before the corpus
+    // proof relies on it — a mistake here should fail loudly at generation
+    // time, not surface as a mysterious center-side parse error later.
+    ctx_traits_io::run_session::read_run_session(&ledger).expect("corpus fixture must parse");
+    ledger
+}
+
+fn physical_index_bytes(index: &std::path::Path) -> u64 {
+    ["", "-wal", "-journal", "-shm"]
+        .iter()
+        .filter_map(|suffix| {
+            let mut path = index.as_os_str().to_owned();
+            path.push(suffix);
+            std::fs::metadata(&path).ok()
+        })
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+#[test]
+fn cold_start_binds_and_answers_a_partial_query_before_the_corpus_finishes_indexing() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("corpus-bind-before-build");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let filler = "x".repeat(CORPUS_LEDGER_FILLER_BYTES);
+    let mut corpus_bytes: u64 = 0;
+    let write_started = Instant::now();
+    for index in 0..CORPUS_LEDGER_COUNT {
+        let ledger = write_corpus_ledger(&root, index, &filler);
+        corpus_bytes += std::fs::metadata(&ledger)
+            .expect("stat corpus ledger")
+            .len();
+    }
+    eprintln!(
+        "corpus proof: fixture write took {:?}, {corpus_bytes} bytes",
+        write_started.elapsed()
+    );
+    assert!(
+        corpus_bytes >= 600_000_000,
+        "fixture corpus must total at least 600MB, got {corpus_bytes} bytes"
+    );
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    // Generous idle so idle exit is never the thing under test; `has_live`
+    // already treats an in-progress warming scan as live regardless.
+    let mut child = spawn_sentinel(&root, &socket, &index, "120000");
+    let _environment = CenterEnvironment::install(&root);
+    // The bound listener must answer a handshake immediately — no wall-clock
+    // ceiling tied to how long the corpus takes to index.
+    let handshake_deadline = Instant::now();
+    drop(await_socket(&socket));
+    assert!(
+        handshake_deadline.elapsed() < PROCESS_DEADLINE,
+        "the listener must be servicing handshakes long before the corpus finishes"
+    );
+    eprintln!(
+        "corpus proof: handshake completed in {:?}",
+        handshake_deadline.elapsed()
+    );
+
+    // `Stats` is a bounded aggregate (unlike a non-subscription `List`, which
+    // would serialize every row into one line and risk exceeding
+    // `MAX_LINE_BYTES`), so it is the natural "how many rows are indexed so
+    // far" observation. Later completion polling below may retry under
+    // sibling-test contention, but the *first* query is the one goal 2 binds:
+    // "a connection refusal or client timeout is not [acceptable]", so it
+    // must be a single request that fails hard on a timeout rather than
+    // silently retrying past it.
+    fn poll_stats_with_retry(deadline: Instant) -> ctx_traits_core::procedure::stats::StatsReport {
+        loop {
+            match ctx_traits_io::center::stats(None, None, None) {
+                Ok(report) => return report,
+                Err(error) if Instant::now() < deadline => {
+                    eprintln!("corpus proof: retrying a stats query after {error}");
+                }
+                Err(error) => panic!("center did not answer a query in time: {error}"),
+            }
+        }
+    }
+
+    let query_started = Instant::now();
+    let first_report = ctx_traits_io::center::stats(None, None, None)
+        .expect("the first cold-corpus query must be answered, not refused or timed out");
+    eprintln!(
+        "corpus proof: first query answered in {:?} with {}/{CORPUS_LEDGER_COUNT} rows indexed",
+        query_started.elapsed(),
+        first_report.total_runs
+    );
+    assert!(
+        first_report.total_runs < CORPUS_LEDGER_COUNT as u64,
+        "an immediate query must observe genuinely partial progress, got {} of {CORPUS_LEDGER_COUNT}",
+        first_report.total_runs
+    );
+
+    let completion_started = Instant::now();
+    let completion_deadline = completion_started + Duration::from_secs(180);
+    loop {
+        let report = poll_stats_with_retry(completion_deadline);
+        let last_seen = report.total_runs;
+        if last_seen == CORPUS_LEDGER_COUNT as u64 {
+            break;
+        }
+        assert!(
+            Instant::now() < completion_deadline,
+            "corpus indexing did not complete in time, last observed {last_seen} of {CORPUS_LEDGER_COUNT}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    eprintln!(
+        "corpus proof: full corpus indexed {} after the first partial answer",
+        format_args!("{:?}", completion_started.elapsed())
+    );
+
+    let physical_bytes = physical_index_bytes(&index);
+    eprintln!("corpus proof: physical index size is {physical_bytes} bytes");
+    assert!(
+        physical_bytes <= 10_000_000,
+        "the built index must stay metadata-only and small: {physical_bytes} bytes on disk"
+    );
+
+    child.0.kill().expect("stop corpus center");
+    child.0.wait().expect("reap corpus center");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Same v1 schema shape as `center::tests::a_version_one_index_is_reprojected_by_the_current_center`,
+/// scaled up to a genuinely large `center_sessions` payload rather than one
+/// row — a small-payload `VACUUM` proves nothing about a real ~500MB index
+/// on disk, which is what goal 1's migration half exists to catch.
+fn build_v1_payload_bearing_index(index: &std::path::Path, ledgers: &[Utf8PathBuf]) -> u64 {
+    let db = rusqlite::Connection::open(index).expect("create v1 index");
+    db.execute_batch(
+        "CREATE TABLE center_meta (version INTEGER NOT NULL); \
+         CREATE TABLE center_rows (ledger TEXT PRIMARY KEY, repo_key TEXT NOT NULL, repo_path TEXT NOT NULL, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, summary TEXT NOT NULL); \
+         CREATE TABLE center_sessions (ledger TEXT PRIMARY KEY, mtime_secs INTEGER NOT NULL, mtime_nanos INTEGER NOT NULL, size INTEGER NOT NULL, session TEXT NOT NULL);",
+    )
+    .expect("create v1 tables");
+    // `CENTER_SCHEMA_VERSION` is a private center.rs constant; 1 is its only
+    // value that has ever shipped, so it is safe to hardcode from this
+    // external process-proof binary.
+    db.execute("INSERT INTO center_meta(version) VALUES (1)", [])
+        .expect("write v1 marker");
+    // Payload per row large enough that 2,500 rows clear 600MB — its content
+    // is irrelevant, since the migration drops this table outright rather
+    // than reading it; only its on-disk size before reclamation matters.
+    let payload = "x".repeat(CORPUS_LEDGER_FILLER_BYTES);
+    db.execute_batch("BEGIN").expect("begin v1 fixture insert");
+    for ledger in ledgers {
+        let metadata = std::fs::metadata(ledger.as_std_path()).expect("stat corpus ledger");
+        let secs = metadata
+            .modified()
+            .expect("ledger mtime")
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("mtime after epoch")
+            .as_secs() as i64;
+        let size = i64::try_from(metadata.len()).expect("ledger size fits sqlite");
+        let summary = serde_json::json!({
+            "session_id": format!("corpus-session-{ledger}", ledger = ledger.file_stem().expect("ledger stem")),
+            "run_id": "corpus-run",
+            "trait_id": "corpus-trait",
+            "status": "awaiting-agent-output",
+            "has_merge_frames": false,
+        })
+        .to_string();
+        db.execute(
+            "INSERT INTO center_rows(ledger, repo_key, repo_path, mtime_secs, mtime_nanos, size, summary) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+            rusqlite::params![ledger.as_str(), "corpus", "/corpus", secs, 0, summary],
+        )
+        .expect("write v1 cached row");
+        db.execute(
+            "INSERT INTO center_sessions(ledger, mtime_secs, mtime_nanos, size, session) VALUES (?1, ?2, 0, ?3, ?4)",
+            rusqlite::params![ledger.as_str(), secs, size, payload],
+        )
+        .expect("write v1 cached payload");
+    }
+    db.execute_batch("COMMIT")
+        .expect("commit v1 fixture insert");
+    drop(db);
+    std::fs::metadata(index)
+        .expect("stat v1 fixture index")
+        .len()
+}
+
+#[test]
+fn migrated_v1_index_over_the_corpus_is_reclaimed_to_the_same_physical_bound() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("corpus-migration");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    // Goal 1's migration half must exercise takeover of a payload-bearing v1
+    // index over the SAME 600MB/2,500-ledger corpus the contract requires,
+    // not a large synthetic SQLite payload paired with near-empty ledgers —
+    // so this fixture carries the same per-ledger filler the fresh-index
+    // sibling test uses, and both the ledger corpus and the v1 index payload
+    // are independently asserted at >=600MB below.
+    let filler = "x".repeat(CORPUS_LEDGER_FILLER_BYTES);
+    let mut corpus_bytes: u64 = 0;
+    let ledgers: Vec<Utf8PathBuf> = (0..CORPUS_LEDGER_COUNT)
+        .map(|index| {
+            let ledger = write_corpus_ledger(&root, index, &filler);
+            corpus_bytes += std::fs::metadata(ledger.as_std_path())
+                .expect("stat corpus ledger")
+                .len();
+            ledger
+        })
+        .collect();
+    eprintln!("migration proof: ledger corpus totals {corpus_bytes} bytes before takeover");
+    assert!(
+        corpus_bytes >= 600_000_000,
+        "the ledger corpus itself must total at least 600MB, got {corpus_bytes} bytes"
+    );
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let v1_bytes = build_v1_payload_bearing_index(&index, &ledgers);
+    eprintln!("migration proof: v1 fixture index is {v1_bytes} bytes before takeover");
+    assert!(
+        v1_bytes >= 600_000_000,
+        "the v1 fixture index must itself total at least 600MB, got {v1_bytes} bytes"
+    );
+
+    // Generous idle so idle exit is never the thing under test.
+    let mut child = spawn_sentinel(&root, &socket, &index, "120000");
+    let _environment = CenterEnvironment::install(&root);
+    // The one-time marker-gated `VACUUM` reclaiming a 600MB+ v1 index runs
+    // inside `CenterModel::open`, ahead of bind, so it — not connection
+    // latency — dominates this proof's startup: give it a generous deadline
+    // rather than PROCESS_DEADLINE's 10s, which binds goal 2's bind-before-
+    // build proof, not this migration cost (task risk R3).
+    drop(await_socket_within(&socket, Duration::from_secs(180)));
+
+    let completion_deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        match ctx_traits_io::center::stats(None, None, None) {
+            Ok(report) if report.total_runs == CORPUS_LEDGER_COUNT as u64 => break,
+            Ok(report) => eprintln!(
+                "migration proof: {}/{CORPUS_LEDGER_COUNT} rows reprojected so far",
+                report.total_runs
+            ),
+            Err(error) => eprintln!("migration proof: retrying a stats query after {error}"),
+        }
+        assert!(
+            Instant::now() < completion_deadline,
+            "the migrated corpus did not finish reprojecting in time"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let physical_bytes = physical_index_bytes(&index);
+    eprintln!(
+        "migration proof: physical index size after takeover is {physical_bytes} bytes (was {v1_bytes})"
+    );
+    assert!(
+        physical_bytes <= 10_000_000,
+        "the migrated index must be reclaimed to the same metadata-only bound as a fresh build: {physical_bytes} bytes on disk"
+    );
+
+    child.0.kill().expect("stop migration center");
+    child.0.wait().expect("reap migration center");
+    let _ = std::fs::remove_dir_all(&root);
 }

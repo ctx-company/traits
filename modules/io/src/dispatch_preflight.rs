@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 
-use ctx_traits_core::procedure::session::{Session, Status};
+use ctx_traits_core::procedure::session::Status;
 use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{ResolvedTask, TaskProvider};
 
@@ -337,24 +337,20 @@ pub fn find_standing_wall(
     crate::center::find_standing_wall(wall_id, dispatched_task, Some(&repo_key))
 }
 
-/// The persisted terminal timestamp for a ledger's last drive outcome, if
-/// any — `last_drive_outcome.recorded_at_epoch`, the drive's own record of
-/// when this session last reached a stop, not the ledger FILE's mtime.
-/// Ledger files can be rewritten (e.g. re-serialized on a later, unrelated
-/// read) without the session reaching a new terminal state, so mtime alone
-/// cannot order block/clear events; a session with no recorded drive outcome
-/// yet sorts as never-terminal (`None`, ordered before any recorded epoch).
-fn terminal_epoch(session: &Session) -> Option<u64> {
-    session
-        .last_drive_outcome
-        .as_ref()
-        .map(|outcome| outcome.recorded_at_epoch)
+/// The five facts `standing_wall_in_facts` reads from a center row's
+/// projection, without reopening the ledger.
+pub(crate) struct WallFacts {
+    pub status: Status,
+    pub task_value: Option<String>,
+    pub terminal_epoch: Option<u64>,
+    pub run_id: String,
+    pub park_wall_id: Option<String>,
 }
 
-/// `sessions` is the center's cached session model. This function filters the
+/// `rows` is the center's cached row projection. This function filters the
 /// relevant completed and blocked states while preserving its input order.
-pub(crate) fn standing_wall_in_sessions(
-    sessions: &[Session],
+pub(crate) fn standing_wall_in_facts(
+    rows: &[WallFacts],
     wall_id: &str,
     dispatched_task: &str,
 ) -> Option<StandingWall> {
@@ -364,44 +360,41 @@ pub(crate) fn standing_wall_in_sessions(
     // approved completion of that same task through any trait clears it,
     // since the task is not tied to which trait last ran it.
     let mut latest_completed: BTreeMap<String, u64> = BTreeMap::new();
-    for session in sessions {
-        if session.status != Status::Completed {
+    for row in rows {
+        if row.status != Status::Completed {
             continue;
         }
-        let Some(task_value) = crate::run_session::session_task(session) else {
+        let Some(task_value) = row.task_value.clone() else {
             continue;
         };
-        let Some(epoch) = terminal_epoch(session) else {
+        let Some(epoch) = row.terminal_epoch else {
             continue;
         };
         let entry = latest_completed.entry(task_value).or_insert(0);
         *entry = (*entry).max(epoch);
     }
 
-    for session in sessions {
-        if session.status != Status::Blocked {
+    for row in rows {
+        if row.status != Status::Blocked {
             continue;
         }
-        let Some(park_report) = crate::run_session::session_park_report(session) else {
-            continue;
-        };
-        let Some(entry_wall_id) = park_report.get("wall-id").and_then(|v| v.as_str()) else {
+        let Some(entry_wall_id) = row.park_wall_id.as_deref() else {
             continue;
         };
         if entry_wall_id != wall_id {
             continue;
         }
-        let origin_task = crate::run_session::session_task(session).unwrap_or_default();
+        let origin_task = row.task_value.clone().unwrap_or_default();
         if origin_task == dispatched_task {
             continue;
         }
-        let Some(blocked_epoch) = terminal_epoch(session) else {
+        let Some(blocked_epoch) = row.terminal_epoch else {
             // No persisted terminal timestamp for this block: never treat it
             // as clearable by epoch comparison, but it still stands as a wall.
             return Some(StandingWall {
                 wall_id: wall_id.to_string(),
                 origin_task,
-                origin_run_id: session.run_id.as_str().to_string(),
+                origin_run_id: row.run_id.clone(),
             });
         };
         let cleared = latest_completed
@@ -413,7 +406,7 @@ pub(crate) fn standing_wall_in_sessions(
         return Some(StandingWall {
             wall_id: wall_id.to_string(),
             origin_task,
-            origin_run_id: session.run_id.as_str().to_string(),
+            origin_run_id: row.run_id.clone(),
         });
     }
     None

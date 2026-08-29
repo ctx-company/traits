@@ -110,7 +110,7 @@ impl RunRecord {
 /// reference ends in [`VERDICT_SLOT_SUFFIX`], across every loop that wrote
 /// one. `None` when no revision matches (missing coverage, not zero
 /// rounds).
-fn verdict_slot_rounds(slot_revisions: &[SlotRevision]) -> Option<u64> {
+pub fn verdict_slot_rounds(slot_revisions: &[SlotRevision]) -> Option<u64> {
     let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
     for revision in slot_revisions {
         let slot_text = revision.slot_ref.as_str();

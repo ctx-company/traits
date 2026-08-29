@@ -455,6 +455,13 @@ pub fn controlled_command(binary: &Path, args: &[&str], cwd: &Path, home: &Path)
         .env("CTX_CENTER_SPAWN_LOCK", home.join("l"))
         .env("CTX_CENTER_RUNS_ROOT", &center_root)
         .env("CTX_CENTER_INDEX", center_root.join("index.sqlite3"))
+        // 0262: the center recovers repository-local, no-driver-event
+        // ledgers by seeding its warming scan from the driver-liveness
+        // index. That index defaults to one fixed per-uid path shared by
+        // every process on the machine; without scoping it here too, this
+        // scratch center would seed from (and wade through) every other
+        // proof's accumulated entries at that shared path.
+        .env("CTX_CENTER_LIVENESS_ROOT", home.join("ctx/traits/liveness"))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Ok(path) = std::env::var("PATH") {
