@@ -1,52 +1,894 @@
 schema-version = "0.2"
 key = "0269.1"
 title = "Render the merge sections and rows"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Build the Merges screen's section list per `.internal/docs/design/screens/merges.md`, and join the title bar's menu with the `Merges` entry the spec places between Tasks and Config.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-The **sections** are `Landing — 1` / `Awaiting approval — 2` / `Landed — 2`, mono 11 `text-muted` headings over rows. **Merge rows are shaped exactly like task rows**: a status dot beside a stack of title over description on the left, an end-aligned state stack on the right. Landing rows take an `accent` dot with `landing · deep merge` in accent over a gates-and-diffstat line; awaiting rows take a `warn` dot with `awaiting approval` in warn over a muted stats and sign-off line; landed rows take an `ok` dot with `landed` over a muted commit sha. The description line is the run-to-target form — `run-1a2b3c → main · guarded-change · closes 0257`.
+`screens/merges.md:12-29` specifies the first half of the Merges screen: the
+title bar's menu gains a `Merges` entry between `Tasks` and `Config`, bright
+while the screen is current (`reference/merges.html:57-91`), and the main pane
+carries exactly three sections — `Landing — 1`, `Awaiting approval — 2`,
+`Landed — 2` — whose headings are mono 11 `text-muted` and whose rows are
+**shaped exactly like task rows**: a 5px status dot beside a title-over-description
+stack on the left, an end-aligned two-line state stack on the right
+(`screens/tasks.md:14-23`).
 
-Every one of those rows is tagged `placeholder:` in the spec, and the evidence says why. No merge-queue surface exists in the backend, so there is no queue and no ordering to render. `RunSummary.landing` is terminal evidence whose own contract states it is `None` mid-run, and `merges_from_center_rows` (`modules/cli/src/app/dashboard.rs:2557`) skips non-terminal in-progress rows and classifies the rest as `Mergeable`, `Parked`, `Failed` or `Landed` — it carries no actively-landing state and no awaiting-approval state. So the rows render design-faithfully from the shared `placeholders` module, structured so each section can be wired when a merge surface lands. The spec's one optional exception is landed rows, which MAY be derived from the default branch's git log; taking it is optional and, if taken, goes through a center-served answer rather than a desktop-side `git` call.
-"""
-scope = """
-## Decisions
+The export fixes the geometry: main pane padding `[18,40,20,40]` gap 28
+(`reference/merges.html:261-264`), section container gap 12 with a row list at
+gap 4 (`298-310`, `367-379`, `489-501`), merge row padding `[8,12]`
+`space-between` top-aligned, left gap 12, dot column top offset 6, dot 5px,
+text-stack gap 2, right column end-aligned mono 10.5 gap 2 (`312-364`,
+`381-487`, `503-608`). Title sans 12.5, description sans 11 `text-secondary`
+(`tokens.md:60-67`).
 
-- In scope: the `Merges` menu entry between Tasks and Config with the switch that reaches it, the three sections with their headings, and all three merge-row forms rendered from the shared `placeholders` module in the exact tokens the spec names.
-- **The spec's tags are the contract.** No row form is promoted to data on the argument that something adjacent is derivable; the queue, its ordering, the landing state and the awaiting-approval state have no backing surface.
-- **The optional landed wiring stays optional.** If it is taken, the landed rows' commit evidence arrives through a center-served answer that a non-GUI face can also reach; a desktop-side git invocation is forbidden either way. Leaving landed rows placeholder-served is a complete outcome for this task.
-- **Each placeholder region is structured for wiring** — one module, one entry per region, each traceable to the `placeholder:`-tagged line in `screens/merges.md` that authorises it.
-- Out of scope: the header, bottom bar and the preview column's placeholder-served blocks (`0269.2`), the `gates` and `sign-offs` blocks (`0269.4`), building any merge, queue or approval surface, and every shared primitive `0265` built.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+This is the cut where grammar rules 1, 2, 3 and 4 become code for a second
+consumer: colour chosen from a named state rather than at a call site
+(`grammar.md:6-22`), states rendered as words and never pills, badges or
+checkmarks (`grammar.md:24-29`), only `→` and `·` from the closed glyph set
+`↰ ↳ → · ∷` and no corner radius inside the canvas (`grammar.md:31-37`), the
+5px dot present because merges are one of rule 4's four qualifying stateful
+lists, and the bright-title selection rule held at the list level
+(`grammar.md:39-47`).
 
-## Prerequisites
+## Six corrections to the draft this plan replaces
 
-`0265.5` — the row vocabulary these rows compose, which chains back to the `placeholders` module `0265.2` created. `0265.9` — the title bar this screen's menu entry joins. `0258` — the source places the four new screens after its work item.
-"""
-validation = """
+**Correction 1 — the optional landed wiring is closed, not open.** The draft
+says landed rows "MAY be derived from the default branch's git log" and treats
+taking the option as a legitimate completion. Parent `0269` elects both of the
+artifact's optional regions into the placeholder form and states that the
+election binds (`0269:11`, `0269:98-107`, `0269:139`). Ruling: **landed rows are
+placeholder-served, exactly like the other two forms.** No landed revision, no
+landing time, no task-close claim and no landed-this-week count is derived from
+frame history, and no center capability — a default-branch history or a diffstat
+among them — is added for this screen. The reachability of a terminal
+`landed=<revision>` frame does not convert an option into a requirement; keeping
+all three sections placeholder-served is precisely what lets one row
+implementation cover them.
+
+**Correction 2 — "no inline placeholder literals" governs placeholder facts, not
+every string on the screen.** Read literally, the draft's rule routes the fixed
+headings `Landing`, `Awaiting approval` and `Landed`, and the menu word `Merges`,
+through the shared module — turning interface chrome into fake placeholder facts
+and poisoning the grep the rule exists to enable (`0269:80-84`). Ruling: the one
+shared `placeholders` module carries **exactly what a `placeholder:` tag
+authorises** — the row titles, the run-to-target descriptions, the detail beside
+each state word and each meta line of `screens/merges.md:23-29` — and nothing
+else. Section headings and the menu entry's label are ordinary interface text.
+
+**Correction 3 — the `placeholders` module is `0265.3`'s, not `0265.2`'s.** The
+draft's prerequisite note says the row vocabulary "chains back to the
+`placeholders` module `0265.2` created". `0265.2` serves a run's claimed task
+through the center and explicitly excludes the module (`0265.2:44`); `0265`
+records that **`0265.3` also creates the one `placeholders` module** (`0265:80`),
+`0265.3` creates it by seeding a single `watch raw` entry (`0265.3:173`,
+`0265.3:245`), and this task's declared dependency `0265.5` is the cut that
+depends on `0265.3` (`0265.5:739`). The module therefore arrives through the
+existing edge; the wrong number in the draft is a citation error, not a missing
+dependency. Discover the module from what `0265.3` actually landed.
+
+**Correction 4 — the export conflicts with the specification on two leaves of
+this cut, and each resolves toward the specification.** `reference/merges.html`
+is measurement, `grammar.md` and `screens/merges.md` are the specification
+(`0269:137`).
+
+- **`landed` renders in `ok`, not neutral.** Grammar rule 1 assigns `ok` to
+  settled good and names `landed` in its own list (`grammar.md:11-14`); the
+  export paints the landed state word `#8b909c`
+  (`reference/merges.html:539-545`, `591-598`). Accordingly `landing` is
+  `accent`, `awaiting approval` is `warn`, `landed` is `ok`. The dots already
+  agree — `#7fb2ff`, `#d8b46a`, `#7fc79a` at `reference/merges.html:326`, `395`,
+  `448`, `517`, `570` — so only the landed state *word* moves.
+- **Every row's description is the run-to-target form.** Parent goal 2 binds
+  merge rows to "a sans title, the run-to-target description and the end-aligned
+  state stack" (`0269:221`). The export's landing and awaiting rows already carry
+  it — `run-1a2b3c → main · guarded-change · closes 0257`,
+  `run-99ffe1 → main · every command ends in a panel`, `run-77cd10 → main ·
+  schema'd emissions` — while its landed rows substitute relative-time prose
+  (`reference/merges.html:533-540`, `586-593`). Content specification wins over
+  export content, and the substitution is reported as an owner correction against
+  the export rather than edited into it.
+
+A further conflict found during implementation resolves the same way and is
+reported. `.internal/docs/design/**` is implementation input and is never edited.
+
+**Correction 5 — the empty-section clause has no copy behind it, and no copy is
+invented.** The draft requires that "a section with no rows says so in the
+design's own voice". Neither `screens/merges.md` nor `reference/merges.html`
+supplies that copy, and the v1 placeholder set is statically nonempty at 1/2/2,
+so the clause is unexercised by this cut's own content. Ruling: the section list
+must not hide an empty section by construction; where an empty section is
+actually reachable, it reuses whatever empty-section voice the landed shared
+vocabulary already provides; if none exists and the case is reachable, the
+missing artifact copy is **reported as an unresolved gap** rather than filled
+with invented prose or hidden.
+
+**Correction 6 — the gap is the queue, not the merge.** The draft's framing —
+"no merge-queue surface exists in the backend" — is true only in its narrow
+reading, and the wide reading would either dismiss reusable evidence or invite a
+rebuild (`0269:34-42`). Ruling: what is absent is named precisely in code,
+comment and commit message — **no merge-queue order, no awaiting-approval state,
+no sign-off record, no queue counts**. What exists stays first-class and
+untouched: `ctx traits merge <run-id>` (`modules/cli/src/app/merge.rs:1-16`), the
+TUI `Screen::Merges` keymap with merge, deep-merge, print-path and drop
+(`modules/cli/src/app/dashboard/keymap.rs:90-111`), and durable merge frames.
+
+## Why every row on this cut is placeholder-served
+
+`screens/merges.md:23-29` tags all three row forms `placeholder:`, and the code
+agrees that nothing else is honest:
+
+- The center protocol's `Request`/`ResponseResult` variants cover registration,
+  subscription, start/control, list/get/resolve, run lookup, stats and the
+  standing wall, and carry **no** merge-queue request, response, queue order,
+  approval state, sign-off record or queue count
+  (`modules/io/src/center.rs:84-208`). `CenterDelta` carries appeared/changed/
+  ended rows and activity lines only (`center.rs:265-281`). No sign-off type and
+  no `awaiting approval` state exists anywhere under `modules/**`.
+- `CenterPublicRow` carries `RunSummary`, `repo_key`, `repo_path`, `ledger_path`,
+  `live` and the ledger's `modified_epoch_secs` (`center.rs:3778-3788`). An mtime
+  is recency, not queue order and not landing chronology.
+- `RunSummary.landing` is durable **terminal** evidence — `landed`, `not-merged`,
+  `parked`, `merge-failed` — and is `None` mid-run, for non-worktree runs and for
+  clean-tree completed runs (`modules/io/src/run_summary.rs:48-69`, `169-186`).
+- `MergeStatus`'s `LockAcquired`, `GatesPassed` and `Reconciled` are durable
+  **checkpoints** that `is_terminal` excludes by construction
+  (`modules/core/src/procedure/session.rs:617-670`); a last non-terminal frame
+  survives a crash unchanged, so reading one as "landing now" yields a row that
+  is permanently wrong.
+- `MergeFrame` carries **no timestamps** by contract (`session.rs:1040-1066`), so
+  no relative landing time and no landed-this-week count is derivable.
+- Live merge progress exists only as CLI-local `MergeLive`, an optional
+  `ActivityEvent` presentation sink whose dashboard caller passes `None`
+  (`merge.rs:44-96`). It is a presentation channel for one in-process
+  invocation, not a center-served queue lifecycle.
+- The TUI's `merges_from_center_rows` is **not** this queue and is not the model
+  to copy: it sorts by descending ledger mtime with ledger-path tie-breaking,
+  skips unreadable and non-terminal rows, and classifies the rest as `Mergeable`,
+  `Parked`, `Failed` or `Landed` (`modules/cli/src/app/dashboard.rs:2505-2609`).
+  None of those four means "landing now" or "awaiting approval". The TUI
+  `MergeRow` and its selection-triggered Git-derived preview
+  (`dashboard.rs:372-449`) are `ctx-traits-cli`-private and unsuitable as a
+  desktop model.
+
+So this cut has **no data leaf at all**: no center request, no full-session
+reconstruction, no ledger read, no store read, no sidecar read, no Git call, no
+timer and no new shared protocol.
+
+## Grounded against HEAD 3fd4906a0
+
+Nothing this task edits exists yet. Root `Cargo.toml` names only the existing
+Rust modules and fixture-agent and excludes only `packages/cdk`; root
+`Cargo.lock` contains no `gpui` package; there is no desktop manifest, no desktop
+lockfile, no gpui source tree, no desktop asset directory, no desktop command and
+no desktop CI lane anywhere in the repository. Every desktop path, module name,
+symbol and signature named below is therefore a guess to be replaced by reading
+what `0256.1`, `0265.3`, `0265.5`, `0265.7` and `0265.9` actually landed.
+
+Every prerequisite is still open at this HEAD: `0265.5` is `ready`, `0265.9` is
+`draft`, `0258` and all its children are `ready`, and `0256.1` is `ready`. Note
+also that `draft` is not a storable status — `TaskStatus` is the closed set
+`ready|done|cancelled` (`modules/core/src/task/mod.rs:22-31`) whose `parse`
+rejects anything else (`mod.rs:208-220`), so `FilesTaskBoard::load` records the
+rejection and skips the document (`modules/io/src/task_files.rs:186-250`).
+Activating a sibling or prerequisite draft is board bookkeeping outside this
+cut's code scope.
+
+**The overflow component's dependency edge was missing, and is now declared.**
+Parent `0269:145` requires reusing the overflow component `0265` extracted rather
+than building another, goal 9 binds this cut to it, and `0265.7` owns it. The
+draft's `depends-on` named `0265.5`, `0265.9` and `0258` only, and `0265.7` is
+reachable from none of them: `0265.7` itself depends on `0265.5`
+(`0265.7:707`), so the two are siblings under one parent and the edge is absent
+rather than transitive. A binding goal over a component with no edge to it is the
+same scheduling defect as a binding goal over a lane with no edge to it, so
+`0265.7` joins `depends-on`. If the shared clip-and-fade has nonetheless not
+landed at execution time, that is an unmet prerequisite reported as one, **not**
+permission to write a Merges-local replacement.
+
+**No command in this repository executes a gpui render, so none is declared as a
+board check.** A check runs under `sh -c` in a clean detached worktree of the
+merged sha, so a command written here on the expectation that a dependency
+creates it later would read as evidence while being unrunnable. The two declared
+checks are commands that exist in this tree today. `0256.1` reached the same
+conclusion about the same command for the same reason (`0256.1:15`).
+
+**The desktop lane exists by the time this task is dispatchable, and that is a
+dependency fact rather than a hope.** This task's declared edge to `0265.5`
+chains `0265.5 → 0265.3` (`0265.5:739`), `0265.3 → 0265.1` (`0265.3:415`) and
+`0265.1 → 0256.1` (`0265.1:293`); `0256.1` establishes the standalone desktop
+project and does not close until "its documented independent build and test
+commands pass from a clean checkout" (`0256.1:17`). The lane and its
+non-interactive command are therefore a **dispatch precondition** of this task,
+not a discovery gamble. The command cannot be written into this file because it
+does not exist at the HEAD this plan was authored against, and a named command
+that does not exist is a fabrication that a board check would execute as if it
+were evidence. Goal 0 resolves that by making the command's resolution and a
+baseline run of it the run's **first** action, ahead of every edit: if the chain
+has not in fact landed and no such command exists or it fails because the
+manifest, lane or command is absent, the run stops there, writes no code, and
+reports an unmet dependency on `0256.1`. An unrunnable primary proof is then a
+scheduling failure caught in seconds — never a task that limps to a pass on a
+diff read.
+
+**Static review decides the structural half and cannot decide the runtime half.**
+The closing reads of `git diff main...HEAD`, `git diff --name-only main...HEAD`
+and `git status --short` establish what a running harness does not show cheaply —
+duplicated row or layout logic, a second placeholders module, inline placeholder
+facts, headings misfiled as placeholders, literals at call sites, CLI-private
+imports, direct reads, timers, new center capability, queue inference,
+sibling-owned work and design-artifact edits. They do not establish that a row
+rendered or that a selection held; the desktop lane decides those.
+'''
+scope = '''
+## GOALS — binding
+
+### What decides these goals
+
+Three mechanisms decide the goals below, and each is used only for what it can
+actually observe.
+
+**The desktop lane, executed.** The menu entry and its switch, the rendered
+sections and rows, the state roles, the selection invariant, the placeholder
+provenance and the fit/overflow behaviour are runtime outcomes; they are decided
+by focused coverage run in the desktop build-and-test lane that the dependency
+chain `0269.1 → 0265.5 → 0265.3 → 0265.1 → 0256.1` guarantees has landed before
+this task is dispatchable. Goal 0 resolves that lane's exact documented
+non-interactive command and runs it before any edit; goal 13 runs the same
+command again over this cut's added cases and requires exit 0.
+
+No goal writes that command as a literal and no check declares it, because it
+does not exist at the HEAD this plan was authored against and a board check must
+already exist and run repo-root-relative in a clean detached worktree — writing
+one now would fabricate it, exactly as `0256.1:15` concluded for the same
+command. Unnameable here is not unrunnable there: goal 0 pins resolution to the
+landed project's own documentation, gives that resolution a definite two-way
+outcome, and makes the absent-lane case a hard stop before a line is written
+rather than a Done-when clause left hanging.
+
+**The two declared checks**, which exist in this repository today:
+
+- `just test` — the per-round workspace gate, showing the workspace stayed green
+  and unchanged in cost while this cut landed entirely outside it.
+- The root gpui-free resolution and lockfile check.
+
+**The closing static read** of the diff printed by `git diff main...HEAD`,
+`git diff --name-only main...HEAD` and `git status --short` — commands that exist
+today — against `screens/merges.md:12-31`, `grammar.md:6-91`, `tokens.md:15-84`
+and `reference/merges.html:57-91`, `261-264`, `298-365`, `367-610`. Its
+inspection list is fixed by goal 14. It decides code shape and forbidden
+constructs, never that something rendered; wherever a goal names a runtime
+outcome the desktop lane decides it and this read only supplements. It cannot be
+a board check, because a check runs in a clean detached worktree of the merged
+sha with no base to diff against.
+
+0. **The desktop lane's command is resolved and run green before anything is
+   edited.** The run's first action, ahead of every edit, is to locate the
+   standalone desktop project the chain through `0256.1` landed and to run its
+   documented non-interactive build-and-test command unchanged, from the location
+   that documentation gives, on the untouched tree. Resolution is not open-ended:
+   the command is read out of that landed project's own documentation — its
+   manifest, README, justfile or CI lane — and the outcome is two-way. Either
+   exactly one such documented command is found and it runs, or none is.
+   Decided by that command running to a result on the unmodified tree and exiting
+   0, reported verbatim with its outcome. That is the baseline every later run of
+   it in goal 13 is compared against, so a later red is attributable to this
+   cut's code rather than to an inherited one.
+   If no such command exists, or it fails because the manifest, lane or command
+   is absent rather than because of anything this cut did, the prerequisite chain
+   was not honoured: the run stops here, writes no code, and reports an unmet
+   dependency on `0256.1`. That report is the whole task outcome, not a warning
+   to proceed past — a plan whose primary proof cannot run must not produce a
+   diff.
+   Excluded: standing up a desktop lane, manifest or command of the run's own;
+   editing any file before this step returns; repairing an inherited red baseline,
+   which belongs to the task that owns the lane; treating a green `just test`, a
+   green root-resolution check or a clean diff read as a substitute for it.
+
+1. **The `Merges` menu entry and the pane it reaches land together.** The
+   title-bar menu registry `0265.9` landed gains exactly one new entry, `Merges`,
+   registered at the fourth slot of the canonical order `Sessions`, `Traits`,
+   `Tasks`, `Merges`, `Config` (`screens/merges.md:14-15`;
+   `reference/merges.html:57-91`) so the visible menu stays in canonical slot
+   order as the remaining screens appear, bright while the screen is current and
+   `text-secondary` otherwise. Selecting it switches to a Merges pane that renders
+   this cut's content, so the entry never leads to an empty screen. Canonical slot
+   placement is unconditional; visible relative position is not, because a screen
+   whose pane does not exist contributes no entry.
+   Decided by focused coverage in the landed desktop lane (goal 13): the menu
+   carries a visible `Merges` entry, activating it switches to the Merges pane, the
+   active entry is the only bright one, and the visible entries appear in canonical
+   slot order with no entry whose pane is absent — so `Merges` follows `Tasks` and
+   precedes `Config` exactly where those panes exist, and neither relative position
+   is asserted where they do not; and by the closing static read showing the entry
+   was added at its canonical slot in `0265.9`'s registry rather than to a
+   Merges-local menu.
+   Excluded: adding dead `Tasks` or `Config` entries merely to bracket `Merges` —
+   `0265.9:15` binds an entry to appear only when its screen does; a second menu
+   or switch mechanism; reordering or restyling entries other screens own; the
+   window frame, traffic lights, logo and menu geometry, which are `0265.9`'s.
+
+2. **The three sections render with their headings and their 1/2/2 rows.** The
+   main pane renders exactly `Landing — 1`, `Awaiting approval — 2` and
+   `Landed — 2` in that order, headings mono 11 `text-muted`, section container
+   gap 12, row list gap 4, over one, two and two rows respectively
+   (`screens/merges.md:21-29`; `reference/merges.html:298-310`, `367-379`,
+   `489-501`).
+   Decided by focused coverage in the landed desktop lane (goal 13) observing
+   three sections in that order with those headings and those row counts; and by
+   the closing static read against `screens/merges.md:21-29` and the export's
+   geometry ranges.
+   Excluded: a fourth section; a section count derived from anything other than
+   the placeholder content it renders; the header and its summary, the bottom bar
+   and the preview column (`0269.2`); the `gates` and `sign-offs` blocks
+   (`0269.4`).
+
+3. **One merge-row implementation covers all three sections.** Landing, awaiting
+   and landed rows are the same renderer over supplied state, semantic role and
+   content — not three copied layouts — composed from the row and list vocabulary
+   `0265.5` landed, since `screens/merges.md:22-23` specifies merge rows as the
+   task-row shape. Each row carries the task-row geometry: padding `[8,12]`,
+   `space-between`, top-aligned; left column gap 12 with a 5px dot at top offset
+   6; a title-over-description stack at gap 2 with title sans 12.5 and description
+   sans 11 `text-secondary`; a right column end-aligned, mono 10.5, gap 2, state
+   over meta (`screens/tasks.md:14-23`; `reference/merges.html:312-364`,
+   `381-487`, `503-608`).
+   Decided by focused coverage in the landed desktop lane (goal 13) observing each
+   of the three forms rendering its own dot role, title, description and two-line
+   right stack through the same row path; and by the closing static read for the
+   structural half — one row renderer and one row data shape, with no per-section
+   layout copy and no Merges-local row, dot, selection or geometry primitive
+   beside `0265.5`'s.
+   Excluded: three row components; a Merges-local status dot, list row or
+   selection primitive; importing CLI-private types — the TUI `MergeRow` and its
+   Git-derived preview (`dashboard.rs:372-449`) are `ctx-traits-cli`-private and
+   are not a desktop model; a checkmark, pill, badge, icon or emoji standing in
+   for a state; any glyph outside `↰ ↳ → · ∷`, of which this cut needs only `→`
+   and `·`; any corner radius inside the canvas beyond rule 4's 5px ellipse.
+
+4. **State roles are semantic and `landed` renders `ok`.** Landing rows take an
+   `accent` dot with `landing · deep merge` in `accent` over a muted
+   gates/diffstat meta line; awaiting rows take a `warn` dot with
+   `awaiting approval` in `warn` over a muted stats/sign-off meta line; landed
+   rows take an `ok` dot with `landed` in **`ok`** over a muted commit sha,
+   resolving the export's neutral landed word per content Correction 4
+   (`grammar.md:6-22`; `reference/merges.html:539-545`, `591-598`). States are
+   words. Every value — `accent #7fb2ff`, `warn #d8b46a`, `ok #7fc79a`,
+   `surface-raised #16181d`, `text-bright #eceef2`, `text #d7dae0`,
+   `text-secondary #8b909c`, `text-muted #585d68` (`tokens.md:15-48`) — and every
+   size, spacing, weight and family comes from the shared token entry point
+   `0265.1` landed. No colour, size, spacing, weight or family literal at a call
+   site in this cut.
+   Decided by focused coverage in the landed desktop lane (goal 13) observing each
+   form's dot role, state word and meta tone, with the landed state word in the
+   `ok` role rather than a neutral one; and by the closing static read against
+   `grammar.md:6-29`, `tokens.md:15-84` and the export's row ranges for the
+   absence of literals at call sites and of a Merges-local colour or word table.
+   Excluded: a second colour/word table beside the shared state presentation; the
+   light column of `tokens.md`; colour used for emphasis rather than meaning; a
+   system font fallback — `tokens.md:6-12` names IBM Plex Sans and Mono, `0265.1`
+   owns resolving the faces, and this cut consumes what it landed.
+
+5. **The initially selected row is the sole `Landing` row, and at most one bright
+   title is held at the list level across all three sections.** On first render
+   the selection rests on the single row of the `Landing` section, as the export
+   shows (`reference/merges.html:312-364`). Exactly the selected row takes
+   `surface-raised` fill and a `text-bright` title; unselected titles take `text`;
+   there is no border, pill, radius or accent bar (`grammar.md:39-47`). The
+   singular-selection invariant survives selection moving between rows and between
+   sections, so no caller can produce a second bright title by rendering a row in
+   isolation.
+   Decided by focused coverage in the landed desktop lane (goal 13): the first
+   render carries exactly one bright title and it is the `Landing` section's only
+   row — an initially selected awaiting or landed row fails this goal even though
+   the cardinality holds — and moving selection within a section and across a
+   section boundary leaves exactly one bright title, with no arrangement producing
+   two; and by the closing static read showing brightness is a function of the
+   supplied selection expressed by the list primitive rather than a per-row flag or
+   a function of the row's state.
+   Excluded: a per-row `is_bright` flag the caller sets freely; a per-section
+   selection that lets two sections each hold a bright row; a border, pill, radius
+   or accent bar marking selection; an initial selection resting anywhere but the
+   sole `Landing` row.
+
+6. **The description on every row is the run-to-target form.** Each row's
+   description carries the run, the `→` target and the `·`-joined trailing
+   segments, exemplified by `run-1a2b3c → main · guarded-change · closes 0257`
+   (`screens/merges.md:24-25`; `0269:221`), including on landed rows, resolving
+   the export's relative-time landed prose per content Correction 4. A missing
+   segment leaves no dangling separator.
+   Decided by focused coverage in the landed desktop lane (goal 13) observing the
+   run-to-target form on all five rendered rows including both landed rows; and by
+   the closing static read against `screens/merges.md:23-29` and
+   `reference/merges.html:533-540`, `586-593`, with the export deviation recorded
+   as a resolved conflict.
+   Excluded: relative-time prose on landed rows; a landing time, landed-this-week
+   count or task-close claim derived from evidence; `→` on an action label — rule
+   3 admits it on consequence rows and in this description form only.
+
+7. **Row content is served from the one shared `placeholders` module; fixed
+   labels are not.** Every string `screens/merges.md:23-29` tags `placeholder:` —
+   row titles, run-to-target descriptions, the detail beside each state word and
+   each meta line — resolves through the single module `0265.3` created, with
+   exactly the entries this cut renders added and each traceable to the tagged
+   line that authorises it, structured so a section's content can be replaced by
+   real queue data without archaeology. The section headings `Landing`,
+   `Awaiting approval` and `Landed` and the menu label `Merges` are ordinary
+   interface text and stay out of that module (content Correction 2).
+   Decided by the closing static read of `git diff main...HEAD` showing the
+   entries added to that one module and resolved at the call sites, with no inline
+   row string, no duplicate literal, no second `placeholders` module and no
+   heading or menu label routed through it; and by focused coverage in the landed
+   desktop lane (goal 13) that the rendered row content resolves through the
+   module rather than inline copy.
+   Excluded: a registry, lookup framework, trait or macro layer; a second
+   placeholder module; entries no cut renders yet; the header summary, bottom bar,
+   preview blocks and footer sentence, which arrive with `0269.2` and `0269.4`;
+   presenting `doctor schema guard`, `run-1a2b3c`, `0257`, `+27 −1`, `7e90ad11`
+   or any other design illustration as center-derived evidence.
+
+8. **No queue fact is invented and no data leaf is introduced.** Nothing on this
+   cut infers an active landing, a queue position, a queue order, an
+   awaiting-approval state, a landing chronology or a landed-this-week count from
+   center rows, run summaries or frame history; landed rows in particular derive
+   nothing from frame evidence (content Correction 1). No center request,
+   response, delta or capability is added, and no default-branch-history or
+   diffstat capability is built.
+   Decided by the closing static read of `git diff main...HEAD` for a
+   `RunSummary`, `MergeStatus`, `MergeFrame`, `merges_from_center_rows`,
+   `MergeLive` or ledger-mtime read, a new served shape in
+   `modules/io/src/center.rs`, or any classification of rows into queue states;
+   and by focused coverage in the landed desktop lane (goal 13) that the rendered
+   sections are unchanged by the presence or absence of center rows, because their
+   content is placeholder-served.
+   Excluded: reading `RunSummary.landing`, `has_merge_frames`, `last_merge_status`
+   or `last_terminal_merge_frame` for these rows; reusing `MergeLive` as queue
+   state; sorting by `modified_epoch_secs`; building a merge queue, an approval
+   flow, a sign-off mechanism or any queue mutation.
+
+9. **Overflow clips and fades through the shared component.** The section list
+   sets clip and, when its content actually overflows, shows the full-pane-width
+   100px bottom fade with a centred mono 10.5 `text-faint` `scroll to end`; when
+   content fits there is no fade (`grammar.md:86-91`; `tokens.md:84`). It reuses
+   the clip-and-fade component `0265.7` landed (`0269:145`).
+   Decided by focused coverage in the landed desktop lane (goal 13) with content
+   that fits and content that overflows, observing no fade in the first case and
+   the fade with its centred hint in the second; and by the closing static read
+   showing the shared component consumed rather than a Merges-local fade.
+   Excluded: a Merges-local clip-and-fade; a fade that shows when content fits. If
+   that shared component has not landed at execution time, that is an unmet
+   prerequisite reported as one — `0265.7` is now a declared dependency, see
+   content, "The overflow component's dependency edge was missing, and is now
+   declared" — not permission to write a replacement.
+
+10. **An empty section is never silently hidden, and no copy is invented.** The
+    section list does not drop a section because it has no rows. The v1
+    placeholder set is statically 1/2/2, so no section of this cut is empty;
+    where an empty section is nonetheless reachable it reuses whatever
+    empty-section voice the landed shared vocabulary provides, and if none exists
+    the missing artifact copy is reported as an unresolved gap in the work
+    summary (content Correction 5).
+    Decided by the closing static read for a branch that hides a section, and by
+    focused coverage in the landed desktop lane (goal 13) only where the case is
+    actually reachable.
+    Excluded: inventing empty-state prose; adding a design-artifact edit to supply
+    it; asserting on a case this cut's content cannot reach.
+
+11. **The rows read nothing, poll nothing and write nothing.** This cut performs
+    no center request, no full-session reconstruction, no ledger, store, sidecar
+    or worktree read, no Git call and no filesystem access at render time; it
+    installs no timer, interval or spawned tick and performs no blocking receive
+    on gpui's UI thread. Where surrounding screen state consumes the landed
+    snapshot/delta model, it consumes it — staging a complete snapshot, committing
+    only an accepted projection, cloning accepted rows before a delta, retaining
+    last-accepted on rejection and reconnecting for a fresh snapshot
+    (`modules/cli/src/app/dashboard/worker.rs:254-415`, `443-457`) — rather than
+    adding a second reducer, and center loss stays explicit rather than presented
+    as current. Nothing here writes, locks, mutates a queue or opens a merge
+    action; the TUI's merge, deep-merge, print-path and drop behaviour is
+    untouched.
+    Decided by the closing static read of `git diff main...HEAD` for a timer,
+    interval, spawned tick, blocking receive on the UI thread, per-row read,
+    direct filesystem or Git path, second reducer or write path, and for the TUI
+    merge paths being unmodified; by the declared `just test` check staying green;
+    and by focused coverage in the landed desktop lane (goal 13) that rendering
+    the sections triggers no read.
+    Excluded: consuming today's center `Get`, which reads a selected ledger
+    synchronously inside `handle_request` (`modules/io/src/center.rs:3595-3669`)
+    and is not the sanctioned off-owner-path shape; resolving repository identity
+    from the desktop process cwd rather than `CenterPublicRow.repo_key`/
+    `repo_path` — this row-only cut should need no repository identity at all; a
+    desktop-side fallback reader when a center answer is missing, ambiguous,
+    unreadable, rejected or disconnected.
+
+12. **The workspace does not learn about gpui.** Root Cargo resolution and the
+    root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+    member, and the per-round workspace gate stays green and unchanged in cost.
+    Decided by the two declared checks.
+    Excluded: adding the desktop project to root workspace members; adding gpui
+    cost to `just test`, `just test-full` or the existing macOS/Linux CI lanes; a
+    grep forbidding the word `gpui` in `Justfile` or `.github/workflows/` — a
+    *separate* desktop lane there is sanctioned, so such a check would red on the
+    sanctioned outcome; declaring a board check that executes the desktop lane
+    before `0256.1` has landed one.
+
+13. **The landed desktop lane runs green over this cut's cases.** The command
+    goal 0 already resolved and ran green on the untouched tree is now the gate
+    for this cut: its harness is extended with focused
+    coverage of the outcomes goals 1-11 assign to it — a visible `Merges` entry at
+    its canonical slot with its switch and no dead entries, its position relative
+    to `Tasks` and `Config` asserted only where those panes exist, the three sections
+    with 1/2/2 rows, each row form's dot role, title, run-to-target description
+    and right-side state/meta stack with `landed` in `ok`,
+    the initially selected row being the sole `Landing` row,
+    and exactly one bright title while
+    selection moves within and across sections, row content resolving through the
+    shared `placeholders` module, content that fits rendering no fade and content
+    that overflows rendering the fade with its centred hint, and any reachable
+    empty-section behaviour — run, and green. It exits 0, and the work summary
+    names it verbatim with its outcome.
+    Decided by that command's exit status, reported verbatim, against the goal 0
+    baseline. It is not declared as a board check because it does not exist at the
+    HEAD this plan was written against and a check must already exist; that is a
+    naming limit, not a relaxation, and goal 0 is what converts it into a command
+    that has demonstrably run before this goal depends on it. The absent-lane case
+    cannot reach this goal — goal 0 stops the run first.
+    Excluded: standing up a parallel desktop lane of the run's own; substituting
+    the workspace checks or the closing diff read for it; weakening the coverage
+    to compile-only; declaring it as a board check; a path, word or
+    file-existence inventory test, and any test that depends on this repository's
+    committed task board, trait set or runtime document — use harness fixtures or
+    scratch state.
+
+14. **The normative artifacts are untouched, and the pass is reviewed once and
+    bounded.** No file under `.internal/docs/design/` is modified, and no
+    sibling-owned region appears in this cut's changes. Content Correction 4's two
+    export conflicts are raised as owner corrections against the design source,
+    never edited into it. Before the task is called done, the diff printed by
+    `git diff main...HEAD` is read against `screens/merges.md:12-31`,
+    `grammar.md:6-91`, `tokens.md:15-84` and `reference/merges.html:57-91`,
+    `261-264`, `298-365`, `367-610`, leaf by leaf, specifically inspecting for:
+    duplicated row or layout logic, a second `placeholders` module, an inline
+    placeholder fact, a fixed heading routed through placeholders, a token or
+    geometry literal at a call site, a neutral landed state, more than one bright
+    title, a timer, a direct desktop read, a CLI-private import, a new center, Git
+    or diffstat capability, queue inference, sibling-owned chrome or preview work,
+    and edits under `.internal/docs/design/**`. The tree it was read from is the
+    tree that lands: `git status --short` prints nothing.
+    Decided for the path exclusion by `git diff --name-only main...HEAD`
+    containing no path under `.internal/docs/design/`, and for sibling-owned work
+    by the read of the full diff itself: `0269.2` and `0269.4` own regions — the
+    header, bottom bar, preview frame, merge/landing/footer blocks, gates and
+    sign-offs — not established files, so the region test is what the changed
+    hunks show, and sharing a Merges screen file with a later cut is expected
+    rather than a violation. No board check can decide this, because a check runs in a clean
+    detached worktree of the merged sha with no base to diff against; if the run
+    branched from something other than `main`, substitute that base
+    (`git merge-base` resolves it).
+    Exactly one targeted repair cycle is allowed: run the commands in the order
+    given under Bounded refinement, repair one named defect, and rerun that
+    command and everything after it. If a second cycle would be needed, stop and
+    report the exact failing command — or the unresolved visual or data contract —
+    with its evidence, rather than iterating.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against, and
+every prerequisite is still open. Read what they landed; do not carry a guess from
+this file into an edit.
+
+- Root `Cargo.toml`'s exclude list and the top-level listing are the suggested way
+  to locate the desktop project; its manifest, README, justfile or CI lane is
+  where its documented command is likely written. Goals 0 and 13 bind that
+  command and the order it runs in; this bullet only suggests where to look.
+  Resolve and run it before reading anything else below — a lane that is absent
+  ends the run, and every discovery step after this one would then be wasted.
+- Read `0265.9`'s title-bar menu registry and screen switch, and add the `Merges`
+  entry and its pane there in one change.
+- Read `0265.5`'s row and list vocabulary — the row geometry, the status dot, the
+  state presentation and the list-level selection primitive — and compose the
+  merge row from it.
+- Read `0265.3`'s `placeholders` module (content Correction 3: `0265.3` creates
+  it, not `0265.2`) and add exactly this cut's row entries beside its existing
+  ones.
+- Read `0265.7`'s clip-and-fade component and wrap the section list in it.
+- Read `0265.1`'s token and font entry point and take every value from it —
+  `surface-raised #16181d`, `text-bright #eceef2`, `text #d7dae0`,
+  `text-secondary #8b909c`, `text-muted #585d68`, `accent #7fb2ff`,
+  `warn #d8b46a`, `ok #7fc79a` and the layout constants (`tokens.md:15-48`,
+  `71-84`) are that module's contents, not this call site's.
+
+### Edit order
+
+1. The merge-row data shape and the single row renderer, composed from `0265.5`'s
+   row vocabulary, with state and semantic role supplied rather than branched per
+   section.
+2. The section component — heading at mono 11 `text-muted`, gap 12, row list at
+   gap 4 — reusing `0265.5`'s list primitive so the selection invariant is owned
+   in one place across all three sections.
+3. The `placeholders` entries for the three row forms, each traceable to its
+   tagged line in `screens/merges.md:23-29`, and their resolution at the row call
+   sites.
+4. The Merges pane assembling the three sections inside `0265.7`'s clip-and-fade.
+5. The `Merges` menu entry and switch in `0265.9`'s registry, landed together with
+   the pane.
+6. The focused proofs in the desktop lane, then that lane's command, then the
+   declared checks, then the closing diff read. Goal 0's baseline run of that
+   same command precedes step 1, not step 6.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `MergeRowData { state, title, description, meta }` with
+the state carrying the semantic role, a `merge_row(data, selected)` component over
+`0265.5`'s row primitive, a `merge_section(heading, rows)` and a
+`merges_pane(sections, selection)` that delegates the bright-title invariant to
+`0265.5`'s list primitive and the clip-and-fade to `0265.7`'s. Names, module paths
+and signatures follow whatever conventions `0256`, `0265.1`, `0265.3`, `0265.5`,
+`0265.7` and `0265.9` established. Where a section's placeholder content is
+assembled, a single replaceable per-section content source is the suggested shape
+— enough that later real queue data replaces it in one place, and no more; a
+backend interface or trait boundary now would be the speculative extraction
+`0269:144` forbids.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the landed harness is the run's call.
+
+- The visible menu is in canonical slot order — `Merges` after `Tasks` and before
+  `Config` wherever those panes exist — with no dead entries, and activating
+  `Merges` reaches a non-empty pane.
+- Three sections in order with their headings and one, two and two rows.
+- Each of the three forms renders its own dot role, state word colour and meta
+  tone, with the landed state word in `ok`.
+- All five rows carry a run-to-target description with `→` and `·` and no dangling
+  separator.
+- Exactly one bright title initially; still exactly one after selection moves
+  within a section and after it crosses a section boundary.
+- Row strings resolve through the shared `placeholders` module rather than inline
+  copy.
+- Content that fits renders no fade; content that overflows renders the 100px fade
+  with a centred `scroll to end`.
+- Any empty-section behaviour that is actually reachable.
+
+### Reuse points
+
+`0265.9`'s title-bar menu registry and screen switch; `0265.5`'s row geometry,
+status dot, state presentation and list-level selection primitive; `0265.3`'s
+single `placeholders` module; `0265.7`'s clip-and-fade; `0265.1`'s token and font
+entry point for every value. The landed snapshot/delta reducer is the semantics to
+consume where surrounding state needs it, never to reimplement
+(`modules/cli/src/app/dashboard/worker.rs:254-415`, `443-457`). Named so nothing
+re-derives or contradicts them, though this cut renders through none of them: core
+`MergeFrame` and `MergeStatus::is_terminal`
+(`modules/core/src/procedure/session.rs:617-670`, `1040-1066`), `RunSummary`'s
+merge leaves (`modules/io/src/run_summary.rs:48-69`, `169-186`), and the CLI's
+merge command and TUI Merges keymap (`modules/cli/src/app/merge.rs:1-16`;
+`dashboard/keymap.rs:90-111`).
+
+### Reporting mechanics — suggestions
+
+What must be reported is fixed by GOALS and Done when; this subsection only
+suggests how. Quoting each executed command in a fenced block with its exit status
+beside it reads better than prose. Naming the discovered desktop path next to that
+lane's command helps `0269.2` declare it as a board check. Stating the two owner
+corrections under their own heading — the neutral landed state word and the landed
+rows' relative-time descriptions — keeps them from reading as commentary, as does
+stating the overflow-dependency gap if it bites. Deviations from this approach are
+reported in the work summary as deviations; that is a report, not a violation and
+not an escalation.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml` and the desktop directory inherits that pin unless `0256.1`
+gave it its own toolchain file. Keep any repair scoped to the one red command and
+preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The header and its summary, the bottom bar and the preview column's frame,
+  `merge`, `landing` and footer blocks (`0269.2`); the `gates` and `sign-offs`
+  blocks (`0269.4`).
+- Building a merge queue, an approval flow, a sign-off mechanism or any queue
+  mutation; a center default-branch-history or diffstat capability; any change to
+  `modules/cli/src/app/merge.rs` or the dashboard's merge actions.
+- Wiring landed-row evidence; extracting or copying `merge_story::gate_rows`.
+- Every shared primitive `0265` built — rows, dots, selection, headers, bars,
+  rail, title menu, overflow, tokens, fonts, the `placeholders` module — is
+  consumed, never re-created Merges-locally.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- A second placeholders module, registry, macro framework or generic capability; a
+  design-system phase or primitives extracted for screens that do not exist yet.
+- Any ledger, store, sidecar, worktree, Git or filesystem read on the desktop
+  side; a GUI poll loop; a blocking receive on gpui's UI thread; a second reducer.
+- A `[[checks]]` entry that executes the desktop lane. No such command exists in
+  the repository today, so declaring one now would be a fabrication. The lane
+  still binds through goal 13.
+- The other three new screens (`0266`, `0267`, `0268`), packaging (`0260`), the
+  summons surface (`0259`), and pencil work of any kind.
+- Anything discovered beyond these goals: that is board material, not a cell here.
+'''
+validation = '''
 ## Watch
 
-- **Do not fabricate merge state.** Deriving an actively-landing run, an awaiting-approval state or a queue order from center rows invents state the projection does not carry; `RunSummary.landing` is `None` mid-run by design.
-- **No inline placeholder literals.** Every string on these rows comes from the one shared module.
-- **Merge rows carry 5px dots** because merges are one of rule 4's four stateful lists — and the dot never appears in prose. One bright title per list; selection is `surface-raised` fill plus `text-bright`, never a border, radius or accent bar.
-- **Colour is semantic**: accent for landing because it is happening right now, warn for what needs the owner, ok for what has settled. Nothing coloured for emphasis.
-- **A section with no rows says so in the design's own voice** rather than being hidden.
-- **No poll loop**, no blocking read on gpui's UI thread, and no compact-row ledger, store or sidecar reads.
-- **Repository identity comes from the center row**, not the desktop process's cwd.
-- **Fail-loud, no direct-reader fallback** for anything that is wired.
-- **Overflow clips with a bottom fade and a centred `scroll to end`, and only when content actually overflows.**
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Do not fabricate merge state.** `RunSummary.landing` is terminal evidence and
+  `None` mid-run by contract; a last non-terminal frame is a checkpoint, not
+  liveness; `MergeLive` is a CLI-local presentation sink; frames carry no
+  timestamps; ledger mtime is recency, not order. Deriving an actively-landing
+  run, an awaiting-approval state, a queue position or a landing time from any of
+  them invents state the projection does not carry.
+- **Do not take the landed-row option.** Parent `0269` elected it closed (content
+  Correction 1). Reaching for a landed revision because it is reachable widens the
+  leaf rather than completing it, and would split one row implementation into two.
+- **Do not overclaim the gap.** The merge command, the TUI Merges screen and
+  durable merge frames exist. What is missing is the queue order, the approval
+  state, the sign-off record and the queue counts. Saying "no merge surface
+  exists" in code, comment or commit message is the wrong claim.
+- **No inline placeholder literal, and no fixed label misfiled as a placeholder.**
+  The shared module carries exactly what a `placeholder:` tag authorises;
+  `Landing`, `Awaiting approval`, `Landed` and the menu word `Merges` are ordinary
+  interface text.
+- **No design example string is ever rendered as data.** `doctor schema guard`,
+  `run-1a2b3c`, `0257`, `+27 −1`, `7e90ad11`, `0252.1 — one output grammar` and
+  the rest are illustrations, valid only as shared-module content.
+- **Colour is semantic**: `accent` for landing because it is happening now, `warn`
+  for what needs the owner, `ok` for what has settled — including the landed state
+  word, which the export paints neutral and grammar rule 1 does not.
+- **No literal values at a call site.** Every colour, size, weight, spacing and
+  family comes from `0265.1`'s token entry point; a hex inside a primitive is the
+  same defect as a hex inside a screen. `tokens.md` names IBM Plex Sans and Mono
+  and this screen must not silently fall back to a system face.
+- **The glyph set is closed** — `↰ ↳ → · ∷`, and this cut needs only `→` and `·`.
+  No icons, no emoji, no checkmark standing in for a state, no arrow on an action
+  label. No corner radius inside the canvas; rule 4's 5px ellipse is the state
+  marker, not row chrome.
+- **Dots belong to stateful lists only.** Merge rows are one of rule 4's four;
+  prose is not, and no later region may inherit a dot because this cut made one
+  easy.
+- **Bright follows selection, not state**, and the invariant is the list's, not
+  each row caller's — otherwise two sections each hold a bright row the moment
+  selection moves.
+- **No poll loop**, no timer, no blocking read on gpui's UI thread, and no
+  compact-row ledger, store, sidecar or Git read. This cut has no data leaf at
+  all, so any read it introduces is by definition out of scope.
+- **Snapshot-then-delta ordering is the contract** for whatever surrounding state
+  this pane sits inside: no lost, duplicated or partially committed visible state,
+  and a fresh snapshot after a rejected candidate. Consume the landed reducer; do
+  not add a second one.
+- **Repository identity comes from the center row**, not the desktop process's
+  cwd — though this row-only cut should need no repository identity at all.
+- **Fail-loud, no direct-reader fallback**; stale state is never presented as
+  current.
+- **Overflow clips with a bottom fade and a centred `scroll to end`, and only when
+  content actually overflows** — through `0265.7`'s component. If that component
+  has not landed, report an unmet prerequisite; do not write a Merges-local
+  replacement.
+- **Do not invent empty-section copy.** No design artifact supplies it and the v1
+  set is nonempty; report the gap rather than hiding a section or writing prose.
+- **The export is measurement, the rules are the specification.** Copy geometry
+  from `reference/merges.html:261-264`, `298-365`, `367-610`; take content and
+  colour semantics from `grammar.md` and `screens/merges.md`. Content Correction
+  4's two conflicts are reported as owner corrections, never edited into
+  `.internal/docs/design/**`.
+- **No test may depend on committed repo content.** Prove behaviour with harness
+  fixtures or scratch state — never against this repository's own board, its own
+  trait set or its own `.ctx/traits/runtime.toml`. Path, word and file-existence
+  inventories are banned workspace-wide.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom
+  "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this cut's
+  desktop behaviour.** They show the workspace stayed gpui-free and green. The
+  rendered outcome is decided by executing the desktop lane `0256.1` establishes
+  (goals 0 and 13); the closing diff read is code-shape review and is
+  supplementary wherever a goal names a runtime outcome. Resolve and run that lane
+  first, before any edit: an absent lane is an unmet dependency that ends the run
+  with no diff, not a clause to discover after the code is written.
 
 ## Done when
 
-The desktop's `Merges` menu entry sits between Tasks and Config and switches to a pane rendering `Landing` / `Awaiting approval` / `Landed` sections whose rows carry the dot, title, run-to-target description and end-aligned state stack the spec names, in its exact tokens — every one served from the one shared `placeholders` module with no inline literal, each region structured so it can be wired when a merge surface lands, and no landing, awaiting-approval or ordering fact inferred from center rows. If the optional landed wiring is taken, it arrives through a center-served answer a non-GUI face can also reach. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- Every command the run executed is green, and the work summary names each one
+  verbatim with its outcome. Nothing is called done over a red command.
+- Before any file was edited, the desktop lane's exact documented non-interactive
+  build-and-test command was resolved from what the chain through `0256.1` landed
+  and run unchanged on the untouched tree, exiting 0; the work summary names it
+  verbatim with that baseline outcome. If no such command existed, or it failed
+  because the manifest, lane or command was absent, that is the terminal outcome:
+  no code was written, an unmet dependency on `0256.1` is reported, and the task
+  does not pass. No workspace command and no diff read substitutes for it.
+- That same command, its harness extended with this cut's cases, exits
+  0, and the work summary names it verbatim with its outcome. Its coverage
+  observes, by running the desktop: a visible `Merges` entry at its canonical
+  slot, with the switch that reaches a non-empty pane, no entry whose pane does
+  not exist, and `Merges` after `Tasks` and before `Config` wherever those panes
+  exist; `Landing — 1`, `Awaiting approval — 2` and `Landed — 2` in order with one, two
+  and two rows; each row form's dot role, sans title, run-to-target description
+  and end-aligned mono state/meta stack, with `landing · deep merge` in `accent`,
+  `awaiting approval` in `warn` and `landed` in `ok`;
+  the initially selected row resting on the sole `Landing` row;
+  exactly one bright title on first render and
+  after selection moves within a section and across a section
+  boundary; row content resolving through the single shared `placeholders` module;
+  content that fits rendering no fade and content that overflows rendering the
+  100px fade with its centred `scroll to end`; and any reachable empty-section
+  behaviour.
+- The closing static read of the diff printed by `git diff main...HEAD`, read
+  against `screens/merges.md:12-31`, `grammar.md:6-91`, `tokens.md:15-84` and
+  `reference/merges.html:57-91`, `261-264`, `298-365`, `367-610`, shows the
+  structural half the lane does not observe: one merge-row renderer and one row
+  data shape covering all three sections, composed from `0265.5`'s row and
+  selection vocabulary with no Merges-local row, dot, selection, geometry or fade
+  primitive; the row geometry of `reference/merges.html:312-364` with no colour,
+  size, spacing, weight or family literal at a call site; row strings resolved
+  through the single `placeholders` module with no inline literal, no second
+  module and no heading or menu label routed through it; brightness a function of
+  the supplied selection expressed by the list primitive; no read of `RunSummary`,
+  `MergeStatus`, `MergeFrame`, `merges_from_center_rows`, `MergeLive` or ledger
+  mtime, and no new served shape in `modules/io/src/center.rs`; no CLI-private or
+  ratatui import; no desktop ledger, store, sidecar, worktree, Git or filesystem
+  read; no timer, interval or spawned tick; no blocking receive on the UI thread;
+  no write path, lock or queue mutation, with the CLI merge command and TUI Merges
+  keymap unmodified; no corner radius inside the canvas beyond the 5px dot; and no
+  hunk building a region `0269.2` or `0269.4` owns — header, bottom bar, preview
+  frame, merge/landing/footer blocks, gates or sign-offs — which the changed hunks
+  decide, not the file list.
+- `git diff --name-only main...HEAD` lists no path under `.internal/docs/design/`.
+  Substitute the run's actual base branch if it is not `main`.
+- The work summary states the two owner corrections raised against the design
+  artifacts — the export's neutral `landed` state word against grammar rule 1, and
+  the export's relative-time landed descriptions against the run-to-target form
+  parent `0269` binds — as corrections rather than edits to
+  `.internal/docs/design/**`, together with the discovered desktop path and lane
+  command, and the overflow-component prerequisite gap if it was hit.
+- `just test` exits 0, unchanged in cost, showing the workspace stayed green while
+  this cut landed entirely outside it.
+- The declared root-resolution check, run verbatim from the repository root, exits
+  0: root Cargo resolution and the root `Cargo.lock` contain no gpui and the
+  desktop project is not a workspace member.
+- `git status --short` prints nothing, and the closing diff was read from the tree
+  that lands.
+
+## Bounded refinement
+
+Run, in order: goal 0's baseline — the resolved desktop lane command, unchanged,
+on the untouched tree, before any edit — then, after the edits, that same command
+over this cut's cases as goal 13 requires, then the root-resolution check, then
+`just test`, then the closing diff read. The reason for that shape is cheap
+evidence first, so a rendering or selection defect surfaces next to the leaf that
+owns it rather than inside a long gate, and so an inherited red is separated from
+one this cut caused before any code is written.
+
+Goal 0's stop is not part of the refinement budget. If the lane or its command is
+absent, the run ends there with an unmet-dependency report; it does not spend a
+repair round standing one up.
+
+Permit at most one targeted repair-and-rerun round: repair one named defect, then
+rerun the failed command and every command after it in that order. If a second
+round would be needed, stop and report the exact failing command — or the
+unresolved visual or data contract — with its evidence rather than iterating. That
+is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0269"
-depends-on = ["0265.5", "0265.9", "0258"]
+depends-on = ["0265.5", "0265.7", "0265.9", "0258"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
