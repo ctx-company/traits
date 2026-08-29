@@ -313,37 +313,40 @@ validation = """
 """
 
 [relations]
-depends-on = ["0243.2", "0243.3"]
+depends-on = [
+    "0243.2",
+    "0243.3",
+]
 
 [[checks]]
 name = "paused outcome kind and the single settled-pause predicate hold"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core pause"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "typed control command, unacknowledged invalid byte, and pause request pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io run_control"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "center protocol, start correlation, control resolution, and paused orphan repair pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "dashboard spawn, resume, and interrupt routing regressions pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "center process proofs cover start, interrupt after restart, pause, and resume continuity"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "per-round workspace gate remains green"
