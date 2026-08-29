@@ -1,57 +1,209 @@
 schema-version = "0.2"
 key = "0266"
 title = "The Tasks (Board) screen"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
+content = '''
 The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Tasks is the first of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders a board. This charter is that screen — state sections, task rows, the board bar and its `new task` action, and the selected-task preview — built per `.internal/docs/design/screens/tasks.md` on the vocabulary `0265` extracted while rendering Sessions.
 
 The screen is small and fully specified, and its spec tags every leaf. The main pane is a counts-from-data header with a placeholder-phrased italic summary, three state sections (`In progress`, `Ready`, `Draft`) of mono-11 muted headings over task rows, and a bottom bar reading `synced` in ok with `.internal/tasks @ <sha>` provenance and a `new task` action that creates a draft. The 380-wide preview is a headerless lede plus four blocks — `details`, `facts`, `checks`, `landing` — and a footer citing `.internal/tasks` with a sync time. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
 
 What makes this a charter rather than a bare task is a stop condition none of its children owns alone: the board becomes something the center serves. `0265.2` taught the center to answer the task a run claims; this screen needs the whole board — every task with its derived state, its facts, its declared checks and the tasks-tree sha — and the plan document's mechanism admits no alternative. Today the board is reached in-process: the CLI's task read (`modules/cli/src/app/tasks.rs`, over `ctx-traits-io::{task_files, task_board_cache}`) and the TUI's `Screen::Tasks` both walk it directly, and a separate desktop binary can reach none of it. The center's task capability is extended here and an existing face is moved onto the same answer in the same release, so nothing on this screen is a capability that exists in only one face.
-"""
-scope = """
-## Decisions
 
-- **In scope**: the Tasks screen as `screens/tasks.md` specifies it — header, the three state sections, the task row form, the bottom bar with its provenance and `new task` action, and the selected-task preview column — plus the center-side board capability each child needs and the migration of an existing face onto it inside this slice (`0266.7` for the board listing, `0266.3` for the draft creation).
-- **The parity mechanism is the plan document's, not a variant of it.** A feature is something the center serves plus per-face rendering. The desktop does not read task files, the board cache, or the tasks tree; it asks the center, and so does at least one existing face by the time this charter closes — the migration is its own child rather than a rider on a rendering cut, so its regression surface is gated honestly.
+## How to read this plan
+
+Goals and approach are separated, and only goals bind. `validation`'s Done-when list, together with the binding constraints and exclusions at the top of `scope`, is the contract; the corrections below bind only through the outcome invariant each one states.
+
+The separation is plan-wide, not confined to the section titled "Suggested approach". Everywhere in this file — inside the corrections, the expected surfaces, the named reuse points, the item order, the closing review route — a named file, symbol, signature, call site, mechanism, command or proof mechanic is the architect's best guidance from the grounding at HEAD `fba80865f`, never a boundary. Where the grounding names a route precisely, it is stated precisely so a child does not have to rediscover it; stating it precisely does not make it binding. A child that reaches a binding outcome by different files, different symbols, a different edit order, different commands or different proof mechanics is correct, and reports the deviation in its work summary. That report is neither a violation nor an owner escalation.
+
+This charter lands no code of its own. Its work is the eight children and the parent-level review that follows the last of them. A ninth implementation written against this file, instead of against the child that owns the leaf, is the failure mode to avoid.
+
+## Grounded against HEAD fba80865f
+
+The corrections below are the places where reading the design artifacts or the existing code naively produces a wrong screen or an unbuildable child. Each one has two layers, and only the first binds:
+
+- **The outcome invariant** — what must be true of the finished screen or the landed code. Every child inherits these. A child that silently guesses through an invariant has failed even where its own Done-when reads green.
+- **The route** — the files, symbols, call sites, mechanisms and cheapest-known implementations named alongside it. These are guidance carried at the point where the evidence for them sits, so a child inherits the reading rather than repeating it. They do not bind. A child that satisfies the invariant another way is correct and reports the deviation in its work summary.
+
+### Correction 1 — `draft` is a word this board cannot store, and this screen requires it
+
+`TaskStatus` is the closed stored set `ready|done|cancelled` (`modules/core/src/task/mod.rs:22-31`); `task::parse` rejects any other value (`mod.rs:208-220`), and `FilesTaskBoard::load` records a parse failure and skips the document (`modules/io/src/task_files.rs:186-249`). No occurrence of `draft` exists anywhere in `modules/core/src/task/`, `task_files.rs` or `modules/cli/src/app/tasks.rs`. Against that, doctrine defines the word: archived `0250` rules `status = "draft"` to mean on the board, visible, split and not yet implementable (`.internal/tasks/archived/0250-plan-writes-drafts-not-marching-orders.toml:16-21`), grammar rule 2 lists `draft` among the state words, and `screens/tasks.md` gives it a section and a row form.
+
+So the Draft section is unrenderable and `0266.3`'s creation is unwritable until `draft` is representable. Making it representable is production scope of this charter, not a client-side reading: `0266.1` already forbids the faces interpreting state themselves. Three consequences to carry:
+
+- **`NewTask.status = None` is not a draft.** An open childless document with no stored status derives `Ready` unless a dependency blocks it (`modules/core/src/task/graph.rs:156-172`). A created draft that derives `Ready` would be dispatchable, which is exactly what `0250` says a draft is not.
+- **Section membership needs a state the faces receive, not infer.** Whether that is a stored `TaskStatus` variant, a `DerivedStatus` variant, or both is the implementing child's call; what binds is that one canonical representation exists, that parsing, derivation, summaries, the write path, the CLI's status word and the scratch-fixture tests move together, and that no face re-derives `draft` from a field that does not say so.
+- **`0250`'s owner ruling stands: no dispatch-side gate is added here.** But every switch over task status that a draft can now reach — queue expansion, dispatch selection, archival on close, the TUI's `task_group` (`modules/cli/src/app/dashboard.rs:5953-6002`), the CLI's list line (`tasks.rs:398-438`) — needs a stated, covered outcome rather than a silent fall-through.
+
+Note also, as `0265` Correction 5 records for its own family: this file and all eight children currently store `status = "draft"` and are therefore unloadable board documents. The board sees `0266` as a childless leaf whose status comes from its own `depends-on`, so this parent's status word is not evidence about its children; the charter closes on the eight children's own closures. When `draft` parses, every such document in this repository's own board becomes visible — a change to the repository's board, and one that no test may assert on (see Watch).
+
+### Correction 2 — three sections do not partition the state model
+
+`screens/tasks.md` names three sections and the header summary counts "Seven open across three states". The derivation underneath has more states than three, and one of the three is not derivable from task documents at all:
+
+- **`In progress` is a run fact.** `graph::derived_status` produces only `Ready|Blocked|Done|Cancelled` (`graph.rs:115-177`) — no in-progress, claimed or awaiting-owner. Membership comes from the run-to-task join over `RunSummary.task_key` and the row's repository identity (`modules/io/src/run_summary.rs:23-118`, `center.rs:3778-3788`), which the TUI already performs client-side (`dashboard.rs:5953-6002`). The target's own earlier phrasing — that section membership is derived from the task documents — is incomplete, and `0266.1` is right to put the join on the center side.
+- **`awaiting owner` is a run outcome, and its mapping already exists.** The TUI maps waiting-on-human/awaiting-input to Pending (`dashboard.rs:1946-1972`). Centralise that mapping; do not write a second one in gpui.
+- **Every open task must land in exactly one section.** Blocked-derived open tasks, closed tasks and archived tasks all have to have a stated destination. A task that is silently dropped from all three sections is a lost row, which is worse than an ugly one. Suggested resolution, reported by the cut that renders it: closed and archived tasks are outside the pane (the summary counts open tasks); a blocked open task sits in `Ready` carrying the `blocked by <id>` meta the spec already gives that row form; drafts sit in `Draft`; anything claimed by a live or pending run outranks the board's own word and sits in `In progress`, matching the precedence `task_group` already encodes.
+
+### Correction 3 — there is no task description field
+
+Every child says the row and the lede show the task's "description". `TaskDocument` has no such field (`mod.rs:119-185`) and `TaskSummary` carries only key, title, stored and derived status and archived (`provider.rs:25-36`). The only prose available is `TaskDocument.content`. One pure projection of `content` is named and shared: the preview lede renders the full prose, and the row's line is the short form of that same projection (first paragraph is the suggested rule). A second projection, a per-face variant, or a newly stored description field that duplicates task prose is a defect; truncation for width is layout, never a value invented in the answer.
+
+### Correction 4 — nothing resolves a tasks-tree sha today, and the wrong resolution lies
+
+`BoardFingerprint` is a stat sweep of `(archived, name, mtime-seconds, len)` (`task_files.rs:124-167`) — a change detector, not a sha. `registry::compute_tree_digest` is a generic SHA-256 content-tree digest with symlink rejection (`modules/io/src/registry.rs:805-831`) and `git_process` is the shared bounded literal-argv Git edge (`modules/io/src/git_process.rs:1-57`). The spec does not choose. The invariant: `<sha>` is a content digest over the exact documents the listing was built from, resolved once on the center side and cited identically by the rows, the bottom bar and the preview footer; a Git object id (`HEAD:.internal/tasks`) is refused because it cannot name an uncommitted board, so the bar would claim `synced` at a sha the rows do not come from; and a `git` call from the desktop process is banned outright. The suggested route, cheapest of the ones the grounding shows: `Board::load` already computes `Digest::source(&text)` per document in the same pass (`task_files.rs:227`), so the board digest can be a deterministic fold over those `(key, digest)` pairs and cost no second walk. That fold is a route, not the invariant — any deterministic content digest over the same documents, resolved once and cited identically, satisfies it.
+
+### Correction 5 — `synced` is a claim the current loader cannot back
+
+- A missing board directory is skipped rather than reported (`task_files.rs:197-200`), so an absent board is indistinguishable from an empty one. A center answer that says `synced · 0 tasks` for a board that does not exist is a lie.
+- Parse failures, duplicate keys and dangling edges are `sync`'s report (`task_files.rs:269-313`); any of them present means the board answer is not clean and the bar must say so rather than print `synced`.
+- `task_board_cache::BoardSnapshotRecord` is explicitly discardable derived evidence — corrupt, mismatched or stale-schema records are dropped (`modules/io/src/task_board_cache.rs:64-109`). It may accelerate a first paint; it may never be the source of a `synced` claim.
+
+### Correction 6 — the board answer is one pass, not `list` + `get` per key + `sync`
+
+Every `FilesTaskBoard` verb rereads the whole directory (`task_files.rs:1-9`, `269-313`), and the TUI's `read_board_snapshot` performs exactly the N+1 shape: `list`, then `get` per key, then `sync`, then a fingerprint sweep (`dashboard.rs:6140-6163`). Copying that into the center and again into gpui would triple it. The invariant: one board resolution costs one directory walk, and the summaries, resolved tasks, sync report and digest a resolution yields all come from that same walk and are shared by the center and the moved face rather than reassembled per consumer. The suggested route is one extracted assembly around the existing `Board::load`, which already produces all four in a single pass; that symbol is guidance — an assembly built elsewhere, or on a different loader entry point, satisfies the invariant equally.
+
+### Correction 7 — `new task` has no grounded payload
+
+`screens/tasks.md` says only that the action creates a draft; the export has a text action and no form. Meanwhile `FilesTaskBoard::create` accepts an empty title, slugifies it to the literal `task` (`task_files.rs:767-782`), writes `raised = None`, and drops checks and auto-close (`task_files.rs:345-389`). A press that produces an unnamed `0270-task.toml` with no raised date is not a working action — and the `facts` block on this very screen renders `raised`, so the screen would immediately show a blank leaf on the task it just created.
+
+Ruling: a created draft carries a non-empty title the owner supplied and a raised date; an empty title is refused at the io level as an invalid field (`WriteError::InvalidField` already exists, `provider.rs:198-222`) so no face can write an unnamed document; no default or placeholder title (`untitled`, `New task`) is ever written, because an invented title reads as evidence. The affordance that collects the title is the smallest thing the screen's grammar already allows — ghost text in the bar, no modal chrome, no corner radius inside the canvas — and the cut that builds it names what it built in its work summary, since the spec does not decide it. This is the one place in the charter where a rendering decision is left to the run rather than to the artifact.
+
+### Correction 8 — creation has no serialization, no occupied result, and no wire shape
+
+`create` loads the board, computes the next key, and writes (`task_files.rs:345-389`) with no lock; two concurrent creations compute the same next key and produce two documents with the same key — a duplicate `sync` will then report. `WriteError` has no occupied or busy case (`provider.rs:198-222`), and `NewTask` derives neither `Serialize` nor `Deserialize` (`provider.rs:85-103`), so `0266.3`'s promise of a refusal a face can render is a capability to add, not one to claim. Ruling: creations for one board pass through a single center-side serialization point, the refusal is typed and serialized rather than mapped onto a generic backend error, and refusal is answered — never queued. The face that moves in the same release writes through that same path; the TUI's existing Split creation (`dashboard.rs:7236-7269`, `7334-7354`) is the grounded second consumer, and repointing it is cheaper and less observable than inventing a `ctx tasks create` command that does not exist today (`modules/cli/src/app/surface/cli.rs:116-272`).
+
+### Correction 9 — where the board work runs inside the center
+
+Normal requests pass through the sole model/SQLite owner with a two-second timeout (`center.rs:2946-2970`); a board walk inside `handle_request` stalls every other client. The invariants: board reads never run inside the sole model/SQLite owner's request handling; board freshness reaches clients as stream events in the established `SnapshotStart`/`SnapshotRow`/`SnapshotEnd`/`Delta` order (`center.rs:1005-1088`, `1506-1524`, `2336-2397`) with no timer on any client; and no new heavyweight dependency — in particular no filesystem watcher — enters `ctx-traits-io`, which today depends only on core plus its existing third-party set (`modules/io/Cargo.toml:12-29`).
+
+The suggested route for each: `Start` and `Control` already demonstrate short model resolution followed by blocking work in the connection worker (`center.rs:3278-3348`, `3380-3429`); the center's existing two-second periodic scan (`center.rs:65`, `3026-3038`) is a detection cadence that already exists, and a stat-only `board_fingerprint` sweep is cheap enough to ride it. Reusing that scan is guidance — a different center-owned detection mechanism that keeps the work off the model-owner path, off the gpui thread and off a client timer, and adds no dependency, satisfies the invariants.
+
+### Correction 10 — which existing face moves, and what "unchanged" means
+
+`0266.7` leaves the choice open; this parent narrows it. **The TUI's `Screen::Tasks` is the face that moves.** It is the one that owns a live in-process reader plus a two-second fingerprint poll (`dashboard.rs:6140-6361`) and already holds a center subscription, so the move removes a second answer rather than adding a dependency. `ctx tasks list` and `tasks show` are one-shot process reads (`tasks.rs:398-438`, `573-679`); routing them through a socket would make a plain board read fail when no center is running, which is a regression rather than parity, so they keep their direct provider path. Unchanged means observably unchanged: the existing groups `Syncing`, `In-flight`, `Awaiting-merge`, `Parked`, `Blocked`, `Ready`, `Done` (`dashboard.rs:582-625`), the same ordering and filtering, and the same error text. The desktop's three sections are a different projection of the same served answer, not a redefinition of the TUI's.
+
+### Correction 11 — the listing stays compact
+
+Wire lines are bounded at 1 MiB (`center.rs:48-52`). This repository's own board is already several hundred documents; a listing that carried every task's `content`, `scope`, `validation` and check commands would exceed the bound outright. The listing carries what a row and a section need; the lede, `details`, `facts`, `checks` and `landing` are the selection-triggered detail `0266.4` and `0266.5` describe.
+
+### Correction 12 — three things this charter extends rather than re-derives
+
+- **The landing line's close policy.** By the time `0266.5` runs, `0265.15` is expected to have landed one shared root-taking auto-close resolution where a task override wins over `[tasks] auto-close`. HEAD still carries two CLI-private copies (`modules/cli/src/app/task_proposals.rs:473-495`, `tasks.rs:300-305`). Extend the landed one; a third copy is a defect.
+- **`frame N of M`.** By the time `0266.4` runs, `0265.14` is expected to have extracted the structural progress derivation from run reconstruction (currently CLI-private in `run_view`'s `projection.rs` / `planned.rs:600-661`). Extend that; never derive progress from `current_run_index` or from a row count.
+- **`in review` is not a task state**, per `0265` Correction 2 — stored status is the closed enum and `blocked` is derived for open leaves only. `screens/tasks.md` writes `0243.4 · in review` as an example. Render the served state word; the design example strings (`0243.4`, `run-ab12ef`, `implement`, the narrated summary sentence) are illustrations and are never hardcoded.
+'''
+scope = '''
+## Binding constraints and exclusions
+
+These bound the outcome regardless of the route taken.
+
+- **In scope**: the Tasks screen as `screens/tasks.md` specifies it — header, the three state sections, the task row form in all four of its state stacks, the bottom bar with its provenance and `new task` action, and the selected-task preview column — plus the center-side board capability each child needs, the canonical `draft` state that capability requires (Correction 1), and the migration of an existing face onto the same answer inside this slice (`0266.7` for the listing, `0266.3` for the creation).
+- **The parity mechanism is the plan document's, not a variant of it.** A feature is something the center serves plus per-face rendering. The desktop reads no task file, no board cache, no tasks tree and no `git`; it asks the center, and so does at least one existing face by the time this charter closes — the migration is its own child rather than a rider on a rendering cut, so its regression surface is gated honestly.
+- **Read-mostly, with one spec-tagged exception.** `screens/tasks.md` tags `new task` as data that creates a draft, so it is wired through a center-served creation with an existing face on the same path. Nothing else on this screen writes: no editing, claiming, closing, status change or deletion is opened here.
+- **The `draft` work is bounded to representation.** Storing, parsing, deriving, summarising, writing and rendering the word, with a stated outcome everywhere a draft can now reach — and, per `0250`'s owner ruling, no new dispatch-side gate. A board-schema redesign, a new status beyond `draft`, or a migration of existing documents' stored statuses is not in this charter.
 - **Nothing here is deferred to `0261`.** That task's own scope admits no production behaviour beyond reconnect-delay parity, two-version coexistence, shared-index versioning and subscription regressions; a capability assigned to it would be assigned to nothing.
-- **Read-mostly, with one spec-tagged exception.** `screens/tasks.md` tags `new task` as data that creates a draft, so it is wired through a center-served creation with an existing face on the same path. Nothing else on this screen writes.
-- **Out of scope**: the other three new screens (each its own work item), any change to the CLI's or TUI's task surfaces beyond moving them onto the center-served answer, and every shared primitive `0265` already built.
-- **Dark theme only.** `tokens.md` records light values for later; v1 implements the dark column and must not drift the light one.
+- **The crate lives outside the cargo workspace.** `0256.1` establishes its location, manifest, lockfile and non-interactive lane; every child of this charter lands into it. gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full` or the existing macOS/Linux CI lanes.
+- **The desktop imports no CLI-private type.** Where it needs semantics that live inside `ctx-traits-cli` beside ratatui rendering — the run-to-task join, the awaiting-owner mapping, the frame progress — the pure derivation is extracted into shared core/IO code and both faces consume it. Copying it into gpui is a defect even when it compiles.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set.** No CLI-level type and no new heavyweight dependency — in particular no filesystem watcher — enters the io crate, because the desktop lane inherits everything it drags in.
+- **Extraction stops at demonstrated consumers.** Each shared piece is extracted by the first cut that renders through it and is only as wide as that cut needs. No design-system phase, and nothing built here for `0267`-`0269` before one of them exists.
+- **`0256`/`0257`/`0258`/`0265`'s robustness contracts are inherited, not renegotiated.** No poll loop anywhere in the GUI; snapshot-then-delta transactionality preserved, so a rejected projection leaves the previous complete model visible and forces a fresh snapshot; socket receives, board reads and layout measurement stay off gpui's UI thread; center-side board work stays off the sole model owner's request path; center failure stays visible and fail-loud, with last-accepted state shown only behind an explicit stale marker and never as current.
+- **Out of scope**: the other three new screens (`0267`-`0269`, each its own work item), any change to the CLI's or TUI's task surfaces beyond the move Correction 10 describes, the light theme (`tokens.md` records light values for later; v1 implements the dark column and must not drift it), pencil work of any kind, and every shared primitive `0265` already built.
+- **This charter's `depends-on` gates nothing on its own.** `derived_status` derives a parent's status from its children and evaluates `depends-on` only for open leaves (`modules/core/src/task/graph.rs:115-177`), so the external prerequisites are named on the earliest child that consumes them — `0266.1` carries `0265.5`, `0265.9` and `0258` — and reach the rest through child-to-child edges. The order below documents the sequence; it is not the gate.
 
 ## Covered work item
 
 `tasks-screen` — the v1 Tasks (Board) screen: state sections, task rows, board bar, task preview, placeholder-marked, dark theme only, chrome citing `.internal/tasks @ <sha>` per grammar rule 12.
-"""
-validation = """
+
+## Suggested approach — guidance, not a boundary
+
+### Item order, and what each cut owns
+
+The edges are already encoded on the children; this is what they mean in sequence.
+
+1. `0266.1` (after `0265.5`, `0265.9`, `0258`) — the load-bearing cut: canonical `draft` (Correction 1), the one-pass board assembly (Correction 6), the center protocol addition with its run-to-task join, the `Tasks` menu entry and switch, and the three sections with the row's dot, title, description and selection model.
+2. `0266.2`, `0266.3`, `0266.4`, `0266.6`, `0266.7` (each after `0266.1`) — header and provenance bar with the sha and sync-time resolution (Corrections 4, 5); the center-served creation with its serialization and typed refusal (Corrections 7, 8); the preview lede and `details`; the row's four-form state stack; the TUI move (Correction 10).
+3. `0266.5` (after `0266.4`) — `facts`, `checks`, the `→`-prefixed `landing` line and the provenance footer. `0266.8` (after `0266.2` and `0266.3`) — binding the bar's action end to end.
+
+### Expected surfaces
+
+- `modules/core/src/task/{mod,graph,provider}.rs` — the canonical `draft` representation and the shared `content` projection of Correction 3.
+- `modules/io/src/task_files.rs` — the one-pass board assembly, the board digest folded from the per-document source digests, the create hardening of Correction 7, and the serialization point of Correction 8. `task_board_cache.rs` stays derived evidence only.
+- `modules/io/src/center.rs` — one board capability extending whatever claimed-task answer `0265.2` landed, plus the creation request and its typed result; a second, parallel task protocol is a defect. Blocking work in the connection worker, freshness on the existing periodic scan.
+- `modules/cli/src/app/dashboard.rs` and `dashboard/worker.rs` — the TUI move, with `task_group`/`task_session_join` lifted to the shared side rather than duplicated.
+- The desktop project `0256.1` establishes — its path, manifest, lockfile and non-interactive command are that task's to name, and children bind to what actually landed rather than to a guess made here. Likewise the vocabulary `0265` extracted: rows, headers, bars, rail, title menu, key/value blocks, preview footers, overflow, and the one `placeholders` module.
+
+### Named reuse points
+
+Prefer these over new derivations; where one is CLI-private, extract rather than copy.
+
+- `Board::load` and the `digests` map it already builds per document (`task_files.rs:186-249`) — the single walk everything else folds out of.
+- `provider::summarize` for status derivation, and `graph::resolved_relations` for `parent`, `depends on` and `blocked by <id>` with deterministic sorting (`graph.rs:188-221`).
+- `task_group` and `task_session_join` (`dashboard.rs:5953-6002`) as the run-to-task join and its precedence rules; the awaiting-owner mapping at `dashboard.rs:1946-1972`.
+- `RunSummary.task_key`, `CenterPublicRow.repo_key`/`repo_path`/`live` for the join's run side (`run_summary.rs:23-118`, `center.rs:3778-3788`).
+- The landed TUI reducer's transaction boundary — stage snapshot rows, project the complete candidate, commit only on success, clone accepted rows before applying a delta, drop and reconnect on a rejected projection, retain last-accepted with an explicit stale time (`dashboard/worker.rs:254-500`). The desktop's board state reuses this posture rather than inventing an optimistic reducer.
+- The center's "short model resolution, then blocking work in the connection worker" shape (`center.rs:3278-3429`) and its existing periodic scan (`center.rs:3026-3038`).
+- `board_fingerprint` (`task_files.rs:124-167`) as the stat-only change detector for that scan — not as the sha.
+- `WriteError::InvalidField` for the empty-title refusal; the TUI's existing `open_read_write(...).create(...)` call site (`dashboard.rs:7236-7269`, `7334-7354`) as the second consumer of the served creation.
+- The shared auto-close resolution `0265.15` lands, and the frame-progress derivation `0265.14` lands (Correction 12).
+
+### The parent's closing pass
+
+After the last child lands, and before this charter is called done, one review pass against the artifacts rather than against memory:
+
+- Walk `screens/tasks.md` leaf by leaf — menu entry and switch, header title and summary, the three sections, all four row state forms, the provenance bar and its action, and the preview's lede, `details`, `facts`, `checks`, `landing` and footer — confirming each `data:` leaf renders from a center-served source that a non-GUI face also consumes, and that the summary's phrasing is the one leaf coming from the shared `placeholders` module.
+- Compare literal geometry against `reference/tasks.html` (`293-743`, `745-976`): section gap 12, row gap 4, row padding `[8,12]`, left gap 12, title/description gap 2, preview block bottom padding 20, bottom-bar padding `[10,14]`, and from `tokens.md:71-85` the 1440x900 window, 36 title bar, 260 rail, main padding `[18,40,20,40]`, 380 preview with `[18,22]`.
+- Apply the export's known content conflicts as resolutions, not as requirements: no rail counts (grammar rule 10), no menu entry for a screen that does not exist yet, no `ctx-logo-white.png` assumption, `→` on the landing line, no `in review` state text, and no extra row metadata such as `implement · 42m` that `screens/tasks.md` does not specify.
+- Exercise the boundaries the leaves depend on: an absent board directory, an unparseable document, a duplicate key, a dangling edge, a board with no runs, a task claimed by a live run and by a pending one, a draft created and observed by a second face, a refused creation, an accepted and a rejected snapshot projection, and center loss and recovery.
+- Run the workspace gates below (`just test-full` and the root-resolution check), and, if `0256.1` has by then established a desktop lane command, that command too as supplementary proof of the rendered screen.
+'''
+validation = '''
 ## Watch
 
-- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A GUI-only reader — a bespoke task-file parser, a private cache, a directory walk written for the desktop — is the capability-in-one-face defect the plan names, even when the bytes it reads are identical.
+- **`grammar.md` and `screens/tasks.md` are the specification; the export is measurement.** Copying a value out of `reference/tasks.html` is right for geometry and wrong for content; the conflicts are listed in the closing pass and a further one found during implementation is resolved the same way and reported.
+- **No design example string is ever hardcoded.** `0243.4`, `run-ab12ef`, `implement`, `in review` and the narrated summary sentence are illustrations. A leaf that renders one of them for a task that does not carry it is worse than an omitted leaf, because it reads as evidence.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A GUI-only reader — a bespoke task-file parser, a private cache, a directory walk or a `git` call written for the desktop — is the capability-in-one-face defect the plan names, even when the bytes it reads are identical.
 - **No poll loop anywhere in the GUI.** Board updates are event-driven over the center's stream; the plan's third done-criterion has no per-screen exception, and a file-backed screen is exactly where a timer would be smuggled in.
-- **Blocking work stays off gpui's UI thread**, and the center-side reads it gains must not block the center's own request loop.
-- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed board answer says so on the screen; it never falls back to reading the filesystem from the desktop process and never presents stale rows as current.
-- **The TUI stays first-class and must not regress.** Moving `Screen::Tasks` onto the center-served answer preserves its rows, ordering, filtering and error text.
-- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set**; the center-side board capability must not pull CLI-level types or a new heavyweight dependency into the io crate, since the desktop lane inherits everything it drags in.
-- **No test may depend on committed repo content.** Prove behaviour with scratch task fixtures, never by asserting on this repository's own `.internal/tasks` — path/word/file-existence inventories are banned workspace-wide.
-- **Grammar rules are normative**: semantic colour, states as words, the closed glyph set (`↰ ↳ → · ∷`), no corner radius inside the canvas, 5px status dots only in stateful lists (the task list qualifies, the preview's prose does not), one bright title per list, sans for content and mono for machinery, a title plus exactly one italic narrated summary and no breadcrumbs, a bottom bar on every screen, overflow clipping only when content actually overflows, and provenance cited in bars and footers.
-- **Placeholder doctrine**: only leaves the spec tags `placeholder:` come from the shared module, and no placeholder string appears inline. Rendering a `data:` leaf as static content inverts the doctrine.
-- **Workspace gate cost must not move.** gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes.
+- **Blocking work stays off gpui's UI thread**, and the center-side board reads must not run inside the sole model/SQLite owner's request handling.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed board answer says so on the screen; it never falls back to reading the filesystem from the desktop process, never presents stale rows as current, and never lets the discardable board cache stand in for a live answer.
+- **One board resolution, cited everywhere.** Rows, the bar's sha and the preview footer's sync time come from the same center-side resolution; two resolutions mean two readers.
+- **The TUI stays first-class and must not regress.** Moving `Screen::Tasks` onto the center-served answer preserves its rows, ordering, filtering and error text, and leaves no second live board reader behind for that face.
+- **Placeholder doctrine**: only leaves the spec tags `placeholder:` come from the shared module, and no placeholder string appears inline. Rendering a `data:` leaf as static content inverts the doctrine, and no `data:` leaf may close as an unrendered gap.
+- **Grammar rules are normative**: semantic colour, states as words, the closed glyph set (`↰ ↳ → · ∷`), no corner radius inside the canvas, 5px status dots only in stateful lists (the task list qualifies, the preview's prose does not), one bright title per list, sans for content and mono for machinery, a title plus exactly one italic narrated summary and no breadcrumbs, ghost-text bottom-bar actions, overflow clipping only when content actually overflows, and provenance cited in bars and footers.
+- **No test may depend on committed repo content.** Prove behaviour with scratch task fixtures and scratch repositories, never by asserting on this repository's own `.internal/tasks` — path/word/file-existence inventories are banned workspace-wide, and that ban covers the drafts Correction 1 makes newly loadable. No test writes into this repository's board.
+- **Workspace gate cost must not move.** gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes. Equally, do not declare a check that forbids the string `gpui` in `Justfile`/`.github/workflows/`: a separate desktop lane there is sanctioned, and a check that reds on the sanctioned outcome is a wrong check.
 - **No desktop board check exists yet**: `0256.1` is still `ready` and no standalone desktop validation command exists in the repository, so no child declares one. Once it lands, the exact desktop command becomes declarable.
-- Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X".
+- Rust is pinned to 1.97.1 by `rust-toolchain.toml`. Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X"; a shared cross-worktree target dir flakes gates.
 
-## Done when
+## Done when — binding goals, and what decides each
 
-Every child task is closed and the stop condition holds: the Tasks screen matches `screens/tasks.md` leaf for leaf — header, the three state sections, every task-row state form, the provenance-citing bottom bar with a working `new task`, and the preview's lede, `details`, `facts`, `checks` and `landing` blocks with its footer — with every `data:` leaf rendering from a capability the center serves and at least one non-GUI face consumes, and the single `placeholder:` leaf served from the shared module. No `data:` leaf closes as an unrendered gap. No poll loop, no blocking read on the UI thread, no filesystem read from the desktop process. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
-"""
+1. **Every child is completed on its own terms.** All eight (`0266.1`-`0266.8`) are `done` — that is the only accepted child state — each having run its own declared checks and, once `0256.1` had landed one, the desktop lane command. Cancellation does not satisfy this goal: a cancelled child leaves its leaves unrendered and its capability unbuilt, so a cancelled child leaves this charter incomplete and the charter stays open until that work is either done or the charter itself is renegotiated with the owner. No board check at this level: child closure is the board's bookkeeping, and this parent's derived status is not evidence of it while any child is still an unloadable draft document (content Correction 1).
+2. **`draft` is a first-class board state end to end.** One canonical representation that parses, round-trips through a write, derives to a state distinguishable from `ready` without any face re-interpreting a field, and is rendered as the word by every face that shows task status; every existing switch a draft can now reach has a stated, covered outcome; no new dispatch-side gate is added, per `0250`'s owner ruling; and no coverage asserts against this repository's own board. Decided by the core and CLI task tests, which run inside the landing gate — Done-when 7's `just test-full`.
+3. **Tasks matches `screens/tasks.md` leaf for leaf** — menu entry and switch, header and its one italic summary, the three sections, all four row state forms, the provenance bar with a working `new task`, and the preview's lede, `details`, `facts`, `checks` and `landing` blocks with its footer — with every `data:` leaf rendering from a center-served source that at least one non-GUI face consumes, the single `placeholder:` leaf served from the shared module, no leaf closing as an unrendered gap, and Corrections 2, 3, 4 and 12 applied. Decided by two things that exist today: the substantive leaf-by-leaf closing review in `scope`, run against the artifacts rather than from memory and naming for each leaf the served source it renders from, and `just test-full` — the landing gate of Done-when 7, declared in `[[checks]]` and runnable now — which proves the shared core/io/center/TUI code those leaves render through is green. Once `0256.1` has landed a desktop lane command, that command is additional proof of the rendered screen; its name is that task's to establish and is not guessed here. No board check is declared for the rendered screen itself, and none may be invented, because no repo-root command inspects a rendered gpui screen today.
+4. **The sections are a total partition of the open board.** Every open task appears in exactly one of `In progress`, `Ready`, `Draft`; `In progress` and `awaiting owner` come from the center-side run join, not from task documents; no task is silently dropped and no state word is invented. Decided by the children's own coverage of the join and section mapping (run inside the landing gate) plus the closing review.
+5. **The board is one center-served answer, resolved once and claimed honestly.** One walk per resolution rather than `list` + `get` per key + `sync`; the rows, the bar's sha and the footer's time cite that one resolution; `synced` is withheld when the board is absent, unparseable, duplicated, dangling, stale or failed; board work runs off the center's model-owner request path; freshness arrives as stream events with no timer on any client; and the desktop process performs no filesystem or `git` read. Decided by the center wire proof and the io/CLI tests inside the landing gate, by the desktop lane command, and by reading the diff for any timer or desktop-side read.
+6. **`new task` creates exactly one named draft, through the center, visible to a second face.** The creation is serialized so two presses cannot mint the same key, an empty title is refused rather than written, a refusal is typed, answered and rendered rather than queued or swallowed, no row is inserted optimistically, and the draft reaches the `Draft` section because the board answer changed. Decided by the CLI/center coverage inside the landing gate plus the desktop lane command.
+7. **The TUI is unchanged in behaviour and the workspace is unmoved.** `Screen::Tasks` reads the board through the served answer with the same rows, ordering, filtering and error text and no second live reader; `ctx tasks list`/`show` still work with no center running; root Cargo resolution and the root lockfile contain no gpui, the desktop project is not a workspace member, and the full landing gate passes without building it: `just test-full`, plus the root-resolution command declared in `[[checks]]` below.
+
+Exclusions, restated so they are checkable by reading the diff: no light-theme value is touched, no pencil artifact is edited, no CLI-private ratatui type is imported by the desktop, no third copy of the auto-close resolution is added, no filesystem-watcher dependency enters `ctx-traits-io`, no task mutation beyond draft creation is opened, and no work belonging to `0267`-`0269` or `0261` is done here.
+
+## Order and bounded refinement
+
+Children run in the three stages listed in `scope`; within a stage, the encoded edges are the only ordering that binds. When the last child lands, the suggested closing route is: leaf-by-leaf review against `screens/tasks.md`, then the literal geometry comparison against `reference/tasks.html`, then the boundary exercises, then `just test-full` and the root-resolution check, with the desktop lane command added once `0256.1` has landed one. The reason for that shape is cheap evidence first, so a rendering defect surfaces next to the leaf that owns it rather than inside a long gate. The sequence is guidance, not a boundary: a pass that reorders it, folds steps together, or reaches the same evidence another way is legitimate and reports the deviation in its work summary.
+
+The stop condition binds. Permit at most one targeted repair-and-rerun round at this level: a round repairs one named defect in the child that owns it, then reruns whatever closing evidence is needed to show the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command or the failing leaf with its evidence rather than iterating; that is the stop condition, not a judgement call.
+'''
 [relations]
 depends-on = ["0265", "0258"]
 
 [[checks]]
 name = "workspace landing gate remains green and gpui-free in cost"
 command = "just test-full"
+expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 300000
