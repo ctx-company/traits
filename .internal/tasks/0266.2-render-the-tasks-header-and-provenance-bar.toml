@@ -1,61 +1,639 @@
 schema-version = "0.2"
 key = "0266.2"
 title = "Render the Tasks header and provenance bar"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Give the Tasks screen its chrome, on the board answer `0266.1` made the center serve.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it wherever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-The **header** carries the title `tasks — ctx-company/traits` over one italic narrated summary — "Seven open across three states — one live run, one waiting on you." `screens/tasks.md` tags the counts `data:` and the phrasing `placeholder:`, so the counts follow the served sections and the prose comes from the shared `placeholders` module until a narrator seat serves it.
+This cut is the Tasks screen's chrome, sitting on the board answer `0266.1`
+serves. It owns five things: the screen header — repository-named title over one
+italic narrated summary — for this screen; the aggregate board digest that the
+bar cites as provenance; the honest `synced` state word and its failure and
+stale replacements; the one captured resolution instant that this bar and
+`0266.5`'s preview footer both read; and the `new task` action rendered inert in
+the bar's grammar.
 
-The **bottom bar** is grammar rule 12's provenance instance for this screen: `synced` in ok, then `· .internal/tasks @ <sha>`. Both halves are `data:` — the state word is a claim about whether the board answer is current, and the sha is the tasks tree's own. Neither is reachable from the desktop process, so the center's board capability grows the two of them here: the tasks-tree sha it resolved the listing at, and the time it last did so, which the preview's footer will cite as well. The bar's `new task` action renders in this cut as the right-hand ghost action; `0266.3` makes the center create the draft and `0266.8` binds the two together.
-"""
-scope = """
-## Decisions
+It resolves almost nothing. The board resolution, its typed presence outcomes,
+its sections, counts and join facts, and its freshness events are all `0266.1`'s
+and arrive already answered. The reusable header is `0265.13`'s, the reusable
+bottom bar, the semantic state presentation and the one `placeholders` module
+are `0265.3`'s, the repository display-name projection is `0265.8`'s, and the
+tokens and IBM Plex faces are `0265.1`'s. The one genuinely new shared value here
+is the aggregate digest — and even that is a fold over per-document digests
+`Board::load` already computed in the same walk (`task_files.rs:227`), not a
+second read.
 
-- In scope: the header with its data counts and placeholder-served phrasing, the bottom bar's `synced` state word and `.internal/tasks @ <sha>` provenance, and the center-side extension that supplies the tasks-tree sha and sync time alongside the board listing, consumed by the same non-GUI face that reads the listing.
-- **The sha is resolved once, centrally.** A sha the desktop computes itself is a second reader and can disagree with the answer the rows came from; the bar and the preview footer must cite the same resolution.
-- **`synced` is a claim, not a constant.** The state word reflects whether the board answer is current, and a stale or failed answer renders the failure rather than the word.
-- Out of scope: the `new task` action's behaviour (`0266.3`, `0266.8`), the sections and rows (`0266.1`, `0266.6`), the preview column, and every shared primitive `0265` built.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+Everything else on this screen belongs to a sibling: the sections and rows
+(`0266.1`), the row's right-hand state stack (`0266.6`), the action's behaviour
+(`0266.3` creates the draft, `0266.8` binds the two together), the preview column
+(`0266.4`, `0266.5`), and the TUI migration (`0266.7`).
 
-## Prerequisite
+## Nine corrections to the draft this plan replaces
 
-`0266.1` — the center-served board answer this chrome describes and the pane it sits on.
-"""
-validation = """
+**Correction 1 — the header is a component this task does not own, and the
+dependency edge was missing.** `0265.13` extracts the reusable screen header —
+title, the single italic summary at fixed width 560, the title-stack gap 5, the
+top-right `∷` and the breadcrumb prohibition — explicitly because three later
+screens consume it, and `0267.2`, `0268.2` and `0269.2` each carry an explicit
+`0265.13` `depends-on` edge for exactly that reason. This task, the fourth
+instance of the same leaf, carried only `0266.1`. Parent edges are not inherited
+by children (`graph::derived_status`, `modules/core/src/task/graph.rs:115-177`),
+and `0266.1`'s own chain — `0265.5` → `0265.3`, `0265.9` → `0265.8`, `0258` —
+reaches the bar, the placeholders module and the repository name but never
+reaches `0265.13`. Without the edge this task could dispatch before the header
+existed and would then rebuild it privately, which is the duplication the three
+sibling files already name a defect. The edge is added. The header is composed
+here, never re-implemented.
+
+**Correction 2 — the draft omitted `∷`, and the header is not optional about
+it.** Grammar rule 6 puts `∷` in mono 14 `text-secondary`, wrapper padding
+`[2,8]`, at the top right of a full-width `space-between` row
+(`grammar.md:58-66`; `reference/tasks.html:277-291`). The draft's watch list
+described the summary and the breadcrumb ban and never mentioned the glyph.
+Composing `0265.13`'s header gets it for free; a hand-built title block would
+silently drop it. This is one more reason the answer to Correction 1 is
+composition.
+
+**Correction 3 — "no fills, borders or icons" is a rule about the action, not
+about the bar, and the draft's phrasing inverts it.** Grammar rule 8 gives the
+bar itself a 1px `border-soft` and padding `[10,14]`, and the export confirms it
+(`grammar.md:74-84`; `reference/tasks.html:715-717`). The ghost-text prohibition
+applies to the *buttons* — `new task` is text, not a control with a fill, a
+border or an icon. Read the draft's watch item literally and it produces a
+borderless bar, which contradicts the rule it was quoting.
+
+**Correction 4 — the `<sha>` is a fold, not a tree walk, and three plausible
+alternatives are wrong.** `registry::compute_tree_digest`
+(`modules/io/src/registry.rs:805-831`) is a real generic content-tree digest, but
+calling it after the board resolution is a second traversal over a *different*
+file set — it would include `board.toml`, which task loading explicitly excludes
+(`task_files.rs:24-29,205-207`), and it would cover files the resolution never
+accepted. `board_fingerprint` is a stat sweep of `(archived, name, mtime-seconds,
+len)` that deliberately reads no contents (`task_files.rs:124-167`) — a change
+detector, never provenance. `task_board_cache::BoardSnapshotRecord` is
+explicitly discardable derived evidence that becomes `None` when missing,
+unreadable, malformed or mismatched (`task_board_cache.rs:1-10,31-91`) — it can
+never back a `synced` claim. And a Git object id such as `HEAD:.internal/tasks`
+cannot name an uncommitted board at all, so the bar would claim `synced` at a
+name the rows do not come from (`0266:52-55`). What is correct is cheap:
+`Board::load` already computes `Digest::source(&text)` per first-wins document in
+the same pass and hands back a `BTreeMap<String, String>` keyed by task key
+(`task_files.rs:186-250`). A deterministic fold over those pairs in key order
+names exactly the documents the rows came from and costs no second walk.
+
+**Correction 5 — the artifacts disagree on the digest's displayed width, and the
+draft did not notice.** `screens/tasks.md:24` says only `<sha>`; grammar rule 8's
+example is eight hex characters (`81e5a394`, `grammar.md:83`); the export renders
+seven (`81e5a39`, `reference/tasks.html:733`). The spec and grammar are content
+authority and the export is measurement, so **eight** wins, and the width is
+fixed here rather than left to the run. Separately, the displayed form is never
+the identity: the served and shared value stays the full digest, because a
+truncated hex string is collision-prone and a face that compares boards on seven
+or eight characters is comparing nothing.
+
+**Correction 6 — the summary's counts are a projection of the served partition,
+and the artifacts leave three questions the draft would have let the renderer
+answer by itself.** `screens/tasks.md:11-13` tags the numbers `data:` and only
+the phrasing `placeholder:`, and gives exactly one example — seven, three, one,
+one. It does not say what happens at zero or one, whether "three states" means
+the three fixed sections or the populated ones, or whether "one live run, one
+waiting on you" counts rows or runs. Left open, each face invents an answer and
+they disagree. This plan fixes one derivation over `0266.1`'s served model
+(goal 2) and requires the phrasing module to be total over zero, one and many.
+
+**Correction 7 — the title's repository name is a served projection, and
+`ctx-company/traits` is an illustration.** `0265.8` fixes the display name as a
+pure total projection of `repo_key` and `repo_path`: split on `/`, drop empty
+segments, take the final two joined by `/`, and fall back to `repo_key` verbatim
+when fewer than two remain (`0265.8:194-215`). That same function feeds the rail
+row, the rail footer and — here — the header title, so the three cannot disagree
+about which repository is on screen. `CenterPublicRow` already carries both
+fields (`center.rs:3778-3788`). The desktop must not derive repository identity
+from `current_dir`; `state::repo_key` is a basename slug plus a path hash
+(`modules/io/src/state.rs:149-160`) and a cwd-derived title would name a
+plausible board the rows did not come from. The export's `ctx-company/traits` is
+legitimate only as the expected output of a fixture path that projects to it.
+
+**Correction 8 — `synced` is a claim about the current answer, and the current
+loader cannot make it unaided.** `Board::load` treats a `read_dir` failure as no
+entries (`task_files.rs:197-200`), so today an absent board, an unreadable board
+and an empty board are one outcome, and `synced · 0 tasks` for a directory that
+does not exist states a fact nobody established. `0266.1` owns making those three
+typed and distinct; this cut consumes them and must not restore the flattening —
+nor the TUI reader's `sync().unwrap_or_default()`, which erases a sync failure
+outright (`dashboard.rs:6154`). The binding semantics: a clean, complete
+resolution earns `synced`, and a legitimately empty board can be clean and
+carries the digest of an empty document set; an absent or unreadable board cannot
+be `synced` and has no digest; parse failures, duplicate keys and dangling edges
+make the answer non-clean even when rows resolved; and a stale or rejected answer
+keeps the previous complete model only behind an explicit marker and never
+presents its old digest or old time as current.
+
+**Correction 9 — the sync time is one captured instant with two consumers, not a
+clock either of them reads.** Grammar rule 12 requires both the bar and the
+preview footer to cite provenance, and `0266.5`'s footer renders
+`.internal/tasks · synced <time>` from "the same center-side resolution the
+bottom bar cites" (`0266.5:12,20`). That instant is captured on the center side
+when a resolution completes successfully, travels in the answer, and updates only
+when the answer updates. Formatting it for display is presentation and belongs to
+each call site; reading a second clock, or ticking a timer to refresh it, is a
+second reader wearing a different hat. The center's own two-second scan already
+exists (`center.rs:65,3026-3038`) and `0266.1` attaches board freshness to it;
+this cut adds no timer, no poll, no watcher and no request of its own.
+'''
+scope = '''
+## GOALS — binding
+
+Each goal names an observable outcome, what decides it, and what it excludes.
+Where a goal names a file, a symbol or a proof mechanic, that naming lives in
+APPROACH; what binds here is the outcome.
+
+1. **The header is `0265.13`'s component, composed once, with the Tasks screen's
+   data.** The Tasks main pane renders the reusable screen header above
+   `0266.1`'s sections: title `tasks — <active repository display name>` in sans
+   13 `text-heading`, exactly one italic narrated summary in sans 12
+   `text-secondary` at fixed width 560, title-stack gap 5, `∷` in mono 14
+   `text-secondary` with wrapper padding `[2,8]` at the top right of a full-width
+   `space-between` row, and no breadcrumb anywhere on the screen (content
+   Corrections 1 and 2; `grammar.md:58-66`; `screens/tasks.md:11-13`;
+   `reference/tasks.html:259-291`). The repository name is `0265.8`'s
+   `repo_display_name` projection over the served `repo_key`/`repo_path`, the same
+   function the rail and its footer use (content Correction 7). With no active or
+   usable repository scope, the Tasks answer fails visibly rather than titling a
+   plausible board.
+   Decided by rendered evidence in the desktop lane: the header present above the
+   sections with the title, one summary line and the `∷`; the title naming the
+   repository the served rows belong to, over at least a normal multi-segment
+   path and a `repo_path` that forces the `repo_key` fallback; no breadcrumb
+   anywhere; and the closing diff read showing the header markup is composed, not
+   re-declared, and that no colour, size, spacing, family or padding literal
+   appears at this call site.
+   Excluded: a second header implementation, a Tasks-private title block, or any
+   edit to `0265.13`'s owned region beyond passing it this screen's strings; a
+   second Tasks main-pane composition — the pane's padding `[18,40,20,40]` and gap
+   28 are already established (`tokens.md:79`; `reference/tasks.html:255-258`) and
+   this cut inserts into it; a breadcrumb, a second summary line, a subtitle, an
+   icon or a second `∷`; deriving the repository from `current_dir`,
+   `Utf8Path::new(".")` or any filesystem probe; the export's literal
+   `ctx-company/traits` as shipped data.
+
+2. **The summary's counts are one fixed derivation over the served answer, and
+   the phrasing is total.** Four numbers come from `0266.1`'s accepted served
+   model and nothing else: **open** is the count of rows the served partition
+   places in `In progress`, `Ready` and `Draft` together; **states** is how many
+   of those three sections are non-empty, so a board whose seven open tasks are
+   all ready reads as one state rather than three; **live** is the number of open
+   *rows* whose served join fact is a live claiming run; **waiting** is the number
+   of open *rows* whose served join fact is pending or awaiting-owner. Rows, not
+   runs, so no task can contribute twice and no count can exceed **open** (content
+   Correction 6). The sentence is produced by a single entry added to `0265.3`'s
+   one `placeholders` module, which receives those four integers and owns only the
+   wording; it is total and grammatical at zero, at one and at many, and no count
+   literal is written into it.
+   Decided by direct tests over the count derivation and the phrasing entry,
+   proven by the declared `just test` check: a board with no open tasks; one open
+   task in one section; open tasks spread across two of the three sections; open
+   tasks in all three; exactly one live and exactly one waiting row; several of
+   each; and none of either — asserting in every case that the four numbers match
+   the served model and that the rendered sentence is grammatical. Plus rendered
+   evidence that exactly one summary line appears and that it is the module's
+   output.
+   Excluded: any count computed from a fresh provider call, a filesystem read or a
+   second projection of the board; counting joined runs rather than rows, or
+   counting a task in two of the four numbers where the served join says one
+   precedence outcome; a count literal, a spelled example number or the example
+   sentence "Seven open across three states — one live run, one waiting on you."
+   inlined anywhere; a second placeholders module or an inline placeholder string
+   at the call site; closing a `data:` leaf as placeholder-served text; rendering
+   the summary from cached, stale or last-accepted counts while the bar states
+   failure.
+
+3. **The board digest is a deterministic fold over the resolution's own
+   per-document digests, computed once, shared.** One shared function folds the
+   `(key, digest)` pairs the board resolution already produced — in key order —
+   into a single content digest naming exactly the first-wins documents that
+   resolution accepted (content Correction 4). It is stable across repeated
+   resolutions of unchanged content; it changes when any accepted document's
+   content changes, when a document is added, and when one is removed; it does not
+   depend on directory iteration order; and a clean but empty document set yields
+   a well-defined digest rather than an error or a blank. It is computed on the
+   center's board-resolution path in the same pass that produced the rows, carried
+   in the board answer, and consumed by the desktop as an opaque value.
+   Decided by direct tests over the fold with scratch boards, proven by the
+   declared io check — stability, content change, addition, removal, order
+   independence, archived documents included exactly as the landed resolution
+   includes them, and the empty-but-clean case — and by the declared
+   `proof_center` check showing the same digest crossing the real socket in the
+   same answer as the rows it describes.
+   Excluded: a second directory walk, including `registry::compute_tree_digest`,
+   after the resolution; `board_fingerprint` or any stat signature as the digest;
+   `task_board_cache` as its source; any `git` invocation on this path, anywhere;
+   computing or recomputing the digest in the desktop process; a digest over
+   `board.toml`, over parse-failed documents, or over non-winning duplicate copies;
+   serving per-document prose to make the digest checkable, which goal 6's bound
+   forbids.
+
+4. **The bar cites provenance in grammar rule 8's form, with an honest state
+   word.** The Tasks pane ends in `0265.3`'s reusable bottom bar: full width,
+   `space-between`, 1px `border-soft`, padding `[10,14]`, all text mono 11. On a
+   clean, complete answer the left side is `synced` in `ok` followed by
+   `· .internal/tasks @ <digest>` in `text-secondary`, where `<digest>` is the
+   first **eight** hex characters of the served digest after its `sha256:` prefix
+   is stripped, while the full digest remains the shared and served value (content
+   Correction 5; `grammar.md:74-84`; `reference/tasks.html:715-742`). Every typed
+   non-clean, stale, rejected or failed outcome replaces the `synced` claim
+   visibly and atomically — state word, detail, digest and time change together,
+   never a new state word beside an old digest — and follows the landed desktop
+   failure idiom rather than one invented literal, preserving the typed error
+   detail (content Correction 8).
+   Decided by rendered evidence in the desktop lane: the clean case with the state
+   word in `ok` and the eight-character digest projection; a legitimately empty but
+   clean board still rendering `synced` with the empty-set digest; and each typed
+   non-clean, absent, unreadable, stale and failed outcome the served answer can
+   carry, rendering something other than `synced` and never showing a digest or
+   time it cannot currently claim. Plus direct tests over the display projection,
+   proven by the declared `just test` check, covering a full prefixed digest and
+   inputs short enough to expose a panic or a silent pad.
+   Excluded: `synced` as a static label, a default, or a state rendered while the
+   answer is stale, rejected or failed; an empty or absent board answered as
+   `0 tasks · synced`; a fabricated digest string, a placeholder digest or a blank
+   where a digest cannot be established; the truncated form used as identity, for
+   comparison, or as the value any other face receives; a second bottom-bar
+   implementation or a Tasks-private bar; a borderless bar (content Correction 3);
+   a fill, border, icon, radius or glyph outside `↰ ↳ → · ∷` anywhere in this
+   chrome; light-column token values.
+
+5. **`new task` renders inert in the bar's action grammar.** The right-hand side
+   of the bar carries `new task` as the primary action in mono 11 `text-bright`,
+   ghost text with no fill, no border and no icon (content Correction 3). It is
+   rendered and not bound: this cut sends no create request, opens no modal,
+   inserts no optimistic row and writes nothing.
+   Decided by rendered evidence that the action is present, bright and in the
+   bar's grammar, and by the closing diff read showing no create request, no
+   handler, no modal, no optimistic insertion and no write path attached to it.
+   Excluded: the creation capability and its typed refusal (`0266.3`); binding the
+   action to it (`0266.8`); a disabled-looking treatment, a tooltip, a fill or a
+   border added to signal inertness; a placeholder click handler that logs, no-ops
+   visibly, or shows a "coming soon" string.
+
+6. **One resolution instant, two consumers, no clock and no timer on the client.**
+   The answer carries exactly one instant, captured on the center side when a
+   resolution completes successfully. The bar's provenance and — later —
+   `0266.5`'s preview footer both read that instant; formatting it for display is
+   presentation, and neither reads a second clock. It changes only when the answer
+   changes (content Correction 9). The desktop adds no timer, interval, spawned
+   tick, polling request, filesystem watcher or direct-read fallback for board
+   freshness; it consumes the events `0266.1` attached to the center's existing
+   scan and stream. Board resolution and digest folding stay off the center's sole
+   model/SQLite owner path (`center.rs:2915-2970`) and off gpui's UI thread, and
+   the answer stays within the 1 MiB wire bound (`center.rs:48-52`).
+   Decided by the declared `proof_center` check showing the instant present in the
+   answer over the real socket and advancing only when the answer does — a
+   re-resolution of unchanged content must not be presented as a new sync moment
+   where the served answer did not change — and by the closing diff read for any
+   timer, interval, tick, watcher, `SystemTime::now`/`Instant::now` or filesystem,
+   cache or `git` read on the desktop side, and for any board walk or digest fold
+   inside `handle_request`.
+   Excluded: a second captured time for the footer; the desktop or the footer
+   formatting from its own clock; a per-screen refresh timer; a fallback to
+   `task_board_cache` or to a direct board read when an answer fails; a parallel
+   chrome-only center request, response or delta family — if the aggregate digest
+   and instant are not already present in what `0266.1` landed, they extend that
+   same task family; serving per-document prose or check commands to carry them.
+
+7. **The workspace does not learn about gpui, and nothing new enters
+   `ctx-traits-io`.** Root Cargo resolution and the root `Cargo.lock` stay
+   gpui-free, the desktop project is not a workspace member, and `just test`,
+   `just test-full` and the existing macOS/Linux CI lanes gain no gpui cost.
+   `ctx-traits-io` still depends only on `ctx-traits-core` and its existing
+   third-party set (`modules/io/Cargo.toml:12-29`).
+   Decided by the declared root metadata and lockfile check and the declared
+   `just test` check.
+   Excluded: adding the desktop project to root workspace members; a new
+   dependency in `ctx-traits-io`, in particular a filesystem watcher; a check that
+   forbids the string `gpui` in `Justfile` or `.github/workflows/`, since a
+   separate desktop lane there is sanctioned and such a check would red on the
+   sanctioned outcome; importing any CLI-private or ratatui type into the desktop.
+
+8. **The pass is reviewed once and bounded.** The completed work is read against
+   this plan's goals, the parent's corrections, `screens/tasks.md:11-25`, grammar
+   rules 1, 2, 3, 5, 6, 8 and 12, the dark column of `tokens.md`, and the measured
+   geometry in `reference/tasks.html:255-291,715-742` — spec and grammar as content
+   authority, the export as measurement only — before the task is called done.
+   Exactly one targeted repair cycle is allowed; if a second would be needed, stop
+   and report the exact failing command with its evidence, or the unresolved data
+   or render contract, rather than iterating.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+Neither the desktop side nor the center's board capability exists at the HEAD
+this plan was written against. `0266.1`, `0265.13`, `0265.3`, `0265.8`, `0265.9`,
+`0265.5`, `0258` and the `0256` chain all land first. Read what landed; do not
+carry a guess from this file into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level listing, then its manifest, README, justfile or CI lane, for the
+  documented non-interactive build-and-test command. Record it verbatim and run
+  it once as a baseline before any edit. If no such lane exists, report an unmet
+  prerequisite; `just test` is not a substitute and a parallel desktop harness is
+  not invented.
+- Read what `0266.1` actually served: whether the aggregate digest and the
+  captured instant are already fields on its answer, and what its typed
+  board-presence, non-clean, stale and failure outcomes are called. Extend that
+  family; do not open a second one.
+- Read `0265.13`'s header component signature, `0265.3`'s bar, semantic state
+  presentation and `placeholders` module, `0265.8`'s `repo_display_name`, and
+  `0256.5`/`0266.1`'s landed desktop failure idiom, before writing any chrome.
+
+### Edit order
+
+1. The shared digest fold in `modules/io/src/task_files.rs`, beside the landed
+   board resolution, over the `digests` map `Board::load` already builds
+   (`task_files.rs:186-250`) — goal 3's shared half, with its focused tests.
+2. The board answer's digest and instant fields in `modules/io/src/center.rs`, on
+   `0266.1`'s landed board request/result family, resolved and folded in the
+   connection worker rather than the model owner (`center.rs:3278-3429` shows the
+   shape) — goals 3 and 6's center halves.
+3. The shared count derivation and the `placeholders` summary entry — goal 2 —
+   placed so the phrasing is the module's and the counts are not.
+4. The desktop header call site composing `0265.13` with the projected repository
+   name and the composed summary — goal 1.
+5. The desktop bar call site composing `0265.3` with the state word, the digest
+   display projection and the inert action — goals 4 and 5.
+6. The desktop lane's rendered evidence, then the focused proofs, then the
+   declared checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like `fn board_digest(digests: &BTreeMap<String, String>) ->
+Digest` in `ctx-traits-io` beside the landed resolution, hashing a canonical
+ordered serialization of the pairs through `Digest::from_bytes`
+(`modules/core/src/digest.rs:120-133`); an added `digest`/`resolved_at` pair on
+`0266.1`'s board answer type; a pure
+`board_summary_counts(sections, joins) -> (open, states, live, waiting)` beside
+the landed section derivation; a `placeholders` entry shaped like
+`board_summary(open, states, live, waiting) -> String`; and a display projection
+shaped like `fn short_board_digest(digest: &str) -> String` taking eight
+characters after the `sha256:` prefix. Note the prior art: `dashboard.rs:5533`
+already has a CLI-private `short_digest` that strips the prefix and takes twelve
+for trust-modal bodies. It is not the same projection and it is not reachable
+from the desktop; if a shared prefix-stripping helper falls out cheaply, take it,
+but do not build a general digest-formatting abstraction for two call sites with
+different widths. Names, module paths and component signatures follow whatever
+conventions the prerequisites established. The behaviours goals 1-7 fix are not
+suggestions; where they live and what they are called are.
+
+### What the focused proofs are expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- The digest fold over scratch boards: repeated resolution of unchanged content;
+  a document's content edited; a document added; a document removed; the same
+  document set discovered in a different order; archived documents per the landed
+  resolution; a clean board with no documents.
+- The typed outcomes as this chrome consumes them: absent board, unreadable
+  board, empty-but-clean board, parse failure, duplicate key, dangling edge — each
+  distinguishable, and only the clean cases carrying a digest.
+- The count derivation over a served model with zero, one, two and three
+  populated sections, and with zero, one and several live and waiting rows; the
+  phrasing entry over each of those, checked for grammaticality rather than for a
+  literal sentence.
+- The display projection over a full `sha256:`-prefixed digest and over inputs
+  short enough to expose a panic or a silent pad.
+- Over the real socket: the digest and instant arriving in the same answer as the
+  rows they describe, from a scratch repository; the instant advancing when the
+  answer changes and not when it does not; the answer still within the wire bound.
+- In the desktop lane: the header with title, one summary line and `∷`; the
+  repository name over a multi-segment path and a fallback path; no breadcrumb;
+  the clean bar with `synced` in `ok` and the eight-character digest; each
+  non-clean, stale and failed outcome replacing it; the inert bright `new task`;
+  and no fill, border, icon or radius on the action.
+
+Tests use scratch boards, scratch repositories and arbitrary ids. No test may
+depend on this repository's committed board content or write into it, and no
+design example string — `ctx-company/traits`, `81e5a394`, `81e5a39`, or the
+narrated summary sentence — is fixture authority except as the expected output of
+a scratch input that legitimately produces it.
+
+### Reuse points
+
+`Board::load`'s per-document `digests` map (`task_files.rs:186-250`) as the one
+walk the fold comes out of; `Digest::from_bytes`/`Digest::source`
+(`modules/core/src/digest.rs:120-133`) as the hashing primitive; `0266.1`'s
+landed board resolution, typed presence and cleanliness outcomes, served sections
+and join facts as the sole source of every number and state word here;
+`0265.13`'s screen header, `0265.3`'s bottom bar, semantic state presentation and
+single `placeholders` module, `0265.8`'s `repo_display_name` and `0265.1`'s dark
+tokens and faces as the rendered vocabulary; `CenterPublicRow.repo_key`/
+`repo_path` (`center.rs:3778-3788`) as the projection's inputs; the center's
+short-resolve-then-blocking-work-in-the-connection-worker shape
+(`center.rs:3278-3429`) and its existing scan and snapshot/delta transaction
+(`center.rs:3026-3038,1005-1088,2336-2397`); `0256.5`/`0266.1`'s landed desktop
+failure idiom for the non-`synced` states; and `proof_center`'s existing scratch
+center, socket and repository helpers
+(`modules/cli/tests/proof_center.rs:297-367`) as the wire harness to extend. If
+any prerequisite surface is absent at execution time, report an unmet
+prerequisite rather than replacing it locally.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml` to 1.97.1, and the desktop directory inherits that pin
+unless `0256.1` gave it its own toolchain file. Keep any repair scoped to the one
+red command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The board resolution itself, its typed presence outcomes, the sections, the
+  rows, the counts' underlying partition, the run-to-task join, the freshness
+  events, navigation and selection (`0266.1`); the row's right-hand state stack
+  (`0266.6`); draft creation and its typed refusal (`0266.3`); binding the action
+  (`0266.8`); the preview lede, `details`, `facts`, `checks`, `landing` and the
+  footer's rendering (`0266.4`, `0266.5`) — this cut only exposes the one instant
+  that footer will cite; the TUI migration (`0266.7`).
+- Any task mutation — creating, editing, claiming, closing, status change or
+  deletion — and any change to `ctx tasks list` or `ctx tasks show`.
+- A second Tasks main-pane composition, a second header, a second bottom bar, a
+  second placeholders module, a second repository-naming path, a second board
+  read, a second digest, a second clock or a second center protocol family.
+- The other three new screens (`0267`-`0269`) and every shared primitive `0265`
+  built.
+- The light column of `tokens.md`, and any edit under `.internal/docs/design/**`
+  or to any pencil artifact.
+- A design-system phase: component registry, theme abstraction, router, generic
+  screen framework, digest-formatting abstraction, or primitives extracted before
+  a named consumer exists.
+- A board check that executes the desktop lane. No such command exists in this
+  repository today, so declaring one now would be a fabrication; the run executes
+  the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell here.
+'''
+validation = '''
 ## Watch
 
-- **Exactly one narrated summary line**, italic sans 12 `text-secondary`, and no breadcrumbs anywhere.
-- **No inline placeholder literal** — the summary's phrasing comes from the one shared module; its counts do not, because they are data.
-- **No second sha resolution.** The bar, the preview footer and the rows all cite one center-side answer; two resolutions is two readers.
-- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
-- **Blocking work stays off gpui's UI thread**, and sha resolution on the center side must not stall its request loop.
-- **No poll loop.** The sync time updates when the board answer does, never on a timer.
-- **Fail-loud, no direct-reader fallback**; a sha the center cannot resolve is a stated failure, not a fabricated string and not a desktop-side `git` call.
-- **No test may depend on committed repo content** — scratch fixtures only.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`grammar.md` and `screens/tasks.md` are the specification; the export is
+  measurement.** Where they disagree, the rules win — which is how the digest
+  width resolves to eight (`grammar.md:83`) rather than the export's seven
+  (`reference/tasks.html:733`). Take geometry from
+  `reference/tasks.html:255-291,715-742`; take content from the rules with this
+  plan's corrections applied. The export's `ctx-company/traits`, `81e5a39` and
+  narrated summary sentence are illustrations. A leaf rendering one of them for a
+  board that does not carry it is worse than an omitted leaf, because it reads as
+  evidence.
+- **The header is `0265.13`'s and this task now depends on it.** Rebuilding it
+  privately is the defect three sibling screens already name, even when it renders
+  correctly — and a private rebuild is exactly how the `∷` goes missing.
+- **The bar has a border; the action does not.** Grammar rule 8's "no fills, no
+  borders, no icons" governs the buttons. The bar itself is 1px `border-soft`,
+  padding `[10,14]` (`grammar.md:74-84`).
+- **`board_fingerprint` is a change detector, `task_board_cache` is discardable,
+  `compute_tree_digest` is a second walk over a different file set, and a Git
+  object id cannot name an uncommitted board.** All four are plausible and all
+  four are wrong here. The digest folds what the resolution already read.
+- **The truncated digest is display only.** Eight characters at the bar; the full
+  digest everywhere a value is served, stored or compared. A face that compares
+  boards on eight hex characters is comparing nothing.
+- **`synced` is a claim, not a label.** `read_dir` errors are currently swallowed
+  (`task_files.rs:197-200`) and the TUI's reader flattens a sync failure with
+  `unwrap_or_default` (`dashboard.rs:6154`). Answering `synced` for a board that
+  is absent, unreadable, non-clean, stale or failed states a fact nobody
+  established — and mixing a new state word with an old digest or old time is the
+  same lie in two pieces.
+- **Counts are `data:`, phrasing is `placeholder:`.** No count enters the
+  `placeholders` module and no placeholder string appears inline. Rendering a
+  `data:` leaf as static content inverts the doctrine; closing a `data:` leaf as an
+  unrendered gap fails it.
+- **Rows, not runs.** A task with two claiming runs must not be counted twice, and
+  no summary number may exceed the open count.
+- **One instant, two consumers, no timer.** The bar and `0266.5`'s footer read the
+  same captured value. A per-screen timer is exactly where a poll loop gets
+  smuggled in, and the TUI's existing two-second board tick
+  (`dashboard.rs:6277-6361`) is the thing not to reproduce.
+- **No board walk or digest fold on the model-owner path.** `handle_request` runs
+  in the sole model/SQLite owner (`center.rs:2915-2970`); `Start`/`Control` show
+  the connection-worker shape (`center.rs:3278-3429`).
+- **The desktop reads nothing.** No `task_files` call, no `task_board_cache` read,
+  no `.internal/tasks` walk, no `git` invocation, no `current_dir`, no second
+  clock. Every fact arrives over the socket the window already holds.
+- **The wire is bounded at 1 MiB** (`center.rs:48-52`). A digest and an instant
+  are compact; do not enlarge the listing to carry them.
+- **No test may depend on committed repo content** — scratch boards and scratch
+  repositories only, with arbitrary ids, and no test writes into this
+  repository's board.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes.
+  Equally, do not declare a check forbidding the string `gpui` in `Justfile` or
+  `.github/workflows/`: a separate desktop lane there is sanctioned, and a check
+  that reds on the sanctioned outcome is a wrong check. Isolate builds with
+  `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are shared-side and workspace-side, not proof of this
+  task's rendered chrome.** They decide the digest fold, the count derivation and
+  display projection, the center wire and the workspace staying gpui-free. The
+  header, the bar, the state words and the inert action are decided by rendered
+  evidence in the lane `0256.1` establishes. What that lane covers is unknown at
+  authoring time, so claim only what it actually verifies and observe the
+  remainder directly — an outcome asserted as "covered" without having been
+  observed is the defect this watch item exists for.
 
 ## Done when
 
-The Tasks screen carries a header titled after the repository over one italic narrated summary whose counts come from the center-served sections and whose phrasing comes from the `placeholders` module, and a bottom bar showing `synced` in ok with `· .internal/tasks @ <sha>` from the center's own resolution of the tasks tree, plus the `new task` ghost action rendered in the bar's grammar. A stale or failed board answer renders the failure instead of `synced`. `just test` passes, the center proof passes, and root workspace resolution and the root lockfile remain gpui-free.
-"""
+- The desktop lane's documented non-interactive command, landed through this
+  task's prerequisite chain and therefore present before it can dispatch, was
+  located first, recorded verbatim in the work summary, and exits 0 with the
+  chrome in the tree and the proofs it already runs left unmodified. If that
+  command cannot be found, the prerequisite chain has not landed: the task stops
+  and reports that, and no workspace command is offered in its place.
+- Rendered evidence — that command for what it decides, and the run's own
+  observation of the running frame and composed tree for the rest, with which
+  decided what named in the work summary — shows goals 1, 2, 4 and 5's observable
+  outcomes: the reusable header above the sections with a repository-named title
+  in sans 13 `text-heading`, exactly one italic sans 12 `text-secondary` summary
+  at width 560, title-stack gap 5, `∷` in mono 14 `text-secondary` padded
+  `[2,8]`, and no breadcrumb; the title tracking the served repository over a
+  multi-segment path and over a path that forces the `repo_key` fallback; the
+  summary rendering the module's phrasing over served counts at zero, one and
+  many; the bar full-width `space-between` with 1px `border-soft` and padding
+  `[10,14]`, all text mono 11, showing `synced` in `ok` plus
+  `· .internal/tasks @ <eight hex>` on a clean answer and on a clean empty board;
+  each typed non-clean, absent, unreadable, stale and failed outcome replacing
+  that claim atomically with no stale digest or time; and `new task` bright,
+  ghost, inert, with no fill, border or icon.
+- All four declared checks exit 0: the io `task_files` lane green over the digest
+  fold and the typed board-presence outcomes it consumes; `proof_center` green
+  over the real socket for the digest and captured instant arriving with the rows
+  they describe and the instant advancing only with the answer — its existing
+  assertions extended rather than weakened; `just test` green over the count
+  derivation, the phrasing entry, the display projection and every other consumer;
+  and root workspace resolution plus the root lockfile still gpui-free.
+- The closing review shows: one board resolution and one digest, folded from the
+  pairs that resolution already produced; no second walk, no
+  `compute_tree_digest` call on this path, no fingerprint or cache as provenance,
+  no `git` invocation; no filesystem, cache or `git` read in the desktop process;
+  no timer, interval, tick, watcher or second clock on any client; no digest
+  truncation used as identity; no `synced` beside a stale or absent answer; no
+  count in the `placeholders` module and no placeholder literal at a call site; no
+  second header, bar, composition, naming path or center protocol family; no
+  colour, size, spacing, family, padding or border literal at a call site; no
+  action fill, border, icon or radius; no borderless bar; no sibling-owned
+  creation, preview or row-state behaviour; no CLI-private or ratatui import in
+  the desktop; no new dependency in `ctx-traits-io`; no light-column value; and no
+  edit under `.internal/docs/design/`.
+- The work summary names the discovered desktop path and command verbatim,
+  whether `0266.1`'s answer already carried the digest and instant or this cut
+  added them to that same family, where the fold, the count derivation, the
+  phrasing entry and the display projection landed, the typed outcome names this
+  chrome consumes and what each renders, the focused test filters actually run,
+  the proof mechanics used where they differ from the suggested route, and every
+  deviation from this approach.
+
+## Bounded refinement
+
+Run the discovered desktop command, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib task_files`, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`, then
+`CARGO_TARGET_DIR=target just test`, then the root gpui-free check, then the
+closing review against `screens/tasks.md:11-25`, grammar rules 1, 2, 3, 5, 6, 8
+and 12, the dark column of `tokens.md` and
+`reference/tasks.html:255-291,715-742`. Permit at most one targeted
+repair-and-rerun round: repair one named defect, then rerun the failed command
+and every command after it in that order. If a second round would be needed, stop
+and report the exact failing command with its evidence, or the unresolved data or
+render contract, rather than iterating. That is the stop condition, not a
+judgement call.
+'''
 [relations]
 parent = "0266"
-depends-on = ["0266.1"]
+depends-on = ["0266.1", "0265.13"]
 
 [[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1200000
-
-[[checks]]
-name = "center wire proof still passes"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-timeout-ms = 1200000
+name = "the board digest fold and the typed board outcomes stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib task_files"
 expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "the center wire carries the digest and the captured instant"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "the counts, the phrasing entry and every other consumer keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 600000
