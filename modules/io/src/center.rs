@@ -642,9 +642,42 @@ fn write_line(stream: &mut UnixStream, value: &impl Serialize) -> crate::Result<
     if line.len() > MAX_LINE_BYTES {
         return Err(protocol_error("line exceeds limit"));
     }
-    stream
-        .write_all(&line)
-        .map_err(|source| io_error(&Utf8PathBuf::from("center socket"), source))
+    // O_NONBLOCK lives on the shared file description, not the descriptor, so
+    // a concurrent `read_line_bounded` on a `try_clone` of this socket (the
+    // subscription EOF watcher) flips this writer into nonblocking mode for
+    // as long as that read is parked. `write_all` treats the resulting
+    // WouldBlock as fatal and tears the stream down mid-line. Write with an
+    // explicit deadline instead: transient WouldBlock retries, while a peer
+    // that genuinely stops reading still fails within STREAM_TIMEOUT.
+    let deadline = Instant::now() + STREAM_TIMEOUT;
+    let mut written = 0;
+    while written < line.len() {
+        match stream.write(&line[written..]) {
+            Ok(0) => {
+                return Err(io_error(
+                    &Utf8PathBuf::from("center socket"),
+                    std::io::Error::from(std::io::ErrorKind::WriteZero),
+                ));
+            }
+            Ok(count) => written += count,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    return Err(io_error(&Utf8PathBuf::from("center socket"), error));
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(source) => {
+                return Err(io_error(&Utf8PathBuf::from("center socket"), source));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn read_line(stream: &mut UnixStream) -> crate::Result<Vec<u8>> {
