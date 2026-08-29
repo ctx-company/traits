@@ -1,47 +1,509 @@
 schema-version = "0.2"
 key = "0266.6"
 title = "Render the task row state stack"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-`0266.1` renders the task row's left half — dot, title, description — from the center-served board listing. This cut renders its right half, where the row's whole semantic load actually sits.
+content = '''
+`0266.1` renders the task row's left half — dot, title, short description — from
+the center-served board answer. This cut renders its right half: the end-aligned
+mono 10.5 stack of state over meta where the row's whole semantic load sits, and
+where a wrong word is indistinguishable from a right one to every gate in this
+repository.
 
-`screens/tasks.md` fixes four forms in an end-aligned mono 10.5 stack of state over meta: claimed and live renders `live · run-<id>` in accent; waiting renders `awaiting owner` in warn with a `warn` dot; ready renders `ready` over `deps met` plain; draft renders `draft` over `blocked by <id>` with a `dot-dim` dot. All of it is `data:` — the state and its qualifying detail come from the derived state the board answer already carries, and `live · run-<id>` names the claiming run through the join `0266.1` put on the center side.
+## This plan separates goals from approach
 
-Colour is chosen from the named state, never at the call site: accent for what is happening right now, warn for what needs the owner, plain for what is merely ready, dim for what is blocked. This is the first screen after Sessions to exercise that rule across four forms in one list, so it is where the row vocabulary `0265.5` extracted proves it composes rather than needing a second implementation.
-"""
-scope = """
-## Decisions
+The `scope` section is GOALS: binding, observable, and — where a command in this
+repository decides one — decided by that command. The `## Approach` half of
+`validation` is APPROACH: expected surfaces, symbols, edit order, commands and
+proof mechanics, stated as precisely as the grounding supports so the run does
+not rediscover them, and never a boundary. Deviate from any of it wherever a goal
+requires it and record the deviation in the work summary; a deviation is not a
+violation and needs no escalation. Where proof mechanics are named, only the
+observation binds — which fixture or harness shows it is the run's call.
 
-- In scope: the task row's end-aligned state-over-meta stack in all four forms, with each row's dot tone following the same named state, rendered from the derived state and join the board answer already carries.
-- **No new center capability.** If a form cannot be rendered from the served answer, that is a gap in `0266.1`'s answer to be closed there, not a client-side derivation added here.
-- **The dot and the state word agree by construction.** A row whose dot says one thing and whose word says another is a rule 1 violation the primitive should make impossible.
-- Out of scope: the sections, left stack and selection model (`0266.1`), the chrome (`0266.2`), draft creation (`0266.3`, `0266.8`), the preview column (`0266.4`, `0266.5`), and every shared primitive `0265` built.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+## Grounded at HEAD b3205ceb7
 
-## Prerequisite
+The worktree was clean. Nothing this cut renders exists yet: there is no desktop
+project, no desktop manifest or lockfile, no desktop command, and `cargo
+metadata` resolves no gpui package. `0256.1`, `0265.3`, `0265.5`, `0265.9`,
+`0258` and `0266.1` are all `ready`, not `done`. The center has no task or board
+request, response or delta arm at all (`modules/io/src/center.rs:90-212,268-284`),
+and stored `TaskStatus` is still the closed set `ready|done|cancelled`
+(`modules/core/src/task/mod.rs:22-31,208-220`), so this very file — which stores
+`status = "draft"` — is not a loadable board document until `0266.1` lands the
+canonical representation.
 
-`0266.1` — the rendered sections, the row's left half and the center-served board answer with its derived state and run-to-task join.
-"""
-validation = """
+Every desktop path, component, protocol type, served field name and command named
+below is therefore a guess to be replaced by reading what the prerequisites
+actually landed. Binding them here would be fabrication. The lane is nonetheless
+guaranteed: an open leaf derives `Blocked` while any `depends-on` target is not
+`Done` (`modules/core/src/task/graph.rs:115-177`), and this task depends on
+`0266.1`, whose closure reaches `0265.5` → `0265.3` → `0265.1` → `0256.1`.
+**The first act of this cell is to locate the desktop lane's documented
+non-interactive command and record it verbatim in the work summary.** If none
+exists, the prerequisite chain has not landed: stop and report that rather than
+substituting a workspace command for rendered-behaviour proof. It is deliberately
+not a `[[checks]]` entry, because a check must exist in the repository at the
+moment the plan is written and this one does not.
+
+What *is* readable today is the data side these goals lean on: `DerivedStatus`
+and `derived_status` (`graph.rs:16-25,115-177`), `resolved_relations` and
+`dangling_edges` (`graph.rs:188-240`), `Relations.depends_on` as an ordered
+`Vec<String>` (`task/mod.rs:119-127`), `TaskSummary`/`ResolvedTask`
+(`provider.rs:25-57`), `NewTask`'s empty-by-default `depends_on`
+(`provider.rs:85-103`), `RunSummary`'s canonical `run_id`/`task_key`
+(`run_summary.rs:23-72`), run-id generation already carrying the `run-` prefix
+(`procedure/session.rs:88-92`), `CenterPublicRow`'s repository scope and
+authoritative `live` (`center.rs:3805-3815`), and the CLI-private join and
+grouping this cut must never copy (`dashboard.rs:1946-1972,5953-6002`;
+`procedure/activity.rs:23-43`).
+
+## Seven corrections the draft this plan replaces did not carry
+
+**Correction 1 — four forms are not total over the board `0266.1` will serve.**
+The draft binds `blocked by <id>` to `draft` alone. But the parent requires a
+blocked, non-draft open task to stay in the `Ready` section carrying exactly that
+detail (`0266` Correction 2; `0266.1` goal 5), and `derived_status` blocks any
+open leaf with an unmet dependency (`graph.rs:115-177`). So a legal, ordinary row
+— open, undrafted, unclaimed, blocked — has no form in the draft's list, and the
+two candidate repairs are both defects: printing `ready` over `blocked by <id>`
+puts a false word above its own contradiction, and promoting it to a fourth
+section is the partition the parent forbids. The stack is therefore specified as
+a total presentation over the served state rather than as four hardcoded rows.
+
+**Correction 2 — `draft` does not imply a blocker.** `depends_on` defaults empty
+(`provider.rs:85-103`) and `0266.3`'s created draft is not required to declare
+one (`0266.3`), so `draft` / `blocked by <id>` is literally unrenderable for the
+first draft this screen's own `new task` action creates. The export's alternative
+bottom line for that row, `2 open questions` (`reference/tasks.html:695-706`), is
+authorized by no served field and no line of `screens/tasks.md`. A draft with no
+unmet dependency renders its state word and no meta line at all — the same
+omission-over-invention rule the reusable bar and row cuts already established
+(`0265.3:47-55,153-171`; `0265.5:316-330`).
+
+**Correction 3 — a blocker is neither singular nor always resolvable.**
+`screens/tasks.md:23` writes a singular `<id>`; the data underneath is a set. A
+task may declare several unmet dependencies, and a dependency naming a key that
+does not exist still blocks — `derived_status` treats a missing key defensively
+(`graph.rs:115-176`) while `resolved_relations` **silently omits** that edge and
+only `dangling_edges` reports it (`graph.rs:188-240`). A blocker line built from
+resolved relations alone therefore renders nothing for precisely the task whose
+dependency is broken. Zero, one, several and dangling each need a stated
+served-and-displayed outcome, and the served set reaches the line whole rather
+than as an arbitrary representative of itself.
+
+**Correction 4 — claim precedence does not choose a run.** `live · run-<id>`
+needs one id, and nothing at HEAD produces one: `task_session_join` maps a key to
+a `Vec` of run indices (`dashboard.rs:5983-6002`) and `task_group` only asks
+whether *any* joined row falls in a precedence class (`dashboard.rs:5953-5980`).
+Picking the first joined run in this renderer would name a different run than the
+preview does, and `0266.4` binds the opposite: its `claimed` row is the same run
+the row's stack names, chosen once and centrally (`0266.4` content; goal 5). This
+cut consumes the claim `0266.1` selected, or renders the typed ambiguous/absent
+outcome honestly. It never selects, never fabricates, and never re-prefixes an
+id that already carries `run-`.
+
+**Correction 5 — the export's extra lines are measurement artifacts, not
+content.** `reference/tasks.html` is geometry authority and content illustration
+only. Its live row carries a second line `implement · 42m`
+(`tasks.html:345-356`) which the parent excludes outright (`0266:154-156`) and
+which no served fact supports — an elapsed duration would additionally require a
+clock this process must not read. Its waiting row carries `claimed · run-77cd10`
+*above* `awaiting owner` (`tasks.html:398-409`), while `screens/tasks.md:21-23`
+names one line for that form. Both forms resolve toward the screen.
+
+**Correction 6 — "plain" and "dim" are not roles.** The draft names tones the
+token file does not define. The export measures the neutral top word at
+`text-secondary` and every bottom meta line at `text-muted`
+(`tasks.html:341-356,395-409,463-478,638-653`; `tokens.md:15-48`). Role
+selection belongs to the one shared state presentation `0265.3` established and
+`0265.5` extended to rows (`0265.3:65-74`; `0265.5:221-281,477-505`) — never a
+hex literal, never a caller-chosen tone, and never a second Tasks-private colour
+table.
+
+**Correction 7 — "fail loud" must respect the landed transaction.** `0266.1`
+requires candidate-level transactionality: stage a complete candidate, commit
+only on success, request a fresh snapshot after rejection, and show last-accepted
+state only behind an explicit stale marker (`0266.1:364-386`). A per-row
+"unresolved" label is therefore not automatically renderable — with typed wire
+enums an unknown variant rejects the whole answer before any row exists. What
+binds is the prohibition, not the label: no fallback to `ready`, no fabricated
+run id, no blocker line invented from an incoherent fact, and no path by which
+the dot and the words commit separately.
+'''
+scope = '''
+## Done when — binding goals, and what decides each
+
+1. **The stack renders as one total presentation over the served state, with no
+   false word and no missing form.** Every task row `0266.1` renders carries an
+   end-aligned mono 10.5 stack whose top line is the state word the board answer
+   actually serves and whose bottom line is that state's qualifying detail. The
+   presentation is exhaustive over the served state at the type level rather than
+   by a catch-all arm, so a state the answer can carry has a form here or the
+   code does not compile: claimed-and-live renders `live · run-<id>`;
+   claimed-and-awaiting-owner renders `awaiting owner`; an unclaimed open task
+   whose dependencies are met renders `ready` over `deps met`, including a task
+   that declares none, which is vacuously met and takes the same form; an
+   unclaimed open task with an unmet dependency renders the state word the answer
+   serves for it over `blocked by <id>` and never the word `ready`, while
+   remaining in the `Ready` section per `0266.1` goal 5 (content Correction 1);
+   an unclaimed draft renders `draft` over `blocked by <id>` when it has an unmet
+   dependency and `draft` with no meta line at all when it does not (content
+   Correction 2). No form invents a word the answer does not carry, and no state
+   word is re-derived here from stored status, derived status or section
+   membership.
+   Decided by rendered evidence in the desktop lane over a scratch board
+   spanning those outcomes; by `just test` for the shared presentation the
+   forms resolve through; and by the closing review for the exhaustiveness
+   being structural rather than a default arm.
+   Excluded: a fourth section or any resectioning; a form keyed off section
+   membership; the word `in review`, which is representable nowhere (`0266`
+   Correction 12); a state word rendered for a task whose served state is one
+   this renderer has not seen before.
+
+2. **A second line exists only where the screen names one.** The live form and
+   the awaiting-owner form are single-line stacks. Neither carries the export's
+   `implement · 42m` nor its `claimed · run-<id>`, and no elapsed time, trait id,
+   frame count, question count or age is rendered anywhere in this stack (content
+   Correction 5). Where a form has no meta, the stack renders one line — not an
+   empty text node, not a dangling `·`, and not a blank reserved row.
+   Decided by rendered evidence for the live and awaiting-owner rows carrying
+   exactly one line each and for a no-meta draft carrying one line with no
+   residue, and by the closing review against `screens/tasks.md:20-23` and
+   `reference/tasks.html:293-709` for any second line the screen does not name.
+   Excluded: any duration, which would require a clock read this process must
+   not perform; any `placeholders` call site in this stack; any leaf closing as
+   an unrendered gap.
+
+3. **The blocker line is honest for zero, one, several and dangling
+   dependencies.** The blocker detail is a served fact carrying every unmet
+   dependency key for the row — including a key that names no document, which
+   `resolved_relations` omits and only `dangling_edges` reports
+   (`graph.rs:188-240`) — in a deterministic order derived from the document's
+   declared `depends_on` order. The one accepted presentation is that the meta
+   line names every unmet key the answer carries for that row, in that declared
+   order: one blocker renders `blocked by <id>`, and several render the same
+   `blocked by` line continuing with every remaining key in declared order, so
+   the rendered line always contains the whole served set and never a subset,
+   count, ellipsis or `and N more` summary (content Correction 3). A dangling key
+   renders as the key the document declares. An incoherent fact — a blocked state
+   with an empty blocker set — renders no blocker line rather than a fabricated
+   one, and takes goal 6's failure route.
+   Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_center` for the blocker set arriving over the socket for a task with
+   one unmet dependency, several, and a dangling one; by `just test` for the
+   shared derivation; and by rendered evidence for the one-blocker line, for the
+   several-blocker line containing every served key in declared order, and for
+   the dangling-blocker line.
+   Excluded: any client-side board, relation or blocker derivation; reading
+   `task_files`, `task_board_cache`, `.internal/tasks`, cwd or `git` from the
+   desktop process; a blocker line built from resolved relations alone, which
+   goes silent exactly when a dependency is broken; dropping, truncating or
+   summarizing keys anywhere — in the answer or in the line; sorting that
+   discards the declared order.
+
+4. **The named run is the claim the center chose, or a typed absence.** `live ·
+   run-<id>` renders the id of the run `0266.1`'s answer named for that row, so
+   this stack and `0266.4`'s `claimed` row can only ever name the same run
+   (content Correction 4). The id is rendered exactly as served — run ids already
+   carry the `run-` prefix (`procedure/session.rs:88-92`), so no prefix is added.
+   When the served claim is a typed ambiguous or absent outcome, the row renders
+   that outcome honestly and falls to its board-state form rather than naming a
+   run.
+   Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_center` over scratch repositories with no claim, one claim, several runs
+   carrying the same key, and a same-key run in another repository; by rendered
+   evidence for the live row naming the served id with no doubled prefix; and by
+   the closing review for any renderer-side run selection.
+   Excluded: choosing a run from a joined set here; any second join, precedence
+   or awaiting-owner mapping in the desktop, which `0266.1` centralized
+   (`dashboard.rs:1946-1972,5953-6002`; `procedure/activity.rs:23-43`);
+   importing any CLI-private or ratatui type; a run id assembled, truncated or
+   re-prefixed at the call site.
+
+5. **Colour is a role selected by the state, and the dot cannot contradict the
+   words.** The top word takes `accent` only when it denotes activity happening
+   now, `warn` only when it denotes owner-needed state, and the neutral
+   secondary role otherwise; the meta line takes the muted meta role
+   (`grammar.md:6-29`; `tokens.md:15-48`, measured at
+   `reference/tasks.html:341-356,395-409,463-478,638-653`). Every role resolves
+   through the one shared state presentation `0265.3`/`0265.5` landed and that
+   `0266.1` already uses for the row's 5px dot (`0266.1:402-428`), so the dot
+   role, the state word and the meta line are projected from a single served
+   state value rather than from independent inputs — a caller cannot render a
+   `warn` dot beside a `ready` word because there is no input with which to do
+   it (content Correction 6).
+   Decided by rendered evidence for the accent live row, the warn awaiting-owner
+   row and its warn dot, and the neutral ready/blocked/draft rows; by `just
+   test` for the shared presentation; and by the closing review for the
+   structural half — one state input feeding dot and stack, no colour, size,
+   spacing or family literal at a call site.
+   Excluded: a Tasks-private colour table or a second state-word mapping; a
+   caller-supplied dot tone or text tone; a second dot anywhere in the row, the
+   dot itself being `0266.1`'s; accent used to draw the eye rather than to mean
+   now; any light-column token value; a pill, badge, chip, icon, checkmark,
+   border, fill or corner radius; any glyph outside `↰ ↳ → · ∷ –`, this stack
+   needing only `·`.
+
+6. **Failure and staleness go through the landed transaction, never through an
+   invented per-row default.** A malformed, unknown or incoherent state fact
+   never falls back to `ready`, never fabricates a run id or blocker key, and
+   never lets the dot and the words commit separately; the answer is rejected as
+   a candidate under `0266.1`'s landed transactionality with the previous
+   complete model retained only behind its explicit stale marker and a fresh
+   snapshot requested (`0266.1:364-386`), or — if `0266.1` landed a typed
+   row-level failure — that landed idiom is used rather than a second one
+   invented here (content Correction 7).
+   Decided by rendered evidence for a rejected candidate leaving the prior
+   complete model visible behind the stale marker rather than showing a
+   defaulted row, and for center loss stating failure rather than presenting
+   rows as current; and by the closing review for any `unwrap_or`, default arm
+   or partial commit on this path.
+   Excluded: presenting last-accepted state as current; a per-row silent skip; a
+   fallback to a direct board read or to `task_board_cache`; a default state,
+   default tone or default id anywhere in this stack.
+
+7. **Form changes arrive as accepted center events, with no timer and no client
+   request.** A row whose task becomes claimed and live switches to the live
+   form; a live claim that begins awaiting the owner switches to the warn form; a
+   claim that disappears or terminates returns the row to its current board-state
+   form; a dependency landing or breaking changes the blocker line. Each
+   transition updates the dot and both lines together from an accepted board or
+   run event, with no optimistic local change, no refetch on an accepted event,
+   no interval, tick or spawned timer, and no filesystem watcher (content
+   Correction 7; `0266.1:364-386`).
+   Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_center` for a claim appearing, changing state and disappearing reaching
+   a subscriber as events without the client asking; by rendered evidence for
+   each transition changing dot and stack together; and by the closing review
+   for any timer, interval, tick or watcher on the client side.
+   Excluded: any client poll loop; a per-screen or per-row refresh; a
+   filesystem-watcher dependency in `ctx-traits-io`; a second reducer,
+   subscription or board request added by this cut.
+
+8. **No new capability is created, and the workspace is unmoved.** Every leaf
+   here is served by the one board capability `0266.1` landed, which that task
+   was explicitly required to shape for this stack (`0266.1:465-478`). If a fact
+   this cut needs is absent from the served answer, it is added at the one place
+   `0266.1` put the board resolution, join and state derivation — centrally,
+   shared, off the model owner's request path, and proven over the socket — never
+   as a second capability, a GUI-only protocol or a client-side derivation; and
+   if it cannot be added without redesigning that answer, the prerequisite is
+   unmet and this task stops and reports it. Root Cargo resolution and the root
+   `Cargo.lock` stay gpui-free, the desktop project stays outside the workspace,
+   and `just test`, `just test-full` and the existing CI lanes gain no gpui cost.
+   Decided by the declared metadata and lockfile check, by `just test`, by
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`
+   for any wire fact this cut caused to be served, and by the closing review for
+   a second protocol, a second projection or a desktop-side read.
+   Excluded: adding the desktop project to root workspace members; a check
+   forbidding the string `gpui` in `Justfile` or `.github/workflows/`, since a
+   separate desktop lane there is sanctioned and such a check would red on the
+   sanctioned outcome; a new dependency in `ctx-traits-io`; widening the compact
+   listing with full task prose for this renderer (`0266` Correction 11).
+
+Exclusions, restated so they are checkable by reading the diff: the sections, the
+row's dot, left stack and selection model (`0266.1`); the header and provenance
+bar (`0266.2`); draft creation and the `new task` action (`0266.3`, `0266.8`);
+the preview column (`0266.4`, `0266.5`); the TUI migration (`0266.7`); every
+shared primitive `0265` already built; any task mutation; any light-theme value;
+any edit under `.internal/docs/design/**` or to any pencil artifact; any
+design-example literal (`run-ab12ef`, `0243.4`, `implement`, `2 open questions`,
+`0253.5`) hardcoded as data or relied on as fixture authority; and any test that
+depends on or writes this repository's own `.internal/tasks`.
+'''
+validation = '''
+## Approach — suggested route, not a boundary
+
+No desktop project, gpui source, desktop lockfile or desktop command exists at
+this HEAD, and the center has no task arm at all
+(`modules/io/src/center.rs:90-212,268-284`), so no desktop path, module,
+component, served field name or protocol type is named below: discover each from
+what `0266.1` and its closure actually landed, and say in the work summary where
+the landed shape differed. If a dependency reports complete but the desktop
+project, the row composition, the served state/claim/blocker facts or the desktop
+lane is absent, that is an unmet prerequisite to report — not permission to build
+a parallel implementation of it here.
+
+**Reuse points, named by what lands them.** `0266.1`'s board answer is the sole
+source of the state word, the section membership, the repository-scoped run join,
+the centrally chosen claim, the awaiting-owner mapping, the blocker detail, the
+board freshness event and the accepted-model transaction — consume all of it,
+derive none of it. `0266.1`'s own row composition owns the 5px dot and the left
+half, so this stack is added to that landed row rather than to a new one, and the
+dot's state input is the one this stack projects from. `0265.3`'s exhaustive
+state-word-to-semantic-role presentation, extended by `0265.5` to row dot roles,
+title tones and right-side forms with list-owned selection and no call-site colour
+literals (`0265.3:65-74`; `0265.5:221-281,477-505`), is the vocabulary to extend
+— minimally, at the landed composition, without redesigning the row or the
+selection model. `0265.1`'s token entry point carries mono 10.5, gap 2, the
+end alignment and every tone as roles rather than literals. On the shared side,
+`graph::dangling_edges` (`graph.rs:225-240`) is why a blocker set must be built
+from the document's declared `depends_on` rather than from `resolved_relations`
+(`graph.rs:188-221`), and `RunSummary.run_id` (`run_summary.rs:23-72`) is the id
+to render verbatim.
+
+**Edit order.**
+
+1. **Read what landed before writing anything.** Locate and record the desktop
+   lane's documented non-interactive command verbatim, and run it as a baseline.
+   Then read `0266.1`'s served answer and desktop model: the exact state fact,
+   the chosen-claim fact and its ambiguous/absent outcomes, the blocker detail if
+   any, the row composition and its dot call site, the shared state presentation,
+   and the accepted-model transaction and its stale marker. Every step below
+   depends on that reading.
+2. **Close the served gaps, if any, where `0266.1` put them** — most likely the
+   unmet-blocker set in the compact row projection, built from declared
+   `depends_on` so a dangling key survives, ordered deterministically, with the
+   center-side coverage extended in `modules/cli/tests/proof_center.rs` beside
+   the board assertions `0266.1` added. Add no field the stack does not render.
+3. **Extend the landed row presentation** so one served state value projects the
+   dot role, the state word with its role, and the meta line with its role,
+   exhaustively over the served state and with the no-meta case expressed as an
+   absent line rather than an empty string.
+4. **Compose the stack into the landed row's right slot** — flex column,
+   `align-items: flex-end`, gap 2, fit-content, mono 10.5, opposite the left half
+   under the row's existing `space-between` (`reference/tasks.html:341-356`) —
+   writing the ambiguous-claim, no-blocker, several-blocker, dangling-blocker,
+   stale and failure renderings alongside the resolved ones rather than after
+   them.
+5. **Prove the transitions** — board-only to claimed live, live to awaiting
+   owner, claim disappearing, blocker changing — over accepted events in the
+   desktop lane, then run the declared checks.
+
+**What must be proven** (observations, not mechanics), over scratch boards,
+repositories, ledgers and arbitrary ids only: a live-claimed row rendering the
+served run id in accent on one line; an awaiting-owner row rendering one warn
+line with a warn dot; an unclaimed dependency-met row rendering `ready` over
+`deps met`, including one that declares no dependencies; an unclaimed blocked
+non-draft row staying in `Ready` while rendering its served state word over
+`blocked by <id>` and never `ready`; a draft with an unmet dependency and a draft
+with none, the latter rendering one line with no residue; a task with several
+unmet dependencies, whose line carries every one of them in declared order, and
+one whose dependency names no document; a task joined by
+several runs arriving as the typed outcome `0266.1` serves; a rejected candidate
+leaving the previous model behind the stale marker; center loss; and each of the
+four transitions arriving as an accepted event with no client request. No test
+may assert against or write this repository's committed `.internal/tasks`.
+
+**Desktop lane.** No repo-root command inspects a rendered gpui screen at this
+HEAD, so none is declared. Run the discovered command as baseline and as final
+rendered proof, and extend that same harness rather than standing up a parallel
+lane or substituting `just test` for rendered behaviour. If it is repo-root
+relative, non-interactive and carries its whole verdict in its exit code, adding
+it to `[[checks]]` verbatim is right; guessing its name now is not.
+
 ## Watch
 
-- **Every leaf here is `data:`.** No state word, run id or `blocked by <id>` detail is served from the `placeholders` module, and none may close as an unrendered gap.
-- **States are words, never pills, badges or icons**; the glyph set is closed and no corner radius exists inside the canvas.
-- **Colour is semantic, not decorative.** Accent because it is happening now, warn because it needs the owner — never to draw the eye.
-- **No poll loop.** A row whose task becomes claimed switches form from a center event, not from a timer, and a rejected projection leaves no row showing a state its dot contradicts.
-- **Fail-loud, no silent staleness.** A row whose state cannot be resolved states that rather than falling back to `ready`.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered forms are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`screens/tasks.md` and `grammar.md` are the specification; the export is
+  measurement.** Take `align-items: flex-end`, gap 2, fit-content and mono 10.5
+  from `reference/tasks.html:341-356,395-409,463-478,638-653`; take content from
+  `screens/tasks.md:20-23` with this plan's corrections applied.
+- **The export's extra lines are the trap.** `implement · 42m`, `claimed ·
+  run-77cd10` and `2 open questions` are illustrations the parent excludes
+  (`0266:154-156`), and a line rendering one of them for a task that does not
+  carry it is worse than an omitted line, because it reads as evidence.
+- **Four forms are not total.** A blocked, undrafted, unclaimed open task is
+  ordinary and has no form in the artifact's list; printing `ready` above
+  `blocked by <id>` is the failure this plan exists to prevent.
+- **A draft need not be blocked** — `depends_on` defaults empty
+  (`provider.rs:85-103`) — and the first draft this screen's own action creates
+  is exactly that case. Omit the line; never invent meta.
+- **A blocker set is not a blocker.** `resolved_relations` silently omits a
+  dangling edge (`graph.rs:188-240`), so a line built from it goes quiet for the
+  broken dependency it most needs to name; and naming one of several hides data
+  the row implied it was showing, which is why the line carries the whole set.
+- **No run is chosen here.** `task_session_join` returns a vector and
+  `task_group` decides a precedence class, not a run
+  (`dashboard.rs:5953-6002`). A renderer that picks one lets this row and its own
+  preview name different runs (`0266.4` goal 5).
+- **Run ids already carry `run-`** (`procedure/session.rs:88-92`). Render the
+  served id; a second prefix is a fabricated identifier.
+- **Colour is semantic, never decorative** (`grammar.md:6-22`): accent because it
+  is happening now, warn because it needs the owner. The dot and the words come
+  from one state input, so they cannot disagree by construction.
+- **States are words** (`grammar.md:24-29`): never a pill, badge, chip, icon or
+  checkmark; compound segments join with `·`; no corner radius inside the canvas;
+  no glyph outside `↰ ↳ → · ∷ –`.
+- **Mono is machinery** (`grammar.md:49-56`): this whole stack is mono 10.5 at
+  the token step, resolved through `0265.1`'s entry point rather than as literals.
+  Dark tokens only; the light column stays unimplemented (`tokens.md:1-4`).
+- **No timer, no watcher, no optimistic update.** Freshness rides `0266.1`'s
+  accepted events; a per-screen tick is exactly where a poll loop gets smuggled
+  in, and the TUI's existing two-second board tick is the thing not to reproduce.
+- **Fail loud, no silent staleness, no per-row default.** No fallback to `ready`,
+  no fabricated id or key, no partial commit that leaves the dot ahead of the
+  words, and no last-accepted row presented as current.
+- **The desktop reads nothing.** No `task_files`, no `task_board_cache`, no
+  `.internal/tasks` walk, no cwd inference, no `git`, no clock — every fact
+  arrives over the socket the window already holds.
+- **No test may depend on committed repo content.** Scratch boards, repositories
+  and ledgers with arbitrary ids only; path/word/file-existence inventories are
+  banned workspace-wide, and no test writes into this repository's board.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes. Do
+  not declare a check forbidding the string `gpui` in `Justfile` or
+  `.github/workflows/` — a separate desktop lane there is sanctioned, and a check
+  that reds on the sanctioned outcome is a wrong check. Rust is pinned to 1.97.1;
+  isolate with `CARGO_TARGET_DIR=target` when a failure looks like a phantom
+  "cannot find X", since a shared cross-worktree target dir flakes gates.
+- **The declared checks are workspace-side and wire-side, not proof of rendered
+  behaviour.** They show the served facts and the shared code are green and the
+  workspace stayed gpui-free. The rendered forms are decided by the desktop lane
+  `0256.1` establishes and by the bounded review below; claim only what the lane
+  actually verifies and observe the remainder directly — an outcome called
+  "covered" without having been observed is the defect this item exists for.
 
-## Done when
+## Bounded review
 
-Every task row carries the end-aligned state-over-meta stack `screens/tasks.md` names, in all four forms — `live · run-<id>` in accent, `awaiting owner` in warn with a warn dot, `ready` over `deps met`, `draft` over `blocked by <id>` with a dim dot — each rendered from the board answer's derived state and its run-to-task join, with dot and word agreeing by construction and nothing placeholder-served. A row whose task becomes claimed changes form from a center event with no timer. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+One review pass over the completed diff before calling this done: walk
+`screens/tasks.md:14-23` leaf by leaf against the rendered rows, naming for each
+of the state word, the run id, the meta line and the dot the served fact it
+renders from; confirm every form in goal 1 renders, including the blocked
+non-draft row and the no-blocker draft, and that the absence and failure forms —
+ambiguous claim, no claim, no blocker, several blockers, dangling blocker, stale,
+outage — render honestly and non-placeholder; compare the geometry against
+`reference/tasks.html:293-709` and resolve each content conflict toward
+`screens/tasks.md` and `grammar.md`; inspect the landed shared presentation and
+the accepted-model transaction; then read the diff for what no fixture shows —
+duplicate state, join, claim or blocker logic; independent dot and text inputs; a
+colour, size, spacing or family literal at a call site; a `placeholders` call
+site; a desktop-side filesystem, cache, `git`, cwd or clock read; a timer,
+interval or watcher; a default or `unwrap_or` on the state path; stale state
+presented as current; and any sibling-owned region touched.
+
+Then run, in order: the discovered desktop lane command, `CARGO_TARGET_DIR=target
+cargo test -p ctx-traits-cli --test proof_center`, `just test`, and the root
+gpui-free check. Permit at most one targeted repair-and-rerun round: repair one
+named defect, then rerun the failed command and every command after it in that
+order. If a second round would be needed, stop and report the exact failing
+command with its evidence, or the unresolved render or data contract, rather than
+iterating. That bound is the stop condition, not a judgement call.
+
+The work summary names the discovered desktop path and command verbatim, the
+exact served state, claim and blocker facts this stack consumed, anything that
+had to be added to `0266.1`'s answer and where it landed, the proof mechanics
+used where they differ from the suggested route, and every deviation from this
+approach.
+'''
 [relations]
 parent = "0266"
 depends-on = ["0266.1"]
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "the served state, claim and blocker facts stay green over the real socket"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "the shared state presentation and every other consumer keep the per-round gate green"
+command = "just test"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 600000
