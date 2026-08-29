@@ -1,46 +1,580 @@
 schema-version = "0.2"
 key = "0265.8"
 title = "Render the rail"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-Grammar rule 10 gives every v1 screen a 260-wide rail on its left, and Sessions is where it lands because Sessions is the first screen. Padding [18,0]. A `Spaces` heading in mono 11 `text-muted` (heading pad [0,18,12,18]), then repo rows — a 5px dot plus the name in sans 13, the active row taking a raised fill with a bright dot and name, rows pad [0,10] gap 3, row pad [8,10] — then a spacer, then the footer at pad [14,18,0,18] gap 6: the owner's handle in mono 10.5 `text-secondary` over `<repo> · local` in mono 10.5 `text-session` / `text-faint` / `text-faint`. Nothing else in v1. Centred 32x1 `border-strong` dividers may separate future rail sections and precede the footer.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-Repository identity comes from the center row, never from the desktop process's cwd. `current_repo_key()` handles ad-hoc directories with an `adhoc-` key that `repo_key(root)` alone cannot reproduce, so a cwd-derived rail would name a repo the center does not know by that name, and repo rows are one of the four stateful lists rule 4 admits a dot into. The footer's owner handle is not something the center serves today, so it renders from the shared `placeholders` module under the placeholder doctrine rather than as an inline literal or an invented read.
+Grammar rule 10 gives every v1 screen a 260-wide rail on its left, and Sessions
+is where it lands because Sessions is the first screen: padding [18,0]; a
+`Spaces` heading in mono 11 `text-muted` at pad [0,18,12,18]; repository rows
+(5px dot + name sans 13, active row taking a raised fill with a bright dot and
+name) in a container at pad [0,10] gap 3, each row pad [8,10]; a flex spacer;
+then the two-line footer at pad [14,18,0,18] gap 6 — the owner's handle in mono
+10.5 `text-secondary` over `<repo> · local` in mono 10.5 `text-session` /
+`text-faint` / `text-faint`. Nothing else in v1. Rule 10 permits centred 32×1
+`border-strong` dividers to separate future rail sections and to precede the
+footer; this cut takes the footer one and only that one, matching the export
+(`.internal/docs/design/grammar.md:93-102`, `tokens.md:71-85`, export geometry
+at `reference/sessions.html:91-249`, footer divider at `:207-215`).
+
+Repository identity comes from the center row, never from the desktop process's
+cwd. `repo_key` is `<basename-slug>-<first-8-sha256-of-canonical-path>`
+(`modules/io/src/state.rs:149-160`) and `current_repo_key()` prefixes an ad-hoc
+directory with `adhoc-` (`state.rs:304-317`), so recomputing identity from the
+desktop's own directory — or by calling `repo_key(repo_path)` on a row — can
+name a repository the center does not know by that name. `CenterPublicRow`
+already carries every fact this rail is allowed to use: `summary`, `repo_key`,
+`repo_path`, `ledger_path`, `live`, `modified_epoch_secs`
+(`modules/io/src/center.rs:3778-3788`). No center protocol addition is needed
+to identify repositories, and none is sanctioned here.
+
+The footer's owner handle — `Oskar Cieslik`, the value rule 10 itself sets
+(`grammar.md:98`) — is not something the center serves today, so it
+renders from the one shared `placeholders` module under the placeholder
+doctrine rather than as an inline literal or an invented read. The parent
+charter assigns that module's creation to `0265.3` and names the owner handle
+as one of the entries a later cut adds when it consumes it (`0265:74-80`).
+
+## Five corrections to the draft this plan replaces
+
+**Correction 1 — the rail's reuse points did not exist through its own edge.**
+The draft said the rail composes "the token constants and the row vocabulary
+the frame list established" and places the owner handle in "the one shared
+module", while declaring `depends-on = ["0265.1"]` alone. The `placeholders`
+module is created by `0265.3` (`0265.3` goal 6; `0265:74-80`), and the frame
+list's dot/selection vocabulary belongs to `0265.5` (`0265.5:267-284`). A
+charter's `depends-on` is not inherited by its children and `derived_status`
+evaluates `depends-on` only for open leaves
+(`modules/core/src/task/graph.rs:129-172`), so neither reuse point reaches this
+task through `0265` or through `0265.1`. The `0265.3` edge is added — see the
+relations correction. The `0265.5` edge is *not*: `0265.5` depends on `0265.3`
+and `0257`, and the parent's item sequence places this cut before it
+(`0265:74-80`), so adding that edge would invert the sequence. Correction 2 is
+how the row vocabulary is resolved instead.
+
+**Correction 2 — the dot and selection primitive has exactly one owner,
+whichever cut runs first.** This cut and `0265.5` are unordered relative to each
+other: both depend on `0265.3`, neither depends on the other. The resolution
+that duplicates nothing, in either order: if `0265.5`'s list primitive and its
+5px dot have already landed, the rail composes them; if they have not, this cut
+establishes exactly the 5px ellipse and the one-bright-per-list selection
+treatment the rail's own list renders, placed beside `0265.3`'s state
+presentation where `0265.5` extends it with the frame-list state colouring, row
+voices and elapsed-time forms rather than creating a second dot or a second
+selection rule. Either way exactly one dot primitive and one selection
+invariant exist in the tree when both have landed. Which case was found is
+reported in the work summary.
+
+**Correction 3 — the export's rail rows drift from rules 4 and 10, and the
+rules win.** Parent Correction 1 already resolves the export's per-repository
+`Count` against rule 10's "Nothing else in v1" (`0265:23-30`;
+`reference/sessions.html:129-160`). Two further measured conflicts in the same
+region resolve the same way. Rule 4 fixes unselected row titles as `text`
+(`grammar.md:44-47`), while the export paints every unselected repository name
+`text-secondary #8b909c` (`reference/sessions.html:151-160,178-186,196-200`) —
+`text` governs. Rule 4 also fixes the dot palette by state (`ok`, `accent`,
+`dot-idle`, `dot-dim`, `warn`), and `text-bright` is not in it, yet the export
+gives its *second*, non-active row a `#eceef2` dot
+(`reference/sessions.html:145-150`) that no rule explains. Both are reported in
+the work summary as owner corrections against the source design, never edited
+into `.internal/docs/design/**`.
+
+**Correction 4 — the row-dot rule is stated, not reverse-engineered from the
+example.** The draft named the dot without saying what colours it. Neither rule
+10 nor `screens/sessions.md` defines an aggregate repository status, so the
+rule is decided here from the rules plus the only status evidence the row
+carries, and named: the active row's dot is `text-bright` because rule 10 says
+so for the rail specifically; a non-active repository with at least one live
+accepted row takes `accent`, because rule 1 assigns accent to what is happening
+right now and rule 4 assigns it to current/live, and `CenterPublicRow.live` is
+the authoritative liveness the row already carries; every other row takes
+`dot-idle`, rule 4's pending/ready tone. That is one boolean fold over rows
+already grouped for deduplication — not a count, not a status rollup, and not
+an inference from the export's colours. The absence of a normative aggregate
+repository status is reported as an owner correction.
+
+**Correction 5 — an empty `repo_path` is a real case with a stated fallback.**
+Direct unindexed-store discovery produces a valid row with a directory key and
+an *empty* path (`modules/io/src/center.rs:6326-6341`); indexed rows take the
+path from the checkout index and retain the previously verified path when
+metadata is unavailable (`center.rs:2111-2134`, tests `7277-7321`). No shared
+helper produces the design's `owner/repo` display identity from those fields
+today, and a basename-only projection cannot produce that form. The friendly
+name is therefore a pure, total projection of `repo_key`/`repo_path` alone with
+an explicit boundary for empty and shallow paths — never a filesystem probe,
+never the cwd, and never the example string `ctx-company/traits` typed in as
+data.
+
+## Grounded at HEAD 449d76f08
+
+Nothing this task edits exists yet. There is no standalone desktop
+`Cargo.toml`, no desktop lockfile, no gpui source tree, no desktop asset
+directory, no tracked font file and no desktop command anywhere in the
+repository; no `0256` child has landed, and `0265.1` and `0265.3` are `ready`
+rather than done. Every desktop path, module name, symbol, signature, gpui API
+and command named below is therefore a guess to be replaced by discovery
+against what `0256`, `0265.1` and `0265.3` actually landed — binding them here
+would be fabrication. The absence of that lane at execution time is an unmet
+prerequisite, not permission to substitute workspace commands for
+rendered-behaviour verification. What is checkable today, and the only board
+coverage this task can honestly declare, is that the workspace stayed gpui-free
+and its per-round gate stayed green.
+
+The desktop lane is nonetheless guaranteed to exist *when this cell runs*, and
+the guarantee is a code fact rather than a hope. An open leaf derives `Blocked`
+while any `depends-on` target is not `Done`
+(`modules/core/src/task/graph.rs:129-172`), this task depends on `0265.1`, and
+`0265.1` depends on all five `0256` leaves including `0256.1`
+(`0265.1:291-293`). So `0265.1` cannot be `Done` — and this task cannot
+dispatch — until `0256.1` has landed the standalone desktop shell and the
+documented non-interactive build-and-test command that goes with it. The first
+act of this cell is therefore to locate that landed command and record it
+verbatim; every behavioural Done-when clause below is decided by that recorded
+command. If no such command is found, the prerequisite chain has not in fact
+landed: stop and report that, rather than substituting a workspace command for
+rendered-behaviour proof. It is deliberately *not* declared as a `[[checks]]`
+entry, because a check must exist in the repository at the moment the plan is
+written and this one does not; `0256.1` is where that command becomes
+declarable.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: the rail at width 260 — `Spaces` heading, repo rows with their dot and active-row treatment, the spacer, and the two-line footer — composed from the token constants and the row vocabulary the frame list established.
-- **Repo rows come from center row data.** The desktop does not derive repository identity from its own working directory, and it does not add a reader to get it: the rows the subscription already carries name their repo and repo path.
-- **The footer's owner handle is placeholder-served.** No center capability supplies it today; the placeholder doctrine covers exactly this case, and the entry lives in the one shared module so wiring it later is a grep.
-- Out of scope: the title bar and the screen menu (`0265.9`), any rail section beyond the three rule 10 names, and every screen body.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+1. **Rule 10's rail exists once, at 260 wide, with four regions and one
+   divider.** One desktop component renders the rail: a full-height 260 column
+   at pad [18,0] holding the `Spaces` heading (mono 11 `text-muted`, pad
+   [0,18,12,18]), the repository-row container (pad [0,10], gap 3, rows pad
+   [8,10], dot-to-name gap 10), a flex spacer, and the footer (pad
+   [14,18,0,18], gap 6). The permitted footer divider **is rendered**: one
+   centred 32×1 `border-strong` line immediately above the footer, at a
+   centred pad within [12–14, 16–18] (`tokens.md:85`;
+   `reference/sessions.html:207-215` measures 12/16/0/16). That is the rail's
+   only divider — rule 10 permits dividers between rail *sections* and v1 has
+   no second section, so no other divider renders. Every colour, size, spacing,
+   family and layout constant comes from `0265.1`'s token entry point — no
+   colour, size, spacing, weight or family literal at a call site in this cut.
+   Decided by the desktop lane's own non-interactive build-and-test command —
+   the one `0256.1` landed, discovered at execution time, recorded verbatim in
+   the work summary before any edit — exiting 0, plus the closing diff read
+   against `grammar.md:39-47,93-102`, `tokens.md:15-85` and
+   `reference/sessions.html:91-249` with Corrections 3 and 4 applied.
+   Excluded: any per-repository count (`0265:23-30`); any rail section beyond
+   the four rule 10 names, and any divider other than the single footer
+   divider; the title bar and screen menu (`0265.9`); the screen body and preview
+   column; any corner radius or border on the rail or its rows; any
+   light-column value; sans anywhere except the repository names; any glyph
+   outside the closed set `↰ ↳ → · ∷` (this rail uses only `·`).
 
-## Prerequisite
+2. **The rows are the distinct repositories of the accepted center row
+   model.** One row per distinct `repo_key` across the accepted rows the
+   desktop's landed snapshot/delta model holds, in a deterministic total order
+   derived from center data alone — never the iteration order of a hash map.
+   Multiple run rows sharing a repository produce one row; when one of them
+   ends the repository remains, and it disappears only when its last accepted
+   row does.
+   Decided by the desktop command, whose coverage must show one row per
+   distinct repository with several rows sharing one; two same-basename
+   repositories staying separate by key; an ad-hoc row's identity preserved;
+   the order stable and independent of insertion sequence; and a repository
+   surviving one row's removal but disappearing with its last.
+   Excluded: deriving any repository from the desktop process's cwd or from
+   `current_repo_key()`; recomputing identity with `repo_key(repo_path)`; a
+   second subscription, reducer, poller, cache or repository reader beside the
+   one `0256` landed; any center protocol addition; listing checkout-index
+   entries that no accepted row represents — that inventory is not on this
+   stream and adding it is board material, not a cell here.
 
-`0265.1` — the token constants and loaded faces the rail's sans 13 names and mono 10.5 footer render in, and the leaf that carries the whole of item `0256`. That chain is what puts `0256.4`'s live delta stream behind this rail: the rows refresh from deltas, and a charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs`), so the gate has to arrive through this edge rather than through `0265`'s.
+3. **The friendly name is this exact pure, total projection of `repo_key` and
+   `repo_path`.** One function of those two fields produces the displayed name,
+   and the same function serves both the rail row and the footer's space line
+   so they cannot disagree. The projection is fixed here, not left to the run:
+   split `repo_path` on `/` and drop empty segments; when two or more segments
+   remain, the name is the **final two segments joined by `/`**; when fewer
+   than two remain — including the empty `repo_path` that unindexed-store
+   discovery produces (`center.rs:6326-6341`) — the name is **`repo_key`
+   verbatim**. That is the whole contract: `/Users/o/ctx-company/traits` names
+   `ctx-company/traits`, `/traits` and `` both name their row's `repo_key`.
+   Decided by the desktop command's coverage checking a normal multi-segment
+   path, an empty `repo_path`, and a one-segment path against *that*
+   predetermined mapping — the expected strings are the ones this goal states,
+   not whichever mapping the implementation chose; plus the closing diff read
+   showing the projection touches no filesystem, no cwd and no field beyond
+   those two.
+   Excluded: a filesystem probe, `canonicalize`, metadata read or existence
+   check anywhere on this path; a cwd fallback; a blank or panicking name for
+   any input; the example string `ctx-company/traits` as shipped data or a
+   hard-coded name in the rail (it is legitimate only as the expected output of
+   a fixture path that projects to it); a general-purpose repository-naming
+   abstraction beyond the one projection this rail renders.
+
+4. **The dot and the active-row treatment follow one stated rule.** The active
+   repository's row takes the `surface-raised` fill, a `text-bright` dot and a
+   `text-bright` name; a non-active repository with at least one live accepted
+   row takes an `accent` dot; every other row takes a `dot-idle` dot; all
+   non-active names take `text` per rule 4. The 5px ellipse is the only state
+   marker, and at most one bright name renders in the list.
+   Decided by the desktop command's coverage over an active row, a non-active
+   live row, a non-active idle row and a list with no active repository —
+   showing never more than one bright name; plus the closing diff read against
+   rules 4 and 10.
+   Excluded: a second dot or selection primitive beside the one Correction 2
+   resolves; brightness as a function of anything but the active identity; a
+   status rollup richer than the stated live/idle fold — no `ok`, `warn` or
+   `danger` aggregation, no count, no per-row badge; any row border, radius or
+   pill; the frame-list row forms, their state colouring, row voices and
+   elapsed times (`0265.5`).
+
+5. **The footer's two lines render from the shared placeholder and the active
+   identity.** The owner line renders the text **`Oskar Cieslik`** — the value
+   the normative grammar establishes (`grammar.md:98`, export `:220-222`) — and
+   it resolves through exactly one new entry in the single `placeholders`
+   module `0265.3` created, with that string appearing nowhere but that entry
+   and no literal at the rail's call site. The space line renders the active
+   repository's name through goal 3's projection in `text-session`, a
+   `text-faint` `·`, then `local` in `text-faint`, at segment gap 5. With no
+   active repository the space line renders honest absence — no invented name,
+   no dangling separator — while the heading and owner line still render.
+   Decided by the desktop command's coverage showing the rendered owner text is
+   exactly `Oskar Cieslik` and reaches the footer through that one module
+   entry, the space line agreeing with the active row's name in every case
+   tested, and the no-active-repository case; plus the closing diff read for a
+   duplicate or inline owner literal.
+   Excluded: a placeholder registry, lookup framework, trait or macro layer;
+   placeholder entries no cut renders yet; any read or center capability to
+   obtain the owner handle; any remote/locality detection behind `local`, which
+   is fixed interface text from rule 10; a second name projection for the
+   footer.
+
+6. **The active identity is the selected run's repository, and one identity
+   serves both.** The rail's active repository is the repository of the
+   accepted selected run held by the model `0256`/`0265.1` landed — never the
+   desktop's launch directory, and never a row the rail promotes on its own.
+   The active row and the footer's space line read that one identity, so they
+   move together when the selection changes.
+   Decided by the desktop command's coverage over a selection change, over the
+   active repository's last row ending, and over an empty snapshot — with the
+   footer and the active row agreeing in every one.
+   Excluded: cwd or `current_repo_key()` as an implicit active repository;
+   the rail holding its own selection state beside the landed model; promoting
+   the first, newest or most recently modified repository as a fallback; any
+   rail interaction, click target or navigation (no cut has asked for it yet).
+
+7. **The rail participates in the accepted snapshot/delta model, and never
+   lies about freshness.** The repository rows and the footer project from the
+   same accepted snapshot/delta candidate as the run rows: a whole snapshot is
+   staged and committed only when the complete candidate projects, a rejected
+   projection leaves the previously accepted rail visible and forces a fresh
+   snapshot, and no update is lost or duplicated across the snapshot-to-delta
+   boundary. Center absence, disconnect or eviction is non-fatal and visibly
+   stale; stale rows are never presented as current. Nothing in the rail path
+   schedules a timer, interval or poll, performs a filesystem, ledger, store or
+   sidecar read, or blocks on gpui's UI thread.
+   Decided by the desktop command, whose coverage must include a repository
+   appearing, changing and having its last row removed through accepted deltas,
+   a rejected projection leaving the previous complete rail, and center loss
+   leaving the rail explicitly stale — with the existing `0256.2`-`0256.5`
+   tests passing unmodified; plus the closing diff read for any timer, spawned
+   tick, read, second subscription or UI-thread block on the rail path.
+   Excluded: a rail-only refresh path; re-subscribing to obtain repositories; a
+   partially committed rail; rendering last-accepted rows without the stale
+   marker; changing `0256`'s reducer semantics to suit the rail.
+
+8. **The workspace does not learn about gpui.** Root Cargo resolution and the
+   root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+   member, and the per-round workspace gate stays green and unchanged in cost.
+   Decided by the two declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing macOS and Linux CI lanes; a grep forbidding the word
+   `gpui` in `Justfile` or `.github/workflows/` — a *separate* desktop lane
+   there is sanctioned, so such a check would red on the sanctioned outcome;
+   declaring a board check that executes the desktop lane before `0256.1` has
+   landed one.
+
+9. **The normative artifacts are untouched and the change stays in scope.** No
+   file under `.internal/docs/design/` is modified, no sibling-owned screen
+   region is touched, and no center, core or IO semantics change. A rule, token
+   or example that looks wrong — including Corrections 3 and 4 — is reported in
+   the work summary as an owner correction against the source design, never
+   edited here.
+   Decided by reading the change this cell produced against those exclusions.
+   No board check can decide it, because a check runs in a clean detached
+   worktree of the merged sha with no base to diff against. Reading the task
+   commit's own file list is the suggested way to see it; how the work is
+   arranged into commits is approach, not a goal.
+
+10. **The pass is reviewed once and bounded.** The completed diff is read
+    against `grammar.md:39-47,93-102`, `tokens.md:15-85`,
+    `screens/sessions.md:7-10` and `reference/sessions.html:85-250` — with the
+    no-count, unselected-`text` and dot-rule corrections applied — before the
+    task is called done. Exactly one targeted repair cycle is allowed. If a
+    second cycle would be needed, stop and report the exact failing command or
+    the unresolved visual/data contract rather than iterating. The work summary
+    names the discovered desktop path, the exact desktop command verbatim, the
+    proof mechanics actually used where they differ from the suggested route,
+    the
+    Correction 2 case found, the name projection and its boundary, the dot rule
+    as implemented, the repository ordering chosen, every owner correction
+    raised, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256`, `0265.1` and `0265.3` landed; do not carry a guess from this file
+into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level directory listing, then its manifest, README, justfile or CI lane,
+  for the documented non-interactive build-and-test command `0256.1`
+  established. Reusing that harness is suggested over standing up a parallel
+  lane. If no such lane exists, the prerequisite chain has not landed and this
+  task cannot pass — report that rather than substituting workspace commands.
+- Read `0265.1`'s token entry point and take every value from it.
+  `surface-raised #16181d`, `text-bright #eceef2`, `text #d7dae0`,
+  `text-session #a7abb5`, `text-secondary #8b909c`, `text-muted #585d68`,
+  `text-faint #4d525c`, `dot-idle #33363d`, `accent #7fb2ff`,
+  `border-strong #2b2e35`, mono 11 / 10.5, sans 13, and the rail's layout
+  constants (`tokens.md:15-48,71-85`) are that module's contents, not this call
+  site's.
+- Read `0265.3`'s `placeholders` module and its state presentation, and read
+  whether `0265.5`'s list primitive and dot have landed — that decides which
+  half of Correction 2 applies.
+- Read `0256.2`-`0256.5`'s accepted snapshot/delta model, its selected-row
+  state and its test harness, and project the rail from that same accepted map.
+
+### Edit order
+
+1. The friendly-name projection and its empty/shallow boundary, kept beside the
+   desktop model that already holds the accepted rows.
+2. The repository grouping: distinct `repo_key`, the live fold, the
+   deterministic order.
+3. The dot/selection primitive — composed from `0265.5`'s if it landed, else
+   established beside `0265.3`'s state presentation per Correction 2.
+4. The rail component: heading, row container and rows, spacer, footer
+   divider, footer.
+5. The one new `placeholders` entry carrying `Oskar Cieslik`.
+6. The Sessions mount, binding the rail's active identity to the landed
+   selected-run identity.
+7. The focused proofs, then the desktop command, then the two declared checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `rail` component taking an ordered list of rendered
+repository rows plus a footer value; a `repo_display_name(repo_key, repo_path)`
+returning the name; a `rail_rows(accepted, active)` grouping the accepted rows
+into ordered repository rows carrying their dot role and name tone. Names,
+module paths and signatures follow whatever conventions `0256`, `0265.1` and
+`0265.3` established. The name projection's *behaviour* is not a suggestion —
+goal 3 fixes it — but where it lives and what it is called are; the ordering's
+suggested shape is by displayed name with `repo_key` as tiebreak, so it is
+total even when two repositories project the same name, and the order is the
+run's call as long as goal 2's determinism holds and the choice is reported.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- One rail row per distinct center repository, with several accepted rows
+  sharing one repository, and two same-basename repositories staying separate.
+- An ad-hoc row's identity preserved as the center reports it, with no
+  recomputation.
+- A multi-segment `repo_path` naming its final two segments joined by `/`, and
+  an empty and a one-segment path each naming their `repo_key` verbatim, per
+  goal 3's fixed mapping.
+- The active row and the footer space line naming the same repository across a
+  selection change, the active repository's last row ending, and an empty
+  snapshot.
+- The active row's raised fill and bright dot/name, a non-active live row's
+  accent dot, a non-active idle row's `dot-idle` dot, and `text` names on all
+  non-active rows, with never more than one bright name.
+- A repository appearing, changing and disappearing through accepted deltas,
+  with the repository surviving until its last row ends.
+- A rejected projection leaving the previous complete rail visible, and center
+  loss leaving the rail explicitly stale rather than current.
+- The owner text rendering exactly `Oskar Cieslik` through the single new
+  `placeholders` entry.
+- The one footer divider present, no count, and no further section or divider
+  rendering anywhere in the rail.
+- The `0256.2`-`0256.5` tests still passing unmodified, keeping the
+  snapshot/delta transaction boundary and the absence of a timer proven where
+  it already is.
+
+### Reuse points
+
+`CenterPublicRow`'s `repo_key`, `repo_path` and `live`
+(`modules/io/src/center.rs:3778-3788`) for every repository fact; `0256`'s
+accepted snapshot/delta model, selected-row state, subscription and test
+harness; `0265.1`'s token and font entry point for every value; `0265.3`'s
+single `placeholders` module for the owner handle; `0265.5`'s dot and list
+primitive when it has landed. The landed TUI reducer is the semantics to match,
+not code to import: it stages a whole snapshot, clones accepted rows before
+applying a delta, commits only a successfully projected candidate, and
+reconnects while retaining the previous accepted map
+(`modules/cli/src/app/dashboard/worker.rs:254-415`); its `rows.values()`
+projection is a hash-map order and is not an ordering contract to copy
+(`worker.rs:569-589`). Where the desktop needs CLI-private semantics, the
+suggested route is extracting a small pure core/IO helper once a second real
+consumer exists rather than copying into gpui or generalising ahead of need;
+goal 2 is where the exclusion of CLI-private imports is stated.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The title bar and screen menu (`0265.9`), the bottom bar (`0265.3`), the
+  frame-row forms and their dot, selection, voices and times (`0265.5`), loop
+  narration and the activity block (`0265.6`), overflow clip-and-fade
+  (`0265.7`), the preview column (`0265.10`-`.12`, `.15`), the header
+  (`0265.13`) and the frame counter (`0265.14`).
+- Any rail section, count, badge or interaction beyond rule 10's four regions.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Center, core or IO semantic changes; a repository-inventory capability on the
+  center; a second projection of the compact row; any ledger, store, sidecar or
+  filesystem read on the rail path; a GUI poll loop; a blocking receive on
+  gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, or primitives
+  extracted for `0266`-`0269` before one of them consumes them.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Packaging, launcher and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **Never derive repository identity from the desktop process's cwd.** Ad-hoc directories carry an `adhoc-` key the desktop cannot reproduce; the center row is the source.
-- **The rail carries nothing beyond `Spaces`, repo rows, spacer and footer in v1.** Extra sections are a later-face temptation, not a v1 element.
-- **No poll loop.** The rail refreshes from deltas, never from a timer.
-- **Fail-loud, no direct-reader fallback.** A GUI that silently re-reads the filesystem when a center request fails breaks the family's posture; center-absent is spawn-on-need or a visibly stale view, never a hard error, and stale data is never presented as current.
-- **No inline literal for the owner handle** — it is a placeholder entry, not a string in the rail's code.
-- **No corner radius inside the canvas**; the active row is a raised fill, not a rounded pill or a border.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered rail and its delta-driven refresh are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Never derive repository identity from the desktop process's cwd.** Ad-hoc
+  directories carry an `adhoc-` key that `repo_key(root)` alone cannot
+  reproduce (`modules/io/src/state.rs:149-160,304-317`); the center row is the
+  source, and it is taken verbatim rather than recomputed.
+- **The rail carries nothing beyond `Spaces`, repo rows, spacer, the one
+  footer divider and the footer in v1.** Extra sections are a later-face
+  temptation, not a v1 element, and the export's per-repository count is export
+  drift the parent already resolved. Rule 10 permits dividers *between
+  sections*; goal 1 takes only the footer one, because there is no second
+  section to separate.
+- **The export is measurement, the rules are the specification.** Copy geometry
+  from `reference/sessions.html:91-249`; take content and colour semantics from
+  `grammar.md` and `screens/sessions.md`. Unselected names take `text`, not the
+  export's `text-secondary`, and the export's bright dot on a non-active row
+  explains nothing — both are reported, not implemented.
+- **The dot rule is stated evidence, not an inference from the picture.** Rule
+  10 fixes the active row bright; `CenterPublicRow.live` is the only status
+  evidence the row carries, so live is accent and everything else is
+  `dot-idle`. A richer rollup would be invented structure.
+- **An empty `repo_path` is a real row, not an error.** It renders the declared
+  key fallback and must never trigger a reader, a probe or a cwd fallback.
+- **No poll loop.** The rail refreshes from the accepted deltas, never from a
+  timer, and a rejected projection must not leave a partially committed rail.
+- **Fail-loud, no direct-reader fallback.** A GUI that silently re-reads the
+  filesystem when a center request fails breaks the family's posture;
+  center-absent is spawn-on-need or a visibly stale view, never a hard error,
+  and stale data is never presented as current.
+- **The footer cannot disagree with the rail.** Both read one active identity
+  and one name projection; two projections is how they drift.
+- **No inline literal for the owner handle** — `Oskar Cieslik` is one new entry
+  in the one shared `placeholders` module, not a string in the rail's code, and
+  not a new center capability.
+- **No corner radius inside the canvas**; the active row is a raised fill, not
+  a rounded pill or a border. Radius 10 exists only on the window frame.
+- **No second dot or selection primitive.** Correction 2 fixes the boundary
+  with `0265.5` from this side; `0265.5:267-284` fixes it from the other.
+- **Hash-map order is not an ordering contract.** The TUI reducer's
+  `rows.values()` projection (`worker.rs:569-589`) is insertion-dependent; the
+  rail needs its own deterministic total order over center data.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like
+  a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's
+  desktop behaviour.** They show the workspace stayed gpui-free and green; the
+  rendered rail and its delta-driven refresh are verified in the desktop lane
+  `0256.1` establishes, whose exact non-interactive command becomes declarable
+  as a check on this task once `0256.1` lands.
 
 ## Done when
 
-The window shows a 260-wide rail with its `Spaces` heading, repo rows carrying 5px status dots with the active row in a raised fill and bright dot and name, a spacer, and the two-line footer whose repo line is center-row data and whose owner handle comes from the shared `placeholders` module — all at the paddings, sizes and tones rule 10 names. Repository identity is sourced from center row data rather than the process cwd, and no timer drives any refresh. Root workspace resolution and the root lockfile remain gpui-free.
+- The desktop lane's documented non-interactive build-and-test command, landed
+  by `0256.1` and therefore present before this task can dispatch
+  (`graph.rs:129-172`; `0265.1:291-293`), was located first, recorded verbatim
+  in the work summary, and exits 0 with the rail component, the repository
+  projection, the name projection and the Sessions mount in the tree, and the
+  `0256.2`-`0256.5` tests pass unmodified. If that command cannot be found, the
+  prerequisite chain has not landed: the task stops and reports that, and no
+  workspace command is offered in its place.
+- That command's coverage shows: one row per distinct center repository with
+  several accepted rows sharing one; same-basename repositories separate by
+  key; ad-hoc identity preserved; a multi-segment `repo_path` naming its final
+  two segments joined by `/`, and a one-segment and an empty `repo_path` each
+  naming their row's `repo_key` verbatim — checked against those expected
+  strings, not against whatever the implementation produced; a deterministic
+  order independent of insertion sequence; the active row and footer space line
+  naming the same repository across a selection change, the active
+  repository's last row ending, and an empty snapshot; the active row's raised
+  fill and bright dot/name, a non-active live row's accent dot, a non-active
+  idle row's `dot-idle` dot, `text` on all non-active names and never more than
+  one bright name; a repository appearing, changing and disappearing through
+  accepted deltas, with the repository surviving until its last row ends; a
+  rejected projection leaving the previous complete rail; center loss leaving
+  the rail explicitly stale rather than current; and the footer owner rendering
+  exactly `Oskar Cieslik` through the single new `placeholders` entry.
+- The closing diff read shows: rule 10's 260 width, four regions plus the one
+  centred 32×1 `border-strong` footer divider, paddings, gaps, tones and type
+  present with no colour, size, spacing, weight or family
+  literal at a call site; no count, no fifth region and no second divider; no cwd or
+  `current_repo_key()` derivation and no `repo_key(repo_path)` recomputation;
+  no filesystem, ledger, store, sidecar or center read and no timer, interval
+  or spawned tick on the rail path; no second subscription, reducer, poller or
+  cache; no hash-map iteration order in the rendered projection; no inline
+  owner literal; no duplicated dot or selection logic; no CLI-private or
+  ratatui import; no light-column value; no row border or radius; and no rail
+  interaction added.
+- The declared root-resolution check exits 0.
+- `just test` exits 0.
+- The change this cell produced touches no file under `.internal/docs/design/`,
+  no sibling-owned screen region, and no center, core or IO semantics —
+  however the work is arranged into commits.
+- The work summary names the desktop path, the exact desktop command, the
+  Correction 2 case found, the name projection's boundary as implemented, the
+  dot rule as implemented, the repository ordering chosen, the proof mechanics
+  used where they differ from the suggested route, the owner corrections raised
+  against the design artifacts, and any deviation from the approach.
+
+## Bounded refinement
+
+Run the desktop command, then the root-resolution check, then `just test`, then
+the closing diff read. Permit at most one targeted repair-and-rerun round:
+repair one named defect, then rerun the failed command and every command after
+it in that order. If a second round would be needed, stop and report the exact
+failing command with its evidence, or the unresolved visual/data contract,
+rather than iterating. That is the stop condition, not a judgement call.
 """
 [relations]
 parent = "0265"
-depends-on = ["0265.1"]
+depends-on = ["0265.1", "0265.3"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
