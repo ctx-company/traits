@@ -1,50 +1,116 @@
 schema-version = "0.2"
 key = "0267.2"
 title = "Render the Traits header and lockfile bar"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Give the Traits screen its chrome, on the inventory-and-trust answer `0267.1` made the center serve.
+content = '''
+Give the Traits screen its chrome — grammar rule 6's header and rule 8/12's provenance bar — over the one repository-scoped answer `0267.1` taught the center to serve. This cut renders; it resolves nothing.
 
-The **header** carries the title `traits — authored in ctx-company/traits` over one italic narrated summary — "Five traits, all digest-pinned — implement carries the dogfood loop." `screens/traits.md` tags the counts `data:` and the phrasing `placeholder:`, so the counts follow the served section and the prose comes from the shared `placeholders` module.
+The **header** is a title in the shape `traits — authored in <repository display identity>` over exactly one italic narrated summary, with `∷` top-right and no breadcrumbs (`grammar.md:58-66`, `screens/traits.md:11-13`). The **bottom bar** is rule 12's provenance instance for this screen: a semantic state word, then the provenance detail, then `author trait` as the right-hand ghost action (`grammar.md:74-84,110-115`, `screens/traits.md:21-22`).
 
-The **bottom bar** is grammar rule 12's provenance instance for this screen: `pinned` in ok, then `· skill-lock @ <sha> · N digests`, with `author trait` as the right-hand ghost action. The sha and the digest count are `data:` from the lockfile — a sha the app cannot resolve is a stated failure, never a fabricated string — and the center's capability grows the lockfile resolution here so that the bar and the preview footer cite one answer rather than two readers. `author trait` is the one action the spec itself tags a v1 `placeholder:`, so it is served from the shared module as a tracked placeholder rather than left as an untracked dead control.
-"""
-scope = """
+Four grounded corrections the draft this file replaces did not carry.
+
+**The provenance resolution is not this cut's, despite the draft's sentence that "the center's capability grows the lockfile resolution here".** Parent Correction 4 (`0267` content) and `0267.1` (`scope`, Done-when 4) assign the whole resolution — the current-member/lock join, the ordered evidence set, its digest and its cardinality — to `0267.1`, which serves one immutable success-or-failure value. `0267.2`'s bar and `0267.4`'s footer each render that same value. So this leaf adds no lock reader, no digest computation, no center-side resolution and no `0267.2` → `0267.4` edge; a second computation here is the two-readers-can-disagree defect that parent correction exists to prevent, and it would also re-open the graph gap the correction closed. If a run finds the resolution genuinely absent from what `0267.1` landed, that is a defect in the prerequisite reported as such, not a thing to grow here.
+
+**Every concrete string in the draft is an export illustration, not a value.** `ctx-company/traits`, `Five traits, all digest-pinned — implement carries the dogfood loop.`, `implement`, the count `5` and the sha `81e5a39` are what `reference/traits.html` happened to render (`262-271`, `596-604`). Parent Correction 9 and the parent's `validation` forbid hardcoding any of them. The export is geometry authority only; `grammar.md` and `screens/traits.md` are the specification. A leaf rendering an export literal is worse than an omitted leaf because it reads as evidence.
+
+**No repository display identity exists at this HEAD, so the title's data source has to be found rather than assumed.** `CenterPublicRow` carries only `repo_key` and `repo_path` (`modules/io/src/center.rs:3778-3788`); `RepoIndexEntry` carries key, path and last-seen time (`modules/io/src/state.rs:477-488`); and `repo_key` is `<basename>-<first 8 hex of the path's sha256>` (`state.rs:149-160`). Nothing in that set is an owner/repository pair, so the export's `ctx-company/traits` shape is not something HEAD can produce truthfully. The execution inspects what `0267.1` actually landed. If its served answer already carries a truthful display identity, the title renders it. If it does not, this cut widens that same typed capability minimally — the widened field reachable by a non-GUI face like every other served leaf — or renders a clearly defined pure projection of the served key/path, and says which in the work summary. What it may not do: read the desktop process's cwd, invoke `git` from the desktop, synthesise an owner segment the system does not hold, or fall back to the reference repository.
+
+**The header's count and the bar's count are two different numbers.** The summary's authored count is the number of rendered `Authored — N` rows — one per family, per standalone package, per source-only package (`0267` Correction 2; `0267.1` Done-when 4-5). `N digests` is the cardinality of the joined current-member evidence set, which counts every member of a multi-variant family and counts a source-only package not at all. Rendering one where the other belongs makes the header and the bar contradict each other on the one screen whose subject is what this repository authored. Relatedly, the all-pinned phrasing of the example sentence cannot be emitted when provenance failed: the phrasing is `placeholder:`, but the pin claim inside it is `data:`.
+'''
+scope = '''
+## Goals and approach are separate
+
+Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or observation shows it is the run's call.
+
 ## Decisions
 
-- In scope: the header with its data counts and placeholder-served phrasing, the bottom bar's `pinned` state word and `skill-lock @ <sha> · N digests` provenance from a center-side lockfile resolution reachable by a non-GUI face, and the placeholder-served `author trait` action.
-- **One lockfile resolution.** The bar, the preview footer and the digest count all cite the same center-side answer; a desktop-side sha computation is a second reader that can disagree.
-- **`pinned` is a claim, not a constant.** It reflects the lockfile's actual state; an unresolvable lockfile renders the failure instead.
-- **`author trait` does nothing and says so through the placeholders contract.** This slice opens no authoring surface.
-- Out of scope: the section and rows (`0267.1`), the preview column (`0267.3`, `0267.4`), and every shared primitive `0265` built.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+- **In scope**: the Traits screen header — repository-qualified title, one italic narrated summary whose counts are data and whose phrasing is placeholder-served, `∷` top-right — and the bottom bar — the semantic pin state, the one shared provenance presentation of the served value, and the placeholder-served `author trait` ghost action — both rendered from the answer `0267.1` serves.
 
-## Prerequisite
+- **The parent's corrections bind.** `0267`'s content corrections govern this leaf; Corrections 4, 9, 10 and 12 are the ones it touches directly, and where this file restates one it does not narrow it.
 
-`0267.1` — the center-served inventory and trust answer this chrome describes and the pane it sits on.
-"""
-validation = """
-## Watch
+- **This leaf resolves nothing.** It performs no manifest, family-table, trust-store, lockfile, `git`, cwd or clock read on the desktop side, computes no digest, and adds no center-side resolution. It receives one immutable typed provenance value and one repository-scoped library answer, and renders them.
 
-- **Exactly one narrated summary line**, italic sans 12 `text-secondary`, and no breadcrumbs anywhere.
-- **No inline placeholder literal** — the summary's phrasing and the `author trait` action both come from the one shared module; the counts, sha and digest count do not, because they are data.
-- **No second sha resolution**, and no `git` or lockfile read from the desktop process.
-- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
-- **Blocking work stays off gpui's UI thread**, and lockfile resolution on the center side must not stall its request loop.
-- **No poll loop.** The bar updates when the served answer does.
-- **Fail-loud, no direct-reader fallback**; an unresolvable lockfile is a visible failure, not a blank sha.
-- **No test may depend on committed repo content** — scratch fixtures only.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **One accepted answer, one commit.** Header, the rows `0267.1` renders, and the bar are projected from the same accepted model. No second request, subscription, model or timer enters for the chrome; a rejected projection leaves title, summary, count and provenance all at their previous accepted values rather than updating some of them.
+
+- **Compose the landed vocabulary, do not duplicate it.** Rule 6's header and rule 8's bar exist once as reusable components from `0265.13` and `0265.3`; the tokens and IBM Plex faces come from `0265.1`'s entry point; the semantic state presentation comes from `0265.3`/`0265.5`; the summary phrasing and `author trait` come from the one `placeholders` module `0265.3` seeded. A Traits-private copy of any of these is a defect even when it renders correctly.
+
+- **One provenance presentation, owned here, consumed later.** This cut lands the single shared presentation — one function or value taking `0267.1`'s served typed provenance and producing the rendered provenance text — and the bar is its only call site in this cut. It takes the served value and knows nothing about how locks are resolved, and it is placed and reachable where a later screen leaf can render the same text by calling it rather than re-assembling the string. Whether `0267.4`'s preview footer in fact renders byte-identical text is `0267.4`'s goal and its call site, done and checked there; nothing here implements, renders or verifies that footer, and no `0267.2` → `0267.4` edge is added.
+
+- **`author trait` is read-only and deliberately inert.** Its label and its tracked no-op come from the shared module. This cut opens no authoring surface and writes no trait, package, lock or trust data.
+
+- Out of scope: the provenance resolution and the served answer itself, the `Authored — N` section and its rows, the menu entry and switch (`0267.1`); the preview column (`0267.3`, `0267.4`); the TUI migration and its poll removal (`0267.5`); trait authoring and any new trust mutation; and every shared primitive `0265` already built.
+
+- Dark tokens only; `tokens.md`'s light column stays unimplemented.
+
+## Prerequisites
+
+`0267.1` — the repository-scoped library answer, its rows, and the immutable provenance value this chrome renders. `0265.13` — grammar rule 6's screen header, extracted while rendering Sessions and consumed here rather than re-derived. `0265.13` is not otherwise reachable from this leaf: `0267.1` gates on `0265.5`, `0265.9` and `0258`, whose closure reaches `0265.3` and `0265.1` but never `0265.13`, and the parent's own rule is that an external prerequisite is named on the earliest child that consumes it. `0265.3`'s bar and `placeholders` module and `0265.1`'s tokens and faces arrive transitively through `0265.5`. Bind to the desktop project, components and non-interactive command those tasks actually landed, not to a path guessed here.
 
 ## Done when
 
-The Traits screen carries a header titled after the authoring repository over one italic narrated summary whose counts come from the center-served section and whose phrasing comes from the `placeholders` module, and a bottom bar showing `pinned` in ok with `· skill-lock @ <sha> · N digests` from a single center-side lockfile resolution, plus the placeholder-served `author trait` ghost action. An unresolvable lockfile renders a failure rather than `pinned`. `just test` passes and root workspace resolution and the root lockfile remain gpui-free.
-"""
+1. **The header renders rule 6's form from the accepted answer.** A title in the shape `traits — authored in <repository display identity>` in Sans 13 `text-heading`, over exactly one italic Sans 12 `text-secondary` summary at width 560, with `∷` in Mono 14 `text-secondary` padded `[2,8]` at the top right of a full-width `space-between` row, title-stack gap 5, inside the existing main pane — and no breadcrumbs anywhere. It composes `0265.13`'s landed header rather than a Traits-private duplicate of its typography, glyph, fixed width or breadcrumb rule. Geometry matches `reference/traits.html:250-285` and `tokens.md:71-84`. Decided by `just test` for the shared code the header renders through, plus the bounded review in `validation` walking `screens/traits.md:11-13` and `grammar.md:58-66` leaf by leaf; no repo-root command inspects a rendered gpui screen today, so this goal declares no board check and none may be invented.
+
+2. **The repository identity in the title is served data with a truthful source.** The identity the title renders names the repository the accepted answer is scoped to, and it reaches the desktop only through `0267.1`'s typed capability, whose non-GUI face can produce the same value. Desktop cwd, a desktop-side `git` call, an invented owner segment, a CLI-private import and the literal `ctx-company/traits` all fail this. An unknown, empty, relative or otherwise unusable repository scope renders the prerequisite's typed refusal instead of a title claiming a repository. How the identity is obtained is the run's call; the route taken is reported in the work summary. Decided by `just test` and the bounded review's diff read for a desktop-side reader or a hardcoded identity.
+
+3. **The summary is data counts in placeholder phrasing, and it never overclaims.** Its authored count equals the number of rows in the rendered `Authored — N` section — families, standalone packages and source-only packages alike — and is not the digest count. Its phrasing comes from the one `placeholders` module, with no inline literal at the call site and no verbatim reproduction of the reference sentence. The pin claim carried inside the sentence is data: when provenance failed, the sentence cannot assert that the library is pinned. Exactly one summary line renders in every state. Decided by `just test` and the bounded review.
+
+4. **The bar renders the served provenance exactly, through the one shared presentation this cut lands.** On success it shows the semantic `ok` state word `pinned` followed by the detail `· skill-lock @ <sha> · N digests`, in a full-width `space-between` row with a 1px `border-soft`, padding `[10,14]`, 8px gap in the left half, all text Mono 11 — composed from `0265.3`'s landed bar, not a second geometry. The `<sha>` and `N` reach the bar only through one shared provenance presentation over the served typed value: that presentation is the sole site in this diff that assembles the provenance text, it takes the served value rather than knowing how locks are resolved, and it sits where a later screen leaf can call it instead of re-assembling — the bar being its only call site here. The bar itself does not derive, parse, shorten, sample or reassemble any part of the text. The literal label `skill-lock` stays as the visual specification requires, with its aggregated package-local `trait.lock` source stated where the presentation lands. The preview footer that will later cite the same text is `0267.4`'s call site and `0267.4`'s goal; it is neither rendered nor verified here. Decided by `just test` and the bounded review, comparing against `reference/traits.html:580-611` for geometry and `screens/traits.md:21-22` plus `grammar.md:74-84,110-115` for content.
+
+5. **Provenance failure renders as failure, never as a degraded success.** When the served value is a typed failure — missing lock, malformed lock, no entry for a current member, digest mismatch, failed repository scope, failed whole resolution — the bar renders that typed failure in place of the claim, in semantic failure treatment, and renders no `pinned`, no blank or placeholder sha, no partial digest count and nothing that reads as current success. A last accepted answer stays visible only behind the inherited explicit stale or outage marker. The renderer consumes the prerequisite's typed distinction between a per-package condition and a whole-answer failure rather than reclassifying strings: a source-only or unreadable package is an ordinary row and does not withhold `pinned` from the rest. Decided by `just test` and the bounded review's exercise of each typed failure over synthetic served values.
+
+6. **`author trait` is the shared module's tracked placeholder and does nothing.** It renders as the right-hand ghost action, Mono 11 in the primary bright tone, with no fill, border, icon, pill or corner radius, and its label and no-op behaviour come from the one `placeholders` module with no inline duplicate. Activating it opens no authoring surface and writes no trait, package, lock or trust data. It is one of exactly two placeholder-served leaves on this screen — the other being the summary's phrasing — and every other leaf here is data. Decided by `just test` and the bounded review's diff read for an inline label or any write path.
+
+7. **Nothing is added that reads, resolves or polls.** No desktop-side manifest, family-table, trust-store, lockfile, `git`, cwd or clock read; no second lock reader, digest computation or center-side resolution; no client timer or poll loop; no second model, request or subscription for the chrome. Blocking work stays off gpui's UI thread and library work stays off the center's model-owner request path, as `0267.1` left it. Header, rows and bar commit together from one accepted answer, and a rejected projection updates none of title, summary, count or provenance. Decided by `just test` and the bounded review's diff read, which is what shows these directly.
+
+8. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and the desktop project stays outside the workspace. Decided by `just test` and the declared metadata/lockfile check.
+
+Exclusions, restated so they are checkable by reading the diff: no lockfile, digest or provenance resolution logic is written or copied here; no `0267.2` → `0267.4` dependency is added; no Traits-private copy of the header, bar, token entry point, state presentation or `placeholders` module is created; no export literal — `ctx-company/traits`, `implement`, the summary sentence, the counts, `trusted`, the hex colours or any sha — is hardcoded at this call site; no light-theme value is touched; no pencil artifact is edited; no row, section, menu, preview or TUI work is done; no trait authoring or trust mutation is opened; and no work belonging to `0267.1`, `0267.3`, `0267.4`, `0267.5`, `0266`, `0268`, `0269` or `0261` is done.
+'''
+validation = '''
+## Approach
+
+Suggested route, not a boundary. The desktop project does not exist at this HEAD — no Cargo manifest in this repository names `gpui`, and `0256.1` is still `ready` — so no desktop path, module, symbol or command is named below. Discover every one of them from what `0256`, `0265` and `0267.1` actually landed, and say in the work summary where the landed shape differed from what is described here.
+
+**Reuse points, named by the task that lands them.** `0265.13`'s rule 6 screen header — supply a title string and one already-composed summary string; do not restate its typography, `∷`, 560 width or breadcrumb rule. `0265.3`'s bottom bar — supply a semantic state, one already-composed detail string and the action set; the component stays source-agnostic and performs no reads. `0265.3`'s `placeholders` module — extend it with exactly the two entries this cut consumes (the summary phrasing, the `author trait` action) and nothing more. `0265.1`'s token/typography entry point and registered IBM Plex faces — every dimension, size and colour on this screen comes through it, so `#7fc79a`, `#8b909c`, `#eceef2` and the `[10,14]`/`[2,8]` paddings appear as token roles at this call site rather than as literals. `0265.3`/`0265.5`'s semantic state-to-colour presentation — the pin state and its failure counterpart map through it. `0267.1`'s served library answer and its immutable provenance value — the only source of counts, identity and provenance here. The TUI reducer's transaction posture (`modules/cli/src/app/dashboard/worker.rs:254-415`) — stage, project the complete candidate, commit only on success, retain last-accepted behind an explicit stale marker — is the client precedent the chrome inherits by being projected inside the same accepted model as the rows, not by acquiring its own staging.
+
+**Edit order.**
+
+1. **Read what `0267.1` landed** before writing anything: the served answer's shape, whether it carries a repository display identity, the typed provenance success and failure variants, and the reducer that accepts it. Done-when 2 and the shape of everything below depend on that reading, not on a guess.
+2. **The shared provenance presentation** — one function or value taking the served typed provenance and producing the rendered text. Placing it next to `0265`'s provenance vocabulary rather than inside the Traits bar's own module is what leaves it reachable from a later preview call site, so `0267.4` can call it instead of re-assembling the string. Landing and calling it from the bar is this cut's work; calling it from the footer is not.
+3. **Satisfy Done-when 2 by whichever of these routes step 1's reading makes true** — the goal is the truthful served identity, and none of these three is binding. If the served answer already carries a display identity, render it and skip the rest of this step. If it does not, widening `0267.1`'s typed capability minimally with that identity — same request/response, reachable by a non-GUI face — is the expected route. Where a widening is not warranted, a clearly defined pure projection of the served `repo_key`/`repo_path` that invents no segment also satisfies the goal. Report which route was taken.
+4. **The header call site** — compose `0265.13`'s header with the repository-derived title and the summary built from the served count, the served pin result and the module's phrasing.
+5. **The bar call site** — compose `0265.3`'s bar with the semantic state, the shared provenance presentation and the module-served action.
+
+**What must be proven** (observations, not mechanics): with synthetic served answers and, where a resolution is genuinely exercised, scratch repositories, packages and locks only — a successful provenance rendering the full detail; each typed failure rendering as a failure with no `pinned`, no blank sha and no partial count; an authored count that changes with the served rows and stays distinct from the digest count when a multi-variant family or a source-only package is present; a source-only or unreadable package that leaves `pinned` intact for the rest; a rejected projection leaving title, summary, count and provenance all at their previous accepted values; a stale last-accepted answer visible only behind the explicit marker; an unusable repository scope rendering the typed refusal rather than a title; the title deriving from served data across two different repositories; the summary phrasing and `author trait` resolving through the `placeholders` module; the bar's action tone and ordering; and `author trait` leaving no trait, package, lock or trust byte changed.
+
+**Desktop lane.** No repo-root command inspects a rendered gpui screen at this HEAD, so none is declared. Once `0256.1` has landed its documented non-interactive command, run it as additional proof and — if it is repo-root-relative, non-interactive and carries its whole verdict in its exit code — add it here verbatim rather than guessing at its name now.
+
+## Watch
+
+- **The provenance resolution is `0267.1`'s** (parent Correction 4). A lock read, a digest computation or a center-side resolution written here is the defect, not the fix; if the served value is missing, that is a prerequisite defect to report.
+- **No design example is data.** `ctx-company/traits`, `Five traits, all digest-pinned — implement carries the dogfood loop.`, `implement`, `5` and `81e5a39` are illustrations from `reference/traits.html`. The export is geometry authority only.
+- **The authored count is rows, not digests**, and the two are visibly different whenever a family has more than one member or a source-only package exists.
+- **The summary cannot claim a pin the provenance did not earn.** Only the phrasing is placeholder; the count and the pin result are data.
+- **No inline placeholder literal** for the phrasing or for `author trait` — the shared module is the single site, exactly as `0265.3` established.
+- **No second string assembly for provenance.** The later footer has to be able to render byte-identical text by calling this cut's presentation; two formatters that agree today drift tomorrow. Reachability is what this cut owes it — not the footer itself.
+- **Ghost text only in the bar** — no fills, action borders, icons, pills or corner radius inside the canvas — and the colours reach the call site as token roles, not as hex.
+- **Exactly one narrated summary line and no breadcrumbs**; two lines or none breaks rule 6.
+- **No poll loop and no blocking work on gpui's UI thread.** The chrome updates only when the served answer or its freshness event is accepted, inside the same commit as the rows.
+- **Fail loud, no silent staleness, no direct-reader fallback.** A blank sha, an invented or shortened hash, a raw lock-entry count presented as `N digests`, or a stale claim shown as current each make the bar lie.
+- **No test may depend on committed repo content** — not this repository's trait set, its `trait.lock` files or its board. Synthetic served values and scratch fixtures only; path/word/file-existence inventories are banned workspace-wide.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes. Do not declare a check forbidding the string `gpui` in `Justfile` or `.github/workflows/` — a separate desktop lane there is sanctioned. Rust is pinned to 1.97.1; isolate with `CARGO_TARGET_DIR=target` when a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this cut's rendering.** They show the shared code is green and the workspace stayed gpui-free; the rendered chrome is decided by the bounded review below and, once it exists, `0256.1`'s desktop command.
+
+## Bounded review
+
+One review pass over the completed diff before calling this done: walk `screens/traits.md:11-13` and `21-22` leaf by leaf against the rendered header and bar, naming for each leaf the served source it renders from and confirming that only the summary's phrasing and `author trait` come from the `placeholders` module; check the form against `grammar.md:58-66`, `74-84` and `110-115`; compare the literal geometry against `reference/traits.html:250-285` and `580-611` and `tokens.md:71-84` — the footer geometry at `881-885` is `0267.4`'s to check, not this pass's; exercise the boundaries listed above; then read the diff for the properties no fixture shows directly — one accepted answer projecting header, rows and bar together, no second reader, resolution, request or timer, no duplicated provenance assembly, no Traits-private copy of the header or bar, no inline placeholder literal, no export literal, and no desktop filesystem or `git` work. Then run the declared checks, and `0256.1`'s desktop command if it exists by then.
+
+At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
+'''
 [relations]
 parent = "0267"
-depends-on = ["0267.1"]
+depends-on = ["0267.1", "0265.13"]
 
 [[checks]]
 name = "per-round workspace gate remains green"
