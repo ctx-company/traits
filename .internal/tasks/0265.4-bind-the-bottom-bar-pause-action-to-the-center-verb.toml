@@ -1,39 +1,451 @@
 schema-version = "0.2"
 key = "0265.4"
 title = "Bind the bottom bar pause action to the center verb"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-`screens/sessions.md` tags the bottom bar's right side `data: state + verbs (0243.5)`. `0265.3` renders `watch raw · pause` as grammar-conformant ghost text with `watch raw`'s permitted v1 no-op served from the `placeholders` module. This cut makes `pause` real: pressing it sends the center's pause verb for the selected run and the bar reflects the resulting state as it arrives back over the subscription.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-Nothing driver-direct. `0258` owns the verbs — spawn, interrupt, pause/resume through the center's `Control` action — and this task is the Sessions bar's binding to the pause one, not a second implementation of it. The plan document's own done-condition for that work item is that each verb round-trips from the window and every other subscriber observes the effect via deltas; this cut is where the desktop's Sessions bar satisfies the pause half of it.
+`screens/sessions.md:32-34` tags the bottom bar's right side `data: state +
+verbs`, rendering `watch raw · pause`. `0265.3` lands that bar as
+grammar-conformant ghost text with `watch raw` served from the `placeholders`
+module and `pause` deliberately wired to nothing. This cut makes `pause` real:
+pressing it sends the center's pause verb for the selected run through the
+control surface `0258.3` lands, and the bar's state word changes only when the
+center's own delta says the run is paused.
+
+**The boundary with 0258.** `0258.3` owns the desktop pause/resume capability:
+the shared center use, the durable frame-boundary pause, the restart-safe
+resume, the failure presentation and the cross-subscriber center proofs
+(`.internal/tasks/0258.3-pause-and-resume-durably.toml:6-21`). This cut owns
+one connection: the Sessions bottom bar's `pause` action to that capability.
+Standing up a second desktop control client, a second action-result channel, a
+second paused-state presentation or a second resume interaction is duplication
+of `0258.3`, not completion of this task.
+
+## Four corrections to the draft this plan replaces
+
+**Correction 1 — fail-loud covers six outcomes, not three.** The draft named
+"refused, ambiguous or not-live". `ControlResult` is exhaustive over
+`Acknowledged`, `Missing`, `Ambiguous(Vec<String>)`, `NotLive`, `Unverifiable`
+and `Refused` (`modules/io/src/center.rs:826-834`), and transport or protocol
+failure surfaces as the outer `Err` (`center.rs:878-902`). All five
+non-acknowledged variants plus client error must terminate visibly. The center
+already produces every one of them: exact ids beat prefixes, and zero, one or
+many matches give missing, one or ambiguous (`center.rs:3887-3912`); a non-live
+row is rejected before a driver is contacted, and a holderless or mismatched
+live row is unverifiable (`center.rs:3397-3427`), with unit coverage over all
+four (`center.rs:4487-4563`).
+
+**Correction 2 — an acknowledgement is not the pause.** The draft's "the bar
+reflects the resulting state as it arrives back over the subscription" is
+correct but underspecified about `Acknowledged`, which proves only that the
+live lock holder accepted the control byte. The real-process proof fails
+outright if a `paused` delta appears inside the acknowledgement window, then
+releases the current frame, waits for the ledger outcome, and only then
+observes a `CenterDelta::RowChanged` whose `summary.last_drive_outcome ==
+Some("paused")` (`modules/cli/tests/proof_center.rs:2781-2846`). So the bar may
+render request feedback on acknowledgement, but its state word and its accepted
+model must be unchanged until that later row is accepted by the reducer `0256`
+landed.
+
+**Correction 3 — resume is not a `ControlAction`.** `ControlAction` has exactly
+two variants, `Interrupt` and `Pause` (`center.rs:240-245`); resume today is
+`center::start_session(session_id, repo_key)` (`center.rs:857-876`), which is
+how the pause proof resumes (`proof_center.rs:2849-2859`). The draft's "renders
+whatever that surface exposes" therefore has a concrete floor: this cut
+consumes whatever durable resume affordance `0258.3` lands and must not invent
+a `ControlAction::Resume`, a second control byte or a center protocol change.
+
+**Correction 4 — the TUI is not a free parity proof.** The draft called the TUI
+dashboard "the parity reference". The TUI does demonstrate the correct
+nonblocking pattern — a short-lived thread around `center::control` that sends
+an action result back (`modules/cli/src/app/dashboard/worker.rs:140-160`) — and
+its `control_message` distinguishes all six results
+(`modules/cli/src/app/dashboard.rs:4971-4992,8670-8685`). But it is
+CLI-private, its wording says `stop`, and no literal TUI-process pause proof
+exists at this HEAD. Cross-subscriber observation must be demonstrated by
+coverage this cut drives, not asserted from the existing center-side proof,
+which exercises a plain client call rather than the Sessions bar.
+
+## Grounded at HEAD 0cbd9326c
+
+No desktop project exists yet: no standalone desktop or gpui manifest,
+lockfile, source tree or command anywhere; root `Cargo.toml` excludes only
+`packages/cdk` (`Cargo.toml:1-12`), and no manifest or lockfile mentions
+`gpui`. `0256.1`, `0258.3`, `0265.1` and `0265.3` are all `ready` rather than
+done. Every desktop path, module, symbol, signature and command named below is
+therefore a guess to be replaced by discovery against what those tasks actually
+landed; binding them here would be fabrication. What is checkable today, and
+the only board coverage this task can honestly declare, is that the workspace
+stayed gpui-free and its per-round gate stayed green.
+
+That deferral is structural, not an omission, and the ordering that closes it
+is code-proven. A parent derives `Done` only when every child is closed
+(`modules/core/src/task/graph.rs:146-153`), and an open leaf is `Blocked`
+while any `depends-on` target is not `Done` (`graph.rs:161-169`). This task
+depends on `0258`, whose child `0258.3` depends on `0256`
+(`.internal/tasks/0258.3-pause-and-resume-durably.toml:24-26`), and `0256` is
+`Done` only once `0256.1` — the cut that lands the desktop project and its
+documented non-interactive build-and-test command — is closed. So this task
+cannot be dispatched before that command exists in the repository.
+
+**Resolving that command is mechanical, not a judgement call.** It is not
+chosen, invented or shaped by the run: it is the non-interactive build-and-test
+command the landed desktop project itself documents, which `0256.1` closes on
+("its documented independent build and test commands pass from a clean
+checkout",
+`.internal/tasks/0256.1-establish-the-standalone-desktop-shell.toml:15,17`).
+Resolve it at dispatch by reading the landed desktop project's manifest and the
+documentation `0256.1` landed beside it, and take it verbatim. If that project
+documents no non-interactive test command, stop before editing and report it as
+an owner correction against `0256.1`: authoring a parallel desktop lane is not
+this cut's work, and reporting a desktop proof without having run that command
+is a false report. The run names the resolved command verbatim in the work
+summary, and it becomes declarable as a `[[checks]]` entry here the moment
+`0256.1` has landed one. Declaring it before then would be a check that passes
+while observing nothing.
+
+**Which command decides what.** Every desktop behavioural clause in this plan —
+goals 1 through 6 — is decided by that one resolved command and by nothing else;
+the two declared `[[checks]]` decide goal 8 only, and goals 7 and 9 are decided
+by the closing diff read. No clause below is decided by a command that this
+plan leaves to the run's discretion.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: binding the bar's `pause` action to `0258`'s center verb for the currently selected run, and rendering the resulting state word from the delta the center publishes rather than from a locally assumed transition.
-- **Optimism is forbidden.** The bar never flips its state word on click; it flips when the center says so. A face that shows `paused` before the center has agreed is presenting stale-in-the-other-direction state as current.
-- Out of scope: the verb implementations themselves (`0258`), spawn and interrupt affordances (the Sessions spec's bar names neither), `watch raw`'s no-op (`0265.3`), and every other region of the screen.
-- Where resume belongs on this bar follows `0258.3`'s durable pause/resume shape; this cut renders whatever that surface exposes for the paused state rather than inventing a second control.
+1. **The `pause` action issues exactly one center pause request for the
+   selected run, off the UI thread.** A press on the bright ghost `pause`
+   action, with a current live row selected, results in exactly one
+   `center::control(session_id, Some(repo_key), ControlAction::Pause)` request
+   (`center.rs:878-902`), dispatched through the background control surface
+   `0258.3` landed. The identity comes from the selected `CenterPublicRow`: the
+   canonical `summary.session_id` and the center-supplied `repo_key`
+   (`center.rs:3778-3788`) — never a display prefix, never a key derived from
+   the desktop process's cwd. Repeated presses while a request is outstanding
+   do not multiply requests.
+   Decided by the desktop lane's own non-interactive build-and-test command —
+   the one `0256.1` landed, resolved by the mechanical rule above and named
+   verbatim in the work summary — exiting 0 with coverage that a press on a
+   selected live
+   row produces that one call with those arguments; plus the closing diff read
+   showing no UI-thread `center::control` and no direct transport.
+   Excluded: any call into `modules/io/src/run_control.rs`, any driver,
+   process-signal, lock-holder or ledger access from the desktop
+   (`run_control.rs:564-636` already owns token-derived socket addressing,
+   bounded IO and exact acknowledgement); a second transport or a second
+   desktop control client; a blocking call on gpui's UI thread — `control` uses
+   the 600-second action timeout (`center.rs:52-54`), so a UI-thread call is
+   categorically unsafe; a new `ControlAction` variant or any center protocol
+   change; spawn, interrupt and `watch raw`, which are not this cut's actions.
 
-## Prerequisites
+2. **Nothing optimistic: the state word changes only by accepted delta.** The
+   accepted Sessions model and the bar's rendered state word are unchanged by
+   the click and unchanged by `ControlResult::Acknowledged`. The paused
+   presentation appears only after the normal subscription delta carrying the
+   settled outcome is accepted by the reducer `0256` landed
+   (`center.rs:1005-1088,265-281`).
+   Decided by the desktop command, whose coverage must show the rendered state
+   identical before the press, after the press and after an acknowledgement,
+   and changed only once a `RowChanged` row carrying the settled paused outcome
+   has been accepted.
+   Excluded: a synthetic row, side channel or local mutation feeding the
+   accepted model; inventing a `SessionState::Paused` — no such variant exists,
+   and a paused row is status `awaiting-agent-output` with outcome `paused`
+   (`center.rs:4566-4576`), with `DriveOutcomeKind::Paused` and
+   `is_settled_pause` owning the settled-pause semantics
+   (`modules/core/src/procedure/session.rs:1093-1232`); assuming the paused
+   display word rather than consuming `0258.3`'s presentation and `0265.3`'s
+   live-aware derivation; using `RunSummary.session_state`, which is projected
+   with `live = false` (`modules/io/src/run_summary.rs:120-143`); a second
+   reducer, subscription or accepted-row model.
 
-`0265.3` (the bar this action sits in) and `0258` (the center's spawn/interrupt/pause verbs).
+3. **Every non-acknowledged outcome terminates visibly.** `Missing`,
+   `Ambiguous`, `NotLive`, `Unverifiable`, `Refused` and a client `Err` each
+   end the interaction with a visible failure, distinguished from one another
+   at the type level with no catch-all arm. None leaves the bar looking
+   unchanged, and none leaves it indefinitely pending.
+   Decided by the desktop command's coverage over each non-acknowledged typed
+   result and over a client error, plus the closing diff read showing an
+   exhaustive match and no swallowed result.
+   Excluded: a second notification or status framework beside the failure
+   presentation `0258.3` and `0265.3` landed; any breach of rule 8's ghost-text
+   grammar to show a failure — no fill, border, icon or spinner
+   (`.internal/docs/design/grammar.md:74-84`); a retry, poll or timer loop; a
+   copied or imported CLI-private result renderer.
+
+4. **A result is scoped to the run it was issued for.** A selection change
+   while a request is in flight must not attach run A's result to run B's bar;
+   the result is correlated to the identity captured at press time using the
+   action-result mechanism `0258.3` landed.
+   Decided by the desktop command's coverage exercising a selection change
+   between press and result, showing the result attributed to the originating
+   run and not to the newly selected one.
+   Excluded: a global "last action result" slot with no identity; a per-bar
+   mutable flag that survives selection changes; making a stale accepted row
+   look current in order to carry a result — visible stale state and
+   fresh-snapshot recovery belong to `0256.5`, and subscriber queues are
+   bounded at 64 with lagging consumers disconnected
+   (`center.rs:65-70,1506-1515`).
+
+5. **The effect is observable through a second independent center subscriber.**
+   Coverage in the desktop lane drives the landed bar handler and shows the
+   same accepted delta observed both by the desktop reducer and by a
+   second independent center subscriber — one center subscription distinct
+   from the desktop's own, not any other face of the system.
+   Decided by that coverage, named verbatim in the work summary.
+   Excluded: citing the existing `proof_center` pause proof as evidence that
+   the bar is bound — it exercises a plain client call, not this handler;
+   claiming a TUI-process proof that does not exist at this HEAD without adding
+   or discovering one; importing CLI-private dashboard code to obtain parity.
+
+6. **Paused and resumable presentation follows `0258.3`.** Whatever `0258.3`
+   lands for the paused state and for the durable resume affordance is what
+   this bar renders; if the action swaps from `pause` to a resume affordance,
+   it swaps through that surface.
+   Decided by the closing diff read against the landed `0258.3` control and
+   resume API, plus the desktop command staying green with `0258.3`'s own
+   coverage unmodified.
+   Excluded: implementing durable pause, frame-boundary settlement,
+   restart-safe resume or any resume transport here; guessing
+   `ControlAction::Resume`; choosing a second resume interaction; editing
+   `0258.3`'s presentation to fit this bar rather than consuming it.
+
+7. **The bar's grammar and geometry are untouched.** This cut changes no
+   geometry, tone or glyph on the bar `0265.3` landed: 1px `border-soft`,
+   padding [10,14], `space-between`, mono 11, faint `·`, `watch raw`
+   secondary, `pause` bright, ghost text throughout (`grammar.md:74-84`), the
+   closed glyph set and no corner radius inside the canvas
+   (`grammar.md:31-37`), and accent reserved for happening-now
+   (`grammar.md:6-22`). Every value comes from `0265.1`'s token entry point,
+   with no colour, size, spacing, weight or family literal at a call site. No
+   file under `.internal/docs/design/` is modified; an artifact that looks
+   wrong is reported as an owner correction.
+   Decided by the closing diff read against `screens/sessions.md:32-34` and
+   grammar rules 1, 3 and 8, plus the task commit's own file list.
+   Excluded: reshaping the bar, adding a fourth action, changing action order
+   or separator; the `frame N of M` detail slot, which `0265.14` fills from the
+   selected-run reconstruction
+   (`.internal/tasks/0265.14-derive-and-render-the-frame-counter.toml:7-25`);
+   any other region of the Sessions screen.
+
+8. **The workspace does not learn about gpui.** Root Cargo resolution and the
+   root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+   member, and the per-round workspace gate stays green and unchanged in cost.
+   Decided by the two declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing macOS and Linux CI lanes
+   (`.github/workflows/ci.yml:12-60`) — a *separate* desktop lane there is
+   sanctioned; declaring a board check that executes the desktop lane before
+   `0256.1` has landed one.
+
+9. **The pass is reviewed once and bounded.** The completed diff is read once
+   against `screens/sessions.md:32-34`, grammar rules 1, 3 and 8, the landed
+   `0265.3` bar API, the landed `0258.3` control and resume API, and the
+   existing accepted snapshot/delta reducer, looking explicitly for: direct
+   `run_control`, driver or filesystem access; a UI-thread `center::control`;
+   local state mutation on click or on acknowledgement; duplicated state or
+   result mapping; a poll, retry or timer loop; stale state shown as current;
+   an unscoped async result; altered bar geometry; and gpui entering root
+   resolution. Exactly one targeted repair cycle is allowed, per the Bounded
+   refinement section. The work summary names the discovered desktop path, the
+   exact desktop command, the `0258.3` dispatch and result surfaces reused, and
+   every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+Nothing on the desktop side exists at the HEAD this plan was written against.
+Read what actually landed; do not carry a guess from this file into an edit.
+
+- `0256.1`: the desktop project location, manifest, lockfile and documented
+  non-interactive build-and-test command. Use that command verbatim, per the
+  resolution rule above; reusing its harness is suggested over standing up a
+  parallel lane. If the landed project documents no such command, stop and
+  report the owner correction instead of editing.
+- `0256.4` and `0256.5`: the accepted snapshot/delta model, its transaction
+  boundary and the stale-state presentation this bar must not bypass.
+- `0258.3`: the background control dispatch, the action-result channel and its
+  identity correlation, the failure presentation, and the paused/resume
+  affordance. These are the reuse points for goals 1, 3, 4 and 6. If `0258.3`
+  landed no reusable dispatch, the invariant that still holds is one background
+  request with a UI-thread handoff of the typed result; extend `0258.3`'s
+  surface rather than opening a second one, and report that in the work
+  summary.
+- `0265.1`: the token entry point. `0265.3`: the bar component's actual
+  signature, its action shape and tone vocabulary, its `placeholders` module,
+  and its live-aware state derivation.
+
+### Edit order
+
+1. Capture the press: the bar's action callback carries the selected row's
+   canonical `session_id` and center `repo_key` into `0258.3`'s dispatch.
+2. Consume the typed result on the UI thread through `0258.3`'s action-result
+   channel, exhaustively over all six `ControlResult` variants plus `Err`,
+   correlated to the captured identity.
+3. Render feedback and failures through the presentation `0258.3` and `0265.3`
+   already landed, with the accepted model untouched.
+4. The focused proofs, including the second-subscriber observation.
+5. The desktop command, then the two declared root checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like an action handler on the Sessions mount that receives the
+bar's `pause` press, a request value carrying `(session_id, repo_key,
+ControlAction::Pause)`, and a result variant on `0258.3`'s action-result type
+carrying the originating session id beside the `ControlResult`. Names, module
+paths and signatures follow whatever `0256`, `0258.3` and `0265.3` established.
+Whether the identity is carried on the request/result pair or held in a
+per-request registry is the run's call; either shape can satisfy goal 4.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- One press on a selected live row produces exactly one pause request carrying
+  the canonical session id and the center-supplied repo key.
+- The rendered state word is identical before the press, after the press and
+  after `Acknowledged`, and changes only once the settled paused row is
+  accepted by the existing reducer.
+- Each of `Missing`, `Ambiguous`, `NotLive`, `Unverifiable`, `Refused` and a
+  client `Err` ends visibly and distinguishably.
+- A selection change between press and result attributes the result to the
+  originating run, not the newly selected one.
+- The accepted delta produced by a real pause is observed both by the desktop
+  reducer and by a second independent center subscriber.
+- `0256.2`-`0256.5` and `0258.3`'s own tests still pass unmodified.
+
+### Reuse points
+
+`ctx_traits_io::center::control` and `ControlAction::Pause` for the verb;
+`ControlResult`'s six variants for the outcome vocabulary; `CenterPublicRow`'s
+`summary.session_id` and `repo_key` for identity (`center.rs:3778-3788`);
+`0258.3`'s background dispatch, action-result channel, failure presentation and
+paused/resume affordance; `0265.3`'s bar component, action shape and state
+derivation; `0256`'s accepted model, subscription and test harness. The TUI's
+worker thread and exhaustive `control_message` are the *semantics* to match,
+never code to import — they are CLI-private and their wording says `stop`.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1
+(`Cargo.toml:14-20`). Keep any repair scoped to the one red command and
+preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The pause capability itself: durable frame-boundary pause, restart-safe
+  resume, the center control implementation, spawn and interrupt (`0258`;
+  `0243.5`, whose behaviour already landed at `bc4a5f8ed`).
+- `watch raw` and its permitted no-op, the bar shape and the state-word table
+  (`0265.3`); the frame counter and the `frame N of M` detail (`0265.14`); the
+  frame rows (`0265.5`), activity (`0265.6`), overflow (`0265.7`), the rail
+  (`0265.8`), title bar and menu (`0265.9`), the preview column
+  (`0265.10`-`.12`, `.15`) and the header (`0265.13`).
+- Any edit under `.internal/docs/design/**`, and the light column of
+  `tokens.md`.
+- Center, core or IO semantic changes; a second projection of the compact row;
+  any ledger, store, sidecar or filesystem read on the bar or row path; a GUI
+  poll loop; a blocking receive or `center::control` on gpui's UI thread.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **Through the center's verbs, never driver-direct.** A desktop process that signals a run itself is the capability-in-one-face defect and bypasses every other subscriber.
-- **Every other subscriber must observe the effect.** The TUI dashboard is the parity reference: a pause issued from the window is visible there through the same deltas.
-- **No poll loop and no blocking send on gpui's UI thread.** The verb round-trip is background work; the UI reacts to the delta.
-- **Fail-loud.** A refused, ambiguous or not-live control response is surfaced as such; it is never swallowed into an unchanged-looking bar.
-- **Ghost text only**, closed glyph set, no corner radius inside the canvas.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Through the center's verb, never driver-direct.** A desktop process that
+  signals a run itself is the capability-in-one-face defect and bypasses every
+  other subscriber. Nothing here touches `run_control`, holder metadata, a pid
+  or a second transport.
+- **Never optimistic.** The bar does not flip its state word on click, and not
+  on `Acknowledged` either — an acknowledgement is the lock holder accepting a
+  control byte, not the pause. A face that shows `paused` before the center has
+  published it is presenting invented state as current.
+- **Fail-loud over all six outcomes.** `Missing`, `Ambiguous`, `NotLive`,
+  `Unverifiable`, `Refused` and client `Err` each terminate visibly. Three of
+  the six is the draft's gap, and a swallowed result is indistinguishable from
+  a successful one.
+- **Results are scoped.** An async result that lands on whichever row happens
+  to be selected is a lie about a different run.
+- **No poll loop, no retry, no timer, no blocking work on gpui's UI thread.**
+  `control` carries a 600-second timeout.
+- **Stale is never current.** A control result must not make a stale accepted
+  row look fresh; `0256.5` owns stale presentation.
+- **Ghost text only**, closed glyph set, no corner radius inside the canvas, no
+  fill, border, icon or spinner introduced to show a request or a failure.
+- **No CLI-private import.** The TUI's control renderer is `pub(crate)` beside
+  ratatui and says `stop`; match its semantics, do not copy it.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like
+  a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this
+  task's desktop behaviour.** They decide goal 8 and nothing else: the workspace
+  stayed gpui-free and green. The bound action is decided by the desktop lane
+  `0256.1` establishes, whose documented non-interactive command is resolved
+  verbatim at dispatch and becomes declarable as a check on this task once
+  `0256.1` has landed one. A green `just test` is never evidence that the
+  `pause` binding works.
 
 ## Done when
 
-Pressing `pause` on the Sessions bottom bar issues the center's pause verb for the selected run, the run's state word changes only once the center's delta says it has, another subscriber observes the same effect, and a refused or not-live response is rendered as a visible failure rather than silently absorbed. Root workspace resolution and the root lockfile remain gpui-free.
+- The desktop lane's documented non-interactive build-and-test command — the one
+  `0256.1` landed, resolved verbatim by the mechanical rule in the plan text and
+  named in the work summary — exits 0 with the `pause` action bound, and
+  `0256.2`-`0256.5` and `0258.3`'s tests pass unmodified. If that command is
+  absent from the repository at dispatch, this task is not done and is not
+  attempted: the run stops and reports the owner correction against `0256.1`.
+- That command's coverage shows: one press on a selected live row issuing
+  exactly one background pause request carrying the canonical `session_id` and
+  the center-supplied `repo_key`; the rendered state word identical before the
+  press, after the press and after `Acknowledged`, changing only once the
+  settled paused row is accepted by the existing reducer; each of `Missing`,
+  `Ambiguous`, `NotLive`, `Unverifiable`, `Refused` and a client `Err`
+  terminating visibly and distinguishably; a selection change between press and
+  result attributing the result to the originating run; and the accepted delta
+  observed both by the desktop reducer and by a
+  second independent center subscriber.
+- The closing diff read shows: no `run_control`, driver, pid or filesystem
+  access from the desktop; no UI-thread `center::control`; no local mutation of
+  the accepted model on click or acknowledgement; no second reducer, dispatch,
+  result channel, paused-state mapping or notification framework beside
+  `0258.3`'s and `0265.3`'s; no catch-all arm over `ControlResult`; no poll,
+  retry or timer; no stale row shown as current; no unscoped async result; no
+  change to the bar's geometry, tones, action order or separator; no
+  `ControlAction::Resume` or center protocol change; no CLI-private import; and
+  no frame-counter derivation.
+- The declared root-resolution check exits 0.
+- `just test` exits 0.
+- The task commit touches no file under `.internal/docs/design/`, no
+  sibling-owned screen region, and no center, core or IO semantics.
+- `git status --short` is empty, the work is in one task-scoped commit, and the
+  work summary names the desktop path, the exact desktop command, the `0258.3`
+  dispatch and result surfaces reused, any owner correction raised against the
+  design artifacts, and any deviation from the approach.
+
+## Bounded refinement
+
+Run the desktop command, then the root-resolution check, then `just test`. If
+this task's cross-subscriber coverage extends the focused center proofs, run
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`
+directly after the desktop command. Permit at most one targeted
+repair-and-rerun round: repair one named defect, then rerun the failed command
+and every command after it in that order. If a second round would be needed,
+stop and report the exact failing command or the unmet observable boundary with
+its evidence rather than iterating. That is the stop condition, not a judgement
+call.
 """
 [relations]
 parent = "0265"
@@ -41,4 +453,10 @@ depends-on = ["0265.3", "0258"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
