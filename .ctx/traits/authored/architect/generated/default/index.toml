@@ -58,6 +58,16 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
+id = "owner-gate"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner plan-approval transport: 'plannotator' (default) parks each critic-approved iteration in the owner's plannotator UI; 'off' auto-approves so unattended batches exit the loop on the critic's verdict alone."
+
+[port.default]
+value = "plannotator"
+
+[[port]]
 id = "receipts"
 direction = "output"
 schema = "schema:architect-receipt"
@@ -497,7 +507,10 @@ equals = "approved"
 [[sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence]]
 id = "owner-approval-gate"
 title = "Await the owner's verdict"
-input = ["slot:target-file"]
+input = [
+    "slot:target-file",
+    "port:owner-gate",
+]
 output = ["slot:owner-answer"]
 
 [sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence.command]
@@ -505,6 +518,10 @@ argv = [
     "sh",
     "-c",
     """
+if [ "$2" = "off" ]; then
+  printf approved
+  exit 0
+fi
 d=$(pwd); c="$d/.plan-review.md"
 cp "$1" "$c"
 if out=$(plannotator annotate "$c" --gate --json --require-approval); then
@@ -515,6 +532,7 @@ fi
 rm -f "$c"""",
     "_",
     "{slot:target-file}",
+    "{port:owner-gate}",
 ]
 
 [[sequence.ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then.sequence]]
@@ -548,7 +566,10 @@ message = "the resolved task file is missing or changed since its last architect
 
 [procedure]
 description = "Ground one draft task, rewrite it in place as a ready execution plan, and reject open-endedness."
-input = ["port:task"]
+input = [
+    "port:owner-gate",
+    "port:task",
+]
 output = ["port:receipts"]
 
 [[procedure.sequence]]

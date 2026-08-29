@@ -4,10 +4,15 @@
     "start": 35,
     "end": 35
   },
-  "port:receipts": {
+  "port:owner-gate": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
     "start": 59,
     "end": 59
+  },
+  "port:receipts": {
+    "file": ".ctx/traits/authored/architect/source/shared/data.ts",
+    "start": 66,
+    "end": 66
   },
   "port:task": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
@@ -116,8 +121,8 @@
   },
   "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then/owner-approval-gate": {
     "file": ".ctx/traits/authored/architect/source/shared/step/owner.ts",
-    "start": 32,
-    "end": 32
+    "start": 42,
+    "end": 42
   },
   "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then/refresh-snapshot-after-owner-review": {
     "file": ".ctx/traits/authored/architect/source/shared/step/snapshot.ts",

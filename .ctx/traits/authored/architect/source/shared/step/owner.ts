@@ -13,11 +13,21 @@
 // decision. The frame budget is the outer bound on how long the owner
 // has per iteration. 0253.4's ask machinery may later replace the
 // transport; the loop semantics stay.
+//
+// The `owner-gate` port selects the transport per dispatch: the default
+// 'plannotator' parks on the owner's UI; 'off' emits the approval
+// immediately so an unattended batch exits the loop on the critic's
+// verdict alone. The loop shape is identical either way — only who
+// answers changes.
 import * as cdk from "@ctx-traits/cdk";
 
-import { ownerAnswer, targetFile } from "../data.ts";
+import { ownerAnswer, ownerGate, targetFile } from "../data.ts";
 
 const GATE_SCRIPT = [
+  'if [ "$2" = "off" ]; then',
+  "  printf approved",
+  "  exit 0",
+  "fi",
   'd=$(pwd); c="$d/.plan-review.md"',
   'cp "$1" "$c"',
   'if out=$(plannotator annotate "$c" --gate --json --require-approval); then',
@@ -31,7 +41,7 @@ const GATE_SCRIPT = [
 export function approvalGate(title: string): void {
   cdk.step.command(title, {
     id: "owner-approval-gate",
-    argv: ["sh", "-c", GATE_SCRIPT, "_", targetFile],
+    argv: ["sh", "-c", GATE_SCRIPT, "_", targetFile, ownerGate],
     output: ownerAnswer,
   });
 }
