@@ -3,11 +3,11 @@
 use std::fs;
 use std::process::Command;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use support::{
-    ScratchRoot, ctx_bin, git_init, require_success, run_pty_with_cursor_reply, strip_escapes,
-    text_after_terminal_restore,
+    ScratchRoot, controlled_command, ctx_bin, git_init, require_success, run_pty_with_cursor_reply,
+    strip_escapes, text_after_terminal_restore,
 };
 
 const ENTER_ALT: &str = "\x1b[?1049h";
@@ -127,8 +127,9 @@ fn failed_startup_pty(
     reason: &str,
     check_termios: bool,
 ) {
-    let output = Command::new("expect")
-        .args([
+    let output = controlled_command(
+        Path::new("expect"),
+        &[
             "-c",
             r#"
                 set timeout 30
@@ -140,18 +141,16 @@ fn failed_startup_pty(
                 }
                 if {[lindex $child_status 3] == 0} { exit 1 }
             "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .env("CTX_STARTUP_COMMAND", command)
-        .output()
-        .unwrap();
+        ],
+        &fixture.repo,
+        &fixture.home,
+    )
+    .env_remove("NO_COLOR")
+    .env("TERM", "xterm-256color")
+    .env("CTX_STARTUP_BIN", ctx_bin())
+    .env("CTX_STARTUP_COMMAND", command)
+    .output()
+    .unwrap();
     assert!(
         output.status.success(),
         "failed startup PTY failed: {output:?}"
@@ -264,24 +263,24 @@ fn startup_pty_needs_no_cursor_query_on_the_alternate_screen() {
 
     // A PTY that deliberately never answers cursor queries. Alternate-screen
     // startup does not issue one, so the run still completes.
-    let output = Command::new("expect")
-        .args([
+    let output = controlled_command(
+        Path::new("expect"),
+        &[
             "-c",
             r#"
                 set timeout 30
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml"
                 expect eof
             "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
+        ],
+        &fixture.repo,
+        &fixture.home,
+    )
+    .env_remove("NO_COLOR")
+    .env("TERM", "xterm-256color")
+    .env("CTX_STARTUP_BIN", ctx_bin())
+    .output()
+    .unwrap();
     assert!(output.status.success(), "startup PTY failed: {output:?}");
     let output = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -362,8 +361,9 @@ fn startup_pty_redraws_after_resize_while_configuration_is_delayed() {
     let fixture = command_trait_fixture();
     make_delayed_config_fifo(&fixture);
 
-    let output = Command::new("expect")
-        .args([
+    let output = controlled_command(
+        Path::new("expect"),
+        &[
             "-c",
             r#"
                 set timeout 3
@@ -388,17 +388,15 @@ fn startup_pty_redraws_after_resize_while_configuration_is_delayed() {
                 }
                 if {$startup_frames < 2 || [lindex $child_status 3] != 130} { exit 1 }
             "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
+        ],
+        &fixture.repo,
+        &fixture.home,
+    )
+    .env_remove("NO_COLOR")
+    .env("TERM", "xterm-256color")
+    .env("CTX_STARTUP_BIN", ctx_bin())
+    .output()
+    .unwrap();
     assert!(output.status.success(), "resize PTY failed: {output:?}");
     let output = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -412,26 +410,25 @@ fn startup_pty_uses_status_narration_when_live_tui_is_environment_ineligible() {
     let fixture = command_trait_fixture();
 
     for (name, value) in [("CI", "1"), ("NO_COLOR", "1"), ("TERM", "dumb")] {
-        let output = Command::new("expect")
-            .args([
+        let output = controlled_command(
+            Path::new("expect"),
+            &[
                 "-c",
                 r#"
                     set timeout 30
                     spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run --progress tui --file .ctx/traits/demo/generated/index.toml"
                     expect eof
                 "#,
-            ])
-            .current_dir(&fixture.repo)
-            .env_clear()
-            .env("HOME", &fixture.home)
-            .env("XDG_CONFIG_HOME", &fixture.home)
-            .env("XDG_CACHE_HOME", &fixture.home)
-            .env("PATH", std::env::var("PATH").unwrap())
-            .env("TERM", "xterm-256color")
-            .env(name, value)
-            .env("CTX_STARTUP_BIN", ctx_bin())
-            .output()
-            .unwrap();
+            ],
+            &fixture.repo,
+            &fixture.home,
+        )
+        .env_remove("NO_COLOR")
+        .env("TERM", "xterm-256color")
+        .env(name, value)
+        .env("CTX_STARTUP_BIN", ctx_bin())
+        .output()
+        .unwrap();
         assert!(output.status.success(), "{name} PTY failed: {output:?}");
         let output = String::from_utf8_lossy(&output.stdout);
         assert!(
@@ -453,8 +450,9 @@ fn startup_pty_is_visible_before_delayed_config_resolution() {
     // The FIFO holds `resolve_runtime_config` after startup construction. The
     // expect branch can only see this title before it starts the writer, which
     // makes the ordering assertion independent of a fast local filesystem.
-    let output = Command::new("expect")
-        .args([
+    let output = controlled_command(
+        Path::new("expect"),
+        &[
             "-c",
             r#"
                 set timeout 3
@@ -467,17 +465,15 @@ fn startup_pty_is_visible_before_delayed_config_resolution() {
                     timeout { exit 1 }
                 }
             "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
+        ],
+        &fixture.repo,
+        &fixture.home,
+    )
+    .env_remove("NO_COLOR")
+    .env("TERM", "xterm-256color")
+    .env("CTX_STARTUP_BIN", ctx_bin())
+    .output()
+    .unwrap();
     assert!(
         output.status.success(),
         "delayed startup PTY failed: {output:?}"
@@ -494,8 +490,9 @@ fn startup_pty_ctrl_c_restores_the_terminal_and_prints_nothing() {
     let fixture = command_trait_fixture();
     make_delayed_config_fifo(&fixture);
 
-    let output = Command::new("expect")
-        .args([
+    let output = controlled_command(
+        Path::new("expect"),
+        &[
             "-c",
             r#"
                 set timeout 3
@@ -516,17 +513,15 @@ fn startup_pty_ctrl_c_restores_the_terminal_and_prints_nothing() {
                 if {!$interrupted} { exit 1 }
                 if {[lindex $child_status 3] != 130} { exit 1 }
             "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
+        ],
+        &fixture.repo,
+        &fixture.home,
+    )
+    .env_remove("NO_COLOR")
+    .env("TERM", "xterm-256color")
+    .env("CTX_STARTUP_BIN", ctx_bin())
+    .output()
+    .unwrap();
     assert!(
         output.status.success(),
         "Ctrl-C did not terminate the startup child itself: {output:?}"
@@ -575,8 +570,9 @@ fn startup_pty_ctrl_c_restores_the_terminal_and_prints_nothing() {
 fn startup_pty_query_refusal_never_commits_untrusted_trait_details() {
     const SENTINEL: &str = "PREAUTH_STARTUP_SENTINEL";
     let fixture = untrusted_query_fixture();
-    let output = Command::new("expect")
-        .args([
+    let output = controlled_command(
+        Path::new("expect"),
+        &[
             "-c",
             r#"
                 set timeout 30
@@ -588,17 +584,15 @@ fn startup_pty_query_refusal_never_commits_untrusted_trait_details() {
                 }
                 if {[lindex $child_status 3] == 0} { exit 1 }
             "#,
-        ])
-        .current_dir(&fixture.repo)
-        .env_clear()
-        .env("HOME", &fixture.home)
-        .env("XDG_CONFIG_HOME", &fixture.home)
-        .env("XDG_CACHE_HOME", &fixture.home)
-        .env("PATH", std::env::var("PATH").unwrap())
-        .env("TERM", "xterm-256color")
-        .env("CTX_STARTUP_BIN", ctx_bin())
-        .output()
-        .unwrap();
+        ],
+        &fixture.repo,
+        &fixture.home,
+    )
+    .env_remove("NO_COLOR")
+    .env("TERM", "xterm-256color")
+    .env("CTX_STARTUP_BIN", ctx_bin())
+    .output()
+    .unwrap();
     assert!(
         output.status.success(),
         "untrusted query PTY failed: {output:?}"

@@ -18,6 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 /// Absolute path to the `ctx` binary under test, built by Cargo before the
 /// test binary runs. Read at runtime (not via the `env!` macro): `support`
@@ -416,8 +417,236 @@ impl ScratchRoot {
 
 impl Drop for ScratchRoot {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        // `Drop` runs during unwinding for a failing test too; a panic here
+        // would abort the process and destroy the original assertion
+        // message, so a failure while already unwinding is reported to
+        // stderr instead of raised again.
+        let panicking = std::thread::panicking();
+        let home = self.dir.join("home");
+        if home.is_dir()
+            && let Err(message) = teardown_center_endpoint(&home)
+        {
+            report_scratch_root_drop_failure(panicking, &message);
+        }
+        if let Err(error) = std::fs::remove_dir_all(&self.dir)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            report_scratch_root_drop_failure(
+                panicking,
+                &format!("cannot remove scratch root {}: {error}", self.dir.display()),
+            );
+        }
     }
+}
+
+fn report_scratch_root_drop_failure(panicking: bool, message: &str) {
+    if panicking {
+        eprintln!("ScratchRoot::drop: {message}");
+    } else {
+        panic!("ScratchRoot::drop: {message}");
+    }
+}
+
+/// The one authority for a scratch `HOME`'s center endpoint identity:
+/// `controlled_command` and [`teardown_center_endpoint`] both derive the
+/// stem from this function rather than keeping a second copy of the hash
+/// formula, so spawn and teardown can never drift apart. Darwin limits
+/// Unix-domain socket paths to 104 bytes; scratch homes use descriptive
+/// temp names, so the endpoint lives under the OS temp directory while
+/// retaining a deterministic per-home identity for every command that
+/// shares this harness.
+pub fn center_endpoint_stem(home: &Path) -> PathBuf {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    home.hash(&mut hasher);
+    std::env::temp_dir().join(format!("ctx-{:016x}", hasher.finish()))
+}
+
+/// The pids [`teardown_center_endpoint`] would wait for, for `home`'s own
+/// tuple. Exposed so a caller (`proof_center.rs`'s fixture-path proof) can
+/// capture the launch identity *before* a [`ScratchRoot`] drop removes the
+/// tree the registry lives in — asserting only against paths that no longer
+/// exist would prove nothing about actual process death. Panics on a launch
+/// registry read failure other than "not created yet": silently reading that
+/// as an empty launch set is exactly the failure mode that let teardown miss
+/// a live center.
+pub fn center_launch_pids(home: &Path) -> Vec<u32> {
+    center_launch_identity(home).unwrap_or_else(|message| panic!("center_launch_pids: {message}"))
+}
+
+/// The one fallible launch-identity collector [`center_launch_pids`] and
+/// [`teardown_center_endpoint`] both use, rather than each parsing the
+/// registry its own way. The union of two sources, because either alone has
+/// a window the other covers:
+///
+/// - `<stem>.spawn`, written by `try_spawn_detached` *before* its child
+///   necessarily reaches `run_server_at` to append itself to the registry,
+///   and removed only once that child binds. A `ScratchRoot` dropped inside
+///   that window (a driver-started child that is slow to bind, or a
+///   deliberately delayed one) would otherwise see zero recorded launches
+///   and skip the death wait entirely.
+/// - the registry itself, for every launch that has already published a
+///   listener (or exited as a no-op start) and so no longer has a `.spawn`
+///   marker to read.
+fn center_launch_identity(home: &Path) -> Result<Vec<u32>, String> {
+    let stem = center_endpoint_stem(home);
+    let socket = stem.with_extension("sock");
+    let registry = center_launch_registry_path(home);
+    let mut pids = Vec::new();
+    if let Some(pid) = spawn_marker_pid(&stem)? {
+        pids.push(pid);
+    }
+    for pid in registry_pids_for_socket(&registry, &socket)? {
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
+}
+
+/// Read `<stem>.spawn` for the pid of a launch that has not yet published a
+/// listener — see [`center_launch_identity`] for why this window matters.
+/// The marker's payload is `"<pid> <epoch millis>\n"` (`center.rs`'s
+/// `try_spawn_detached`); only the first field is needed here.
+fn spawn_marker_pid(stem: &Path) -> Result<Option<u32>, String> {
+    let path = stem.with_extension("spawn");
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => Ok(contents
+            .split_whitespace()
+            .next()
+            .and_then(|pid| pid.parse().ok())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "cannot read spawn marker {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+/// The fixture-private launch registry a spawned center appends one line to
+/// per launch attempt (`center <pid> <socket>`), read only by
+/// [`teardown_center_endpoint`] — never the ambient `CTX_CENTER_LAUNCH_MARKER`
+/// product code installs, which `proof_center.rs`'s `CenterEnvironment`
+/// leaves set in the harness process across 20+ tests. Forwarding that
+/// ambient name here would append a fixture's launches into another test's
+/// registry file moments before that test removes its tree, and the
+/// marker write is not best-effort in the child (`run_server_at` propagates
+/// its failure), so a forwarded ambient marker can abort an unrelated
+/// child. A caller may still opt a whole process into one shared registry
+/// (Step 5's post-battery assertion) via `CTX_FIXTURE_CENTER_REGISTRY`.
+fn center_launch_registry_path(home: &Path) -> PathBuf {
+    std::env::var("CTX_FIXTURE_CENTER_REGISTRY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join("center-launches"))
+}
+
+const CENTER_TEARDOWN_POLL: Duration = Duration::from_millis(20);
+const CENTER_TEARDOWN_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Read `registry`, keeping only the pids of launches recorded against
+/// `socket` — the positive filter that keeps a shared (forwarded) registry
+/// from waiting on pids other fixtures still legitimately own. Parses each
+/// record as the `"center "` prefix, one pid field, then the *entire*
+/// remainder of the line as the socket path — never `split_whitespace` on
+/// the whole line, which would silently truncate a socket path containing a
+/// space (e.g. a temp root with one) at its first component and so never
+/// match. A read failure other than the registry not existing yet (the
+/// normal case before any launch) is propagated rather than read as "no
+/// launches": that silent-empty reading is what let teardown miss a live
+/// center whose registry it happened not to be able to read.
+fn registry_pids_for_socket(registry: &Path, socket: &Path) -> Result<Vec<u32>, String> {
+    let contents = match std::fs::read_to_string(registry) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(format!(
+                "cannot read launch registry {}: {error}",
+                registry.display()
+            ));
+        }
+    };
+    let socket = socket.to_string_lossy();
+    Ok(contents
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("center ")?;
+            let (pid, recorded_socket) = rest.split_once(' ')?;
+            let pid: u32 = pid.parse().ok()?;
+            (recorded_socket == socket).then_some(pid)
+        })
+        .collect())
+}
+
+/// `Ok(true)` if a non-blocking acquire of the tuple's serving-lifetime
+/// owner lock succeeds — proof that nothing currently answers as owner —
+/// `Ok(false)` if it is contended.
+fn center_owner_uncontended(owner_path: &Path) -> Result<bool, String> {
+    let owner = camino::Utf8Path::from_path(owner_path).ok_or_else(|| {
+        format!(
+            "owner lock path {} is not valid UTF-8",
+            owner_path.display()
+        )
+    })?;
+    let file = ctx_traits_io::file_lock::open_lock_file_no_follow(owner)
+        .map_err(|error| format!("cannot open owner lock {owner}: {error}"))?;
+    ctx_traits_io::file_lock::try_lock_exclusive(&file)
+        .map_err(|error| format!("cannot probe owner lock {owner}: {error}"))
+}
+
+/// Block until, under a bounded deadline, every center process this `home`'s
+/// tuple ever launched is a dead process (re-observed via
+/// `pid_is_alive`, never inferred from a socket/artifact/timestamp), then
+/// remove the tuple's `<stem>.{sock,log,owner,spawn}` artifacts. Filters the
+/// launch registry to this tuple's own socket first, so a registry shared by
+/// concurrently running fixtures (the forwarded case) never blocks on a pid
+/// another fixture still legitimately owns. Exposed as `pub` (a new symbol,
+/// nothing removed) so callers that build a `home` no `ScratchRoot` owns —
+/// several `proof_center.rs` sites use a bare `scratch(...)` root — can reuse
+/// the same one teardown authority instead of leaving fresh `/tmp` debris.
+pub fn teardown_center_endpoint(home: &Path) -> Result<(), String> {
+    let stem = center_endpoint_stem(home);
+    let launched = center_launch_identity(home)?;
+
+    let deadline = Instant::now() + CENTER_TEARDOWN_DEADLINE;
+    for pid in &launched {
+        while ctx_traits_io::file_lock::pid_is_alive(*pid) {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "center endpoint {} still has a live launched process (pid {pid}) after {CENTER_TEARDOWN_DEADLINE:?}",
+                    stem.display()
+                ));
+            }
+            std::thread::sleep(CENTER_TEARDOWN_POLL);
+        }
+    }
+
+    // Strictly weaker than (and the precondition for touching `.owner`
+    // after) the death proof above: a serving center holds this lock
+    // exclusively for its whole serving lifetime.
+    let owner_path = stem.with_extension("owner");
+    loop {
+        match center_owner_uncontended(&owner_path) {
+            Ok(true) => break,
+            Ok(false) if Instant::now() < deadline => std::thread::sleep(CENTER_TEARDOWN_POLL),
+            Ok(false) => {
+                return Err(format!(
+                    "center endpoint {} owner lock at {} is still held after {CENTER_TEARDOWN_DEADLINE:?}",
+                    stem.display(),
+                    owner_path.display()
+                ));
+            }
+            Err(message) => return Err(message),
+        }
+    }
+
+    for extension in ["log", "owner", "sock", "spawn"] {
+        let path = stem.with_extension(extension);
+        if let Err(error) = std::fs::remove_file(&path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(format!("cannot remove {}: {error}", path.display()));
+        }
+    }
+    Ok(())
 }
 
 /// Build a controlled-environment `Command` for `binary`/`args`/`cwd`/`home`,
@@ -428,17 +657,23 @@ impl Drop for ScratchRoot {
 /// environment (needed by `ctx traits merge`'s landing-gate `rustc`/`cargo`
 /// shims and `ctx traits build`'s `node` shell-out); no provider/network
 /// credentials ever passed through.
+///
+/// This is also the one seam that configures a fixture center's lifetime and
+/// tuple identity (task 0263): `CTX_CENTER_IDLE_MS` bounds how long a
+/// detached center launched under this tuple keeps running after its last
+/// command, and `CTX_CENTER_LAUNCH_MARKER` points the launch registry
+/// [`teardown_center_endpoint`] polls at [`center_launch_registry_path`].
+/// Never re-declare either in a proof file or PTY helper — every caller
+/// (including the three PTY helpers via [`run_expect`]) reaches a detached
+/// center's environment through `process::spawn_detached_with`, which layers
+/// `envs` on an *inherited*, not cleared, environment.
 pub fn controlled_command(binary: &Path, args: &[&str], cwd: &Path, home: &Path) -> Command {
     // Every scratch HOME needs its own complete center endpoint tuple. The
     // production socket is UID/version scoped, so HOME isolation alone would
     // otherwise allow one proof to query another proof's runs root.
     let center_root = home.join("ctx/traits/runs");
-    // Darwin limits Unix-domain socket paths to 104 bytes. Scratch homes use
-    // descriptive temp names, so put the endpoint under /tmp while retaining a
-    // deterministic per-home identity for commands that share this harness.
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    home.hash(&mut hasher);
-    let center_socket = std::env::temp_dir().join(format!("ctx-{:016x}.sock", hasher.finish()));
+    let stem = center_endpoint_stem(home);
+    let center_socket = stem.with_extension("sock");
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -462,6 +697,20 @@ pub fn controlled_command(binary: &Path, args: &[&str], cwd: &Path, home: &Path)
         // scratch center would seed from (and wade through) every other
         // proof's accumulated entries at that shared path.
         .env("CTX_CENTER_LIVENESS_ROOT", home.join("ctx/traits/liveness"))
+        // A test-spawned center's lifetime is its test's lifetime (task
+        // 0263): 2000ms rather than the production 15s default, since this
+        // seam reaches the entire CLI integration suite and every premature
+        // exit costs a respawn plus an index open plus a warming scan on the
+        // next command. The idle clock restarts on work, so this only has to
+        // exceed the gap between two sequential commands of one test, not
+        // the test's duration; the bounded, re-observed death wait in
+        // `teardown_center_endpoint` is what actually proves the process is
+        // gone, not this value.
+        .env("CTX_CENTER_IDLE_MS", "2000")
+        .env(
+            "CTX_CENTER_LAUNCH_MARKER",
+            center_launch_registry_path(home),
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Ok(path) = std::env::var("PATH") {

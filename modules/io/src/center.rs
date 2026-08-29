@@ -2870,12 +2870,19 @@ fn acquire_owner_lock(paths: &CenterPaths) -> crate::Result<Option<std::fs::File
 fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) -> crate::Result<()> {
     if let Ok(marker) = std::env::var("CTX_CENTER_LAUNCH_MARKER") {
         // Private test instrumentation: each sentinel process records exactly
-        // one launch before it can publish a listener.
+        // one launch before it can publish a listener. The pid and socket
+        // let a fixture teardown identify and wait out exactly the launches
+        // its own tuple caused, even when this file is a registry shared
+        // (via forwarding) across several concurrently running fixtures.
         std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(marker)
-            .and_then(|mut file| file.write_all(b"center\n"))
+            .and_then(|mut file| {
+                file.write_all(
+                    format!("center {} {}\n", std::process::id(), paths.socket).as_bytes(),
+                )
+            })
             .map_err(|source| io_error(&paths.socket, source))?;
     }
     let Some(_owner_lock) = acquire_owner_lock(&paths)? else {

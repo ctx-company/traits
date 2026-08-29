@@ -7,7 +7,9 @@ use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use camino::Utf8PathBuf;
-use support::{controlled_command, git_init, require_success};
+use support::{
+    ScratchRoot, controlled_command, git_init, require_success, require_success_with_env,
+};
 
 // These proofs launch the same binary and compete for CPU during test-suite
 // startup. Serializing their short-lived sentinels removes scheduler-dependent
@@ -24,6 +26,43 @@ impl Drop for ChildGuard {
             let _ = self.0.wait();
         }
     }
+}
+
+/// Restores the process-global `TMPDIR` and removes only the run-unique
+/// directory this guard was handed — never a fixed, machine-global path —
+/// including on the unwind path when a later assertion panics. A test that
+/// only restored `TMPDIR` on its normal-return path would leave every
+/// concurrently running `proof_center` process (this suite's tests share one
+/// process-wide `TMPDIR`) pointed at a directory this test is about to
+/// remove, for as long as the failing test's own panic message is being
+/// formatted.
+struct TmpDirGuard {
+    previous: Option<std::ffi::OsString>,
+    dir: std::path::PathBuf,
+}
+
+impl Drop for TmpDirGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var("TMPDIR", value),
+                None => std::env::remove_var("TMPDIR"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// `true` if `path` is exclusively held (a probe acquire fails to lock it) —
+/// the same non-blocking check a serving center's owner lock is proven by,
+/// reused here so a boundary test can assert an independent tuple's owner
+/// lock stays *contended* by its own live server, not merely that its
+/// pathname/inode is unchanged (which a replaced, unlocked file would also
+/// satisfy).
+fn owner_lock_contended(path: &std::path::Path) -> bool {
+    let owner = camino::Utf8Path::from_path(path).expect("owner lock path is UTF-8");
+    let file = ctx_traits_io::file_lock::open_lock_file_no_follow(owner).expect("open owner lock");
+    !ctx_traits_io::file_lock::try_lock_exclusive(&file).expect("probe owner lock")
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -1377,6 +1416,328 @@ fn held_driver_lock_survives_center_idle_period() {
     drop(lock);
     assert!(await_exit(&mut child.0).success());
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// A `ScratchRoot` with a trusted, active "run a command" trait — driving it
+/// through `ctx traits run` reaches the driver flock and so calls
+/// `center::start_for_driver()` unconditionally (`drive.rs:1261`), giving
+/// this fixture a real, `controlled_command`-launched detached center
+/// without needing the heavier custom-harness apparatus `write_drive_fixture`
+/// sets up for the agent-driven proofs above.
+fn command_center_fixture() -> (ScratchRoot, std::path::PathBuf, std::path::PathBuf) {
+    let scratch = ScratchRoot::new("fixture-center-lifetime");
+    let home = scratch.home();
+    let repo = home.join("repo");
+    std::fs::create_dir_all(repo.join(".ctx/traits/demo/generated"))
+        .expect("create fixture directories");
+    git_init(&repo);
+    std::fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        "id = \"demo\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"Demo\"\nsummary = \"Demo\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+    )
+    .expect("write fixture trait");
+    std::fs::write(
+        repo.join(".ctx/traits/demo/trait.toml"),
+        "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
+    )
+    .expect("write fixture manifest");
+    let path = ".ctx/traits/demo/generated/index.toml";
+    require_success(
+        "approve fixture",
+        &["traits", "trust", "--approved", path],
+        &repo,
+        &home,
+    );
+    require_success(
+        "activate fixture",
+        &["traits", "state", "--active", "--file", path],
+        &repo,
+        &home,
+    );
+    (scratch, repo, home)
+}
+
+fn run_command_center_fixture(repo: &std::path::Path, home: &std::path::Path) {
+    require_success(
+        "fixture run launches a detached center",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--progress",
+            "none",
+        ],
+        repo,
+        home,
+    );
+}
+
+/// The registry lives *inside* the tree a `ScratchRoot` drop removes, so its
+/// pids must be captured before the drop — asserting only against paths that
+/// no longer exist would prove nothing about actual process death.
+fn await_center_launch_pids(home: &std::path::Path, deadline: Duration) -> Vec<u32> {
+    let start = Instant::now();
+    loop {
+        let pids = support::center_launch_pids(home);
+        if !pids.is_empty() {
+            return pids;
+        }
+        assert!(
+            start.elapsed() < deadline,
+            "no center launch was recorded for {} within {deadline:?}",
+            home.display()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn scratch_root_drop_proves_its_launched_center_is_dead_and_its_artifacts_gone() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let (scratch, repo, home) = command_center_fixture();
+    run_command_center_fixture(&repo, &home);
+    let pids = await_center_launch_pids(&home, PROCESS_DEADLINE);
+    let stem = support::center_endpoint_stem(&home);
+    let sock = stem.with_extension("sock");
+    let log = stem.with_extension("log");
+    let owner = stem.with_extension("owner");
+    let spawn = stem.with_extension("spawn");
+    // `home` is a descendant of the whole `ScratchRoot`; asserting only that
+    // it disappeared would not prove the root itself (and any sibling of
+    // `home` under it) was removed.
+    let root_path = scratch.path().to_path_buf();
+
+    drop(scratch);
+
+    for pid in &pids {
+        assert!(
+            !ctx_traits_io::file_lock::pid_is_alive(*pid),
+            "center pid {pid} survived its ScratchRoot's drop"
+        );
+    }
+    for path in [&sock, &log, &owner, &spawn] {
+        assert!(
+            !path.exists(),
+            "center artifact {} survived its ScratchRoot's drop",
+            path.display()
+        );
+    }
+    assert!(
+        !home.exists(),
+        "scratch home {} survived its ScratchRoot's drop",
+        home.display()
+    );
+    assert!(
+        !root_path.exists(),
+        "scratch root {} survived its ScratchRoot's drop",
+        root_path.display()
+    );
+}
+
+#[test]
+fn scratch_root_drop_never_touches_an_independent_concurrently_live_tuple() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    // An independent, directly spawned private sentinel this proof owns
+    // end to end — the guard against Correction 4's danger (teardown that
+    // reaches outside its own tuple).
+    let root = scratch("independent-tuple");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let mut independent = ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", &socket)
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", &root)
+            .env("CTX_CENTER_INDEX", root.join("index.sqlite3"))
+            .env("CTX_CENTER_IDLE_MS", "5000")
+            .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
+            .spawn()
+            .expect("spawn independent sentinel"),
+    );
+    handshake_ready(&socket);
+    let owner_metadata = std::fs::symlink_metadata(&socket).expect("stat independent socket");
+    use std::os::unix::fs::MetadataExt;
+    let owner_dev_ino = (owner_metadata.dev(), owner_metadata.ino());
+    let owner_lock = root.join("center.owner");
+    assert!(
+        owner_lock_contended(&owner_lock),
+        "independent sentinel's owner lock at {} was not contended before the unrelated teardown",
+        owner_lock.display()
+    );
+
+    let (scratch_root, repo, home) = command_center_fixture();
+    run_command_center_fixture(&repo, &home);
+    let _ = await_center_launch_pids(&home, PROCESS_DEADLINE);
+    drop(scratch_root);
+
+    assert!(
+        independent
+            .0
+            .try_wait()
+            .expect("poll independent sentinel")
+            .is_none(),
+        "teardown of an unrelated fixture reaped an independent tuple's process"
+    );
+    let after_metadata = std::fs::symlink_metadata(&socket)
+        .expect("stat independent socket after unrelated teardown");
+    assert_eq!(
+        (after_metadata.dev(), after_metadata.ino()),
+        owner_dev_ino,
+        "teardown of an unrelated fixture touched an independent tuple's socket"
+    );
+    // A newly creatable/acquirable owner lock would mean an unrelated
+    // teardown unlinked or replaced the pathname while the sentinel retained
+    // only an anonymous locked inode — the socket/process assertions above
+    // would still pass in that case, so the contended lock is checked
+    // explicitly rather than only inferred from them.
+    assert!(
+        owner_lock_contended(&owner_lock),
+        "independent sentinel's owner lock at {} was no longer contended after the unrelated teardown",
+        owner_lock.display()
+    );
+    handshake_ready(&socket);
+
+    independent.0.kill().expect("stop independent sentinel");
+    independent.0.wait().expect("reap independent sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Regression for the launch-identity window `try_spawn_detached` leaves
+/// open: it writes `<stem>.spawn` (and forks the detached child) before that
+/// child necessarily reaches `run_server_at` to append itself to the launch
+/// registry. Reuses the same delayed-executable wrapper pattern
+/// `driver_start_returns_before_a_delayed_center_binds` uses, so the child
+/// is deliberately still sleeping — represented only by `<stem>.spawn`, with
+/// no registry line and no socket yet — when the `ScratchRoot` drops.
+#[test]
+fn scratch_root_drop_waits_for_delayed_unregistered_center() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let (scratch, repo, home) = command_center_fixture();
+    let delayed = home.join("delayed-center.sh");
+    std::fs::write(
+        &delayed,
+        "#!/bin/sh\nsleep 1\nexec \"$CTX_CENTER_REAL_EXE\" \"$@\"\n",
+    )
+    .expect("write delayed center wrapper");
+    let mut permissions = std::fs::metadata(&delayed)
+        .expect("read delayed center wrapper")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&delayed, permissions)
+        .expect("make delayed center wrapper executable");
+
+    require_success_with_env(
+        "fixture run launches a deliberately delayed detached center",
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+        &[
+            ("CTX_CENTER_REAL_EXE", env!("CARGO_BIN_EXE_ctx")),
+            (
+                "CTX_CENTER_EXECUTABLE",
+                delayed.to_str().expect("UTF-8 delayed wrapper path"),
+            ),
+        ],
+    );
+
+    let stem = support::center_endpoint_stem(&home);
+    assert!(
+        stem.with_extension("spawn").exists(),
+        "spawn marker missing while the delayed center is still sleeping"
+    );
+    assert!(
+        !stem.with_extension("sock").exists(),
+        "delayed center bound before its deliberate sleep elapsed"
+    );
+    // The registry write happens in `run_server_at`, which the delayed child
+    // has not reached yet — assert that directly, not just the absent socket,
+    // or this regression could stay green even if the spawn-marker half of
+    // the collector regressed and every pid came from the registry instead.
+    let registry = home.join("center-launches");
+    assert!(
+        !registry.exists(),
+        "launch registry already recorded the delayed center before it reached run_server_at — \
+         this regression no longer exercises the pre-registry spawn-marker window"
+    );
+    let pids = support::center_launch_pids(&home);
+    assert!(
+        !pids.is_empty(),
+        "no launch identity captured while the center is represented only by <stem>.spawn"
+    );
+
+    drop(scratch);
+
+    for pid in &pids {
+        assert!(
+            !ctx_traits_io::file_lock::pid_is_alive(*pid),
+            "delayed center pid {pid} survived its ScratchRoot's drop"
+        );
+    }
+}
+
+/// Regression for the registry parser truncating a socket path at its first
+/// space (`split_whitespace` over the whole line, fixed to a `"center "`
+/// prefix plus a single pid field plus the untouched remainder). The only
+/// source of a space in a fixture's socket path is `std::env::temp_dir()`
+/// itself, which every launch/teardown path resolves independently in the
+/// harness process — safe to override here because `ScratchRoot::new` is
+/// this binary's one caller of `std::env::temp_dir()` for a center endpoint,
+/// and it is only ever reached under `SENTINEL_TEST_LOCK`.
+///
+/// The directory itself is run-unique (`scratch`'s pid+nanos suffix, not a
+/// fixed machine-global path) and torn down through [`TmpDirGuard`], which
+/// restores `TMPDIR` and removes only this invocation's directory even if a
+/// later assertion panics — a fixed shared path or a normal-path-only
+/// restore would let a concurrent `proof_center` process (or a later test in
+/// this one) observe the wrong `TMPDIR`, or have its own scratch tree
+/// deleted by this test's cleanup.
+#[test]
+fn scratch_root_drop_proves_death_under_a_space_containing_temp_root() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let space_root = scratch("review 0263");
+    std::fs::create_dir_all(&space_root).expect("create space-containing temp root");
+    let previous_tmpdir = std::env::var_os("TMPDIR");
+    unsafe {
+        std::env::set_var("TMPDIR", &space_root);
+    }
+    let _tmpdir_guard = TmpDirGuard {
+        previous: previous_tmpdir,
+        dir: space_root,
+    };
+
+    let (scratch, repo, home) = command_center_fixture();
+    run_command_center_fixture(&repo, &home);
+    let pids = await_center_launch_pids(&home, PROCESS_DEADLINE);
+    assert!(
+        !pids.is_empty(),
+        "no launch identity recorded under a space-containing temp root"
+    );
+
+    drop(scratch);
+
+    for pid in &pids {
+        assert!(
+            !ctx_traits_io::file_lock::pid_is_alive(*pid),
+            "center pid {pid} under a space-containing temp root survived its ScratchRoot's drop"
+        );
+    }
 }
 
 #[test]

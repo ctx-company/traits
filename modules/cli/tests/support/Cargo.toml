@@ -7,3 +7,5 @@ description = "Shared scaffolding for ctx-traits-cli integration tests, split in
 
 [dependencies]
 serde_json.workspace = true
+ctx-traits-io.workspace = true
+camino.workspace = true

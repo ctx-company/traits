@@ -3,7 +3,7 @@ key = "0263"
 title = "Fixture centers die with their tests"
 status = "ready"
 raised = "2026-08-28"
-content = '''
+content = """
 Isolated fixture centers (0252.8's tuple isolation) spawn correctly but
 outlive their tests: 586 leaked `__ctx-center` daemons and hundreds of
 `/tmp` endpoint triples accumulated across two days of proof runs,
@@ -134,8 +134,8 @@ which `second_direct_sentinel_on_the_same_tuple_exits_without_replacing_the_owne
 either path would pass this task's own proof while breaking those. Any
 removal must happen only after the fixture has positively established
 that nothing is serving its tuple.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -460,7 +460,7 @@ that neither of those gives.
 
 After Steps 1-3, before writing proofs:
 `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center --no-run`
-'''
+"""
 validation = '''
 ## Done when — binding goals, each with the existing command that decides it
 
@@ -594,20 +594,20 @@ depends-on = ["0252.8"]
 [[checks]]
 name = "the completed battery leaves no live center it launched and no fixture artifacts"
 command = '''d=/tmp/ctx-fix-bat-$$; mkdir -p "$d"; ids() { for p in $(pgrep -f '__ctx-cente[r]' 2>/dev/null); do st=$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ' '_'); [ -n "$st" ] && echo "$p|$st"; done; }; ids > "$d/.before"; TMPDIR="$d" cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown; rc=$?; end=$(($(date +%s)+60)); while :; do alive=""; for id in $(ids); do grep -qxF -- "$id" "$d/.before" || alive="$alive $id"; done; [ -z "$alive" ] && break; [ "$(date +%s)" -ge "$end" ] && break; sleep 1; done; leaks=$(find "$d" -maxdepth 1 \( -name 'ctx-*.sock' -o -name 'ctx-*.log' -o -name 'ctx-*.owner' -o -name 'ctx-*.spawn' -o -name 'ctx-traits-cli-test-*' \) ); echo "post-battery survivors:[$alive] leaks:[$leaks]"; rm -rf "$d"; [ $rc -eq 0 ] && [ -z "$alive" ] && [ -z "$leaks" ]'''
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "fixture center death, tuple-scoped cleanup and held-driver-lock survival are proven"
 command = "cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "production center lifecycle is unchanged"
 command = "cargo test -p ctx-traits-io center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "landing gate stays green"
