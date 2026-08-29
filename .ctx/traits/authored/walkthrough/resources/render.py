@@ -69,6 +69,7 @@ def normalize(nodes):
         node = {
             "id": nid,
             "parent": (str(raw.get("parent")).strip() if raw.get("parent") else None),
+            "symbol": (str(raw.get("symbol")).strip() if raw.get("symbol") else None),
             "title": str(raw.get("title", nid)),
             "kind": str(raw.get("kind", "component")),
             "summary": str(raw.get("summary", "")),
@@ -235,6 +236,21 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
 .codeblk pre{margin:0;padding:8px 10px;overflow:auto;max-height:340px;font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--text-session)}
 .codeblk .ln{color:var(--text-faint);user-select:none;display:inline-block;min-width:3.2em}
 .codeblk .drift{color:var(--warn);font-family:var(--mono);font-size:10.5px;padding:4px 8px}
+.conns{margin:14px 0 0;padding:10px 0 0;border-top:1px solid var(--border-soft)}
+.conns .chip{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--accent);border:1px solid var(--border-soft);border-radius:3px;padding:1px 7px;margin:0 6px 6px 0;cursor:pointer}
+.conns .chip:hover{border-color:var(--accent);color:var(--accent-bright)}
+.conns .more{color:var(--text-muted);font-family:var(--mono);font-size:10.5px}
+.overlay{position:fixed;inset:0;background:var(--canvas);z-index:40;display:none;flex-direction:column}
+.overlay.open{display:flex}
+.overlay .obar{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--border)}
+.overlay .obar .t{font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text-heading);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.overlay .obar button{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-secondary);background:var(--button);border:1px solid var(--border-soft);border-radius:4px;padding:4px 9px;cursor:pointer}
+.overlay .obody{flex:1;overflow-y:auto;padding:22px 0}
+.overlay .ocol{max-width:1020px;margin:0 auto;padding:0 24px}
+.overlay .ocol .exp p{font-size:15px;line-height:1.65}
+.overlay .codeblk pre{max-height:none;font-size:12.5px;line-height:1.55}
+.ego{margin:14px 0}
+.ego svg{max-width:100%;height:auto;display:block}
 .xref{color:var(--accent);cursor:pointer;border-bottom:1px dashed var(--accent-dim)}
 .xref:hover{color:var(--accent-bright)}
 #tourpos{font-family:var(--mono);font-size:11px;color:var(--text-secondary);white-space:nowrap}
@@ -252,7 +268,15 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
   <div id="map" role="tree" aria-label="Treemap"></div>
   <aside id="panel"></aside>
 </main>
-<footer>click a tile to zoom in; Esc/Backspace goes up · j/k or ←/→ walk the tour in reading order · tile area = lines the node covers · code shown is read from the repo at render time</footer>
+<div class="overlay" id="reader" role="dialog" aria-label="Reader">
+  <div class="obar"><span class="kind" id="rkind"></span><span class="t" id="rtitle"></span><span id="rpos" style="font-family:var(--mono);font-size:11px;color:var(--text-secondary)"></span><button id="rclose">esc closes</button></div>
+  <div class="obody"><div class="ocol" id="rbody"></div></div>
+</div>
+<div class="overlay" id="graph" role="dialog" aria-label="File graph">
+  <div class="obar"><span class="t">file connections — mechanical name-matches inside described spans</span><button id="gclose">esc closes</button></div>
+  <div class="obody"><div class="ocol" id="gbody"></div></div>
+</div>
+<footer>click a tile to zoom in; Esc goes up · j/k walk the tour · Enter opens the reader (big source) · g opens the file graph · connections are name-matches, not call analysis · code read from the repo at render time</footer>
 <script>
 var DATA = __DATA__;
 var HORIZON = __HORIZON__;
@@ -273,6 +297,10 @@ var REPOROOT = __REPOROOT__;
   DATA.forEach(function(n){
     var m = n.title && n.title.match(/^[A-Za-z_][A-Za-z0-9_]*$/);
     if (m && !NAMEIDX[n.title]) NAMEIDX[n.title] = n.id;
+  });
+  var USEDBY = {};
+  DATA.forEach(function(n){
+    (n.uses || []).forEach(function(t){ (USEDBY[t] = USEDBY[t] || []).push(n.id); });
   });
   function prose(s, selfId){
     var parts = String(s).split(/\\n\\s*\\n/);
@@ -396,6 +424,123 @@ var REPOROOT = __REPOROOT__;
     var m = String(r.lines).match(/^(\\d+)/);
     return m ? m[1] : "1";
   }
+  function codeBlocksHtml(n){
+    if (!n.code || !n.code.length) return "";
+    var html = "<div class=\\"codes\\"><h3>source</h3>";
+    n.code.forEach(function(c){
+      html += "<div class=\\"codeblk\\"><div class=\\"ch\\"><span>" + esc(c.path) + ":" + esc(c.lines) + "</span><span>" + editorLinks(c.path, c.start) + "</span></div>";
+      if (c.drifted) html += "<div class=\\"drift\\">" + esc(c.drifted) + "</div>";
+      if (c.text){
+        var out = "";
+        c.text.split("\\n").forEach(function(line, i){
+          out += "<span class=\\"ln\\">" + (c.start + i) + "</span>" + esc(line) + "\\n";
+        });
+        html += "<pre>" + out + "</pre>";
+      }
+      html += "</div>";
+    });
+    return html + "</div>";
+  }
+  function chipList(ids, cap){
+    var html = "";
+    ids.slice(0, cap).forEach(function(id){
+      var t = byId[id];
+      if (t) html += "<span class=\\"chip\\" data-id=\\"" + id + "\\">" + esc(t.title) + "</span>";
+    });
+    if (ids.length > cap) html += "<span class=\\"more\\">+" + (ids.length - cap) + " more</span>";
+    return html;
+  }
+  function connsHtml(n){
+    var uses = n.uses || [], usedBy = USEDBY[n.id] || [];
+    if (!uses.length && !usedBy.length) return "";
+    var html = "<div class=\\"conns\\"><h3>connections · name-matches</h3>";
+    if (uses.length) html += "<div><span class=\\"more\\">uses → </span>" + chipList(uses, 14) + "</div>";
+    if (usedBy.length) html += "<div><span class=\\"more\\">← used by </span>" + chipList(usedBy, 14) + "</div>";
+    return html + "</div>";
+  }
+  function egoSvg(n){
+    var ins = (USEDBY[n.id] || []).slice(0, 10), outs = (n.uses || []).slice(0, 10);
+    if (!ins.length && !outs.length) return "";
+    var rows = Math.max(ins.length, outs.length), H = rows * 30 + 40, W = 960, midY = H / 2;
+    var s = "<div class=\\"ego\\"><svg viewBox=\\"0 0 " + W + " " + H + "\\" role=\\"img\\">";
+    function nodeText(id, x, y, anchor){
+      var t = byId[id];
+      return "<text class=\\"gnode\\" data-id=\\"" + id + "\\" x=\\"" + x + "\\" y=\\"" + y + "\\" text-anchor=\\"" + anchor + "\\" font-size=\\"12\\" fill=\\"var(--accent)\\" style=\\"cursor:pointer\\">" + esc(t ? t.title : id) + "</text>";
+    }
+    ins.forEach(function(id, i){
+      var y = 30 + i * 30;
+      s += "<line x1=\\"268\\" y1=\\"" + (y - 4) + "\\" x2=\\"" + (W/2 - 90) + "\\" y2=\\"" + midY + "\\" stroke=\\"var(--border-strong)\\"/>" + nodeText(id, 260, y, "end");
+    });
+    outs.forEach(function(id, i){
+      var y = 30 + i * 30;
+      s += "<line x1=\\"" + (W/2 + 90) + "\\" y1=\\"" + midY + "\\" x2=\\"" + (W - 268) + "\\" y2=\\"" + (y - 4) + "\\" stroke=\\"var(--border-strong)\\"/>" + nodeText(id, W - 260, y, "start");
+    });
+    s += "<text x=\\"" + (W/2) + "\\" y=\\"" + (midY + 4) + "\\" text-anchor=\\"middle\\" font-size=\\"13\\" font-weight=\\"600\\" fill=\\"var(--text-heading)\\">" + esc(n.title) + "</text>";
+    return s + "</svg></div>";
+  }
+  var readerOpen = false;
+  function renderReader(){
+    if (!readerOpen) return;
+    var n = byId[selectedId];
+    document.getElementById("rkind").textContent = n.kind;
+    document.getElementById("rkind").className = "kind k-" + String(n.kind).toLowerCase().replace(/[^a-z-]/g, "");
+    document.getElementById("rtitle").textContent = n.title;
+    var i = ORDER.indexOf(selectedId);
+    document.getElementById("rpos").textContent = i >= 0 ? (i + 1) + " / " + ORDER.length : "";
+    document.getElementById("rbody").innerHTML =
+      "<p class=\\"sum\\">" + esc(n.summary) + "</p>" +
+      "<div class=\\"exp\\">" + prose(n.explanation, n.id) + "</div>" +
+      egoSvg(n) + connsHtml(n) + codeBlocksHtml(n);
+    document.getElementById("reader").scrollTop = 0;
+  }
+  function setReader(open){
+    readerOpen = open;
+    document.getElementById("reader").className = "overlay" + (open ? " open" : "");
+    if (open) renderReader();
+  }
+  function fileOf(id){
+    var cur = byId[id];
+    while (cur && cur.kind !== "file" && cur.parent) cur = byId[cur.parent];
+    return cur && cur.kind === "file" ? cur.id : null;
+  }
+  var graphOpen = false, graphBuilt = false;
+  function renderGraph(){
+    var files = DATA.filter(function(n){ return n.kind === "file"; });
+    var counts = {};
+    DATA.forEach(function(n){
+      var f = fileOf(n.id);
+      (n.uses || []).forEach(function(t){
+        var g = fileOf(t);
+        if (f && g && f !== g){ var k = f + ">" + g; counts[k] = (counts[k] || 0) + 1; }
+      });
+    });
+    var W = 980, H = 720, cx = W/2, cy = H/2, R = Math.min(cx, cy) - 130;
+    var pos = {};
+    files.forEach(function(f, i){
+      var a = (i / files.length) * 2 * Math.PI - Math.PI/2;
+      pos[f.id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a: a };
+    });
+    var s = "<svg viewBox=\\"0 0 " + W + " " + H + "\\" role=\\"img\\">";
+    Object.keys(counts).sort().forEach(function(k){
+      var ab = k.split(">"), p1 = pos[ab[0]], p2 = pos[ab[1]], c = counts[k];
+      if (!p1 || !p2) return;
+      var w = Math.min(6, 0.6 + Math.log(c + 1));
+      s += "<path d=\\"M " + p1.x + " " + p1.y + " Q " + cx + " " + cy + " " + p2.x + " " + p2.y + "\\" fill=\\"none\\" stroke=\\"var(--accent-dim)\\" stroke-width=\\"" + w.toFixed(1) + "\\" opacity=\\"0.55\\"><title>" + esc(byId[ab[0]].title) + " → " + esc(byId[ab[1]].title) + ": " + c + " mentions</title></path>";
+    });
+    files.forEach(function(f){
+      var p = pos[f.id], right = Math.cos(p.a) >= 0;
+      s += "<circle cx=\\"" + p.x + "\\" cy=\\"" + p.y + "\\" r=\\"5\\" fill=\\"var(--accent)\\"/>";
+      s += "<text class=\\"gnode\\" data-id=\\"" + f.id + "\\" x=\\"" + (p.x + (right ? 10 : -10)) + "\\" y=\\"" + (p.y + 4) + "\\" text-anchor=\\"" + (right ? "start" : "end") + "\\" font-size=\\"12\\" fill=\\"var(--text)\\" style=\\"cursor:pointer\\">" + esc(f.title) + " <tspan fill=\\"var(--text-muted)\\">~" + f.total + "</tspan></text>";
+    });
+    s += "</svg>";
+    document.getElementById("gbody").innerHTML = s;
+    graphBuilt = true;
+  }
+  function setGraph(open){
+    graphOpen = open;
+    document.getElementById("graph").className = "overlay" + (open ? " open" : "");
+    if (open && !graphBuilt) renderGraph();
+  }
   function renderPanel(){
     var n = byId[selectedId];
     var kindClass = String(n.kind).toLowerCase().replace(/[^a-z-]/g, "");
@@ -408,22 +553,8 @@ var REPOROOT = __REPOROOT__;
       n.refs.forEach(function(r){ html += "<div>" + esc(r.path) + "<span>:" + esc(r.lines) + "</span> " + editorLinks(r.path, refStart(r)) + "</div>"; });
       html += "</div>";
     }
-    if (n.code && n.code.length){
-      html += "<div class=\\"codes\\"><h3>source</h3>";
-      n.code.forEach(function(c){
-        html += "<div class=\\"codeblk\\"><div class=\\"ch\\"><span>" + esc(c.path) + ":" + esc(c.lines) + "</span><span>" + editorLinks(c.path, c.start) + "</span></div>";
-        if (c.drifted) html += "<div class=\\"drift\\">" + esc(c.drifted) + "</div>";
-        if (c.text){
-          var out = "";
-          c.text.split("\\n").forEach(function(line, i){
-            out += "<span class=\\"ln\\">" + (c.start + i) + "</span>" + esc(line) + "\\n";
-          });
-          html += "<pre>" + out + "</pre>";
-        }
-        html += "</div>";
-      });
-      html += "</div>";
-    }
+    html += connsHtml(n);
+    html += codeBlocksHtml(n);
     if (n.id === "__ROOT__" && HORIZON){
       html += "<div class=\\"refs\\"><h3>horizon</h3><div class=\\"exp\\">" + prose(HORIZON, n.id) + "</div></div>";
     }
@@ -464,14 +595,27 @@ var REPOROOT = __REPOROOT__;
     var i = ORDER.indexOf(selectedId);
     el.textContent = i >= 0 ? (i + 1) + " / " + ORDER.length : "";
   }
-  function renderAll(){ renderCrumbs(); renderMap(); renderPanel(); renderTourPos(); }
+  function renderAll(){ renderCrumbs(); renderMap(); renderPanel(); renderTourPos(); renderReader(); }
 
-  document.getElementById("panel").addEventListener("click", function(e){
-    var t = e.target.closest ? e.target.closest(".xref") : null;
-    if (t && t.getAttribute("data-id")){ jumpTo(t.getAttribute("data-id")); }
-  });
+  function jumpDelegate(e){
+    var t = e.target.closest ? e.target.closest(".xref, .chip, .gnode") : null;
+    if (t && t.getAttribute("data-id")){
+      if (graphOpen) setGraph(false);
+      jumpTo(t.getAttribute("data-id"));
+    }
+  }
+  document.getElementById("panel").addEventListener("click", jumpDelegate);
+  document.getElementById("reader").addEventListener("click", jumpDelegate);
+  document.getElementById("graph").addEventListener("click", jumpDelegate);
+  document.getElementById("rclose").addEventListener("click", function(){ setReader(false); });
+  document.getElementById("gclose").addEventListener("click", function(){ setGraph(false); });
 
   document.addEventListener("keydown", function(e){
+    if (e.key === "Enter" && !graphOpen){ setReader(!readerOpen); e.preventDefault(); return; }
+    if (e.key === "g"){ setGraph(!graphOpen); e.preventDefault(); return; }
+    if ((e.key === "Escape" || e.key === "Backspace") && (readerOpen || graphOpen)){
+      setReader(false); setGraph(false); e.preventDefault(); return;
+    }
     if (e.key === "j" || e.key === "ArrowRight"){
       var i = ORDER.indexOf(selectedId);
       if (i < ORDER.length - 1){ jumpTo(ORDER[i + 1]); e.preventDefault(); }
@@ -588,11 +732,49 @@ def embed_code(nodes) -> None:
             n["code"] = blocks
 
 
+IDENT = __import__("re").compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+GENERIC_NAME_CAP = 6
+MAX_USES = 40
+
+
+def derive_edges(nodes) -> None:
+    """Mechanical mention edges: identifier tokens inside a leaf node's
+    embedded spans, matched against every other leaf's symbol name. Labeled
+    as name-matches in the UI — never semantic call analysis. A name shared
+    by more than GENERIC_NAME_CAP symbols is skipped as too generic."""
+    name_to_ids = {}
+    for n in nodes:
+        sym = n.get("symbol")
+        if not sym:
+            continue
+        name = sym.rsplit(":", 1)[-1]
+        name_to_ids.setdefault(name, []).append(n["id"])
+    name_to_ids = {k: v for k, v in name_to_ids.items() if len(v) <= GENERIC_NAME_CAP}
+    for n in nodes:
+        blocks = n.get("code") or []
+        if not blocks:
+            continue
+        tokens = set()
+        for b in blocks:
+            tokens.update(IDENT.findall(b.get("text", "")))
+        self_name = (n.get("symbol") or "").rsplit(":", 1)[-1]
+        uses = set()
+        for t in tokens:
+            if t == self_name:
+                continue
+            for tid in name_to_ids.get(t, []):
+                if tid != n["id"]:
+                    uses.add(tid)
+        if uses:
+            n["uses"] = sorted(uses)[:MAX_USES]
+
+
 def main() -> None:
     if len(sys.argv) < 5:
         fail("usage: render.py <skeleton> <batches> <horizon-text> <output-html-path>")
     nodes, root_id = normalize(merge_inputs(sys.argv[1], sys.argv[2]))
     embed_code(nodes)
+    derive_edges(nodes)
     horizon = sys.argv[3].strip()
     out_path = sys.argv[4].strip()
     if not out_path:
@@ -601,7 +783,7 @@ def main() -> None:
     root = next(n for n in nodes if n["id"] == root_id)
     data_json = json.dumps(
         [
-            {k: n[k] for k in ("id", "parent", "title", "kind", "summary", "explanation", "refs", "total", "children", "code") if k in n}
+            {k: n[k] for k in ("id", "parent", "title", "kind", "summary", "explanation", "refs", "total", "children", "code", "uses", "symbol") if k in n and n[k] is not None}
             for n in nodes
         ],
         ensure_ascii=False,
