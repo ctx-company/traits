@@ -1,63 +1,843 @@
 schema-version = "0.2"
 key = "0265.15"
 title = "Render the preview landing block"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Close the Sessions preview column with grammar rule 13's consequence block: sans 11.5 `text-secondary` lines, `→`-prefixed, covering the worktree, the merge and the task close. `screens/sessions.md` tags them `data: run config`, and the three lines do not share one source.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it wherever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-Two of them are in the run's own provenance. `Provenance.worktree` carries the prepared `--worktree` evidence and is `None` for a run started without one — a fact to state, not a line to omit. `Provenance.merge_intent` carries the resolved automatic-landing rung, persisted before driving precisely so a resumed run lands the same way, with `merge_frames` recording what has actually happened.
+This cut closes the Sessions preview column with grammar rule 13's consequence
+block: the `landing` block, last in `0265.10`'s ordered body, after `0265.12`'s
+`slots` fact block and before the spacer and provenance footer
+(`grammar.md:117-124`). It is the fifth and final implementation stage of
+`0265`; the parent-level artifact review that follows it is the parent's work,
+not this task's.
 
-The third is not. **The task-close policy is configuration, not session provenance**: `[tasks] auto-close` is resolved by `ctx_traits_io::harness_config` (`effective_auto_close`) beneath each task document's own `auto_close` override (`modules/core/src/task/mod.rs`). Nothing in `Session` states it. So this line renders from a served resolution of that policy for the run's claimed task — the document's override where it declares one (already on `0265.2`'s answer) and the resolved `[tasks]` value beneath it — rather than from a field the reconstruction does not have. Where the center does not answer that resolution yet, this cut teaches it to and lands the same answer for an existing non-GUI face, per the charter's parity rule.
-"""
-scope = """
-## Decisions
+`screens/sessions.md:36-49` fixes the position and tags the whole block `data:
+run config` — worktree, merge and task close are three data leaves, not
+placeholders, and they do not share one source. Two of the three are the
+selected run's own durable provenance. The third is not: **the task-close policy
+is configuration, not session provenance.** A `Session` records the claimed
+task's key and digest and nothing about what happens to that task
+(`session.rs:302-311`); the policy is `TaskDocument.auto_close`
+(`modules/core/src/task/mod.rs:135-184`) over the `[tasks] auto-close` config
+leaf (`modules/io/src/harness_config.rs:1195-1210,1588-1593`), the override
+winning in either direction. So that line renders from a served resolution of
+current configuration, and the block's determinism claim has to be stated
+accordingly rather than asserted flat.
 
-- In scope: the `landing` consequence block — worktree line from `Provenance.worktree`, merge line from `Provenance.merge_intent` and the recorded merge frames, task-close line from a served resolution of the `[tasks] auto-close` policy beneath the claimed task's own override — with the close-policy resolution reachable by an existing non-GUI face in the same release.
-- **Configuration is resolved once, centrally.** A desktop-side read of `runtime.toml`, or a close policy inferred from the task's status, is the one-face capability the plan calls a defect; `harness_config`'s existing resolution is the substrate and a second parser is not written.
-- **Do not present a configured consequence as an accomplished one.** This block states what will happen when the run lands; it is not a landing report, and a finished run's block must not silently become a claim about what did happen.
-- **A run with no worktree and no merge intent says so** in the design's own voice; the lines the run's configuration does not state are not invented, and the block does not shrink to nothing silently.
-- **`→` prefixes consequence lines** and appears nowhere else on this screen; it is a structural glyph, not decoration.
-- Out of scope: the earlier preview blocks (`0265.10`, `0265.11`, `0265.12`), the whole Config screen's runtime capability (`0268`), and the main pane.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+Nine corrections follow. Each is a place where the draft this plan replaces
+stated something the code does not support, and each one, implemented as
+written, would have put a plausible lie about a run on screen.
 
-## Prerequisite
+## Nine corrections to the draft this plan replaces
 
-`0265.12` — the preview column's fact block, its key/value rows and the selection-triggered reconstruction the worktree and merge evidence arrive on.
-"""
-validation = """
+**Correction 1 — the line size is contested, and a plan carrying both sizes is
+not executable.** Grammar rule 13 requires `landing` consequence lines to be
+`→`-prefixed **sans 12** (`grammar.md:117-124`). Three other artifacts say
+11.5: `screens/sessions.md:47`, the type scale row "11.5 | kv keys,
+sub-descriptions, check/landing lines" (`tokens.md:62`), and the export's three
+`Landing Line` divs at `font-size: 11.5px` (`reference/sessions.html:846-866`).
+The draft repeated 11.5 while inheriting rule 13. This plan settles it at **sans
+12**, on the parent's own resolution: Correction 1 of `0265` quotes rule 13's
+requirement verbatim and rules "Rule 13 governs (`0265.15`)" (`0265:23-30`), and
+that bullet is addressed at this task by name. `tokens.md` is an extraction from
+the pen file, the same source the export measures, so its scale row and the
+export are one piece of evidence, not two. The three 11.5 appearances are raised
+as one owner correction against the design artifacts and are never edited here.
+If the owner rules for 11.5, that is one constant at `0265.1`'s token entry
+point, not a re-plan. The colour is not contested: `text-secondary` `#8b909c` in
+all four artifacts.
+
+**Correction 2 — `Provenance.worktree: None` does not prove the run was started
+without `--worktree`.** The field's own documentation says `None` covers a run
+started without one *and* every legacy ledger (`session.rs:255-261`), which is
+why `ctx traits merge` is required to report it as unresolvable rather than
+guess. The draft's "a run started without one — a fact to state" would render a
+historical flag choice the ledger does not record. Goal 2 states the absence of
+recorded provenance instead. `WorktreeProvenance` carries `id`, `branch`,
+`seed_snapshots` and an optional `path` (`session.rs:552-576`); goal 2 projects
+the served `id` and never the path, the branch, or current Git state.
+
+**Correction 3 — merge intent and merge frames are independent facts, and the
+draft decided nothing between them.** `Provenance.merge_intent:
+Option<MergeRung>` is the automatic post-drive landing intent, resolved once and
+persisted before driving precisely so later `[merge]` config changes cannot
+alter a resumed run (`session.rs:268-275`, `523-534`); `None` covers no
+effective merge request, every legacy ledger, and an intent a resumed `drive
+--no-merge` explicitly cleared (`modules/io/src/run_session.rs:601-614`).
+`Provenance.merge_frames` is the ordered record of merge attempts that actually
+happened (`session.rs:262-267`). A manual `ctx traits merge` appends frames to a
+run with no intent; an intended merge can have no frame yet. The draft
+simultaneously required a future-consequence block, required frames to affect
+it, and forbade the finished block becoming a report of what happened — three
+statements that do not decide any observable case. Goal 3 decides the whole
+matrix and gives the rule: **intent is the line's subject until a terminal frame
+exists; a terminal frame supersedes it; a nonterminal frame never does.**
+`LockAcquired`, `GatesPassed` and `Reconciled` are nonterminal mid-attempt
+stages; `Merged`, `Parked`, `PostMergeCleanupFailure` and `RecoveryFailure` are
+terminal (`session.rs:617-670`). After a terminal outcome, rendering a pending
+consequence would assert a future that already resolved — that is why the
+supersession is not a report-of-what-happened, it is the consequence's own
+resolution.
+
+**Correction 4 — the merge line cannot name a target branch.** `MergeRung` is
+`Standard | Deep` and carries no branch (`session.rs:523-534`); `ctx traits
+merge` resolves its default branch at merge time
+(`modules/cli/src/app/merge.rs:719-791,1099-1121`), and only free-form frame
+evidence may incidentally mention one. The export's `Merges deep into main on
+approval` is therefore two fabrications in one line: `main` is not served, and
+`on approval` describes no code path — the intent is automatic post-drive
+landing, not an approval gate. Goal 3's forms carry neither. Terminal success
+evidence is principally `landed=<sha>` on the frame
+(`merge.rs:2022-2029,2363-2378`), which `landing_state` already strips
+(`session.rs:705-760`); goal 3 renders that revision and nothing else.
+
+**Correction 5 — `AutoClosePolicy` is not "closes when landed".** It is the
+closed set `confirm | checked | merge` (`task/mod.rs:64-79`) and the three
+behave differently: `confirm` never closes without the owner's key press;
+`checked` closes only when at least one check is declared and every one runs and
+passes, and otherwise stays a proposal naming why; `merge` closes a hardened
+candidate regardless of check outcomes, recording `unchecked` for an empty set
+(`task_proposals.rs:405-470`). A successful resolution yielding `None` is a
+fifth, distinct state — no policy configured, the historical confirm-only flow —
+and it is not the same as a resolution that failed. Goal 4 gives all five their
+own fixed form.
+
+**Correction 6 — a task key plus an effective policy cannot support "this task
+will close".** Automatic closing today is invoked from exactly one place: the
+`ctx traits run --task ...` queue, after `landing_state` is `Landed` with a
+revision, and it still returns `false` for no policy, a `Proposal` disposition,
+a missing revision, a provider or read failure, or a failed write
+(`modules/cli/src/app/run.rs:874-946`; `task_queue.rs:71-108`). Nothing in a
+session records that it came through that queue — `--task-dispatch` binds a task
+outside it (`modules/io/src/run.rs:223-241`) and `CallerProvenance` carries only
+surface, caller, agent and harness (`session.rs:122-157`). The export's `Closes
+task 0243.4 when landed` is therefore unsupported for any run. Goal 4's forms
+state the **configured close policy for the claimed task** and never that this
+run will execute it. Adding a durable queue or close-intent fact to provenance
+would make the stronger claim true and is deliberately not done here: the
+target's own ruling is that this block states configured consequence, not
+accomplishment, and policy is configuration rather than provenance.
+
+**Correction 7 — the existing resolution erases exactly the failure this block
+must render, and there are already two copies.** `resolve_auto_close_policy` is
+the pure override-then-default combinator (`task_proposals.rs:473-481`);
+`resolve_task_close_policy` wraps it with a config read that converts every
+resolution error to `None` through `.ok()` (`:483-496`); and `tasks.rs:290-317`
+repeats the whole thing inline, anchoring its config read at
+`Utf8Path::new(".")` — the process cwd, which is the wrong locus even for the
+CLI and unusable for a center answering about another repository's run. Reusing
+the `.ok()` wrapper as-is would make an unresolvable policy indistinguishable
+from a successfully-resolved absence, which is precisely the fail-loud rule the
+draft asserted and its own approach would have broken. Goals 5 and 6 extract one
+shared root-taking resolution with three distinguishable outcomes and retain
+both existing consumers through it. A third copy, or a second TOML parser
+anywhere, is the defect the parent named (`0265:44-47`).
+
+**Correction 8 — `resolve_runtime_config` is not root-safe for a center
+answering about another repository.** It is the central layered parser
+(`harness_config.rs:3896-3904`), but `runtime_config_layers` absolutizes
+`start_dir` and then bounds its ancestor walk with
+`repository::discover_repo_root()` (`harness_config.rs:5079-5156`), which runs
+`git rev-parse --show-toplevel` **at the process working directory**
+(`modules/io/src/repository.rs:12-32`). Handing the selected row's `repo_path`
+to the existing function is therefore not sufficient: the ancestor bound still
+comes from wherever the center process happens to be running, so the repo layer
+stack can be truncated or over-extended for the repository actually being
+answered about. Goal 6 makes the repository root an explicit parameter and keeps
+everything else — the global tiers, the `runtime.ts`/`generated/runtime.toml`
+resolution, layer precedence, the retired-source error, `CTX_CONFIG` — exactly
+as it is.
+
+**Correction 9 — the draft's declared `proof_doctor` check proves nothing about
+this task.** `modules/cli/tests/proof_doctor.rs` covers the compact
+source-inspection panel and asserts only that `--config` and `--verbose`
+conflict (`:1-25,255-273`); it contains no `tasks.auto-close` case, and neither
+does `proof_config.rs`. Calling it "doctor's config-reporting proof" was a false
+claim, and it would have gone green having asserted nothing. It is dropped. The
+checks this plan declares are the per-round gate, the real-socket `proof_center`
+lane, the retained CLI consumer's lane, the focused `harness_config` lane with
+an `expect` guard, and the root gpui-free invariant.
+
+**And a boundary the draft overstated.** "A finished run's block must be
+identical after closing and reopening the window" is true for the worktree and
+merge lines, which reconstruct from ledger provenance alone. It cannot be true
+unconditionally for the close line: that line renders current configuration —
+the task document's `auto_close` and the `[tasks]` leaf — and both are mutable
+between two views. Persisting the resolved policy into the ledger to force
+identity would contradict this task's own ruling that policy is configuration,
+not provenance. Goal 9 states the correct boundary rather than an unsupported
+claim.
+
+## Grounded at HEAD 240f3b53d
+
+Nothing this task renders exists yet. `0256`, `0256.1`-`0256.5`, `0257`,
+`0257.1`-`0257.3` and every `0265` sibling are `ready`, not `Done`. Root
+`Cargo.toml:1-12` lists only the existing workspace crates and excludes only
+`packages/cdk`; no manifest or lockfile names gpui; there is no desktop
+directory, no desktop recipe in `Justfile`, no desktop CI lane, and no
+claimed-task or close-policy request on the center (`center.rs:84-225`).
+
+Every desktop path, module name, component name, symbol, signature, gpui API and
+command named below is therefore a guess to be replaced by discovery against
+what `0256.1`, `0265.1`, `0257`, `0265.2`, `0265.10`, `0265.11` and `0265.12`
+actually landed. Binding them here would be fabrication. The desktop lane is
+nonetheless guaranteed to exist when this cell runs, and the guarantee is a code
+fact: an open leaf derives `Blocked` while any `depends-on` target is not `Done`
+(`modules/core/src/task/graph.rs:115-177`), and this task depends on `0265.12` →
+`0265.10` → `0265.2` → `0265.1` → `0256.1`. That chain is also why `0265.2`'s
+claimed-task answer is reachable without a fourth `depends-on` edge here. The
+first act of this cell is to locate the desktop lane's documented non-interactive
+command and record it verbatim in the work summary. If no such command exists,
+the prerequisite chain has not landed: stop and report that, rather than
+substituting a workspace command for rendered-behaviour proof. It is deliberately
+not a `[[checks]]` entry, because a check must exist in the repository at the
+moment the plan is written and this one does not.
+
+**Rendered-preview evidence**, the phrase the goals use, means two things taken
+together: the landed lane's documented command, run as it exists and exiting 0;
+and, for every outcome that command does not itself decide, the run's own
+observation of the running frame and the composed element tree, by whatever
+means that harness already supports. Which of the two decided which outcome, and
+the mechanics used, are named in the work summary.
+
+What *is* readable today is the whole data side, and the goals lean on it:
+`Provenance.worktree`, `merge_intent` and `merge_frames` (`session.rs:244-275`),
+`MergeStatus::is_terminal` (`:617-670`), `landing_state`'s existing `landed=`
+strip (`:705-760`), `TaskDocument.auto_close` (`task/mod.rs:135-184`),
+`EffectiveConfig::effective_auto_close` (`harness_config.rs:1588-1593`), the two
+duplicated resolutions (`task_proposals.rs:473-496`; `tasks.rs:290-317`), the
+layer stack (`harness_config.rs:5079-5156`), and the center's short-resolve-then-
+blocking-work-in-the-connection-worker shape (`center.rs:3278-3315,3380-3429`)
+which `Get`'s model-owner-blocking shape (`:3649-3669`) must not be inherited
+from.
+'''
+scope = '''
+## GOALS — binding
+
+1. **The block is exactly three `→` consequence lines under a `landing`
+   heading, and no line is ever omitted.** Worktree, merge and task close, in
+   that order (`screens/sessions.md:47`), each line prefixed with `→` per rule
+   13 and rule 3's closed glyph set (`grammar.md:31-37,117-124`) — including
+   the absence forms goals 2, 3 and 4 bind, which are line forms rather than
+   dropped children. The heading is the lowercase word `landing`, mono 11
+   `text-muted` (rule 5). Every rendered string is either fixed text this plan
+   binds or a value the center served for the selected run; nothing here
+   resolves through the `placeholders` module, because
+   `screens/sessions.md:47` tags the whole block `data: run config`.
+   Decided by rendered-preview evidence: three lines present for a run with
+   full evidence, three lines present for a run with none of it, the `→` on
+   each, and the heading word and tone; plus the closing diff read showing no
+   `placeholders` entry added and no conditional that can drop a line.
+   Excluded: omitting, collapsing or merging a line; a fourth line; a count, a
+   status dot, a pill, a badge, an icon, a border, a fill or a corner radius
+   inside this block (rules 3 and 4); any glyph outside `→`; the export's
+   strings `Runs in worktree wt-ab12ef`, `Merges deep into main on approval`,
+   `Closes task 0243.4 when landed`, its ids `wt-ab12ef` and `0243.4`, the word
+   `main` and the phrase `on approval`.
+
+2. **The worktree line renders recorded provenance, never an inferred flag
+   choice.** With `Provenance.worktree` present, the line is `→ Runs in
+   worktree <id>` where `<id>` is `WorktreeProvenance.id` verbatim. With it
+   absent, the line is `→ No worktree recorded for this run` — the truthful
+   form, because `None` covers a run started without `--worktree` *and* every
+   legacy ledger (`session.rs:255-261`, content Correction 2).
+   Decided by direct tests over the shared line projection for a session with
+   worktree provenance and one without, proven by the declared `just test`
+   check; plus rendered-preview evidence of both forms.
+   Excluded: rendering `WorktreeProvenance.path`, `branch` or `seed_snapshots`;
+   inferring presence from a path, from current Git state, or from a `git
+   worktree list` shell-out; the wording "started without a worktree" or any
+   other claim about the flag the run was started with; the design example id.
+
+3. **The merge line renders the configured intent until a terminal frame
+   supersedes it, and never names a branch.** The complete matrix, all of it
+   fixed text plus at most one served value:
+   - `merge_intent = Standard`, no terminal frame → `→ Merges automatically
+     when this run lands`.
+   - `merge_intent = Deep`, no terminal frame → `→ Merges deep automatically
+     when this run lands`.
+   - `merge_intent = None`, no terminal frame → `→ No automatic merge intent
+     recorded`.
+   - A terminal frame present — the last one in `merge_frames` order whose
+     `MergeStatus::is_terminal` holds — supersedes the intent entirely,
+     whatever the intent was, including `None`: `Merged` with a `landed=<sha>`
+     evidence entry → `→ Merged at <sha>` in the `ok` tone; `Merged` without
+     one → `→ Merged`, same tone; `Parked` → `→ Merge parked` in the `warn`
+     tone; `PostMergeCleanupFailure` or `RecoveryFailure` → `→ Merge failed` in
+     the `danger` tone (rule 1: `ok` is landed, `warn` needs the owner,
+     `danger` is failure, `grammar.md:7-18`).
+   - `LockAcquired`, `GatesPassed` and `Reconciled` frames are nonterminal and
+     change nothing: a run mid-attempt still renders its intent form.
+   The supersession is the rule this plan decides (content Correction 3); it is
+   not a general landing report, and no other block on this screen changes
+   because of it.
+   Decided by direct tests over the shared line projection covering every cell
+   of that matrix — the three intent values crossed with no frame, a
+   nonterminal frame, each terminal status, and a terminal frame on a run with
+   no intent — proven by the declared `just test` check; plus rendered-preview
+   evidence of an intent form, a superseded form and the three non-neutral
+   tones.
+   Excluded: naming a target branch, inferring one from config, Git or frame
+   evidence, or rendering `main` (content Correction 4); the phrase `on
+   approval`; substituting `session::landing_state` for this projection, whose
+   `NotMerged` and `None` arms are derived from drive outcome and commit
+   receipt and mean something else (`session.rs:705-760`); rendering a
+   nonterminal frame; rendering merge-frame evidence strings, stage names,
+   durations or holder pids; adding `merge_intent` to `RunSummary` or to any
+   compact list row against the compact-row invariant.
+
+4. **The task-close line states the configured policy for the claimed task,
+   never a prediction that it will close.** Five fixed forms, over the served
+   claimed task and the effective policy goal 5 resolves:
+   - No `task_key` on the run → `→ No task claimed by this run`.
+   - Effective `Confirm` → `→ Task <key> closes only on owner confirmation`.
+   - Effective `Checked` → `→ Task <key> closes when its declared checks
+     pass`.
+   - Effective `Merge` → `→ Task <key> closes when a run lands, checks or
+     not`.
+   - Resolved successfully to no policy → `→ Task <key> has no auto-close
+     policy`.
+   And one failure form, which is not one of the five: any unresolved
+   response — an unusable repository path, a config read or parse error, a
+   provider error, a claimed key the board does not yield (including a
+   document the loader skipped as a parse failure,
+   `modules/io/src/task_files.rs:186-249`) → `→ Task <key> close policy
+   unresolved` in the `danger` tone, or `→ Claimed task close policy
+   unresolved` where no key is available. The wording is deliberately about the
+   policy and about "a run", not about this run: a run's task key does not
+   record that it came through the close-executing queue (content Correction
+   6). The three policy sentences preserve the three behaviours' actual
+   differences (content Correction 5); none of them predicts a check result or
+   a successful later write.
+   Decided by direct tests over the shared line projection for each of the six
+   outcomes, proven by the declared `just test` check; by the declared
+   `proof_center` check for the unresolved forms arriving from real
+   center-side failures rather than being synthesized locally; plus
+   rendered-preview evidence of a policy form, the no-policy form and the
+   unresolved form in danger tone.
+   Excluded: `→ Closes task <key> when landed` or any wording that asserts
+   this run will close the task; defaulting an unresolved response to
+   `confirm`, to no-policy, or to any plausible value; deriving the policy from
+   the task's stored status, from its declared checks, or from board-derived
+   `blocked`; rendering the task title, description or status here, which is
+   `0265.10`/`0265.13`'s `run` block; widening the served answer with the
+   document's `checks` to sharpen the `checked` wording; adding a queue or
+   close-intent fact to `Provenance` to make a stronger claim true.
+
+5. **One shared root-taking auto-close resolution, three distinguishable
+   outcomes, both existing consumers retained.** A single shared resolution —
+   in `ctx-traits-io` or `ctx-traits-core`, reachable by the center without
+   importing CLI-private code — takes an explicit repository root and a task
+   document's own `auto_close`, and returns a result that keeps effective
+   policy `Some(..)`, successfully-resolved absence `None`, and resolution
+   failure apart. `resolve_auto_close_policy`'s override-then-default
+   precedence (`task_proposals.rs:473-481`) and
+   `EffectiveConfig::effective_auto_close` (`harness_config.rs:1588-1593`) are
+   consumed, not reimplemented. Both existing copies are routed through it:
+   `task_proposals::resolve_task_close_policy` (and therefore
+   `evaluate_task_close`, `task_proposals.rs:578-584`) and the inline repeat in
+   `tasks.rs:290-317`. Existing CLI behaviour stays observably unchanged, which
+   means the `.ok()` error-to-`None` collapse survives as an explicit mapping
+   at those two call sites rather than inside the shared resolution; any
+   deliberate change to the `tasks.rs` cwd anchor is named in the work summary
+   as its own correction rather than absorbed silently.
+   Decided by the declared `harness_config` and `just test` checks over the
+   shared resolution — document override winning over each config value in
+   either direction, config-only, neither configured, and a malformed config
+   surfacing as failure rather than `None` — and by the declared CLI `tasks`
+   check keeping the retained consumer green.
+   Excluded: a third copy of the resolution anywhere, including in the desktop
+   or the center; a second TOML parser or a desktop-side `runtime.toml` read; a
+   resolution that returns `Option` only and so cannot distinguish failure from
+   absence; changing `AutoClosePolicy`, `close_disposition`,
+   `evaluate_task_close`'s disposition semantics, or the queue's close path
+   (`task_queue.rs:71-108`); making the CLI's existing failure text or exit
+   behaviour differ without saying so.
+
+6. **The layered config read takes the repository root explicitly instead of
+   discovering it at the process cwd.** The shared resolution's config half
+   reads through `harness_config`'s existing layer stack with the repository
+   root supplied by the caller, so a center answering about repository B never
+   bounds its ancestor walk with the root of wherever the center process is
+   running (`harness_config.rs:5079-5156`; `repository.rs:12-32`, content
+   Correction 8). Layer precedence, the global tiers, the
+   `runtime.ts`/`generated/runtime.toml` resolution, the retired-source error
+   and `CTX_CONFIG` behave exactly as they do today, and existing callers of
+   `resolve_runtime_config`/`resolve_config_report` are observably unchanged.
+   Read and parse errors are returned, never swallowed.
+   Decided by the declared `harness_config` check with its `expect` guard, over
+   scratch repositories: an explicit root resolving its own repo layer while
+   the process cwd is elsewhere, `tasks.auto-close` merging from a repo layer
+   as it does today (`harness_config.rs:8579-8613`), a malformed document
+   erroring, and the existing config winners and doctor provenance unchanged;
+   plus the declared `just test` check for every other caller.
+   Excluded: changing what any existing caller resolves; a second layer stack,
+   a second parser, or a bypass that reads one file directly; making
+   `discover_repo_root` itself take a directory, which would change
+   `worktree.rs` and the `root = "repo"` resolver — out of scope here; running
+   Git from the center's request path.
+
+7. **The three facts arrive through the one center-served selected-detail
+   path, resolved off the model owner and anchored at the row's repository.**
+   Worktree and merge provenance come from the selected-detail model `0257`
+   and `0265.10`-`0265.12` landed. The effective close policy is served by
+   widening `0265.2`'s landed claimed-task answer and its connection-worker
+   path with goal 5's resolution, keeping that answer's existing non-GUI
+   consumer (`ctx tasks show --session <id>`) as the second consumer of the
+   widened field per the charter's parity rule; if the landed shape differs
+   from that plan, the widening follows what actually landed. Board and config
+   reads are anchored at the selected row's `repo_path` — never the center's
+   cwd, never the desktop's — and an empty, relative, unusable or mismatched
+   path is a typed refusal or error, which goal 4 renders as unresolved. The
+   board authority is `FilesTaskBoard::open_read(..)` behind `TaskProvider`,
+   called with the run's canonical key (`task_files.rs:269-289,787-856`);
+   `task_board_cache` is not authority. All of it runs in the connection
+   worker, the shape `Start` and `Control` already use
+   (`center.rs:3278-3315,3380-3429`), never inside the sole model owner's
+   request handling and never on gpui's UI thread.
+   Decided by the declared `proof_center` check over the real socket — the
+   effective policy answering from a scratch repository, a scratch board
+   document and a scratch runtime document; the document override beating the
+   config value; config-only; neither configured; a malformed config; a run
+   claiming no task; a claimed key absent or skipped by the loader; an empty
+   and a relative repository path — and by the declared `just test` check where
+   the existing model-owner isolation coverage lives; plus the closing diff
+   read for any read on the model owner, any UI-thread block, and any direct
+   ledger, board, config, sidecar, cwd or cache read in the desktop process.
+   Excluded: a second task or close-policy request; a second selected-detail
+   protocol; an independent doctor-only parser; adding the policy to
+   `CenterPublicRow`, `RunSummary` or any list answer; reading anything from
+   the filesystem in the desktop process; a cwd fallback in any failure case;
+   changing subscription semantics, the delta reducer or run controls.
+
+8. **The block renders in the artifacts' shape, composed from the landed
+   preview primitives.** A full-width block with internal gap 8 and bottom
+   padding 20 (`tokens.md:71-84`; `reference/sessions.html:839-845`), heading
+   first, then the three lines in `text-secondary` `#8b909c` at **sans 12** per
+   rule 13 and `0265`'s Correction 1 — with the 11.5 appearances at
+   `screens/sessions.md:47`, `tokens.md:62` and `reference/sessions.html:846-866`
+   raised as one owner correction and never edited (content Correction 1).
+   Goal 3's and goal 4's tinted forms are the only exceptions to the secondary
+   tone. It is the last block in `0265.10`'s ordered body, after `0265.12`'s
+   `slots` block and before the spacer and provenance footer, per rule 13. The
+   named-block heading form comes from `0265.10`; a consequence line is the one
+   new primitive, and it stops there.
+   Decided by rendered-preview evidence for the position, gap, padding,
+   family, size and tones, plus the closing diff read against
+   `grammar.md:31-56,117-124`, `tokens.md:3-4,26-84`,
+   `screens/sessions.md:36-49` and `reference/sessions.html:839-867`.
+   Excluded: a second named-block or heading form beside `0265.10`'s; a
+   key/value row here, which this block is not; any colour, size, spacing,
+   family or weight literal at a call site; a corner radius, dot, pill, badge,
+   icon or fill; a component registry, design-system layer or generic screen
+   framework; editing any file under `.internal/docs/design/`; implementing or
+   drifting a light-column value (`tokens.md:3-4`); scrolling or clipping this
+   column, which is `0265.7`'s.
+
+9. **The block commits atomically with the rest of the selected preview, and
+   its determinism boundary is stated honestly.** The three lines join the
+   selected preview under `0265.10`'s stable selection identity and
+   staged-candidate transaction: a complete candidate is staged and committed
+   only on success, the prior accepted model is retained only behind the
+   inherited explicit stale marker, and a fresh complete snapshot is requested
+   after rejection (`modules/cli/src/app/dashboard/worker.rs:254-415`). Heading
+   and lines never commit separately, and a rapid A-then-B selection never
+   combines A's provenance or policy with B's block. No read fires per list
+   row, on hover, on a delta for an unselected run, as a prefetch or on a
+   timer. **The determinism claim is:** for one selected run, the worktree and
+   merge lines reproduce byte-identically after the application closes and
+   reopens, because they derive from ledger provenance alone; the close line
+   reproduces byte-identically for the same ledger *and* the same served
+   current policy, and changes when the task document's `auto_close` or the
+   `[tasks]` leaf changes, because it renders current configuration rather than
+   provenance (content Correction 9). No rendered fact lives only in GUI
+   memory, and no policy value is written into the ledger to force identity.
+   Decided by rendered-preview evidence over out-of-order A/B selection, a
+   rejected candidate, a detail failure arriving against a newer selection, the
+   stale posture after center loss, no read fired for an unselected row or a
+   hover, a finished run's worktree and merge lines identical after a restart,
+   and the close line following a changed `auto_close` override across two
+   selections; and by the closing diff read for any timer, interval, spawned
+   tick, blocking UI-thread receive or eager read.
+   Excluded: a second selection model, detail request, subscription or
+   protocol; a preview-private state system; committing the heading and lines
+   separately; presenting last-accepted lines as current after the stream
+   becomes uncertain; persisting the resolved policy into the ledger, the
+   sidecar or any cache to make the close line restart-identical; a polled or
+   watched refresh of the policy.
+
+10. **The workspace does not learn about gpui, and this cut stays inside its
+    own scope.** Root Cargo resolution and the root `Cargo.lock` stay
+    gpui-free, `just test`/`just test-full`/the existing CI lanes do not gain
+    gpui cost, no CLI-private or ratatui type is imported into the desktop, and
+    no `0265.10`/`.11`/`.12`/`.13`-owned region or the main pane is edited.
+    Every presentation value resolves through `0265.1`'s dark token and font
+    entry point.
+    Decided by the declared root metadata/lockfile check and the declared `just
+    test` check for the workspace side, and by the closing diff read for the
+    scope half. No board check can decide the scope half: a check runs in a
+    clean detached worktree of the merged sha with no base to diff against.
+    Excluded: adding the desktop project to root workspace members; a grep
+    forbidding the string `gpui` in `Justfile` or `.github/workflows/`, since a
+    *separate* desktop lane there is sanctioned and such a check would red on
+    the sanctioned outcome; a second token module or theme abstraction.
+
+11. **The pass is reviewed once and bounded.** The completed diff is read
+    against `screens/sessions.md:36-49`, `grammar.md:7-18,31-56,117-124`,
+    `tokens.md:3-4,26-84` and `reference/sessions.html:839-867` before the task
+    is called done. Exactly one targeted repair cycle is allowed; if a second
+    would be needed, stop and report the exact failing command or the
+    unresolved data or render contract rather than iterating. The work summary
+    names the discovered desktop path and command verbatim, where the shared
+    resolution landed and which consumers were retained through it, whether
+    goal 7's widening matched `0265.2`'s planned shape, the proof mechanics
+    used where they differ from the suggested route, every owner correction
+    raised against the design artifacts — at minimum the sans 11.5/12 conflict
+    and the export's three fabricated strings — and every deviation from this
+    approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against, and
+neither does the claimed-task answer. Read what landed; do not carry a guess
+from this file into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level listing, then its manifest, README, justfile or CI lane, for the
+  documented non-interactive build-and-test command. Record it verbatim before
+  any edit. If no such lane exists, the prerequisite chain has not landed:
+  report that rather than substituting workspace commands.
+- Read `0265.2`'s landed claimed-task request, its answer type, its
+  connection-worker function and its non-GUI consumer. Widen that one path;
+  its suggested names (`Request::ClaimedTask`, `ClaimedTask`, `ctx tasks show
+  --session`) are guesses from its plan, not the landed API.
+- Read `0265.10`'s landed preview frame: the ordered body sequence, the
+  named-block form, the selection transaction, the stale and failure
+  presentation, and how `0265.12` composed its block into that body.
+- Read `0265.1`'s token and font entry point for every value.
+
+### Edit order
+
+1. The root-taking config resolution in `modules/io/src/harness_config.rs`
+   (goal 6), with existing callers unchanged and unit tests beside the existing
+   layer coverage.
+2. The shared auto-close resolution on top of it (goal 5), with
+   `task_proposals::resolve_task_close_policy` and `tasks.rs:290-317` rewritten
+   as its consumers.
+3. The shared line projection: goals 2, 3 and 4's fixed forms as pure functions
+   over provenance and an effective-policy outcome, with direct tests — in
+   core/IO, not in gpui.
+4. The center widening (goal 7): the claimed-task worker resolves the effective
+   policy from the row's `repo_path`, the answer carries it, and the retained
+   non-GUI consumer renders it.
+5. The consequence-line primitive and the block, composed into `0265.10`'s body
+   at rule 13's position.
+6. The desktop lane's proofs, then the focused proofs, then the declared
+   checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like `resolve_runtime_config_at(repo_root: &Utf8Path,
+start_dir: &Utf8Path) -> Result<RuntimeConfig>` beside
+`resolve_config_report`, with `runtime_config_layers` taking the root instead
+of calling `discover_repo_root()`; something shaped like
+`effective_auto_close_policy(repo_root: &Utf8Path, document_override:
+Option<AutoClosePolicy>) -> Result<Option<AutoClosePolicy>>` as the one shared
+resolution; and a small enum over goals 2-4's line forms with one rendering
+function, beside whatever `0265.12` put its projection next to. Names, module
+paths and signatures follow whatever conventions the prerequisites established.
+The behaviours goals 1-9 fix are not suggestions; where they live and what they
+are called are.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- Worktree present and absent, rendering the two fixed forms.
+- The full merge matrix: three intent values × no frame, a nonterminal frame,
+  `Merged` with and without `landed=`, `Parked`, `PostMergeCleanupFailure`,
+  `RecoveryFailure`; and a terminal frame on a run with no intent.
+- The five policy forms and the unresolved form, including a config that fails
+  to parse arriving as failure rather than as absence.
+- The document override winning over each config value in either direction,
+  config-only, and neither configured.
+- An explicit repository root resolving its own repo layer while the process
+  cwd is a different repository.
+- A run claiming no task; a claimed key absent from the board; a claimed
+  document the loader skipped; an empty and a relative repository path.
+- `evaluate_task_close`, the queue close path and `ctx tasks show` observably
+  unchanged over the extracted resolution.
+- The block's position, gap, padding, family, size and tones, the `→` on every
+  line, and the absence of dots, radius and placeholders.
+- Out-of-order A/B selection, a rejected candidate and a detail failure leaving
+  the accepted block whole; the stale posture after center loss; no read fired
+  for an unselected row or a hover.
+- A finished run's worktree and merge lines identical after a restart, and the
+  close line following a changed override.
+
+Tests use scratch repositories, scratch runtime documents, scratch task
+documents, scratch ledgers and arbitrary ids. No test may depend on this
+repository's committed board or runtime content, and no design example string is
+fixture authority.
+
+### Reuse points
+
+`resolve_auto_close_policy` as the override-then-default combinator
+(`task_proposals.rs:473-481`); `EffectiveConfig::effective_auto_close`
+(`harness_config.rs:1588-1593`); the existing layer stack, its precedence and
+its `CTX_CONFIG` handling (`harness_config.rs:5079-5156`);
+`MergeStatus::is_terminal` (`session.rs:617-670`) and `landing_state`'s
+`landed=` strip (`:705-760`) as the terminal-frame semantics — read, not
+re-derived; `FilesTaskBoard::open_read` behind `TaskProvider` as the one board
+authority (`task_files.rs:269-289,787-856`); `0265.2`'s claimed-task answer,
+worker and non-GUI consumer as the one path to widen; the center's
+short-resolve-then-blocking-work-in-the-worker shape
+(`center.rs:3278-3315,3380-3429`); `0265.10`'s preview frame, named-block form,
+selection identity, staged-candidate transaction and stale/failure
+presentation; `0265.12`'s block composition into the body sequence; `0265.1`'s
+token and font entry point; and the accepted-model transaction shape at
+`modules/cli/src/app/dashboard/worker.rs:254-415` as the semantics to match. If
+any prerequisite surface is absent at execution time, report an unmet
+prerequisite rather than replacing it locally.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml`, and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The `run` block and footer (`0265.10`), the `in progress` and `verdict`
+  blocks (`0265.11`), the `slots` block (`0265.12`), the header (`0265.13`),
+  the frame counter (`0265.14`), the frame-row forms (`0265.5`), loop narration
+  (`0265.6`), overflow (`0265.7`), the rail (`0265.8`), the title bar
+  (`0265.9`), the bottom bar (`0265.3`) and the whole main pane.
+- The parent's closing artifact review (`0265:104-112`), which follows this
+  task and is the parent's work.
+- The Config screen's whole runtime capability (`0268`) and any doctor surface
+  change; adding a `tasks.auto-close` case to `proof_config` is board material
+  unless a goal here needs it.
+- Any change to `AutoClosePolicy`, `close_disposition`, the queue close path,
+  `Provenance`'s shape, `MergeRung`, `RunSummary`'s field shape, or the ledger
+  contract.
+- Adding a durable queue or close-intent fact to provenance so the close line
+  could claim execution (content Correction 6) — board material if the owner
+  wants it.
+- Making `discover_repo_root` itself take a directory, which would change
+  `worktree.rs` and the `root = "repo"` resolver.
+- Any center protocol change beyond widening `0265.2`'s landed claimed-task
+  answer; any change to subscription semantics, the delta reducer, run controls
+  (`0258`), summons (`0259`) or packaging (`0260`).
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`
+  or any pencil artifact.
+- A design-system phase: component registry, theme abstraction, generic screen
+  framework, or primitives extracted before a named consumer exists.
+- A board check that executes the desktop lane. No such command exists in this
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **The close policy is not in the ledger.** `Session` provenance carries the claimed task's key and digest, not what happens to that task when the run lands; sourcing this line from provenance renders a configuration claim with no backing.
-- **The per-document override wins over the `[tasks]` value.** Reporting the config-level policy for a task that declares its own is a wrong answer that looks right.
-- **No desktop-side configuration read** and no second `runtime.toml` parser anywhere; `ctx doctor --config` and this answer must not disagree about the same knob.
-- **Reads stay on the selection path and off gpui's UI thread**; nothing refreshes on a timer and nothing fires per list row.
-- **A finished run's block must be identical after closing and reopening the window** — the ledger is authoritative for the worktree and merge halves, and neither may depend on in-process state.
-- **Fail-loud, no direct-reader fallback.** An unresolvable policy is stated as unresolved rather than defaulted to a plausible one.
-- **Sans is content and mono is machinery**: the consequence lines are sans 11.5 `text-secondary`; block headings are mono 11 `text-muted` lowercase. No status dots in this column, no corner radius inside the canvas.
-- **No test may depend on committed repo content** — scratch runtime documents and scratch task fixtures only.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and that the served resolution is green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`grammar.md` and `screens/sessions.md` are the specification; the export is
+  measurement.** Take geometry from `reference/sessions.html:839-867`; take
+  content from the rules with this plan's corrections applied. All three of the
+  export's landing strings are fabrications about a real run: `main` is not
+  served, `on approval` describes no code path, and `Closes task 0243.4 when
+  landed` asserts an execution the ledger cannot support. A leaf that renders
+  one of them is worse than an omitted leaf, because it reads as evidence.
+- **The size conflict is settled at sans 12, not left open.** Rule 13 governs
+  by the parent's own resolution (`0265:23-30`); `screens/sessions.md:47`,
+  `tokens.md:62` and the export say 11.5 and are raised as an owner correction,
+  never edited. Do not ship both sizes and do not silently pick the other one.
+- **`worktree: None` is two different histories.** A run started without
+  `--worktree` and a legacy ledger are indistinguishable
+  (`session.rs:255-261`). State the absence of recorded provenance, not a flag
+  choice.
+- **Intent and frames are independent facts.** A manual merge appends frames to
+  a run with no intent; an intended merge can have no frame yet
+  (`session.rs:262-275`). Nonterminal stages are mid-attempt, not outcomes
+  (`session.rs:617-670`). Goal 3 fixes every cell; the implementation does not
+  get to choose one.
+- **`landing_state` means something else.** Its `NotMerged` and `None` arms
+  come from drive outcome and commit receipt (`session.rs:705-760`), so it is
+  the projection of what happened, not of a configured consequence. Read its
+  `landed=` strip; do not substitute the function.
+- **The close policy is not in the ledger.** `Session` carries the claimed
+  task's key and digest and nothing about its fate (`session.rs:302-311`).
+  Sourcing this line from provenance renders a configuration claim with no
+  backing.
+- **The per-document override wins over the `[tasks]` value, in either
+  direction** (`task/mod.rs:177-184`; `task_proposals.rs:473-481`). Reporting
+  the config-level policy for a task that declares its own is a wrong answer
+  that looks right.
+- **The three policies are not one behaviour.** `confirm` never closes without
+  the owner; `checked` needs at least one declared check and every one passing;
+  `merge` closes regardless of checks (`task_proposals.rs:405-470`). And a
+  resolved `None` is not a failure — collapsing the two is exactly what
+  `.ok()` does today (`task_proposals.rs:483-496`) and exactly what the
+  fail-loud rule forbids.
+- **No desktop-side configuration read, no second parser, no third copy of the
+  resolution.** `ctx doctor --config` and this answer must never disagree about
+  the same knob.
+- **The repository root is a parameter, not a discovery.** `discover_repo_root`
+  runs Git at the process cwd (`repository.rs:12-32`); a center answering about
+  another repository that goes through it is reading the wrong layer stack.
+  Board and config both anchor at the selected row's `repo_path`, and an empty
+  or unusable path fails loudly rather than falling back.
+- **Reads stay on the selection path, off the sole model owner and off gpui's
+  UI thread.** Nothing refreshes on a timer and nothing fires per list row, on
+  hover, on an unselected delta or as a prefetch. Do not inherit `Get`'s
+  model-owner blocking shape (`center.rs:3649-3669`).
+- **One block, one commit.** The defect this shape invites is run B's heading
+  above run A's worktree line. Stage the whole candidate, commit on success
+  only, retain the prior model behind the inherited explicit stale marker
+  (`worker.rs:254-415`).
+- **Restart identity is not uniform across the three lines.** Worktree and
+  merge reconstruct from the ledger; the close line renders current
+  configuration and legitimately changes when that configuration changes.
+  Writing the resolved policy into the ledger to force identity would
+  contradict this task's own ruling that policy is configuration.
+- **Sans is content and mono is machinery**: the consequence lines are sans 12
+  `text-secondary`; the block heading is mono 11 `text-muted` lowercase
+  (`grammar.md:49-56`). No status dots in this prose block, no corner radius
+  inside the canvas (`grammar.md:31-47`). Rule 1's tones apply only to goal
+  3's terminal outcomes and goal 4's unresolved form.
+- **No test may depend on committed repo content** — scratch repositories,
+  scratch runtime documents, scratch task documents and scratch ledgers only,
+  with arbitrary ids.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full` or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like
+  a phantom "cannot find X".
+- **The declared checks are shared-side and workspace-side, not proof of this
+  task's rendered behaviour.** They decide the shared resolution and its
+  retained consumers, the layered config read, the center wire, and the
+  workspace staying gpui-free. The block itself is decided by rendered-preview
+  evidence in the lane `0256.1` establishes. What that lane covers is unknown
+  at authoring time, so claim only what it actually verifies and observe the
+  remainder directly — an outcome asserted as "covered" without having been
+  observed is the defect this watch item exists for. The draft's `proof_doctor`
+  check asserted nothing about auto-close (`proof_doctor.rs:1-25,255-273`) and
+  is gone; do not reinstate it.
 
 ## Done when
 
-The Sessions preview column carries a `→`-prefixed `landing` block whose worktree and merge lines come from the selected run's own provenance and whose task-close line comes from a served resolution of `[tasks] auto-close` beneath the claimed task document's own override — reachable by an existing non-GUI face, never read from the filesystem by the desktop, and stated as unresolved rather than defaulted when it cannot be resolved. A run without a worktree or without a merge intent states that rather than dropping the line, and the block describes what will happen rather than what did. A finished run's block is identical after closing and reopening the window. `just test` passes, the doctor config proof passes, and root workspace resolution and the root lockfile remain gpui-free.
-"""
+- The desktop lane's documented non-interactive build-and-test command, landed
+  through `0265.12` → `0265.10` → `0265.2` → `0265.1` → `0256.1` and therefore
+  present before this task can dispatch (`graph.rs:115-177`), was located
+  first, recorded verbatim in the work summary, and exits 0 with the block in
+  the tree and the proofs it already runs left unmodified. If that command
+  cannot be found, the prerequisite chain has not landed: the task stops and
+  reports that, and no workspace command is offered in its place.
+- Rendered-preview evidence — that command for what it decides, and the run's
+  own observation of the running frame and composed tree for the rest, with
+  which decided what named in the work summary — shows goals 1-9's observable
+  outcomes: three `→` lines under a lowercase `landing` heading for every
+  selected run, including one with no worktree, no merge intent and no claimed
+  task; goal 2's two worktree forms; goal 3's intent forms, a superseded
+  terminal form and the `ok`/`warn`/`danger` tones; goal 4's five policy forms
+  and the danger-toned unresolved form; the block's position after the `slots`
+  block and before the spacer and footer, with gap 8, bottom padding 20,
+  heading mono 11 `text-muted`, lines sans 12 `text-secondary`, and no dot,
+  radius, pill or placeholder; out-of-order A/B selection, a rejected candidate
+  and a detail failure leaving the accepted block whole; the stale posture
+  after center loss; no read fired for an unselected row or a hover; and a
+  finished run's worktree and merge lines identical after the application
+  closes and reopens, with the close line following a changed `auto_close`
+  override across two selections.
+- All five declared checks exit 0: the layered config read and the shared
+  auto-close resolution green under the focused `harness_config` filter, whose
+  `expect` guard proves the filter matched tests and whose reported test list
+  the work summary names; every other consumer green under `just test` — which
+  is what decides the shared line projection wherever it lands, since the
+  focused filters cover it only if it lives beside them; `proof_center` green
+  over the real socket, answering the effective policy from a scratch
+  repository, scratch board and scratch runtime document, with the override,
+  config-only, neither-configured, malformed-config, no-claimed-task,
+  absent-key, skipped-document, empty-path and relative-path cases arriving as
+  the typed outcomes goal 4 renders — its existing assertions extended rather
+  than weakened; `cargo test -p ctx-traits-cli --lib tasks` green over the
+  retained non-GUI consumer and the rewritten `tasks.rs` resolution; and root
+  workspace resolution plus the root lockfile still gpui-free.
+- The closing diff read shows: every colour, size, spacing and family resolving
+  through `0265.1`'s entry point with no call-site literal; sans 12 on the
+  lines and no 11.5 anywhere in this block; one auto-close resolution with
+  three outcomes and both prior copies routed through it; one layered config
+  read; one selection model, one detail request and one failure presentation;
+  no `placeholders` entry added; no second parser and no desktop-side
+  configuration or board read; no cwd fallback in any failure path; no
+  CLI-private or ratatui import; no timer, interval, spawned tick or UI-thread
+  block; no policy value written into the ledger, sidecar or cache; no design
+  example id or string, no `main`, no `on approval`, and no glyph outside `→`;
+  no light-column value; no edit under `.internal/docs/design/`; and no edit to
+  `0265.10`/`.11`/`.12`/`.13`-owned regions, the main pane, run controls or
+  center subscription semantics.
+- The work summary names the discovered desktop path and command verbatim,
+  where the shared resolution and the root-taking config read landed and which
+  consumers were retained through them, any deliberate change to the
+  `tasks.rs` cwd anchor, whether goal 7's widening matched `0265.2`'s planned
+  shape or deviated from it, the focused test names the filters actually ran,
+  the proof mechanics used where they differ from the suggested route, the
+  owner corrections raised against the design artifacts — at minimum the sans
+  11.5/12 conflict and the export's three fabricated strings — and any
+  deviation from this approach.
+
+## Bounded refinement
+
+Run the discovered desktop command, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib harness_config`,
+then `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`,
+then `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks`, then
+`CARGO_TARGET_DIR=target just test`, then the root gpui-free check, then the
+closing diff read. Permit at most one targeted repair-and-rerun round: repair
+one named defect, then rerun the failed command and every command after it in
+that order. If a second round would be needed, stop and report the exact failing
+command with its evidence, or the unresolved data or render contract, rather
+than iterating. That is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0265"
 depends-on = ["0265.12"]
 
 [[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1200000
-
-[[checks]]
-name = "doctor's config-reporting proof still passes"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_doctor"
-timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
-
-[[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "layered config read and the shared auto-close resolution stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib harness_config"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
+
+[[checks]]
+name = "the retained non-GUI close-policy consumer stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
+
+[[checks]]
+name = "center wire and the served claimed-task answer stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1800000
+
+[[checks]]
+name = "shared projection and its consumers keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
