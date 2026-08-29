@@ -839,9 +839,9 @@ impl RatatuiPane {
     /// `SIGINT` sets for cooperative-stop bookkeeping, but in raw mode
     /// Ctrl-C never becomes a signal — this key path is its only meaning
     /// here, and unlike a real `SIGINT` it does not wait for the current
-    /// frame) and leaves the pane, printing a one-line plain-text note once
-    /// the terminal is back in cooked mode so the user knows what state the
-    /// run is in. Every other drained key is returned for the caller to
+    /// frame) and leaves the pane silently, with the terminal already back
+    /// in cooked mode and nothing printed — the caller reports the outcome.
+    /// Every other drained key is returned for the caller to
     /// apply to its own scroll/focus/modal state.
     pub(crate) fn poll_detach(&mut self) -> Vec<KeyEvent> {
         if self.detached() {
@@ -859,7 +859,6 @@ impl RatatuiPane {
                 }
                 self.detached = true;
                 self.leave();
-                eprintln!("run killed; terminal restored");
                 return unhandled;
             }
             unhandled.push(key);

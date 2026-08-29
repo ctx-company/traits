@@ -3,7 +3,7 @@ key = "0252.9"
 title = "No loose prose on exit"
 status = "ready"
 raised = "2026-08-27"
-content = '''
+content = """
 With the live view on the alternate screen (0252.7), an exit already
 restores a clean shell. The bare prose one-liners that used to explain a
 torn screen are now noise between the prompt and whatever the command
@@ -162,8 +162,8 @@ Both invariants stay exactly as they are.
 Neither is one of this task's three named removals. Removing either
 without a new owner ruling is scope creep, and the second would regress a
 landed task.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -336,8 +336,8 @@ strings, exit code and cooked termios, from scratch fixtures only.
   unedited.
 - The two neighbouring loose lines of content fact 7.
 - Any new panel on the startup-interrupt path.
-'''
-validation = '''
+"""
+validation = """
 ## Done when — binding goals, each with the existing command that decides it
 
 1. On the live-pane ctrl-c path 0252.4 landed — the first ctrl-c opens
@@ -446,11 +446,15 @@ causal guess and the suggested repair never do.
 - If the landed 0252.4 modal makes the first ctrl-c never reach
   `poll_detach`, the note is still deleted — the surviving non-opted-in
   panes are the reason the producer must go, not just the live pane.
-'''
+"""
 
 [relations]
+depends-on = [
+    "0252.7",
+    "0252.8",
+    "0252.4",
+]
 parent = "0252"
-depends-on = ["0252.7", "0252.8", "0252.4"]
 
 [[checks]]
 name = "the run-view exit path restores the shell with no kill note"
@@ -478,8 +482,8 @@ expect = 'test result: ok\. [1-9][0-9]* passed; 0 failed'
 
 [[checks]]
 name = "the three prose producers are gone and the three fallback diagnostics remain"
-command = "! rg -n 'terminal restored' modules/cli/src && ! rg -n 'to run the remaining queue anyway' modules/cli/src && test \"$(rg -o 'run tui unavailable; falling back to status progress' modules/cli/src | wc -l | tr -d ' ')\" = 3 && echo exit-prose-clean"
-expect = 'exit-prose-clean'
+command = """! rg -n 'terminal restored' modules/cli/src && ! rg -n 'to run the remaining queue anyway' modules/cli/src && test "$(rg -o 'run tui unavailable; falling back to status progress' modules/cli/src | wc -l | tr -d ' ')" = 3 && echo exit-prose-clean"""
+expect = "exit-prose-clean"
 
 [[checks]]
 name = "the landing gate stays green"

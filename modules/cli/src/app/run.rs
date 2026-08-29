@@ -749,7 +749,7 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
 }
 
 /// One `--task` queue member's terminal outcome (0195) — the row a
-/// per-task outcome table renders once the queue finishes or halts.
+/// per-task outcome panel renders once the queue finishes or halts.
 #[derive(Debug, Clone)]
 pub(crate) enum TaskQueueOutcome {
     Landed {
@@ -773,6 +773,16 @@ pub(crate) enum TaskQueueOutcome {
 }
 
 impl TaskQueueOutcome {
+    /// Row tone derived from `halts()` — the single classification
+    /// authority; never a second match on the variants.
+    fn tone(&self) -> crate::app::presentation::RowTone {
+        if self.halts() {
+            crate::app::presentation::RowTone::Fail
+        } else {
+            crate::app::presentation::RowTone::Pass
+        }
+    }
+
     /// A failed run or a parked/failed merge halts the queue by default
     /// (owner ruling 2026-08-17) — `--continue-on-failure` is the only
     /// thing that lets the queue run past one of these.
@@ -948,11 +958,17 @@ pub(crate) fn handle_task_queue_run(
     // An empty queue (every member closed before expansion) never invokes
     // the closure above, so `startup.take()` never fires — drop it here
     // unconditionally, before any report output, so a live pane can never
-    // survive to compete with `print_task_queue_report`'s plain-text rows.
+    // survive to compete with the task-queue panel's rows.
     drop(startup);
 
     if !input.json {
-        print_task_queue_report(&outcomes, halted);
+        use crate::app::presentation::{HumanOutputMode, emit_human};
+        emit_human(
+            false,
+            &task_queue_panel(&outcomes, halted, input.queue.len()),
+            HumanOutputMode::Compact,
+            || Ok(()),
+        )?;
     }
 
     let any_halting = outcomes.iter().any(|(_, outcome)| outcome.halts());
@@ -1090,16 +1106,148 @@ mod task_queue_drive_tests {
             "not completed: blocked"
         );
     }
+
+    #[test]
+    fn tone_is_derived_from_halts_for_every_variant() {
+        use crate::app::presentation::RowTone;
+
+        assert_eq!(TaskQueueOutcome::Parked.tone(), RowTone::Fail);
+        assert_eq!(TaskQueueOutcome::MergeFailed.tone(), RowTone::Fail);
+        assert_eq!(
+            TaskQueueOutcome::NotCompleted {
+                status: "blocked".to_string(),
+                outcome: None,
+            }
+            .tone(),
+            RowTone::Fail
+        );
+        assert_eq!(
+            TaskQueueOutcome::Failed {
+                message: "boom".to_string(),
+            }
+            .tone(),
+            RowTone::Fail
+        );
+        assert_eq!(
+            TaskQueueOutcome::Landed { closed: true }.tone(),
+            RowTone::Pass
+        );
+        assert_eq!(
+            TaskQueueOutcome::Landed { closed: false }.tone(),
+            RowTone::Pass
+        );
+        assert_eq!(TaskQueueOutcome::Completed.tone(), RowTone::Pass);
+        assert_eq!(TaskQueueOutcome::NotMerged.tone(), RowTone::Pass);
+    }
+
+    #[test]
+    fn panel_reports_success_with_every_row_and_no_hint_when_nothing_halts() {
+        let outcomes = vec![
+            (
+                "0001".to_string(),
+                TaskQueueOutcome::Landed { closed: true },
+            ),
+            ("0002".to_string(), TaskQueueOutcome::NotMerged),
+        ];
+        let lines = task_queue_panel(&outcomes, false, 2).plain_lines();
+        assert!(lines.contains(&"  0001: landed, closed".to_string()));
+        assert!(lines.contains(&"  0002: committed, not merged".to_string()));
+        assert!(!lines.iter().any(|line| line.contains("remaining")));
+        assert!(!lines.iter().any(|line| line.contains("next")));
+        assert_eq!(lines.last(), Some(&"Success".to_string()));
+    }
+
+    #[test]
+    fn panel_reports_failure_with_no_hint_when_continue_on_failure_ran_to_completion() {
+        let outcomes = vec![
+            ("0001".to_string(), TaskQueueOutcome::Parked),
+            ("0002".to_string(), TaskQueueOutcome::NotMerged),
+        ];
+        let lines = task_queue_panel(&outcomes, false, 2).plain_lines();
+        assert!(!lines.iter().any(|line| line.contains("remaining")));
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.contains("--continue-on-failure"))
+        );
+        assert_eq!(lines.last(), Some(&"Failure".to_string()));
+    }
+
+    #[test]
+    fn panel_names_remaining_work_when_the_queue_halted_early() {
+        let outcomes = vec![("0001".to_string(), TaskQueueOutcome::Parked)];
+        let lines = task_queue_panel(&outcomes, true, 2).plain_lines();
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("remaining") && line.contains("1 not attempted"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("next") && line.contains("--continue-on-failure"))
+        );
+        assert_eq!(lines.last(), Some(&"Failure".to_string()));
+    }
+
+    #[test]
+    fn panel_names_no_remaining_work_when_the_halt_lands_on_the_last_member() {
+        let outcomes = vec![("0001".to_string(), TaskQueueOutcome::Parked)];
+        let lines = task_queue_panel(&outcomes, true, 1).plain_lines();
+        assert!(lines.iter().any(|line| line.contains("0001")));
+        assert!(!lines.iter().any(|line| line.contains("remaining")));
+        assert!(!lines.iter().any(|line| line.contains("next")));
+        assert_eq!(lines.last(), Some(&"Failure".to_string()));
+    }
+
+    #[test]
+    fn panel_reports_success_for_an_empty_queue() {
+        let lines = task_queue_panel(&[], false, 0).plain_lines();
+        assert!(!lines.iter().any(|line| line.starts_with("  ")));
+        assert_eq!(lines.last(), Some(&"Success".to_string()));
+    }
 }
 
-fn print_task_queue_report(outcomes: &[(String, TaskQueueOutcome)], halted: bool) {
-    println!("task queue:");
+/// The final `--task` queue report (0195/0252.9), routed through the shared
+/// panel kit for every non-JSON mode. Closing state is driven by whether any
+/// outcome halts, never by `halted` alone — a queue that ran to its last
+/// member and failed there is `Failure` with nothing left to continue,
+/// exactly like a queue halted mid-way with everything attempted.
+fn task_queue_panel(
+    outcomes: &[(String, TaskQueueOutcome)],
+    halted: bool,
+    queue_len: usize,
+) -> crate::app::presentation::Panel {
+    use crate::app::presentation::{Panel, PanelRow, PanelStatus, RowTone};
+
+    let failed = outcomes.iter().any(|(_, outcome)| outcome.halts());
+    let mut panel = Panel::new(
+        "task queue",
+        "",
+        if failed {
+            PanelStatus::Blocked("Failure".to_string())
+        } else {
+            PanelStatus::Passed("Success".to_string())
+        },
+    );
     for (key, outcome) in outcomes {
-        println!("  {key}: {}", outcome.label());
+        panel = panel.row(PanelRow::toned(key, outcome.label(), outcome.tone()));
     }
-    if halted {
-        println!("halted — pass --continue-on-failure to run the remaining queue anyway");
+    let remaining = queue_len.saturating_sub(outcomes.len());
+    if halted && remaining > 0 {
+        panel = panel
+            .row(PanelRow::toned(
+                "remaining",
+                format!("{remaining} not attempted"),
+                RowTone::Warn,
+            ))
+            .next(PanelRow::toned(
+                "next",
+                "rerun with --continue-on-failure to attempt the rest",
+                RowTone::Default,
+            ));
     }
+    panel
 }
 
 /// P550 run-termination story hook: interactive-TTY-only pane, plain-text

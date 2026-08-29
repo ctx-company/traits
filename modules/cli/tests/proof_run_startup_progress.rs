@@ -490,7 +490,7 @@ fn startup_pty_is_visible_before_delayed_config_resolution() {
 }
 
 #[test]
-fn startup_pty_ctrl_c_restores_the_terminal_before_the_interrupt_note() {
+fn startup_pty_ctrl_c_restores_the_terminal_and_prints_nothing() {
     let fixture = command_trait_fixture();
     make_delayed_config_fifo(&fixture);
 
@@ -534,10 +534,8 @@ fn startup_pty_ctrl_c_restores_the_terminal_before_the_interrupt_note() {
     let output = String::from_utf8_lossy(&output.stdout);
     let restored = text_after_terminal_restore(&output);
     assert!(
-        restored
-            .lines()
-            .any(|line| line.trim() == "run startup interrupted; terminal restored"),
-        "interrupt note was not printed after restore: {output:?}"
+        restored.trim().is_empty(),
+        "the restored region must carry no output at all — nothing replaces the deleted note: {output:?}"
     );
     assert!(
         !saw_startup_pane(&restored),
@@ -548,8 +546,7 @@ fn startup_pty_ctrl_c_restores_the_terminal_before_the_interrupt_note() {
         "Ctrl-C unexpectedly reached a live run frame: {output:?}"
     );
     assert!(
-        output.contains("run startup interrupted; terminal restored")
-            && output.contains("\x1b[?25h"),
+        output.contains("\x1b[?25h"),
         "Ctrl-C did not restore the terminal to cooked, visible-cursor mode: {output:?}"
     );
     let termios = fs::read_to_string(fixture.repo.join(".ctx/startup-termios")).unwrap();

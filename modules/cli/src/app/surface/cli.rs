@@ -2430,7 +2430,7 @@ pub struct SessionStartArgs {
 
     /// With `--task`: keep running the remaining queue after a failed run
     /// or a parked merge instead of halting, reporting every task's outcome
-    /// in a table at the end.
+    /// in a panel at the end.
     #[arg(long = "continue-on-failure", requires = "task")]
     pub continue_on_failure: bool,
 

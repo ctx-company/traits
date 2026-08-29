@@ -165,16 +165,16 @@ fn task_queue_brings_up_the_live_pane_for_every_member() {
 
     let text = text_after_terminal_restore(&raw);
     let committed = &text;
-    // Both members reach the table — the point of `--continue-on-failure`,
+    // Both members reach the panel — the point of `--continue-on-failure`,
     // and the thing a pane that failed to hand off would cut short. The
     // outcome WORD is deliberately not asserted: it is classification, which
     // `proof_task_queue_refusal_teardown.rs` owns, and pinning it here made
     // this proof fail for a reason that had nothing to do with panes.
     assert!(
-        committed.contains("task queue:")
+        committed.contains("task queue")
             && committed.contains("0002: ")
             && committed.contains("0003: "),
-        "task queue outcome table did not report both members: {committed:?}"
+        "task queue panel did not report both members: {committed:?}"
     );
 
     let termios = fs::read_to_string(termios_file).unwrap();
@@ -185,5 +185,79 @@ fn task_queue_brings_up_the_live_pane_for_every_member() {
             && !flags.contains(&"-icanon")
             && !flags.contains(&"-echo"),
         "queue pane handoff left the slave terminal in raw mode: {termios:?}"
+    );
+}
+
+/// Without `--continue-on-failure` the queue halts on the first member, so
+/// only one live pane and one failure modal ever come up — the zero- vs.
+/// nonzero-remaining boundary the panel's `remaining`/`next` rows exist for.
+#[test]
+fn task_queue_names_remaining_work_when_it_halts_without_continue_on_failure() {
+    let fixture = failing_two_member_queue_fixture();
+    let termios_file = fixture.repo.join(".ctx/queue-halt-termios");
+    let wrapper = fixture.repo.join(".ctx/queue-halt-wrapper.sh");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n{} \"$@\"\nstatus=$?\nstty -a > {}\nexit $status\n",
+            shell_quote(&ctx_bin()),
+            shell_quote(&termios_file),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    let failure_modal = painted_pattern("Resume/Retry");
+    let (exit_code, raw) = run_pty_keys_after_markers(
+        &wrapper,
+        "traits run --worktree --merge --max-retries 0 --task 0002 --task 0003",
+        &fixture.repo,
+        &fixture.home,
+        &[(failure_modal.as_str(), "\u{1b}[C\u{1b}[C\r")],
+    );
+    assert_eq!(
+        exit_code, 7,
+        "expected the queue-halted exit code (app::error::EXIT_RUN_FAILED): {raw:?}"
+    );
+    assert!(
+        !raw.contains("falling back to status progress"),
+        "the cursor-position fallback fired: {raw:?}"
+    );
+    assert_eq!(
+        alternate_screen_entries(&raw),
+        1,
+        "only the first member should ever bring up a live pane, got {}: {raw:?}",
+        alternate_screen_entries(&raw)
+    );
+
+    let committed = text_after_terminal_restore(&raw);
+    assert!(
+        committed.contains("0002: "),
+        "the attempted member's row did not survive: {committed:?}"
+    );
+    assert!(
+        !committed.contains("0003"),
+        "the never-attempted member must not get a row: {committed:?}"
+    );
+    assert!(
+        committed.contains("remaining") && committed.contains('1'),
+        "the panel must name exactly one member left unattempted: {committed:?}"
+    );
+    assert!(
+        committed.contains("--continue-on-failure"),
+        "the panel must name the flag that resumes the rest: {committed:?}"
+    );
+    assert!(
+        committed.contains("Failure"),
+        "a halted queue must close as Failure: {committed:?}"
+    );
+
+    let termios = fs::read_to_string(termios_file).unwrap();
+    let flags = termios.split_whitespace().collect::<Vec<_>>();
+    assert!(
+        flags.contains(&"icanon")
+            && flags.contains(&"echo")
+            && !flags.contains(&"-icanon")
+            && !flags.contains(&"-echo"),
+        "queue halt teardown left the slave terminal in raw mode: {termios:?}"
     );
 }

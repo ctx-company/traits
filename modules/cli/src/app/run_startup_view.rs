@@ -190,7 +190,6 @@ impl StartupView {
                 pane.quit();
             }
             let _ = ctx_traits_io::decode_diagnostics::end_capture();
-            eprintln!("run startup interrupted; terminal restored");
             std::process::exit(130);
         }
         if redraw {

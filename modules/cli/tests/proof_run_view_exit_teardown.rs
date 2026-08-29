@@ -487,6 +487,27 @@ fn ctrl_c_during_a_live_run_opens_failure_modal_and_aborts() {
             .filter(|line| line.contains('│'))
             .all(|line| line.starts_with("│   "))
     );
+    assert!(
+        restored.contains("┌── "),
+        "no panel header survived teardown: {restored:?}"
+    );
+    assert!(
+        restored.contains("session:"),
+        "no session row survived teardown: {restored:?}"
+    );
+    assert!(
+        restored.contains("error:"),
+        "no error row survived teardown: {restored:?}"
+    );
+    assert!(
+        restored.trim_end().ends_with("└── Failure"),
+        "the panel did not end with a Failure close: {restored:?}"
+    );
+    assert_eq!(
+        restored.matches("└── ").count(),
+        1,
+        "expected exactly one compact failure panel: {restored:?}"
+    );
     assert!(!raw_after_terminal_restore(&raw).contains(CLEAR_VIEWPORT));
 }
 

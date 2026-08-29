@@ -88,7 +88,7 @@ fn unbindable_dispatch_fixture() -> Fixture {
 /// calling `drive_session`. This is the second shape the live repro's fix
 /// must cover: the per-member closure that used to be the only place
 /// `startup.take()` fired never runs, so the pane must be torn down some
-/// other way before `print_task_queue_report`.
+/// other way before the task-queue panel renders.
 fn empty_charter_fixture() -> Fixture {
     let scratch = ScratchRoot::new("p0198-empty-charter-teardown");
     let home = scratch.home();
@@ -191,12 +191,24 @@ fn queue_dispatch_refusal_and_outcome_table_survive_startup_pane_teardown() {
         "per-task refusal line did not survive teardown: {committed:?}"
     );
     assert!(
-        committed.contains("task queue:") && committed.contains("0003: failed:"),
-        "task queue outcome table did not survive teardown: {committed:?}"
+        committed.contains("task queue"),
+        "task queue panel did not survive teardown: {committed:?}"
+    );
+    let row_start = committed
+        .rfind("0003:")
+        .unwrap_or_else(|| panic!("0003 row did not survive teardown: {committed:?}"));
+    let after_key = &committed[row_start + "0003:".len()..];
+    assert!(
+        after_key.trim_start().starts_with("failed:"),
+        "0003 row did not report a failed outcome: {committed:?}"
     );
     assert!(
-        committed.contains("halted — pass --continue-on-failure"),
-        "halted hint did not survive teardown: {committed:?}"
+        committed.contains("Failure"),
+        "closing state did not survive teardown: {committed:?}"
+    );
+    assert!(
+        !committed.contains("remaining") && !committed.contains("--continue-on-failure"),
+        "a single-member queue has nothing left to continue and must show no hint: {committed:?}"
     );
 
     let termios = fs::read_to_string(fixture.repo.join(".ctx/queue-refusal-termios")).unwrap();
@@ -214,7 +226,7 @@ fn queue_dispatch_refusal_and_outcome_table_survive_startup_pane_teardown() {
 /// child is already closed expands (`expand_task_queue`) to an empty
 /// queue, so the per-member closure that normally consumes `startup`
 /// never runs. `handle_task_queue_run` must still drop the pane before
-/// `print_task_queue_report`'s plain-text rows — proven the same way as
+/// the task-queue panel's rows — proven the same way as
 /// the refusal case, by requiring the report to land after the pane's own
 /// `Show` restore escape.
 #[test]
@@ -237,12 +249,16 @@ fn empty_charter_queue_report_survives_startup_pane_teardown() {
     let committed = &text[..marker];
 
     assert!(
-        committed.contains("task queue:"),
+        committed.contains("task queue"),
         "empty task queue report did not survive teardown: {committed:?}"
     );
     assert!(
         !committed.contains("halted"),
         "an empty, non-halting queue should not report a halt: {committed:?}"
+    );
+    assert!(
+        committed.contains("Success"),
+        "an empty, non-halting queue should close as Success: {committed:?}"
     );
 
     let termios = fs::read_to_string(fixture.repo.join(".ctx/empty-charter-termios")).unwrap();
