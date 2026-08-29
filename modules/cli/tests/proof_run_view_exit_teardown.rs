@@ -5,12 +5,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use camino::Utf8PathBuf;
 use support::{
     ScratchRoot, ctx_bin, git_init, painted_pattern, raw_after_terminal_restore, require_success,
-    run_pty_keys_after_markers, run_pty_signal_after_marker, run_pty_with_cursor_reply, spawn_ctx,
-    text_after_terminal_restore,
+    run_pty_keys_after_markers, run_pty_keys_then_sync_touch, run_pty_signal_after_marker,
+    run_pty_with_cursor_reply, spawn_ctx, text_after_terminal_restore,
 };
 
 const TRAIT_ID: &str = "demo";
@@ -134,6 +135,82 @@ printf '{"type":"result","session_id":"fixture","result":"{\\"notified\\":\\"ok\
         _scratch: scratch,
         repo,
         home,
+    }
+}
+
+const GATE_STEP_ID: &str = "gate-step";
+const AFTER_STEP_ID: &str = "after-step";
+const LIVE_VIEW_CLOSED_NOTICE: &str = "live view closed";
+
+struct GateFixture {
+    exit: ExitFixture,
+    /// Touched by the fixture's driven trait once its gate step's real
+    /// child has actually started (not merely once the live pane has
+    /// painted the step as "running" — reading proved that paint can
+    /// precede the driver lock's own acquisition, so it cannot serve as
+    /// the "genuinely parked" synchronization point on its own).
+    armed_path: PathBuf,
+    release_path: PathBuf,
+}
+
+/// A two-command-step trait whose first step blocks until this fixture's
+/// `release_path` appears on disk — the externally releasable gate the
+/// q-detach proof parks on, mirroring the shape of the plannotator approval
+/// gate the incident itself parked on. `cmd` shorthand is not shell
+/// (`parse_command_shorthand` rejects every shell metacharacter and just
+/// splits on whitespace), so the gate is an executable poll-loop script
+/// rather than an inline `until [ -f … ]` one-liner; the release path is
+/// passed as its own whitespace-split argv token, the same mechanism the
+/// existing `"sleep 30"` fixture step already relies on.
+fn two_step_command_trait_fixture(label: &str) -> GateFixture {
+    let (scratch, repo, home) = fixture_repo();
+    let armed_path = home.join("gate-armed");
+    let release_path = home.join("release-gate");
+    let gate_script = home.join("ctx-fixture-gate.sh");
+    fs::write(
+        &gate_script,
+        r#"#!/bin/sh
+armed="$1"
+release="$2"
+: > "$armed"
+while true; do
+  if [ -f "$release" ]; then
+    printf 'ctx-fixture-gate-released\n'
+    exit 0
+  fi
+  sleep 0.1
+done
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(&gate_script).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&gate_script, permissions).unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        format!(
+            "id = \"demo\"\nschema-version = \"0.4\"\nversion = \"0.1.0\"\nname = \"{label}\"\ndescription = \"Demo\"\nsummary = \"Demo\"\n\n[procedure]\ndescription = \"Run commands\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"{GATE_STEP_ID}\"\ntitle = \"{GATE_STEP_ID}\"\nkind = \"command\"\ncmd = \"{} {} {}\"\noutput = [\"slot:notified\"]\n\n[[procedure.sequence]]\nid = \"{AFTER_STEP_ID}\"\ntitle = \"{AFTER_STEP_ID}\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+            gate_script.display(),
+            armed_path.display(),
+            release_path.display(),
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/trait.toml"),
+        "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    commit_trust_and_activate(&repo, &home);
+    GateFixture {
+        exit: ExitFixture {
+            _scratch: scratch,
+            repo,
+            home,
+        },
+        armed_path,
+        release_path,
     }
 }
 
@@ -424,6 +501,201 @@ fn dashboard_attach_then_exit_leaves_no_run_frame() {
         "dashboard never painted {DASHBOARD_SESSION_MARKER}: {raw:?}"
     );
     assert!(!text_after_terminal_restore(&raw).contains(STEP_ID));
+}
+
+const MID_FLIGHT_DEADLINE: Duration = Duration::from_secs(30);
+const MID_FLIGHT_POLL: Duration = Duration::from_millis(20);
+
+/// task 0264: confirmed `q` on the live DRIVING process's own confirm-quit
+/// modal must close only the view — the drive survives, the ledger keeps
+/// advancing, the session stays dashboard-visible/reattachable, and the
+/// driver lock releases only at the genuine terminal outcome. Reproduces the
+/// 2026-08-28 incident end to end: a run parked in a step only this test can
+/// release, `q` accepted (observed by its own effect reaching the PTY, never
+/// by elapsed time), `run_control::probe` re-checked while the step is still
+/// parked, the step released, and the run's own terminal outcome and lock
+/// release re-observed afterward.
+#[test]
+fn q_on_a_live_driving_run_detaches_the_view_without_killing_the_drive() {
+    let GateFixture {
+        exit: fixture,
+        armed_path,
+        release_path,
+    } = two_step_command_trait_fixture("q-detach");
+    let sync_path = fixture.home.join("q-sync-touch");
+
+    let binary = ctx_bin();
+    let args = "traits run --progress tui --file .ctx/traits/demo/generated/index.toml".to_string();
+    let repo = fixture.repo.clone();
+    let home = fixture.home.clone();
+    let sync_path_thread = sync_path.clone();
+    let armed_path_thread = armed_path.clone();
+    let gate_pattern = painted_pattern(GATE_STEP_ID);
+    let handle = thread::spawn(move || {
+        // The gate step's real child touches `armed_path_thread` only once
+        // it has actually started, which (read from a running proof) is
+        // strictly after the driver lock is acquired — a bare painted-text
+        // match on the pane's optimistic "running" paint is not: that paint
+        // was observed to precede lock acquisition, which would race `q`
+        // ahead of the very lock this proof means to observe.
+        let steps = [(gate_pattern.as_str(), "q"), ("Quit live view?", "\r")];
+        run_pty_keys_then_sync_touch(
+            &binary,
+            &args,
+            &repo,
+            &home,
+            &armed_path_thread,
+            &steps,
+            support::SyncTouch {
+                pattern: LIVE_VIEW_CLOSED_NOTICE,
+                path: &sync_path_thread,
+            },
+        )
+    });
+
+    // Every mid-flight step — including the wait for q's own effect — runs
+    // under `catch_unwind` so the gate is released (and the PTY thread
+    // reaped) on every path, including a panicking assertion or a timeout
+    // here — otherwise the child hangs to `CHILD_EXIT_GRACE_SECS` and the
+    // real failure is buried under a `__PTY_CHILD_HANG__` panic, or (worse,
+    // for the wait below specifically) nothing ever releases the gate at
+    // all and the PTY thread is left running past this test's own end.
+    let mid_flight = catch_unwind(AssertUnwindSafe(|| {
+        // q's own effect (the continuation notice reaching the PTY) is the
+        // synchronization point — never elapsed time, which would make
+        // every later assertion meaningless (it could run before q was
+        // even applied).
+        let sync_deadline = Instant::now() + MID_FLIGHT_DEADLINE;
+        while !sync_path.exists() {
+            assert!(
+                Instant::now() < sync_deadline,
+                "q's own effect ({LIVE_VIEW_CLOSED_NOTICE:?}) never reached the sync path before the deadline"
+            );
+            thread::sleep(MID_FLIGHT_POLL);
+        }
+
+        let session_id = ledger_session_id(&fixture.repo);
+        let ledger_path = ledger_paths(&fixture.repo)
+            .into_iter()
+            .next()
+            .expect("exactly one run ledger");
+        let ledger = Utf8PathBuf::from_path_buf(ledger_path).expect("ledger path is UTF-8");
+
+        assert!(
+            matches!(
+                ctx_traits_io::run_control::probe(&ledger),
+                Ok(ctx_traits_io::run_control::DriverProbe::Held(_))
+            ),
+            "driver lock for session {session_id} must still be held while the gate step is \
+             parked — a released lock here means the driving PROCESS unwound, not merely the view"
+        );
+
+        let session =
+            ctx_traits_io::run_session::read_run_session(&ledger).expect("read mid-flight ledger");
+        let mid_flight_revisions = session.slot_revisions.len();
+
+        let live = matches!(
+            ctx_traits_io::run_control::probe(&ledger),
+            Ok(ctx_traits_io::run_control::DriverProbe::Held(_))
+        );
+        let outcome_kind = session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| &outcome.outcome);
+        let state = ctx_traits_core::procedure::activity::SessionState::derive(
+            &session.status,
+            outcome_kind,
+            live,
+        );
+        assert_eq!(
+            state,
+            ctx_traits_core::procedure::activity::SessionState::Running,
+            "a still-driven session must classify as Running through the existing \
+             SessionState::derive authority"
+        );
+
+        // Dashboard-visible and reattachable through the existing
+        // row.live/observer-attach authorities: attach, see the parked step,
+        // detach (the observer's own q) without disturbing the independently
+        // owned driver.
+        let (dashboard_code, dashboard_raw) = run_pty_keys_after_markers(
+            &ctx_bin(),
+            "traits",
+            &fixture.repo,
+            &fixture.home,
+            &[
+                (&painted_pattern(DASHBOARD_SESSION_MARKER), "kkkkkkkkj\r"),
+                (r"(?s)gate-step.*\[d\] dash", "q"),
+                ("Quit live view?", "\r"),
+                ("SESSIONS", "q"),
+                (r"Quit.*ctx.*traits\?", "\r"),
+            ],
+        );
+        assert_eq!(
+            dashboard_code, 0,
+            "dashboard attach/detach output: {dashboard_raw:?}"
+        );
+        assert!(
+            support::painted_text_present(&dashboard_raw, DASHBOARD_SESSION_MARKER),
+            "dashboard never painted {DASHBOARD_SESSION_MARKER}: {dashboard_raw:?}"
+        );
+
+        assert!(
+            matches!(
+                ctx_traits_io::run_control::probe(&ledger),
+                Ok(ctx_traits_io::run_control::DriverProbe::Held(_))
+            ),
+            "the dashboard observer's own q must detach without releasing the independently \
+             owned driver lock"
+        );
+
+        (mid_flight_revisions, ledger)
+    }));
+
+    fs::write(&release_path, b"go\n").expect("release the gate");
+    let (pty_code, pty_raw) = handle.join().expect("PTY driving thread panicked");
+    let (mid_flight_revisions, ledger) = match mid_flight {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+
+    assert_eq!(pty_code, 0, "PTY driving process output: {pty_raw:?}");
+
+    let terminal_deadline = Instant::now() + MID_FLIGHT_DEADLINE;
+    let final_session = loop {
+        let session =
+            ctx_traits_io::run_session::read_run_session(&ledger).expect("read final ledger");
+        let outcome = session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.to_string());
+        if session.slot_revisions.len() > mid_flight_revisions
+            && outcome.as_deref() == Some("completed")
+        {
+            break session;
+        }
+        assert!(
+            Instant::now() < terminal_deadline,
+            "the run never reached its post-q terminal outcome before the deadline (last seen: \
+             {session:?})"
+        );
+        thread::sleep(MID_FLIGHT_POLL);
+    };
+    assert!(final_session.slot_revisions.len() > mid_flight_revisions);
+    assert_eq!(
+        final_session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.to_string()),
+        Some("completed".to_string())
+    );
+    assert!(
+        matches!(
+            ctx_traits_io::run_control::probe(&ledger),
+            Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. })
+        ),
+        "driver lock must be released only at the genuine terminal outcome"
+    );
 }
 
 #[test]

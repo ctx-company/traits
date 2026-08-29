@@ -1195,6 +1195,92 @@ pub fn run_pty_keys_after_markers(
     run_expect(&script, binary, cwd, home)
 }
 
+/// Like [`run_pty_keys_after_markers`], but before the first key busy-waits
+/// (bounded by the same `remaining`/`READY_BUDGET_MS` deadline
+/// `pty_prelude` already installs) for `arm_path` to appear on disk — the
+/// caller's own proof that the step it is about to interrupt has genuinely
+/// started, since a live pane's initial paint of a step as "running" is
+/// observed to precede the process actually reaching that step's real
+/// execution (a bare painted-text marker races ahead of it) — and after the
+/// last key also waits for `sync_pattern` (a plain substring match against
+/// the raw PTY stream, not a [`painted_pattern`]-style ERE — the caller
+/// passes whatever text proves the last key's own effect already reached
+/// the terminal) and then touches `sync_path` before entering the ordinary
+/// child-lifetime wait. This exposes the window between "the key's effect
+/// is observable" and "the child has exited" to a caller running on another
+/// thread, which [`run_pty_keys_after_markers`] cannot do — it only returns
+/// once the child is already gone (`child_lifetime_wait`'s EOF wait).
+/// Composed from the same private `pty_prelude`/`marker_wait`/
+/// `child_lifetime_wait` pieces as every other PTY helper here: the file
+/// poll reuses `pty_prelude`'s own `remaining` proc for its bound, and
+/// `marker_wait`'s action is already arbitrary Tcl and `child_lifetime_wait`
+/// already uses `exec kill`, so the `exec touch` this adds is not a new
+/// mechanism.
+/// The post-key synchronization pattern/path pair [`run_pty_keys_then_sync_touch`]
+/// waits on and then touches — split into its own type (rather than two
+/// more bare arguments) purely to keep the function under clippy's
+/// `too_many_arguments` ceiling.
+pub struct SyncTouch<'a> {
+    pub pattern: &'a str,
+    pub path: &'a Path,
+}
+
+pub fn run_pty_keys_then_sync_touch(
+    binary: &Path,
+    args: &str,
+    cwd: &Path,
+    home: &Path,
+    arm_path: &Path,
+    steps: &[(&str, &str)],
+    sync: SyncTouch<'_>,
+) -> (i32, String) {
+    let SyncTouch {
+        pattern: sync_pattern,
+        path: sync_path,
+    } = sync;
+    // A plain Tcl `after` sleep would starve `expect`'s own event loop:
+    // crossterm's cursor-position query (`ESC[6n`) blocks the child until
+    // something answers it, so this poll has to keep reading/answering the
+    // pty on every iteration (via a short-timeout `expect` block, the same
+    // `-re {\x1b\[6n}` arm every other wait in this file uses) rather than
+    // sleeping blind — a busy `after`-only loop was observed to hang the
+    // child indefinitely.
+    let arm_wait = format!(
+        r#"
+                while {{![file exists {{{}}}]}} {{
+                    remaining {{arm-file}}
+                    set timeout 1
+                    expect {{
+                        -re {{\x1b\[6n}} {{ send -- "\033\[40;120R"; exp_continue -continue_timer }}
+                        timeout {{ }}
+                        eof {{ puts stderr "__PTY_EOF_BEFORE__arm-file__"; exit 2 }}
+                    }}
+                }}
+        "#,
+        arm_path.display()
+    );
+    let mut waits = String::new();
+    for (pattern, key) in steps {
+        waits.push_str(&marker_wait(pattern, &format!("send -- {{{key}}}")));
+    }
+    waits.push_str(&marker_wait(
+        sync_pattern,
+        &format!("exec touch {{{}}}", sync_path.display()),
+    ));
+    let script = format!(
+        r#"
+                spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) {args}"
+                {}
+                {arm_wait}
+                {waits}
+                {}
+            "#,
+        pty_prelude(),
+        child_lifetime_wait(None)
+    );
+    run_expect(&script, binary, cwd, home)
+}
+
 /// Slicing after the restore paired with the final alternate-screen entry
 /// proves content arrived after the pane handed the screen back. A panic can
 /// trigger an idempotent unwind restore later, so the final leave alone is not

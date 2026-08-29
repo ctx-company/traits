@@ -357,7 +357,7 @@ happened.
 Before writing the assertions out in full:
 `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --no-run`
 """
-validation = '''
+validation = """
 ## Done when — binding goals, each with the existing command that decides it
 
 1. The reproduction verdict is established before any production edit
@@ -468,7 +468,7 @@ at the seam the failing proof named.
   exit code and output say more than any reading of the key path does.
 - A leaked fixture center or a stray driver observed during this work
   belongs to 0263 and to a report, not to an edit here.
-'''
+"""
 
 [relations]
 depends-on = ["0252.7"]
