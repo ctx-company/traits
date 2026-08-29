@@ -3588,13 +3588,28 @@ fn migrated_v1_index_over_the_corpus_is_reclaimed_to_the_same_physical_bound() {
         .unwrap_or_else(|poison| poison.into_inner());
     let root = scratch("corpus-migration");
     std::fs::create_dir_all(&root).expect("create scratch root");
-    // Ledgers themselves stay small here — goal 1's migration half binds the
-    // pre-existing v1 INDEX's on-disk payload, not the ledger corpus size
-    // (already proved by the fresh-index sibling test above); the empty
-    // filler keeps fixture setup fast without weakening that bound.
+    // Goal 1's migration half must exercise takeover of a payload-bearing v1
+    // index over the SAME 600MB/2,500-ledger corpus the contract requires,
+    // not a large synthetic SQLite payload paired with near-empty ledgers —
+    // so this fixture carries the same per-ledger filler the fresh-index
+    // sibling test uses, and both the ledger corpus and the v1 index payload
+    // are independently asserted at >=600MB below.
+    let filler = "x".repeat(CORPUS_LEDGER_FILLER_BYTES);
+    let mut corpus_bytes: u64 = 0;
     let ledgers: Vec<Utf8PathBuf> = (0..CORPUS_LEDGER_COUNT)
-        .map(|index| write_corpus_ledger(&root, index, ""))
+        .map(|index| {
+            let ledger = write_corpus_ledger(&root, index, &filler);
+            corpus_bytes += std::fs::metadata(ledger.as_std_path())
+                .expect("stat corpus ledger")
+                .len();
+            ledger
+        })
         .collect();
+    eprintln!("migration proof: ledger corpus totals {corpus_bytes} bytes before takeover");
+    assert!(
+        corpus_bytes >= 600_000_000,
+        "the ledger corpus itself must total at least 600MB, got {corpus_bytes} bytes"
+    );
 
     let socket = root.join("center.sock");
     let index = root.join("index.sqlite3");
