@@ -1,43 +1,824 @@
 schema-version = "0.2"
 key = "0265.6"
 title = "Render loop narration and the live activity block"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-Two things sit between and beneath the frame rows, and both are live.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-The **loop-narration line** goes between frames: italic mono 10.5 `text-faint`, e.g. "round 2 — refinement reviewed, review re-runs". `screens/sessions.md` tags it precisely — the loop marker is `data:`, the copy phrasing is `placeholder:` — so the line appears exactly where the run's own loop evidence puts it, wearing prose from the shared module.
+Two leaves of `screens/sessions.md:19-31` sit between and beneath the frame rows
+`0265.5` landed, and both are live.
 
-The **activity block** sits under the current row (grammar rule 11): eight mono 10.5 `text-faint` lines, pad-left aligned under the row's text, newest at top at opacity 1.0 fading stepwise to roughly 0.45, gap 3, carrying the agent's actual activity — the charter's example is `review: reading modules/io/src/center.rs`. It is tagged `data: center activity deltas`, and it is the sharpest no-poll-loop surface in the application: the lines arrive as deltas on the subscription channel `0256.4` drives, are received off the UI thread, and are never fetched on a timer.
+The **loop-narration line** goes between frames: italic mono 10.5 `text-faint`,
+illustrated as "round 2 — refinement reviewed, review re-runs". The screen tags
+it precisely — the marker is `data:`, the copy phrasing is `placeholder:`
+(`screens/sessions.md:22-24`) — so the line appears where the run's own loop
+evidence puts it, wearing prose from the one shared module. The export fixes its
+geometry: container padding `[8,12,2,12]` at full width, text IBM Plex Mono 10.5,
+italic, weight 400, `#4d525c`, nowrap (`reference/sessions.html:349-359`).
+
+The **activity block** sits under the current row: mono 10.5 `text-faint` lines,
+newest at top at opacity 1.0 stepping to about 0.45, gap 3, carrying "the agent's
+actual activity" (`grammar.md:104-108`). The export fixes it at full width,
+column gap 3, padding `[4,12,6,27]` — the 27 left offset is the current row's
+12 padding + 5 dot + 10 gap, so the lines align under the row's text
+(`reference/sessions.html:460-463`, `413-459`). It is tagged
+`data: center activity deltas`, and it is the sharpest no-poll surface in the
+application: lines arrive as deltas on the subscription `0256.4` drives, are
+received off the UI thread, and are never fetched on a timer.
+
+Grammar rule 5 separates the two narration voices — inline narration is italic
+mono 10.5 `text-faint`/`text-ghost`, a narrated *screen summary* is italic sans
+12 `text-secondary` (`grammar.md:49-56`). This line is the former. Rules 1-4 bind
+as they did for `0265.5`: colour chosen from a named state, states as words, the
+closed glyph set, dots confined to stateful lists, and no corner radius inside
+the canvas beyond rule 4's 5px ellipse (`grammar.md:6-47`). `text-faint` is
+`#4d525c` and 10.5 is the mono meta step that `tokens.md:34`, `64` already name;
+both arrive through `0265.1`'s token entry point, never as call-site literals.
+
+## Six corrections to the draft this plan replaces
+
+**Correction 1 — the marker is loop path segments and nothing else; other
+segments carry iteration for unrelated bookkeeping.** Parent Correction 2 already
+records that "loop marker exists" names no stored field, and that the durable
+evidence is structural: `SequenceStatus.position_path` is a `Vec<PathSegment>` of
+`{ kind, id, index, iteration, item_index }`
+(`modules/core/src/procedure/runtime/state.rs:282-315`), and an active
+`ControlFrame` carries `iteration_index`, `max_iterations`, `item_index` and
+`item_total` (`state.rs:349-389`). The sharper point the draft misses is stated
+in the repository's own doc comment on `story::format_step_title`: "Only loop
+control segments own round numbers; item and other control segments may repeat an
+iteration field for unrelated bookkeeping"
+(`modules/cli/src/app/story.rs:29-44`). A narration line emitted because *some*
+segment carried an `iteration` would invent a round for a `for-each` item or an
+unrelated control frame. Ruling: only `kind == "loop"` segments produce a
+narration line.
+
+**Correction 2 — the round is one-based on display, and nested loops produce more
+than one, which the existing precedent joins rather than flattens.**
+`format_step_title` maps each loop segment's `iteration` with `saturating_add(1)`
+and joins the collected rounds with `/` (`story.rs:33-43`, tests at
+`story.rs:1120-1157`). Storage is zero-based; the human value is +1. A nested
+loop therefore has an ordered *sequence* of rounds, not one number. Ruling: the
+narration renders the one-based value(s) the shared projection supplies, and
+nested evidence stays distinguishable — flattening a nested position to a single
+round, or keeping the innermost and discarding the rest, presents a different
+run's structure as this one's. Which of those values the phrase surfaces is the
+run's call; erasing them is not.
+
+**Correction 3 — the `review:` prefix in the export is not in the activity
+event.** `ActivityEvent` carries `sequence`, `frame_id`, an `ActivityKind` from
+the closed set (`Dispatching`, `Thinking`, `RunningTool`, `StreamingOutput`,
+`ValidatingOutput`, `Retrying`, `Stalled`, `Compacting`, `NoActivityReported`,
+`RateLimited`), optional bounded `text`, optional `tool`, tokens and optional
+rate-limit evidence (`modules/core/src/procedure/activity.rs:55-144`). It has no
+role and no structural path, so `review:` in
+`reference/sessions.html:464-511` cannot come from the event. Ruling: any role or
+frame prefix comes from the authoritative frame projection associated with the
+current row — the same durable mapping `0265.5` chose for the current row's
+trailing segment — or the prefix is omitted. A literal `review:` would fabricate
+evidence, which parent Correction 2 forbids outright.
+
+**Correction 4 — the block cannot render every `ActivityRecord` variant.**
+`CenterDelta::ActivityLine { row, activity }` carries a whole `ActivityRecord`
+(`modules/io/src/center.rs:265-281`), and that enum has four variants:
+`Activity { at_epoch_ms, event }`, `StepSummary { at_epoch_ms, key, role, text }`,
+`SessionTitle { at_epoch_ms, title }` and
+`Narration { at_epoch_ms, frame_id, text }`
+(`modules/io/src/activity_sidecar.rs:22-56`). Rule 11 says the content is the
+agent's *actual activity*. A session title is chrome evidence for a different
+surface, a step summary is a settled verdict, and a narration is the narrator's
+voice rather than the agent's. The repository already draws this line:
+`story::load_activity` routes only `Activity` into `events`, keeps
+`step_summaries` and `narrations` in separate typed collections, and drops
+`SessionTitle` for this purpose (`story.rs:205-267`). Ruling: the block renders
+`Activity` records; the other three variants are not lines here and are not
+silently reformatted into lines.
+
+**Correction 5 — the fade is positional, and eight is a cap rather than a
+target.** The export's newest line carries no `opacity` property at all — it is
+the default 1.0 — and the seven beneath it carry `0.93, 0.86, 0.79, 0.72, 0.65,
+0.55, 0.45` in order (`reference/sessions.html:464-511`; parent `0265:108-110`
+restates the sequence). Nothing in the export or in rule 11 ties a step to a
+timestamp or to age in seconds. Ruling: opacity is a function of the line's
+visible index and nothing else; with fewer than eight lines the leading slots of
+that sequence are used; the ramp is stepwise, not interpolated; and no clock,
+timer or elapsed-time input participates. The draft's "eight lines" is the
+maximum retained and rendered, not a count to pad up to — an empty or short block
+renders exactly what evidence exists.
+
+**Correction 6 — `ActivityEvent.sequence` alone cannot order the block.**
+Consecutive same-kind `Thinking`/`StreamingOutput` events for one frame are
+coalesced into a single persisted record at the sidecar append boundary, bounded
+at 2048 characters, while `RunningTool`/`Dispatching`/`Retrying`/`Compacting`
+persist one-for-one (`modules/cli/src/app/drive.rs:476-490`, `633-707`); the
+durable coalesced event currently carries sequence 0. Ruling: "newest first"
+means reverse arrival chronology over the accepted lines the detail model already
+holds, using the record's `at_epoch_ms` and arrival order — not a sort on
+`sequence`, and not a reversal of center delivery.
+
+## Grounded against HEAD 6a4a013c8
+
+Nothing this task edits exists yet. Root `Cargo.toml:1-12` names the seven
+existing Rust members and excludes only `packages/cdk`; there is no desktop
+manifest, no desktop lockfile, no gpui source tree, no desktop asset directory
+and no desktop command anywhere in the repository, and neither `Cargo.lock` nor
+`Justfile` nor any CI workflow mentions gpui. No `placeholders` module exists.
+Both prerequisites are `ready` rather than done, and `0265.5` reaches `0257` and
+the whole `0256` chain transitively, so by execution time the standalone shell,
+the accepted snapshot/delta model, the selected-detail reconstruction, the token
+entry point, the `placeholders` module and the frame-row/list vocabulary have all
+landed. Every desktop path, module name, symbol and signature named below is
+therefore a guess to be replaced by reading what `0256.1`, `0265.1`, `0265.3`,
+`0265.5` and `0257` actually landed.
+
+**No command in this repository executes a gpui render, so none is declared as a
+board check.** A check runs under `sh -c` in a clean detached worktree of the
+merged sha, so a command written here on the expectation that a dependency
+creates it later would read as evidence while being unrunnable. The six declared
+checks are commands that exist in this tree today, and they include the
+repository's own landing gate `just test-full` (`Justfile:148-180`).
+
+**The desktop lane the dependency chain lands is nonetheless the binding gate for
+rendered behaviour.** `0256.1` does not close until its documented independent
+build and test commands pass from a clean checkout, so by execution time that
+lane and its documented non-interactive command exist. Read the command out of
+the landed lane's own documentation — manifest, README, justfile or CI lane —
+extend that existing harness with this cut's cases, run it, and name it verbatim
+with its outcome. Goal 14 binds it. If the lane is absent at execution time, the
+prerequisite chain was not honoured: report an unmet dependency and do not pass
+the task. Do not stand up a lane of the run's own.
+
+**A prerequisite that does not serve an unambiguous current activity slice is a
+defect to report, not permission to guess.** Durable activity identity is
+`frame.item_id` or, absent that, `frame.title`
+(`modules/cli/src/app/drive.rs:3184-3196`); it carries no path and no iteration,
+so one id can name several loop executions. `0257.3` owns reconciling the
+ledger/sidecar seed with later deltas and attributing them to the current
+execution, and `0265.5` already treats a repeated id as ambiguous timing
+evidence. This cut consumes that attribution. If it is missing, that is an unmet
+prerequisite contract stated as a finding — never a licence to show an older
+execution's activity beneath the current row.
+
+**Static review decides the structural half and cannot decide the runtime half.**
+The closing reads of `git diff main...HEAD`, `git diff --name-only main...HEAD`
+and `git status --short` establish what a running harness does not show cheaply —
+duplicated formatting logic, CLI-private imports, call-site literals, direct
+sidecar or ledger reads, timers and polls, inline placeholder prose, scope, and
+untouched design artifacts — and they satisfy the parent's review clause
+(`0265:104-112`). They do not establish that a line rendered, in what order, at
+what opacity, or at what position.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: the loop-narration line between frames with its data-driven position and placeholder-served phrasing, and the faded activity block under the current row fed from center activity deltas, both as reusable pieces the later screens may compose.
-- **The fade is stepwise and newest-first**, 1.0 down to about 0.45. An even ramp or a reversed order misreads rule 11.
-- **The block owns no timer and no fetch.** It renders the lines the subscription hands it; where those lines come from is the delta stream's concern, not this block's.
-- Out of scope: the subscription and delta reducer (`0256`), overflow clipping and the bottom fade (`0265.7`), the preview column, and every other screen region.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+### What decides these goals
 
-## Prerequisites
+Three mechanisms decide the goals below, and each is used only for what it can
+actually observe.
 
-`0265.5` (the frame rows this narration sits between and this block sits under) and `0256.4` (the live delta stream the activity lines arrive on).
+**The desktop lane, executed.** Rendered position, order, opacity, geometry,
+filtering, transition behaviour and the absence of a timer are runtime outcomes;
+they are decided by focused coverage run in the desktop build-and-test lane that
+`0256.1` lands, whose exact documented non-interactive command is discovered at
+execution time and must exit 0 (goal 14). No goal names that command and no check
+declares it: it does not exist at the HEAD this plan was written against, and a
+board check must already exist and run repo-root-relative in a clean detached
+worktree. The obligation is unconditional even though the command is
+unnameable — an absent lane at execution time is an unmet dependency that
+prevents this task from passing, not permission to accept those outcomes on a
+diff read.
+
+**The six declared checks**, which exist in this repository today and decide
+every workspace-side semantic outcome, including any shared extraction this cut
+lands in core/IO with the CLI as its second consumer:
+
+- `just test` — the per-round workspace gate (`cargo test --workspace --lib`
+  plus the format/lint/SDK/TS steps, `Justfile:111-146`). It decides the shared
+  side of this cut: any extracted loop-round or activity-line derivation, and the
+  existing CLI coverage of the same semantics still green after the extraction.
+- `just test-full` — the repository's landing gate (`Justfile:148-180`): the
+  per-round gate's surface plus `just ts-test`, `just lint`,
+  `cargo build --workspace --bins` and the full `cargo test --workspace`
+  including the integration proof binaries. It is the gate nothing lands
+  without, and this cut passes it unconditionally.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib story` — the
+  loop-round derivation and the `ActivityRecord` variant routing this cut
+  consumes (`story.rs:29-44`, `205-267`, tests at `1120-1157`), still green under
+  the existing filter, showing they were extracted rather than forked.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view` — the
+  reconstruction and activity-line formatting semantics beneath this cut
+  (`run_view/projection.rs:985-1025`), still green.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center` —
+  the center wire contract carrying `CenterDelta::ActivityLine`, which must stay
+  green whether or not this cut touches it.
+- The root gpui-free resolution check.
+
+**The closing static read** of the diff printed by `git diff main...HEAD`,
+`git diff --name-only main...HEAD` and `git status --short` — commands that exist
+today — against `screens/sessions.md:19-31`, `grammar.md:6-56` and `104-108`,
+`tokens.md:15-84` and `reference/sessions.html:349-359`, `413-463`, `464-511`.
+Its inspection list is fixed by goal 13. It decides code shape and forbidden
+constructs, never that something rendered; wherever a goal names a runtime
+outcome the desktop lane decides it and this read only supplements. It cannot be
+a board check, because a check runs in a clean detached worktree of the merged
+sha with no base to diff against.
+
+1. **The narration line is placed and valued from structural loop evidence
+   alone.** A loop-narration line appears at the position the shared structural
+   projection `0257` serves marks it, carrying the one-based round derived from
+   loop `PathSegment` evidence (stored zero-based, +1 on display, content
+   Correction 2). No line is produced for an `iteration` or `item_index` carried
+   by a non-loop segment (content Correction 1), and no line is produced from
+   flat rendered-row order, adjacency, or a change of row label — parent
+   `0265:38` forbids exactly that inference. Nested loop evidence stays
+   distinguishable rather than flattened to one number.
+   Decided by focused coverage in the landed desktop lane (goal 14), exercising a
+   reconstruction with no loop, one with a recorded second round, one whose
+   non-loop control segments carry iteration bookkeeping, and a nested-loop
+   reconstruction — observing that a line appears only in the loop cases, at the
+   projection-supplied position, carrying the one-based round(s); by the declared
+   `--lib story` check staying green, showing the loop-only, plus-one,
+   nested-preserving derivation was consumed rather than forked; and by the
+   closing static read for provenance — the position and round read from the
+   shared projection, with no round arithmetic, no `kind` test and no boundary
+   inference living in the desktop.
+   Excluded: a durable "loop marker" boolean invented on any type; deriving the
+   boundary from row order or label change; a second flattening or path
+   derivation in the desktop; importing CLI-private `run_view` or `story` types;
+   any hardcoded round number.
+
+2. **The narration prose is the `placeholders` module's one new entry.** The
+   phrase shape resolves through the single module `0265.3` created, adding
+   exactly the loop-phrasing entry this cut renders and nothing else, traceable
+   to the `placeholder:` tag at `screens/sessions.md:22-24` that authorises it.
+   The round and the position are data and pass through it rather than being
+   served by it — a statically served marker would mark a wired region as
+   unwired.
+   Decided by the closing static read of `git diff main...HEAD` showing exactly
+   one entry added to that one module, resolved at the call site with the
+   projection-supplied round supplied to it, and no inline sentence, no duplicate
+   literal, no second `placeholders` module; and by focused coverage in the
+   landed desktop lane (goal 14) that a run with a different recorded round
+   renders a different round in the same phrase.
+   Excluded: a registry, lookup framework, trait or macro layer; entries no cut
+   renders yet (header phrasing, in-progress narration, owner handle — each
+   arrives with its consumer); the example sentence typed as a literal; the round
+   baked into the placeholder string.
+
+3. **The narration renders in rule 5's inline-narration voice with the export's
+   geometry.** Italic mono 10.5 `text-faint`, nowrap, in a full-width container
+   at padding `[8,12,2,12]` (`grammar.md:49-56`,
+   `reference/sessions.html:349-359`), every value taken from `0265.1`'s token
+   entry point. It is not the italic sans 12 `text-secondary` narrated screen
+   summary that rule 5 distinguishes it from.
+   Decided by focused coverage in the landed desktop lane (goal 14) that the line
+   renders in the mono italic voice at the specified size, colour and container
+   padding; and by the closing static read against `grammar.md:49-56` and
+   `reference/sessions.html:349-359` for the absence of any colour, size,
+   spacing, weight, family or opacity literal at a call site.
+   Excluded: the sans 12 summary voice; a bold or non-italic variant; any glyph
+   outside `↰ ↳ → · ∷`; any corner radius; any light-column value; a wrapping or
+   multi-line narration container.
+
+4. **The block renders the agent's actual activity and filters the rest.** Only
+   `ActivityRecord::Activity` becomes a line; `StepSummary`, `SessionTitle` and
+   `Narration` do not (content Correction 4). The line's text derives from the
+   event's own bounded evidence — quoted agent text for `Thinking` and
+   `StreamingOutput`, the tool label rather than raw tool-input JSON for
+   `RunningTool`, and a kind label otherwise — matching the semantics the CLI
+   already holds at `run_view/projection.rs:985-1025`, consumed through shared
+   code rather than a third divergent copy.
+   Decided by focused coverage in the landed desktop lane (goal 14): a detail
+   carrying all four record variants renders lines only for the `Activity` ones,
+   and a `RunningTool` event with tool-input text renders the tool label rather
+   than the raw JSON; by the declared `--lib story` and `--lib run_view` checks
+   staying green, showing the variant routing and the fallback formatting were
+   consumed rather than forked; and by the closing static read for shape — one
+   shared formatter with a retained CLI consumer, no import of CLI-private types,
+   and no reformatting of a non-`Activity` variant into a line.
+   Excluded: rendering raw stream or tool-input JSON; a third divergent formatter
+   beside `projection.rs:985-1025` and `harness_stream.rs:1502-1573`; copying
+   either into gpui; widening a bound the adapters already applied
+   (`harness_activity.rs:282-307`).
+
+5. **At most eight lines, newest first, at the exact positional opacity slots.**
+   The block retains and renders no more than eight lines, newest at top, and
+   assigns opacity strictly by visible index from `1.0, 0.93, 0.86, 0.79, 0.72,
+   0.65, 0.55, 0.45`; with fewer than eight, the leading slots of that sequence
+   are used (content Correction 5). Ordering is reverse arrival chronology over
+   the accepted lines, not a sort on `ActivityEvent.sequence` and not a reversal
+   of center delivery (content Correction 6). Zero lines render nothing — no
+   placeholder, no padded empty slot, no invented line.
+   Decided by focused coverage in the landed desktop lane (goal 14) at zero, one,
+   fewer-than-eight, exactly-eight and more-than-eight accepted lines: the count
+   never exceeds eight, the newest accepted line is at top, the ninth and older
+   lines are dropped rather than shown, each visible line's opacity matches its
+   slot, and the empty case renders no line; and by the closing static read that
+   opacity is a function of visible index with no timestamp, age, elapsed or
+   clock input and no interpolation.
+   Excluded: an even or interpolated ramp; an age- or timestamp-derived opacity;
+   padding to eight; reversing center delivery order rather than presenting in
+   reverse arrival order; an unbounded retained buffer.
+
+6. **The block aligns under the current row's text.** Full width, flex column,
+   gap 3, padding `[4,12,6,27]`, mono 10.5 `text-faint`
+   (`reference/sessions.html:460-463`, `grammar.md:104-108`), with the 27 left
+   offset consistent with the current row's 12 padding + 5 dot + 10 gap
+   (`:413-459`). Every value comes from `0265.1`'s token entry point.
+   Decided by focused coverage in the landed desktop lane (goal 14) that the
+   block renders at that gap and padding directly beneath the current row; and by
+   the closing static read against `reference/sessions.html:413-463` for the
+   geometry and for the absence of literals at call sites.
+   Excluded: a dot, glyph or corner radius inside the block — rule 4 confines
+   dots to stateful list rows and this is prose-adjacent; a block rendered under
+   a done, pending or failed row; any light-column value.
+
+7. **Any role or frame prefix comes from served detail, never a literal.** Where
+   a line carries a role or frame prefix, it is read from the authoritative frame
+   projection associated with the current row — the same durable mapping `0265.5`
+   chose — or it is omitted with no dangling separator. `ActivityEvent` carries
+   no role (content Correction 3).
+   Decided by focused coverage in the landed desktop lane (goal 14) that a detail
+   serving one role renders that role and a detail serving another renders that
+   other, and that an absent role leaves no dangling separator; and by the
+   closing static read for the absence of a hardcoded `review:`, of any example
+   string from `reference/sessions.html:464-511`, and of any attribution
+   reconstructed from `ActivityEvent.frame_id` alone.
+   Excluded: a literal role; deriving structural attribution from `frame_id`,
+   which is item-id-or-title and repeats across loop executions
+   (`drive.rs:3184-3196`); showing an older execution's activity as current — an
+   ambiguous slice is reported as an unmet `0257.3` contract, not rendered.
+
+8. **The block owns no timer, no fetch and no blocking receive.** No timer,
+   interval, spawned tick, animation clock, polling loop, filesystem read or
+   blocking `recv`/`recv_timeout` appears on the desktop side of this cut. The
+   block renders the lines the accepted detail model already holds; where they
+   came from is the subscription's concern.
+   Decided by focused coverage in the landed desktop lane (goal 14) that lines
+   appear on an accepted delta without any advancing of a clock or a wait, and
+   that the prerequisite coverage `0256.2`-`0256.5` and `0257.3` landed still
+   runs and passes with its stated semantics intact — an adaptation forced by a
+   shared extraction is legitimate and reported, a weakened or deleted assertion
+   is not; by the declared `proof_center`, `just test` and `just test-full`
+   checks for the workspace side
+   of that contract; and by the closing static read of `git diff main...HEAD` for
+   any timer, interval, spawned tick, `Instant`, animation frame request,
+   blocking receive on the UI thread, or desktop-side sidecar, ledger or store
+   read.
+   Excluded: a second subscription, socket reader, delta reducer, cache or
+   recovery protocol; a desktop filesystem fallback when the center fails —
+   `center.rs:2423-2452` performs no ledger refresh on activity delivery and the
+   established baseline/fresh-subscription posture is the only recovery; an
+   optimistic line rendered ahead of a delta.
+
+9. **The visible block is a function of accepted state, and transitions rebind
+   it.** The accepted detail reducer `0257.3` landed remains the sole owner of
+   activity state. A rejected projection leaves the prior complete frame list,
+   marker positions, current row and activity block unchanged, and no line from a
+   discarded candidate reaches the visible deque. When the accepted current frame
+   changes, the block resets and rebinds so a previous frame's lines never appear
+   beneath a new current row. Center loss shows the explicit stale posture
+   `0256.5` established, never last-accepted lines presented as current.
+   Decided by focused coverage in the landed desktop lane (goal 14): an accepted
+   delta updates the block; a rejected candidate leaves the previous block, list
+   and current row intact with no leaked line; a current-frame transition clears
+   the previous frame's lines; and a disconnect renders the stale posture rather
+   than silently current lines; by the declared `proof_center` check for the
+   snapshot-before-delta and bounded-queue-eviction contract
+   (`center.rs:6931-6997`) staying green; and by the closing static read that the
+   block holds no activity state of its own beside the accepted model.
+   Excluded: a second activity store in the component; mutating visible state
+   before a candidate commits; presenting last-accepted lines as current;
+   re-deriving loss recovery in the desktop.
+
+10. **Shared semantics are extracted, not copied and not forked.** Where this cut
+    needs a derivation that is CLI-private today — the loop-only one-based round,
+    the `ActivityRecord` variant routing, the activity-line text formatting — the
+    pure derivation moves into shared core/IO code with the CLI retained as its
+    second consumer, and the semantics its existing coverage asserts stay
+    asserted and green. Nothing CLI-private is imported by the desktop, and no
+    third divergent implementation is added. Moving a test onto the extracted
+    home, or adjusting a call in it, is a legitimate consequence of extraction
+    and is reported in the work summary; dropping or weakening what it asserted
+    is not.
+    Decided by the declared `just test`, `just test-full`, `--lib story` and
+    `--lib run_view` checks staying green after any extraction, with the
+    loop-only plus-one nested-preserving round semantics
+    (`story.rs:1120-1157`), the `ActivityRecord` variant routing and the
+    activity-line text semantics still covered; and by the closing static read
+    for the shape — one home per derivation, a live CLI consumer at that home,
+    and no `pub(crate)`/`pub(super)` CLI import in the desktop.
+    Excluded: copying a CLI function into gpui even where it compiles; widening a
+    CLI type's visibility instead of extracting the derivation; extracting more
+    than this cut consumes.
+
+11. **The workspace does not learn about gpui.** Root Cargo resolution and the
+    root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+    member, and the per-round workspace gate stays green and unchanged in cost —
+    including any shared extraction this cut lands and its CLI consumer.
+    Decided by the declared checks.
+    Excluded: adding the desktop project to root workspace members; adding gpui
+    cost to the existing CI lanes; a grep forbidding the word `gpui` in
+    `Justfile` or `.github/workflows/` — a *separate* desktop lane there is
+    sanctioned, so such a check would red on the sanctioned outcome; declaring a
+    board check that executes the desktop lane before `0256.1` has landed one.
+
+12. **The normative artifacts are untouched and no sibling's behaviour is
+    absorbed.** No file under `.internal/docs/design/` is modified. This cut adds
+    no frame-row form, no list-level selection rule, no measured overflow
+    clipping, no pane-bottom gradient and no frame counter: those behaviours
+    belong to `0265.5`, `0265.7` and `0265.14`. Any conflict found between the
+    artifacts is raised as an owner correction, never edited into them.
+    Sibling scope is judged by behaviour and diff content, never by which task
+    last touched a file: editing a surface `0265.5` landed — its frame list, its
+    row model, its detail binding — is the composition this cut exists to
+    perform, and is legitimate wherever a goal above requires it.
+    Decided, for the artifacts, by `git diff --name-only main...HEAD` — the
+    changed-file list of this cut against its base — containing no path under
+    `.internal/docs/design/`; and, for sibling behaviour, by the closing
+    substantive read of `git diff main...HEAD` showing the diff introduces none
+    of the behaviours named above. No board check can decide either, because a
+    check runs in a clean detached worktree of the merged sha with no
+    base to diff against; if the run branched from something other than `main`,
+    substitute that base (`git merge-base` resolves it).
+
+13. **The pass is reviewed once and bounded.** Before the task is called done,
+    the diff printed by `git diff main...HEAD` is read against
+    `screens/sessions.md:19-31`, `grammar.md`, `tokens.md` and
+    `reference/sessions.html`, specifically inspecting for: a marker derived from
+    row order or from a non-loop segment, round arithmetic living in the desktop,
+    inline placeholder prose or a statically served marker, literals at render
+    call sites, a hardcoded `review:` or example sentence, a third activity
+    formatter, a CLI-private import, a desktop sidecar or ledger read, a timer or
+    poll, an unbounded or non-index-derived fade, activity state held outside the
+    accepted model, and scope. The tree it was read from is the tree that lands:
+    `git status --short` prints nothing.
+    Exactly one targeted repair cycle is allowed: run the commands in the order
+    given under Bounded refinement — the discovered desktop lane command first —
+    repair one named failure, and rerun that command and everything after it. If
+    a second cycle would be needed, stop and report the exact failing command — or
+    the unresolved visual or data contract — with its evidence, rather than
+    iterating.
+
+14. **The landed desktop lane runs green over this cut's cases.** The exact
+    documented non-interactive build-and-test command of the desktop lane
+    `0256.1` landed is discovered at execution time, extended with focused
+    coverage of the outcomes goals 1-9 assign to it — no-loop, repeated-loop and
+    nested-loop structural fixtures, non-loop iteration bookkeeping producing no
+    marker, the marker's position and round from projection evidence with the
+    phrase from the `placeholders` module, the narration voice and container
+    geometry, the four record variants filtered to `Activity`, zero and one and
+    fewer-than-eight and exactly-eight and more-than-eight lines with
+    newest-first order and the exact opacity slots, the block's alignment beneath
+    the current row, role attribution from served detail, an accepted delta
+    updating the block, a rejected candidate preserving the prior complete view
+    with no leaked line, a current-frame transition clearing the previous frame's
+    lines, the disconnect stale posture, and no timer or UI-thread blocking
+    receive — run, and green. It exits 0, and the work summary names it verbatim
+    with its outcome.
+    Decided by that command's exit status, reported verbatim. It is not declared
+    as a board check because no such command exists at the HEAD this plan was
+    written against and a check must already exist; that is a naming limit, not a
+    relaxation. If the lane is absent at execution time, the prerequisite chain
+    `0265.5` → `0265.3` → `0265.1` → `0256.1` was not honoured: that is an unmet
+    dependency, it is reported as one, and this task does not pass.
+    Excluded: standing up a parallel desktop lane of the run's own; substituting
+    workspace commands or the closing diff read for it; weakening the coverage to
+    compile-only; declaring it as a board check.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against, and
+both prerequisites are still open. Read what they landed; do not carry a guess
+from this file into an edit.
+
+- Root `Cargo.toml`'s exclude list and the top-level listing are the suggested
+  way to locate the desktop project; its manifest, README, justfile or CI lane is
+  where its documented command is likely written. Goal 14 binds that command;
+  this bullet only suggests where to find it.
+- Read `0265.5`'s frame-list primitive and its row/selection model. The narration
+  line and the activity block are items composed into that list, not a second
+  list. Whether the list takes a heterogeneous item enum or the narration is a
+  row form is the run's call, so long as goal 1's placement provenance holds.
+- Read `0257.2`'s shared frame projection and `0257.3`'s live detail
+  reconciliation first. Whether the marker/placement and the current activity
+  slice are already exposed decides whether this cut consumes them or extends the
+  shared projection with the CLI as its second consumer. Extending is preferred
+  over adding a second projection.
+- Read `0265.1`'s token entry point: `text-faint #4d525c` (`tokens.md:34`), the
+  10.5 mono meta step (`tokens.md:64`), the IBM Plex Mono italic face and the
+  gap/padding constants are that module's contents, not this call site's. Confirm
+  the italic mono face is actually loaded — a silent system-font substitution for
+  the italic weight is a failure, not a fallback.
+- Read `0265.3`'s `placeholders` module and add exactly one entry beside the
+  existing `watch raw` and `0265.5`'s current-frame intent entry.
+
+### Edit order
+
+1. The loop-marker/placement consumption: read what `0257` serves, and extend the
+   shared structural projection only if it does not already expose an explicit
+   marker with its one-based round(s).
+2. The shared activity-line derivation: the `ActivityRecord` variant routing and
+   the bounded line text, extracted into core/IO with the CLI consumer moved onto
+   it.
+3. The `placeholders` entry for the loop phrasing, taking the round as data.
+4. The narration line component and its container geometry.
+5. The activity block component: a bounded newest-first view over the accepted
+   lines with index-derived opacity, and its geometry beneath the current row.
+6. Composition into `0265.5`'s frame list, and the rebind on accepted
+   current-frame transition.
+7. The focused proofs in the desktop lane and in the workspace, then the desktop
+   command, then the declared checks and the remaining named commands.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a shared `loop_rounds(position_path) -> Vec<usize>`
+carrying the loop-only filter and the plus-one conversion, living beside the
+projection types `0257` shares, with `story::format_step_title` moved onto it; a
+shared `activity_line_text(&ActivityEvent) -> String` carrying the quoting and
+tool-label semantics of `projection.rs:985-1025`, with the CLI retained as its
+consumer; a desktop `loop_narration(round_phrase)` component and an
+`activity_block(lines)` that owns the eight-line cap and the index-derived
+opacity so no caller can set a per-line opacity. Names, module paths and
+signatures follow whatever conventions `0256`, `0257`, `0265.1`, `0265.3` and
+`0265.5` established. Whether the center answers already-filtered activity lines
+or the desktop filters the accepted records is the run's call — note only that
+the wire cap is 1 MiB (`center.rs:48-52`) and the block needs at most eight
+lines, so a bounded projection is the safer shape.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- A reconstruction with no loop renders no narration line.
+- A reconstruction with a recorded second round renders one line at the
+  projection-supplied position carrying the one-based round.
+- A non-loop control segment carrying an `iteration` renders no line.
+- A nested-loop reconstruction keeps its rounds distinguishable.
+- A different recorded round renders a different round in the same phrase.
+- All four `ActivityRecord` variants present; only the `Activity` ones become
+  lines.
+- A `RunningTool` event renders the tool label, not raw tool-input JSON.
+- Zero, one, fewer-than-eight, exactly-eight and more-than-eight lines: the count
+  caps at eight, the newest is at top, and each visible line's opacity matches
+  its slot.
+- The empty case renders no line at all.
+- The role prefix follows the served detail and is absent without one, with no
+  dangling separator.
+- An accepted delta updates the block; a rejected candidate leaves the previous
+  block, list, markers and current row intact with no leaked line.
+- A current-frame transition clears the previous frame's lines.
+- A disconnect renders the stale posture rather than silently current lines.
+- The `0256.2`-`0256.5` and `0257.3` coverage still passes with its semantics
+  intact — ideally untouched, and any adaptation an extraction forced is
+  reported rather than treated as a violation.
+
+### Reuse points
+
+`story::format_step_title`'s loop-only, plus-one, nested-preserving round
+semantics (`story.rs:29-44`) as the derivation to extract, not to copy;
+`story::load_activity`'s `ActivityRecord` variant routing (`story.rs:205-267`)
+for which records are activity; `activity_event_fallback_tail`'s quoting and
+tool-label rules (`run_view/projection.rs:985-1025`) as the line text semantics
+to extract — and note the older `harness_stream.rs:1502-1573` formatter as the
+second existing shape, so any extraction converges rather than adding a third;
+`PathSegment` and `ControlFrame`
+(`modules/core/src/procedure/runtime/state.rs:282-315`, `349-389`) as the durable
+loop evidence; `CenterDelta::ActivityLine` and `ActivityRecord`
+(`center.rs:265-281`, `activity_sidecar.rs:22-56`) as the delta contract, already
+established and not to be extended here; `0257`'s shared frame projection and
+accepted detail reducer; `0265.5`'s frame-list primitive and current-row model;
+`0265.3`'s `placeholders` module; `0265.1`'s token entry point for every value.
+The landed TUI reducer is the semantics to match, not code to import: stage the
+whole snapshot, project the complete candidate, commit only on success, clone
+accepted rows before applying a delta, and retain the previous accepted model on
+rejection (`modules/cli/src/app/dashboard/worker.rs:254-415`), with an
+`ActivityLine` reporting the affected path without mutating the compact row map
+(`worker.rs:420-440`).
+
+### Reporting mechanics — suggestions
+
+What must be reported is fixed by GOALS and Done when; this subsection only
+suggests how. Quoting each executed command in a fenced block with its exit
+status beside it reads better than prose. Naming the discovered desktop path
+beside that lane's command helps the next cut declare it as a board check.
+Stating the durable role mapping used for the line prefix, and any owner
+correction raised against the design artifacts, under their own heading keeps
+them from being read as commentary. Deviations from this approach are reported in
+the work summary as deviations; that is a report, not a violation and not an
+escalation.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml:21-24` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The frame-row forms, the list-level selection invariant and the current row's
+  right-side composition (`0265.5`); measured list overflow, clipping and the
+  100px pane-bottom gradient (`0265.7`); the frame counter (`0265.14`); the
+  header, bottom bar, preview column, rail, title bar and chrome.
+- The subscription, socket reader, delta protocol and stale/recovery posture
+  (`0256`); the baseline sidecar/store read and the detail reducer (`0257`). This
+  cut consumes them and adds no second one.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Any ledger, store, sidecar or filesystem read on the desktop side; a GUI poll
+  loop; a timer or animation clock; a blocking receive on gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, or primitives
+  extracted for `0266`-`0269` before one of them consumes them.
+- A `[[checks]]` entry that executes the desktop lane. No such command exists in
+  the repository today, so declaring one now would be a fabrication. The lane
+  still binds: goal 14 requires the run to discover it, extend it, run it green
+  and report it verbatim.
+- Packaging and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **No poll loop.** A timer anywhere in this block is the defect the plan's third done-criterion names outright; blocking receives stay off gpui's UI thread.
-- **Snapshot-then-delta ordering is the contract.** Activity lines from a discarded snapshot must not survive a rejected projection, and a rejected projection must leave no partially committed visible state.
-- **Only the narration phrasing is a placeholder.** The loop marker's presence and position are data; serving the marker itself statically would mark a wired region as unwired. No inline literal — the phrasing comes from the one shared module.
-- **Narration is italic mono 10.5 `text-faint`** per rule 5's inline-narration voice, distinct from the header's italic sans 12 narrated summary. Confusing the two collapses rule 5.
-- **Fail-loud, no direct-reader fallback**; a center failure never licenses re-reading the activity sidecar from the desktop process.
-- **Closed glyph set, no corner radius inside the canvas.**
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Only loop segments own rounds.** The repository's own doc comment says item
+  and other control segments "may repeat an iteration field for unrelated
+  bookkeeping" (`story.rs:29-32`). A narration line emitted from any `iteration`
+  invents a round for a `for-each` item.
+- **Storage is zero-based, display is one-based, and nested loops carry more than
+  one round.** `format_step_title` adds 1 and joins the collected rounds
+  (`story.rs:33-43`). Flattening a nested position to a single number presents a
+  different structure than the run recorded.
+- **The marker's position and existence are data, never placeholder content.**
+  Serving the marker itself statically would mark a wired region as unwired, and
+  deriving it from adjacent row labels or flat row order is what parent
+  `0265:38` forbids by name.
+- **Narration is italic mono 10.5 `text-faint`**, rule 5's inline voice — not the
+  italic sans 12 `text-secondary` narrated screen summary. Confusing the two
+  collapses rule 5.
+- **`review:` is not in the event.** `ActivityEvent` carries no role and no
+  structural path (`activity.rs:55-144`). A literal prefix fabricates evidence,
+  which parent Correction 2 forbids.
+- **Not every `ActivityRecord` is activity.** Four variants travel through
+  `CenterDelta::ActivityLine`; rule 11 asks for the agent's actual activity, and
+  `story::load_activity` already routes summaries, titles and narrations
+  elsewhere (`story.rs:205-267`).
+- **The fade is positional, and eight is a cap.** Opacity is a function of the
+  visible index against `1.0, 0.93, 0.86, 0.79, 0.72, 0.65, 0.55, 0.45`; an even
+  ramp, an interpolated ramp, an age-derived opacity, or padding to eight all
+  misread rule 11. An empty block renders nothing rather than an invented line.
+- **`sequence` alone cannot order the block.** Coalesced thinking/output records
+  currently persist with sequence 0 (`drive.rs:476-490`, `633-707`); ordering
+  comes from arrival and `at_epoch_ms`. "Newest first" is a presentation
+  reversal, never a reversal of center delivery.
+- **`frame_id` is ambiguous across loop executions.** It is item-id-or-title
+  (`drive.rs:3184-3196`). If `0257.3` does not serve an unambiguous current
+  activity slice, report an unmet prerequisite contract; do not show an older
+  execution's activity beneath the current row.
+- **The block owns no timer and no fetch.** It renders the lines the accepted
+  model hands it. `recv`/`recv_timeout` are blocking (`center.rs:1005-1088`) and
+  belong off gpui's UI thread.
+- **Snapshot-then-delta ordering is the contract.** Lines from a discarded
+  candidate must not survive a rejected projection, and a rejected projection
+  must leave the prior list, markers, current row and block complete and
+  unchanged.
+- **Fail-loud, no direct-reader fallback.** Activity delivery performs no ledger
+  refresh (`center.rs:2423-2452`), and a dropped delta becomes the explicit stale
+  state `0256.5` established followed by a fresh snapshot — never a desktop
+  filesystem read and never last-accepted lines shown as current.
+- **No literal values at a call site.** Every colour, size, weight, spacing,
+  family and opacity slot comes from `0265.1`'s token entry point; a hex or a
+  0.93 inside a primitive is the same defect as one inside a screen.
+- **Closed glyph set and no corner radius inside the canvas.** The 5px ellipse is
+  rule 4's state marker on stateful list rows; neither the narration line nor an
+  activity line is one.
+- **No design example string is hardcoded.** `round 2 — refinement reviewed,
+  review re-runs` and `review: reading modules/io/src/center.rs` illustrate one
+  run. The export is measurement; `grammar.md` and `screens/sessions.md` are the
+  specification.
+- **No third activity formatter.** Two shapes already exist
+  (`projection.rs:985-1025`, `harness_stream.rs:1502-1573`). Extract and
+  converge, or consume what `0257` already extracted; a gpui copy is a defect
+  even where it compiles.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom
+  "cannot find X".
+- **The declared checks decide the workspace-side invariants and the shared
+  semantics this cut extracts.** They show the workspace stayed gpui-free, and
+  that the loop-round derivation, the variant routing, the activity-line
+  formatting and the center wire contract still run and pass. They do not show
+  that a line rendered, in what order, at what opacity, or at what position.
+- **The rendered outcomes are decided by executing the desktop lane, not by
+  reading the diff.** Goal 14 binds the lane `0256.1` landed. The closing diff
+  read is code-shape review — what is imported, read, duplicated, literal, timed,
+  or out of scope — and it is supplementary wherever a goal names a runtime
+  outcome. An absent lane at execution time is an unmet dependency and the task
+  does not pass.
 
 ## Done when
 
-The frame list shows the loop-narration line at the position the run's own loop evidence puts it, in italic mono 10.5 `text-faint` with its phrasing from the `placeholders` module, and the current row carries a block of up to eight activity lines fed from center activity deltas, newest at top, stepping from full opacity to about 0.45. A live run's activity lines appear as the deltas arrive, with no timer anywhere and no blocking receive on the UI thread. Root workspace resolution and the root lockfile remain gpui-free.
+- Every command the run executed is green, and the work summary names each one
+  verbatim with its outcome. Nothing is called done over a red command.
+- The desktop lane's exact documented non-interactive build-and-test command,
+  discovered from what `0256.1` landed and extended with this cut's cases, exits
+  0, and the work summary names it verbatim with its outcome. Its coverage
+  observes, by running the desktop: no narration line for a loop-free
+  reconstruction and none for a non-loop segment carrying iteration bookkeeping;
+  one line at the projection-supplied position carrying the one-based round for a
+  recorded second round, with nested loop evidence staying distinguishable and a
+  different recorded round rendering a different round in the same
+  `placeholders`-served phrase; the line in italic mono 10.5 `text-faint` at
+  container padding `[8,12,2,12]`; lines rendered only for
+  `ActivityRecord::Activity` with `StepSummary`, `SessionTitle` and `Narration`
+  filtered out, and a `RunningTool` event rendering its tool label rather than
+  raw tool-input JSON; zero, one, fewer-than-eight, exactly-eight and
+  more-than-eight accepted lines yielding at most eight rendered newest-first at
+  the exact opacity slots `1.0, 0.93, 0.86, 0.79, 0.72, 0.65, 0.55, 0.45`, with
+  the empty case rendering nothing; the block at gap 3 and padding `[4,12,6,27]`
+  beneath the current row; a role prefix following the served detail and absent
+  without one, with no dangling separator; an accepted delta updating the block;
+  a rejected candidate leaving the previous block, list, markers and current row
+  intact with no leaked line; a current-frame transition clearing the previous
+  frame's lines; and a disconnect rendering the stale posture rather than
+  silently current lines. If that lane is absent, this clause is unmet, it is
+  reported as an unmet dependency on `0265.5` → `0265.3` → `0265.1` → `0256.1`,
+  and the task does not pass; no workspace command and no diff read substitutes
+  for it.
+- The closing static read of the diff printed by `git diff main...HEAD`, read
+  against `screens/sessions.md:19-31`, `grammar.md:49-56` and `104-108`,
+  `tokens.md` and `reference/sessions.html:349-359`, `413-463`, `464-511`, shows
+  the structural half the lane does not observe: the marker's position and round
+  read from the shared projection with no round arithmetic, `kind` test or
+  boundary inference in the desktop; exactly one entry added to the one
+  `placeholders` module, resolved at the call site with the round passed through
+  as data and no inline sentence; the narration and block geometry matching the
+  export with no colour, size, spacing, weight, family or opacity literal at a
+  call site; opacity a function of visible index with no timestamp, age or clock
+  input; one shared activity-line formatter with a retained CLI consumer and no
+  third copy; no CLI-private import; no desktop sidecar, ledger, store or
+  filesystem read; no timer, interval, spawned tick, `Instant` or blocking
+  receive on the UI thread; no activity state held outside the accepted model; no
+  hardcoded `review:`, `round 2` or example sentence; the `0256.2`-`0256.5` and
+  `0257.3` coverage still asserting what it asserted, with any extraction-forced
+  adaptation reported; none of the sibling behaviours goal 12 names introduced;
+  and no corner radius or dot inside the block.
+- The work summary states the durable role mapping used for any line prefix, and
+  any owner correction raised against the design artifacts, as corrections rather
+  than edits to `.internal/docs/design/**`.
+- The declared root-resolution check, run verbatim from the repository root,
+  exits 0.
+- `just test` exits 0, carrying any shared loop-round or activity-line derivation
+  this cut extracted, with the existing CLI coverage of the same semantics still
+  green after the extraction.
+- `just test-full` exits 0 — the repository's landing gate (`Justfile:148-180`),
+  including `just ts-test`, `just lint`, `cargo build --workspace --bins` and
+  the full `cargo test --workspace` over the integration proof binaries. It is
+  unconditional: no focused command, no desktop lane run and no diff read
+  substitutes for it, and it does not substitute for them either.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib story` exits 0, run
+  under that existing filter as written, showing the loop-only, plus-one,
+  nested-preserving round derivation and the `ActivityRecord` variant routing
+  were consumed rather than forked.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view` exits 0,
+  showing the reconstruction and activity-line formatting semantics beneath this
+  cut were consumed rather than forked.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`
+  exits 0, whether or not this cut touched the center detail contract.
+- `git diff --name-only main...HEAD` lists no path under
+  `.internal/docs/design/`, and the substantive read of `git diff main...HEAD`
+  shows none of the sibling behaviours goal 12 names — a frame-row form, a
+  list-level selection rule, measured overflow clipping, a pane-bottom gradient
+  or a frame counter — introduced by this cut. Composing into a surface a
+  sibling landed is not such a behaviour. Substitute the run's actual base
+  branch if it is not `main`.
+- `git status --short` prints nothing, and the closing diff was read from the
+  tree that lands.
+
+## Bounded refinement
+
+Run, in order: the discovered desktop lane command required by goal 14, the
+root-resolution check, `just test`,
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib story`,
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view`, and
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`,
+`just test-full` — the landing gate, run last of the commands because it is the
+most expensive and the focused ones localise a failure faster — then the closing
+diff read.
+Permit at most one targeted repair-and-rerun round: repair one named defect, then
+rerun the failed command and every command after it in that order. If a second
+round would be needed, stop and report the exact failing command — or the
+unresolved visual or data contract — with its evidence rather than iterating.
+That is the stop condition, not a judgement call.
 """
 [relations]
 parent = "0265"
@@ -45,4 +826,30 @@ depends-on = ["0265.5", "0256.4"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "the landing gate remains green"
+command = "just test-full"
+timeout-ms = 3600000
+
+[[checks]]
+name = "the loop-round derivation and activity record routing stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib story"
+timeout-ms = 900000
+
+[[checks]]
+name = "the reconstructed run-view projection stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
+timeout-ms = 900000
+
+[[checks]]
+name = "the center wire contract stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 900000
