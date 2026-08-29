@@ -1781,6 +1781,12 @@ impl CenterModel {
         // commit failure in the same slice could still roll back.
         let mut pending_deltas: Vec<(Option<CenterPublicRow>, Option<CenterPublicRow>)> =
             Vec::new();
+        // Full pre-mutation rows (not just the public projection used for
+        // deltas), so a failed slice commit can restore exactly the model
+        // state a subscriber and every other query already relied on before
+        // this slice touched anything durable.
+        let mut touched: Vec<(Utf8PathBuf, Option<CenterRow>, bool)> = Vec::new();
+        let mut confirmed_present: Vec<Utf8PathBuf> = Vec::new();
         loop {
             if budget == 0 {
                 break;
@@ -1801,7 +1807,8 @@ impl CenterModel {
             match next {
                 Some((ledger, is_unscanned)) => {
                     let repo_paths = self.warm.as_ref().unwrap().repo_paths.clone();
-                    let before = self.rows.get(&ledger).map(public_row);
+                    let previous = self.rows.get(&ledger).cloned();
+                    let before = previous.as_ref().map(public_row);
                     let refreshed = self
                         .refresh_ledger_inner(paths, &ledger, false, repo_paths.as_ref(), None)
                         .is_ok();
@@ -1812,9 +1819,14 @@ impl CenterModel {
                     if before != after {
                         pending_deltas.push((before, after));
                     }
+                    // Deferred until the slice's `COMMIT` actually succeeds —
+                    // marking presence early would let a partially-warmed,
+                    // never-persisted refresh survive the finalize retain
+                    // below even after this slice's writes are rolled back.
                     if is_unscanned && refreshed && self.rows.contains_key(&ledger) {
-                        self.warm.as_mut().unwrap().present.insert(ledger);
+                        confirmed_present.push(ledger.clone());
                     }
+                    touched.push((ledger, previous, is_unscanned));
                     budget -= 1;
                 }
                 None => {
@@ -1847,9 +1859,44 @@ impl CenterModel {
                 }
             }
         }
-        self.db
-            .execute_batch("COMMIT")
-            .map_err(|source| protocol_error(source.to_string()))?;
+        if let Err(source) = self.db.execute_batch("COMMIT") {
+            // The transaction may still be open (a failed `COMMIT` does not
+            // imply SQLite already rolled it back); force it closed so the
+            // next slice opens a clean one. Best-effort: a `ROLLBACK`
+            // failure here does not change what must happen to in-memory
+            // state below.
+            let _ = self.db.execute_batch("ROLLBACK");
+            // Nothing this slice wrote is durable, so no in-memory mutation
+            // it made may survive either — restore every touched row to its
+            // pre-slice value and requeue the ledger so the next slice
+            // retries it. Deltas were only buffered, never emitted, so
+            // nothing has to be un-published.
+            for (ledger, previous, is_unscanned) in touched.into_iter().rev() {
+                match previous {
+                    Some(row) => {
+                        self.rows.insert(ledger.clone(), row);
+                    }
+                    None => {
+                        self.rows.remove(&ledger);
+                    }
+                }
+                let scan = self
+                    .warm
+                    .as_mut()
+                    .expect("drain_warm_queue requires a scan");
+                if is_unscanned {
+                    scan.pending_unscanned
+                        .get_or_insert_with(VecDeque::new)
+                        .push_front(ledger);
+                } else {
+                    scan.queue.push_front(ledger);
+                }
+            }
+            return Err(protocol_error(source.to_string()));
+        }
+        for ledger in confirmed_present {
+            self.warm.as_mut().unwrap().present.insert(ledger);
+        }
         for (before, after) in pending_deltas {
             self.emit_delta(before, after);
         }
@@ -2842,8 +2889,19 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
         // Advance any in-progress warming scan (cold-start build or a
         // periodic rescan below) by one bounded slice per loop tick, so the
         // pathname stays serviced throughout instead of only at start/end.
-        if model.is_warming() && model.warm_step(&paths, WARM_SLICE).is_err() {
-            model.uncertain = true;
+        if model.is_warming() {
+            if model.warm_step(&paths, WARM_SLICE).is_err() {
+                model.uncertain = true;
+            }
+            if !model.is_warming() {
+                // The scan just finished this tick. Measuring the interval
+                // from completion (not from when it started) means a scan
+                // that runs longer than `scan_interval` does not immediately
+                // rearm on its own next tick — which would otherwise keep
+                // `is_warming()`, and so `has_live()`, true indefinitely and
+                // starve idle exit.
+                last_scan = Instant::now();
+            }
         }
         while let Ok(job) = job_receiver.try_recv() {
             match job {
@@ -2927,21 +2985,29 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
         }
         // A periodic rescan starts a new bounded scan rather than blocking
         // the loop for one corpus-sized pass; already-warming scans (e.g.
-        // the cold-start build) are left to keep draining above.
-        if last_scan.elapsed() >= scan_interval && !model.is_warming() {
+        // the cold-start build) are left to keep draining above. `last_scan`
+        // only advances once a started scan has actually finished (above,
+        // or immediately below for a scan small enough to complete in one
+        // slice), never merely because one was started.
+        if !model.is_warming() && last_scan.elapsed() >= scan_interval {
             if model.warm_step(&paths, WARM_SLICE).is_err() {
                 model.uncertain = true;
             }
-            last_scan = Instant::now();
+            if !model.is_warming() {
+                last_scan = Instant::now();
+            }
         }
         if last_work.elapsed() >= idle {
             prune_pending_starts(&mut model);
-            // `has_live` below already treats an in-progress scan as live,
-            // so idle exit cannot fire mid-warm; still avoid starting a new
-            // full discover here while one is already advancing per tick.
-            if !model.is_warming() && model.discover(&paths).is_err() {
-                model.uncertain = true;
-            }
+            // No fresh scan is started here: the periodic rescan above and
+            // the cold-start scan already validate the corpus in bounded
+            // slices on their own schedule, and `has_live` below already
+            // treats an in-progress scan as live, so idle exit cannot fire
+            // mid-warm. Starting yet another scan from this branch would
+            // make `has_live` observe its own just-started scan and never
+            // see a genuinely idle model — the bounded-validation contract
+            // is "idle exit waits for warming to settle", not "idle exit
+            // triggers one more validation pass first".
             if !model.has_live() {
                 return Ok(());
             }
@@ -5890,6 +5956,36 @@ mod tests {
     }
 
     #[test]
+    fn a_scan_longer_than_the_idle_and_scan_intervals_still_permits_idle_exit() {
+        // `WARM_SLICE` ledgers drain per accept-loop tick, so 40 ledgers take
+        // several ticks (well over both durations below) to finish even a
+        // fully-cached validate-only pass. Before the fix this regresses,
+        // measuring the periodic-scan interval from when a scan *started*
+        // let a scan that outran the interval rearm on its very next tick —
+        // keeping `is_warming()`, and so `has_live()`, true for effectively
+        // the whole run and starving idle exit.
+        let root = scratch("scan-outruns-idle");
+        let paths = paths(root.clone());
+        for repo in 0..40 {
+            write_fixture_ledger(&root, &format!("repo-{repo}"), "completed");
+        }
+        let server_paths = paths.clone();
+        let (completed, result) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let _ = completed.send(run_server_at(
+                server_paths,
+                Duration::from_millis(30),
+                Duration::from_millis(10),
+            ));
+        });
+        assert!(
+            matches!(result.recv_timeout(Duration::from_secs(5)), Ok(Ok(()))),
+            "a corpus too large to warm inside one idle window must still exit once quiescent"
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
     fn corrupt_first_discovery_publishes_an_appeared_row() {
         let root = scratch("unreadable-appeared");
         let paths = paths(root.clone());
@@ -5963,6 +6059,85 @@ mod tests {
             appeared, 2,
             "both ledgers must publish exactly one Appeared each, after the scan finalizes"
         );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn warm_slice_commit_failure_emits_no_delta_and_restores_rows() {
+        // SQLite's classic upgrade hazard: every write inside a deferred
+        // transaction only needs a RESERVED lock, compatible with another
+        // connection's open read transaction, but COMMIT must upgrade to
+        // EXCLUSIVE — which that reader blocks. This reproduces a slice
+        // whose per-ledger writes all succeed and only the final `COMMIT`
+        // fails, exercising the rollback path a trigger-based per-row
+        // failure (see `persistence_failure_restores_the_previous_verified_row`)
+        // never reaches.
+        let root = scratch("warm-scan-commit-failure");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repo-a", "completed");
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let (outbound, receiver) = mpsc::sync_channel(8);
+        model.subscribers.insert(
+            1,
+            Subscriber {
+                repo_key: None,
+                outbound,
+                snapshot: None,
+                pending_deltas: VecDeque::new(),
+            },
+        );
+        model.begin_scan(&paths).expect("begin warm scan");
+        assert!(model.is_warming(), "a fresh scan starts warming");
+
+        let blocker = Connection::open(paths.index.as_std_path()).expect("open blocking reader");
+        blocker
+            .busy_timeout(Duration::from_millis(0))
+            .expect("blocker never waits");
+        blocker
+            .execute_batch("BEGIN; SELECT count(*) FROM center_rows;")
+            .expect("hold a shared read lock across the slice's commit");
+        model
+            .db
+            .busy_timeout(Duration::from_millis(0))
+            .expect("slice never waits either");
+
+        assert!(
+            model.warm_step(&paths, 8).is_err(),
+            "commit must fail while a reader holds the database lock"
+        );
+        assert!(
+            !model.rows.contains_key(&ledger),
+            "a failed slice commit must not retain a row nothing durable backs"
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "no delta may be published for a rolled-back slice"
+        );
+        assert!(
+            model.is_warming(),
+            "the scan stays open so the ledger is retried, not dropped"
+        );
+
+        blocker
+            .execute_batch("ROLLBACK;")
+            .expect("release the blocking read transaction");
+        drop(blocker);
+
+        while model.is_warming() {
+            model
+                .warm_step(&paths, 8)
+                .expect("the retried slice commits once the blocker releases");
+        }
+        assert!(
+            model.rows.contains_key(&ledger),
+            "the requeued ledger is indexed once the retry succeeds"
+        );
+        match receiver.recv().expect("delta after the successful retry") {
+            Outbound::Delta(CenterDelta::Appeared { row }) => {
+                assert_eq!(row.ledger_path, ledger);
+            }
+            other => panic!("expected an appeared delta after the retry, got {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 

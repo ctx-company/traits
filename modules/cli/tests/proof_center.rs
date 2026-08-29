@@ -38,7 +38,18 @@ fn scratch(name: &str) -> std::path::PathBuf {
 }
 
 fn await_socket(socket: &std::path::Path) -> UnixStream {
-    let deadline = Instant::now() + PROCESS_DEADLINE;
+    await_socket_within(socket, PROCESS_DEADLINE)
+}
+
+/// Same as [`await_socket`], but with a caller-supplied deadline. Bind
+/// itself happens before any corpus scan and is bounded by `PROCESS_DEADLINE`
+/// everywhere that's what is under test; a one-time, marker-gated `VACUUM`
+/// reclaiming a payload-bearing v1 index (goal 1's migration half) is a
+/// separate, explicitly-not-bind-timing cost (task risk R3) and needs a
+/// generous deadline of its own rather than a change to the production
+/// bind-before-migration ordering.
+fn await_socket_within(socket: &std::path::Path, deadline_from_now: Duration) -> UnixStream {
+    let deadline = Instant::now() + deadline_from_now;
     loop {
         match UnixStream::connect(socket) {
             Ok(stream) => return stream,
@@ -141,6 +152,11 @@ impl Drop for CenterEnvironment {
 fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
     let root = Utf8PathBuf::from_path_buf(root.to_path_buf()).expect("UTF-8 scratch root");
     let ledger = root.join("repository/session.json");
+    write_running_ledger_at(&ledger);
+    ledger
+}
+
+fn write_running_ledger_at(ledger: &Utf8PathBuf) {
     let session = serde_json::from_value(serde_json::json!({
         "schema-version": "0.1.0",
         "session-id": "center-proof-session",
@@ -175,8 +191,7 @@ fn write_running_ledger(root: &std::path::Path) -> Utf8PathBuf {
         "state-digest": "sha256:center-proof",
     }))
     .expect("fixture session");
-    ctx_traits_io::run_session::write_run_session(&ledger, &session).expect("write ledger");
-    ledger
+    ctx_traits_io::run_session::write_run_session(ledger, &session).expect("write ledger");
 }
 
 fn write_completed_ledger(ledger: &Utf8PathBuf) {
@@ -1667,6 +1682,101 @@ fn sigkill_center_leaves_held_driver_and_restart_reconstructs_it() {
     drop(lock);
     await_socket_removal(&root.join("center.sock"));
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn sigkill_center_leaves_a_pointer_only_ledger_held_and_restart_reconstructs_it() {
+    // Same shape as `sigkill_center_leaves_held_driver_and_restart_reconstructs_it`,
+    // except the held ledger lives entirely outside `CTX_CENTER_RUNS_ROOT` —
+    // a repository-local `.ctx/runs` ledger the flat-store walk in
+    // `begin_scan` can never enumerate — and is recoverable only because it
+    // was upserted into `run_liveness`'s pointer index. No
+    // `Request::Register` is ever sent and no `DriverNotifier` frame is ever
+    // written; the replacement center's only source for this session is
+    // `run_liveness::read_index`, seeded before the flat-store walk even
+    // begins (0262 defect 5).
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("pointer-only-sigkill-rebuild");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let repo = scratch("pointer-only-sigkill-repo");
+    std::fs::create_dir_all(&repo).expect("create scratch repo");
+    let repo = Utf8PathBuf::from_path_buf(repo).expect("UTF-8 scratch repo");
+    let ledger = repo.join(".ctx/runs/session.json");
+    write_running_ledger_at(&ledger);
+    // Overwrite the session/run identifiers so this fixture cannot collide
+    // with the flat-store fixture's `center-proof-session` in an assertion.
+    let mut session = serde_json::to_value(
+        ctx_traits_io::run_session::read_run_session(&ledger).expect("read fixture back"),
+    )
+    .expect("serialize fixture session");
+    session["session-id"] = serde_json::json!("pointer-only-session");
+    session["run-id"] = serde_json::json!("pointer-only-run");
+    session["ledger"]["run-id"] = serde_json::json!("pointer-only-run");
+    ctx_traits_io::run_session::write_run_session(
+        &ledger,
+        &serde_json::from_value(session).expect("re-deserialize fixture session"),
+    )
+    .expect("rewrite fixture session with pointer-only identifiers");
+
+    let mut activity = ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger);
+    activity.append_session_title("pointer-only, durable before crash".to_string());
+    let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+    let lock =
+        ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path).expect("open driver lock");
+    ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold driver lock");
+
+    let liveness_root = root.join("liveness");
+    ctx_traits_io::run_liveness::upsert_row(
+        &Utf8PathBuf::from_path_buf(liveness_root.clone()).expect("UTF-8 liveness root"),
+        &ctx_traits_io::run_liveness::LiveRunFacts {
+            session_id: "pointer-only-session".to_string(),
+            run_id: "pointer-only-run".to_string(),
+            repo_key: "pointer-only-repo".to_string(),
+            repo_path: repo.to_string(),
+            ledger_path: ledger.clone(),
+            worktree_path: None,
+            branch: None,
+            log_path: None,
+        },
+        std::process::id(),
+        1000,
+    )
+    .expect("seed the liveness index with the pointer-only ledger");
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let mut first = spawn_sentinel(&root, &socket, &index, "100");
+    let stream = await_socket(&root.join("center.sock"));
+    drop(stream);
+    first.0.kill().expect("SIGKILL center");
+    assert!(!first.0.wait().expect("reap SIGKILL center").success());
+    std::fs::remove_file(&index).expect("delete disposable index before restart");
+
+    let _environment = CenterEnvironment::install(&root);
+    let stream = ctx_traits_io::center::ensure_connected().expect("restart through arbitration");
+    drop(stream);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        root.join("center.sock").exists(),
+        "restarted center lost the still-held pointer-only driver lock"
+    );
+    let rows = ctx_traits_io::center::list(None).expect("query restarted center");
+    let row = rows
+        .iter()
+        .find(|row| row.summary.session_id == "pointer-only-session")
+        .expect(
+            "restarted center recovers a repository-local ledger from the liveness index alone",
+        );
+    assert!(
+        row.live,
+        "restarted center must report the genuinely held pointer-only ledger as live"
+    );
+    drop(lock);
+    await_socket_removal(&root.join("center.sock"));
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(repo);
 }
 
 #[test]
@@ -3498,7 +3608,12 @@ fn migrated_v1_index_over_the_corpus_is_reclaimed_to_the_same_physical_bound() {
     // Generous idle so idle exit is never the thing under test.
     let mut child = spawn_sentinel(&root, &socket, &index, "120000");
     let _environment = CenterEnvironment::install(&root);
-    drop(await_socket(&socket));
+    // The one-time marker-gated `VACUUM` reclaiming a 600MB+ v1 index runs
+    // inside `CenterModel::open`, ahead of bind, so it — not connection
+    // latency — dominates this proof's startup: give it a generous deadline
+    // rather than PROCESS_DEADLINE's 10s, which binds goal 2's bind-before-
+    // build proof, not this migration cost (task risk R3).
+    drop(await_socket_within(&socket, Duration::from_secs(180)));
 
     let completion_deadline = Instant::now() + Duration::from_secs(180);
     loop {
