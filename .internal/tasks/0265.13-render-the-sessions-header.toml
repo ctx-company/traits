@@ -1,43 +1,564 @@
 schema-version = "0.2"
 key = "0265.13"
 title = "Render the Sessions header"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-Render grammar rule 6's header on the Sessions screen from the answer `0265.2` taught the center to give: a title that is the claimed task's id and title (`0243.4 — everyone asks the center`), one italic narrated summary, and `∷` top-right. Sans 13 heading tone over italic sans 12; exactly one summary line and no breadcrumbs.
+Grammar rule 6 opens every v1 screen with a title block: a title in sans 13
+`text-heading` over exactly one italic narrated summary in sans 12
+`text-secondary` at fixed width 560, with `∷` in mono 14 `text-secondary`
+padded `[2,8]` at the top right of a full-width `space-between` row, and no
+breadcrumbs anywhere (`.internal/docs/design/grammar.md:58-66`). The export
+fixes the remaining geometry: title-stack gap 5, title weight normal, summary
+width 560, action wrapper `[2,8]` (`reference/sessions.html:251-288`).
+`screens/sessions.md:14-18` names the Sessions instance: the title is the
+claimed task's id and title, both tagged `data:`; the summary carries the run
+description and — later — the frame counter, in prose phrasing tagged
+`placeholder:`.
 
-The title is straightforward now that the capability exists: `RunSummary.task_key` names the task and the served answer carries its title. **The summary's description leaf is where the care goes.** `screens/sessions.md` tags it `data: run description`, and the run description is not the claimed task's description — substituting one for the other renders a board fact under a leaf that means "what this run is doing". The verified run-level description the system actually holds is the narrator-resolved session title: `Provenance::session_title`, projected onto the compact row as `RunSummary.title` through `resolved_title()` (`modules/io/src/run_summary.rs`). It is optional by contract — `None` means "not yet requested", and a requested title may never resolve — so when it is absent the summary renders its placeholder phrasing without a description rather than reaching for the task's prose or any other nearby field.
+This cut renders that header on Sessions **and extracts it once**, because it
+is the first screen to need it and three later screens already depend on this
+leaf for it. It composes; it resolves nothing. The claimed-task answer is
+`0265.2`'s, the `placeholders` module is `0265.3`'s, the tokens and IBM Plex
+faces are `0265.1`'s, and the frame counter is `0265.14`'s.
 
-The summary's phrasing itself is `placeholder:` until a narrator seat serves it, and comes from the `placeholders` module `0265.3` created.
+## Four corrections to the draft this plan replaces
+
+**Correction 1 — the header is a reusable component, and the draft never said
+so.** The parent charter assigns shared screen-header extraction to this cut,
+and `0267.2`, `0268.2` and `0269.2` each carry an explicit `0265.13`
+`depends-on` edge for exactly it, each describing the same contract: a
+component taking a title string and one already-composed summary string, owning
+the typography, the fixed width, the title-stack gap, the `∷` and the
+breadcrumb prohibition. The draft planned a Sessions header only; its Done-when
+was satisfiable by a Sessions-private layout that three later leaves then
+cannot consume, which is the duplication those three files call a defect even
+when it renders correctly. The component is therefore source-agnostic: it
+renders presented strings and performs no center, board, ledger, sidecar,
+filesystem or selection read. Every data decision belongs to the Sessions call
+site.
+
+**Correction 2 — both title halves come from one accepted answer, not from the
+row plus the answer.** The draft read "`RunSummary.task_key` names the task and
+the served answer carries its title". Those are two values with two arrival
+paths: the key is on the selected compact row, the answer arrives
+asynchronously against a selection identity, and a late answer for selection A
+paired with B's row key renders a task title that never existed. `0265.2`'s
+answer carries the canonical key *and* the title together, so the header
+composes both halves from that one accepted value. The row still supplies the
+stable run and repository identity used to request and validate the answer — it
+just does not supply the rendered key.
+
+**Correction 3 — the claimed task does not arrive on a delta.** The draft's
+watch item said "the title and description update from center deltas as the
+claimed task and the session title resolve". Half of that is unsupported.
+`0265.2` serves an on-demand, run-addressed request and defines no task-answer
+delta stream; board freshness events are `0266`'s work. The description half is
+correct and its mechanism is concrete: on an `ActivityRecord::SessionTitle`,
+`broadcast_activity` writes the resolved title onto `row.summary.title` and
+emits `CenterDelta::RowChanged` without reopening the ledger
+(`modules/io/src/center.rs:2423-2445`), while the drive path appends the
+resolved title to the durable activity sidecar at resolution and the
+authoritative ledger write waits for a safe frame boundary
+(`modules/cli/src/app/drive.rs:5502-5531`), and the center's refresh prefers the
+ledger title and falls back to the sidecar when the ledger has not caught up
+(`center.rs:2140-2147`, `modules/io/src/activity_sidecar.rs:206-217`). So the
+title is a response, the description is a delta, and neither is a timer or a
+repeated request.
+
+**Correction 4 — the example string is a shape, and the failure state is
+binding.** `0243.4 — everyone asks the center` and the exported summary sentence
+illustrate one run; the parent explicitly forbids hardcoding design examples,
+and the draft carried the example inline through its content, scope and
+Done-when. Separately, the draft's fail-loud clause lived only in `## Watch`
+while its Done-when described the success rendering alone. Typed non-success is
+now a bound goal: `0265.2`'s typed outcomes are consumed as outcomes rather
+than flattened into an `Option`, and a run that claims no task, together with
+every failed or refused lookup, renders a visible non-success state.
+
+## Claimed-task ownership, between this cut and 0265.10
+
+`0265.10`'s goal 9 owns a selected model that joins the compact row, the
+authoritative detail and the claimed-task answer under one stable selection
+identity, with no second claimed-task request or model and with late A
+responses unable to overwrite selection B. This leaf needs the same answer for
+its title, and there is no ordering edge between the two — both depend on
+`0265.2` and `0265.3` and either may land first. The resolution that duplicates
+nothing, and the reason no edge is added here: **there is exactly one
+selection-scoped claimed-task request and one accepted selected model, and
+whichever of the two leaves lands first establishes it while the other extends
+it.** If `0265.10` has landed, this header reads the answer already joined into
+that model and adds no request. If it has not, this cut establishes the single
+selection-scoped request and join in the shape goal 9 describes — staged,
+projected, committed whole — and `0265.10` then adds the detail and variant to
+that same model rather than forking a second one. A header-private request,
+subscription, reducer, cache or model fails this either way. The run reads what
+has landed before editing and reports which side of that fork it took.
+
+## Grounded at HEAD 5e33882d6
+
+Nothing this task edits exists yet, and the draft's sentence that the capability
+"exists" is false at this HEAD. There is no tracked desktop manifest, lockfile,
+gpui source tree, `placeholders` module, desktop recipe in `Justfile` or desktop
+CI lane; root `Cargo.toml` excludes only `packages/cdk` and the root lockfile
+has no gpui package; `0256.1` is `ready` rather than done; and no `ClaimedTask`
+type or claimed-task center request exists in production Rust code, because
+`0265.2` is still a plan. Every desktop path, module name, symbol, signature and
+command named below is therefore a guess to be replaced by discovery against
+what `0256`, `0265.1`, `0265.2` and `0265.3` actually landed — binding them here
+would be fabrication. The dependency chain does guarantee those surfaces by
+dispatch time: `0265.13` → `0265.3` → `0265.1` → `0256.1` for the desktop
+project, tokens, bar and `placeholders` module, and the direct `0265.2` edge for
+the task answer. What is checkable from the repository root today, and the only
+board coverage this task can honestly declare, is that the workspace stayed
+gpui-free, that its per-round gate stayed green, and that `0265.2`'s center-side
+claimed-task contract stayed green.
+
+## The command that decides the desktop goals
+
+Every desktop-behaviour goal below is decided by one command, and which command
+that is is not a judgement call left to the run. It is **the deciding desktop
+command**: the standalone desktop project's documented non-interactive
+build-and-test command — the one whose passing from a clean checkout is
+`0256.1`'s own Done-when clause, and which `0256.1` obliges itself to document.
+
+That command is present when this leaf dispatches, guaranteed through direct
+`depends-on` edges rather than an inherited hope: `0265.13` depends on `0265.3`,
+`0265.3` depends on `0265.1`, and `0265.1` depends on `0256.1` directly, while an
+open leaf derives `Blocked` whenever any `depends-on` target is not `Done` and a
+parent derives `Done` only when every child is closed
+(`modules/core/src/task/graph.rs:115-177`). This leaf cannot be dispatched until
+`0256.1` is closed; when it is dispatched, the lane is in the tree. No further
+edge is added here because that chain is already hard.
+
+Resolving the invocation is mechanical, single-valued and done before any edit:
+read root `Cargo.toml`'s exclude list and the top-level directory listing for the
+standalone desktop project, then that project's manifest, README, justfile or CI
+lane for the command `0256.1` documented; run it unedited to establish a
+baseline; record its repo-root-relative path and exact invocation verbatim in the
+work summary. Every "Decided by the desktop command" clause below names that one
+resolved invocation and decides on its exit code plus the coverage that goal
+requires. If the dependency chain reports closed and no such command is present,
+that is an unmet prerequisite and this task stops there — it does not substitute
+`just test`, stand up a parallel lane, or invent a command.
+
+Writing that invocation's literal text into this file now would be fabrication:
+no desktop project, lane or command exists at the HEAD this plan was grounded
+against, and `0256.1` itself records that "no pre-existing exact desktop command
+exists to use as a board check". It therefore stays a definite reference here, and
+becomes a literal — and a declarable `[[checks]]` entry on this task — the moment
+`0256.1` lands one.
 """
 scope = """
-## Decisions
+## Goals and approach are separate
 
-- In scope: the header's title (`<task id> — <task title>`) from the center-served claimed-task answer, the single italic narrated summary with its run description and placeholder-served phrasing, and `∷` top-right, in the tokens `screens/sessions.md` names.
-- **The run description's source is the narrator-resolved session title and nothing else.** The claimed task's description is a different fact under a different leaf; using it here is the substitution this cut exists to avoid. An unresolved title renders no description.
-- The frame counter that completes this summary line arrives with `0265.14`, which owns the reconstruction the counter is derived from. This cut leaves the summary's counter position to that slot.
-- Out of scope: the center capability itself (`0265.2`), the `placeholders` module's creation (`0265.3`), the frame counter (`0265.14`), the frame list, the preview column, and the rail and title bar.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+Everything under `## GOALS` is binding: each one names an observable outcome,
+what decides it, and what it excludes. Everything under `## APPROACH` — the
+discovery order, the expected files, symbols and signatures, the edit order and
+the proof mechanics — is the architect's suggested route from the grounding and
+never a boundary. Deviate from any of it wherever a goal requires it, and record
+the deviation in the work summary; a deviation is not a violation and needs no
+escalation.
 
-## Prerequisites
+## GOALS — binding
 
-`0265.2` — the center-served claimed-task answer this header renders. `0265.3` — the `placeholders` module the summary's phrasing is served from.
+1. **Rule 6's header exists once, as a reusable source-agnostic component.**
+   One desktop component renders the title block: a full-width `space-between`
+   row; a left-aligned title stack at gap 5 holding a title in IBM Plex Sans 13
+   `text-heading` at normal weight over exactly one italic IBM Plex Sans 12
+   `text-secondary` summary at fixed width 560; `∷` in IBM Plex Mono 14
+   `text-secondary` in a `[2,8]` wrapper at the top right; and no breadcrumb,
+   back link or subtitle anywhere. It takes an already-presented title string
+   and one already-composed summary string and renders them — it performs no
+   center, board, ledger, store, sidecar, filesystem, cwd, cache or selection
+   read, and knows nothing about `CenterPublicRow`, `RunSummary` or a
+   claimed-task answer. Every colour, size, spacing, weight and family comes
+   through `0265.1`'s token and typography entry point; no such literal appears
+   at any call site in this cut. It is placed and reachable so that `0267.2`,
+   `0268.2` and `0269.2` compose it rather than re-deriving it.
+   No repo-root command inspects a rendered gpui screen at this HEAD, so this
+   goal declares no board check and none may be invented. Decided by **the
+   deciding desktop command** — the single invocation `content` resolves by
+   definite rule from `0256.1`'s documented lane, baselined unedited before any
+   edit and named verbatim in the work summary — exiting 0, plus the bounded
+   review reading the closing diff against
+   `grammar.md:58-66`, `screens/sessions.md:14-18`, the dark column of
+   `tokens.md` and `reference/sessions.html:251-288`.
+   Excluded: a Sessions-private header, title stack or glyph placement; a second
+   summary element, or zero; a breadcrumb, back link or subtitle; a generic
+   screen framework, component registry, theme abstraction or header variants
+   for screens that do not exist yet; the other screens' headers (`0266`-`0269`
+   consume this component); any light-column value.
+
+2. **The title composes from one accepted claimed-task answer.** Both halves —
+   the canonical task key and the task title — come from a single accepted
+   `0265.2` answer for the currently selected run; neither is taken from
+   `RunSummary.task_key`, `RunSummary.title`, the session title, a board
+   document read desktop-side, `task_board_cache` or the previous selection. The
+   selected row supplies only the stable run and repository identity used to
+   request and validate that answer.
+   Decided by that same desktop command, whose coverage must include a title
+   rendered from one answer and a rapid A-then-B selection whose A answer
+   arrives last leaving B's header intact; plus the bounded review's diff read
+   for any pairing of a row-sourced key with an answer-sourced title.
+   Excluded: a header-private claimed-task request, subscription, reducer,
+   cache, model or poll; a second claimed-task protocol or center change; any
+   desktop-side board, task-file, ledger, store, sidecar, cwd or cache read;
+   deriving board status or rendering any status word in the header, which is
+   `0265.10`'s row and which `0265.2` deliberately does not derive.
+
+3. **Every non-success claimed-task outcome is visible.** `0265.2`'s typed
+   outcomes are consumed as outcomes, not flattened into an `Option`. A run that
+   claims no task renders that absence visibly, and every failed or refused
+   lookup — missing or ambiguous session, unusable repository scope, provider
+   failure, absent or unparseable claimed document — renders a visible
+   non-success state.
+   Decided by the desktop command's coverage over the no-claimed-task case and
+   at least one failed-answer case; plus the bounded review's diff read.
+   Excluded: a blank title; an invented or placeholder task title; substituting
+   the session title, `RunSummary.task_key` alone, a cached board value or the
+   prior selection's title; a `match` arm that collapses distinct typed outcomes
+   into one silent absence; covering a request failure with any local read.
+
+4. **The summary is exactly one element, and its description is the run's
+   session title.** The header renders one narrated summary and never two or
+   zero. Its description leaf is the accepted selected row's `RunSummary.title`
+   — the narrator-resolved session title, projected through
+   `SessionTitleState::resolved_title()`
+   (`modules/io/src/run_summary.rs:204-209`,
+   `modules/core/src/procedure/session.rs:378-417`) — and nothing else. That
+   field is legitimately absent for `InFlight`, `Retryable` and `Terminal`
+   titles and for `Provenance.session_title = None`, which means unattempted and
+   covers every ledger written before the field existed
+   (`session.rs:295-301`); when it is absent the summary still renders as one
+   element in module-owned placeholder phrasing, carrying no description.
+   Decided by the desktop command's coverage over a present and an absent
+   session title, both rendering exactly one summary element; plus the bounded
+   review's diff read.
+   Excluded: rendering the claimed task's `description` (`0265.2`'s wire name
+   for `TaskDocument.content`) as the run description — the substitution this
+   cut exists to prevent; substituting the task's `scope` or `validation` prose,
+   the session phase, `current_sequence_title`, the run id or an empty string
+   masquerading as data; treating an absent title as an error; a desktop-side
+   ledger or sidecar read to recover it.
+
+5. **A session title that resolves mid-run reaches the header on a delta, and
+   nothing commits partially.** A `CenterDelta::RowChanged` carrying a newly
+   resolved title — the path `broadcast_activity` emits after writing
+   `row.summary.title` from an `ActivityRecord::SessionTitle`
+   (`center.rs:2423-2445`) — updates the description without a refresh, a timer,
+   an interval, a spawned tick or a repeated claimed-task request. It reaches
+   the header only through the complete accepted selected model: a candidate is
+   staged, projected and committed whole, a rejected projection leaves the
+   previously accepted header intact rather than a partially committed one, and
+   last-accepted data stays visible only behind the explicit stale or outage
+   marker `0256.5` landed. Synchronous socket receives and claimed-task work
+   stay off gpui's UI thread.
+   Decided by the desktop command's coverage over a live `SessionTitle` row
+   delta updating the description, a rejected projection preserving the prior
+   complete header only under stale treatment, and center loss leaving the
+   header not looking current, with the `0256.2`-`0256.5` proofs passing
+   unmodified; plus the bounded review's diff read for any timer, interval,
+   spawned tick, blocking receive on the UI thread, or header-private
+   subscription, reducer or cache.
+   Excluded: a second reducer, subscription, accepted-row model or claimed-task
+   model beside the one landed; any center protocol change; per-row or
+   unselected-row work — compact-row projection must not trigger a selection
+   detail or board read.
+
+6. **The summary phrasing comes from the shared module, and the counter slot is
+   reserved, not filled.** The Sessions summary's prose phrasing resolves
+   through the one `placeholders` module `0265.3` created, extended with exactly
+   the one module-owned Sessions summary phrasing surface this cut consumes and
+   nothing more, traceable to
+   the `placeholder:` tag in `screens/sessions.md:14-18` that authorises it. The
+   summary is composed so `0265.14` can add its `frame N of M` to the same
+   single summary element without changing the shared header component, and so
+   that any combination of present and absent description and counter renders
+   one element with no blank, doubled or dangling separator.
+   Decided by the desktop command's coverage showing the phrasing resolving
+   through the module and the summary composing correctly with and without an
+   optional trailing counter segment; plus the bounded review's diff read for a
+   duplicate literal at the call site.
+   Excluded: an inline placeholder literal anywhere; a second `placeholders`
+   module; a registry, lookup framework, trait or macro layer; entries no cut
+   renders yet; deriving or rendering `frame N of M`, or any counter guessed
+   from list position, row count or `current_run_index` (`0265.14` owns it); the
+   design example strings `0243.4 — everyone asks the center`, the exported
+   summary sentence and `Review round 2` as literals — if the landed formatter
+   treats review-round prose as part of its phrasing, the value is still never
+   hardcoded, and `RunSummary.verdict_rounds` rendering belongs to `0265.3`'s
+   bar and is not opened here.
+
+7. **The workspace does not learn about gpui, and the inherited contracts stay
+   green.** Root Cargo resolution and the root `Cargo.lock` stay gpui-free, the
+   desktop project is not a workspace member, the per-round workspace gate stays
+   green and unchanged in cost, and `0265.2`'s center-side claimed-task and
+   title-delta contract stays green.
+   Decided by the three declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing macOS and Linux CI lanes; a grep forbidding the word
+   `gpui` in `Justfile` or `.github/workflows/` — a *separate* desktop lane
+   there is sanctioned, so such a check would red on the sanctioned outcome;
+   declaring a board check that executes the desktop lane before `0256.1` has
+   landed one; substituting `just test` for desktop proof.
+
+8. **The normative artifacts are untouched.** No file under
+   `.internal/docs/design/` is modified. A rule, token or example that looks
+   wrong is reported in the work summary as an owner correction against the
+   source design, never edited here. The export is measurement; where it and the
+   rules disagree, `grammar.md` and `screens/sessions.md` govern.
+   Decided by the task commit's own file list; no board check can decide this,
+   because a check runs in a clean detached worktree of the merged sha with no
+   base to diff against.
+
+9. **The pass is reviewed once and bounded.** The completed diff is read leaf by
+   leaf against `screens/sessions.md:14-18`, `grammar.md:58-66`, the dark column
+   of `tokens.md` and `reference/sessions.html:251-288` before the task is
+   called done. Exactly one targeted repair cycle is allowed, per the stop
+   condition in `validation`. The work summary names the discovered desktop
+   path, the exact desktop command, which side of the `0265.10` ownership fork
+   was taken, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256`, `0265.1`, `0265.2` and `0265.3` actually landed; do not carry a
+guess from this file into an edit.
+
+- Resolving and baselining the deciding desktop command is binding, and its rule
+  is in `content`; what is only suggested here is reusing that same harness for
+  the focused coverage rather than standing up a parallel one. Read `0256.1`'s
+  landed lane for how its existing tests observe a rendered element, and follow
+  it.
+- Read `0265.1`'s token and typography entry point and take every value from it.
+  `text-heading #f2f4f7`, `text-secondary #8b909c`, IBM Plex Sans and Mono,
+  sizes 13/12/14 and the `[2,8]` padding are `tokens.md`'s dark values and
+  belong in that module rather than at this call site.
+- Read `0265.2`'s landed answer type, its wire field names and its typed
+  outcome set, so goals 2 and 3 are written against real variants rather than a
+  guessed shape. Note that its `description` field is `TaskDocument.content` and
+  is not this screen's run description.
+- Read `0265.3`'s `placeholders` module for the convention its single `watch
+  raw` entry established, and `0256.3`-`0256.5` for the accepted selected-row
+  model, the stale/outage posture and the test harness those tasks' tests
+  already run in. Check whether `0265.10` has landed the joined selected model;
+  the ownership section in `content` states both branches.
+
+### Edit order
+
+1. The reusable rule-6 header component: the `space-between` row, the gap-5
+   title stack, the two text elements, the `∷` wrapper — all through the token
+   entry point, taking title and summary as arguments.
+2. The one module-owned Sessions summary phrasing surface goal 6 requires, added
+   to the existing `placeholders` module. Whether that surface is a static entry
+   or a formatter is the run's call, not part of the acceptance contract.
+3. The Sessions call site: the claimed-task answer's key and title composed into
+   the title string; the accepted row's optional `RunSummary.title` and the
+   module's phrasing composed into the one summary string, with the counter
+   position left composable.
+4. The claimed-task join — consumed from the landed selected model, or
+   established in goal 9's shape if `0265.10` has not landed.
+5. The focused proofs.
+6. The desktop command, then the three declared root checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `screen_header(title, summary)` component that renders
+two presented strings and the glyph; a `sessions_header_summary(description,
+counter)` composition at the call site returning the one summary string; one
+`placeholders` entry for the Sessions summary phrasing. Whether the summary
+arrives as one composed string or as ordered segments the component joins is the
+run's call, provided the component stays source-agnostic per goal 1 and
+`0265.14` can add a segment without touching it — `0267.2`, `0268.2` and
+`0269.2` all describe supplying one already-composed summary string, which is
+the shape to prefer absent a reason. Names, module paths and signatures follow
+whatever conventions `0256`, `0265.1` and `0265.3` established.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- The component's exact geometry and tones: gap-5 title stack, sans 13
+  `text-heading` title, italic sans 12 `text-secondary` summary at width 560,
+  mono 14 `text-secondary` `∷` in a `[2,8]` wrapper on a full-width
+  `space-between` row.
+- Exactly one summary element, and no breadcrumb anywhere.
+- The title composed from one claimed-task answer's key and title together.
+- A present session title rendering as the description, and an absent one still
+  rendering one summary element with no description.
+- A live `SessionTitle` row delta updating the description.
+- The no-claimed-task outcome and at least one failed-answer outcome rendering
+  visible non-success rather than a blank or invented title.
+- A rapid A-then-B selection whose late A results are discarded.
+- A rejected projection preserving the prior complete header, and only under
+  stale treatment.
+- The summary phrasing resolving through the shared `placeholders` module.
+- The summary composing with and without an optional trailing counter segment,
+  with no dangling separator and no change to the shared component.
+- The `0256.2`-`0256.5` tests still passing unmodified.
+
+### Reuse points
+
+`0265.2`'s claimed-task answer and its typed outcomes — the only source of the
+title's two halves. `RunSummary.title` for the description, already projected by
+`RunSummary::from_session` through `resolved_title()`
+(`run_summary.rs:204-209`), kept current by the center's sidecar fallback
+(`center.rs:2140-2147`, `activity_sidecar.rs:206-217`) and updated mid-run by
+`broadcast_activity`'s `RowChanged` (`center.rs:2423-2445`) — the desktop
+consumes that delta and re-derives none of it. `0265.1`'s token and typography
+entry point for every value. `0265.3`'s `placeholders` module, extended by one
+entry. `0256`'s accepted selected-row model, subscription, stale/outage posture
+and test harness, and `0265.10`'s joined selected model if it has landed. The
+landed TUI reducer is the semantics to match, not code to import: it stages a
+whole snapshot, clones accepted rows before applying a delta, commits only a
+successfully projected candidate, and reconnects while retaining the previous
+accepted map behind an explicit stale marker
+(`modules/cli/src/app/dashboard/worker.rs:254-415`).
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The center capability itself (`0265.2`), including widening it; the
+  `placeholders` module's creation (`0265.3`); the frame counter's derivation
+  and rendering (`0265.14`); the frame rows, loop narration and activity block
+  (`0265.5`-`0265.7`); the rail (`0265.8`); the title bar and screen menu
+  (`0265.9`); the preview column (`0265.10`-`.12`, `.15`); and the other
+  screens' headers (`0266`-`0269`, which consume this component).
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Center, core or IO semantic changes; a second projection of the compact row; a
+  second claimed-task request, protocol, model, reducer, subscription or cache;
+  any ledger, store, sidecar, board, task-file, cwd or filesystem read from the
+  desktop process; a GUI poll loop; a blocking receive on gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, or primitives
+  extracted for `0266`-`0269` before one of them consumes them.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Packaging and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **Do not substitute the task description for the run description**, and do not substitute the session title for the task title. Two different leaves, two different sources, both tagged `data:` — a plausible-looking swap misreports the screen in a way no build gate catches.
-- **An absent session title is a real state, not an error and not a gap to fill.** `session_title` is `None` on every ledger written before it existed and on every run whose title has not been requested; the header renders without a description and never invents one.
-- **Exactly one narrated summary line**, and no breadcrumbs anywhere: two lines or none breaks rule 6.
-- **No inline placeholder literal.** The summary's phrasing comes from the shared module; a literal at the call site is the defect the doctrine exists to prevent.
-- **No poll loop and no blocking read on gpui's UI thread.** The title and description update from center deltas as the claimed task and the session title resolve — a title that resolves mid-run appears without a refresh loop, and a rejected projection leaves no partially committed header.
-- **Fail-loud.** A run whose claimed task cannot be read reports the failure; it does not render a blank or invented title.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Do not substitute the task description for the run description**, and do not
+  substitute the session title for the task title. Two different leaves, two
+  different sources, both tagged `data:` — a plausible-looking swap misreports
+  the screen in a way no build gate catches. `0265.2` names its projection of
+  `TaskDocument.content` `description`, and that is not this screen's run
+  description.
+- **One answer, both title halves.** Pairing the selected row's `task_key` with
+  a title from a different or stale response renders a title that never existed.
+- **An absent session title is a real state, not an error and not a gap to
+  fill.** `session_title` is `None` on every ledger written before it existed
+  and on every run whose title has not been requested, and `InFlight`,
+  `Retryable` and `Terminal` all project no title. The summary stays one element
+  and carries no description; it never invents one.
+- **Exactly one narrated summary, and no breadcrumbs anywhere**: two elements or
+  none breaks rule 6.
+- **No inline placeholder literal.** The phrasing comes from the shared module;
+  a literal at the call site is the defect the doctrine exists to prevent.
+- **No design example string is hardcoded.** `0243.4 — everyone asks the
+  center`, the exported summary sentence, `Review round 2` and `frame 5 of 9`
+  illustrate one run; they are shapes, not data to ship.
+- **Do not invent the counter.** The summary leaves a composable position;
+  `0265.14` derives and fills it from the reconstruction.
+- **The task answer is a response, not a delta.** The description updates from
+  `RowChanged`; the claimed task arrives as the request's answer. No timer, no
+  interval, no repeated request, and no blocking read on gpui's UI thread. A
+  rejected projection leaves no partially committed header.
+- **Late A must not overwrite B.** Selection identity is stable, the candidate
+  is staged and committed whole, and a response for a superseded selection is
+  discarded rather than rendered.
+- **Center loss cannot leave the header looking current.** It inherits
+  `0256.5`'s explicit stale and outage posture; there is no header-private
+  subscription, reducer, cache or poll loop.
+- **Fail-loud.** A run whose claimed task cannot be read reports the failure; it
+  never renders a blank or invented title, and never covers the failure with a
+  local read.
+- **The reusable component reads nothing.** If it needs to know about a row, an
+  answer or a selection to render, the composition boundary three later screens
+  depend on has been broken.
+- **The export is measurement, the rules are the specification.** Take geometry
+  from `reference/sessions.html:251-288`; take content and colour semantics from
+  `grammar.md:58-66` and `screens/sessions.md:14-18`. Report any conflict rather
+  than resolving it silently.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a
+  phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's
+  desktop behaviour.** They show the workspace stayed gpui-free and green and
+  that the inherited center contract still holds; the rendered outcome is
+  verified in the desktop lane `0256.1` establishes, whose exact non-interactive
+  command becomes declarable as a check on this task once `0256.1` lands.
 
 ## Done when
 
-The Sessions screen renders `<task id> — <task title>` from the center-served claimed-task answer over exactly one italic narrated summary whose description is the run's narrator-resolved session title — absent when that title is unresolved, never the task's description — and whose phrasing comes from the `placeholders` module, with `∷` top-right in the tokens `screens/sessions.md` names. A session title that resolves while the run is live updates the header from a delta, with no timer and no partially committed state after a rejected projection. Root workspace resolution and the root lockfile remain gpui-free.
+- The deciding desktop command is resolved before any edit by the definite rule
+  in `content` — root `Cargo.toml`'s exclude list and the top-level listing to
+  the standalone desktop project, that project's manifest, README, justfile or CI
+  lane to the command `0256.1` documented — its unedited baseline is run, and its
+  repo-root-relative path and exact invocation are recorded verbatim in the work
+  summary. If the dependency chain reports closed and that lane is nonetheless
+  absent, the task stops there and reports the unmet prerequisite rather than
+  substituting `just test`, standing up a parallel lane, or inventing a command.
+- That resolved command exits 0 with the reusable rule-6 header component, the
+  one module-owned Sessions summary phrasing surface in the `placeholders`
+  module and the Sessions header call site in the tree, and the
+  `0256.2`-`0256.5` tests pass unmodified.
+- That command's coverage shows: the component's gap-5 title stack, sans 13
+  `text-heading` title, single italic sans 12 `text-secondary` summary at width
+  560, and mono 14 `text-secondary` `∷` in a `[2,8]` wrapper on a full-width
+  `space-between` row, with no breadcrumb; a title composed from one
+  claimed-task answer's key and title together; a present session title
+  rendering as the description and an absent one still rendering exactly one
+  summary element with no description; a live `SessionTitle` `RowChanged` delta
+  updating the description; the no-claimed-task outcome and at least one
+  failed-answer outcome rendering visible non-success; a rapid A-then-B
+  selection whose late A results are discarded; a rejected projection preserving
+  the prior complete header only under stale treatment; the phrasing resolving
+  through the shared `placeholders` module; and the summary composing with and
+  without an optional trailing counter segment, with no dangling separator and
+  no change to the shared component.
+- The closing diff read shows: no colour, size, spacing, weight or family
+  literal at a call site and no light-column value; no Sessions-private header
+  and no duplicated header geometry; no center, board, ledger, store, sidecar,
+  filesystem, cwd, cache or selection read inside the reusable component and
+  none anywhere in this cut's desktop code; no second claimed-task request,
+  protocol, model, reducer, subscription or cache; no `Option`-flattening of the
+  typed outcomes; no row-sourced key paired with an answer-sourced title; no
+  task prose, session phase or `current_sequence_title` standing in for the run
+  description; no inline placeholder or design-example literal; no counter
+  derivation; no timer, interval or spawned tick; no blocking receive on the UI
+  thread; and no gpui in root resolution.
+- The three declared checks exit 0.
+- The task commit touches no file under `.internal/docs/design/`, no
+  sibling-owned screen region, and no center, core or IO semantics.
+- `git status --short` is empty, the work is in one task-scoped commit, and the
+  work summary names the discovered desktop path, the exact desktop command,
+  which side of the `0265.10` ownership fork was taken, any owner correction
+  raised against the design artifacts, and any deviation from the approach.
+
+## Bounded refinement
+
+Run the desktop command, then the root-resolution check, then `just test`, then
+the center wire proof. Permit at most one targeted repair-and-rerun round:
+repair one named defect, then rerun the failed command and every command after
+it in that order. If a second round would be needed, stop and report the exact
+failing command with its evidence, or the exact unresolved leaf, rather than
+iterating. That is the stop condition, not a judgement call.
 """
 [relations]
 parent = "0265"
@@ -45,4 +566,15 @@ depends-on = ["0265.2", "0265.3"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "center wire and claimed-task contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1200000
