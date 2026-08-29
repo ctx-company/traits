@@ -416,28 +416,15 @@ fn run(
 }
 
 /// A terminal drive is a changed row, not a disappearance. Only the center's
-/// explicit `Ended` delta removes an entry from the dashboard model.
+/// explicit `Ended` delta removes an entry from the dashboard model. The rule
+/// itself lives in `ctx_traits_io::center::CenterDelta::apply_to`, shared with
+/// the desktop; this wrapper only keeps this call site's `Option<String>`
+/// shape.
 fn apply_delta(
     rows: &mut HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     delta: ctx_traits_io::center::CenterDelta,
 ) -> Option<String> {
-    match delta {
-        ctx_traits_io::center::CenterDelta::Appeared { row }
-        | ctx_traits_io::center::CenterDelta::RowChanged { row } => {
-            let ledger_path = row.ledger_path.clone();
-            rows.insert(ledger_path.clone(), *row);
-            Some(ledger_path)
-        }
-        ctx_traits_io::center::CenterDelta::Ended { row } => {
-            rows.remove(&row.ledger_path);
-            Some(row.ledger_path.clone())
-        }
-        // Activity lines do not change the row projection, but they may change
-        // the selected detail view that intentionally reads one ledger by path.
-        ctx_traits_io::center::CenterDelta::ActivityLine { row, .. } => {
-            Some(row.ledger_path.clone())
-        }
-    }
+    Some(delta.apply_to(rows))
 }
 
 fn center_unreachable(last_snapshot_at: Option<std::time::SystemTime>, detail: &str) -> String {

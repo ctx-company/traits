@@ -283,6 +283,47 @@ pub enum CenterDelta {
     },
 }
 
+impl CenterDelta {
+    /// The row every variant carries, regardless of what it means for that
+    /// row's presence in a keyed map.
+    pub fn row(&self) -> &CenterPublicRow {
+        match self {
+            Self::Appeared { row }
+            | Self::RowChanged { row }
+            | Self::Ended { row }
+            | Self::ActivityLine { row, .. } => row,
+        }
+    }
+
+    pub fn ledger_path(&self) -> &str {
+        &self.row().ledger_path
+    }
+
+    /// The one canonical rule for folding a delta into a `ledger_path`-keyed
+    /// row map, shared by every consumer of the center subscription stream.
+    ///
+    /// A terminal drive is a changed row, not a disappearance: only `Ended`
+    /// removes an entry. `ActivityLine` never changes the row map — the
+    /// center follows a title activity line with an explicit `RowChanged`.
+    /// Returns the affected `ledger_path` regardless of variant, since some
+    /// callers (e.g. a selected detail view) care about identity even when
+    /// the map itself did not change.
+    pub fn apply_to(self, rows: &mut HashMap<String, CenterPublicRow>) -> String {
+        match self {
+            Self::Appeared { row } | Self::RowChanged { row } => {
+                let ledger_path = row.ledger_path.clone();
+                rows.insert(ledger_path.clone(), *row);
+                ledger_path
+            }
+            Self::Ended { row } => {
+                rows.remove(&row.ledger_path);
+                row.ledger_path.clone()
+            }
+            Self::ActivityLine { row, .. } => row.ledger_path.clone(),
+        }
+    }
+}
+
 /// Canonical driver identity supplied by the held driver lock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriverRegistration {
@@ -7693,5 +7734,80 @@ mod tests {
         drop(client);
         drop(replacement);
         let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    fn public_row_fixture(ledger_path: &str) -> Box<CenterPublicRow> {
+        Box::new(CenterPublicRow {
+            summary: crate::run_summary::RunSummary::unreadable(
+                "session".to_string(),
+                "fixture".to_string(),
+            ),
+            repo_key: "repo".to_string(),
+            repo_path: "/repo".to_string(),
+            ledger_path: ledger_path.to_string(),
+            live: false,
+            modified_epoch_secs: 0,
+        })
+    }
+
+    #[test]
+    fn apply_to_inserts_on_appeared_and_row_changed() {
+        let mut rows = HashMap::new();
+        let ledger_path = CenterDelta::Appeared {
+            row: public_row_fixture("/repo/a.json"),
+        }
+        .apply_to(&mut rows);
+        assert_eq!(ledger_path, "/repo/a.json");
+        assert!(rows.contains_key("/repo/a.json"));
+
+        let ledger_path = CenterDelta::RowChanged {
+            row: public_row_fixture("/repo/a.json"),
+        }
+        .apply_to(&mut rows);
+        assert_eq!(ledger_path, "/repo/a.json");
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn apply_to_removes_on_ended() {
+        let mut rows = HashMap::new();
+        CenterDelta::Appeared {
+            row: public_row_fixture("/repo/a.json"),
+        }
+        .apply_to(&mut rows);
+        let ledger_path = CenterDelta::Ended {
+            row: public_row_fixture("/repo/a.json"),
+        }
+        .apply_to(&mut rows);
+        assert_eq!(ledger_path, "/repo/a.json");
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn apply_to_ended_for_an_absent_key_is_a_no_op() {
+        let mut rows = HashMap::new();
+        let ledger_path = CenterDelta::Ended {
+            row: public_row_fixture("/repo/never-there.json"),
+        }
+        .apply_to(&mut rows);
+        assert_eq!(ledger_path, "/repo/never-there.json");
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn apply_to_activity_line_leaves_the_map_untouched() {
+        let mut rows = HashMap::new();
+        CenterDelta::Appeared {
+            row: public_row_fixture("/repo/a.json"),
+        }
+        .apply_to(&mut rows);
+        let before = rows.clone();
+        let ledger_path = CenterDelta::ActivityLine {
+            row: public_row_fixture("/repo/a.json"),
+            activity: test_activity(),
+        }
+        .apply_to(&mut rows);
+        assert_eq!(ledger_path, "/repo/a.json");
+        assert_eq!(rows, before);
     }
 }

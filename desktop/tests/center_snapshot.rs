@@ -80,7 +80,7 @@ fn await_socket(socket: &std::path::Path) {
 }
 
 #[test]
-fn link_delivers_one_coherent_snapshot_and_then_stays_quiet() {
+fn link_delivers_exactly_one_coherent_snapshot_and_stays_open() {
     let guard = scratch();
     let root = &guard.0;
     let socket = root.join("center.sock");
@@ -121,6 +121,9 @@ fn link_delivers_one_coherent_snapshot_and_then_stays_quiet() {
     };
     let rows = match update {
         ctx_traits_desktop::center_link::LinkUpdate::Snapshot(rows) => rows,
+        ctx_traits_desktop::center_link::LinkUpdate::Delta(_) => {
+            panic!("a delta must not arrive before the initial snapshot")
+        }
         ctx_traits_desktop::center_link::LinkUpdate::Unavailable(message) => {
             panic!("center link reported unavailable: {message}")
         }
@@ -131,10 +134,27 @@ fn link_delivers_one_coherent_snapshot_and_then_stays_quiet() {
         "snapshot must contain the seeded run"
     );
 
-    assert!(
-        matches!(updates.try_recv(), Err(async_channel::TryRecvError::Empty)),
-        "nothing further should arrive once the initial snapshot is complete"
-    );
+    // 0256.2 only cared that exactly one snapshot arrives and the channel
+    // stays open; deltas are 0256.4's, and a live center may emit unrelated
+    // ones (e.g. periodic discovery re-confirming the seeded row) at any
+    // time. Drain and tolerate those; a second `Snapshot` or an
+    // `Unavailable` would mean the coherent-snapshot guarantee broke.
+    let drain_until = Instant::now() + Duration::from_millis(200);
+    while Instant::now() < drain_until {
+        match updates.try_recv() {
+            Ok(ctx_traits_desktop::center_link::LinkUpdate::Delta(_)) => {}
+            Ok(ctx_traits_desktop::center_link::LinkUpdate::Snapshot(_)) => {
+                panic!("a second snapshot arrived; the initial snapshot was not exclusive")
+            }
+            Ok(ctx_traits_desktop::center_link::LinkUpdate::Unavailable(message)) => {
+                panic!("center link reported unavailable: {message}")
+            }
+            Err(async_channel::TryRecvError::Empty) => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(async_channel::TryRecvError::Closed) => break,
+        }
+    }
     assert!(!updates.is_closed(), "the channel must still be open");
 
     drop(updates);

@@ -1,57 +1,80 @@
 //! Background link to a machine-local run center: connects to an already-
 //! serving center (never launches one — see `center::subscribe_existing`),
-//! assembles one coherent initial snapshot, and forwards it to the gpui UI
-//! thread over an async channel. Later deltas (0256.4) are not applied yet.
+//! assembles one coherent initial snapshot, and forwards it — followed by
+//! every later delta, in subscription order — to the gpui UI thread over a
+//! single async channel. The snapshot-plus-delta stream is the exclusive
+//! source of dashboard change; nothing here scans a run directory or polls
+//! the center.
 
-use ctx_traits_io::center::{self, CenterEvent, CenterPublicRow};
+use ctx_traits_io::center::{self, CenterDelta, CenterEvent, CenterPublicRow};
 
-/// One update the UI thread may act on.
+/// One update the UI thread may act on, in the exact order the center
+/// produced it.
 pub enum LinkUpdate {
     Snapshot(Vec<CenterPublicRow>),
+    Delta(CenterDelta),
     Unavailable(String),
 }
 
 /// Stages snapshot rows between `SnapshotStart` and `SnapshotEnd`, mirroring
-/// the TUI dashboard worker's staging rule: never publish a partial set.
+/// the TUI dashboard worker's staging rule: never publish a partial set. A
+/// delta that races a snapshot in flight is buffered rather than dropped or
+/// reordered, and is replayed immediately after the snapshot it raced.
 #[derive(Default)]
 pub struct SnapshotAssembler {
     staged: Vec<CenterPublicRow>,
+    buffered_deltas: Vec<CenterDelta>,
     receiving: bool,
 }
 
 impl SnapshotAssembler {
-    /// Returns `Some(rows)` only at a complete `SnapshotStart..SnapshotEnd`
-    /// boundary.
-    pub fn accept(&mut self, event: CenterEvent) -> Option<Vec<CenterPublicRow>> {
+    /// Returns the updates this event yields, in arrival order. Normally
+    /// empty or a single element; a `SnapshotEnd` that closes a boundary with
+    /// races buffered behind it returns the snapshot followed by each raced
+    /// delta, oldest first.
+    pub fn accept(&mut self, event: CenterEvent) -> Vec<LinkUpdate> {
         match event {
             CenterEvent::SnapshotStart => {
                 self.staged.clear();
+                self.buffered_deltas.clear();
                 self.receiving = true;
-                None
+                Vec::new()
             }
             CenterEvent::SnapshotRow(row) => {
                 if self.receiving {
                     self.staged.push(*row);
                 }
-                None
+                Vec::new()
             }
             CenterEvent::SnapshotEnd => {
+                if !self.receiving {
+                    return Vec::new();
+                }
+                self.receiving = false;
+                let rows = std::mem::take(&mut self.staged);
+                let deltas = std::mem::take(&mut self.buffered_deltas);
+                let mut updates = Vec::with_capacity(1 + deltas.len());
+                updates.push(LinkUpdate::Snapshot(rows));
+                updates.extend(deltas.into_iter().map(LinkUpdate::Delta));
+                updates
+            }
+            CenterEvent::Delta(delta) => {
                 if self.receiving {
-                    self.receiving = false;
-                    Some(std::mem::take(&mut self.staged))
+                    self.buffered_deltas.push(delta);
+                    Vec::new()
                 } else {
-                    None
+                    vec![LinkUpdate::Delta(delta)]
                 }
             }
-            // Delta application is 0256.4's; it must not end or corrupt a
-            // snapshot in flight, so it is simply ignored here.
-            CenterEvent::Delta(_) => None,
         }
     }
 }
 
 /// Start the background link thread and return the channel its updates
 /// arrive on. Connecting and forwarding both happen off the caller's thread.
+/// The blocking `recv()` loop stays on this dedicated thread — never on
+/// gpui's UI thread — and feeds one unbounded channel, which is what
+/// preserves subscription order end to end.
 pub fn start(repo_key: Option<String>) -> async_channel::Receiver<LinkUpdate> {
     let (tx, rx) = async_channel::unbounded();
     std::thread::spawn(move || {
@@ -64,10 +87,10 @@ pub fn start(repo_key: Option<String>) -> async_channel::Receiver<LinkUpdate> {
         };
         let mut assembler = SnapshotAssembler::default();
         while let Ok(event) = subscription.recv() {
-            if let Some(rows) = assembler.accept(event)
-                && tx.send_blocking(LinkUpdate::Snapshot(rows)).is_err()
-            {
-                break;
+            for update in assembler.accept(event) {
+                if tx.send_blocking(update).is_err() {
+                    return;
+                }
             }
         }
         // `recv()` returning Err means the center closed; deciding what the
@@ -95,35 +118,62 @@ mod tests {
         })
     }
 
+    fn ended_delta(run_id: &str) -> CenterDelta {
+        CenterDelta::Ended { row: row(run_id) }
+    }
+
+    fn snapshot_run_ids(updates: &[LinkUpdate]) -> Vec<&str> {
+        match updates.first() {
+            Some(LinkUpdate::Snapshot(rows)) => {
+                rows.iter().map(|r| r.summary.run_id.as_str()).collect()
+            }
+            _ => panic!(
+                "expected a leading snapshot update, got {} updates",
+                updates.len()
+            ),
+        }
+    }
+
+    fn delta_run_ids(updates: &[LinkUpdate]) -> Vec<&str> {
+        updates
+            .iter()
+            .filter_map(|update| match update {
+                LinkUpdate::Delta(delta) => Some(delta.row().summary.run_id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn complete_snapshot_yields_exactly_its_rows() {
         let mut assembler = SnapshotAssembler::default();
-        assert_eq!(assembler.accept(CenterEvent::SnapshotStart), None);
-        assert_eq!(assembler.accept(CenterEvent::SnapshotRow(row("a"))), None);
-        assert_eq!(assembler.accept(CenterEvent::SnapshotRow(row("b"))), None);
-        let rows = assembler
-            .accept(CenterEvent::SnapshotEnd)
-            .expect("complete snapshot");
-        assert_eq!(
-            rows.iter()
-                .map(|r| r.summary.run_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["a", "b"]
+        assert!(assembler.accept(CenterEvent::SnapshotStart).is_empty());
+        assert!(
+            assembler
+                .accept(CenterEvent::SnapshotRow(row("a")))
+                .is_empty()
         );
+        assert!(
+            assembler
+                .accept(CenterEvent::SnapshotRow(row("b")))
+                .is_empty()
+        );
+        let updates = assembler.accept(CenterEvent::SnapshotEnd);
+        assert_eq!(snapshot_run_ids(&updates), vec!["a", "b"]);
+        assert_eq!(updates.len(), 1);
     }
 
     #[test]
     fn rows_before_snapshot_start_are_ignored() {
         let mut assembler = SnapshotAssembler::default();
-        assert_eq!(
-            assembler.accept(CenterEvent::SnapshotRow(row("stray"))),
-            None
+        assert!(
+            assembler
+                .accept(CenterEvent::SnapshotRow(row("stray")))
+                .is_empty()
         );
-        assert_eq!(assembler.accept(CenterEvent::SnapshotStart), None);
-        let rows = assembler
-            .accept(CenterEvent::SnapshotEnd)
-            .expect("complete snapshot");
-        assert!(rows.is_empty());
+        assert!(assembler.accept(CenterEvent::SnapshotStart).is_empty());
+        let updates = assembler.accept(CenterEvent::SnapshotEnd);
+        assert!(snapshot_run_ids(&updates).is_empty());
     }
 
     #[test]
@@ -133,42 +183,67 @@ mod tests {
         assembler.accept(CenterEvent::SnapshotRow(row("discarded")));
         assembler.accept(CenterEvent::SnapshotStart);
         assembler.accept(CenterEvent::SnapshotRow(row("kept")));
-        let rows = assembler
-            .accept(CenterEvent::SnapshotEnd)
-            .expect("complete snapshot");
-        assert_eq!(
-            rows.iter()
-                .map(|r| r.summary.run_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["kept"]
-        );
+        let updates = assembler.accept(CenterEvent::SnapshotEnd);
+        assert_eq!(snapshot_run_ids(&updates), vec!["kept"]);
     }
 
     #[test]
-    fn a_delta_mid_snapshot_neither_emits_nor_corrupts() {
+    fn a_second_snapshot_start_discards_buffered_deltas_too() {
         let mut assembler = SnapshotAssembler::default();
         assembler.accept(CenterEvent::SnapshotStart);
         assembler.accept(CenterEvent::SnapshotRow(row("a")));
-        assert_eq!(
-            assembler.accept(CenterEvent::Delta(
-                ctx_traits_io::center::CenterDelta::Ended { row: row("a") }
-            )),
-            None
+        assert!(
+            assembler
+                .accept(CenterEvent::Delta(ended_delta("stale")))
+                .is_empty()
         );
-        let rows = assembler
-            .accept(CenterEvent::SnapshotEnd)
-            .expect("complete snapshot");
-        assert_eq!(
-            rows.iter()
-                .map(|r| r.summary.run_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["a"]
+        // The stream aborts and restarts before this delta was ever emitted.
+        assembler.accept(CenterEvent::SnapshotStart);
+        assembler.accept(CenterEvent::SnapshotRow(row("b")));
+        let updates = assembler.accept(CenterEvent::SnapshotEnd);
+        assert_eq!(snapshot_run_ids(&updates), vec!["b"]);
+        assert!(delta_run_ids(&updates).is_empty());
+    }
+
+    #[test]
+    fn a_delta_mid_snapshot_is_emitted_after_the_snapshot_in_arrival_order() {
+        let mut assembler = SnapshotAssembler::default();
+        assembler.accept(CenterEvent::SnapshotStart);
+        assembler.accept(CenterEvent::SnapshotRow(row("a")));
+        assert!(
+            assembler
+                .accept(CenterEvent::Delta(ended_delta("first")))
+                .is_empty()
         );
+        assert!(
+            assembler
+                .accept(CenterEvent::Delta(ended_delta("second")))
+                .is_empty()
+        );
+        let updates = assembler.accept(CenterEvent::SnapshotEnd);
+        assert_eq!(snapshot_run_ids(&updates), vec!["a"]);
+        assert_eq!(delta_run_ids(&updates), vec!["first", "second"]);
+        // The snapshot update precedes both deltas.
+        assert!(matches!(updates[0], LinkUpdate::Snapshot(_)));
+        assert!(matches!(updates[1], LinkUpdate::Delta(_)));
+        assert!(matches!(updates[2], LinkUpdate::Delta(_)));
+    }
+
+    #[test]
+    fn a_post_snapshot_delta_is_emitted_immediately_alone() {
+        let mut assembler = SnapshotAssembler::default();
+        assembler.accept(CenterEvent::SnapshotStart);
+        let updates = assembler.accept(CenterEvent::SnapshotEnd);
+        assert_eq!(updates.len(), 1);
+
+        let updates = assembler.accept(CenterEvent::Delta(ended_delta("later")));
+        assert_eq!(updates.len(), 1);
+        assert_eq!(delta_run_ids(&updates), vec!["later"]);
     }
 
     #[test]
     fn snapshot_end_without_a_start_emits_nothing() {
         let mut assembler = SnapshotAssembler::default();
-        assert_eq!(assembler.accept(CenterEvent::SnapshotEnd), None);
+        assert!(assembler.accept(CenterEvent::SnapshotEnd).is_empty());
     }
 }

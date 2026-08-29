@@ -62,8 +62,9 @@ desktop reports it unavailable rather than connecting to it.
 
 The desktop **never launches a center** — `subscribe_existing` only connects
 to one that is already serving, fails fast otherwise, and never retries.
-Absent-center startup posture and reconnection are 0256.5's; applying later
-deltas after the initial snapshot is 0256.4's.
+Absent-center startup posture, mid-stream disconnect, and reconnection are
+0256.5's; forwarding later deltas after the initial snapshot is 0256.4's (see
+below).
 
 For `just desktop-run` to show anything, start a matching-version center
 first, e.g. from the repo root:
@@ -101,11 +102,11 @@ the scoped view exercisable and testable; no scope control exists in the
 window yet; adding one is a later task.
 
 The list is a plain `div().id("run-list").flex_col().overflow_y_scroll()`
-column, one row per `RunRow`, projected fresh on every render call. That
-re-projection and the unvirtualized row list are accepted at this
-walking-skeleton's scale — see 0256.4 for turning the raw row `Vec` into a
-`ledger_path`-keyed map with a cached projection, and `uniform_list` for
-virtualization if the list ever needs it.
+column, one row per `RunRow`. As of 0256.4 the render call reads a cached
+projection off `Dashboard` rather than re-projecting a raw `Vec` — see below.
+The unvirtualized row list is still accepted at this walking-skeleton's
+scale; `uniform_list` is the option for virtualization if the list ever
+needs it.
 
 `elapsed_text` and `tokens_text` intentionally mirror
 `ctx_traits_cli::app::tui::elapsed_text` and
@@ -119,3 +120,58 @@ Manual smoke test: with a matching-version center running (see above),
 `just desktop-run` should open a window listing every run the center knows
 about, grouped implicitly by the order above (live first, then newest
 ledger modification, ties broken by `ledger_path`).
+
+## Live deltas (0256.4)
+
+Past the initial snapshot, the background link thread keeps forwarding
+`CenterDelta` events off the same blocking `recv()` loop, over the same
+single unbounded `async-channel`, to the same single `cx.spawn` consumer in
+`Shell`. `SnapshotAssembler::accept` now returns a `Vec<LinkUpdate>` (usually
+empty or one element) instead of `Option<Vec<row>>`, so a delta that races a
+`SnapshotStart..SnapshotEnd` boundary is buffered and replayed immediately
+after the snapshot it raced, rather than dropped or reordered. One thread
+feeding one channel feeding one consumer, applied sequentially, is what
+keeps subscription order intact end to end — there is deliberately no
+second channel, second spawn, or coalescing/batching layer, which is the
+only realistic way this ordering guarantee breaks.
+
+`src/dashboard.rs`'s `Dashboard` is the model this stream now drives
+exclusively: a `ledger_path`-keyed `HashMap<String, CenterPublicRow>`, plus a
+`Vec<RunRow>` projection cache rebuilt through `run_row::project` only when a
+delta actually changes the keyed row for its `ledger_path` — `ActivityLine`
+never mutates the map, and neither does a no-op fold: an `Appeared`/
+`RowChanged` replaying content already present, or an `Ended` for a key not
+in the model. `Dashboard::apply` reports whether the *visible* projection
+changed, which can be `false` even for a real model change the current
+`RepoScope` still hides — that update is retained in the model and
+reappears once the scope widens. `Shell::apply` installs a `Snapshot`
+as a wholesale replacement (never a merge) and folds a `Delta` in only once
+already `Connected` — a delta arriving before any snapshot cannot occur in a
+conformant ordered stream and is dropped rather than treated as coherent
+state. `Shell::set_scope` re-scopes both `Shell` and the live `Dashboard` so
+the cache stays in sync.
+
+The insert/update/remove rule itself —
+`ctx_traits_io::center::CenterDelta::apply_to` — is shared with the CLI
+dashboard worker (`modules/cli/src/app/dashboard/worker.rs`), which now
+delegates its `apply_delta` to it. It is protocol semantics, not
+presentation: only `Ended` removes a row; a completed run arrives as
+`RowChanged` and is retained. Treating `Ended` as "run finished" would be a
+visible correctness bug and a divergence from the TUI's own behaviour — see
+the unit tests guarding it in both `modules/io/src/center.rs` and
+`dashboard.rs`.
+
+Re-projection is a full `run_row::project` (filter + sort) per changed
+delta, applied in place with no clone-and-roll-back — the desktop's
+projection is infallible, unlike the CLI worker's, which clones per delta to
+support a renderer that can reject a projection. O(n log n) per delta with
+an unvirtualized list is accepted deliberately at this scale, same as the
+unvirtualized-list note above; the incremental-insert option was considered
+and declined for the same one-code-path reason.
+
+Not yet built (0256.5's): recovering from an absent center, a mid-stream
+disconnect, bounded-subscriber eviction/backpressure (today's channel is
+unbounded — the real backpressure is the center's own bounded subscriber
+queue), resubscription, and any stale-state presentation. Row selection, run
+detail, control verbs, and virtualization remain out of scope for the
+dashboard entirely, for now.

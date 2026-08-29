@@ -4,8 +4,8 @@ use gpui::{
 };
 
 use crate::center_link::{self, LinkUpdate};
-use crate::run_row::{self, RepoScope};
-use ctx_traits_io::center::CenterPublicRow;
+use crate::dashboard::Dashboard;
+use crate::run_row::RepoScope;
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -24,7 +24,7 @@ pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
 
 pub enum CenterState {
     Connecting,
-    Connected { rows: Vec<CenterPublicRow> },
+    Connected { dashboard: Dashboard },
     Unavailable { message: String },
 }
 
@@ -59,14 +59,34 @@ impl Shell {
     /// Exposed so the scoped view is exercisable and testable ahead of any UI
     /// control for it — a control is out of scope for this task.
     pub fn set_scope(&mut self, scope: RepoScope) {
-        self.scope = scope;
+        self.scope = scope.clone();
+        if let CenterState::Connected { dashboard } = &mut self.center {
+            dashboard.set_scope(scope);
+        }
     }
 
     fn apply(&mut self, update: LinkUpdate) {
-        self.center = match update {
-            LinkUpdate::Snapshot(rows) => CenterState::Connected { rows },
-            LinkUpdate::Unavailable(message) => CenterState::Unavailable { message },
-        };
+        match update {
+            LinkUpdate::Snapshot(rows) => {
+                // A snapshot always installs a coherent `Connected` state,
+                // replacing whatever came before it (including a prior
+                // `Connected` dashboard — 0256.5's recovery case).
+                self.center = CenterState::Connected {
+                    dashboard: Dashboard::from_snapshot(rows, self.scope.clone()),
+                };
+            }
+            LinkUpdate::Delta(delta) => {
+                // A delta before any snapshot cannot occur in a conformant
+                // ordered stream; drop it rather than paint incomplete state
+                // as coherent.
+                if let CenterState::Connected { dashboard } = &mut self.center {
+                    dashboard.apply(delta);
+                }
+            }
+            LinkUpdate::Unavailable(message) => {
+                self.center = CenterState::Unavailable { message };
+            }
+        }
     }
 }
 
@@ -77,11 +97,8 @@ impl Render for Shell {
             CenterState::Unavailable { message } => {
                 div().child(format!("center unavailable: {message}"))
             }
-            CenterState::Connected { rows } => {
-                // Projected fresh per render at walking-skeleton scale; 0256.4
-                // is where `rows` becomes a `ledger_path`-keyed map and this
-                // projection gets cached against delta application instead.
-                let projected = run_row::project(rows, &self.scope);
+            CenterState::Connected { dashboard } => {
+                let projected = dashboard.rows();
                 let header = match &self.scope {
                     RepoScope::All => format!("{} runs", projected.len()),
                     RepoScope::Repo(repo_key) => {
@@ -94,7 +111,7 @@ impl Render for Shell {
                     .flex_col()
                     .size_full()
                     .overflow_y_scroll();
-                for row in &projected {
+                for row in projected {
                     list = list.child(
                         div()
                             .flex()
