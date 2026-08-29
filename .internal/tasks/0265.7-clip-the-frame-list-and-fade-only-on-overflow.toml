@@ -1,39 +1,706 @@
 schema-version = "0.2"
 key = "0265.7"
 title = "Clip the frame list and fade only on overflow"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-Grammar rule 9 governs what happens when a list is longer than its pane, and the Sessions frame list is the first list in the application that can be. The container sets clip. When — and only when — content overflows, a full-pane-width gradient overlay sits above the bottom bar: canvas colour, alpha 0 at the top rising to opaque at 80% and 100%, height 100, with `scroll to end` centred near its bottom in mono 10.5 `text-faint`.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-The rule's teeth are in its last clause: **no fade when content fits.** That makes this a measuring primitive rather than a decorating one — it has to know whether the content actually exceeds the container before it paints anything, and an always-painted fade is the failure mode the rule names explicitly. Building it here, against a real list with a real overflow case, is what makes it reusable by the four later screens without each of them re-deciding when the gradient appears.
+Grammar rule 9 governs what happens when a list is longer than its pane, and the
+Sessions frame list `0265.5` landed is the first list in the application that can
+be. The container clips. When — and only when — content overflows, a
+full-pane-width gradient overlay sits above the bar: canvas colour, alpha 0 at
+the top rising to opaque at 80% and 100%, height 100, with `scroll to end`
+centred near its bottom in mono 10.5 `text-faint`. Content that fits gets no fade
+(`grammar.md:86-91`; `screens/sessions.md:19` tags the frame list as its first
+consumer; `gpui-desktop-face-design.md:59-61` restates the decisive condition).
+
+The rule's teeth are in its last clause: **no fade when content fits.** That
+makes this a measuring primitive rather than a decorating one. It has to know
+whether the content actually exceeds its container before it paints anything, and
+an always-painted fade is the failure mode the rule names by name. Building it
+here, against a real list with a real overflow case, is what lets the four later
+screens compose it without each re-deciding when the gradient appears
+(`0265:70-78`; `0269.1:38` and `0269.2:46` already restate the rule for Merges).
+
+## Six corrections to the draft this plan replaces
+
+**Correction 1 — the overlay is a child of the pane, not of the thing it covers.**
+The draft says the gradient "sits above the bottom bar" and leaves its parenting
+open. The export fixes it: `Main Pane` is `position: relative`
+(`reference/sessions.html:251-254`), `Frames Section` is the clipped viewport at
+`overflow: hidden`, `flex: 1 1 0`, z-index 1 (`:289-295`), `Frame Rows` is the
+measured content at `flex-shrink: 0`, `height: fit-content` (`:293-296`), and
+`Bottom Fade` is an *absolute* box at `left: 0`, z-index 3, in the pane's
+positioning context — a sibling of the clipped section, not a descendant of it
+(`:620-630`). This is not cosmetic. An overlay parented inside the clipped
+viewport is itself clipped, and one parented inside the scrolled content scrolls
+away with it — in both cases the fade disappears exactly when the rule says it
+must appear. Ruling: the overlay lives outside the clipped subtree, in the pane's
+own positioning context, painting over the clipped content rather than within it.
+
+**Correction 2 — `full-pane-width` is the pane including its padding, and 800 is a
+measurement, not a constant.** At the export's 1440 width the pane is 800 wide
+after the 260 rail and the 380 preview column (`:93`, `:251-254`, `:634`), while
+its 40 horizontal padding leaves the list content only 720 wide. The fade is
+`left: 0`, `width: 800px` — it spans the whole pane, deliberately wider than the
+list it covers, which is why rule 9 says *full-pane-width* rather than
+full-list-width. Ruling: the overlay derives the pane's current width; 800 is
+what the reference pane measured at one window size and is never a literal.
+
+**Correction 3 — the overlay's bottom edge is the clipped viewport's bottom, not
+the bar's top and not `top: 675`.** The export's fade is `top: 675px`,
+`height: 100px`, so its bottom edge is 775. The window is 900 with a 36 title bar
+(`:26`, `:29`), leaving 864 of body; the pane is `height: 100%` with bottom
+padding 20, so the pane's content box ends at 844; the `Run Bar` is a
+non-shrinking sibling with padding `[10,14]` and a 1px border around 11px mono
+(`:575-577`), and the pane's gap is 28 — which puts the clipped section's bottom
+edge within a few px of 775 and the bar's top edge roughly 30 lower down the
+stack. The fade's bottom therefore tracks the *clipped viewport's* bottom edge,
+not the bar's top; it covers the last 100 of clipped content and leaves the 28
+gap and the bar untouched. (The bar's exact height depends on the resolved
+line-height of `line-height: normal`, so treat the arithmetic as corroborating
+the anchor, not as a target to reproduce.) Ruling: anchor the overlay's bottom to
+the clipped viewport's own resolved bottom edge. Anchoring it to the bar would
+paint across the gap, and would break on `0266`-`0269`, whose bars differ and
+which are the documented consumers of this vocabulary. Rule 9's "above the bar"
+is a statement about not covering the bar — the export's z-index 3 over the bar's
+2 only matters against the clipped content at z-index 1, since the two boxes do
+not overlap.
+
+**Correction 4 — a row count cannot decide overflow, because the rows are not a
+fixed height.** The frame list is heterogeneous by specification: ordinary done
+rows, loop-narration lines, a taller current row whose description is 430 wide at
+line-height 16 and therefore wraps to a variable number of lines, an activity
+block of up to eight lines at gap 3, and pending rows
+(`screens/sessions.md:19-31`, `0265:108-110`). The same eight rows can fit or
+overflow depending on one description's wrap and on how many activity lines have
+arrived. Ruling: the comparison is between the clipped viewport's resolved height
+and its content's resolved height, taken from the layout pass. Content height
+*equal* to viewport height is the fit case and paints nothing; only strictly
+greater is overflow. Before a valid measurement exists the primitive paints no
+fade — an optimistic or default-on overlay is the exact violation rule 9 names,
+and defaulting the other way is the safe direction because a briefly-missing fade
+is a hint, while a wrongly-present one is a lie about the content.
+
+**Correction 5 — "measurement does not block the UI thread" is the absence of
+added blocking work, not a claim about which thread gpui lays out on.** The draft
+states the constraint as if measurement could simply be moved off-thread. It
+cannot be grounded from this tree whether the locked gpui revision runs its
+layout callbacks on or off the main thread, and a layout pass is by construction
+part of producing a frame — a plan that ordered measurement onto another thread
+would be prescribing an architecture it cannot see. The parent's robustness
+inheritance is about *stalls* (`0265:66`). Ruling: the binding, observable
+property is that this cut adds no blocking wait, sleep or join, no filesystem,
+socket, ledger or sidecar read, no timer, animation clock or poll loop, and no
+second layout model maintained beside gpui's own on the render path. Whatever
+measurement mechanism the landed desktop code already established is the one to
+reuse; inventing a parallel one is the defect this replaces the draft's phrasing
+to prevent.
+
+**Correction 6 — rule 9 and rule 11 are two different fades that coexist, and
+`scroll to end` is a label rather than an affordance.** Rule 11's activity fade is
+a per-line positional opacity ramp from 1.0 to about 0.45 over up to eight lines
+(`grammar.md:104-108`), owned by `0265.6`; rule 9's is a canvas-coloured gradient
+overlay outside the content. With a live current row and an overflowing list both
+are on screen at once, and neither substitutes for the other. Ruling: no shared
+"fade" abstraction spans the two, and this cut does not touch the activity ramp.
+Separately, this task ships the `scroll to end` text without shipping scroll
+input: rule 9 specifies the label, the target excludes scroll handling beyond
+what clipping requires, so the label is plain centred text with no click target,
+no hover state, no cursor change, no scrollbar, arrow or icon, and no corner
+radius — rule 3 closes the glyph set and forbids radius inside the canvas
+(`grammar.md:31-37`). The existing TUI's `ViewportScroll`
+(`modules/cli/src/app/tui_kit.rs:206-274`) is not this primitive: it tracks a
+row-count length and an offset, measures no pixels, owns input behaviour that is
+out of scope here, and is CLI-private, which the parent forbids the desktop from
+importing.
+
+## Grounded against HEAD 32642ef5b
+
+Nothing this task edits exists yet. Root `Cargo.toml:1-12` names the seven
+existing Rust members and excludes only `packages/cdk`; there is no desktop
+manifest, no desktop lockfile, no gpui source tree and no desktop command
+anywhere in the repository, and neither `Cargo.lock` nor `Justfile` nor any CI
+workflow mentions gpui. No shared overflow-measurement primitive exists in the
+workspace's Rust or TypeScript. The one prerequisite `0265.5` is `ready` rather
+than done, and it reaches `0265.3`, `0265.1`, `0257` and the whole `0256` chain
+transitively, so by execution time the standalone shell, the token entry point,
+the bottom bar and main-pane composition, and the frame-list primitive have all
+landed. Every desktop path, module name, symbol and signature named below is
+therefore a guess to be replaced by reading what `0256.1`, `0265.1`, `0265.3` and
+`0265.5` actually landed.
+
+**No command in this repository executes a gpui render, so none is declared as a
+board check.** A check runs under `sh -c` in a clean detached worktree of the
+merged sha, so a command written here on the expectation that a dependency
+creates it later would read as evidence while being unrunnable. The three
+declared checks are commands that exist in this tree today, and they include the
+repository's own landing gate `just test-full` (`Justfile:148-180`).
+
+**The desktop lane the dependency chain lands is nonetheless the binding gate for
+rendered behaviour.** `0256.1` does not close until its documented independent
+build and test commands pass from a clean checkout, so by execution time that
+lane and its documented non-interactive command exist. Read the command out of
+the landed lane's own documentation — manifest, README, justfile or CI lane —
+extend that existing harness with this cut's cases, run it, and name it verbatim
+with its outcome. Goal 12 binds it. If the lane is absent at execution time, the
+prerequisite chain was not honoured: report an unmet dependency and do not pass
+the task. Do not stand up a lane of the run's own.
+
+**The static export demonstrates only the overflow case.** It is one measurement
+of one overflowing list; it contains no evidence about what a fitting list looks
+like, which is the half of rule 9 most likely to ship broken. The fit case can
+only be established by running layout over content that fits, which makes goal 12
+load-bearing here in a way a diff read cannot substitute for.
+
+**Static review decides the structural half and cannot decide the runtime half.**
+The closing reads of `git diff main...HEAD`, `git diff --name-only main...HEAD`
+and `git status --short` establish what a running harness does not show cheaply —
+a caller-supplied overflow boolean, a row-count approximation, call-site literals,
+a duplicated overflow implementation, CLI-private imports, timers and polls,
+scope, and untouched design artifacts — and they satisfy the parent's review
+clause (`0265:104-112`). They do not establish that anything clipped, measured or
+painted.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: clipping the Sessions frame list, measuring whether its content overflows, and painting the gradient and its centred `scroll to end` label only in the overflow case — as a primitive the later screens' lists compose.
-- **The primitive measures.** A screen that has to tell it "you are overflowing" has had the rule pushed back onto it.
-- The gradient is the canvas colour from the token set, not a hand-mixed value, and carries no corner radius.
-- Out of scope: scroll input handling beyond what clipping requires, the activity fade (`0265.6`, a different rule with a different ramp), the preview column, and every other screen region.
-- The exact measurement mechanism and how it interacts with gpui's layout pass are the architect's call; what is fixed is that the fade's presence is a function of measured overflow and that measuring does not block the UI thread.
+### What decides these goals
 
-## Prerequisite
+Three mechanisms decide the goals below, and each is used only for what it can
+actually observe.
 
-`0265.5` — the frame list this clips, whose row forms give it something to overflow with.
+**The desktop lane, executed.** Clipping, measurement, conditional visibility,
+overlay geometry and re-measurement on change are runtime outcomes; they are
+decided by focused coverage run in the desktop build-and-test lane that `0256.1`
+lands, whose exact documented non-interactive command is discovered at execution
+time and must exit 0 (goal 12). No goal names that command and no check declares
+it: it does not exist at the HEAD this plan was written against, and a board
+check must already exist and run repo-root-relative in a clean detached worktree.
+The obligation is unconditional even though the command is unnameable — an absent
+lane at execution time is an unmet dependency that prevents this task from
+passing, not permission to accept those outcomes on a diff read.
+
+**The three declared checks**, which exist in this repository today and decide
+every workspace-side invariant:
+
+- The root gpui-free resolution check — root Cargo resolution and the root
+  `Cargo.lock` stay free of gpui.
+- `just test` — the per-round workspace gate (`cargo test --workspace --lib` plus
+  the format/lint/SDK/TS steps, `Justfile:111-146`), green and unchanged in cost.
+- `just test-full` — the repository's landing gate (`Justfile:148-180`): the
+  per-round gate's surface plus `just ts-test`, `just lint`,
+  `cargo build --workspace --bins` and the full `cargo test --workspace`
+  including the integration proof binaries. It is the gate nothing lands without,
+  and this cut passes it unconditionally.
+
+This cut is expected to land nothing in the workspace crates, so these three
+decide that the workspace stayed untouched and green rather than that anything
+this task renders is correct. If a shared extraction does turn out to be needed,
+they decide its semantics too, and no focused filter check is declared here
+because no existing test filter covers overflow measurement — declaring one that
+matched nothing would pass while proving nothing.
+
+**The closing static read** of the diff printed by `git diff main...HEAD`,
+`git diff --name-only main...HEAD` and `git status --short` — commands that exist
+today — against `grammar.md:31-37` and `86-91`, `screens/sessions.md:19-31`,
+`tokens.md:15-85` and `reference/sessions.html:251-296`, `575-577`, `620-630`.
+Its inspection list is fixed by goal 11. It decides code shape and forbidden
+constructs, never that something rendered; wherever a goal names a runtime
+outcome the desktop lane decides it and this read only supplements. It cannot be
+a board check, because a check runs in a clean detached worktree of the merged
+sha with no base to diff against.
+
+1. **The frame list clips.** The container holding the frame rows sets clip, so
+   content taller than the container is cut at the container's bounds rather than
+   overflowing the pane, spilling into the bar, or forcing the pane to grow. The
+   clipped viewport is the flex-filling region and the measured content inside it
+   is the fit-content column of rows (`reference/sessions.html:289-296`).
+   Decided by focused coverage in the landed desktop lane (goal 12) that content
+   exceeding the container is visually cut at the container bound and that
+   neither the pane nor the bar is displaced by it.
+   Excluded: growing the pane to fit; a scrollbar, gutter or track; letting rows
+   paint over the bar; clipping the pane rather than the list region.
+
+2. **Overflow is decided by comparing resolved geometry, and equality is fit.**
+   The primitive compares the clipped viewport's resolved height against its
+   content's resolved height, taken from the layout pass. Strictly greater is
+   overflow; equal is fit (content Correction 4). No row count, item count,
+   estimated row height, character count or heuristic participates, because the
+   list is heterogeneous by specification — a wrapped 430-wide description or an
+   arriving activity line changes content height without changing row count.
+   Decided by focused coverage in the landed desktop lane (goal 12) over content
+   that fits, content at exact fit, and content that exceeds the viewport,
+   including a case where the resolved content height changes while the row count
+   stays fixed and the decision flips from fit to overflow; and by the closing
+   static read for the absence of any count-based or fixed-row-height derivation.
+   Excluded: `rows.len()` compared against a capacity; a per-row height constant;
+   deciding overflow from the data model rather than from layout; treating exact
+   fit as overflow.
+
+3. **The fade is present when and only when content overflows.** In the overflow
+   case the gradient overlay and its `scroll to end` label render. In the fit
+   case neither renders at all — not at zero opacity, not as an empty box, not as
+   a transparent overlay that still intercepts anything. Before a valid
+   measurement exists nothing is painted (content Correction 4).
+   Decided by focused coverage in the landed desktop lane (goal 12) exercising
+   both cases and asserting absence, not merely invisibility, in the fit case;
+   and by the closing static read that no code path paints the overlay
+   unconditionally or defaults it on ahead of a measurement.
+   Excluded: an always-rendered overlay whose opacity or colour is toggled; a
+   fade shown on first frame and corrected later; deciding visibility from
+   whether the list is live, long, or currently scrolled.
+
+4. **The overlay is anchored to the pane, spans the pane, and sits outside the
+   clipped content.** It is a sibling of the clipped viewport within the pane's
+   positioning context, not a descendant of the viewport and not part of the
+   scrolled content (content Correction 1). It spans the pane's full current
+   width including the pane's horizontal padding, derived rather than taken from
+   the reference's 800 (content Correction 2). It is 100 high, its bottom edge is
+   the clipped viewport's resolved bottom edge, and it never covers the bar
+   (content Correction 3). It paints above the clipped content in z-order.
+   Decided by focused coverage in the landed desktop lane (goal 12) that the
+   overlay is not clipped away and does not move with the content, that it spans
+   the pane rather than the narrower list inset, that its height is the token
+   fade height, that its bottom meets the clipped region's bottom, and that the
+   bar remains fully visible beneath it; and by the closing static read against
+   `reference/sessions.html:251-296`, `620-630` for the parenting and for the
+   absence of `800`, `675`, `100` or a bar-derived offset as literals.
+   Excluded: parenting the overlay inside the clipped viewport or inside the row
+   column; sizing it to the list content width; hardcoding the reference pane
+   width, the reference `top`, or the bar's height; overlapping or dimming the
+   bar; painting it beneath the content.
+
+5. **Every gradient and label value comes from the token entry point.** The
+   gradient is the canvas colour at alpha 0 rising to opaque at 80% through 100%
+   over the token fade height of 100 (`grammar.md:86-91`, `tokens.md:85`). The
+   label is `scroll to end` in mono 10.5 `text-faint`, nowrap, horizontally
+   centred, aligned to the overlay's bottom with padding 12
+   (`reference/sessions.html:621-629`). Each of `#0c0d10`, `#4d525c`, IBM Plex
+   Mono, 10.5, 100 and the 80% stop resolves through `0265.1`'s token entry point
+   rather than appearing at this call site.
+   Decided by focused coverage in the landed desktop lane (goal 12) that the
+   rendered overlay carries the canvas gradient reaching opaque at 80% over the
+   token height and that the label renders centred and bottom-padded in the mono
+   meta voice at the faint colour; and by the closing static read for the absence
+   of any colour, size, family, stop, height or spacing literal at a call site.
+   Excluded: a hand-mixed or approximated gradient colour; a linear alpha ramp
+   with no 80% opaque stop; a light-column value; a solid fill instead of a
+   gradient; the label as a different string, size, colour or alignment.
+
+6. **The overlay carries no radius, no glyph and no affordance.** It is a
+   gradient and a line of plain text. No corner radius exists inside the canvas
+   (`grammar.md:36-37`), no scrollbar, track, thumb, arrow, chevron, icon or pill
+   appears, and the label is not a button: no click target, no hover state, no
+   cursor change, no focus ring (content Correction 6).
+   Decided by the closing static read for radius, for any glyph outside
+   `↰ ↳ → · ∷`, and for any mouse, hover, focus or cursor handler introduced by
+   this cut; and by focused coverage in the landed desktop lane (goal 12) that
+   the overlay renders as gradient plus label and nothing else.
+   Excluded: making `scroll to end` clickable — that is scroll behaviour, which
+   this task excludes; a scrollbar as an alternative to the fade; rounding the
+   overlay or the label.
+
+7. **Measurement refreshes when either side changes, and no stale overlay
+   survives a transition.** A change in content height — an accepted frame-list
+   update, a description that rewraps, an arriving activity line — or a change in
+   viewport height from a window or layout resize re-runs the comparison, so the
+   overlay appears on a fit-to-overflow transition and disappears on an
+   overflow-to-fit transition. A previous measurement never leaves the overlay
+   visible over content that now fits, nor absent over content that now
+   overflows.
+   Decided by focused coverage in the landed desktop lane (goal 12) exercising
+   fit-to-overflow and overflow-to-fit in both directions, driven once by a
+   content change and once by a viewport resize, observing the overlay appear and
+   disappear accordingly; and by the closing static read that the measurement is
+   not cached across a layout it no longer describes.
+   Excluded: measuring once at construction; a cache keyed on item count; a
+   debounce, timer or animation tick used to schedule re-measurement; deferring
+   the disappearance so the fade lingers over content that fits.
+
+8. **The primitive measures; no caller tells it whether it is overflowing.** The
+   reusable component owns both the measurement and the visibility decision, so a
+   screen composing it supplies content and geometry and nothing else. Its
+   content is opaque to it — the component knows nothing of frame rows, current
+   rows, narration or activity — so `0265.6`'s content composes into it without
+   duplicating overflow logic, and the later screens' lists compose it without
+   re-deciding rule 9.
+   Decided by the closing static read of `git diff main...HEAD` showing no
+   `is_overflowing`, `has_overflow`, `show_fade` or equivalent boolean crossing
+   the component's boundary from a caller, no frame-row or Sessions-specific type
+   in the component's signature, and exactly one overflow implementation in the
+   desktop; and by focused coverage in the landed desktop lane (goal 12) that the
+   same component renders correctly over content of a shape it does not know.
+   Excluded: an API taking a caller-computed overflow flag or a caller-computed
+   content height; the Sessions screen computing overflow and the component only
+   drawing; a second overflow path added anywhere in the desktop.
+
+9. **Reuse stops at this cut's demonstrated need.** One measured overflow
+   container with its overlay, extracted because this list needs it and the later
+   screens are documented consumers of the vocabulary (`0265:53-67`). Not a
+   component registry, not a generic design system, not a scroll-controller
+   framework, and no variants, options or configuration for screens that do not
+   exist yet.
+   Decided by the closing static read of `git diff main...HEAD` for surface added
+   beyond one container and its overlay — parameters no current caller passes,
+   trait or macro layers, feature flags, or a primitives module built out ahead of
+   a consumer.
+   Excluded: horizontal-overflow, top-fade, both-edges or fade-height variants;
+   a scroll position, offset or programmatic scroll API; abstracting rule 9 and
+   rule 11 behind one shared "fade" type (content Correction 6).
+
+10. **This cut adds no blocking work and no sibling behaviour.** No blocking wait,
+    sleep or join, no filesystem, socket, ledger, sidecar or store read, no
+    timer, interval, spawned tick or animation clock, no poll loop, and no second
+    layout model maintained beside gpui's own on the render path (content
+    Correction 5). Nothing CLI-private is imported, `ViewportScroll` included. No
+    scroll-input handling beyond what clipping requires, no activity fade, no
+    frame-row form, no bar behaviour, no preview column, no frame counter, and no
+    file under `.internal/docs/design/` is modified. Any conflict found between
+    the artifacts is raised as an owner correction, never edited into them.
+    Decided, for the artifacts, by `git diff --name-only main...HEAD` — the
+    changed-file list of this cut against its base — containing no path under
+    `.internal/docs/design/`; and, for everything else, by the closing
+    substantive read of `git diff main...HEAD`. Sibling scope is judged by
+    behaviour and diff content, never by which task last touched a file: editing
+    a surface `0265.5` landed — wrapping its frame list in the clipped container,
+    composing the overlay into the pane it built — is the composition this cut
+    exists to perform, and is legitimate wherever a goal above requires it.
+    Substitute the run's actual base branch if it is not `main`
+    (`git merge-base` resolves it).
+
+11. **The workspace does not learn about gpui, and the pass is reviewed once and
+    bounded.** Root Cargo resolution and the root `Cargo.lock` stay gpui-free,
+    the desktop project is not a workspace member, and both workspace gates stay
+    green — decided by the three declared checks. Before the task is called done,
+    the diff printed by `git diff main...HEAD` is read against `grammar.md`,
+    `screens/sessions.md`, `tokens.md` and `reference/sessions.html`,
+    specifically inspecting for: a caller-supplied overflow boolean, a row-count
+    or fixed-height approximation, an always-painted or default-on fade, a second
+    overflow implementation, any merging of rule 9 with rule 11's opacity ramp,
+    literals at render call sites, a scrollbar, glyph, radius or click affordance,
+    a blocking wait, I/O, timer or poll, a CLI-private import, an overlay
+    parented inside the clipped content or sized to the list inset, generality
+    beyond one container, and scope. The tree it was read from is the tree that
+    lands: `git status --short` prints nothing.
+    Exactly one targeted repair cycle is allowed: run the commands in the order
+    given under Bounded refinement — the discovered desktop lane command first —
+    repair one named failure, and rerun that command and everything after it. If
+    a second cycle would be needed, stop and report the exact failing command — or
+    the unresolved visual contract — with its evidence, rather than iterating.
+    Excluded: adding the desktop project to root workspace members; adding gpui
+    cost to the existing CI lanes; a grep forbidding the word `gpui` in
+    `Justfile` or `.github/workflows/` — a *separate* desktop lane there is
+    sanctioned, so such a check would red on the sanctioned outcome.
+
+12. **The landed desktop lane runs green over this cut's cases.** The exact
+    documented non-interactive build-and-test command of the desktop lane
+    `0256.1` landed is discovered at execution time, extended with focused
+    coverage of the outcomes goals 1-8 assign to it — content that fits rendering
+    no overlay and no label at all, content at exact fit rendering none, content
+    that exceeds the viewport rendering the clipped list plus the pane-spanning
+    100-high canvas overlay with its centred bottom-padded mono 10.5 `text-faint`
+    label, the overlay surviving outside the clipped subtree rather than being
+    clipped or scrolled away, the bar fully visible beneath it, a resolved
+    content-height change at a fixed row count flipping the decision from fit to
+    overflow, and fit-to-overflow and overflow-to-fit transitions driven both by
+    content change and by viewport resize — run, and green. It exits 0, and the
+    work summary names it verbatim with its outcome.
+    Decided by that command's exit status, reported verbatim. It is not declared
+    as a board check because no such command exists at the HEAD this plan was
+    written against and a check must already exist; that is a naming limit, not a
+    relaxation. If the lane is absent at execution time, the prerequisite chain
+    `0265.5` → `0265.3` → `0265.1` → `0256.1` was not honoured: that is an unmet
+    dependency, it is reported as one, and this task does not pass.
+    Excluded: standing up a parallel desktop lane of the run's own; substituting
+    workspace commands or the closing diff read for it; weakening the coverage to
+    compile-only or to the overflow case alone — the fit case is the half the
+    export cannot demonstrate; declaring it as a board check.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against, and
+the prerequisite is still open. Read what it landed; do not carry a guess from
+this file into an edit.
+
+- Root `Cargo.toml`'s exclude list and the top-level listing are the suggested
+  way to locate the desktop project; its manifest, README, justfile or CI lane is
+  where its documented command is likely written. Goal 12 binds that command;
+  this bullet only suggests where to find it.
+- Read the locked gpui revision before designing the measurement. Which hook
+  exposes a laid-out element's resolved bounds, and whether the landed desktop
+  code already uses one, decides the shape of this cut more than anything else
+  written here. Prefer whatever mechanism `0256.1` and `0265.5` already
+  established over introducing a second one.
+- Read `0265.5`'s frame-list primitive and `0265.3`'s bottom-bar and main-pane
+  composition. The clipped viewport wraps the former and the overlay is anchored
+  in the latter's positioning context; whether the list already sits in a
+  flex-filling region or needs one is the run's call.
+- Read `0265.1`'s token entry point: `canvas #0c0d10` (`tokens.md:16`),
+  `text-faint #4d525c` (`:34`), the 10.5 mono meta step (`:64`), the IBM Plex
+  Mono face, and the `bottom fade` layout constant — h 100, full pane width,
+  stops canvas-alpha 0 → opaque at 0.8 → 1 (`:85`). Those are that module's
+  contents, not this call site's. If the fade height or stops did not land as
+  tokens, adding them there is preferable to a literal here.
+
+### Edit order
+
+1. The clipped viewport: wrap `0265.5`'s frame list in the flex-filling clipped
+   region, with the row column as non-shrinking fit-content content.
+2. The measurement: read the viewport's and the content's resolved heights from
+   whatever layout hook the locked gpui exposes, refreshed on layout.
+3. The overlay component: gradient plus centred label, rendered only on a
+   measured overflow, anchored in the pane's positioning context at the clipped
+   region's bottom edge and the pane's current width.
+4. Composition into the Sessions pane, above the clipped content and clear of the
+   bar.
+5. The focused proofs in the desktop lane — fit first, since it is the case the
+   export cannot demonstrate — then the desktop command, then the declared
+   checks, then the closing diff read.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a desktop `clipped_with_overflow_fade(content)` that owns
+the clip, the measurement and the conditional overlay, so no caller can hand it a
+visibility decision (goal 8), plus an internal overlay element taking the pane
+width and the viewport's bottom edge as measured values rather than constants.
+Names, module paths and signatures follow whatever conventions `0256`, `0265.1`,
+`0265.3` and `0265.5` established. Whether the clip and the overlay are one
+component or a container plus a pane-level overlay is the run's call, so long as
+goal 4's parenting and goal 8's ownership hold — the constraint that decides it
+is that the overlay cannot be a descendant of the thing it covers.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- Content shorter than the viewport: no overlay and no label present at all.
+- Content exactly as tall as the viewport: still no overlay.
+- Content taller than the viewport: the list is cut at the container bound, the
+  overlay renders at the token height spanning the pane, the label renders
+  centred and bottom-padded, and the bar is fully visible.
+- The overlay is not clipped away and does not translate with the content.
+- The overlay spans the pane, not the 40-inset list content width.
+- A content-height change at a fixed row count still flips the decision and
+  produces the fade. Rewrapping the 430-wide description, adding an activity
+  line, or any other harness input that grows resolved content height without
+  changing the row count are equally acceptable ways to drive it; which one the
+  existing harness makes cheapest is the run's call.
+- Fit to overflow and overflow to fit, driven by a content change: the overlay
+  appears and then disappears, with no stale overlay left behind.
+- Fit to overflow and overflow to fit, driven by a viewport resize: same.
+- The component renders correctly over content whose type it does not know.
+
+### Reuse points
+
+`0265.5`'s frame-list primitive and its test harness as the content and the place
+to extend coverage; `0265.3`'s bottom bar and main-pane composition as the
+positioning context and the box the overlay must not cover; `0265.1`'s token
+entry point for canvas, `text-faint`, the mono face, the 10.5 step and the fade
+height and stops; `0256.1`'s desktop lane as the build-and-test command and the
+established layout/measurement mechanism to reuse. `reference/sessions.html:251-254`,
+`289-296`, `575-577` and `620-630` are the geometry measurement — pane,
+clipped viewport, measured content, bar and overlay respectively — and
+`grammar.md:86-91` with `screens/sessions.md:19-31` are the specification.
+`modules/cli/src/app/tui_kit.rs:206-274` is named only as what this is *not*:
+a row-count viewport with input behaviour, CLI-private, not to be imported and
+not to be ported.
+
+### Reporting mechanics — suggestions
+
+What must be reported is fixed by GOALS and Done when; this subsection only
+suggests how. Quoting each executed command in a fenced block with its exit
+status beside it reads better than prose. Naming the discovered desktop path
+beside that lane's command helps the next cut declare it as a board check.
+Stating the measurement hook actually used, and any owner correction raised
+against the design artifacts, under their own heading keeps them from being read
+as commentary. Deviations from this approach are reported in the work summary as
+deviations; that is a report, not a violation and not an escalation.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml:21-24` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- Scroll input of any kind: wheel, drag, keyboard, programmatic scroll, scroll
+  position or offset state, and making `scroll to end` clickable. Clipping is
+  what this task owns; the label is text.
+- The activity fade and loop narration (`0265.6`); the frame-row forms and the
+  list-level selection rule (`0265.5`); the frame counter (`0265.14`); the
+  header, bottom bar, preview column, rail, title bar and chrome.
+- The subscription, socket reader, delta protocol and stale/recovery posture
+  (`0256`); the detail reducer (`0257`). This cut consumes what they landed and
+  adds no second one.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Any ledger, store, sidecar or filesystem read on the desktop side; a GUI poll
+  loop; a timer or animation clock; a blocking wait on gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, scroll
+  framework, or primitives extracted for `0266`-`0269` before one of them
+  consumes them.
+- A `[[checks]]` entry that executes the desktop lane. No such command exists in
+  the repository today, so declaring one now would be a fabrication. The lane
+  still binds: goal 12 requires the run to discover it, extend it, run it green
+  and report it verbatim.
+- Packaging and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **A fade over content that fits is a rule 9 violation** and the easiest one to ship by accident. It has to be provably absent in the fits case and present in the overflows case, both exercised.
-- **Measurement must not stall the frame.** Layout work that blocks gpui's UI thread is the same defect class as a socket or ledger read on that thread.
-- **The label is `scroll to end`, centred, mono 10.5 `text-faint`** — not a scrollbar, not an arrow glyph, not an icon; the glyph set is closed and no corner radius exists inside the canvas.
-- **The overlay spans the full pane width and sits above the bar**, not inside the list's own scrolled content.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **A fade over content that fits is a rule 9 violation** and the easiest one to
+  ship by accident. It has to be provably absent in the fit case and present in
+  the overflow case, both exercised by running layout. The static export shows
+  only the overflow case, so it is evidence for half the rule and silent on the
+  half most likely to break.
+- **Exact fit is fit.** Content height equal to viewport height paints nothing;
+  only strictly greater is overflow. An inclusive comparison ships a fade on a
+  list that fits perfectly.
+- **Nothing is painted before a valid measurement exists.** A default-on or
+  optimistic overlay corrected on a later frame is the failure the rule names. A
+  briefly-missing hint is a missing hint; a wrongly-present fade is a lie about
+  the content.
+- **A row count cannot decide overflow.** The list is heterogeneous by
+  specification — a 430-wide description at line-height 16 rewraps and an
+  activity line arrives, both changing content height at an unchanged row count
+  (`screens/sessions.md:19-31`, `0265:108-110`).
+- **The overlay cannot be a descendant of what it covers.** Inside the clipped
+  viewport it is clipped; inside the scrolled content it scrolls away. The export
+  parents it absolutely in the pane at `left: 0`, z-index 3, beside the clipped
+  section at z-index 1 (`reference/sessions.html:251-254`, `289-295`, `620-630`).
+- **`full-pane-width` is 800, not the 720 list inset — and both are
+  measurements.** The pane's 40 horizontal padding is deliberately covered. 800
+  is what the reference pane measured at one window size; derive the current
+  width.
+- **The overlay's bottom is the clipped viewport's bottom, not the bar's top.**
+  The export's fade ends at 775 while the bar's top sits roughly 30 lower down
+  the stack, separated by the pane's 28 gap. Anchoring to the bar paints across
+  that gap and breaks on `0266`-`0269`, whose bars differ.
+- **Re-measure on both sides.** A content change and a viewport resize each flip
+  the answer. A measurement cached at construction, or keyed on item count,
+  leaves a stale overlay over content that now fits.
+- **The primitive measures.** A screen that has to tell it "you are overflowing"
+  has had the rule pushed back onto it, and every later screen re-decides rule 9.
+- **Rule 9 is not rule 11.** The activity block's positional 1.0-to-0.45 opacity
+  ramp (`grammar.md:104-108`, `0265.6`) is a different rule with a different
+  ramp; both are on screen at once during a live overflowing run. Merging them
+  behind one "fade" abstraction collapses two rules into one.
+- **The label is `scroll to end`, centred, mono 10.5 `text-faint`** — not a
+  scrollbar, not an arrow glyph, not an icon, and not a button. Rule 3 closes the
+  glyph set and forbids corner radius inside the canvas (`grammar.md:31-37`).
+  Shipping the label without shipping scroll input is intentional here.
+- **`ViewportScroll` is not this primitive.** It tracks a row-count length and an
+  offset, measures no pixels, owns input behaviour that is out of scope, and is
+  CLI-private (`modules/cli/src/app/tui_kit.rs:206-274`) — which the parent
+  forbids the desktop from importing.
+- **No literal values at a call site.** `#0c0d10`, `#4d525c`, IBM Plex Mono,
+  10.5, the 100 height and the 80% stop all come from `0265.1`'s token entry
+  point; a hex or a stop inside a primitive is the same defect as one inside a
+  screen.
+- **"Does not block the UI thread" means no added blocking work**, not a claim
+  about which thread gpui lays out on. No sleep, join, I/O, timer, animation
+  clock, poll loop, or second layout model beside gpui's own on the render path.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom
+  "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's
+  desktop behaviour.** They show the workspace stayed gpui-free and green. They
+  do not show that anything clipped, measured or painted.
+- **The rendered outcomes are decided by executing the desktop lane, not by
+  reading the diff.** Goal 12 binds the lane `0256.1` landed. The closing diff
+  read is code-shape review — what is parented where, imported, duplicated,
+  literal, timed, or out of scope — and it is supplementary wherever a goal names
+  a runtime outcome. An absent lane at execution time is an unmet dependency and
+  the task does not pass.
 
 ## Done when
 
-The Sessions frame list clips, and paints the canvas-coloured bottom gradient with its centred `scroll to end` label when and only when its content overflows — demonstrated both ways, with a list that fits showing no gradient at all. Measurement runs off gpui's UI thread, the overlay carries no radius, and the primitive is composable by the later screens' lists without each re-deciding the rule. Root workspace resolution and the root lockfile remain gpui-free.
+- Every command the run executed is green, and the work summary names each one
+  verbatim with its outcome. Nothing is called done over a red command.
+- The desktop lane's exact documented non-interactive build-and-test command,
+  discovered from what `0256.1` landed and extended with this cut's cases, exits
+  0, and the work summary names it verbatim with its outcome. Its coverage
+  observes, by running the desktop: content shorter than the viewport rendering
+  no overlay and no label at all; content exactly as tall as the viewport
+  rendering none either; content taller than the viewport rendering the list cut
+  at the container bound plus the canvas gradient overlay at the token height,
+  reaching opaque at 80%, spanning the pane's full current width rather than the
+  list inset, with its bottom at the clipped region's bottom edge and the bar
+  fully visible beneath it, carrying `scroll to end` centred and bottom-padded in
+  mono 10.5 `text-faint`; the overlay neither clipped away nor translating with
+  the content; a resolved content-height change at a fixed row count flipping the
+  decision from fit to overflow and producing the fade; and fit-to-overflow and
+  overflow-to-fit transitions driven both by a content change and by a viewport
+  resize, with the overlay appearing and disappearing accordingly and no stale
+  overlay left behind. If that lane is absent, this clause is unmet, it is
+  reported as an unmet dependency on `0265.5` → `0265.3` → `0265.1` → `0256.1`,
+  and the task does not pass; no workspace command and no diff read substitutes
+  for it.
+- The closing static read of the diff printed by `git diff main...HEAD`, read
+  against `grammar.md:31-37` and `86-91`, `screens/sessions.md:19-31`,
+  `tokens.md:15-85` and `reference/sessions.html:251-296`, `575-577`, `620-630`,
+  shows the structural half the lane does not observe: no overflow boolean or
+  content height crossing the component's boundary from a caller; no row-count,
+  item-count or fixed-row-height approximation; no unconditionally painted or
+  default-on fade; exactly one overflow implementation in the desktop; no merging
+  of rule 9 with rule 11's opacity ramp; no colour, size, family, stop, height or
+  spacing literal at a render call site, and specifically no `#0c0d10`,
+  `#4d525c`, `10.5`, `100`, `800`, `675` or gradient stop; no scrollbar, track,
+  arrow, icon, corner radius, click target, hover state or cursor change; no
+  blocking wait, sleep, join, filesystem, socket, ledger or sidecar read, timer,
+  interval, spawned tick, animation clock or poll loop; no CLI-private import,
+  `ViewportScroll` included; the overlay parented in the pane's positioning
+  context rather than inside the clipped subtree; no generality beyond one
+  container and its overlay — no variants, options or configuration without a
+  current caller; none of the sibling behaviours goal 10 names introduced; and no
+  scroll-input handling beyond what clipping requires.
+- The work summary states the gpui measurement hook actually used and the
+  discovered desktop path, and raises any conflict found between the design
+  artifacts as an owner correction rather than an edit to
+  `.internal/docs/design/**`.
+- The declared root-resolution check, run verbatim from the repository root,
+  exits 0.
+- `just test` exits 0, green and unchanged in cost.
+- `just test-full` exits 0 — the repository's landing gate (`Justfile:148-180`),
+  including `just ts-test`, `just lint`, `cargo build --workspace --bins` and the
+  full `cargo test --workspace` over the integration proof binaries. It is
+  unconditional: no desktop lane run and no diff read substitutes for it, and it
+  does not substitute for them either.
+- `git diff --name-only main...HEAD` lists no path under
+  `.internal/docs/design/`, and the substantive read of `git diff main...HEAD`
+  shows none of the sibling behaviours goal 10 names — an activity fade, a
+  frame-row form, a bar behaviour, a preview block or a frame counter —
+  introduced by this cut. Wrapping a surface a sibling landed is not such a
+  behaviour. Substitute the run's actual base branch if it is not `main`.
+- `git status --short` prints nothing, and the closing diff was read from the
+  tree that lands.
+
+## Bounded refinement
+
+Run, in order: the discovered desktop lane command required by goal 12, the
+root-resolution check, `just test`, then `just test-full` — the landing gate, run
+last of the commands because it is the most expensive and the earlier ones
+localise a failure faster — then the closing diff read.
+Permit at most one targeted repair-and-rerun round: repair one named defect, then
+rerun the failed command and every command after it in that order. If a second
+round would be needed, stop and report the exact failing command — or the
+unresolved visual contract — with its evidence rather than iterating. That is the
+stop condition, not a judgement call.
 """
 [relations]
 parent = "0265"
@@ -41,4 +708,15 @@ depends-on = ["0265.5"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "the landing gate remains green"
+command = "just test-full"
+timeout-ms = 3600000
