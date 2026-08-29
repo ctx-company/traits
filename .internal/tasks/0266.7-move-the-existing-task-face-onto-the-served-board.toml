@@ -1,41 +1,489 @@
 schema-version = "0.2"
 key = "0266.7"
 title = "Move the existing task face onto the served board"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-`0266.1` taught the center to answer the board. This cut is the other half of the plan document's parity mechanism: an existing non-GUI face reads the board through that same answer, in the same release, so the capability is never one the desktop alone can reach.
+content = '''
+`0266.1` teaches the center to answer the board. This cut is the other half of the
+plan document's parity mechanism: an existing non-GUI face reads the board through
+that same answer, in the same release, so the capability is never one the desktop
+alone can reach — and so the migration's regression surface is paid for by a cut
+that owns it, rather than as a footnote on a rendering task.
 
-Today the board is walked in-process twice over. The CLI's task read (`modules/cli/src/app/tasks.rs`) and the TUI's `Screen::Tasks` both go through `ctx-traits-io::{task_files, task_board_cache}` inside their own process. Which of them moves is the architect's call — the ruling is that at least one does, and that its behaviour is indistinguishable afterwards: same rows, same ordering, same filtering, same error text.
+Six grounded corrections to the draft this plan replaces, each verified at this
+HEAD.
 
-This is the cut where the migration's regression surface is paid for honestly, with the existing task and dashboard tests as its gate rather than as a footnote on a rendering task.
-"""
-scope = """
+**Correction 1 — the choice of face is no longer open, and this file must stop
+offering it.** The draft says "the CLI's task listing or the TUI's `Screen::Tasks`
+— the architect's call". Parent `0266` Correction 10 already made that call: **the
+TUI's `Screen::Tasks` is the face that moves**, because it is the one holding a
+live in-process reader plus a two-second fingerprint poll (`dashboard.rs:6140-6361`)
+and already holding a center subscription, so the move removes a second answer
+instead of adding a dependency. `ctx tasks list` and task-addressed `ctx tasks
+show` are one-shot process reads (`modules/cli/src/app/tasks.rs:398-438,573-679`);
+routing them through a socket would make a plain board read fail with no center
+running, which is a regression rather than parity, so they keep their direct
+provider path. Parent Done-when 7 repeats the split (`0266:186`). Moving the CLI
+listing instead of the TUI is now a defect, not an alternative.
+
+**Correction 2 — `0266.1` has not landed at this HEAD, so nothing named here can
+be assumed.** The draft's opening sentence is written in the past tense and is
+prospective. `0266.1` is `ready`, not `done`. `center.rs` has no task or board
+arm at all: `Request` carries run operations only (`modules/io/src/center.rs:90-156`),
+`ResponseResult` has no task arm (`:199-212`), and `CenterDelta` has only
+run-row and activity variants (`:268-284`). `TaskStatus` is still the closed set
+`ready|done|cancelled` (`modules/core/src/task/mod.rs:22-31`), so this file's own
+`status` word is one `0266.1` makes storable, and until it does `Board::load`
+records this document as a parse failure and skips it
+(`modules/io/src/task_files.rs:186-250`). The first act of this cut is to read
+what `0266.1` actually landed — its request, its answer, its typed board-presence
+outcomes, its shared repository-scoped join and group facts, its freshness event,
+and its detail boundary if it has one. If those are absent, the prerequisite is
+unmet: stop and report that. Absence is not permission to build the served board
+answer inside `0266.7`.
+
+**Correction 3 — five readers move, not one.** The draft scopes this to "the
+listing", and a run that repoints only initial list population leaves the screen
+reading the filesystem four more ways. At HEAD the live `Screen::Tasks` answer is
+produced by: `load_tasks_board_at_startup` before the event loop, which reads the
+persisted cache and otherwise reads the board synchronously
+(`dashboard.rs:1224-1240,6321-6361`); the two-second tick, which runs
+`refresh_tasks_board_if_stale` regardless of the active screen, stat-sweeping and
+rereading on change (`dashboard.rs:2830-2844,6277-6319`); uppercase `S`, which
+calls `sync_tasks_board` synchronously (`dashboard.rs:3091-3101,6196-6224`;
+keymap `dashboard/keymap.rs:136-173`); `resync_tasks_board_after_write`, which
+rereads and rebuilds the visible model after each successful direct write
+(`dashboard.rs:6254-6275`, called at `7077,7260,7318,7349,7372,7520`); and the
+selected preview, which projects from the same locally resolved snapshot
+(`dashboard.rs:6364-6555`). Each of those is a live board answer for the moved
+face. Leaving any of them wired is exactly the "two readers" the cut exists to
+remove.
+
+**Correction 4 — the preview cannot ride the compact listing, and no sibling is
+going to supply it.** `0266.4` explicitly assigns the existing in-process Tasks
+preview at `dashboard.rs:6364-6555` to this task (`0266.4:84`), and `0266.5`
+likewise puts TUI migration outside its own scope; both are parallel siblings
+under the current graph, not prerequisites, so neither is guaranteed to have
+landed a TUI-usable detail boundary. Meanwhile the served listing is bounded:
+wire lines cap at 1 MiB (`center.rs:48-52,638-647`) and `0266.1` excludes full
+prose and checks from each row on purpose. The TUI preview renders full
+`content`, `scope` and `validation` prose, four resolved relation directions with
+the other side's status, open steps, joined runs, proposal evidence and dangling
+findings — none of which can be widened into every board row. So this cut owns a
+**selection-scoped served detail route**, extending the landed boundary minimally
+where it lacks a field the pane already shows, and consuming an equivalent where a
+sibling has already landed one. Answering one selection by reading the board
+locally, or by fattening every row, are the two failures to avoid.
+
+**Correction 5 — "unchanged" cannot mean preserving the absent-is-empty lie.**
+`Board::load` swallows every `read_dir` error for both the board directory and
+`archived/` with a bare `let Ok(entries) = ... else { continue }`
+(`task_files.rs:197-200`), and `board_fingerprint` treats a missing directory as
+empty (`:136-166`). A board that does not exist and a board with nothing in it are
+one outcome today. `0266.1` supersedes that with typed absent, unreadable and
+empty outcomes. Parity therefore means preserving valid row and output behaviour
+while rendering the new typed failure honestly — not reproducing a clean empty
+success for a board the process never read. Likewise
+`task_board_cache::BoardSnapshotRecord` is derived evidence by its own module's
+declaration and returns `None` for missing, unreadable, corrupt, wrong-schema or
+wrong-board records (`task_board_cache.rs:1-10,25-41,72-91`); after the move it
+may never stand in for a live answer.
+
+**Correction 6 — mutation and precondition reads are not display readers, and
+this cut must not swallow them.** Fresh digest reads back archive, edit and
+mark-done TOCTOU checks (`dashboard.rs:6619-6855,6915-7000`), `open_task_reconcile`
+performs its own `list(true)` + `sync` + per-key `get` (`:6857-6913`), and the
+update and create paths still use `open_read_write`
+(`:7061,7248,7303,7341,7367,7475`). Those remain justified: a write that checks a
+captured digest against the file it is about to overwrite is not a second display
+answer. Separately, `0266.3` is a sibling that moves both Split creation sites
+through the center and tells its own executor not to perform this task's listing
+removal (`0266.3:342-355,520-522`), so at execution time whether direct Split and
+`resync_tasks_board_after_write` still exist is a fact to inspect, not to assume in
+either direction. This cut removes display rereads; it does not expand into
+migrating every task mutation.
+'''
+scope = '''
+## Goals and approach are separate
+
+Everything in this section, including the `## Done when` list at the end of it, is
+a GOAL: binding, observable, and — where a command in this repository can decide it
+— decided by that command. Everything under `## Approach` in the validation section
+is APPROACH: expected files, symbols, signatures, edit order, commands and proof
+mechanics, stated precisely because the grounding supports them, and never a
+boundary. Deviate from any of it wherever a goal requires it and record the
+deviation in the work summary; a deviation is not a violation and needs no
+escalation. Proof mechanics are named only where the grounding shows them already
+occurring — what must be proven is stated, which fixture or matcher observes it is
+the run's call.
+
 ## Decisions
 
-- In scope: re-pointing one existing non-GUI face — the CLI's task listing or the TUI's `Screen::Tasks` — at the center-served board answer, with its observable behaviour unchanged.
-- **A green build with different output is still a regression.** Row content, ordering, filtering and error text are the contract, not the implementation beneath them.
-- **Center-absent behaviour keeps the family's posture** on the moved face: spawn-on-need or a visibly stale view, never a hard error, and never a silent fallback that re-reads the filesystem while presenting itself as current.
-- Out of scope: changing what that face shows, the desktop rendering (`0266.1`, `0266.6`), the board answer's own shape (`0266.1`), and any other face.
+- **In scope**: re-pointing the TUI's `Screen::Tasks` — its list projection and its
+  selected preview — at the center-served board answer; removing every automatic
+  direct board read on those paths (startup cache and live read, the two-second
+  fingerprint tick, the post-write display resync) and repointing the manual sync
+  key at the served answer; keeping the existing task actions working and observed
+  through that answer; and, only where the landed boundary lacks it, the minimal
+  extension that lets the served detail carry what the preview already renders.
+
+- **The parent's corrections bind.** `0266`'s Corrections 9, 10 and 11 govern this
+  leaf, and parent Done-when 7 is its outcome statement. Where this file restates
+  one it does not narrow it.
+
+- **The face is the TUI, settled.** `ctx tasks list` and task-addressed `ctx tasks
+  show` keep their direct provider path and must still work with no center running
+  (content Correction 1).
+
+- **Behaviour is observably unchanged.** Same rows, same seven groups in the same
+  order, same group precedence, same within-group ordering, same filtering, same
+  row labels, same selection identity, same preview contents, same message and
+  title text. A green build with different output is a regression.
+
+- **One accepted answer feeds the moved face.** The list projection consumes one
+  complete served board answer; the selected preview consumes one selection-scoped
+  served detail. Rebuilding the old `list(true)` + per-key `get` + `sync` shape out
+  of served calls fails this as surely as reading the filesystem would (content
+  Correction 3).
+
+- **No second live reader survives on the moved paths.** After this cut the list
+  and preview paths call no `FilesTaskBoard` read, no `board_fingerprint` sweep and
+  no `task_board_cache` read of their own. Plumbing left without a consumer is
+  removed rather than left inert, because an inert route is how direct reading
+  comes back. Write-side digest rechecks and reconcile preconditions are not
+  display readers and stay (content Correction 6).
+
+- **Out of scope**: the served board answer's own shape, scope contract, typed
+  board-presence outcomes, shared join and group semantics and freshness mechanism
+  (`0266.1`); center-served draft creation and the TUI Split sites (`0266.3`); the
+  desktop screen, its three sections, its header, provenance bar, preview blocks and
+  row state stack (`0266.1`, `0266.2`, `0266.4`, `0266.5`, `0266.6`, `0266.8`);
+  `ctx tasks list`, `ctx tasks show`, `ctx tasks sync` and `ctx tasks update`, whose
+  direct provider authority is unchanged; migrating any task mutation beyond
+  repointing its post-write display refresh; the store migration in
+  `.internal/docs/the-board-one-door.md`; and every shared primitive `0265` already
+  built.
 
 ## Prerequisite
 
-`0266.1` — the center-served board answer this face moves onto.
-"""
-validation = """
-## Watch
-
-- **The TUI stays first-class and must not regress.** It is the parity reference for this whole charter; a moved projection that loses a filter or reorders rows breaks the thing the move exists to prove.
-- **Do not leave two readers behind.** The point of the move is that the walked-in-process path stops being a second answer for the face that moved; leaving both wired is the disagreement this cut is meant to remove.
-- **Blocking work stays off the face's own event loop**, and the center's board read must not stall its request loop.
-- **Fail-loud, no silent staleness.** A failed board answer is reported by the moved face in its own idiom rather than replaced by stale rows.
-- **No test may depend on committed repo content** — scratch task fixtures only, never assertions against this repository's own `.internal/tasks`.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+`0266.1` — the center-served board answer, its typed absent/unreadable/empty
+outcomes, its shared repository-scoped run join and group facts, and its
+board-freshness event. Bind to what it actually landed, not to any name guessed in
+this file: none of them exists at the HEAD this plan was written against (content
+Correction 2). If the served answer, the typed outcomes, the shared semantics or
+the freshness event are missing at execution time, report an unmet prerequisite and
+stop, rather than building them here.
 
 ## Done when
 
-An existing non-GUI face reads the board through the center-served answer and behaves exactly as before — same rows, same ordering, same filtering, same error text — with its in-process walk of the tasks tree no longer a second live answer for that face, and center-absent handled with the family's posture rather than a hard error. `just test` passes, the CLI task tests and the dashboard projections pass, and root workspace resolution and the root lockfile remain gpui-free.
-"""
+1. **The task list renders from one accepted served answer, with output
+   unchanged.** All seven groups render in the fixed order `syncing`, `in-flight`,
+   `awaiting merge`, `parked`, `blocked`, `ready`, `done`, each with its header
+   present at zero count, `Done` collapsed at start and the others expanded, and
+   collapse state surviving a refresh. Group precedence is unchanged: a joined live
+   run wins in-flight, else a joined pending run wins parked, else a joined
+   `not_merged` row wins awaiting-merge including for a done or cancelled task, else
+   the board's derived status decides; the run join stays repository-scoped so a
+   sibling repository's run carrying the same key does not join; before the first
+   accepted session snapshot every task is `syncing` regardless of board status.
+   Ordering stays fixed group order then lexicographic task key within each group,
+   over every parsed live and archived document, so live done, archived done and
+   cancelled tasks all still appear under `done` with no separate filtering step.
+   Row labels are unchanged: fixed-width key, derived status with the local
+   `dispatched` override and the widened `awaiting merge - <branch>` form, the `!`
+   proposal marker in its fixed column, and a title truncated to preserve the fixed
+   label width. Proposal evidence and awaiting-merge branch and command survive as
+   facts, not just as markers, so the actions keyed to them behave as before.
+   Selection identity stays the task key and survives reordering when the key is
+   still present. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli
+   --lib dashboard` and `just test`, over synthetic served answers and scratch
+   boards spanning ready, blocked, draft, done, cancelled and archived tasks with
+   live, pending, not-merged, cross-repository and absent joined runs.
+   Excluded: a second board projection or a second task reducer in the TUI; a group,
+   label, ordering rule or filter that differs from HEAD's; adopting the desktop's
+   `In progress`/`Ready`/`Draft` sections for this screen; deriving group membership
+   from a rendered status word; index-identified selection; a row-only mapping that
+   drops the proposal or awaiting-merge facts.
+
+2. **The selected preview renders from a selection-scoped served detail.** The pane
+   keeps its existing contents: key and title; `syncing`, the awaiting-merge branch
+   or the derived status; dangling relation findings for the selected key; the full
+   `content`, `scope` and `validation` prose; resolved `depends on`, `blocks`,
+   `parent` and `children` edges each with key, title, status and open/closed glyph;
+   open steps with `(none)` when empty; every joined run with its display label and
+   state, with `(none)` when empty; pending done-proposal evidence with its `press y
+   to mark done` line; and the exact line `(relations unavailable — resolve failed
+   at the last sync)` when a summary exists whose detail did not resolve. That
+   content arrives over the served boundary with no local provider read on the
+   preview path, and answering one selection does not request or re-resolve the
+   whole board. Where the landed answer does not carry a field the pane shows, this
+   cut extends the served boundary minimally rather than reading it locally. A
+   detail response whose task key no longer matches the current selection is
+   discarded rather than rendered. Decided by `CARGO_TARGET_DIR=target cargo test -p
+   ctx-traits-cli --lib dashboard`, `CARGO_TARGET_DIR=target cargo test -p
+   ctx-traits-cli --test proof_center` and `just test`, plus the diff read for a
+   surviving local read on that path.
+   Excluded: carrying full prose, scope, validation or checks in every board row;
+   a local provider fallback when a detail response fails; re-resolving the board to
+   answer one selection; leaving the preview backed by the renderer-local resolved
+   map; changing what the pane shows.
+
+3. **Every automatic direct board read on the moved paths is gone, and freshness is
+   the center's event.** No client timer, tick or filesystem watcher refreshes the
+   task board: a new accepted board model is produced only by the served answer and
+   the center's board-freshness event. The startup path no longer reads the board or
+   the persisted board cache synchronously before the event loop; the two-second
+   fingerprint sweep for the board is removed from the event loop; the post-write
+   display resync no longer rereads the board. Board work stays off the TUI event
+   loop and render path, and off the center's sole model/SQLite owner request path.
+   Refresh plumbing left without a consumer is removed rather than left dormant, and
+   the persisted board cache never stands in for a live answer. The session poll and
+   every non-task reader on the same tick are untouched. Decided by
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard`,
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`, `just
+   test`, and the diff read for a surviving board timer, fingerprint sweep, startup
+   read or cache fallback.
+   Excluded: relocating the two-second board sweep instead of removing it; a
+   second subscription, worker, reconnect policy or retry delay beside the existing
+   one; a filesystem watcher or any new dependency in `ctx-traits-io`; treating an
+   absent board as an empty one (content Correction 5); presenting cache-backed rows
+   as current.
+
+4. **Manual sync and the existing task actions still work, and their text is
+   unchanged.** Uppercase `S` still refreshes the board through the served answer
+   and still reports `synced` when the sync report is clean, `synced — sync issues
+   found, see task detail` when it is not, and `sync failed: <error>` on failure,
+   without blocking the event loop. Archive, edit, mark-done, reconcile, dispatch
+   and split keep their keys, refusals and wording; their captured-digest rechecks
+   and reconcile preconditions remain (content Correction 6). After a successful
+   write the new state becomes visible through a served update rather than a
+   reinstated local reread, and a failed refresh after a write still preserves the
+   write confirmation and appends its failure rather than replacing the message. The
+   list title keeps `tasks (no board read yet)` with no accepted answer, `tasks (as
+   of <elapsed> ago)` with one, and the `— refresh failed` suffix when the latest
+   refresh did not land. Decided by `CARGO_TARGET_DIR=target cargo test -p
+   ctx-traits-cli --lib dashboard` and `just test`, over scratch boards.
+   Excluded: routing a task mutation that this cut does not own through the center;
+   removing or renaming a key, action, modal or refusal; a manual sync that walks the
+   board in the TUI process; presenting a write as landed before the served answer
+   reflects it.
+
+5. **Center absence has exactly three defined states, and none of them lies.**
+   Spawn-on-need is attempted first through the existing connect path. With no
+   accepted board answer the screen states an outage rather than showing an empty
+   board as a valid one. With a previously accepted answer, that answer stays
+   visible only behind an explicit stale or error marker, and the marker clears only
+   when a complete answer is accepted again. A rejected or incomplete candidate
+   leaves the last accepted model intact and asks for a fresh complete answer rather
+   than committing partially. In no case does the dashboard hard-fail, and in no
+   case does it fall back to a filesystem or cache read presented as current.
+   Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_center`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   dashboard` and `just test`.
+   Excluded: a hard error or panic on center loss; a silent direct-read fallback; a
+   partial board commit; an empty list standing in for a failed answer; a second
+   outage vocabulary beside the one the dashboard worker already uses.
+
+6. **The CLI's direct task readers are untouched.** `ctx tasks list` and
+   task-addressed `ctx tasks show` still read through `FilesTaskBoard` in-process and
+   still work with no center running; their output, ordering and error text are
+   unchanged. Decided by `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   tasks` and `just test`.
+   Excluded: routing any CLI task read through the socket; changing
+   `FilesTaskBoard`'s public verbs or their semantics for their existing callers.
+
+7. **The workspace is unmoved.** Root Cargo resolution and the root `Cargo.lock`
+   stay gpui-free, the desktop project stays outside the workspace, `just test` and
+   `just test-full` gain no gpui cost, and this cut adds no dependency to
+   `ctx-traits-io`. Decided by `just test` and the declared metadata and lockfile
+   check.
+
+Exclusions, restated so they are checkable by reading the diff: no board wire type,
+typed board outcome, run-to-task join, group precedence rule or freshness mechanism
+that `0266.1` carries is redefined or copied in CLI code; no second task-TOML parser
+or board walk is added anywhere; no filesystem watcher or new dependency enters
+`ctx-traits-io`; no action, key, modal, group or screen is added, removed or
+renamed; no test asserts on this repository's committed `.internal/tasks`, including
+the documents `0266.1` makes newly loadable, and no test writes into this
+repository's board; no work belonging to `0266.1`, `0266.2`, `0266.3`, `0266.4`,
+`0266.5`, `0266.6`, `0266.8`, `0267`-`0269` or `0261` is done; and no gpui or
+root-workspace file is touched.
+'''
+validation = '''
+## Approach
+
+Suggested route, not a boundary. Every symbol is named because the grounding
+supports it at this HEAD; take a different one wherever a goal requires it and say
+so in the work summary.
+
+**Reuse points, named.** `0266.1`'s served board answer, typed board-presence
+outcomes, shared repository-scoped join and group facts, freshness event and detail
+boundary are the one board source — no second board wire type or join in CLI code.
+The dashboard's existing background IO owner (`modules/cli/src/app/dashboard/worker.rs`)
+is the migration route: it already owns the persistent `center::subscribe(None)`
+stream, receives blocking events off the event loop, stages rows between
+`SnapshotStart` and `SnapshotEnd`, projects a complete candidate before replacing
+accepted state, clones accepted state before applying a delta, reconnects for a
+fresh snapshot after a rejected candidate (`worker.rs:254-415`), and reconnects
+after a bounded 500 ms delay while still servicing queued commands
+(`worker.rs:470-500`). Its outage strings already distinguish no-accepted-snapshot
+from retained-with-timestamp (`worker.rs:443-457`), and `State::apply_refresh_results`
+already commits a complete snapshot or retains state and records the error
+(`dashboard.rs:1449-1530`) with the footer's `stale: <error>` (`dashboard.rs:8602-8611`).
+`center::subscribe` already calls `ensure_connected` (`modules/io/src/center.rs:786-817,1041-1091`),
+so spawn-on-need and reconnection are inherited rather than re-policied. Render-only
+structures stay: `TaskGroup::order`/`label` (`dashboard.rs:582-625`),
+`TaskVisibleRow`, `rebuild_visible_tasks`' key-preserving selection restore
+(`dashboard.rs:6004-6105`), `task_row_label` (`dashboard.rs:8507-8551`),
+`build_task_preview` and `push_task_relation_lines` (`dashboard.rs:6364-6555`),
+`tasks_list_title` (`dashboard.rs:7804-7817`), the collapse set, the pane layout,
+the keymap (`dashboard/keymap.rs:136-173`) and every action modal. `task_group`,
+`task_session_join` and `session_group` (`dashboard.rs:1938-1972,5953-6002`) are the
+semantics `0266.1` extracts — consume the landed shared form and delete the CLI
+copy rather than keeping both. `CenterPublicRow.repo_key`/`repo_path`
+(`center.rs:3805-3815`), `RunSummary.task_key` (`modules/io/src/run_summary.rs:61-72,187-193`)
+and the machine checkout index (`modules/io/src/state.rs:477-557`) are the existing
+repository-scope inputs; the board is never derived from the center process's cwd.
+`modules/cli/tests/proof_center.rs` is the existing real-socket harness with its
+private center tuples and scratch repositories (`proof_center.rs:297-367`).
+Analogous migration task `0267.5` is the closest structural precedent for the whole
+shape of this cut.
+
+**Edit order.**
+
+1. **Read what `0266.1` actually landed** — the board request and its explicit
+   repository scope, the answer's row facts and typed absent/unreadable/empty
+   outcomes, the shared join and group precedence, the freshness event, and any
+   detail boundary. Every name below is provisional until this step; none of it
+   exists at this HEAD.
+2. **The pure projection** — one function taking one complete served answer plus the
+   accepted session rows and yielding the visible rows, the proposal map and the
+   awaiting-merge map, replacing `rebuild_visible_tasks`' board half. This is the
+   unit-test seam for the seven groups, precedence, pre-first-snapshot `syncing`,
+   ordering, row labels and selection restore.
+3. **The worker's board path** — request the board on the landed client wrapper off
+   the render and event loops, stage the candidate, project, commit only on success,
+   retain the last accepted model behind an explicit marker on failure or outage, and
+   subscribe to the board-freshness event as the only trigger for a new answer.
+4. **Detail** — request selection-scoped detail by task key, discard a response whose
+   key no longer matches the selection as `State::apply_preview_results`
+   (`dashboard.rs:1485-1501`) already demonstrates, and render `build_task_preview`
+   from it. Where the landed answer lacks a field the pane shows, extend the served
+   boundary minimally at `modules/io/src/center.rs` and the shared resolution rather
+   than reading it in the dashboard.
+5. **Removal** — delete the board half of the direct read path:
+   `load_tasks_board_at_startup` and its cache read (`dashboard.rs:1224-1240,6321-6361`),
+   `refresh_tasks_board_if_stale` and its call on the tick (`dashboard.rs:2830-2844,6277-6319`),
+   `read_board_snapshot` (`dashboard.rs:6140-6163`), the board-display half of
+   `resync_tasks_board_after_write` (`dashboard.rs:6254-6275` and its call sites),
+   and the persisted-cache write, if no prerequisite has given them another consumer.
+   Leave the session poll, the non-task readers on the same tick, and the write-side
+   digest and reconcile precondition reads (`dashboard.rs:6619-7000`) alone.
+6. **Manual sync and post-write refresh** — repoint `sync_tasks_board_in`
+   (`dashboard.rs:6196-6224`) and the post-write refresh at the served answer, keeping
+   their exact messages and the resync-failure append.
+
+**What must be proven** (observations, not mechanics): over synthetic served answers
+and scratch boards, repositories and ledgers only — the seven headers in order with
+zero counts rendered, `done` collapsed at start, collapse surviving a refresh; the
+full precedence table including a done task with an unmerged run; a same-key run in
+another repository not joining; pre-first-snapshot `syncing`; live done, archived
+done and cancelled all under `done`; lexicographic within-group order across many
+keys; the `dispatched` override, the awaiting-merge branch form, the proposal marker
+and title truncation at fixed width; selection surviving a reorder and a task
+leaving the board; the full preview for a resolved task, for a summary whose detail
+did not resolve, and for a task with a dangling edge, a pending proposal and joined
+runs; a rapid A-then-B selection where A's response arrives last; one board change
+reaching the screen as an unsolicited event with no timer; manual sync's three
+messages; a write becoming visible through a served update with its confirmation
+preserved and its resync failure appended; and spawn-on-need, no-accepted-answer
+outage, retained-answer-plus-marker, marker cleared only on a complete accepted
+answer, rejected candidate leaving the prior model intact, and no filesystem
+fallback. The one-answer and no-surviving-reader properties are diff-read or
+call-path observations, not fixtures: no call from the list or preview paths to
+`FilesTaskBoard::open_read`, `board_fingerprint` or `task_board_cache`, and no
+board timer left on the event loop. `proof_center` is the existing process-boundary
+suite for spawn, snapshots, deltas, reconnect and repository scope; the dashboard
+unit module already covers the projection, rendering, mutation and refresh-failure
+behaviour (`dashboard.rs:13701-14373,14648-15318`). `just test` deliberately
+excludes integration proof binaries (`Justfile:111-147`), so the focused
+`proof_center` run is separate evidence; `just test-full` (`Justfile:148-180`)
+belongs to the parent's closing pass.
+
+## Watch
+
+- **The face is the TUI's `Screen::Tasks`, not the CLI listing.** Parent Correction
+  10 settled it. `ctx tasks list` and `tasks show` routed through a socket would
+  fail with no center running — a regression, not parity.
+- **Five readers, not one.** Startup cache and live read, the two-second fingerprint
+  tick, manual `S`, the post-write display resync, and the preview. Repointing only
+  the list leaves four live board answers behind (content Correction 3).
+- **Do not rebuild N+3 out of served calls.** `read_board_snapshot` is `list(true)`
+  plus a `get` per summary plus `sync` plus a fingerprint sweep
+  (`dashboard.rs:6140-6163`); reproducing that shape over the socket keeps the cost
+  and adds a round trip per key. One answer for the list, one selection-scoped detail
+  for the preview.
+- **Do not fatten the listing to carry the preview.** Wire lines cap at 1 MiB
+  (`center.rs:48-52,638-647`) and this board is already several hundred documents;
+  full prose in every row takes the screen down at exactly the moment it matters.
+- **`0266.4`/`0266.5` are siblings, not prerequisites.** Do not assume a landed
+  detail boundary; extend minimally where it is absent, and consume it where it is
+  present (content Correction 4).
+- **Absent is not empty.** `read_dir` errors are swallowed today
+  (`task_files.rs:197-200`) and the fingerprint treats a missing directory as empty
+  (`:136-166`). Preserving that as "unchanged behaviour" preserves a lie; render
+  `0266.1`'s typed outcome honestly instead (content Correction 5).
+- **`task_board_cache` is discardable derived evidence** (`task_board_cache.rs:1-10,25-41,72-91`).
+  It may never become the authority, the fallback, or the backing of an "as of"
+  claim after the move.
+- **Write-side reads stay.** Captured-digest rechecks, TOCTOU guards and
+  `open_task_reconcile`'s preconditions are not display answers
+  (`dashboard.rs:6619-7000`); removing them turns a parity cut into a correctness
+  regression. Equally, do not expand into migrating mutations `0266.3` owns.
+- **Inspect what `0266.3` landed.** It moves both TUI Split creation sites and tells
+  its executor to leave this task's listing removal alone; whether direct Split and
+  `resync_tasks_board_after_write` still exist is a fact to check, not to assume.
+- **Selection is by key, never by index** (`dashboard.rs:6004-6105`). Groups
+  reshuffle on every board change and every session delta.
+- **Fail loud, no silent staleness, no direct-reader fallback.** An absent answer is
+  a stated outage, never an empty board that reads as a board with nothing in it.
+- **Blocking work stays off the TUI event loop** and off the center's model-owner
+  request path (`center.rs:2973-2997`); no second worker, subscription, reducer,
+  timer or reconnect policy beside the existing one.
+- **No test may depend on committed repo content** — scratch boards, repositories
+  and ledgers only, never this repository's `.internal/tasks`, and no test writes
+  into this repository's board.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes, and no
+  dependency is added to `ctx-traits-io` (`modules/io/Cargo.toml:12-29`). Rust is
+  pinned to 1.97.1; isolate with `CARGO_TARGET_DIR=target` when a failure looks like
+  a phantom "cannot find X".
+
+## Bounded review
+
+One substantive review pass over the completed diff before calling this done:
+compare the migrated list and preview against the legacy projection for the seven
+headers and their order, every parsed live and archived row and its within-group
+order, group precedence, pre-first-snapshot `syncing`, the proposal and
+awaiting-merge facts, row labels, key-preserving selection, the full preview
+contents and its exact failure line, and the manual-sync, title and post-write
+text; confirm one accepted answer feeds the list and one selection-scoped detail
+feeds the preview; read the moved paths for any surviving `FilesTaskBoard`,
+`board_fingerprint` or `task_board_cache` call, any surviving board timer or startup
+read, and any second task reducer; exercise one unsolicited board update, a rejected
+candidate, and all three center-absence states. Then run the declared checks.
+
+At most one targeted repair-and-rerun round: repair one named defect and rerun
+whatever evidence shows the repair holds and broke nothing already proven. If a
+second round would be needed, stop and report the failing command with its output,
+or the violated observable contract with its evidence, rather than iterating. That
+is the stop condition, not a judgement call.
+
+The work summary names what `0266.1` actually landed and how this cut consumed it,
+whether `0266.3` had landed and what that changed, whether a sibling detail boundary
+existed or this cut extended one and how far, which readers were removed, the
+focused test filters actually run, and every deviation from this approach.
+'''
 [relations]
 parent = "0266"
 depends-on = ["0266.1"]
@@ -43,20 +491,28 @@ depends-on = ["0266.1"]
 [[checks]]
 name = "per-round workspace gate remains green"
 command = "just test"
-timeout-ms = 1200000
+timeout-ms = 1800000
 
 [[checks]]
-name = "CLI task read path stays green"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
-timeout-ms = 900000
-expect = "test result: ok\\. [1-9]"
-
-[[checks]]
-name = "TUI board projection stays green"
+name = "the TUI board projection and preview stay green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
-timeout-ms = 900000
 expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
+
+[[checks]]
+name = "the CLI's direct task readers stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
+
+[[checks]]
+name = "the served board answer and center absence stay green over the real socket"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 600000
