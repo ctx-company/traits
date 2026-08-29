@@ -1,50 +1,156 @@
 schema-version = "0.2"
 key = "0265"
 title = "Render Sessions to the visual charter"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
+content = '''
 Work item 0 of the visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) is complete. `tokens.md`, `grammar.md`, `screens/{sessions,tasks,traits,config,merges}.md` and `reference/<screen>.{png,html}` are committed and git-tracked under `.internal/docs/design/`. They are normative implementation input, not a debt: nothing in this charter owes work item 0 any code, and no task here re-opens pencil. Their acceptance clause — a worker implements any v1 screen from those files alone — is a statement about the artifacts, which already hold.
 
 What this charter owes is the first screen. `0256` brings the window, the center subscription and the read-only run list; `0257` adds the selected run's authoritative reconstruction; `0258` adds spawn/interrupt/pause through the center's verbs. All three were authored 2026-08-25, before the visual charter existed, and none of them names `tokens.md`, `grammar.md` or `screens/sessions.md`. This charter renders Sessions to that specification on top of their plumbing, and it does not re-author them: two authorities on one slice is a defect.
 
 Shared rendering vocabulary — the dark token constants and the IBM Plex faces they name, the semantic colour roles and state words, the status dot and selection rule, the sans/mono voice split, key/value rows, the screen header and bottom bar, the overflow clip-and-fade, the faded activity block, the rail, the title-bar screen menu, and the one `placeholders` module — is extracted by the Sessions cut that first renders through it, never ahead of one. There is no design-system phase here; there is a screen, and the reusable parts of it fall out while it is being built. The four later screens (`0266`-`0269`) consume that vocabulary rather than re-deriving it.
-"""
-scope = """
-## Decisions
+
+## How to read this plan
+
+Goals and approach are separated, and only goals bind. `validation`'s Done-when list, together with the binding constraints and exclusions at the top of `scope`, is the contract. Everything under "Suggested approach" — the item order, the extraction map, the expected surfaces, the named reuse points and the closing review route — is the architect's best route from the grounding, not a boundary. A child that deviates because a binding goal requires it reports the deviation in its work summary; that is neither a violation nor an owner escalation.
+
+This charter lands no code of its own. Its work is the fifteen children and the parent-level review that follows the last of them. A sixteenth implementation written against this file, instead of against the child that owns the leaf, is the failure mode to avoid.
+
+## Grounded against HEAD 70662f259
+
+The design artifacts are normative, and the corrections below are the places where reading them naively produces a wrong screen. Every child inherits them; a child that silently guesses through one has failed even where its own Done-when reads green.
+
+### Correction 1 — where the artifacts disagree, the rules win and the export loses
+
+`reference/<screen>.{png,html}` is a pencil export. It is literal geometry evidence — paddings, gaps, opacities, sizes, colours — and it is not an independent authority on what a screen contains. Four measured conflicts, all resolved against the export:
+
+- **Landing lines take `→`.** Grammar rule 13 requires `→`-prefixed sans 12 consequence lines in the `landing` block; `reference/sessions.html:840-861` renders three bare "Landing Line" divs with no glyph. Rule 13 governs (`0265.15`).
+- **The rail carries no counts.** Grammar rule 10 fixes the rail as `Spaces` heading → repo rows (5px dot + name) → spacer → footer, and closes with "Nothing else in v1". The export renders a `Count` of `3` beside each repo row (`reference/sessions.html:127-135`). No counts (`0265.8`) — and note that a per-repo count is not free evidence either: it would have to be a projection of the accepted center rows, which is more than rule 10 asks for.
+- **The menu lists only screens that exist.** The export's menu already shows Sessions, Traits, Tasks and Config (`reference/sessions.html:62-83`) — the end state of `0266`-`0268`. Sessions ships alone; each later charter adds its own entry together with its own screen. No empty pane and no dead entry (`0265.9`).
+- **`ctx-logo-white.png` does not exist.** Every reference file points a background-image at it (`reference/sessions.html:50`), and `git ls-files` matches no logo asset anywhere in the repository. `0265.9` may not assume that URL resolves: either a real tracked asset ships inside the desktop project, or the mark is omitted and the gap is reported for `0260`. A broken image reference, or a blank 34×18 box presented as the logo, is not a rendering of this leaf.
+
+### Correction 2 — three words in the design example have no field behind them
+
+`screens/sessions.md` writes its examples as concrete strings. Three of them name evidence that does not exist under that name, and typing the example string into the screen would make it lie about a real run:
+
+- **`smart`**, in `live · round 2 · smart`, is tagged `data: state/round/seat`. There is no seat *name* in the ledger. `Provenance.agent_assignments` carries `role`, `harness`, `transport`, `model`, `seat_index` and `list_length` (`modules/core/src/procedure/session.rs:162-177`); `Session.current_agent` is an `AgentRole` whose structural seat ordinal is deliberately not persisted (`modules/core/src/procedure/runtime/frames.rs:175-204`). The cut that renders this leaf chooses one durable mapping, renders that, and names it in its work summary.
+- **`in review`**, in `task 0243.4 · in review`, is not a task state. Stored status is the closed set `ready|done|cancelled` (`modules/core/src/task/mod.rs:22-31`); `blocked` is derived, and only for open leaves (`modules/core/src/task/graph.rs:129-172`). Render the served state word (`0265.2`, `0265.10`). If the owner wants `in review` literally, that is a board-schema question raised as a finding — not a string typed into the desktop.
+- **"loop marker exists"** describes no type. Durable loop evidence is structural: `PathSegment.iteration` / `item_index`, and `ControlFrame.iteration_index` / `item_index` / `item_total` / `max_iterations` (`modules/core/src/procedure/runtime/state.rs:282-315`, `349-389`). `0265.6` places the narration line from `0257`'s structural projection, never by inferring a loop boundary from flat row order.
+
+### Correction 3 — the traffic lights are not tokens
+
+`tokens.md` names no traffic-light colour; the export hardcodes the three macOS values (`reference/sessions.html:33-42`). If `0265.9` draws its own controls rather than using the platform's, those three constants get one grounded home beside the token set, marked as platform chrome rather than as tokens, and never appear as call-site literals. Nothing else inside the canvas may take a literal colour: `tokens.md`'s dark column plus its three named literal washes are the whole vocabulary, and the light column stays untouched.
+
+### Correction 4 — the auto-close resolution `0265.15` needs is already duplicated
+
+The landing block's task-close line is `TaskDocument.auto_close` over the `[tasks] auto-close` default. That resolution exists twice in CLI-private code today: `task_proposals::resolve_task_close_policy` (`modules/cli/src/app/task_proposals.rs:488-496`), and an inline repeat in `tasks.rs:301-306` that reads its config from `Utf8Path::new(".")` — the process cwd, which is precisely the wrong locus for a center answering about another repository's run. `0265.15` must not add a third copy. The pure combinator `resolve_auto_close_policy` (`task_proposals.rs:476-481`) and `EffectiveConfig::effective_auto_close` (`modules/io/src/harness_config.rs:1591`) already exist; what is missing is a shared, root-taking resolution the center can call with the selected row's `repo_path`.
+
+### Correction 5 — every child of this charter is currently an unloadable board document
+
+All fifteen children (and this file, until this rewrite) store `status = "draft"`. `TaskStatus` is the closed `ready|done|cancelled` enum, so `ctx_traits_core::task::parse` rejects the document and `FilesTaskBoard::load` records a parse failure and skips it (`modules/io/src/task_files.rs:189-249`). Two consequences worth stating once: the board sees `0265` as a *childless* leaf, so its derived status comes from its own `depends-on` rather than from child closure (`graph.rs:129-172`); and this parent's status word is therefore not evidence about its children. Each child is activated by its own architect pass before it is dispatched, and this charter closes on the fifteen children's own closures, never on a derived word.
+'''
+scope = '''
+## Binding constraints and exclusions
+
+These bound the outcome regardless of the route taken.
 
 - **In scope**: the Sessions screen as `screens/sessions.md` specifies it — header, the four frame-row forms, the loop-narration line, the live activity block, the bottom bar, the 380-wide preview column, plus the rail and title bar the screen sits inside — with the shared vocabulary extracted in place as each cut needs it.
 - **Out of scope**: the center subscription and delta reducer (`0256`), the selected-run reconstruction (`0257`), the verbs themselves (`0258`), pencil work of any kind, the light theme (`tokens.md` records light values for later; v1 implements the dark column and must not drift the light one), and the parked surfaces (chat family, plan review, run brief/diff, mobile).
 - **No coverage is claimed over the summons surface (`0259`) or ship shape (`0260`).** That shared chrome or bundled font assets may later be reused by those work items is not coverage of them; they remain wholly their own tasks.
 - **Center parity is a hard rule, not a preference.** Where a `data:` leaf needs something the center does not serve today, the cut that renders that leaf teaches the center to serve it and lands a second, non-GUI consumer in the same release. Nothing is routed around the center by reading the filesystem from the desktop process, and nothing is deferred to `0261` — that task's own scope admits no production behaviour beyond its four named bullets.
-- **The crate lives outside the cargo workspace**, per the plan document's structural ruling: own manifest, own lockfile, own build lane, path dependencies on the io/core crates it consumes. `0256.1` establishes that lane; every child of this charter lands into it.
-- The rail's repository identity comes from the center row, never from the desktop process's cwd — ad-hoc directories carry an `adhoc-` key that `repo_key(root)` alone cannot reproduce.
-- **This charter's `depends-on` gates nothing on its own.** `derived_status` derives a parent's status from its children alone and evaluates `depends-on` only for open leaves (`modules/core/src/task/graph.rs`), so every external prerequisite is named on the earliest child that consumes it and reaches the rest through explicit child-to-child edges: `0265.1` carries the whole of item `0256` and every other child chains to it, `0257` is named on `0265.5`, `0265.10` and `0265.14`, and `0258` on `0265.4`. The table below is documentation of the item order, not the gate.
-"""
-validation = """
+- **The crate lives outside the cargo workspace**, per the plan document's structural ruling: own manifest, own lockfile, own build lane, path dependencies on the io/core crates it consumes. `0256.1` establishes that lane; every child of this charter lands into it. gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full` or the existing macOS/Linux CI lanes.
+- **The desktop imports no CLI-private type.** `run_view`'s projection types and functions are `pub(super)`/`pub(crate)` inside `ctx-traits-cli` and sit next to ratatui rendering. Where the desktop needs that semantics, the pure derivation is extracted into shared core/IO code and both faces consume it; copying it into gpui is a defect even when it compiles.
+- **Extraction stops at demonstrated consumers.** Each shared piece is extracted by the first cut that renders through it and is only as wide as that cut needs. No design-system phase, no generic component registry, no abstraction built for `0266`-`0269` before one of them exists.
+- The rail's repository identity comes from the center row, never from the desktop process's cwd — ad-hoc directories carry an `adhoc-` key that `repo_key(root)` alone cannot reproduce (`modules/io/src/state.rs:153-160`). Any friendly display name is a pure projection of center-provided `repo_key`/`repo_path`.
+- **`0256`/`0257`/`0258`'s robustness contracts are inherited, not renegotiated.** No poll loop anywhere in the GUI; snapshot-then-delta transactionality preserved, so a rejected projection leaves the previous complete model visible and forces a fresh snapshot; compact rows never trigger ledger, store, sidecar, plan or preview reads; socket receives, ledger/board/config reads, trait resolution and layout measurement stay off gpui's UI thread; center failure stays visible and fail-loud, with last-accepted state shown only behind an explicit stale marker and never as current; a finished run's view reconstructs identically after the window is closed and reopened, so no displayed fact may live only in GUI memory.
+- **This charter's `depends-on` gates nothing on its own.** `derived_status` derives a parent's status from its children alone and evaluates `depends-on` only for open leaves (`modules/core/src/task/graph.rs:129-172`), so every external prerequisite is named on the earliest child that consumes it and reaches the rest through explicit child-to-child edges: `0265.1` carries the whole of item `0256` and every other child chains to it, `0257` is named on `0265.5`, `0265.10` and `0265.14`, and `0258` on `0265.4`. The order below is documentation of the item sequence, not the gate.
+
+## Suggested approach — guidance, not a boundary
+
+### Item order, and what each cut extracts
+
+The edges are already encoded on the children; this is what they mean in sequence, and which shared piece falls out where.
+
+1. `0265.1` (after all five `0256` leaves) — repaint the run list in the dark token set. Extracts the one token entry point: dark colours, the three literal washes, the type scale, weights, layout constants, and the loaded IBM Plex Sans/Mono faces (regular, italic, and any 500 actually used). Font bytes ship with SIL OFL 1.1 text beside them; a silent system-font substitution is a failure, not a fallback.
+2. `0265.2`, `0265.3`, `0265.8` (after `0265.1`) — the claimed-task center answer; the bottom bar (extracting bar shape, state words and the ghost-text action row); the rail (extracting rail chrome and the repo-row form).
+3. `0265.4` (also gates on `0258`), `0265.5` (also `0257`), `0265.9`, `0265.10` (also `0257`), `0265.13` — pause bound to the center verb; the frame-row forms (extracting semantic state/colour selection, the 5px dot, the one-bright-title-per-list selection rule and the sans/mono row voice); title bar and screen menu; the preview `run` block and provenance footer (extracting key/value rows, preview-block ordering and the footer form); the screen header.
+4. `0265.6`, `0265.7`, `0265.11`, `0265.12`, `0265.14` — loop narration and the live activity block; frame-list clip-and-fade (extracting an overflow component that owns measurement and fade visibility, covering both the fits and the overflows case); the `in progress` and `verdict` blocks; the `slots` block; the frame counter (extracting one progress value rendered by both header and bar).
+5. `0265.15` (after `0265.12`) — the `landing` block.
+
+`0265.3` also creates the one `placeholders` module, holding only the `watch raw` no-op at first; later cuts add exactly the entries they consume (current-frame intent, loop phrasing, header phrasing, in-progress narration, owner handle) and nothing they do not.
+
+### Expected surfaces
+
+- The desktop project `0256.1` establishes — its location, manifest, lockfile and non-interactive validation command are that task's to name, and children bind to what actually landed rather than to a guess made here.
+- `modules/io/src/center.rs` — one genuine protocol addition (`0265.2`'s claimed-task answer), plus whatever live-detail contract `0257` lands. `0265` consumes that contract; a second detail protocol is a defect.
+- Shared core/IO projection code for structural frame reconstruction, the frame counter, frame spans from activity evidence, and the auto-close resolution of Correction 4.
+- `modules/cli/` — the second, non-GUI consumer each new center answer owes.
+
+### Named reuse points
+
+Prefer these over new derivations; where one is CLI-private, extract rather than copy.
+
+- The landed TUI reducer's transaction boundary — stage snapshot rows, project the complete candidate, commit only on success, clone accepted rows before applying a delta, drop and reconnect on a rejected projection, retain last-accepted with an explicit stale time (`modules/cli/src/app/dashboard/worker.rs:254-415`, `443-500`).
+- `RunSummary` and `CenterPublicRow` for every compact fact: run/session/trait ids, status, start epoch, elapsed, current sequence title, `task_key`, narrator-resolved `title`, worktree, `verdict_rounds`, plus the row's `repo_key`/`repo_path`/`live`/`modified_epoch_secs` (`modules/io/src/center.rs:3779-3788`, `modules/io/src/run_summary.rs:23-118`).
+- `verdict_slot_rounds` for the review round (`modules/core/src/procedure/stats.rs:113`) — already surfaced as `RunSummary.verdict_rounds`.
+- `SessionState::derive(status, outcome, live)` for the state word (`modules/core/src/procedure/activity.rs:25`). Pass the row's authoritative `live`: `RunSummary.session_state` is projected with `live = false` (`run_summary.rs:136-143`) and is not a live answer on its own.
+- `run_view`'s flatten/active-path/`counts_progress` derivation as the semantics the frame list and counter must match (`projection.rs:29-219`, `planned.rs:600-661`) — extracted, per the constraint above. Note `render_ledger_run_view` passes an empty `finished_durations` map (`projection.rs:480-495`), which is why per-frame time needs sidecar evidence and can never be split out of total elapsed.
+- One frame-span derivation from the first and last `Activity.at_epoch_ms` of a frame, living once near the sidecar/detail boundary and yielding `None` when evidence is absent (`modules/io/src/activity_sidecar.rs:22-56`). The desktop never opens `<ledger>.json.activity.jsonl` itself; absent or truncated sidecar lines read as missing evidence, not as an error.
+- `center::control(..., ControlAction::Pause)` and the full `ControlResult` set — acknowledged, missing, ambiguous, not-live, unverifiable, refused (`center.rs:826-900`). An acknowledgement is not a state transition: the bar changes on a later delta. Resume is `start_session` today, so paused wording follows whatever `0258.3` lands.
+- `resolve_auto_close_policy` + `EffectiveConfig::effective_auto_close`, lifted to a shared root-taking form (Correction 4).
+- `FilesTaskBoard::open_read` behind `TaskProvider`, called as `provider.get(key)` with the run's canonical `task_key`. `resolve` first would cost a second full board read (the files backend rereads on every verb), and `task_board_cache` is discardable derived evidence, not authority for a fail-loud answer.
+- The center's existing "short `ModelCommand`, then blocking work in the connection worker" shape (`center.rs:3301-3429`). Board, config and trait reads must not run inside the sole model owner's `handle_request`.
+
+### The parent's closing pass
+
+After `0265.15` lands, and before this charter is called done, one review pass against the artifacts rather than against memory:
+
+- Walk `screens/sessions.md` leaf by leaf — header, the four row forms, loop narration, activity block, bottom bar, and the six preview blocks — confirming each `data:` leaf renders from a center-served source and each `placeholder:` leaf comes from the one `placeholders` module.
+- Compare literal values against `reference/sessions.html`: activity opacities `1.0, 0.93, 0.86, 0.79, 0.72, 0.65, 0.55, 0.45` newest-first, current-row padding `[8,12]`, activity padding `[4,12,6,27]`, current-description width 430 at 16px line height, frame-list gap 4, and the 100px bottom fade reaching opaque canvas at 80% — with Correction 1's four resolutions applied.
+- Confirm no screen re-derives a token, colour role, state word, glyph, dot rule, chrome element or placeholder string that a Sessions cut already extracted.
+- Exercise the boundaries the leaves depend on: fit and overflow; missing and malformed sidecar evidence; an accepted and a rejected snapshot projection; center loss and recovery; pause observed through a second subscriber; a finished run reopened after the window closes.
+- Run the desktop lane command `0256.1` established, then the workspace gates below.
+'''
+validation = '''
 ## Watch
 
-- **Workspace gate cost must not move.** gpui is a git dependency on Zed's tree and a multi-minute compile; it must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes. A separate desktop lane is consistent with the ruling; extending an existing lane is not.
-- **No desktop board check exists yet.** `0256.1` is still `ready` and no standalone desktop manifest or non-interactive validation command exists in the repository, so no child may declare a check that executes the desktop lane. Each child's own verification runs in whatever lane `0256.1` establishes; the board checks here cover the workspace-side invariants only. Once `0256.1` lands, the exact desktop command becomes declarable and should be added.
-- **No poll loop anywhere in the GUI.** Every update arrives as a center delta.
-- **Snapshot-then-delta ordering is the contract.** The landed TUI reducer stages snapshot rows and commits only on a successful projection; a rejected projection breaks the stream and the center resends a complete snapshot. Lost, duplicated or partially committed visible state is a defect.
-- **The ledger is authoritative**; the center DB, the in-memory model and activity sidecars are derived evidence. Compact list rows must never trigger ledger, store or sidecar reads — full reconstruction happens only on selection.
-- **Fail-loud, no direct-reader fallback.** A failed center request stays fail-loud rather than silently re-reading the filesystem; center-absent is spawn-on-need or a visibly stale view, never a hard error, and stale data is never presented as current.
-- **Blocking work stays off gpui's UI thread** — socket reads, ledger reads, filesystem and overflow measurement.
+- **`grammar.md` and `screens/sessions.md` are the specification; the export is measurement.** Copying a value out of `reference/sessions.html` is right for geometry and wrong for content. Correction 1 lists the four places that already disagree; a fifth found during implementation is resolved the same way and reported.
+- **No design example string is ever hardcoded.** `smart`, `in review`, `run-ab12ef`, `0243.4` and the narrated sentences are illustrations. A leaf that renders one of them for a run that does not carry it is worse than an omitted leaf, because it reads as evidence.
+- **No child may declare a board check that executes the desktop lane until `0256.1` has landed one.** No standalone desktop manifest or non-interactive command exists in the repository today, so such a check would be a fabrication. Equally, do not declare a grep that forbids the string `gpui` in `Justfile`/`.github/workflows/`: a *separate* desktop lane there is sanctioned by the ruling, and only extending an existing lane is not — a check that reds on the sanctioned outcome is a wrong check.
+- **Watch the center's model owner.** The claimed-task answer and any config/trait resolution must not perform filesystem work inside the sole SQLite/model owner's request handling. The board is resolved from the selected row's `repo_path`, never from the center's or the desktop's cwd, and an empty or unusable path fails loudly rather than falling back.
+- **Compact rows stay compact.** If a rendering leaf tempts a read during list projection, the leaf belongs to the selected-run reconstruction instead.
+- **A stale view must say so.** Center loss shows last-accepted state behind an explicit stale marker and time, or spawns on need; it never silently presents old data as current and never reads the filesystem from the desktop process to cover the gap.
 - Rust is pinned to 1.97.1 by `rust-toolchain.toml`. Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X"; a shared cross-worktree target dir flakes gates.
+- New board/config coverage uses scratch repositories, task documents, runtime config, ledgers and sidecars. No test may depend on this repository's committed content.
 
-## Done when
+## Done when — binding goals, and what decides each
 
-Every child task is closed and the stop condition holds: the Sessions screen matches `screens/sessions.md` leaf for leaf — header, four frame-row forms, loop narration, activity block, bottom bar and the six preview blocks — with every `data:` leaf rendering from a real center-served source and every `placeholder:` leaf served from the one `placeholders` module; a live run's detail updates as frames land with no poll loop, and a finished run's view is identical after closing and reopening the window. The shared vocabulary those cuts extracted is what `0266`-`0269` consume, with no screen re-deriving a token, a colour role, a state word, a glyph, a dot rule, a chrome element or a placeholder string. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
-"""
+1. **Every child is closed on its own terms.** All fifteen (`0265.1`-`0265.15`) are `done` or `cancelled`, each having run its own declared checks and, once `0256.1` had landed one, the desktop lane command. No board check at this level: child closure is the board's bookkeeping, and this parent's derived status is not evidence of it while any child is still an unloadable draft document (content Correction 5).
+2. **Sessions matches `screens/sessions.md` leaf for leaf** — header, the four frame-row forms, loop narration, activity block, bottom bar and the six preview blocks — with every `data:` leaf rendering from a real center-served source, every `placeholder:` leaf served from the one `placeholders` module, and Correction 1's four resolutions and Correction 2's three mappings applied. Decided by the closing review pass in `scope` plus the desktop lane command; no board check exists for it, and none may be invented, because no repo-root command inspects a rendered gpui screen today.
+3. **A live run's detail updates as frames land with no poll loop, and a finished run's view is identical after the window is closed and reopened.** Decided by the children's own desktop-lane coverage (`0265.5`, `0265.6`, `0265.7`) and by reading the diff for any timer, interval or filesystem read on the desktop side. No board check.
+4. **Every center answer this charter added is proven at the center boundary and consumed by a second, non-GUI surface**, with existing CLI/TUI behaviour unchanged. The children declare the focused proofs (`proof_center`, `--lib tasks`, `--lib run_view`, `proof_doctor`); at this level they all run inside the landing gate, so the deciding command is Done-when 5's.
+5. **The workspace is unmoved and the landing gate is green**: root Cargo resolution and the root lockfile contain no gpui, the desktop project is not a workspace member, and the full landing gate passes without building it:
+   `just test-full`, plus the root-resolution command declared in `[[checks]]` below.
+
+Exclusions, restated so they are checkable by reading the diff: no light-theme value is touched, no pencil artifact is edited, no CLI-private ratatui type is imported by the desktop, no third copy of the auto-close resolution is added, and no work belonging to `0259`, `0260` or `0261` is done here.
+
+## Order and bounded refinement
+
+Children run in the five stages listed in `scope`; within a stage, the encoded edges are the only ordering that binds. When the last child lands, run the closing pass in this order — leaf-by-leaf review against `screens/sessions.md`, then the literal comparison against `reference/sessions.html`, then the boundary exercises, then the desktop lane command, then `just test-full`, then the root-resolution check — so a rendering defect surfaces next to the leaf that owns it rather than inside a long gate.
+
+Permit at most one targeted repair-and-rerun round at this level. A round repairs one named defect in the child that owns it, then reruns the failed step and every later step in that order. If a second round would be needed, stop and report the failing command or the failing leaf with its evidence rather than iterating; that is the stop condition, not a judgement call.
+'''
 [relations]
 depends-on = ["0256", "0257", "0258"]
 
 [[checks]]
 name = "workspace landing gate remains green and gpui-free in cost"
 command = "just test-full"
+expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 300000
