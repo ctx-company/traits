@@ -1,47 +1,303 @@
 schema-version = "0.2"
 key = "0265.1"
 title = "Repaint the live run list in the dark token set"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-`0256.1` opens the native window and `0256.3` renders repository-aware run rows in it. Those rows draw in gpui's defaults today. Repaint them through the dark column of `.internal/docs/design/tokens.md`, and let the token constants and the font faces fall out of that repaint rather than preceding it.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+one names an observable outcome and what decides it. The APPROACH section is
+the architect's suggested route — discovery order, file and symbol guesses,
+edit order, proof mechanics. Deviate from any of it whenever a goal requires
+it and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-`tokens.md` is committed and normative: 30-odd colour tokens with dark and light columns and a stated role each, a type scale from 16 down to 10 px with per-usage assignment, layout constants (window 1440x900 corner-radius 10, title bar h 36, rail w 260, main pane padding [18,40,20,40] gap 28, preview column w 380), and two font tokens — `font-sans` = IBM Plex Sans, `font-mono` = IBM Plex Mono. Only the dark column is implemented for v1.
+`0256.1` opens the native window, `0256.3` renders repository-aware run rows in
+it, and `0256.4`/`0256.5` keep those rows live and honestly stale. Those rows
+draw in gpui's defaults. Repaint them through the dark column of
+`.internal/docs/design/tokens.md`, and let the token constants and the loaded
+IBM Plex faces fall out of that repaint rather than preceding it. This is the
+first visual cut of `0265` and the first render that needs a font, so it
+resolves fonts for every later cut.
 
-Fonts are the real risk and this task resolves them because it is the first render that needs them. The repository carries no `.ttf`, `.otf` or `.woff*` outside `node_modules`, and neither IBM Plex face is a macOS system font, so naming the tokens and rendering in whatever the system substitutes is a token violation dressed as a default. IBM Plex ships under SIL OFL 1.1 and is redistributable: bundle the faces in the desktop lane's own assets with the licence text beside them, where they also ride the app bundle `0260` will package.
+`tokens.md:6-85` is committed and normative: 32 named colours with a dark and a
+light column and a stated role each, three dark washes recorded as literals
+rather than variables (additions `#7fc79a14`, deletions `#e08b7f14`, selection
+`#7fb2ff12`), a type scale from 16 down to 10 px with per-usage assignment,
+weights (500 only for emphasized in-block titles, everything else normal),
+layout constants, and two font tokens — `font-sans` = IBM Plex Sans,
+`font-mono` = IBM Plex Mono. Only the dark column is implemented for v1.
+
+Fonts are the real risk. `git ls-files '*.ttf' '*.otf' '*.woff' '*.woff2'
+'*OFL*'` matches nothing tracked, there is no font loader to reuse, and neither
+IBM Plex face is a macOS system font. gpui resolves an unknown family by
+falling through to a fallback stack, so naming `IBM Plex Sans` and rendering in
+whatever the system substitutes is a token violation dressed as a default.
+`reference/sessions.html:6-10` pulls the faces from a Google Fonts stylesheet
+with CSS system fallbacks — that is export machinery, not a native
+implementation. IBM Plex ships under SIL OFL 1.1 and is redistributable:
+vendor the faces into the desktop lane's own assets from a pinned upstream
+revision with the copyright and licence text beside the bytes, where `0260`
+will later carry them into the app bundle.
+
+GROUNDED AT HEAD fae04b518. Nothing this task edits exists yet. There is no
+standalone desktop `Cargo.toml`, no desktop lockfile, no gpui source, no
+desktop asset directory and no desktop command anywhere in the repository, and
+all five prerequisites are `ready` rather than done. Every desktop path,
+symbol, asset mechanism, gpui revision and command named below is therefore a
+guess to be replaced by discovery against what `0256` actually landed —
+binding them here would be fabrication. The one thing that is checkable today,
+and the only board check this task can honestly declare, is that the root
+workspace stayed gpui-free.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: the dark column of `tokens.md` transcribed into the desktop crate as constants reachable from one entry point — colours, the diff/selection washes that the file records as literals rather than variables, the type scale, weights and the layout constants — and the existing run list repainted through them, in the bundled faces.
-- **Bundle the OFL faces** in the desktop lane's assets, carrying the SIL OFL 1.1 licence text as that licence requires. If the owner prefers a system-font fallback instead, that fallback is recorded explicitly in `tokens.md` before this task closes; silence is not an option either way.
-- Out of scope: the light column (recorded for later, neither implemented nor drifted), semantic colour roles and state words, chrome, the rail, the preview column, and the `placeholders` module — each lands with the Sessions cut that first renders it.
-- `.internal/docs/design/**` is read-only normative input. A constant that looks wrong is an owner/assistant correction against the `.pen`, not a worker edit.
-- The desktop lane's build and test command is whatever `0256.1` establishes; none exists in the repository today, so this task declares no check that executes it.
+1. **One dark token entry point.** A single desktop module exports the whole
+   dark vocabulary of `tokens.md:6-85`, reachable from one import: all 32 named
+   dark colours, the three literal washes, the type sizes 16, 14, 13, 12.5, 12,
+   11.5, 11, 10.5 and 10 px, normal weight 400 plus medium 500 where a call
+   site actually uses it, the two font-family names, and the layout constants —
+   window 1440x900 with corner radius 10 and clip; title bar h 36, padding
+   [0,20], traffic lights 12, logo 34x18, menu gap 18; rail w 260 with its
+   listed paddings and gaps; main pane padding [18,40,20,40] gap 28; preview
+   column w 380 padding [18,22]; and the list-row, block, bottom-bar, fade and
+   divider dimensions of `tokens.md:71-85`. Each name is defined exactly once,
+   and no light-column value appears anywhere in the desktop lane.
+   Decided by the desktop lane's own non-interactive build-and-test command —
+   the one `0256.1` landed, discovered at execution time and named verbatim in
+   the work summary — exiting 0, plus the closing diff read against
+   `tokens.md`.
+   Excluded: the light column, which stays recorded and unimplemented; a theme
+   abstraction, runtime theme switching or palette indirection built for a
+   second theme that does not exist; semantic colour roles and state words
+   (`0265.5`); rendering the title bar or consuming its constants — the
+   traffic-light size, logo box and menu gap are defined here and applied by
+   `0265.9`; the `placeholders` module (`0265.3`).
 
-## Prerequisites
+2. **The bundled faces render, and a substitution fails loudly.** IBM Plex Sans
+   and IBM Plex Mono faces are vendored into the desktop lane's own assets from
+   a pinned upstream revision or release, with the SIL OFL 1.1 copyright and
+   licence text beside the bytes and the upstream source and version recorded
+   in the change. They are registered through the desktop lane's existing
+   startup and asset path. A desktop proof shows each family and variant the
+   repainted call sites request resolves to a bundled face rather than to a
+   fallback, and a registration failure surfaces as a visible startup or render
+   failure instead of a quiet default-font render.
+   Decided by the same desktop command, which must include that font-resolution
+   proof; a successful render alone does not decide this goal, because a
+   fallback renders successfully.
+   Excluded: fetching fonts over the network at build or run time; pinning to a
+   mutable branch URL; accepting a system substitute as a fallback — no owner
+   ruling selecting one is recorded in `tokens.md`, so bundling is the binding
+   default; bundling weights or styles no call site resolves; app bundling,
+   launcher, icon or release work (`0260`).
 
-Work item `0256` in full: `0256.1` (the standalone desktop crate, its manifest, lockfile and independent build/test lane), `0256.2` (the initial center snapshot), `0256.3` (the repository-aware run rows this task repaints), `0256.4` (the live delta stream every later Sessions cut refreshes from) and `0256.5` (the visible center-loss posture). All five are named on this leaf, not on the charter: `derived_status` evaluates `depends-on` only for open leaves and derives a parent's status from its children alone (`modules/core/src/task/graph.rs`), so a charter's dependency is never inherited by its children. Every other `0265` child chains to this one for the item gate.
+3. **The landed rows are repainted, not rebuilt.** No colour, size, spacing,
+   weight or font-family literal remains at a repainted run-row call site, and
+   the row's data projection, identity, ordering, delta handling, selection and
+   stale posture are unchanged. `CenterPublicRow` and `RunSummary` are neither
+   altered nor duplicated, and live presentation keeps reading the row's
+   authoritative `CenterPublicRow.live` rather than
+   `RunSummary.session_state`, which is projected with `live = false`
+   (`modules/io/src/run_summary.rs:136-143`).
+   Decided by the desktop lane's existing `0256.2`-`0256.5` tests passing
+   unmodified under that same command, plus the closing diff showing no
+   non-presentation change to the row path.
+   Excluded: the frame-row forms, the 5px state dot, the one-bright-title
+   selection rule and frame activity (`0265.5`, `0265.6`); the bottom bar
+   (`0265.3`), rail (`0265.8`), title bar (`0265.9`), preview column
+   (`0265.10`-`.12`, `.15`), header (`0265.13`) and frame counter (`0265.14`);
+   any new row structure lifted from the frame list in
+   `reference/sessions.html`; any change to center, core or IO semantics; any
+   import of CLI-private ratatui rendering.
+
+4. **The workspace does not learn about gpui.** Root `Cargo.toml` resolution
+   and the root `Cargo.lock` stay gpui-free, and the per-round workspace gate
+   stays green and unchanged in cost.
+   Decided by `test -f Cargo.lock && metadata="$(cargo metadata
+   --format-version 1)" && ! printf '%s' "$metadata" | rg -q '"name":"gpui"' &&
+   ! rg -q '^name = "gpui"$' Cargo.lock` and by `just test`; both are declared
+   as checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   or font-asset cost to the existing macOS and Linux CI lanes
+   (`.github/workflows/ci.yml:12-60`); a grep forbidding the word `gpui` in
+   `Justfile` or `.github/workflows/` — a *separate* desktop lane there is
+   sanctioned, so such a check would red on the sanctioned outcome.
+
+5. **The normative artifacts are untouched.** No file under
+   `.internal/docs/design/` is modified. A token that looks wrong is reported
+   in the work summary as an owner correction against the source design, never
+   edited here.
+   Decided by the task commit's own file list; no board check can decide this,
+   because a check runs in a clean detached worktree of the merged sha with no
+   base to diff against.
+
+6. **The pass is reviewed once and bounded.** The completed diff is read
+   against `tokens.md`, the applicable literal evidence in
+   `reference/sessions.html`, and the actual `0256.3` renderer before the task
+   is called done. Exactly one targeted repair cycle is allowed: run the
+   desktop lane proof and the root checks, repair one named failure, rerun that
+   command and everything after it. If a second cycle would be needed, stop and
+   report the exact failing command and the unresolved font or render evidence
+   rather than iterating. The work summary names the discovered desktop path,
+   the exact desktop command, the locked gpui revision, the vendored faces with
+   their upstream revision, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of this exists at the HEAD this plan was written against. Read what
+`0256` landed; do not carry a guess from this file into an edit.
+
+- Find the desktop project: root `Cargo.toml`'s `exclude`/members and the
+  top-level directory listing, then its own manifest and lockfile. Read its
+  README, its justfile or its CI lane for the documented non-interactive
+  build-and-test command `0256.1` established.
+- Read the gpui revision pinned in the desktop lockfile and check the text
+  stack against *that* revision's source, not against upstream. Current Zed
+  exposes `TextSystem::add_fonts(Vec<Cow<'static, [u8]>>) -> Result<()>` and a
+  `resolve_font` that falls through to a fallback stack when a family does not
+  resolve — that is why naming a family is not loading one — but the locked
+  revision decides the actual call.
+- Read the asset mechanism `0256.1` established (an `AssetSource`
+  implementation, `include_bytes!`, or a build-time embed) and extend it. Do
+  not add a second one.
+- Read the `0256.3` row renderer and the `0256.2`/`0256.4`/`0256.5` tests:
+  enumerate the presentation fields the compact row actually renders today, and
+  the harness that will show they still behave identically afterwards.
+
+### Edit order
+
+1. The token module: dark colours, the three washes, the type scale, weights,
+   the layout constants — in gpui-native types (its `rgb`/`rgba` colour
+   helpers, `Pixels`, `FontWeight`, shared family strings) where that removes a
+   conversion from the call sites.
+2. The vendored faces plus the OFL text beside them, registered on the existing
+   startup path with a failure that is visible rather than swallowed.
+3. The font-resolution proof, written so a fallback substitution reds it.
+4. The row repaint: replace presentation literals with the token constants,
+   touching nothing else in the row path.
+5. Run the desktop lane command, then the two declared root checks.
+
+### Mapping the row
+
+Apply only what the landed row actually presents; a field the row does not
+render gets no call site here, and the frame-list forms in the export belong to
+siblings. The applicable literal evidence for this region is canvas `#0c0d10`
+(`reference/sessions.html:26`); normal list-row padding `[6,12]`, row-left gap
+10, sans 12.5 title in text `#d7dae0` and mono 10.5 metadata in text-muted
+`#585d68` (`:299-344`); selected fill surface-raised `#16181d` with a
+text-bright `#eceef2` title and a text-secondary `#8b909c` description
+(`:414-457`).
+
+Faces follow the same rule. Sans Regular and Mono Regular are demonstrably
+consumed by that row. Italic marks narration only and 500 is for emphasized
+in-block titles, both sibling-owned — vendor those faces only if a call site
+this task repaints, or the token entry point itself, actually resolves them,
+and say which faces shipped and why in the work summary.
+
+### Reuse points
+
+`0256.1`'s application initialisation, window setup and asset source;
+`0256.3`'s row renderer and its projection; `0256.2`/`0256.4`/`0256.5`'s
+snapshot, delta and stale-posture paths; the desktop lane's existing test
+harness. `tokens.md` stays the single source of the values and the new module
+the single source in code — no second token table anywhere, and no parallel
+startup, asset, row-model or validation path.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X". Rust is pinned to 1.97.1 by `rust-toolchain.toml` and the desktop directory
+inherits that pin unless `0256.1` gave it its own toolchain file. Keep any
+repair scoped to the one red command and preserve every invariant named under
+Excluded.
+
+## Excluded — not cells here
+
+- The light column, and any "fix" to a value in `.internal/docs/design/**`.
+- A design-system phase: a component registry, a generic palette abstraction,
+  or constants extracted for `0266`-`0269` before one of them consumes them.
+- Any sibling-owned screen region listed in goal 3.
+- Center, core or IO semantic changes; a second projection of the compact row;
+  any ledger, store, sidecar or filesystem read on the row path; a GUI poll
+  loop; a blocking receive on gpui's UI thread; repository identity derived
+  from the desktop process's cwd.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes it and reports its output in the work summary instead.
+- Packaging, launcher, icon and release work (`0260`), and the summons surface
+  (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **Font loading is the actual risk**, not the constants. gpui's text stack against Zed's tree is unverified here; a silent system-face substitution must fail visibly rather than pass quietly.
-- **Licence obligations travel with the bytes** — bundling OFL faces without the licence text is a redistribution defect.
-- **Do not drift the light column.** It is recorded for a later theme; implementing or fixing it now creates a second source of truth against a normative document.
-- **Workspace gate cost must not move**: adding font binaries to the desktop lane's assets must not change what the workspace builds, and gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes.
-- Rust is pinned to 1.97.1 by `rust-toolchain.toml`; a desktop directory inside this repository inherits that pin unless it carries its own.
-- Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the repainted render — fonts especially — is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Font substitution is the failure mode, not a fallback.** A screenshot, a
+  clean build and a green render all survive the system quietly substituting a
+  face. The proof must assert resolution against the bundled bytes, and
+  registration failure must be visible at startup or render.
+- **Licence obligations travel with the bytes.** Redistributing OFL faces
+  without the copyright and licence text beside them is a defect, and a
+  mutable branch URL is not a pinned source.
+- **Do not drift the light column.** It is recorded for a later theme;
+  implementing or repairing it now creates a second source of truth against a
+  normative document. `.internal/docs/design/**` is read-only input.
+- **Copying the export is right for geometry and wrong for content.** The
+  export's main list is a frame list; this task owns the compact run rows.
+  Route the landed row's demonstrated presentation through the tokens, and do
+  not invent row structure from `reference/sessions.html`.
+- **Workspace cost must not move.** Font binaries live in the desktop lane's
+  assets. gpui must not enter root resolution, the root `Cargo.lock`,
+  `just test`, `just test-full`, or the existing macOS/Linux CI lanes. A
+  separate desktop CI lane is sanctioned; extending an existing one is not.
+- **The declared checks are workspace-side invariants, not proof of this
+  task's render.** They show the workspace stayed gpui-free and green. The
+  repaint and the fonts are proven in the desktop lane `0256.1` established,
+  whose exact command becomes declarable as a check only after it exists.
+- One repair cycle, then stop with the exact failing command. Do not iterate
+  against a font or render failure without a bound.
 
 ## Done when
 
-The run list the walking skeleton already renders draws in the bundled IBM Plex Sans and Mono faces at the dark token colours and type-scale sizes — matching `reference/sessions.html`'s literal values for the region it covers — or, under an explicit owner ruling recorded in `tokens.md`, in the named fallback. The dark constants are reachable from one entry point, no colour, size, spacing or font-name literal remains at a repainted call site, and the light column is unchanged. Root workspace resolution and the root lockfile remain gpui-free.
+- The desktop lane's documented non-interactive build-and-test command — named
+  verbatim in the work summary — exits 0 with the token module, the vendored
+  faces, the font-resolution proof and the repainted rows in the tree, and the
+  `0256.2`-`0256.5` tests pass unmodified.
+- That command's font proof shows every family and variant the repainted call
+  sites request resolving to a bundled face, and a forced registration failure
+  is visible rather than silently substituted.
+- The closing diff read shows: all 32 dark colours, the three washes, the type
+  scale, the used weights and the layout constants of `tokens.md:6-85` present
+  once behind one entry point; no light-column value; no colour, size, spacing,
+  weight or font-family literal at a repainted call site; no second token
+  table; the OFL text beside the font bytes; and no change to row projection,
+  identity, ordering, delta handling, selection or stale posture.
+- `test -f Cargo.lock && metadata="$(cargo metadata --format-version 1)" && !
+  printf '%s' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$'
+  Cargo.lock` exits 0.
+- `just test` exits 0.
+- The task commit touches no file under `.internal/docs/design/`, no
+  sibling-owned screen region, no packaging surface and no center, core or IO
+  semantics.
+- `git status --short` is empty, the work is in one task-scoped commit, and the
+  work summary names the desktop path, the desktop command, the locked gpui
+  revision, the vendored faces and their upstream revision, any owner
+  correction raised against `tokens.md`, and any deviation from the approach.
 """
+
 [relations]
 parent = "0265"
 depends-on = ["0256.1", "0256.2", "0256.3", "0256.4", "0256.5"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''test -f Cargo.lock && metadata="$(cargo metadata --format-version 1)" && ! printf '%s' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
