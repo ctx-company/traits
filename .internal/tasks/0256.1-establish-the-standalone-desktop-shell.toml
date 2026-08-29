@@ -16,9 +16,13 @@ Do not inherit workspace-only dependencies in a way that pulls the desktop into 
 ## Done when
 The standalone desktop project has its own manifest and lockfile, its documented independent build and test commands pass from a clean checkout, and running it opens a basic native window. Root workspace resolution and the root lockfile contain no gpui dependency, and `just test-full` passes without building the desktop project.
 """
+
 [relations]
+depends-on = [
+    "0243.4",
+    "0243.5",
+]
 parent = "0256"
-depends-on = ["0243.4", "0243.5"]
 
 [[checks]]
 name = "workspace landing gate remains green"
@@ -27,4 +31,4 @@ timeout-ms = 900000
 
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''

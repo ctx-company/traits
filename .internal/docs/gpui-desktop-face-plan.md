@@ -45,11 +45,12 @@ The summons work item additionally gates on **0253.4** (ask parks
 
 ## Structural decision the charter must carry
 
-**The crate lives OUTSIDE the cargo workspace.** gpui is a git dependency
-on Zed's tree; inside the workspace it would put a multi-minute compile
-into `just test-full` and every CI lane. Own directory, own `Cargo.toml`
-and lockfile, own build lane; path-dependencies on the io/core crates it
-consumes. This is a cost ruling, not architecture ceremony.
+**The crate lives OUTSIDE the cargo workspace.** gpui is a crates.io
+dependency (`gpui = "0.2.2"`, published 2025-10-22); inside the workspace
+it would put a multi-minute compile into `just test-full` and every CI
+lane. Own directory, own `Cargo.toml` and lockfile, own build lane;
+path-dependencies on the io/core crates it consumes. This is a cost
+ruling, not architecture ceremony.
 
 ## Work items
 

@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "ctx-traits-desktop"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Oskar Cieslik"]
+license = "Apache-2.0"
+repository = "https://github.com/ctx-company/traits"
+publish = false
+
+[[bin]]
+name = "ctx-desktop"
+path = "src/main.rs"
+
+[dependencies]
+gpui = "0.2.2"

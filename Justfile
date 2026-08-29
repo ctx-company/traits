@@ -8,6 +8,7 @@
 # was originally defending against.
 gate_target_dir := env_var_or_default("CARGO_TARGET_DIR", justfile_directory() / "target")
 target_dir := env_var_or_default("CARGO_TARGET_DIR", "target")
+desktop_dir := justfile_directory() / "desktop"
 
 install:
 	mkdir -p "$HOME/.local/bin"
@@ -107,6 +108,25 @@ ts-test:
 lint:
 	cargo fmt --check
 	CARGO_TARGET_DIR="{{gate_target_dir}}" cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# The standalone gpui desktop project (0256.1). Outside the root cargo
+# workspace on purpose: gpui resolves ~700 crates, and none of that cost may
+# reach `just test`, `just test-full`, or a CI lane. CARGO_TARGET_DIR is SET,
+# not inherited — runs lease a shared cache slot, and 700 gpui crates dropped
+# into the slot the workspace gates build in is how a gate starts failing for
+# load rather than for a defect.
+desktop-build:
+	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo build
+
+desktop-test:
+	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo test
+
+desktop-lint:
+	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo fmt --check
+	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo clippy --all-targets -- -D warnings
+
+desktop-run:
+	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo run
 
 # The PER-ROUND gate (0056). The implement trait's check step runs `just test`
 # every build round, in a fresh worktree, for every run — so this must stay

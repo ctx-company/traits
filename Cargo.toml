@@ -9,7 +9,7 @@ members = [
   "modules/wasm-plugin",
   "modules/cli/tests/fixture-agent",
 ]
-exclude = ["packages/cdk"]
+exclude = ["packages/cdk", "desktop"]
 
 [workspace.package]
 version = "0.4.0"
