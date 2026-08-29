@@ -46,8 +46,8 @@
   },
   "prompt:describe-the-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 77,
-    "end": 77
+    "start": 78,
+    "end": 78
   },
   "prompt:fix-reviewed-nodes": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -61,8 +61,8 @@
   },
   "prompt:summarize-the-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 139,
-    "end": 139
+    "start": 140,
+    "end": 140
   },
   "prompt:survey-the-topic": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -156,8 +156,8 @@
   },
   "sequence:describe-each-chunk-body/describe-the-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 76,
-    "end": 76
+    "start": 77,
+    "end": 77
   },
   "sequence:procedure/coverage-status-final": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
@@ -171,8 +171,8 @@
   },
   "sequence:procedure/describe-each-chunk": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 74,
-    "end": 74
+    "start": 75,
+    "end": 75
   },
   "sequence:procedure/enumerate-symbols": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/step/render.ts",
@@ -191,13 +191,13 @@
   },
   "sequence:procedure/seed-batches": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 69,
-    "end": 69
+    "start": 70,
+    "end": 70
   },
   "sequence:procedure/summarize-the-walkthrough": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 138,
-    "end": 138
+    "start": 139,
+    "end": 139
   },
   "sequence:procedure/surveying": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
@@ -241,8 +241,8 @@
   },
   "slot:describe-each-chunk-item": {
     "file": ".ctx/traits/authored/walkthrough/source/variant/default/index.ts",
-    "start": 74,
-    "end": 74
+    "start": 75,
+    "end": 75
   },
   "slot:file-closure": {
     "file": ".ctx/traits/authored/walkthrough/source/shared/data.ts",

@@ -47,11 +47,12 @@ export default function () {
     investigator.prompt("Survey the topic", {
       input: input.prompt`
                 Survey ${shared.data.topic} in THIS repository with your own tools (search, read files). Follow ${shared.resource.walkthroughStandards} exactly. Deliver three things.
-                1. The FILE CLOSURE: every source file the topic's code lives in, plus every same-workspace file it directly or transitively depends on (follow imports/use declarations), stopping only at the horizon. Each entry: the repo-relative path (verify it exists) and one sentence why it belongs. This list is the coverage contract — a deterministic script will enumerate EVERY symbol in these files and the run cannot finish until every one is described. The run refuses closures beyond roughly a thousand symbols: prefer the topic's owning files plus first-degree collaborators, and push deep transitive dependencies to the horizon — a wide neighbor earns a horizon sentence, not a closure entry.
-                2. The HORIZON: plain prose naming where traversal deliberately stopped and why (std/third-party, unrelated subsystems, generated code). Honesty here is part of the deliverable.
-                3. The SKELETON NODES: the upper tree only — one root (id "root", kind "overview", no parent) narrating architecture and intent; area nodes for the module groupings; ONE file node per closure entry with kind "file", parent set to its area (or the root), and id "f-" plus the path slugified (lowercase, every character outside a-z0-9 becomes "-", runs collapsed, ends trimmed — e.g. modules/io/src/mcp.rs becomes f-modules-io-src-mcp-rs); optional flow nodes for cross-cutting paths. NO type or function nodes here — those are produced per-file later. Every node carries verified refs.
+                1. The FILE CLOSURE: every source file the topic's code lives in, plus every same-workspace file it directly or transitively depends on (follow imports/use declarations), stopping only at the horizon. Verify every path exists. This list is the coverage contract — a deterministic script enumerates EVERY symbol in these files and the run cannot finish until every one is described. The run refuses closures beyond roughly a thousand symbols: prefer the topic's owning files plus first-degree collaborators, and push deep transitive dependencies to the horizon — a wide neighbor earns a horizon sentence, not a closure entry.
+                2. The HORIZON: where traversal deliberately stopped and why, naming every cut. Honesty here is part of the deliverable — the note renders into the walkthrough.
+                3. The SKELETON: the upper tree only — the single root overview narrating architecture and intent, area nodes for the module groupings, one file node per closure entry, optional flow nodes for cross-cutting paths. No type or function nodes here — those are produced per-file later. Ground every node in refs you verified.
                 On a later round your previous closure and skeleton are attached — extend and correct them rather than starting over.
-                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading. Your ONLY deliverable is this step's structured output; submit it directly, never write it to a file, never wrap it in prose or explanation.`,
+                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading.
+                `,
       output: [shared.data.fileClosure, shared.data.horizon, shared.data.skeletonNodes],
       include: [shared.data.fileClosure.optional(), shared.data.horizon.optional(), shared.data.skeletonNodes.optional()],
     });
@@ -75,11 +76,10 @@ export default function () {
     loop.limit(96);
     investigator.prompt("Describe the chunk", {
       input: input.prompt`
-                Describe exactly one symbol chunk — ${chunk} — for the walkthrough of ${shared.data.topic}. The chunk names its file and lists the enumerated symbols you owe; other chunks run in their own frames.
-                OPEN the chunk's file and emit EXACTLY ONE node per listed symbol — the batch's nodes length must equal the chunk's symbols length; no symbol may be skipped, merged, or invented. Each entry's key is path:line:name — read the symbol's name and 1-indexed definition line out of it. For each: id "s-" plus the symbol name plus "-" plus its line (kebab-case); parent = the file's node id ("f-" plus the slugified path: lowercase, non-alphanumerics to "-", runs collapsed, ends trimmed); kind copied from the entry (function or type); symbol = the entry's key copied VERBATIM — coverage joins on this exact string; refs = one span from the definition line to its real end, read from the file; summary one glanceable sentence; explanation the precise mechanics at leaf register per ${shared.resource.walkthroughStandards} — one tight paragraph for small items, up to three for load-bearing ones.
-                Never emit null for any field; omit optional fields entirely when unused. Return only this chunk's nodes.
-                Submission shape: exactly one JSON object whose single top-level key is "node-batches"; its value is the batch object carrying the "nodes" list. Never submit the batch bare with "nodes" at top level — the "node-batches" slot key must be the outermost key.
-                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading. Your ONLY deliverable is this step's structured output; submit it directly, never write it to a file, never wrap it in prose or explanation.`,
+                Describe exactly one symbol chunk — ${chunk} — for the walkthrough of ${shared.data.topic}. The chunk names its file and lists the enumerated symbols you owe; other chunks run in their own frames — touch only this one.
+                OPEN the chunk's file and describe EVERY listed symbol: exactly one node each, none skipped, merged, or invented — private items and test helpers included. Spans come from the file you opened, definition line to its real end. Explanations sit at leaf register per ${shared.resource.walkthroughStandards}: one tight paragraph for small items, up to three for load-bearing ones.
+                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading.
+                `,
       output: shared.data.nodeBatches.with(operation.Append),
     });
   });
@@ -92,10 +92,10 @@ export default function () {
     investigator.prompt("Cover the gaps", {
       input: input.prompt`
                 The deterministic coverage report for the walkthrough of ${shared.data.topic} is ${shared.data.coverageReport}.
-                If it shows zero uncovered entries, zero unknown symbol keys, and zero orphan parents with exactly one root: return an empty batch (nodes: []) and nothing else.
-                Otherwise return one batch making progress on what it names, AT MOST 40 nodes this round — the loop runs again for the rest. Priority order: first corrected re-emissions for nodes with unknown symbol keys or orphaned parents (re-emitting an id replaces that node — keep its content, fix the broken field, never drop a valid symbol key); then a node per uncovered entry, same rules as chunk description — verbatim symbol key, verified span, leaf register per ${shared.resource.walkthroughStandards}. Never emit null for any field.
-                Submission shape: exactly one JSON object whose single top-level key is "node-batches"; its value is the batch object carrying the "nodes" list. Never submit the batch bare with "nodes" at top level — the "node-batches" slot key must be the outermost key.
-                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading. Your ONLY deliverable is this step's structured output; submit it directly, never write it to a file, never wrap it in prose or explanation.`,
+                If it shows zero uncovered entries, zero unknown symbol keys, and zero orphan parents with exactly one root: contribute an empty batch and nothing else.
+                Otherwise make progress on what it names, at most 40 nodes this round — the loop runs again for the rest. Priority: first corrected re-emissions for nodes with unknown symbol keys or orphaned parents (keep the content, fix the broken field, never drop a valid symbol key); then a node per uncovered entry, described from the opened file at leaf register per ${shared.resource.walkthroughStandards}.
+                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading.
+                `,
       output: shared.data.nodeBatches.with(operation.Append),
     });
 
@@ -122,10 +122,11 @@ export default function () {
     flow.when("Apply review fixes", condition.fieldEquals(shared.data.verdict1, "status", "revise"), () => {
       investigator.prompt("Fix reviewed nodes", {
         input: input.prompt`
-                The reviewer's verdict for the walkthrough of ${shared.data.topic} is ${shared.data.verdict1}. For every blocker it names, re-emit the corrected node in one batch: same id (re-emission replaces), same VERBATIM symbol key where the node had one (coverage must not regress), the named defect actually fixed against the real file. Nodes without blockers are not re-emitted.
-                Also return the horizon note: REWRITTEN when a blocker names the horizon (the current note is ${shared.data.horizon}), byte-identical otherwise — the horizon renders into the walkthrough, and this step is the only place review fixes can reach it.
+                The reviewer's verdict for the walkthrough of ${shared.data.topic} is ${shared.data.verdict1}. For every blocker it names, re-emit the corrected node with the named defect actually fixed against the real file; nodes without blockers are not re-emitted, and a corrected node keeps its symbol key so coverage never regresses.
+                Also return the horizon note: rewritten when a blocker names the horizon (the current note is ${shared.data.horizon}), unchanged otherwise.
                 Follow ${shared.resource.walkthroughStandards}.
-                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading. Your ONLY deliverable is this step's structured output; submit it directly, never write it to a file, never wrap it in prose or explanation.`,
+                READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading.
+                `,
         output: [shared.data.nodeBatches.with(operation.Append), shared.data.horizon],
       });
     });
