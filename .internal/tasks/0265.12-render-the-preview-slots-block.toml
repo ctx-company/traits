@@ -1,46 +1,736 @@
 schema-version = "0.2"
 key = "0265.12"
 title = "Render the preview slots block"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Add the Sessions preview column's fact block: `slots`, key/value from the slot ledger — `review-verdict-1 · filled · r1`, `work-summary · filled`, `changed-files · 12 files`.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it wherever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-Every leaf is `data:`, and the source is the selected run's authoritative reconstruction. `Session.slot_revisions` records which slots exist, whether each is filled and at which revision, which is exactly what the three example rows show; the same record is what the verdict block beside it reads its typed slots from. Nothing here is re-derived from prompt text or file presence — that would produce a second, disagreeing answer about a fact the ledger already states.
+This cut inserts the Sessions preview column's `slots` fact block into the body
+sequence `0265.10` parameterised, after `0265.11`'s state blocks and before
+`0265.15`'s `landing` consequence block. Nothing about the preview frame, the
+named-block form or the key/value row is rebuilt here: this is the first fact
+block, and the composition it lands is what `0267.3` and `0268.3` take for
+`facts`, `checks`, `variants` and `ports`.
 
-This is the fact-block shape the four later screens compose (`facts`, `checks`, `variants`, `ports` all take it); the consequence-block shape is `0265.15`'s.
-"""
-scope = """
-## Decisions
+`screens/sessions.md:36-49` fixes the position and tags the whole block `data:
+slot ledger` — no leaf here is a placeholder. Rule 13 puts fact blocks after the
+state blocks in a 380-wide column (`grammar.md:117-124`); rule 5 makes the
+heading lowercase mono 11 `text-muted` (`grammar.md:49-56`); rule 7 makes keys
+sans 11.5 `text-secondary` and values mono 10.5 `text`, "state-colored only when
+the value IS a state" (`grammar.md:68-72`); rule 3 closes the glyph set and this
+block needs only `·` (`grammar.md:31-37`); rule 4 keeps dots out of a key/value
+column (`grammar.md:39-47`). The export measures exactly that: a full-width
+column, gap 8, bottom padding 20, heading `slots` mono 11 `#585d68`, then
+full-width `space-between` rows with sans 11.5 `#8b909c` keys and mono 10.5
+`#d7dae0` values (`reference/sessions.html:778-838`).
 
-- In scope: the `slots` key/value block from the run's recorded slot revisions, fed from the selection-triggered reconstruction, positioned per rule 13 between the verdict block and the landing block.
-- **Every leaf here is `data:`.** No part of this block is served from the `placeholders` module.
-- Out of scope: the earlier preview blocks (`0265.10`, `0265.11`), the `landing` consequence block (`0265.15`), and the main pane.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+Everything else in the artifacts is illustration. `review-verdict-1 · filled ·
+r1`, `work-summary · filled`, `changed-files · 12 files` are one run's rows, not
+a contract (`0265:117-122`). Seven corrections follow. Each is a place where the
+draft this plan replaces stated something the ledger does not contain, and each
+one, copied into the desktop, would have shipped a plausible lie about run
+evidence.
 
-## Prerequisite
+## Seven corrections to the draft this plan replaces
 
-`0265.10` — the preview column, its key/value row primitive and its selection-triggered reconstruction.
-"""
-validation = """
+**Correction 1 — `slot_revisions` does not record which slots exist or whether
+they are filled.** The draft's central claim was that `Session.slot_revisions`
+"records which slots exist, whether each is filled and at which revision, which
+is exactly what the three example rows show". `SlotRevision` carries `slot_ref`,
+`value_digest`, a run-global `acceptance_order`, optional operation, submitted
+payload, prior value, source and command evidence, a position path and loop /
+for-each coordinates (`modules/core/src/procedure/runtime/state.rs:702-755`).
+There is no declaration field, no `filled` boolean and no per-slot ordinal.
+Existence is a *trait* fact — `Trait.slots: Vec<Slot>`
+(`modules/core/src/trait/mod.rs:389-395`) — and current value is a *session*
+fact, `Session.accepted_slot_values: Vec<Value>` (`session.rs:1424-1460`;
+`runtime/state.rs:180-244`), projected from authoritative `State`
+(`session.rs:2620-2647`). Revisions are append-only write evidence beside them.
+Goals 1 and 3 read each of the three from the source that actually holds it.
+
+**Correction 2 — `r1` is not stored, and a revision count is a write count.**
+`acceptance_order` is stamped once per accepted output across the whole run and
+offset per output within one activation (`runtime/transitions.rs:788-812`), so
+it is a run-global sequence number and never a per-slot `rN`. The only honest
+`rN` is a one-based count of that slot's committed revisions — and what it counts
+is *writes*, because a revision may be `replace`, `append`, `merge`,
+`set-field` or `increment` (`modules/core/src/trait/procedure/model.rs:252-268`).
+It is not a review round, not a semantic version and not a retry count. Goal 3
+renders it with that meaning stated, and goal 5 puts the count in one shared
+place rather than a second one in gpui.
+
+**Correction 3 — "list each slot" has no served answer, and the three example
+rows are not a selection rule.** The draft's Done-when said the block lists
+"each slot". Declared slots live only in the trait, and the desktop may not read
+the filesystem (`0265:53-66`); `Plan.slots` carries `Required |
+PlannedProduced | Missing` with no current value
+(`procedure/run/model.rs:194-216,343-369`); and neither `Slot`
+(`trait/slot.rs:17-56`) nor `SlotRevision` carries a preview-visibility,
+priority or presentation flag. Meanwhile the artifacts show three rows for a
+trait family that declares nine — `changed-files`, `commit-message`,
+`diff-base`, `draft`, `git-status`, `review-verdict-1`, `review-verdict-2`,
+`stage-output`, `work-summary`
+(`.ctx/traits/authored/implement/generated/basic/index.toml:63-110`) — in an
+order that is neither declaration order nor its reverse, at a point in the run
+where `diff-base` and `draft` also hold values. So the illustration cannot be a
+rule, and no served metadata supplies one. Goal 1 binds the one rule the served
+evidence can actually decide: a row per slot the run's own committed evidence
+carries, in the order the ledger lists it. The unexplainable three-row subset is
+reported as an owner correction, not reverse-engineered into a filter.
+
+**Correction 4 — `12 files` is not in the ledger and has no served selector.**
+`changed-files` is `schema:text`, described as raw `git diff --name-status`
+names and change kinds (`generated/basic/index.toml:63-67`), not a typed file
+list; no helper in the repository turns it into a count. Rendering `12 files`
+would require both a new text-parsing presentation (empty text, trailing
+newline, rename and copy records, malformed lines, singular at one) and, worse,
+a rule saying *which* slots get a payload summary instead of the evidence value
+— metadata that does not exist. Hardcoding the slot id or sniffing the schema
+would fail for every other trait and would violate the no-example-literals rule.
+Goal 7 excludes payload summaries from this cut entirely and reports the row as
+an owner correction against the design. That leaves the draft's own Done-when
+intact: it asked for filled state and revision, never for a file count.
+
+**Correction 5 — a current value with no revision is real, and `filled · r1`
+would lie about it.** Slot defaults are pushed straight into
+`accepted_slot_values` with source `TraitConfig`, `acceptance_order = None` and
+no revision at all (`runtime/transitions.rs:67-100`), and ledgers written before
+revisions existed deserialize with an empty revision vector — which is why the
+shared story builder keeps an explicit legacy accepted-value fallback instead of
+fabricating history (`procedure/story.rs:586-625`). Committed ledger validation
+deliberately runs with `require_revision_for_value = false`
+(`ledger_contract.rs:721-727,1103-1147`): every latest revision must match an
+accepted value, but not every accepted value has a revision. Goal 3 gives that
+case its own honest form — the value word with no `r` segment — rather than
+calling it unfilled or inventing `r1`.
+
+**Correction 6 — a naive revision traversal leaks values runtime deliberately
+withholds.** Effects accepted inside an active `parallel` branch are staged in
+`EffectBuffer`, documented as "never part of the committed ledger … until
+merge", and round-tripped through the ledger only so a multi-call run can resume
+mid-branch (`runtime/state.rs:317-345`). They are persisted, so walking every
+revision the ledger file contains would put one branch's writes on screen while
+its sibling is forbidden to see them, and runtime keeps recorded and
+currently-visible traversals apart for exactly this reason
+(`ledger_contract.rs:3645-3665`). The draft said nothing about it. Goal 1 binds
+committed top-level evidence only.
+
+**Correction 7 — a selection-time read cannot keep this block current, and the
+draft named no mechanism.** Its prerequisite list stopped at `0265.10`'s
+"selection-triggered reconstruction", but center deltas are `Appeared`,
+`RowChanged`, `Ended` and `ActivityLine`, each carrying only a
+`CenterPublicRow` of compact summary, repository, ledger, liveness and mtime
+facts with no slot values or revisions (`center.rs:265-281,3778-3788`). A run
+selected before a slot is written would sit stale forever. `0265.11` already
+owns that reconciliation for the verdict block, through the one served detail
+path with no second request and no timer (`0265.11:461-505,832-842`) — and it
+also owns the numbered-verdict-ref correction to the shared revision counting
+this block's `rN` consumes. Both are why this task now depends on `0265.11` as
+well as `0265.10`: without the edge, `derived_status` would let the two cells run
+concurrently against the same body sequence and the same counting surface
+(`modules/core/src/task/graph.rs:115-177`). Goal 8 consumes that landed
+reconciliation rather than adding a mechanism beside it.
+
+## Grounded at HEAD 9f77cd3c7
+
+Nothing this task renders exists yet. Root `Cargo.toml:1-12` lists only the
+existing workspace crates and excludes only `packages/cdk`; no manifest or
+lockfile names gpui; there is no desktop directory, no desktop recipe in
+`Justfile` and no desktop lane in CI. The prerequisites `0265.10` and `0265.11`
+are `ready`, not landed.
+
+Every desktop path, module name, component name, symbol, signature, gpui API and
+command named below is therefore a guess to be replaced by discovery against
+what `0256.1`, `0265.1`, `0257`, `0265.10` and `0265.11` actually landed.
+Binding them here would be fabrication. The desktop lane is nonetheless
+guaranteed to exist when this cell runs, and the guarantee is a code fact: an
+open leaf derives `Blocked` while any `depends-on` target is not `Done`
+(`graph.rs:115-177`), and this task depends on `0265.10` → `0265.3` → `0265.1` →
+`0256.1`. The first act of this cell is to locate that lane's documented
+non-interactive command and record it verbatim in the work summary. If no such
+command is found, the prerequisite chain has not in fact landed: stop and report
+that, rather than substituting a workspace command for rendered-behaviour proof.
+It is deliberately not declared as a `[[checks]]` entry, because a check must
+exist in the repository at the moment the plan is written and this one does not.
+
+**Rendered-preview evidence**, the phrase the goals use, means two things taken
+together: the landed lane's documented command, run as it exists and exiting 0;
+and, for every outcome that command does not itself decide, the run's own
+observation of the running frame and the composed element tree, by whatever
+means that harness already supports. Which of the two decided which outcome, and
+the mechanics used, are named in the work summary. Adding coverage inside the
+landed harness is right where a goal needs it; standing up a second validation
+lane beside it is not.
+
+What *is* readable today is the data side, and the goals lean on it. A full
+`Session` carries `accepted_slot_values` — value, digest, optional schema ref,
+source, acceptance and producer evidence (`session.rs:1424-1460`;
+`runtime/state.rs:180-244`) — beside append-only `slot_revisions`
+(`runtime/state.rs:702-755`). `upsert_runtime_value` replaces a slot's current
+value in place and pushes only a ref it has not seen
+(`runtime/frame_builders.rs:1063-1072`, called from
+`control_flow.rs:1948-1960`), so `accepted_slot_values` is in first-appearance
+order — defaults seeded at run start (`transitions.rs:67-100`), then each slot at
+its first write — and that order is what the ledger durably stores. It is the
+only ordering evidence this block needs, and goal 1 uses it rather than inventing
+a sort. `procedure::stats::verdict_slot_rounds` is the existing per-ref counting
+and per-slot-maximum aggregation (`stats.rs:109-122`); goal 5 extracts the count
+underneath it rather than growing a second one.
+
+Two protocol notes for discovery rather than for binding. `center::get` today
+returns the full `Session` with typed Missing/Session/Ambiguous results
+(`center.rs:916-935`) but reads the selected ledger synchronously inside the sole
+model owner (`center.rs:3649-3669`); `0257` and `0265.10` are expected to
+establish the sanctioned off-UI selected-detail path, and this cut consumes it
+rather than inheriting the blocking shape. And the center wire is bounded to
+1 MiB per line, with full sessions returned only by `get`
+(`center.rs:48-53`) — so this block projects compact rows from the already-served
+selected detail and never asks for slot payloads in a list answer.
+'''
+scope = '''
+## GOALS — binding
+
+1. **Rows are one per slot the selected run's committed evidence carries, in the
+   ledger's own order.** The rendered row set is the slot refs present in the
+   served selected run's committed `accepted_slot_values`, in the order that
+   vector serves them — first-appearance order by construction
+   (`frame_builders.rs:1063-1072`), durable in the ledger, identical after a
+   restart. Each row's key is that ref's slot id, the served ref text with its
+   `slot:` scheme stripped, rendered verbatim. A slot the run has never held a
+   value for is not a row: its declaration is a trait fact the served detail does
+   not carry and the desktop may not read. The evidence is the committed
+   top-level mirror only; values and revisions staged in an active or held
+   `parallel` branch buffer are runtime-isolated until the barrier
+   (`runtime/state.rs:317-345`) and never render (content Correction 6).
+   Decided by direct core tests over the shared row projection — no slot
+   evidence, one slot, many slots, a slot written more than once appearing
+   exactly once, arbitrary non-alphabetical ref ordering preserved, and a
+   session whose control stack holds unmerged branch values whose refs must not
+   appear — proven by the declared core and `just test` checks; plus
+   rendered-preview evidence that the rows appear in the served order.
+   Excluded: reading the trait, plan, board, worktree or any file from the
+   desktop process to discover declared slots; rendering a declared-but-unwritten
+   slot, which would require a center widening no goal here asks for; sorting
+   alphabetically, by digest, by recency or by any desktop-local rule; a
+   hardcoded slot id, an id allow-list or deny-list, or any filter reverse-
+   engineered from the artifacts' three-row subset (content Correction 3); a
+   top-N cap, "important slots" heuristic, or truncation — overflow is `0265.7`'s.
+
+2. **No evidence renders no block.** A selected run whose committed evidence
+   carries no accepted slot value renders no `slots` block at all — not a
+   heading with no rows, not a placeholder line, not a zero count — matching the
+   family convention `0265.5:316-330` and `0265.11`'s verdict block. When the
+   selection changes, no previous run's rows survive into the new one.
+   Decided by rendered-preview evidence for a run with no slot evidence
+   rendering no heading and no rows, and for a selection change from a run with
+   rows to one without.
+   Excluded: an empty block, an "no slots" sentence, a `placeholders` entry —
+   goal 7 keeps every leaf here `data:` — or a retained previous selection's
+   rows.
+
+3. **Each value is one fixed composition of served evidence, and the count means
+   writes.** A row's value is mono 10.5 in the neutral value tone, composed of
+   the lowercase word `filled` — the run holds an accepted current value for that
+   slot — and, when the run's committed evidence carries at least one revision
+   for that ref, a `·` separator per rule 2 and the segment `r<N>`, where `N` is
+   the one-based count of that slot's committed revisions. A slot holding an
+   accepted value with no committed revision — a seeded default
+   (`transitions.rs:67-100`) or a pre-revisions legacy ledger
+   (`story.rs:586-625`) — renders `filled` alone, with no separator and no `r`
+   segment, because no write evidence exists to count (content Correction 5). `N`
+   counts writes, not review rounds and not versions: revisions may be `replace`,
+   `append`, `merge`, `set-field` or `increment`
+   (`trait/procedure/model.rs:252-268`), and that meaning is stated where the
+   projection is defined. `filled` is not one of rule 1's states, so the whole
+   value takes the neutral `text` tone per rule 7; only goal 4's failure form is
+   tinted.
+   Decided by direct core tests over the shared value composition — no revision,
+   one revision, several revisions, and a slot whose several revisions carry
+   mixed write operations — proven by the declared core and `just test` checks;
+   plus rendered-preview evidence of `filled`, of `filled · r<N>`, and of the
+   neutral tone on both.
+   Excluded: rendering `acceptance_order` as `rN`, which is a run-global stamp
+   (content Correction 2); a desktop-local count (goal 5); the literal `r1` or
+   any design example value; labelling a revision-less value `unfilled`, `r0`,
+   `default` or blank; an `unfilled`/`empty` word for any row, since goal 1
+   renders no row without a value; state-colouring `filled`; a dangling `·`; a
+   dot, pill, badge or icon (rule 4, `grammar.md:39-47`).
+
+4. **Broken slot evidence renders a fixed fail-loud row, not a silent one.** When
+   a slot's latest committed revision has no accepted current value with the same
+   ref and digest — the condition committed ledger validation reports as a
+   contract violation (`ledger_contract.rs:1103-1147`) — that slot renders one
+   row through `0265.10`'s key/value primitive: the key as in goal 1, and the
+   value the lowercase literal `unreadable` in the danger tone, rule 1's failure
+   sense. It is never dropped from the set and never rendered as `filled`. An
+   unreadable selection, a failed detail response or a lost center render through
+   `0265.10`'s inherited explicit stale and failure model, which this cut extends
+   rather than duplicating.
+   Decided by direct core tests over a session whose latest revision digest
+   disagrees with its accepted value, and one whose revision has no accepted value
+   at all, each producing the fixed `unreadable` row while the run's other rows
+   render normally; plus rendered-preview evidence of that row in danger tone and
+   of the inherited stale posture after center loss.
+   Excluded: a second error, stale or failure presentation beside `0265.10`'s;
+   dropping the row; falling back to the revision's `submitted_payload` or
+   `prior_value` to reconstruct a current value; reading the ledger file, the
+   worktree or a cache from the desktop process to repair the disagreement;
+   silently rendering `filled` over mismatched evidence.
+
+5. **Per-slot revision counting is one shared primitive, and the verdict helper
+   consumes it.** The count goal 3 renders is produced by a single shared
+   per-slot-ref revision counting primitive in
+   `modules/core/src/procedure/stats.rs`, with
+   `verdict_slot_rounds` retained as a consumer of it — keeping its suffix
+   recognition, whatever `0265.11` corrected there, its per-slot-maximum
+   aggregation and its `None` for absent coverage
+   (`stats.rs:109-122`). If a prerequisite already extracted such a primitive,
+   it is consumed rather than duplicated; the extraction is only as wide as these
+   two consumers need.
+   Decided by the declared `procedure::stats` check with its `expect` guard, and
+   by the declared `just test` check keeping `RunSummary::from_session` and every
+   other consumer of the helper green.
+   Excluded: a counting implementation in the desktop or in a preview module; a
+   second helper beside `verdict_slot_rounds`; changing its suffix recognition,
+   its per-slot-maximum aggregation or its `None`-for-absent contract while
+   extracting; changing `RunSummary`'s field shape or the center wire; a generic
+   ledger-statistics layer built for consumers that do not exist.
+
+6. **The block renders in the artifacts' shape, composed from `0265.10`'s
+   primitives.** A full-width block with internal gap 8 and bottom padding 20,
+   whose first child is the lowercase heading `slots` in mono 11 `text-muted`,
+   followed by one full-width `space-between`, vertically centred row per slot:
+   key sans 11.5 `text-secondary`, value mono 10.5, no corner radius. It sits in
+   `0265.10`'s ordered body sequence after `0265.11`'s state blocks and before
+   the position `0265.15` takes, per rule 13. The named-block form and the
+   key/value row come from `0265.10`; what is new here is the fact-block
+   composition — a block heading over a served list of key/value rows — and it is
+   shaped for the later `facts`, `checks`, `variants` and `ports` blocks that
+   name it (`0267.3`, `0268.3`) rather than for this screen alone.
+   Decided by rendered-preview evidence for the position in the body sequence,
+   the gaps, paddings, families, sizes and tones, plus the closing diff read
+   against `grammar.md:49-72,117-124`, `tokens.md:26-84` and
+   `reference/sessions.html:778-838`.
+   Excluded: a second named-block, heading or key/value form beside
+   `0265.10`'s; any colour, size, spacing, family or weight literal at a call
+   site; a corner radius, dot, pill, badge, icon or fill inside the block; a
+   component registry, design-system layer or generic screen framework — the
+   extraction stops at the fact-block composition its two named consumers need;
+   scrolling, clipping or fading this column.
+
+7. **Every leaf is data, and no payload summary is invented.** Nothing in this
+   block resolves through the `placeholders` module: `screens/sessions.md:45-46`
+   tags the whole block `data: slot ledger`, and every rendered string is either
+   a served id or one of the fixed words goals 3 and 4 bind. No row renders a
+   summary of a slot's payload — no file count, no line count, no truncated
+   value, no type name — because no served metadata says which slots would get
+   one and the payload in question is untyped text (content Correction 4). The
+   artifacts' `12 files` row, and their three-row subset and its order, are
+   reported as owner corrections against `screens/sessions.md` and
+   `reference/sessions.html`.
+   Decided by the closing diff read showing no `placeholders` entry added, no
+   payload parsing, no slot-id or schema-ref branch in the value composition, and
+   no design example string; plus the work summary naming the owner corrections
+   raised.
+   Excluded: parsing `git diff --name-status` text or any other slot payload;
+   branching presentation on slot id, title or schema ref; a value formatter
+   registry; a `placeholders` entry for any leaf here; rendering `Slot.title`,
+   which is a trait fact the served detail does not carry.
+
+8. **The block commits atomically from center-served evidence, reads nothing, and
+   polls nothing.** The rows join the selected compact row and the served
+   selected detail under `0265.10`'s stable selection identity and staged-
+   candidate transaction: a complete candidate is staged and committed only on
+   success, the prior accepted model is retained only behind the inherited
+   explicit stale marker, and a fresh complete snapshot is requested after
+   rejection (`modules/cli/src/app/dashboard/worker.rs:254-415`). Heading and
+   rows never commit separately, and a rapid A-then-B selection whose A responses
+   arrive last leaves B's rows intact — no update ever combines one run's rows
+   with another's. A slot written while its run is already selected becomes
+   visible through the same served detail reconciliation `0265.11` landed, with
+   no second request, no second protocol and no timer; if that landed path
+   reconciles a verdict slot but not an arbitrary one, the gap is closed by the
+   smallest widening of that same path, and its existing coverage is then updated
+   to assert the widened contract, since a reconciliation the proof does not
+   observe is not proven. A same-path widening is a sanctioned consequence of
+   this goal, not a violation; it is named in the work summary. All reads fire
+   from an explicit selection only, off gpui's UI thread through the landed
+   desktop bridge. No rendered fact lives only in GUI memory: a finished run's
+   block reproduces identically from ledger evidence after the application closes
+   and reopens.
+   Decided by rendered-preview evidence over out-of-order A/B selection, a
+   rejected candidate, a detail failure arriving against a newer selection, a
+   slot written while its run is already selected, the stale posture after center
+   loss, no read fired for an unselected row or a hover, and a finished run
+   identical after a restart; by the declared `proof_center` check observing that
+   a slot written against an already-selected run reconciles through the one
+   served detail path with no second request and no timer; and by the closing
+   diff read for any per-row, hover, unselected-delta or eager read, any timer,
+   interval or spawned tick, any blocking receive on the UI thread, and any
+   direct ledger, sidecar, trait, board, cwd or cache read in the desktop
+   process.
+   Excluded: a second selection model, detail request, subscription or protocol;
+   a preview-private state system; committing the heading and rows separately;
+   presenting last-accepted rows as current after the stream becomes uncertain;
+   adding slot payloads to compact rows or to any list answer, against the 1 MiB
+   wire bound (`center.rs:48-53`); any change to subscription semantics, the
+   delta reducer, run controls or any center surface other than the minimal
+   selected-detail widening this goal may require; weakening or deleting an
+   existing assertion rather than extending it; importing or copying CLI-private
+   code, including `run_view::projection`'s revision traversal
+   (`modules/cli/src/app/run_view/projection.rs:401-412`) — if historical
+   visibility is ever needed, it is extracted as shared semantics with the CLI
+   retained as a consumer.
+
+9. **Every presentation value comes from the one token entry point, and this cut
+   stays inside its own scope.** All colours, sizes, spacings and families
+   resolve through `0265.1`'s dark token and font entry point — block gap 8,
+   bottom padding 20, mono 11 `text-muted`, sans 11.5 `text-secondary`, mono 10.5
+   `text`, danger. No file under `.internal/docs/design/` is modified, no
+   light-column value is touched, no sibling-owned region is edited, and the
+   workspace does not learn about gpui: root Cargo resolution and the root
+   `Cargo.lock` stay gpui-free and the per-round gate's cost does not move. A
+   rule, token or example that looks wrong — including the `12 files` row, the
+   three-row subset and its order — is reported as an owner correction against
+   the source design, never edited here.
+   Decided by the declared checks for the workspace side, and by the closing diff
+   read against `tokens.md:26-84` for call-site literals, a light value, a
+   design-artifact edit, a CLI-private or ratatui import, and any edit to
+   `0265.10`/`.11`/`.15`-owned regions or the main pane. No board check can
+   decide the scope half, because a check runs in a clean detached worktree of
+   the merged sha with no base to diff against.
+   Excluded: a second token module, palette wrapper or theme abstraction; adding
+   the desktop project to root workspace members; adding gpui cost to `just
+   test`, `just test-full` or the existing CI lanes; a grep forbidding the string
+   `gpui` in `Justfile` or `.github/workflows/`, since a *separate* desktop lane
+   there is sanctioned and such a check would red on the sanctioned outcome.
+
+10. **The pass is reviewed once and bounded.** The completed diff is read against
+    `screens/sessions.md:36-49`, `grammar.md:31-72,117-124`, `tokens.md:26-84`
+    and `reference/sessions.html:778-838` before the task is called done. Exactly
+    one targeted repair cycle is allowed; if a second would be needed, stop and
+    report the exact failing command or the unresolved data or render contract
+    rather than iterating. The work summary names the discovered desktop path and
+    command verbatim, what was extracted here versus consumed from a
+    prerequisite and where its retained non-GUI consumers are, the proof
+    mechanics used where they differ from the suggested route, every owner
+    correction raised against the design artifacts, and every deviation from this
+    approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256.1`, `0265.1`, `0257`, `0265.10` and `0265.11` landed; do not carry a
+guess from this file into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level listing, then its manifest, README, justfile or CI lane, for the
+  documented non-interactive build-and-test command. Record it verbatim before
+  any edit. If no such lane exists, the prerequisite chain has not landed:
+  report that rather than substituting workspace commands.
+- Read `0265.10`'s landed preview frame: how the ordered body sequence takes
+  additional blocks, the named-block form, the key/value row's tone-carrying
+  value segments, the selection transaction, and the stale and failure
+  presentation to extend for goal 4.
+- Read `0265.11`'s landed selected-detail reconciliation and whether it carries
+  arbitrary slot evidence or only the verdict's; widen that one path minimally if
+  goal 8 requires it, and update its coverage in the same move.
+- Read `procedure::stats` for whatever `0265.11` left there — the suffix
+  recognition it corrected, and whether it already extracted a per-slot count.
+  Consume what exists; extract only what does not.
+- Read `0265.1`'s token and font entry point for every value.
+
+### Edit order
+
+1. The shared count primitive in `procedure::stats`, with `verdict_slot_rounds`
+   rewritten as its consumer and its existing coverage unchanged.
+2. The shared row projection: goal 1's row set and order, goal 3's value
+   composition and goal 4's failure form, as pure functions over a `Session`'s
+   committed slot evidence, in core with direct tests — not in gpui.
+3. The fact-block composition over `0265.10`'s named block and key/value row.
+4. Insertion into `0265.10`'s body sequence at the position rule 13 fixes,
+   between `0265.11`'s blocks and `0265.15`'s.
+5. Goal 8's reconciliation: consume `0265.11`'s path, widening it only if it does
+   not carry arbitrary slot evidence, and update that path's coverage if so.
+6. The desktop lane's proofs, then the focused core proofs, then the declared
+   checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like `slot_revision_counts(&[SlotRevision]) -> BTreeMap<&str,
+u64>` in `modules/core/src/procedure/stats.rs` with `verdict_slot_rounds`
+filtering and maxing over it; a shared projection near it returning an ordered
+list of `(slot id, value form)` where the value form is a small enum over
+`filled`, `filled` with a write count, and unreadable; and a `fact_block(heading,
+rows)` composition beside `0265.10`'s block form. Names, module paths and
+signatures follow whatever conventions the prerequisites established. The
+behaviours goals 1-8 fix are not suggestions; where they live and what they are
+called are.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- No slot evidence rendering no block; one slot; many slots in served
+  non-alphabetical order; a slot written repeatedly appearing once.
+- A revision-less accepted value rendering `filled` with no segment; one, two and
+  many revisions rendering `r1`, `r2`, `rN`; mixed write operations counted the
+  same way.
+- Unmerged parallel-branch values in the control stack never appearing as rows.
+- A latest revision whose digest disagrees with the accepted value, and one with
+  no accepted value, each rendering the fixed `unreadable` danger row while
+  sibling rows render normally.
+- `verdict_slot_rounds` unchanged in behaviour over the extracted count,
+  including its `None` for absent coverage and its per-slot maximum.
+- The block's position after the state blocks, its gaps, paddings, families,
+  sizes and neutral value tone, and the absence of dots, radius and placeholders.
+- Out-of-order A/B selection, a rejected candidate and a detail failure leaving
+  the accepted rows whole; a slot written while its run is selected becoming
+  visible with no timer; center loss leaving the preview visibly stale; no read
+  fired for an unselected row or a hover.
+- A finished run's block identical after the application closes and reopens.
+- The `0256.2`-`0256.5` proofs and `0265.11`'s selected-detail proof still
+  passing — extended, not weakened, if goal 8's same-path widening was needed.
+
+Tests use scratch traits, sessions, ledgers and slot values with arbitrary slot
+ids and payloads. No test may depend on this repository's committed content — not
+its implement trait, not its slot ids — and no design example string is fixture
+authority.
+
+### Reuse points
+
+`0265.10`'s preview frame, named-block form, key/value row with tone-carrying
+value segments, stable selection identity, staged-candidate transaction and
+stale/failure presentation; `0265.11`'s selected-detail reconciliation and its
+`procedure::stats` correction; `0265.1`'s token and font entry point; `0257`'s
+selected-detail contract and off-thread bridge; `0256`'s accepted subscription
+model and test harness;
+`ctx_traits_core::procedure::stats::verdict_slot_rounds` as the one round helper
+(`stats.rs:109-122`), retained as a consumer of goal 5's primitive, with
+`RunSummary::from_session` retained as its consumer
+(`modules/io/src/run_summary.rs:243-245`); `Session.accepted_slot_values` and
+`Session.slot_revisions` as the one evidence source (`session.rs:1424-1460`;
+`runtime/state.rs:180-244,702-755`); and the accepted-model transaction shape at
+`modules/cli/src/app/dashboard/worker.rs:254-415` as the semantics to match. If
+any prerequisite surface is absent at execution time, report an unmet
+prerequisite rather than replacing it locally.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml` to 1.97.1, and the desktop directory inherits that pin
+unless `0256.1` gave it its own toolchain file. Keep any repair scoped to the one
+red command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The `run` block and footer (`0265.10`), the `in progress` and `verdict` blocks
+  (`0265.11`), the `landing` block (`0265.15`), the header (`0265.13`), the frame
+  counter (`0265.14`), the frame-row forms (`0265.5`), loop narration
+  (`0265.6`), the rail (`0265.8`), the title bar (`0265.9`), the bottom bar
+  (`0265.3`) and the whole main pane.
+- The later screens' fact blocks (`0266.4`, `0266.5`, `0267.3`, `0267.4`,
+  `0268.3`), which reuse this composition rather than being built for here.
+- Overflow, clip and fade behaviour (`0265.7`); scrolling this column.
+- Rendering declared-but-unwritten slots, which would need a center widening to
+  serve trait or plan slot declarations — board material if the owner wants it,
+  not a cell here.
+- Any payload summary presentation, including a `changed-files` file count
+  (content Correction 4) — reported as an owner correction, not implemented.
+- Any center protocol change beyond consuming what `0257` and `0265.11` landed
+  and closing goal 8's arbitrary-slot reconciliation gap through that same path —
+  which includes updating that path's existing coverage; any change to
+  subscription semantics, the delta reducer, run controls (`0258`), summons
+  (`0259`) or packaging (`0260`).
+- Any change to `SlotRevision`, `Value`, `Slot`, `RunSummary`'s field shape, the
+  ledger contract's validation, or the runtime's parallel-buffer isolation.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**` or
+  any pencil artifact.
+- A design-system phase: component registry, theme abstraction, generic screen
+  framework, or primitives extracted before a named consumer exists.
+- A board check that executes the desktop lane. No such command exists in this
+  repository today, so declaring one now would be a fabrication; the run executes
+  the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **Slot state is read, not re-derived.** The reconstruction records which slots are filled and at which revision; recomputing that from prompt text or file presence would produce a second, disagreeing answer.
-- **Reads stay on the selection path and off gpui's UI thread**; nothing refreshes on a timer and nothing fires per list row.
-- **A finished run's block must be identical after closing and reopening the window** — the ledger is authoritative, and the block may not depend on in-process state.
-- **Fail-loud, no direct-reader fallback.** A reconstruction failure is stated rather than filled from the filesystem.
-- **Sans is content and mono is machinery**: slot values are mono; block headings are mono 11 `text-muted` lowercase. No status dots in this column, no corner radius inside the canvas.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`grammar.md` and `screens/sessions.md` are the specification; the export is
+  measurement.** Take geometry from `reference/sessions.html:778-838`; take
+  content from the rules with this plan's corrections applied.
+  `review-verdict-1 · filled · r1`, `work-summary · filled` and `changed-files ·
+  12 files` are one run's rows. A leaf that renders one of them for a run that
+  does not carry it is worse than an omitted leaf, because it reads as evidence.
+- **The ledger does not say which slots exist or whether they are filled.**
+  `SlotRevision` has no declaration field, no filled flag and no per-slot ordinal
+  (`runtime/state.rs:702-755`); declarations live in the trait
+  (`trait/mod.rs:389-395`), current values in `accepted_slot_values`
+  (`session.rs:1424-1460`). Three facts, three sources (content Correction 1).
+- **`acceptance_order` is run-global and is never `rN`**
+  (`transitions.rs:788-812`), and a revision count is a *write* count, because
+  writes may be `replace`, `append`, `merge`, `set-field` or `increment`
+  (`trait/procedure/model.rs:252-268`). Say what the number means where it is
+  computed (content Correction 2).
+- **A current value with no revision is normal, not a defect.** Defaults are
+  seeded with no revision (`transitions.rs:67-100`), legacy ledgers carry none
+  (`story.rs:586-625`), and committed validation deliberately does not require
+  one (`ledger_contract.rs:721-727`). `filled` alone is its honest form; `r1`
+  would be a fabrication and `unfilled` would be a lie (content Correction 5).
+- **Unmerged parallel-branch values are persisted but withheld by contract**
+  (`runtime/state.rs:317-345`; `ledger_contract.rs:3645-3665`). Walking every
+  revision the file contains leaks a branch's writes past the barrier (content
+  Correction 6).
+- **Three example rows are not a selection rule.** The family they illustrate
+  declares nine slots, and the shown order is neither declaration order nor its
+  reverse (`generated/basic/index.toml:63-110`). No served metadata selects a
+  subset; render what the evidence carries, in the order it carries it, and raise
+  the subset as an owner correction (content Correction 3).
+- **`12 files` is not in the ledger.** `changed-files` is untyped
+  `schema:text` (`generated/basic/index.toml:63-67`) and no metadata says which
+  slots get a payload summary. Parsing it here would be a formatter invented for
+  one committed trait id (content Correction 4).
+- **One counting helper, not two.** `verdict_slot_rounds` already counts
+  revisions per ref (`stats.rs:109-122`); a second count in the desktop is the
+  duplication this cut invites (goal 5).
+- **Absence is rendered, not defaulted, and every form is fixed.** No evidence
+  renders no block; a revision-less value renders `filled`; broken evidence
+  renders `unreadable` in danger; a declared-but-unwritten slot renders no row.
+  Those are goals 2, 3 and 4's forms, not the implementation's to choose — none
+  is a guessed default, a blank field, a dangling `·`, or the previously selected
+  run's rows left on screen.
+- **The glyph set is closed and this block needs only `·`**
+  (`grammar.md:31-37`). **No dots, no pills, no radius**: rule 4 restricts dots
+  to stateful lists and this is a key/value column (`grammar.md:39-47`).
+- **One block, one commit.** The defect this shape invites is run B's heading
+  above run A's rows, or a row set half-replaced mid-update. Stage the whole
+  candidate, commit on success only, retain the prior model behind the inherited
+  explicit stale marker (`worker.rs:254-415`).
+- **Compact rows stay compact.** No reconstruction or slot read fires per list
+  row, on hover, on a delta for an unselected run, or as a prefetch, and no slot
+  payload joins a list answer against the 1 MiB wire bound (`center.rs:48-53`).
+- **Blocking work stays off gpui's UI thread**, through the landed desktop
+  bridge; do not inherit `center::get`'s model-owner blocking shape
+  (`center.rs:3649-3669`).
+- **Fail-loud, no direct-reader fallback, no poll.** A slot written after
+  selection arrives through the center-served detail path `0265.11` landed, never
+  a timer, a desktop filesystem read or a second protocol.
+- New coverage uses scratch traits, sessions, ledgers and slot values with
+  arbitrary ids. No test may depend on this repository's committed content, and
+  no design example string is fixture authority.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the
+  root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom
+  "cannot find X".
+- **The declared checks are shared-side and workspace-side, not proof of this
+  task's desktop behaviour.** They decide the extracted count primitive and its
+  retained consumer, the shared row projection, the center wire and served detail
+  path staying green, and the workspace staying gpui-free. The rendered block is
+  decided by rendered-preview evidence in the lane `0256.1` establishes. What
+  that lane covers is unknown at authoring time, so claim only what it actually
+  verifies and observe the remainder directly — an outcome asserted as "covered"
+  without having been observed is the defect this watch item exists for.
 
 ## Done when
 
-The Sessions preview column carries a `slots` key/value block listing each slot with its filled state and revision from the selected run's recorded slot revisions, in the tokens `screens/sessions.md` names and in rule 13's order. A finished run's block is identical after closing and reopening the window; reads fire only on selection, off the UI thread, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- The desktop lane's documented non-interactive build-and-test command, landed
+  through `0265.10` → `0265.3` → `0265.1` → `0256.1` and therefore present before
+  this task can dispatch (`graph.rs:115-177`), was located first, recorded
+  verbatim in the work summary, and exits 0 with the block in the tree and the
+  `0256.2`-`0256.5` proofs it already runs left unmodified. If that command
+  cannot be found, the prerequisite chain has not landed: the task stops and
+  reports that, and no workspace command is offered in its place.
+- Rendered-preview evidence — that command for what it decides, and the run's own
+  observation of the running frame and composed tree for the rest, with which
+  decided what named in the work summary — shows goals 1-8's observable outcomes:
+  one row per slot the run's committed evidence carries, in the served order,
+  keyed by the served slot id; no block at all for a run with no slot evidence;
+  `filled` alone for a revision-less value and `filled · r<N>` for a written one,
+  both in the neutral value tone; the fixed `unreadable` danger row for broken
+  evidence while sibling rows render normally; no row for a declared-but-unwritten
+  slot and none for an unmerged branch value; the block's position after the
+  state blocks with its gaps, paddings, families and sizes, and no dot, radius or
+  placeholder; out-of-order A/B selection, a rejected candidate and a detail
+  failure leaving the accepted rows whole; a slot written while its run is
+  selected becoming visible with no timer; the stale posture after center loss;
+  no read fired for an unselected row; and a finished run identical after the
+  application closes and reopens.
+- All four declared checks exit 0: the extracted per-slot count primitive and
+  `verdict_slot_rounds` green under the focused `procedure::stats` filter, whose
+  `expect` guard proves the filter matched tests and whose reported test list the
+  work summary names; the shared row projection, `RunSummary::from_session` and
+  every other consumer green under `just test` — which is what decides the
+  projection wherever it lands, since the focused filter covers it only if it
+  lives in `procedure::stats`; `proof_center` green over the
+  center wire and the served selected-detail path, observing that a slot written
+  against an already-selected run reconciles through that one path with no second
+  request and no timer — its existing assertions extended rather than weakened if
+  goal 8's same-path widening was needed; and root workspace resolution plus the
+  root lockfile still gpui-free.
+- The closing diff read shows: every colour, size, spacing and family resolving
+  through `0265.1`'s entry point with no call-site literal; one counting helper,
+  one row projection, one selection model, one detail request and one failure
+  presentation; no `placeholders` entry added; no payload parsing and no
+  slot-id or schema-ref branch; no CLI-private or ratatui import and no copy of
+  `run_view::projection`'s traversal; no direct ledger, sidecar, trait, board,
+  cwd or cache read in the desktop process; no timer, interval, spawned tick or
+  UI-thread block on this path; no design example id or value, and no em dash or
+  glyph outside `·`; no light-column value; no edit under
+  `.internal/docs/design/`; and no edit to `0265.10`/`.11`/`.15`-owned regions,
+  the main pane, run controls or center subscription semantics.
+- The work summary names the discovered desktop path and command verbatim, what
+  was extracted here versus consumed from a prerequisite and where its retained
+  non-GUI consumers live, the focused `procedure::stats` test names the filter
+  actually ran, whether goal 8's same-path reconciliation widening was needed and
+  what its coverage now asserts, the proof mechanics used where they differ from
+  the suggested route, the owner corrections raised against the design artifacts
+  — at minimum the `12 files` row and the unexplainable three-row subset and its
+  order — and any deviation from the approach.
+
+## Bounded refinement
+
+Run the discovered desktop command, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-core --lib procedure::stats`,
+then `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`,
+then `CARGO_TARGET_DIR=target just test`, then the root gpui-free check, then the
+closing diff read. Permit at most one targeted repair-and-rerun round: repair one
+named defect, then rerun the failed command and every command after it in that
+order. If a second round would be needed, stop and report the exact failing
+command with its evidence, or the unresolved data or render contract, rather than
+iterating. That is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0265"
-depends-on = ["0265.10"]
+depends-on = ["0265.10", "0265.11"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-slot revision counting and the verdict round helper stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core --lib procedure::stats"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
+
+[[checks]]
+name = "shared projection and its retained consumers keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "center wire and selected-detail contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1800000
