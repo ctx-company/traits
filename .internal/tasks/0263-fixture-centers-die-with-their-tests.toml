@@ -1,38 +1,615 @@
 schema-version = "0.2"
 key = "0263"
 title = "Fixture centers die with their tests"
-status = "draft"
+status = "ready"
 raised = "2026-08-28"
-content = """
+content = '''
 Isolated fixture centers (0252.8's tuple isolation) spawn correctly but
-never exit: 586 leaked `__ctx-center` daemons and hundreds of
-`/tmp/ctx-501-0.4.0-<hash>.{sock,log,spawn.lock}` triples accumulated
-across two days of proof runs, surviving their tests, their sessions,
-and their worktrees. A leaked daemon population also amplifies index
-churn (every kill mid-write fattens the next rebuild's journal —
-2026-08-28's 336MB journal).
+outlive their tests: 586 leaked `__ctx-center` daemons and hundreds of
+`/tmp` endpoint triples accumulated across two days of proof runs,
+surviving their tests, their sessions, and their worktrees. A leaked
+daemon population also amplifies index churn (every kill mid-write
+fattens the next rebuild's journal — 2026-08-28's 336MB journal).
 
-Owner contract: a test-spawned center's lifetime is its test's
-lifetime. Nothing test-spawned survives the proof battery.
-"""
-scope = """
-## Goals (binding)
+Owner contract: a test-spawned center's lifetime is its test's lifetime.
+Nothing test-spawned survives the proof battery.
 
-1. A fixture center exits when its spawning context ends: parent-death
-   detection, an idle timeout measured in seconds, or explicit reaping
-   by the test harness — chosen by grounding; any mechanism satisfying
-   the proof below is acceptable.
-2. Fixture center runtime files (socket/log/spawn.lock triples) are
-   removed on that exit.
-3. Proof: run the full PTY/teardown proof battery, then assert zero
-   surviving `__ctx-center` processes and zero new `/tmp` triples —
-   an executable check, not an inspection.
+## How to read this plan
+
+Goals and approach are separated, and only goals bind. `validation`'s
+Done-when list, together with the binding constraints and exclusions at
+the top of `scope`, is the contract: each Done-when states an observable
+outcome and the existing command that decides it. Everything under
+"Suggested approach" — expected files, symbol names and signatures, edit
+order, the choice of lifetime mechanism, the choice of exit-proof
+authority, the poll interval and deadline values, and proof mechanics —
+is the architect's best route from the grounding, not a boundary.
+Deviate from any of it whenever a goal requires it and report the
+deviation in the work summary; that is not a violation and not an owner
+escalation.
+
+## Grounded against HEAD f17f2a7ff
+
+The task was raised by `a215a14a7`, before 0262 landed. `41a55a467`,
+`aaf8bd20d`, `2a8f02173` and `c7b10c65a` have since reshaped
+`modules/io/src/center.rs`, `modules/cli/tests/proof_center.rs` and the
+test support crate. Five statements in the original draft no longer hold
+and are corrected here; the corrections are what the goals are built on.
+
+### Correction 1 — the idle timeout is NOT absent
+
+A default 15-second idle timeout exists (`IDLE_TIMEOUT`,
+`center.rs:65-66`), and `run_server` already parses per-process
+`CTX_CENTER_IDLE_MS` / `CTX_CENTER_SCAN_MS` overrides (`:2775-2791`).
+0262 additionally repaired the one starvation defect that defeated it —
+warming scans now finish before rearming and `has_live` no longer stays
+true merely because scanning keeps restarting (`:2889-3017`), regressed
+by `a_scan_longer_than_the_idle_and_scan_intervals_still_permits_idle_exit`
+(`:5964-5990`) and `private_sentinel_exits_after_its_bounded_idle_period`
+(`proof_center.rs:1298-1320`).
+
+So a plan phrased as "make the center exit at all" would be re-doing
+landed work. The actual unresolved gap is at the FIXTURE boundary:
+`controlled_command` (`modules/cli/tests/support/src/lib.rs:423-480`)
+exports the complete private tuple but sets no fixture lifetime, no
+owner, and no reaping handle; and `ScratchRoot::Drop` (`:418-422`)
+removes its whole tree without ever proving the detached center it caused
+to be launched has exited. The center therefore outlives the test by up
+to the full default idle period, keeps working against a runs root that
+has already been deleted underneath it, and leaves artifacts behind.
+
+### Correction 2 — the artifact set is different and larger
+
+The draft's `/tmp/ctx-501-0.4.0-<hash>.{sock,log,spawn.lock}` naming is
+historical. At HEAD, one fixture HOME deterministically yields the stem
+`std::env::temp_dir()/ctx-<16 hex of home hash>`, and four artifacts hang
+off it:
+
+- `<stem>.sock` — `controlled_command:437-441`.
+- `<stem>.log` — `spawn_center` derives it as `socket.with_extension("log")`
+  (`center.rs:1293-1306`).
+- `<stem>.owner` — 0262's serving-lifetime owner flock (`owner_lock_path`,
+  `center.rs:2793-2809`). New since the draft was written; ignoring it
+  means fixture teardown still leaves fresh `/tmp` debris even after this
+  task.
+- `<stem>.spawn` — transient launch marker, already removed once the
+  listener is published (`:1309-1333`, `:2861-2864`).
+
+The support spawn lock is `<home>/l` (`controlled_command:455`), inside
+the scratch tree, so it is removed only as a side effect of the tree
+being removed — and `ScratchRoot::Drop` is `let _ = remove_dir_all`
+(`support/src/lib.rs:418-419`), which discards its own failure. A center
+still running against that HOME can recreate state under it while the
+removal walks, and the residue is then invisible. So the scratch tree and
+its `<home>/l` are part of what teardown has to leave gone, not a free
+consequence of the current `Drop`.
+
+Only the four stem artifacts live outside the tree, and only `.sock` has
+a remover today (`SocketGuard`, exact uid+dev+inode match,
+`center.rs:2740-2771`) — and only on a graceful server exit that the
+fixture never waits for.
+
+### Correction 3 — parent-death is not an available mechanism
+
+`process::spawn_detached` deliberately `setsid`s the child, nulls stdin,
+redirects to a log, and documents that dropping the returned `Child` must
+never terminate it (`modules/io/src/process.rs:7-27`). That is production
+semantics for detached runs and is not negotiable here. `PR_SET_PDEATHSIG`
+is Linux-only while CI runs macOS and Ubuntu
+(`.github/workflows/ci.yml:12-21`), so it cannot be the sole mechanism.
+And binding the center to the immediate `ctx` launcher is wrong for the
+fixture shape regardless: one `ScratchRoot` runs several sequential `ctx`
+commands against the same tuple, and the command that first spawns the
+center routinely exits before the later trust/activate/run/dashboard
+commands need it.
+
+The owner of a fixture center is therefore the fixture (the `ScratchRoot`
+/ support harness), not any single child process, and the mechanism must
+be fixture-scoped rather than a change to detached-spawn behaviour.
+
+### Correction 4 — "zero surviving `__ctx-center`" cannot be asserted globally
+
+Measured during grounding: `pgrep -fal '__ctx-center'` returned two live
+daemons, both reparented to PID 1 — one ~19h old, one from a different
+worktree ~5m old — and `lsof -a -p ... -U` showed both on the production
+socket `/tmp/ctx-501-0.4.0.sock`. A literal machine-global emptiness
+assertion would go red on those and, worse, invite a sweep that kills an
+unrelated production or sibling-worktree daemon.
+
+`proof_assist_bound_kill.rs:205-230` is the existing survivor-check
+idiom, but it only works because the child's argv contains a unique
+scratch path; a center's argv is just `__ctx-center`, so `pgrep -f`
+cannot tell a fixture center from any other. The post-battery assertion
+must therefore be scoped — by a private temp root, an owner/PID registry,
+or before/after differencing — and must still prove that every center
+this battery launched is dead.
+
+### Correction 5 — cleanup may not be an unconditional unlink
+
+`SocketGuard` removes only the exact socket inode it bound, and
+`socket_guard_does_not_remove_replacement` (`center.rs:7573-7586`) pins
+that. The `.owner` file is load-bearing for 0262's one-owner protocol,
+which `second_direct_sentinel_on_the_same_tuple_exits_without_replacing_the_owner`
+(`proof_center.rs:1183-1295`) pins. Fixture cleanup that blindly unlinks
+either path would pass this task's own proof while breaking those. Any
+removal must happen only after the fixture has positively established
+that nothing is serving its tuple.
+'''
+scope = '''
+## Binding constraints and exclusions
+
+These bound the outcome regardless of the route taken.
+
+- Fixture center lifetime and identity are configured at exactly one
+  seam — `support::controlled_command`, the authority 0252.8
+  established. The Center tuple and any lifetime setting are never
+  re-declared in the three PTY helpers, in `run_expect`, or in
+  individual proof files.
+- Production behaviour is unchanged: the default `IDLE_TIMEOUT` /
+  `SCAN_INTERVAL`, `production_paths`, `spawn_detached`'s survival of
+  parent exit, `CenterModel::has_live`'s liveness invariants
+  (`center.rs:2707-2716`), launch arbitration, the complete-tuple
+  rejection at `center_paths` (`:562-584`), the one-serving-owner
+  protocol, and `SocketGuard`'s exact-inode removal all keep their
+  current semantics. Nothing added here may be reachable from a
+  production center.
+- A fixture's teardown does not return until, within a bounded deadline,
+  every center process launched under its tuple is no longer alive —
+  process death, not merely "no longer serving". The evidence must be an
+  authority that cannot mistake a live process for a dead one, and it
+  must be scoped to centers this fixture caused to be launched. Three
+  things are explicitly insufficient as substitutes, alone or together:
+  a free serving-owner lock, an absent socket, and an absent artifact of
+  any kind — a center that has released the socket and the owner lock,
+  or that exited its serving loop as an idempotent no-op start, can
+  still be a running process. A fixed sleep and a timestamp heuristic
+  are likewise not evidence. Which authority establishes death is the
+  run's choice (see Suggested approach).
+- After a fixture's teardown, none of the four artifacts derived from
+  its endpoint stem (`.sock`, `.log`, `.owner`, `.spawn`) remains, and
+  its scratch tree is gone — including the `<home>/l` support spawn lock
+  and the runs/index/liveness state under `<home>/ctx/traits`. A
+  teardown whose tree removal fails silently does not satisfy this.
+- No fixture teardown may signal, unlink, or classify anything outside
+  its own tuple. A production center, a sibling worktree's center, and a
+  genuinely running drive holding a driver flock must be provably
+  untouched by this change.
+- The post-battery assertion is executable, runs after all four battery
+  binaries have returned, and carries its whole verdict in an exit code.
+  It decides two facts, not one: that no center this battery launched is
+  still a live process (within a bounded wait), and that no fixture
+  artifact or scratch tree of that battery remains. Per-fixture teardown
+  checks and the narrower `proof_center` run support it but do not
+  replace it. It is scoped (content Correction 4): a machine-global "no
+  `__ctx-center` anywhere" assertion is forbidden — both flaky and
+  dangerous — and the scoping must not weaken the process fact into
+  "nothing is serving" or "no artifact is left".
+- Every wait for a condition is bounded by an explicit deadline and
+  decided by re-observing that condition, and expiry fails loudly rather
+  than proceeding. No `sleep` stands in for evidence. The poll interval
+  and deadline values are the run's choice; `proof_center.rs` has an
+  established idiom worth reusing (see Suggested approach).
+- The three public PTY helper signatures, `ScratchRoot`'s public API and
+  `controlled_command`'s signature keep their names, parameter order and
+  return types — they have consumers across the whole CLI integration
+  suite. No public symbol is removed.
 
 ## Out of scope
 
-- Production center lifecycle (0262 owns the production daemon).
-- Sweeping existing debris (one-time manual op, already performed).
-"""
+- Production center lifecycle: 0262 owns the production daemon and
+  explicitly excluded this task's fixture lifecycle. Do not retune
+  `IDLE_TIMEOUT`, `SCAN_INTERVAL`, `has_live`, or the owner protocol for
+  production.
+- 0264's view-detach behaviour.
+- Sweeping existing debris. The historical leak was cleared by a one-time
+  manual op; this task prevents new debris and does not garbage-collect
+  old.
+- Generic parent-death behaviour in `process::spawn_detached`, and any
+  Linux-only mechanism as the sole route (content Correction 3).
+- Converting the seven bespoke `Command::new("expect")` scripts in
+  `proof_run_startup_progress.rs`. They must still compile and pass;
+  rewriting them is scope creep.
+- The center's own protocol, projection, migration or scan behaviour. If
+  a fixture center is observed doing something wrong while serving, that
+  is a finding to report, not a licence to edit product logic here.
+
+## Suggested approach — guidance, not a boundary
+
+### Expected files
+
+- `modules/cli/tests/support/src/lib.rs` — the seam and the teardown.
+- `modules/cli/tests/support/Cargo.toml` — likely one added dependency
+  (see Step 3); it carries only `serde_json` today.
+- `modules/cli/tests/proof_center.rs` — the fixture-path proof.
+- `modules/io/src/center.rs` — only if a route needs product-side
+  instrumentation (see Step 2's fallback).
+
+Touching files beyond this list is legitimate whenever a binding goal
+requires it. Do it and report it.
+
+### Step 0 — read before editing
+
+`support/src/lib.rs:361-480` (`ScratchRoot`, `controlled_command`) and
+`:823-947` (`run_expect` and the three PTY helpers); `center.rs:65-66`,
+`:531-612`, `:1280-1335`, `:2740-2830`, `:2861-3017`; `process.rs:7-27`;
+`file_lock.rs:86-102`; and `proof_center.rs:1-150` plus `:1183-1400`.
+The support harness derives the endpoint stem in exactly one place today
+(`controlled_command:433-441`); teardown needs the same stem, and that
+shared derivation — not a second copy of the hash formula — is the reuse
+point.
+
+### Step 1 — one endpoint-stem authority in support
+
+Extract the hash-from-HOME derivation into a single private function
+(shape: `fn center_endpoint_stem(home: &Path) -> PathBuf`, returning
+`temp_dir()/ctx-<16 hex>` without an extension) and have
+`controlled_command` build `CTX_CENTER_SOCKET` from
+`stem.with_extension("sock")`. Teardown then asks the same function for
+the same stem and derives `.log`, `.owner` and `.spawn` from it,
+mirroring how `spawn_center` and `owner_lock_path` derive theirs.
+
+Verified: all four battery binaries pass `ScratchRoot::home()` as `home`
+(`proof_run_view_exit_teardown.rs:34`, `proof_run_startup_progress.rs:23,71`,
+`proof_task_queue_pane_handoff.rs:31`,
+`proof_task_queue_refusal_teardown.rs:28,94`), so `ScratchRoot::Drop` can
+recompute the stem from `self.dir.join("home")`. Check the wider suite
+for callers that pass a home no `ScratchRoot` owns; if any exist, either
+route them through the same teardown helper or expose it publicly rather
+than leaving them uncovered.
+
+### Step 2 — a fixture lifetime at the seam
+
+The cheapest correct route uses a knob the product already parses, so no
+product code changes: have `controlled_command` export a short
+`CTX_CENTER_IDLE_MS` (and, if it helps convergence, a matching
+`CTX_CENTER_SCAN_MS`). Sizing is a judgement the run must make
+deliberately and record: the idle clock restarts on work
+(`center.rs:3000-3015`), so the value only has to exceed the gap between
+two sequential `ctx` commands of the same test, not the test's duration —
+too small merely costs a respawn, too large re-creates the leak window.
+Start around a second, and treat a fixture center respawning between
+commands as acceptable rather than as a failure.
+
+Note the blast radius honestly: `controlled_command` is also the seam for
+`run_ctx`, `spawn_ctx`, `run_git` and the whole CLI integration suite
+(`support/src/lib.rs:483-557`), so this setting reaches every proof that
+spawns a center. That is desirable — they leak too — but it means
+`just test-full` is the real evidence, not the four PTY binaries alone.
+
+Idle exit alone does not satisfy the goals: it is asynchronous to the
+test, it proves nothing about when the process is actually gone, and it
+removes only `.sock` (via `SocketGuard`), never `.log` or `.owner`.
+Step 3 is required regardless of Step 2's sizing.
+
+### Step 3 — teardown that proves death, then cleans up
+
+In `ScratchRoot::Drop` (or a private helper it calls), before removing
+the tree, in this order:
+
+1. Wait, under a deadline, until every center this fixture launched is a
+   dead process. Suggested route, because it reuses instrumentation that
+   already exists: `CTX_CENTER_LAUNCH_MARKER` (`center.rs:2837-2847`)
+   appends one line per launched sentinel from inside `run_server_at`,
+   before the owner lock is even attempted, so it sees no-op starts too.
+   Extend the appended line to carry both the launching PID and the
+   tuple it launched for — shape `center <pid> <socket>`, both already
+   in scope there (`std::process::id()`, `paths.socket`). The line
+   change is test-only instrumentation and the five existing consumers
+   count lines (`proof_center.rs:1400,1426,1466,1492,1566`) rather than
+   matching the payload, so the wider line keeps them green.
+
+   Have `controlled_command` set the marker, forwarding an ambient
+   `CTX_CENTER_LAUNCH_MARKER` when one is set and otherwise defaulting
+   to a path inside the scratch tree — the same `if let Ok(..) =
+   std::env::var(..)` forwarding idiom it already uses for
+   `PATH`/`RUSTUP_HOME`/`CARGO_HOME` (`support/src/lib.rs:467-479`).
+   The forwarded case is what lets a whole battery keep one registry
+   that outlives every scratch tree, which Step 5 can then sharpen its
+   process half with; the default case keeps `just test-full` from
+   writing a new file outside the tree.
+
+   Teardown then reads that registry and polls, under a deadline, only
+   the PIDs whose recorded socket is its own stem, using
+   `ctx_traits_io::file_lock::pid_is_alive` (`file_lock.rs:86-102`),
+   whose `kill(pid, 0)` semantics treat only a confirmed `ESRCH` as
+   dead and every other outcome — including `EPERM` — as alive. That
+   conservative direction is what makes it usable as death evidence and
+   what keeps it from ever misreading a live center. Filtering by socket
+   is not optional in the forwarded case: `cargo test` runs a binary's
+   tests concurrently, so a shared registry holds PIDs of centers other
+   fixtures are still legitimately using, and an unfiltered wait would
+   block on them and time out. Any other authority that satisfies the
+   binding constraint is fine — report the substitution. Nothing outside
+   this step depends on the recorded line's shape: Done-when 1's command
+   does not parse it, so a different scoped identity changes only this
+   step and Step 5's optional sharpening.
+2. Additionally confirm nothing is still serving the tuple, which is a
+   different and weaker fact than (1) but is the precondition for
+   removing `.owner` safely: a serving center holds `<stem>.owner`
+   exclusively for its whole serving lifetime (`center.rs:2793-2830`),
+   so acquiring that flock non-blocking proves no center is serving —
+   and only that. Reuse
+   `ctx_traits_io::file_lock::{open_lock_file_no_follow, try_lock_exclusive}`
+   (note `open_lock_file_no_follow` takes a `&Utf8Path`) rather than
+   reimplementing flock; `ctx-traits-io` is the one dependency Step 0
+   anticipated for `support/Cargo.toml` (already a workspace path
+   dependency at `Cargo.toml:54`, and `support` is only a dev-dependency
+   of the CLI, so no cycle).
+3. Only then remove `<stem>.log`, `<stem>.owner`, and any residual
+   `<stem>.sock` / `<stem>.spawn`. Ordering matters: removing `.owner`
+   while ownership is still contended is exactly what content
+   Correction 5 forbids.
+4. Then remove the tree — but read the removal's result instead of
+   discarding it as today, since the tree and its `<home>/l` being gone
+   is a binding outcome.
+
+Two details worth getting right the first time. `Drop` runs during
+unwinding for a failing test, so gate any panic on
+`!std::thread::panicking()` — otherwise a genuine assertion failure turns
+into an abort and hides its own message. And when the deadline expires,
+fail loudly with a message naming the stem and which PID was still
+alive; a silent best-effort teardown here is indistinguishable from the
+bug this task removes.
+
+`proof_center.rs` already sets the polling idiom worth copying: a 20ms
+poll under a 10-second `PROCESS_DEADLINE` (`:16`, `:39-93`). Those
+numbers are precedent, not a requirement.
+
+### Step 4 — the fixture-path proof
+
+Extend `proof_center.rs` rather than building a second process harness:
+`SENTINEL_TEST_LOCK`, `PROCESS_DEADLINE`, `ChildGuard`, `await_exit`,
+`await_socket` and `await_socket_removal` (`:12-93`) already exist, and
+the direct-sentinel proofs already cover idle exit, held-lock survival,
+concurrent launchers and owner arbitration. What is missing is coverage
+of the actual `controlled_command` / `ScratchRoot` path this task
+changes. What must be proven, however the run chooses to observe it:
+
+- a `ScratchRoot` that caused a center to be launched leaves, after its
+  drop, no live center process from that tuple — a scoped, bounded
+  observation of actual process death, which is the one claim a free
+  owner lock and an absent socket do not support;
+- that same drop leaves no `.sock` / `.log` / `.owner` / `.spawn` at its
+  stem, and no scratch tree — neither the tree root, nor `<home>/l`, nor
+  the runs/index/liveness state under it;
+- the teardown of one fixture leaves an independent, concurrently live
+  tuple (a second private sentinel) untouched — its process, its socket
+  and its owner lock all still there. This is the guard against content
+  Correction 4's danger and against a cleanup that reaches outside its
+  own tuple;
+- the existing held-driver-lock behaviour still holds: a center with a
+  genuinely held driver flock does not exit early
+  (`held_driver_lock_survives_center_idle_period`, `:1345-1379`).
+
+Practical note for the first bullet: whatever identifies the fixture's
+centers lives inside the scratch tree that the drop removes, so the
+proof has to capture that identity before the drop and assert against it
+after — asserting only on paths that no longer exist proves nothing.
+
+### Step 5 — the scoped post-battery assertion
+
+The assertion has two halves, and both run after the cargo process
+returns.
+
+Artifacts. Run the four battery binaries with `TMPDIR` pointed at a
+run-private directory. `ScratchRoot::new` and the endpoint stem both
+resolve through `std::env::temp_dir()` in the test harness process, so
+every fixture artifact of that run — and nothing else on the machine —
+lands under that directory: the four stem files and each
+`ctx-traits-cli-test-*` scratch tree alike. Asserting that none of them
+remains there afterwards is then concurrency-safe by construction, needs
+no `pgrep`, and can never match a production or sibling-worktree
+endpoint. Keep the private directory short (e.g. directly under `/tmp`):
+Darwin caps AF_UNIX paths at 104 bytes and the stem adds ~26. Collect
+that leak listing before removing the private directory, or the removal
+erases the evidence the check exists to find.
+
+Processes. The artifact half says nothing about whether a center is
+still running: a survivor that has released its socket and owner lock
+leaves the directory clean. Done-when 1's command therefore scopes the
+process half the one way that needs nothing new to exist — it snapshots
+each live `__ctx-center` as a *process identity*, not a bare PID: the
+pair `<pid>|<ps -o lstart>`. A candidate observed after the battery is
+excluded only when that whole pair matches a baseline entry, so a
+production or sibling-worktree daemon that was already running is
+excluded by construction, nothing is ever signalled, and a battery
+center that happens to be assigned a recycled PID does not inherit the
+baseline's exclusion — its start time differs, so it is still checked
+for actual death. A bare numeric PID set would not have that property:
+it would silently drop exactly such a survivor. Three properties are
+worth keeping whatever form this takes: identity is more than a PID, the
+wait is bounded and re-observed, and a still-alive identity reaches the
+final exit code rather than only being printed.
+
+`lstart` is available on both CI platforms (BSD `ps` on macOS, procps on
+Ubuntu). Its resolution is one second, so the one case this form cannot
+separate is a PID recycled into a new center within the same second as
+the dead original's start — not a systematic hole, and the sharper form
+below removes even that. The form's remaining imprecisions are in the
+safe direction: a sibling worktree that starts a center during the
+window reads as a survivor, and a zombie reads as alive — both false
+reds, and the diagnostic line names the identity so it can be
+identified.
+
+If the run implements Step 3's launch registry, sharpening the process
+half with it is a strictly better check and a welcome deviation: point
+`CTX_CENTER_LAUNCH_MARKER` at a file in the same private directory and
+poll only the PIDs the battery's own sentinels recorded — `ps -p "$p"`
+is the portable shell form of the same conservative "present means
+alive" reading `pid_is_alive` gives in-process. That form scopes
+positively (every polled PID was recorded by a battery center) instead
+of by exclusion, so no baseline subtraction is involved at all, and it
+can add a non-vacuity clause the baseline form cannot (`[ -s "$marker" ]`:
+a battery that recorded no launch should fail rather than pass by
+observing nothing, and every one of these binaries does drive `ctx`
+through a center). Its own residual imprecision is the mirror image —
+a recycled PID can read alive after the recorded center died (false
+red). Report the substituted command in the work summary; it has to fail
+while any battery-launched center is alive.
+
+Whichever form ships, the non-vacuity of the whole battery check rests
+on the `expect` regex matching cargo's own `test result: ok. N passed`
+line — a run that never executed the binaries cannot pass it.
+
+Step 3's in-test death proof already fails the battery through cargo's
+own exit code, and Done-when 2 pins the mechanism narrowly; this
+post-battery check is the independent verdict on the completed battery
+that neither of those gives.
+
+### Build checkpoint
+
+After Steps 1-3, before writing proofs:
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center --no-run`
+'''
+validation = '''
+## Done when — binding goals, each with the existing command that decides it
+
+1. The completed battery leaves behind neither a live center it
+   launched nor any fixture state. After all four shared-helper binaries
+   have returned: every center process the battery launched is dead,
+   decided within a bounded wait by re-observing each such process; and
+   the private temp root they ran under holds neither a
+   `ctx-*.{sock,log,owner,spawn}` endpoint artifact nor a surviving
+   `ctx-traits-cli-test-*` scratch tree (which is where `<home>/l` and
+   the runs/index/liveness state live). Both halves reach one exit code,
+   and both listings are taken before the root is removed:
+   `d=/tmp/ctx-fix-bat-$$; mkdir -p "$d"; ids() { for p in $(pgrep -f '__ctx-cente[r]' 2>/dev/null); do st=$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ' '_'); [ -n "$st" ] && echo "$p|$st"; done; }; ids > "$d/.before"; TMPDIR="$d" cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown; rc=$?; end=$(($(date +%s)+60)); while :; do alive=""; for id in $(ids); do grep -qxF -- "$id" "$d/.before" || alive="$alive $id"; done; [ -z "$alive" ] && break; [ "$(date +%s)" -ge "$end" ] && break; sleep 1; done; leaks=$(find "$d" -maxdepth 1 \( -name 'ctx-*.sock' -o -name 'ctx-*.log' -o -name 'ctx-*.owner' -o -name 'ctx-*.spawn' -o -name 'ctx-traits-cli-test-*' \) ); echo "post-battery survivors:[$alive] leaks:[$leaks]"; rm -rf "$d"; [ $rc -eq 0 ] && [ -z "$alive" ] && [ -z "$leaks" ]`
+   That command is one way to decide the outcome, not the mechanism the
+   outcome is made of. Any command that keeps the four properties below
+   satisfies this Done-when, and substituting one — for instance the
+   sharper launch-registry form in Step 5, if that route ships — is a
+   reportable deviation, not a violation.
+   (a) The process half is scoped by a before/after difference over
+   process *identities* — the pair `<pid>|<ps -o lstart>`, whitespace
+   collapsed so one identity is one shell word — never over bare PIDs. A
+   candidate is excluded only when its whole identity matches a baseline
+   entry, so a production or sibling-worktree daemon that was already
+   alive is excluded by construction, nothing is ever signalled or
+   unlinked outside the run's own temp root (content Correction 4), and a
+   battery center assigned a recycled PID is still checked for actual
+   death instead of inheriting the dead original's exclusion. A bare
+   numeric PID set has no such property: it drops exactly that survivor,
+   silently and green. The comparison is per-candidate `grep -qxF`, not
+   `grep -vf`, because an empty baseline file under BSD `grep -f` cannot
+   then be read as matching everything; an unmatched candidate always
+   counts as alive. The bracket in `'__ctx-cente[r]'` keeps the matcher
+   from matching the checking shell's own argv.
+   (b) The process half waits under an explicit deadline, re-observing
+   each candidate, and a still-alive PID reaches the exit code rather
+   than only being printed.
+   (c) The artifact listing uses `find` with an explicit `\( ... \)`
+   group rather than `ls`: `ls` with several globs exits non-zero as soon
+   as any one is unmatched, so an `! ls` form only goes red when every
+   artifact kind survives at once — it silently passes a single leaked
+   `.log`. Both listings are taken before the root is removed.
+   (d) The command's `expect` matches cargo's own result line, so a run
+   that executed no test cannot pass by observing nothing.
+   No test is lost from the 22 at HEAD (11 + 8 + 1 + 2).
+2. Fixture-center death is proven per fixture, and cleanup stays inside
+   its own tuple. After a `ScratchRoot` that launched a center is
+   dropped: no center process launched under that tuple is still alive,
+   established by a scoped, bounded observation that fails while any
+   such process runs — neither a free owner lock nor an absent artifact
+   may stand in for it; no `.sock` / `.log` / `.owner` / `.spawn`
+   remains at its stem; the scratch tree, including its `<home>/l` spawn
+   lock, is gone; an independent, concurrently live tuple's process,
+   socket and owner lock are untouched; and the existing
+   `held_driver_lock_survives_center_idle_period` (`proof_center.rs:1345`)
+   still passes, so a center holding a genuine driver flock is neither
+   exited early nor reaped by any of this:
+   `cargo test -p ctx-traits-cli --test proof_center`
+3. Production center lifecycle is unchanged — default idle and scan
+   periods, production path shape, `has_live` invariants including the
+   held-driver-lock and long-scan cases its unit tests cover, launch
+   arbitration, exact-inode socket removal and the one-owner protocol
+   all still hold at the library level:
+   `cargo test -p ctx-traits-io center`
+4. The wider suite survives the seam change. `controlled_command` reaches
+   every proof that spawns a center, so a fixture lifetime set there is
+   only correct if nothing else moves:
+   `just test-full`
+
+Exclusions, restated so they are checkable by reading the diff: no
+production default is retuned, `spawn_detached` keeps its detach
+semantics, no historical debris is swept, and no machine-global
+`__ctx-center` assertion is introduced.
+
+## Order and bounded refinement
+
+Read (Step 0), then Steps 1-3, then the `--no-run` build checkpoint, then
+Step 4, then Step 5. Then run the Done-when commands in the order 2, 3,
+1, 4 — the narrow proof before the battery before the gate, so a seam
+defect surfaces next to the edit that caused it rather than inside a
+long gate.
+
+Permit at most two targeted repair-and-rerun rounds. A round repairs one
+named failure, then reruns the failed command AND every later command in
+that order. If a third round would be needed, stop and report the failing
+command with its output rather than continuing — that is the stop
+condition, not a judgement call.
+
+## Watch
+
+- If the battery goes red only when the fixture idle period is short, the
+  likely cause is a center exiting between two sequential `ctx` commands
+  of one test, with the next command paying a respawn. That is correct
+  behaviour, not a defect: raise the period or accept the respawn. Never
+  fix it by weakening `has_live` or by holding the center alive on a
+  timer.
+- Acquiring `<stem>.owner` proves only that nothing is serving the tuple.
+  A sentinel that lost the owner-lock race exits as a no-op start and a
+  serving center releases the lock as it shuts down, so in both windows
+  the lock is free while a process still exists. Treating that as death
+  is the exact hole this task's goal 2 closes; a green artifact check
+  next to a surviving daemon means the death evidence is the weak one.
+- If teardown's death wait times out, read what is still alive
+  before changing anything. A center that will not exit once its runs
+  root has been deleted underneath it is a real finding worth reporting;
+  a teardown that starts ignoring its own timeout is this task failing
+  silently.
+- A `Drop` that panics while a test is already unwinding aborts the
+  process and destroys the original assertion message. Gate the assertion
+  on `!std::thread::panicking()`.
+- Do not unlink `.owner` before ownership is proven free, and do not
+  replace `SocketGuard` with an unconditional socket unlink.
+  `second_direct_sentinel_on_the_same_tuple_exits_without_replacing_the_owner`
+  and `socket_guard_does_not_remove_replacement` exist to catch exactly
+  that; a green fixture proof alongside either of them going red is this
+  task breaking 0262.
+- `pgrep -f __ctx-center` cannot distinguish a fixture center from a
+  production or sibling-worktree one (content Correction 4, measured at
+  grounding). It is usable only when scoped — differenced against a
+  baseline of process identities (PID plus start time; a bare PID set
+  silently excludes a battery center that recycled a baseline PID), or
+  filtered to identities only this battery could have produced — never as
+  a bare emptiness assertion, and never as the basis for killing
+  anything.
+- A red result in command 4 that is absent on clean main is this task's
+  own fallout from the shared seam, not a baseline defect — fix it here.
+'''
 
 [relations]
 depends-on = ["0252.8"]
+
+[[checks]]
+name = "the completed battery leaves no live center it launched and no fixture artifacts"
+command = '''d=/tmp/ctx-fix-bat-$$; mkdir -p "$d"; ids() { for p in $(pgrep -f '__ctx-cente[r]' 2>/dev/null); do st=$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ' '_'); [ -n "$st" ] && echo "$p|$st"; done; }; ids > "$d/.before"; TMPDIR="$d" cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown; rc=$?; end=$(($(date +%s)+60)); while :; do alive=""; for id in $(ids); do grep -qxF -- "$id" "$d/.before" || alive="$alive $id"; done; [ -z "$alive" ] && break; [ "$(date +%s)" -ge "$end" ] && break; sleep 1; done; leaks=$(find "$d" -maxdepth 1 \( -name 'ctx-*.sock' -o -name 'ctx-*.log' -o -name 'ctx-*.owner' -o -name 'ctx-*.spawn' -o -name 'ctx-traits-cli-test-*' \) ); echo "post-battery survivors:[$alive] leaks:[$leaks]"; rm -rf "$d"; [ $rc -eq 0 ] && [ -z "$alive" ] && [ -z "$leaks" ]'''
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 1800000
+
+[[checks]]
+name = "fixture center death, tuple-scoped cleanup and held-driver-lock survival are proven"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 1800000
+
+[[checks]]
+name = "production center lifecycle is unchanged"
+command = "cargo test -p ctx-traits-io center"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 900000
+
+[[checks]]
+name = "landing gate stays green"
+command = "just test-full"
+timeout-ms = 1800000
