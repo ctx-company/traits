@@ -16,12 +16,13 @@ The wire has no separate version field, so connection must honor the existing ve
 ## Done when
 A freshly started desktop process connects to an available matching center through the shared typed client, receives one coherent initial compact-row snapshot, and presents that snapshot without blocking the native UI when no further events arrive. Focused center proofs and the desktop project's independent tests cover the connection and initial-snapshot boundary.
 """
+
 [relations]
-parent = "0256"
 depends-on = ["0256.1"]
+parent = "0256"
 
 [[checks]]
 name = "existing center protocol proofs pass"
 command = "cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 300000
+expect = 'test result: ok\. [1-9][0-9]* passed'

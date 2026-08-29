@@ -48,3 +48,29 @@ part of 0256.1 — treat it as unverified until a later task validates it.
 No second `rust-toolchain.toml`: rustup walks up from `desktop/` and finds
 the root pin (1.97.1), so the desktop lane always builds with the same
 compiler as the rest of the repo.
+
+## Center link (0256.2)
+
+On startup the shell connects to the machine-local run center through
+`ctx_traits_io::center::subscribe_existing` and receives one coherent
+`SnapshotStart → SnapshotRow* → SnapshotEnd` snapshot on a background
+thread, forwarded to the gpui UI thread over an `async-channel`. It speaks
+the same version-scoped socket as the CLI (`/tmp/ctx-{uid}-{version}.sock`,
+scoped by `ctx-traits-io`'s own `CARGO_PKG_VERSION`), so a center started
+from a different installed `ctx` version is a different socket and the
+desktop reports it unavailable rather than connecting to it.
+
+The desktop **never launches a center** — `subscribe_existing` only connects
+to one that is already serving, fails fast otherwise, and never retries.
+Absent-center startup posture and reconnection are 0256.5's; applying later
+deltas after the initial snapshot is 0256.4's.
+
+For `just desktop-run` to show anything, start a matching-version center
+first, e.g. from the repo root:
+
+```
+cargo run --bin ctx -- traits internal stats --json
+```
+
+then run `just desktop-run` within that center's idle window (300s by
+default).

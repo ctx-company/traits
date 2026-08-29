@@ -1038,12 +1038,54 @@ impl Drop for CenterSubscription {
     }
 }
 
-/// Establish a persistent, repository-scoped snapshot stream. The reader owns
-/// socket I/O, leaving consumers with a typed channel rather than a protocol
-/// stream. Dropping the handle shuts down its reader socket so the server's
-/// EOF watcher removes the subscriber without waiting for a later delta.
+/// Establish a persistent, repository-scoped snapshot stream against a center
+/// hosted by this caller's own executable, spawning one if none is running.
+/// Callers whose own executable does not host the center sentinel (a
+/// standalone GUI process, for example) must use [`subscribe_existing`]
+/// instead — this entry would fork a second copy of the caller.
 pub fn subscribe(repo_key: Option<&str>) -> crate::Result<CenterSubscription> {
-    let mut stream = ensure_connected()?;
+    subscribe_on(ensure_connected()?, repo_key)
+}
+
+/// Establish the same persistent, repository-scoped snapshot stream as
+/// [`subscribe`], but only against a center that is already serving — it
+/// never spawns one. For callers whose own executable does not host the
+/// center sentinel (`__ctx-center`), spawning through their own `current_exe`
+/// would fork an unrelated process rather than the center. Connection
+/// failure is reported, not retried; a caller wanting bounded retry cadence
+/// (e.g. while a matching center is starting up) supplies its own.
+pub fn subscribe_existing(repo_key: Option<&str>) -> crate::Result<CenterSubscription> {
+    subscribe_on(connect_existing_at(&center_paths()?)?, repo_key)
+}
+
+/// Connect to an already-serving center without ever spawning one. A single
+/// retry on EOF absorbs the same accept-then-exit handoff race that
+/// `ensure_connected_at` retries during spawn arbitration.
+fn connect_existing_at(paths: &CenterPaths) -> crate::Result<UnixStream> {
+    let mut retried_eof = false;
+    loop {
+        match UnixStream::connect(paths.socket.as_std_path()) {
+            Ok(mut stream) => match handshake(&mut stream) {
+                Ok(()) => return Ok(stream),
+                Err(error) if !retried_eof && is_handshake_eof(&error) => {
+                    retried_eof = true;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            },
+            Err(error) => return Err(io_error(&paths.socket, error)),
+        }
+    }
+}
+
+/// Subscribe over an already-handshaken stream. The reader owns socket I/O,
+/// leaving consumers with a typed channel rather than a protocol stream.
+/// Dropping the handle shuts down its reader socket so the server's EOF
+/// watcher removes the subscriber without waiting for a later delta.
+fn subscribe_on(
+    mut stream: UnixStream,
+    repo_key: Option<&str>,
+) -> crate::Result<CenterSubscription> {
     let id = format!(
         "subscription-{}-{}",
         std::process::id(),

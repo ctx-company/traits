@@ -4,6 +4,11 @@ members = ["."]
 
 [package]
 name = "ctx-traits-desktop"
+# This crate can't inherit the root workspace's version (it's excluded from
+# it), so bumping the root version does not bump this one automatically. It
+# has no effect on which center this connects to — that socket is scoped by
+# ctx-traits-io's own CARGO_PKG_VERSION — but keep it in step by hand so it
+# doesn't silently drift into a misleading label.
 version = "0.4.0"
 edition = "2024"
 rust-version = "1.97.1"
@@ -18,3 +23,9 @@ path = "src/main.rs"
 
 [dependencies]
 gpui = "0.2.2"
+ctx-traits-io = { path = "../modules/io" }
+async-channel = "2"
+
+[dev-dependencies]
+serde_json = "1"
+camino = "1"

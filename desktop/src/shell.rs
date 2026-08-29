@@ -3,6 +3,9 @@ use gpui::{
     WindowOptions, div, px, size,
 };
 
+use crate::center_link::{self, LinkUpdate};
+use ctx_traits_io::center::CenterPublicRow;
+
 pub const APP_TITLE: &str = "ctx desktop";
 
 pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(960.), px(640.));
@@ -18,11 +21,61 @@ pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     }
 }
 
-pub struct Shell;
+pub enum CenterState {
+    Connecting,
+    Connected { rows: Vec<CenterPublicRow> },
+    Unavailable { message: String },
+}
+
+pub struct Shell {
+    center: CenterState,
+}
+
+impl Shell {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let updates = center_link::start(None);
+        cx.spawn(async move |this, cx| {
+            while let Ok(update) = updates.recv().await {
+                if this
+                    .update(cx, |shell, cx| {
+                        shell.apply(update);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+        Self {
+            center: CenterState::Connecting,
+        }
+    }
+
+    fn apply(&mut self, update: LinkUpdate) {
+        self.center = match update {
+            LinkUpdate::Snapshot(rows) => CenterState::Connected { rows },
+            LinkUpdate::Unavailable(message) => CenterState::Unavailable { message },
+        };
+    }
+}
 
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().child(APP_TITLE)
+        match &self.center {
+            CenterState::Connecting => div().child("connecting to center…"),
+            CenterState::Unavailable { message } => {
+                div().child(format!("center unavailable: {message}"))
+            }
+            CenterState::Connected { rows } => {
+                let mut container = div().child(format!("{} runs", rows.len()));
+                for row in rows {
+                    container = container.child(div().child(row.summary.run_id.clone()));
+                }
+                container
+            }
+        }
     }
 }
 

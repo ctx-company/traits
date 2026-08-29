@@ -4021,3 +4021,73 @@ fn migrated_v1_index_over_the_corpus_is_reclaimed_to_the_same_physical_bound() {
     child.0.wait().expect("reap migration center");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// `subscribe_existing` must never fork a center of its own — proven by the
+/// launch marker staying absent while no center is running — and must still
+/// reach an already-serving center's coherent snapshot exactly like
+/// `subscribe` does.
+#[test]
+fn standalone_subscribe_reaches_a_running_center_and_never_launches_one() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("standalone-subscribe");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let launch_marker = root.join("launches");
+    let _environment = CenterEnvironment::install(&root);
+
+    assert!(
+        ctx_traits_io::center::subscribe_existing(None).is_err(),
+        "no center is running yet"
+    );
+    assert!(
+        !launch_marker.exists(),
+        "subscribe_existing must never spawn a center: launch marker was written"
+    );
+    assert!(
+        !socket.exists(),
+        "subscribe_existing must never spawn a center: socket was created"
+    );
+
+    let ledger = write_running_ledger(&root);
+    // Generous idle so idle exit is never the thing under test.
+    let mut child = spawn_sentinel(&root, &socket, &index, "120000");
+    let _ = &ledger;
+    let stream = await_socket(&socket);
+    drop(stream);
+
+    let subscription = ctx_traits_io::center::subscribe_existing(None)
+        .expect("subscribe_existing must reach the already-serving center");
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    let mut found = false;
+    loop {
+        match subscription
+            .recv_timeout(PROCESS_DEADLINE)
+            .expect("center snapshot event")
+        {
+            ctx_traits_io::center::CenterEvent::SnapshotRow(row) => {
+                found |= row.summary.run_id == "center-proof-run";
+            }
+            ctx_traits_io::center::CenterEvent::SnapshotEnd => break,
+            _ => {}
+        }
+    }
+    assert!(found, "subscribe_existing must serve the seeded row");
+    drop(subscription);
+
+    let marker_lines = std::fs::read_to_string(&launch_marker).unwrap_or_default();
+    assert_eq!(
+        marker_lines.lines().count(),
+        1,
+        "exactly one center may have launched — the sentinel this test spawned itself: {marker_lines}"
+    );
+
+    child.0.kill().expect("stop standalone-subscribe center");
+    child.0.wait().expect("reap standalone-subscribe center");
+    let _ = std::fs::remove_dir_all(&root);
+}
