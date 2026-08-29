@@ -255,7 +255,11 @@ def main() -> None:
                 + len(report["orphan-parents"])
                 + (0 if len(report["roots"]) == 1 else 1)
             )
-            print("complete" if problems == 0 else f"incomplete:{problems}")
+            # No trailing newline: text-slot command output is captured
+            # VERBATIM, and the Covering loop's exit is a string equality
+            # against exactly "complete" — a print() here made the loop
+            # unsatisfiable and exhausted every fully-covered run.
+            sys.stdout.write("complete" if problems == 0 else f"incomplete:{problems}")
         return
     fail(f"unknown mode {mode!r}")
 
