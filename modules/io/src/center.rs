@@ -6382,6 +6382,83 @@ mod tests {
     }
 
     #[test]
+    fn a_fresh_model_recovers_a_live_index_seeded_ledger_with_no_registration_or_frame() {
+        // Defect 5's actual mechanism: `begin_scan` seeds its warm queue from
+        // `run_liveness::read_index` before the flat-store walk, so a
+        // repository-local ledger the flat enumeration can never reach is
+        // still recovered as live from a fresh model — no `Request::Register`
+        // (unlike `discovery_retains_an_unscanned_registered_ledger_until_it_is_deleted`,
+        // which drives the same row through registration instead) and no
+        // `DriverNotifier` frame ever reaches this process.
+        let root = scratch("live-index-seeded-no-registration");
+        let paths = CenterPaths {
+            socket: root.join("center.sock"),
+            spawn_lock: root.join("center.lock"),
+            runs_root: root.join("flat-runs"),
+            index: root.join("index.sqlite3"),
+            liveness_root: root.join("liveness"),
+        };
+        std::fs::create_dir_all(paths.runs_root.as_std_path()).expect("create flat runs root");
+        let ledger = root
+            .join("repository")
+            .join(".ctx")
+            .join("runs")
+            .join("session-pointer-only.json");
+        std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+            .expect("create repository-local store");
+        crate::run_session::write_run_session(
+            &ledger,
+            &fixture_session_with_outcome("awaiting-agent-output", "paused"),
+        )
+        .expect("write ledger");
+
+        // Hold the genuine kernel flock a driver would hold — the sole
+        // liveness authority — without ever registering with a center.
+        let lock_path = crate::run_control::driver_lock_path(&ledger);
+        let lock = crate::file_lock::open_lock_file_no_follow(&lock_path).expect("open lock");
+        assert!(crate::file_lock::try_lock_exclusive(&lock).expect("lock ledger"));
+
+        // Write only the liveness pointer row, exactly as `run_control` does
+        // on lock acquisition — never a `Request::Register` and never a
+        // `DriverNotifier` connection.
+        crate::run_liveness::upsert_row(
+            &paths.liveness_root,
+            &crate::run_liveness::LiveRunFacts {
+                session_id: "session-pointer-only".to_string(),
+                run_id: "run-pointer-only".to_string(),
+                repo_key: "repository".to_string(),
+                repo_path: root.to_string(),
+                ledger_path: ledger.clone(),
+                worktree_path: None,
+                branch: None,
+                log_path: None,
+            },
+            std::process::id(),
+            1,
+        )
+        .expect("write liveness pointer row");
+
+        let mut model = CenterModel::open(&paths).expect("open fresh center");
+        model
+            .begin_scan(&paths)
+            .expect("begin scan seeded from liveness index");
+        while model.is_warming() {
+            model.warm_step(&paths, 8).expect("drain warm queue");
+        }
+
+        assert!(
+            model.rows.get(&ledger).is_some_and(|row| row.live),
+            "a fresh model must recover liveness for a pointer-only, unregistered ledger"
+        );
+        assert!(
+            model.has_live(),
+            "a genuinely held driver lock must keep the model live"
+        );
+        drop(lock);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
     fn unchanged_terminal_fingerprint_does_not_parse() {
         let root = scratch("unchanged-terminal");
         let paths = paths(root.clone());
