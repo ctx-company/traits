@@ -1,50 +1,898 @@
 schema-version = "0.2"
 key = "0265.11"
 title = "Render the preview in-progress and verdict blocks"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-Add the Sessions preview column's two state blocks, between the `run` block and the footer `0265.10` rendered.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — discovery order, file and symbol
+guesses, edit order, proof mechanics. Deviate from any of it wherever a goal
+requires it, and report the deviation in the work summary; a deviation is not a
+violation and needs no escalation.
 
-The **`in progress`** block is grammar rule 13's bordered "now" item: `row-open` fill, border-soft, pad [8,10], a title in sans 12 with the state word right, and a narrated line in mono 10.5 `text-muted`. `screens/sessions.md` names the instance — title `review — refinement round 2` with `live` in accent, over "reading the diff against 0243.3's contract." The title and the `live` marker are `data:`, from the selected run's reconstruction (its current sequence title and the run's verdict-round count) and the row's live flag. The narrated line is `placeholder:` and comes from the shared `placeholders` module.
+This cut inserts the Sessions preview column's two state blocks into the body
+sequence `0265.10` parameterised: the bordered `in progress` "now" item and the
+`verdict` block, between the `run` identity block and the spacer. `0265.12`'s
+`slots` block and `0265.15`'s `landing` block follow them; nothing about the
+frame, the named-block form or the key/value row is rebuilt here.
 
-The **`verdict — round N`** block is key/value: `status` with a warn-coloured value (`blocked · 2 findings`) plus the blocker lines beneath it in mono 10.5 `text-secondary`. It is `data:` from the run's typed verdict slots, which the selected run's reconstruction carries in its slot record — the same evidence the review verdict itself was written into, read rather than re-derived.
+Grammar rule 13 fixes both the position and the now-item's shape: state blocks
+sit after the identity block, and the bordered item is `row-open` fill,
+border-soft 1, pad [8,10], a title in sans 12 with the state word at the right,
+and a narrated line in mono 10.5 `text-muted` (`grammar.md:117-124`). Rule 5
+makes block headings lowercase mono 11 `text-muted` (`grammar.md:49-56`); rule 7
+makes keys sans 11.5 `text-secondary` and values mono 10.5, "state-colored only
+when the value IS a state" (`grammar.md:68-72`). The export measures the same
+two blocks: full width, gap 8, bottom padding 20, item gap 5, `#101215` fill on
+`#23262d` border, title sans 12 `#d7dae0`, marker mono 10.5 `#7fb2ff`, narration
+mono 10.5 `#585d68` at 16px line height (`reference/sessions.html:698-736`);
+then heading mono 11 `#585d68`, one status key/value row whose value is
+`#d8b46a`, and blocker lines mono 10.5 `#8b909c`
+(`reference/sessions.html:737-776`). `screens/sessions.md:36-49` tags what is
+`data:` and what is `placeholder:`: the title and marker are data, the narrated
+line is the placeholder, and the verdict heading, status and blocker lines are
+data from typed verdict slots.
 
-Colour is semantic in both: `live` is accent because it is happening now; the verdict status is warn because it needs the owner. Neither is coloured for emphasis.
-"""
-scope = """
-## Decisions
+Everything else in the export and the screen doc is illustration.
+`review — refinement round 2`, `live`, `blocked · 2 findings`, `b1 — ...` and
+the narration sentence are examples of runs, not literals valid for any run
+(`0265:117-122`). Seven corrections follow, and each one is a place where
+copying the illustration would have shipped a plausible lie.
 
-- In scope: the bordered `in progress` item with its title, `live` state word and placeholder-served narrated line, and the `verdict — round N` block with its warn-coloured `status` value and blocker lines, both fed from the selected run's center-served reconstruction.
-- **Exactly one placeholder here** — the `in progress` narrated line. Rendering the title, the marker, the status or the blocker lines statically would mark wired data as unwired.
-- **The round number in the block heading is data**, not a fixed `1`; a run with no verdict round yet renders no verdict block rather than an empty one labelled round 1.
-- Out of scope: the `run` block and footer (`0265.10`), the `slots` block (`0265.12`), the `landing` block (`0265.15`), and the main pane.
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+## Seven corrections to the draft this plan replaces
 
-## Prerequisite
+**Correction 1 — `blocked` is not a stored verdict status.** The draft made
+`blocked · 2 findings` the contract for the status value. The family's stored
+status is the closed pair `approved|revise`
+(`packages/toolkit/src/schema.ts:311-330`; generated at
+`.ctx/traits/authored/implement/generated/basic/index.toml:224-264`), with
+`status = revise` if and only if `blockers` is non-empty. Nothing in the ledger
+ever says `blocked`. This is exactly `0265.10`'s Correction 1 in a second place,
+and it resolves the same way (`0265:32-38`): render the served status word,
+and if the owner wants `blocked` on this screen, that is a schema or design
+finding raised against the artifact, never a synonym table typed into the
+desktop. Goal 6 binds the served word plus a finding-count segment derived from
+the blocker list, and nothing else.
 
-`0265.10` — the preview column, its key/value row primitive and its selection-triggered reconstruction.
-"""
-validation = """
+**Correction 2 — warn is not the tone of every revise verdict.** The draft said
+"the verdict status is warn because it needs the owner". Rule 1 defines warn
+narrowly as *needs the owner* (`grammar.md:6-22`), and the schema carries that
+fact separately and explicitly: `escalation = none|needs-owner`, where
+`needs-owner` means at least one blocker cannot be cleared by the worker from
+inside the run (`packages/toolkit/src/schema.ts:338-348`). An ordinary
+worker-fixable revise verdict is the common case and does not need the owner, so
+colouring it gold makes rule 1's one gold signal meaningless. Goal 6 binds the
+tone to the served evidence: `needs-owner` is warn, `approved` is ok (settled
+good, rule 1), and a revise verdict with `escalation = none` takes the neutral
+value tone. The export's gold value is measurement of one example run whose
+escalation the export does not record; the rule is the authority
+(`0265:117-122`).
+
+**Correction 3 — the shared round helper cannot see this repository's own
+verdict slots.** `verdict_slot_rounds` counts revisions whose slot ref
+`ends_with("-verdict")` and takes the maximum per-slot count
+(`modules/core/src/procedure/stats.rs:57,109-122`); `RunSummary::from_session`
+projects `verdict_rounds` from it (`modules/io/src/run_summary.rs:243-245`).
+The implement family's verdict slots are `review-verdict-1` and
+`review-verdict-2`
+(`.ctx/traits/authored/implement/generated/basic/index.toml:91-99`), whose refs
+end in `-verdict-1`/`-verdict-2` and match nothing; the helper's only test uses
+`review-a-verdict` (`stats.rs:671-683`). So at this HEAD an implement run with
+real typed reviewer verdicts carries `verdict_rounds = None`, and a heading that
+reads the row honestly would render no verdict block for the repository's
+principal trait family. This is a shared-data defect, not something the desktop
+may route around with a local count. Goal 8 corrects the helper and its
+coverage in core. Its existing per-slot-maximum aggregation is *kept*: with two
+reviewers each writing once per round, the maximum per-slot revision count is
+the round count, which is the right answer once the refs are recognised.
+
+**Correction 4 — the two design round numbers have two different sources, and
+the draft conflated them.** The illustration shows `refinement round 2` in the
+in-progress title and `round 1` in the verdict heading, so one count cannot feed
+both. They are different facts: completed verdict rounds is
+`RunSummary.verdict_rounds`, while the round a run is *currently in* is
+structural loop evidence. Goal 3 therefore binds the title to
+`RunSummary.current_sequence_title` — the served active frame title, which for
+implement:basic is authored text like `Implement the task` or `Review the
+implementation`, not the design literal `review`
+(`modules/core/src/procedure/session.rs:1424-1460,2615-2637`;
+`.ctx/traits/authored/implement/generated/basic/index.toml:391-429`) — with a
+round segment appended only from the shared one-based loop presentation
+`0265.6` lands, and omitted entirely when the selected run is in no loop and
+therefore no round is served. No desktop-local `+1` over the zero-based
+structural iteration, no inference from flat row order, no hardcoded `2`, and no
+reuse of the completed-verdict count as the current round. That presentation is
+the reason `0265.6` is a prerequisite here: the only one-based derivation in the
+repository today is CLI-private `format_step_title`, which filters
+`segment.kind == "loop"`, adds 1 to each recorded zero-based `iteration` and
+joins nested rounds with `/` (`modules/cli/src/app/story.rs:32-44`, `pub(crate)`
+in the CLI binary), and goal 9 forbids the desktop importing or copying
+CLI-private code. Without `0265.6`'s extraction landed, goal 3's with-round
+outcome would have no shared projection to consume and could only be met by
+taking a sibling's scope. Goal 5 binds the verdict heading to `verdict_rounds`,
+with `None`
+rendering no block at all — the family convention `0265.5:316-330` already
+fixed: missing evidence renders no round segment, never round zero.
+
+**Correction 5 — the em dash is not in the closed glyph set.** The design text
+uses `review — refinement round 2`, `verdict — round 1` and `b1 — ...`, but rule
+3's allowed set is `↰ ↳ → · ∷ –` and closes with "nothing else"
+(`grammar.md:31-37`); rule 2 says compound states join with `·`
+(`grammar.md:24-29`). Per `0265:117-122` a newly discovered export/rule conflict
+resolves in favour of the grammar and is reported. Every separator this cut
+renders is `·`, and the em dash occurrences are raised as an owner correction
+against `screens/sessions.md` and `reference/sessions.html`.
+
+**Correction 6 — the blocker line cannot come from the existing gloss, and the
+desktop may not grow a second reader for it.**
+`ctx_traits_core::procedure::story::value_gloss` is documented as the single
+place `status`/`verdict`, `blockers[].id`, `escalation` and advisory conventions
+are read (`story.rs:223-324`), and CLI `run_format::print_escalation_blockers`
+reuses it (`modules/cli/src/app/run_format.rs:601-621`). It returns
+`blockers: Vec<String>` — sorted, deduplicated ids only — so the export's
+`<id> <sep> <description>` line is not producible from it today. Re-reading the
+JSON conventions in gpui would duplicate the one reader. Goal 7 binds one
+minimal extension of that shared reader to carry each blocker's `what` — the
+schema field described as "The defect and the concrete failure it causes"
+(`packages/toolkit/src/schema.ts:129-133`) — with
+`print_escalation_blockers`'s existing sorted, deduplicated, byte-stable id
+output unchanged. The same goal forbids inventing a truncation contract: the
+shared reader already bounds text at `GLOSS_CHAR_BOUND` and appends `…`
+(`story.rs:54,261-269`), a glyph rule 3 does not authorise, and the export marks
+blocker lines nowrap at a 380-wide column. Neither is this cut's to solve
+locally; both are reported.
+
+**Correction 7 — the draft bound exactly one boundary and left the rest to
+prose.** "A run with no verdict round shows no verdict block" was its only
+presence rule. Unbound were: whether the `in progress` block exists at all for a
+finished run (accent `live` is truthful only when `CenterPublicRow.live` is
+true, `center.rs:3778-3788`, and `RunSummary.session_state` is projected with
+`live = false` and cannot answer it, `run_summary.rs:131-143`); an absent or
+blank current title; a `parse_error` row; approved and no-blocker verdicts;
+malformed accepted values; multiple verdict slots, which implement:complex makes
+real by writing two reviewer verdicts per round
+(`.ctx/traits/authored/implement/source/variant/complex/index.ts:13-25`); a
+partially written round; and the atomicity of heading round against body under
+rapid selection. Goals 1, 5, 6 and 9 bind all of them.
+
+## Grounded at HEAD cafd932a9
+
+Nothing this task renders exists yet. Root `Cargo.toml` lists only the existing
+workspace crates and excludes only `packages/cdk`; no manifest or lockfile names
+gpui; there is no desktop directory, no desktop recipe in `Justfile` and no
+desktop lane in `.github/workflows/ci.yml`. The prerequisite `0265.10` is
+`ready`, and so are its own prerequisites `0265.2`, `0265.3` and `0257`.
+
+Every desktop path, module name, component name, symbol, signature, gpui API and
+command named below is therefore a guess to be replaced by discovery against
+what `0256.1`, `0265.1`, `0265.3`, `0257` and `0265.10` actually landed. Binding
+them here would be fabrication.
+
+The desktop lane is nonetheless guaranteed to exist when this cell runs, and the
+guarantee is a code fact: an open leaf derives `Blocked` while any `depends-on`
+target is not `Done` (`modules/core/src/task/graph.rs:115-177`), and this task
+depends on `0265.10`, which depends on `0265.3` → `0265.1` → `0256.1`. The same
+rule is what makes goal 3's round segment unconditional: this task also depends
+on `0265.6`, so its shared one-based loop presentation is landed before this
+cell dispatches. The first
+act of this cell is to locate that lane's documented non-interactive command and
+record it verbatim in the work summary. If no such command is found, the
+prerequisite chain has not in fact landed: stop and report that, rather than
+substituting a workspace command for rendered-behaviour proof. It is
+deliberately not declared as a `[[checks]]` entry, because a check must exist in
+the repository at the moment the plan is written and this one does not.
+
+**Rendered-preview evidence**, the phrase the goals use, means two things taken
+together: the landed lane's documented command, run as it exists and exiting 0;
+and, for every outcome that command does not itself decide, the run's own
+observation of the running frame and the composed element tree, by whatever
+means that harness already supports. Which of the two decided which outcome, and
+the mechanics used, are named in the work summary. Adding coverage inside the
+landed harness is right where a goal needs it; standing up a second validation
+lane beside it is not.
+
+What *is* readable today is the data side, and the goals lean on it.
+`RunSummary` already carries `current_sequence_title`, `verdict_rounds` and
+`parse_error` (`run_summary.rs:73-118`), and `CenterPublicRow` carries the
+authoritative `live` flag beside the summary (`center.rs:3778-3788`). A full
+`Session` carries current `accepted_slot_values` — full JSON value, digest,
+optional schema ref, source, acceptance and producer evidence
+(`session.rs:1447-1460`; `runtime/state.rs:180-244`) — and append-only
+`slot_revisions` carrying slot ref, digest, acceptance order, operation, loop id
+and iteration (`runtime/state.rs:702-755`). Ledger validation enforces that each
+latest revision matches an accepted current value with the same ref and digest
+(`runtime/ledger_contract.rs:1103-1147`), while historical payload replay exists
+only where operation/submitted evidence does (`ledger_contract.rs:1179-1279`).
+So the verdict body is read from the accepted typed `Value`, and revisions are
+chronological/round evidence — never a reason to reconstruct current JSON from
+prompt text or from a file.
+
+Two protocol notes for discovery rather than for binding. `center::get` today
+returns the full `Session` with typed Missing/Session/Ambiguous results
+(`center.rs:916-935`) but reads the selected ledger synchronously inside the
+sole model owner (`center.rs:3649-3669`); `0257` is expected to establish the
+sanctioned selected-detail path and the off-thread desktop bridge, and this cut
+consumes that rather than inheriting the blocking shape or adding a second
+request. And today's deltas are `Appeared`, `RowChanged`, `Ended` and
+`ActivityLine`, the last carrying a compact row plus an activity-sidecar record
+and no slot JSON (`center.rs:265-281`; `activity_sidecar.rs:24-56`) — so a view
+selected *before* a verdict is written cannot stay current from that delta
+alone. Inspect what `0257.3` landed: if its contract does not carry or reconcile
+changed selected detail, that is a data-contract gap to close through the same
+center-served detail path, and never with a timer, a desktop filesystem read or
+a second detail protocol.
+'''
+scope = '''
+## GOALS — binding
+
+1. **The `in progress` block exists only while the selected run is happening
+   now.** It renders when the selected row's `CenterPublicRow.live` is true, and
+   not otherwise: a finished, ended or non-live selection renders no now item
+   and no `live` marker at all, rather than a bordered item with the marker
+   dropped. A row carrying `parse_error` renders no now item either — its empty
+   identity and absent title are not evidence about a real run
+   (`run_summary.rs:255-295`). When the selection changes, no previous run's now
+   item survives into the new one.
+   Decided by rendered-preview evidence for a live selection, a non-live
+   selection, an unreadable selection, and a live-to-finished transition on the
+   same run; plus the closing diff read showing the presence condition reads the
+   row's `live` flag and not `RunSummary.session_state`, which is projected
+   `live = false` by construction (`run_summary.rs:131-143`).
+   Excluded: deriving liveness from elapsed, mtime, terminal epoch, a render
+   clock or the absence of a stop reason; a persistent block that merely hides
+   its marker; leaving the block visible while the selection is stale or the
+   center is lost, which goal 9 governs.
+
+2. **The now item renders in the artifacts' shape.** A full-width block with
+   internal gap 8 and bottom padding 20, whose first child is the lowercase
+   heading `in progress` in mono 11 `text-muted`, followed by one bordered item:
+   `row-open` fill, 1px `border-soft`, padding [8,10], internal gap 5, no corner
+   radius; inside it a full-width `space-between` row with the title in sans 12
+   and the state word at the right in mono 10.5 accent, then the narrated line
+   in mono 10.5 `text-muted` at 16px line height across the full width. The
+   named-block form and the heading come from `0265.10`'s primitives; only the
+   bordered item is new here, and it is reusable by the later previews that name
+   a now item rather than built for one screen.
+   Decided by rendered-preview evidence for the fill, border, paddings, gaps,
+   families, sizes and tones, plus the closing diff read against
+   `grammar.md:117-124`, `tokens.md:71-84` and
+   `reference/sessions.html:698-736`.
+   Excluded: a pill, badge, chip, icon or dot — rule 4 restricts dots to
+   stateful lists (`grammar.md:39-47`); any corner radius inside the canvas; a
+   second named-block or heading form beside `0265.10`'s; any colour, size,
+   spacing, family or weight literal at a call site; rule 5's italic narrator
+   voice here — rule 13 is the specific rule for this item and it is non-italic
+   mono 10.5 `text-muted`.
+
+3. **The now item's title is served data with no locally computed round.** The
+   title renders `RunSummary.current_sequence_title` verbatim. A round segment is
+   appended, joined with `·` per rule 2, from the shared one-based loop
+   presentation prerequisite `0265.6` lands, for every selected run whose served
+   structural evidence carries a loop round; a run in no loop serves none and its
+   title renders alone with no round segment and no dangling separator. That
+   projection is consumed, never re-derived: the repository's only one-based
+   derivation today is CLI-private (`modules/cli/src/app/story.rs:32-44`) and
+   goal 9 forbids importing or copying it. The `live` marker is the served state
+   word in accent per
+   rule 1. A live run whose served title is absent or blank renders one fixed
+   form: the lowercase literal `no current frame`, in the title's sans 12 but in
+   `text-muted` rather than the title tone, with no round segment and no
+   separator. That literal is this cut's absence form for missing served
+   evidence, not a `placeholders` entry — goal 4 keeps that module to the
+   narration — and it is never an empty line, a guessed default phrase or the
+   previous selection's title.
+   Decided by rendered-preview evidence for a served title whose run carries a
+   loop round, a served title for a run in no loop, and a live run with no served
+   title rendering exactly `no current frame` in `text-muted` with no separator;
+   plus the closing diff
+   read for any `+1` over structural zero-based iteration, any inference from
+   row order or list position, any literal `review`, `refinement round 2` or
+   `round`-prefixed constant, and any reuse of `verdict_rounds` as the current
+   round (content Correction 4).
+   Excluded: re-deriving the current frame in the desktop rather than consuming
+   `current_sequence_title`; substituting `RunSummary.title`, the task title or
+   the trait id for a missing title; rendering `round 0`; a preview-private
+   loop-round computation; any design example string typed as a literal.
+
+4. **The narrated line is the `placeholders` module's own entry, and the only
+   placeholder in this cut.** The sentence resolves through the one module
+   `0265.3` created, with exactly one entry added here — the in-progress
+   narration — and no inline literal at the call site, traceable to the
+   `placeholder:` tag at `screens/sessions.md:38-39` that authorises it. Every
+   other leaf in both blocks is data.
+   Decided by the closing diff read showing exactly one entry added to that one
+   module and resolved at the call site, with no inline sentence, no duplicate
+   literal and no second `placeholders` module; plus rendered-preview evidence
+   that the line renders from the module entry.
+   Excluded: a registry, lookup framework, trait or macro layer; entries no cut
+   renders yet (loop phrasing, header phrasing, owner handle — each arrives with
+   its consumer); a second `placeholders` module; a placeholder standing in for
+   the title, marker, heading, status, count or blocker lines, which would mark
+   wired data as unwired.
+
+5. **The verdict block exists only on recognised verdict evidence, and its
+   heading round and body come from one accepted snapshot.** The block renders
+   when the selected run's served evidence carries at least one recognised
+   verdict round; `RunSummary.verdict_rounds = None` renders no block at all —
+   not an empty block, not one labelled round 1, not `round 0` — matching
+   `0265.5:316-330`. The heading is lowercase mono 11 `text-muted` reading
+   `verdict` with ` · round <R>` from `verdict_rounds`, and `R` and the rendered
+   body are taken from the same accepted evidence snapshot: a row version's
+   round is never combined with another version's slot JSON. An accepted value
+   that is malformed, schema-mismatched or carries none of the recognised
+   conventional fields renders one fixed failure form: the heading exactly as
+   above, and a body of exactly one key/value row through `0265.10`'s primitive —
+   key `status`, value the lowercase literal `unreadable` in the danger tone,
+   rule 1's failure sense, because the served evidence could not be read — with
+   no findings segment and no blocker lines. A value whose status word falls
+   outside the closed `approved|revise` pair is exactly such a schema mismatch
+   and renders that same `unreadable` row, never the word it carries. No
+   previously accepted verdict block survives a newer selection or a failed
+   refresh as current.
+   Decided by rendered-preview evidence for no round, one round, a later round,
+   a malformed accepted value and a value whose status is outside the closed pair
+   each rendering exactly the `status` / `unreadable` danger row with no findings
+   segment and no blocker lines, and a refresh failure against a previously
+   rendered verdict; plus the closing diff read showing heading and body read one
+   snapshot.
+   Excluded: `round 0` or a defaulted round; the design literal `round 1`;
+   re-deriving the round inside the desktop rather than consuming the projected
+   row field (content Correction 3 fixes the projection instead); reconstructing
+   verdict JSON from prompt text, historical revision payloads or a file when
+   the accepted value is unreadable; the em dash separator (content
+   Correction 5).
+
+6. **The status row renders the served status word, an evidence-derived finding
+   count, and a tone that means what rule 1 says it means.** One key/value row
+   through `0265.10`'s primitive: key `status` in sans 11.5 `text-secondary`;
+   value in mono 10.5 composed of the served status word and, when the rendered
+   blocker set is non-empty, a `·` separator and the count segment `<N> findings`
+   — singular `1 finding` at `N = 1` — where `N` is the size of that rendered
+   deduplicated set; an empty set renders no separator and no segment. So a
+   revise verdict carrying two distinct blocker ids renders `revise · 2
+   findings`. Only the status word is a state and carries a
+   tone; the separator and the count are neutral, per rule 7. The tone follows
+   the served evidence: `escalation = needs-owner` is warn, `approved` is ok,
+   and a revise verdict with `escalation = none` takes the neutral value tone
+   (content Correction 2). A status word outside the closed `approved|revise`
+   pair is not a status: it is a schema-mismatched accepted value and renders
+   goal 5's fixed `status` / `unreadable` danger row, never a verbatim render and
+   never a mapping onto a known word.
+
+   Multiple verdict slots aggregate by one deterministic shared rule, stated
+   here in full and testable outside the GUI, over evidence that is entirely
+   derivable from `slot_revisions` and `accepted_slot_values` with no plan or
+   trait read:
+   - **Displayed round.** `R` is the maximum per-slot count of recognised
+     verdict revisions — `verdict_slot_rounds`'s existing aggregation, goal 8's
+     correction applied — and is the round the heading shows.
+   - **Participating slots.** A verdict slot participates when it carries at
+     least one recognised verdict revision. A declared-but-unwritten slot is not
+     yet a reviewer and contributes nothing.
+   - **Round membership.** A participating slot's current accepted value belongs
+     to round `R` if and only if that slot's own recognised verdict revision
+     count equals `R`. A participating slot whose count is less than `R` has not
+     reported in round `R`: its current accepted value is an earlier round's and
+     is excluded from the rendered body entirely, so no round mixes two rounds'
+     JSON.
+   - **Complete round.** Every participating slot's count equals `R`. The status
+     is `revise` if any member value is `revise`, and `approved` only when every
+     member value is `approved`.
+   - **Partial round.** At least one participating slot's count is less than
+     `R`. The status never renders a settled word: `approved` is unreachable for
+     a partial round however many members approved. It takes exactly one of two
+     forms, both fixed here. Member `revise` still outranks: a partial round with
+     any member `revise` renders `revise` with the same count segment as a
+     complete one. A partial round with no member `revise` renders the lowercase
+     word `pending` in the neutral value tone, with no findings segment. There is
+     no third form.
+   - **Blockers.** The rendered blocker set is the union of the member values'
+     blockers only, deduplicated by id in the shared reader's existing sorted
+     order; a non-member slot's blockers never appear. The finding count is
+     derived from that same rendered set.
+   Decided by direct core tests over the shared aggregation and tone inputs —
+   approved, revise with `escalation = none`, revise with `needs-owner`, one
+   reviewer, two reviewers agreeing at `R`, two reviewers disagreeing at `R`, a
+   partial round where the lagging slot's accepted value is approved, a partial
+   round where a member is revise, and a status outside the closed pair — each
+   asserted against the word, count segment and tone fixed above, proven by the
+   declared core and `just test` checks; and by rendered-preview evidence that
+   the row renders those same fixed forms: `approved` with no segment in ok,
+   `revise · <N> findings` with the neutral segment and the escalation-implied
+   tone, `pending` with no segment in the neutral tone, and `unreadable` in
+   danger for a status outside the closed pair.
+   Excluded: the literal `blocked` or any synonym table mapping `revise` to
+   another word (content Correction 1); an unconditional warn for every revise
+   verdict; colouring the whole compound value, which would make the count read
+   as a state; a count derived from anything but the rendered blocker set; a
+   desktop-local status, tone or round-membership rule rather than the shared
+   one; treating a status outside the closed pair as renderable data; combining
+   a non-member slot's accepted value, blockers or count into round `R`;
+   reading the plan or trait to decide which slots participate; inventing an
+   "approved" line the schema does not carry — an approved verdict with no
+   blockers renders the status row alone with no findings segment and no blocker
+   lines.
+
+7. **Blocker lines come from the one shared conventional reader, extended once.**
+   Each rendered line is mono 10.5 `text-secondary`, full width, composing the
+   blocker's `id` and, when the served value carries one, a `·` separator and
+   its `what` text; a blocker with no `what` renders its id alone with no
+   dangling separator. The convention is read in exactly one place —
+   `procedure::story::value_gloss` extended minimally to carry `what` beside the
+   existing id — and `run_format::print_escalation_blockers` remains a consumer
+   with its sorted, deduplicated, byte-stable id output unchanged. The desktop
+   adds no truncation, ellipsis or wrapping policy of its own: whatever bounding
+   the shared reader already applies is what renders, and the two unresolved
+   visual boundaries — the `…` the shared bound emits, which rule 3's closed
+   glyph set does not authorise, and the export's nowrap blocker lines in a
+   380-wide column — are reported as owner corrections rather than solved with a
+   local formatter.
+   Decided by direct core tests over the extended reader — blockers with and
+   without `what`, duplicate ids, a value carrying none of the conventional
+   fields, and a non-object value — plus the CLI consumer's existing behaviour
+   still green under the declared checks, and rendered-preview evidence of the
+   composed lines and of a blocker with no `what`.
+   Excluded: a second JSON-convention reader in the desktop or anywhere else;
+   reading `where`, `root-cause`, `required-fix`, `steps` or `done-when` into
+   this line; changing `print_escalation_blockers`'s output; a desktop-side
+   truncation, ellipsis, character budget or wrap policy; the em dash separator;
+   the design's example blocker text as a literal or as fixture authority.
+
+8. **The shared round helper recognises the repository's own verdict slots.**
+   `verdict_slot_rounds` counts revisions for numbered verdict slots such as
+   `review-verdict-1` and `review-verdict-2` as verdict rounds, not only refs
+   ending exactly in `-verdict`, keeping its per-slot-maximum aggregation — which
+   is the correct round count when two reviewers each write once per round — and
+   keeping `None` for genuinely absent coverage. Its coverage in
+   `procedure::stats` is extended to the numbered form. If a prerequisite
+   already corrected it, that correction is consumed rather than duplicated.
+   Decided by the declared `cargo test -p ctx-traits-core --lib procedure::stats`
+   check and by the declared `just test` check for
+   `RunSummary::from_session` and every other consumer of the helper staying
+   green; plus rendered-preview evidence that an implement-shaped run with
+   numbered verdict revisions renders a verdict block with a round.
+   Excluded: a desktop-local round count or a second counting helper; matching
+   any slot whose ref merely contains `verdict`, which would count non-verdict
+   slots; changing the per-slot-maximum aggregation to a sum across slots, which
+   would double a two-reviewer round; changing `RunSummary`'s field shape or the
+   center wire.
+
+9. **Both blocks commit atomically from center-served evidence, read nothing,
+   and poll nothing.** The now item and the verdict block join the selected
+   compact row, its `live` flag and the served selected detail under
+   `0265.10`'s stable selection identity and staged-candidate transaction: a
+   complete candidate is staged and committed only on success, the prior
+   accepted model is retained only behind the inherited explicit stale marker,
+   and a fresh complete snapshot is requested after rejection
+   (`modules/cli/src/app/dashboard/worker.rs:254-415`). A rapid A-then-B
+   selection whose A responses arrive last leaves B's blocks intact, and no
+   update ever combines one run's title with another's verdict. All reads fire
+   from an explicit selection only, off gpui's UI thread through the landed
+   desktop bridge; a center or detail failure renders through `0265.10`'s
+   inherited explicit stale marker — that landed contract's form, not a new one
+   invented here. If `0257.3`'s
+   landed contract does not carry or reconcile changed selected detail for a run
+   selected before its verdict is written, that gap is closed by the smallest
+   widening of that same served detail path — and then its existing coverage is
+   updated to assert the widened contract, since a reconciliation that the
+   proof does not observe is not proven. A same-path widening is a sanctioned
+   consequence of this goal, not a violation; it is named in the work summary.
+   Decided by rendered-preview evidence over out-of-order A/B selection, a
+   rejected candidate, a detail failure arriving against a newer selection, a
+   verdict written while its run is already selected, and the stale/disconnected
+   posture after center loss; by the declared `proof_center` check observing
+   that a verdict written against an already-selected run reconciles through the
+   served selected-detail path with no second request and no timer, and by the
+   declared `just test` check with the `0256.2`-`0256.5` proofs unmodified; and
+   by the closing diff read for any per-row, hover, unselected-delta or eager
+   read, any timer, interval or spawned tick, any blocking receive on the UI
+   thread, and any direct ledger, sidecar, trait, board, cwd or cache read in the
+   desktop process.
+   Excluded: a second selection model, a second detail request or protocol, a
+   second subscription, or a second placeholder/token module; a preview-private
+   state system; committing the verdict heading and body separately; presenting
+   last-accepted content as current after the stream becomes uncertain; any
+   change to subscription semantics, the delta reducer, run controls or any
+   center-protocol surface other than the minimal selected-detail widening this
+   goal requires; weakening or deleting an existing assertion rather than
+   extending it when that coverage is updated; importing
+   or copying CLI-private `run_view::projection`'s revision traversal
+   (`modules/cli/src/app/run_view/projection.rs:401-412`) — if historical
+   visibility is needed, extract it as shared semantics with the CLI retained as
+   a consumer; any rendered fact that exists only in GUI memory, so a finished
+   run reopened after the application closes reproduces the same title, marker,
+   heading round, status, count and blocker lines from durable evidence.
+
+10. **Every presentation value comes from the one token entry point, and this
+    cut stays inside its own scope.** All colours, sizes, spacings, families and
+    weights resolve through `0265.1`'s dark token and font entry point —
+    `row-open`, `border-soft`, [8,10], gap 5, block gap 8, bottom padding 20,
+    sans 12, mono 10.5 at 16px line height, mono 11 `text-muted`, sans 11.5
+    `text-secondary`, accent, warn, ok. No file under `.internal/docs/design/`
+    is modified, no light-column value is touched, no sibling-owned region is
+    edited, and the workspace does not learn about gpui: root Cargo resolution
+    and the root `Cargo.lock` stay gpui-free and the per-round gate's cost does
+    not move. A rule, token or example that looks wrong — including the export's
+    em dashes, its `blocked · 2 findings`, its gold status value and the
+    `…`/nowrap boundary of Correction 6 — is reported as an owner correction
+    against the source design, never edited here.
+    Decided by the four declared checks for the workspace side, and by the
+    closing diff read against `tokens.md:6-84` for call-site literals, a light
+    value, a design-artifact edit, a CLI-private or ratatui import, and any edit
+    to `0265.10`/`.12`/`.15`-owned regions or the main pane. No board check can
+    decide the scope half, because a check runs in a clean detached worktree of
+    the merged sha with no base to diff against.
+    Excluded: a second token module, palette wrapper or theme abstraction;
+    adding the desktop project to root workspace members; adding gpui cost to
+    `just test`, `just test-full` or the existing CI lanes; a grep forbidding
+    the string `gpui` in `Justfile` or `.github/workflows/`, since a *separate*
+    desktop lane there is sanctioned and such a check would red on the
+    sanctioned outcome.
+
+11. **The pass is reviewed once and bounded.** The completed diff is read
+    against `grammar.md:6-72,117-124`, `screens/sessions.md:36-49`,
+    `tokens.md:6-84` and `reference/sessions.html:698-776` before the task is
+    called done. Exactly one targeted repair cycle is allowed; if a second would
+    be needed, stop and report the exact failing command or the unresolved data
+    or render contract rather than iterating. The work summary names the
+    discovered desktop path and command verbatim, the shared corrections made
+    versus consumed and where their retained non-GUI consumers are, the proof
+    mechanics
+    used where they differ from the suggested route, every owner correction
+    raised against the design artifacts, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256.1`, `0265.1`, `0265.3`, `0257` and `0265.10` landed; do not carry a
+guess from this file into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level listing, then its manifest, README, justfile or CI lane, for the
+  documented non-interactive build-and-test command. Record it verbatim before
+  any edit. If no such lane exists, the prerequisite chain has not landed:
+  report that rather than substituting workspace commands.
+- Read `0265.10`'s landed preview frame: how the ordered body sequence takes
+  additional blocks, the named-block form, the key/value row's tone-carrying
+  value segments, and the selection transaction and stale marker to reuse.
+- Read `0257`'s landed selected-detail contract — what it serves for accepted
+  slot values and revisions, and whether a verdict written after selection is
+  reconciled. Extend that one contract where goal 9 requires it; a second
+  detail request or a timer is a defect.
+- Read the prerequisite `0265.6`'s landed shared one-based loop presentation —
+  the extraction of `format_step_title`'s loop-only, plus-one, nested-preserving
+  semantics (`modules/cli/src/app/story.rs:32-44`) — and consume it for the
+  title's round segment. Read also whether any prerequisite already corrected
+  `verdict_slot_rounds`; consume what exists, correct only what does not.
+- Read `0265.3`'s landed `placeholders` module for the entry convention, and
+  `0265.1`'s token and font entry point for every value.
+
+### Edit order
+
+1. The shared core corrections first, so the render side has honest evidence to
+   consume: `verdict_slot_rounds`'s numbered-ref recognition with its
+   `procedure::stats` coverage, then `value_gloss`'s minimal `what` extension
+   with `print_escalation_blockers` unchanged and direct tests beside the
+   reader.
+2. The shared verdict presentation: status word, finding count, tone from
+   `escalation`/`approved`, and the multi-slot aggregation of goal 6 — placed
+   in core beside the reader it consumes, with core tests, not in gpui.
+3. The bordered now-item primitive, composed from `0265.10`'s named block.
+4. The two blocks' projection off the selected model: presence conditions,
+   heading round and body from one snapshot, absences.
+5. Insertion into `0265.10`'s body sequence at the position rule 13 fixes.
+6. The desktop lane's proofs, then the focused core proofs, then the declared
+   checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `now_item(title_segments, state_word, narration)`
+primitive beside `0265.10`'s block form; a shared verdict presentation in
+`modules/core/src/procedure/` returning a status word, its semantic role, a
+finding count and the blocker lines, built on the extended `value_gloss`; and a
+selected-preview projection extension carrying the two blocks' optional content.
+`ValueGloss.blockers` becoming a small typed pair rather than `Vec<String>` is
+the likely shape of Correction 6's extension. Names, module paths and signatures
+follow whatever conventions `0256.1`, `0265.1`, `0265.3`, `0257` and `0265.10`
+established. The behaviours goals 1-9 fix are not suggestions; where they live
+and what they are called are.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- A live selection rendering the now item; a non-live one, an unreadable one and
+  a live-to-finished transition rendering none.
+- The now item's fill, border, paddings, gaps, families, sizes and tones, with
+  the title left and the accent state word right, and the narrated line
+  non-italic mono 10.5 `text-muted` at 16px line height.
+- A served title for a run carrying a loop round and one for a run in no loop,
+  with no dangling `·`; a live run with no served title rendering exactly
+  `no current frame` in `text-muted`.
+- The narration resolving through the one `placeholders` entry.
+- No verdict round rendering no block; one round and a later round rendering the
+  heading round from the projected field.
+- Approved with no blockers; revise with `escalation = none`; revise with
+  `needs-owner`; two reviewers agreeing at the displayed round; two reviewers
+  disagreeing at it; a partial round whose lagging slot holds an approved
+  earlier-round value rendering `pending` with no segment; a partial round with a
+  member revise rendering `revise · <N> findings` — each with the word, count
+  segment and tone goal 6 fixes, none mapped to `blocked`, and no non-member
+  value's blockers in the rendered set. The count's singular form at one finding
+  and its absence at zero are covered too.
+- Blocker lines with and without `what`, with duplicate ids deduplicated; a
+  malformed accepted value and one whose status is outside the closed
+  `approved|revise` pair each rendering exactly the `status` / `unreadable`
+  danger row with no findings segment and no blocker lines.
+- An implement-shaped run with `review-verdict-1`/`-2` revisions producing a
+  round count, and a run with no verdict revisions producing none.
+- Out-of-order A/B selection, a rejected candidate and a detail failure all
+  leaving the accepted blocks whole; a verdict written while its run is selected
+  becoming visible without a timer; center loss leaving the preview visibly
+  stale.
+- No read fired for an unselected row or a hover.
+- A finished run's two blocks identical after the application closes and
+  reopens.
+- The `0256.2`-`0256.5` proofs still passing unmodified, and `0257.3`'s
+  selected-detail proof passing — extended, not weakened, if goal 9's
+  same-path reconciliation widening was needed.
+
+Tests use scratch sessions, ledgers and slot values with arbitrary titles, slot
+refs, statuses and blocker ids and text. No test may depend on this
+repository's committed content, and no design example string is fixture
+authority.
+
+### Reuse points
+
+`0265.10`'s preview frame, named-block form, key/value row with tone-carrying
+value segments, stable selection identity and staged-candidate transaction;
+`0265.1`'s token and font entry point; `0265.3`'s single `placeholders` module;
+prerequisite `0265.6`'s shared one-based loop presentation for the title's round
+segment; `0257`'s selected-detail contract and off-thread bridge; `0256`'s
+accepted subscription model and test harness;
+`ctx_traits_core::procedure::story::value_gloss` as the one conventional reader
+(`story.rs:223-324`) with `run_format::print_escalation_blockers` retained as
+its non-GUI consumer (`run_format.rs:601-621`);
+`ctx_traits_core::procedure::stats::verdict_slot_rounds` as the one round helper
+(`stats.rs:109-122`) with `RunSummary::from_session` retained as its consumer
+(`run_summary.rs:243-245`); `CenterPublicRow.live` as the live authority
+(`center.rs:3778-3788`); `RunSummary.current_sequence_title`, `verdict_rounds`
+and `parse_error` (`run_summary.rs:73-118`); and the accepted-model transaction
+shape at `modules/cli/src/app/dashboard/worker.rs:254-415` as the semantics to
+match. If any prerequisite surface is absent at execution time, report an unmet
+prerequisite rather than replacing it locally.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml` to 1.97.1, and the desktop directory inherits that pin
+unless `0256.1` gave it its own toolchain file. Keep any repair scoped to the
+one red command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The `run` block and footer (`0265.10`), the `slots` block (`0265.12`), the
+  `landing` block (`0265.15`), the header (`0265.13`), the frame counter
+  (`0265.14`), the frame-row forms (`0265.5`), loop narration (`0265.6`), the
+  rail (`0265.8`), the title bar (`0265.9`), the bottom bar (`0265.3`) and the
+  whole main pane.
+- The later screens' previews (`0266.4`, `0266.5`, `0267.3`, `0267.4`), which
+  reuse these primitives rather than being built for here.
+- Overflow, clip and fade behaviour (`0265.7`); scrolling this column.
+- Any center protocol change beyond consuming what `0257` landed and closing
+  goal 9's selected-detail reconciliation gap through that same path — which
+  includes updating that path's existing coverage to assert the widened
+  contract; any change to subscription semantics, the delta reducer, run
+  controls (`0258`), summons (`0259`) or packaging (`0260`).
+- Any change to the review-verdict or blocker schema, to the implement family's
+  slots, or to `RunSummary`'s field shape.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`
+  or any pencil artifact — the em dash, `blocked`, the gold status value and the
+  `…`/nowrap boundary are reported, not fixed here.
+- A design-system phase: component registry, theme abstraction, generic screen
+  framework, or primitives extracted for `0266`-`0269` before one of them
+  consumes them.
+- A board check that executes the desktop lane. No such command exists in this
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **No inline placeholder literal**: the `in progress` narrated line comes from the one shared module.
-- **Semantic colour only.** Accent marks what is happening right now and warn marks what needs the owner; nothing here is coloured to draw the eye, and rule 1's caution that blue is a pointer rather than a theme applies to a column that already shows accent in the `run` block's task state.
-- **States are words, never pills or icons**; the bordered item's border is border-soft with no corner radius, since radius exists only on the window frame.
-- **Reads stay on the selection path and off gpui's UI thread**; nothing here refreshes on a timer and nothing fires per list row.
-- **Fail-loud.** A reconstruction that cannot supply the verdict evidence reports the failure; it does not fall back to a filesystem read or present stale findings as current.
-- **Narration voice is mono 10.5 `text-muted` inside the bordered item** per rule 13, distinct from the header's italic sans 12 narrated summary.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **`grammar.md` and `screens/sessions.md` are the specification; the export is
+  measurement.** Take the two blocks' geometry from
+  `reference/sessions.html:698-776`; take content from the rules with the
+  parent's and this plan's corrections applied. `review — refinement round 2`,
+  `blocked · 2 findings`, `b1 — InventoryCache still read in dashboard.rs` and
+  the narration sentence are illustrations. A leaf that renders one of them for
+  a run that does not carry it is worse than an omitted leaf, because it reads
+  as evidence.
+- **`blocked` is not a stored status and never reaches the screen** (content
+  Correction 1). The schema's stored pair is `approved|revise`
+  (`packages/toolkit/src/schema.ts:311-330`). Render the served word; raise the
+  design's `blocked` as an owner correction.
+- **Gold means the owner is needed, and the schema says when.** `escalation =
+  needs-owner` is the fact (`schema.ts:338-348`); an ordinary worker-fixable
+  revise verdict is not gold (content Correction 2, `grammar.md:6-22`).
+- **Accent means happening now, and only `CenterPublicRow.live` proves it.**
+  `RunSummary.session_state` is projected `live = false` and cannot answer
+  (`run_summary.rs:131-143`). A finished run must not keep a now item.
+- **The two round numbers are two facts.** `verdict_rounds` is completed verdict
+  rounds; the current round is structural loop evidence, one-based only through
+  the prerequisite `0265.6`'s shared presentation — the only such derivation
+  today is CLI-private (`modules/cli/src/app/story.rs:32-44`), which the desktop
+  may not import or copy. No desktop `+1`, no flat-row inference, no hardcoded
+  `2`, and never one count feeding both labels (content Correction 4).
+- **A partial round is not a settled round.** Membership in the displayed round
+  `R` is per-slot revision count equal to `R`; a lagging participating slot's
+  accepted value belongs to an earlier round and neither renders nor votes, and
+  its absence keeps `approved` unreachable (goal 6). Mixing two rounds' JSON
+  under one heading is the defect this rule exists for.
+- **An unrecognised status is a schema mismatch, not data.** The stored pair is
+  closed (`schema.ts:311-330`); anything outside it renders goal 5's fixed
+  `status` / `unreadable` danger row rather than a verbatim neutral word.
+- **`verdict_slot_rounds` is blind to `review-verdict-1`/`-2` at this HEAD**
+  (`stats.rs:57,109-122` against
+  `.ctx/traits/authored/implement/generated/basic/index.toml:91-99`). Fix the
+  shared helper and its coverage; a desktop-local count is the wrong repair
+  (content Correction 3).
+- **One conventional reader, extended once.** `value_gloss` is documented as the
+  single place these conventions are read (`story.rs:223-324`) and
+  `print_escalation_blockers` reuses it (`run_format.rs:601-621`). A second
+  reader in gpui is the duplication this cut invites.
+- **Absence is rendered, not defaulted, and every form is already fixed.** No
+  verdict round renders no block; no blockers renders the status word with no
+  segment; a blocker with no `what` renders its id alone; no served title on a
+  live run renders `no current frame` muted; an unreadable row renders no now
+  item; a malformed or out-of-pair accepted value renders the `status` /
+  `unreadable` danger row; a partial round with no member revise renders
+  `pending`. Those forms are goals 3, 5, 6 and 7's, not the implementation's to
+  choose — none of them is a guessed default, a blank field, a dangling `·`, or
+  the previously selected run's value left on screen.
+- **Truncation is not this cut's to invent.** The shared bound already emits `…`
+  (`story.rs:54,261-269`), which rule 3's closed set does not authorise, and the
+  export marks blocker lines nowrap at 380. Report both; do not add a local
+  formatter (content Correction 6).
+- **The glyph set is closed and this cut needs only `·`** (`grammar.md:31-37`).
+  Every em dash in the design text is an owner correction (content
+  Correction 5).
+- **No dots, no pills, no radius.** Rule 4 restricts dots to stateful lists and
+  this column is prose and key/value (`grammar.md:39-47`).
+- **Two blocks, one commit.** The defect this shape invites is run B's title
+  beside run A's verdict, or a heading round from one row version beside a body
+  from another. Stage the whole candidate, commit on success only, retain the
+  prior model behind the inherited explicit stale marker
+  (`worker.rs:254-415`).
+- **Compact rows stay compact.** No reconstruction or slot read fires per list
+  row, on hover, on a delta for an unselected run, or as a prefetch.
+- **Blocking work stays off gpui's UI thread**, through the landed desktop
+  bridge; do not inherit `center::get`'s model-owner blocking shape
+  (`center.rs:3649-3669`).
+- **Fail-loud, no direct-reader fallback, no poll.** A verdict written after
+  selection arrives through the center-served detail path, never a timer, a
+  desktop filesystem read or a second protocol.
+- New coverage uses scratch sessions, ledgers and slot values. No test may
+  depend on this repository's committed content, and no design example string
+  is fixture authority.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a
+  phantom "cannot find X".
+- **The declared checks are shared-side and workspace-side, not proof of this
+  task's desktop behaviour.** They decide the corrected round helper, the
+  extended reader and its retained consumer, the center wire staying green, and
+  the workspace staying gpui-free. The rendered blocks are decided by
+  rendered-preview evidence in the lane `0256.1` establishes. What that lane
+  covers is unknown at authoring time, so claim only what it actually verifies
+  and observe the remainder directly — an outcome asserted as "covered" without
+  having been observed is the defect this watch item exists for.
 
 ## Done when
 
-The Sessions preview column shows a bordered `in progress` item whose title and accent `live` marker come from the selected run's reconstruction and whose narrated line comes from the `placeholders` module, and a `verdict — round N` block whose heading round, warn-coloured `status` value and blocker lines all come from the run's typed verdict slots — in the tokens `screens/sessions.md` names, positioned per rule 13's block order. A run with no verdict round shows no verdict block. Reads fire only on selection, off the UI thread, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- The desktop lane's documented non-interactive build-and-test command, landed
+  through `0265.10` → `0265.3` → `0265.1` → `0256.1` and therefore present
+  before this task can dispatch (`graph.rs:115-177`), was located first,
+  recorded verbatim in the work summary, and exits 0 with both blocks in the
+  tree and the `0256.2`-`0256.5` proofs it already runs left unmodified. If that
+  command cannot be found, the prerequisite chain has not
+  landed: the task stops and reports that, and no workspace command is offered
+  in its place.
+- Rendered-preview evidence — that command for what it decides, and the run's
+  own observation of the running frame and composed tree for the rest, with
+  which decided what named in the work summary — shows goals 1-9's observable
+  outcomes: the now item present only for a live selection and absent for
+  non-live, unreadable and finished ones; its fill, border, paddings, gaps,
+  families, sizes and tones; a title for a run carrying a loop round and one for
+  a run in no loop, and a live run with no served title rendering exactly
+  `no current frame` in `text-muted`; the narration from the one
+  `placeholders` entry; no verdict block without a round and the heading round
+  from the projected field; approved with no findings segment, revise with
+  `escalation = none`, revise with `needs-owner`, two reviewers agreeing at the
+  displayed round, two disagreeing at it, a partial round whose lagging slot
+  holds an approved earlier-round value rendering `pending` with no segment, and
+  a partial round with a member revise rendering `revise` with the `<N> findings`
+  segment — each matching the word, count segment, tone and blocker set goal 6
+  fixes, checked against those forms rather than against forms the run selected;
+  blocker lines with and without `what`; a malformed accepted value, and one
+  whose status is outside the closed `approved|revise` pair, each rendering
+  exactly the `status` / `unreadable` danger row with no findings segment and no
+  blocker lines;
+  out-of-order A/B selection, a rejected candidate and a detail failure leaving
+  the accepted blocks whole; a verdict written while its run is selected
+  becoming visible with no timer; the stale posture after center loss; no read
+  fired for an unselected row; and a finished run identical after the
+  application closes and reopens.
+- All four declared checks exit 0: the corrected `verdict_slot_rounds` and its
+  numbered-ref coverage green under the focused `procedure::stats` filter, whose
+  reported test list the work summary names so a filter matching nothing cannot
+  be mistaken for coverage; the extended `value_gloss`, the shared verdict
+  presentation and `RunSummary::from_session` plus the retained CLI consumer
+  green under `just test`; and `proof_center` green over the center wire and the
+  served selected-detail path, observing that a verdict written against an
+  already-selected run reconciles through that one path with no second request
+  and no timer — its existing assertions extended rather than weakened if goal
+  9's same-path widening was needed; and root workspace resolution plus the root
+  lockfile still gpui-free.
+- The closing diff read shows: every colour, size, spacing, family and weight
+  resolving through `0265.1`'s entry point with no call-site literal; exactly
+  one entry added to the one `placeholders` module and no inline sentence; one
+  conventional reader, one round helper, one status/tone mapping, one selection
+  model and one detail request; no CLI-private or ratatui import and no copy of
+  `run_view::projection`'s traversal; no direct ledger, sidecar, trait, board,
+  cwd or cache read in the desktop process; no timer, interval, spawned tick or
+  UI-thread block on this path; no `blocked` literal, em dash, ellipsis policy
+  or design example string; no light-column value; no edit under
+  `.internal/docs/design/`; and no edit to `0265.10`/`.12`/`.15`-owned regions,
+  the main pane, run controls or center subscription semantics.
+- The work summary names the discovered desktop path and command verbatim, which
+  shared pieces were corrected here versus consumed from a prerequisite and
+  where their retained non-GUI consumers live, the focused `procedure::stats`
+  test names the filter actually ran, whether goal 9's same-path selected-detail
+  widening was needed and what its coverage now asserts, the proof mechanics
+  used where they differ from the suggested
+  route, the owner corrections raised against the design artifacts — at minimum
+  the em dashes, `blocked`, the unconditional gold status value, and the
+  `…`/nowrap blocker-line boundary — and any deviation from the approach.
+
+## Bounded refinement
+
+Run the discovered desktop command, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-core --lib procedure::stats`,
+then `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`,
+then `CARGO_TARGET_DIR=target just test`, then the root gpui-free check, then
+the closing diff read. Permit at most one targeted repair-and-rerun round:
+repair one named defect, then rerun the failed command and every command after
+it in that order. If a second round would be needed, stop and report the exact
+failing command with its evidence, or the unresolved data or render contract,
+rather than iterating. That is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0265"
-depends-on = ["0265.10"]
+depends-on = ["0265.10", "0265.6"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "verdict round helper and its coverage stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core --lib procedure::stats"
+timeout-ms = 900000
+
+[[checks]]
+name = "shared conventional reader, round projection and their retained consumers keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "center wire and selected-detail contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1800000
