@@ -1,56 +1,647 @@
 schema-version = "0.2"
 key = "0266.3"
 title = "Create a draft task through the center"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-`screens/tasks.md` tags the board bar's right-hand action `data:` and says what it does: `new task` creates a draft. It is the one write on an otherwise read-mostly screen, and the spec gives it no placeholder exit, so it has to work.
+content = '''
+This plan separates GOALS from APPROACH, and only the GOALS bind. Each goal names
+an observable outcome, what decides it, and what it excludes. The APPROACH
+section — discovery order, file and symbol guesses, signatures, edit order,
+commands and proof mechanics — is the architect's suggested route from the
+grounding at HEAD `d6cc41546`. Deviate from any of it wherever a goal requires
+it, and report the deviation in the work summary; a deviation is not a violation
+and needs no escalation.
 
-This cut builds the write itself: the center creates the draft, an existing non-GUI face reaches the same creation in the same release, and the board answer that already feeds the sections reflects the new task — which is what will later make the row appear without anything polling for it. No desktop process writes a task file, names one, or formats one.
+`screens/tasks.md` tags the board bar's right-hand action `data:` and says what
+it does: `new task` creates a draft. It is the one write on an otherwise
+read-mostly screen, and the spec gives it no placeholder exit, so it has to work.
 
-Binding the bar's action to this creation is `0266.8`, deliberately separate: the write is a center capability with per-face rendering, and the rendering half has its own failure behaviour to get right.
-"""
-scope = """
-## Decisions
+This cut builds the write itself and nothing that renders it: the center creates
+the draft over the same socket the board answer arrives on, an existing non-GUI
+face reaches the same creation in the same release, and the board answer that
+already feeds the sections changes so the new task appears without anything
+polling for it. No desktop process writes a task file, names one, or formats one;
+this cut has no reason to edit desktop code at all. Binding the bar's action and
+rendering its failure is `0266.8`, deliberately separate.
 
-- In scope: a center-served draft creation — a `draft`-status task, reachable over the same socket the board answer arrives on — plus an existing non-GUI face on the same path, with the resulting task appearing in the board answer that feeds the sections.
-- **No desktop-side write**, and no second write path: the creation goes through the same io-level task write the existing faces use, so two faces cannot disagree about what a created draft looks like.
-- **Occupied and refused cases are answered, not swallowed.** A creation the center refuses answers a refusal that a face can render; refusal is never queued.
-- Out of scope: the desktop binding and its failure rendering (`0266.8`), any other task mutation — no editing, claiming, closing, status changes or deletions — and the preview column.
+## Grounded at HEAD d6cc41546, and what is not there yet
 
-## Prerequisite
+The worktree was clean at grounding. **`0266.1` had not landed**: it is `ready`,
+and its own prerequisites `0256.1`, `0265.5`, `0265.9` and `0258` are `ready`
+too. There is no desktop project, no gpui package, no desktop manifest and no
+desktop command; `cargo metadata --format-version 1 --no-deps` resolves no gpui.
+There is no task or board arm anywhere in the center protocol: `Request` carries
+register/notification, subscribe, start/control and run queries only
+(`modules/io/src/center.rs:84-153`), `ResponseResult` has no task result
+(`center.rs:196-209`), and `CenterDelta` carries only run-row and activity
+variants (`center.rs:262-281`).
 
-`0266.1` — the center-served board answer the created draft arrives through.
-"""
-validation = """
+So every name this plan gives to a `0266.1` surface — the board answer, the
+board-presence outcomes, the board-directory helper, the board event, the
+canonical `draft` representation — is a guess to be replaced by reading what
+`0266.1` actually landed. **The first act of this cell is that read.** If the
+center-served board answer, the shared board-directory convention, the board
+freshness event or the canonical `draft` representation is absent at execution
+time, the prerequisite is unmet: stop and report that, rather than building any
+of them locally. Building `0266.1`'s capability here would be a second board
+implementation, which is the charter's named defect.
+
+What *is* readable today, and what the goals lean on, is the whole write side:
+`NewTask` and `WriteError` (`modules/core/src/task/provider.rs:85-103,198-222`),
+`TaskProviderMut::create` (`provider.rs:258-273`), `Board::create` and its key,
+filename and document rules (`modules/io/src/task_files.rs:345-389,735-785`),
+`write_document` (`task_files.rs:331-343`), `open_read_write` and `ReadWriteBoard`
+(`task_files.rs:787-855`), the nonblocking flock primitives
+(`modules/io/src/file_lock.rs:12-42`), `audit_journal::today_date_utc`
+(`audit_journal.rs:139-149`), the center's client helper pattern
+(`center.rs:780-902`), its connection-worker interception of `Start`/`Control`
+(`center.rs:3278-3348,3380-3429`) against the sole model/SQLite owner's
+`handle_request` path (`center.rs:2915-2970`), the repository index
+(`modules/io/src/state.rs:477-558`), and the TUI's two Split creation sites
+(`modules/cli/src/app/dashboard.rs:7236-7269,7334-7354`).
+
+## Eight corrections
+
+**Correction 1 — `NewTask.status = None` is not a draft.** An open childless
+document with no stored status derives `Ready`
+(`modules/core/src/task/graph.rs:156-172`), and a created draft that derives
+`Ready` is dispatchable, which is exactly what archived `0250` says a draft is
+not. Stored `TaskStatus` at HEAD is the closed set `ready|done|cancelled`
+(`modules/core/src/task/mod.rs:22-31`). The new-task request must therefore carry
+the canonical `draft` representation `0266.1` landed, explicitly. This cut
+consumes that representation; it does not add, widen or reinterpret it, and it
+does not invent a client-side reading of `draft`.
+
+**Correction 2 — `create` accepts an unnamed, undated document today, and the
+screen that creates it renders both fields.** `Board::create` performs no title
+validation at all — the existing `empty_title_refused` test
+(`task_files.rs:1418-1437`) covers `update`, not `create` — and `slugify` falls
+back to the literal `task` for an all-non-alphanumeric title
+(`task_files.rs:764-785`), so an empty title produces `NNNN-task.toml`. It also
+writes `raised: None` (`task_files.rs:358-377`) while `facts` on this very screen
+renders `raised`. Ruling, per parent Correction 7: an empty or whitespace-only
+title is refused **at the IO provider boundary** with `WriteError::InvalidField`
+so every face inherits one rule; a created task carries a raised date; and no
+placeholder title (`untitled`, `New task`) is ever persisted, because an invented
+title reads as evidence. The date comes from the shared UTC `YYYY-MM-DD`
+projection already used for the `closed` field (`audit_journal.rs:139-149`,
+consumed at `task_files.rs:518`) — not from a new calendar conversion and not
+from a new dependency.
+
+**Correction 3 — creation has no serialization, and the failure is silent
+corruption rather than an error.** `create` loads the board, computes the next
+key from the loaded snapshot, and writes with no lock
+(`task_files.rs:345-389`); `next_top_level_key` and `next_child_key` are pure
+functions of that snapshot (`task_files.rs:735-762`); and `write_document` is
+`create_dir_all` then `std::fs::write` (`task_files.rs:331-343`), which
+overwrites. Two concurrent creations therefore compute the same next key: with
+different titles they produce two documents claiming one key, which only a later
+`sync` reports as a duplicate; with the same title one silently overwrites the
+other. Key allocation and write are one operation or they are broken. Per the
+parent, the serialization point is **center-side**, one per board, and contention
+is answered immediately as a typed refusal — never queued, never silently
+retried, never blocked on.
+
+**Correction 4 — an expected refusal must survive as data, and today it cannot.**
+`WriteError` has no occupied or busy case and derives no serde traits
+(`provider.rs:198-222`); its `InvalidField.field` is `&'static str`, so
+deserializing `WriteError` itself is not a free win. `NewTask` derives neither
+`Serialize` nor `Deserialize` (`provider.rs:85-103`) although every field is
+serializable once `draft` lands. So both halves of the wire are capabilities to
+add. The binding shape: the request carries the typed creation payload, and an
+expected refusal — invalid title, occupied board, unknown parent, an absent or
+unreadable board — arrives as **typed data the face matches on**, following the
+established `StartWireResult`/`ControlWireResult` split where the generic
+`ResponseResult::Error` means transport or protocol failure and the
+action-specific arm means an answered outcome (`center.rs:196-209,780-902`).
+Flattening a refusal into `ResponseResult::Error { message }` is the defect: it
+makes "the board is busy, try again" indistinguishable from "the center broke".
+
+**Correction 5 — the write must not run on the model owner's path.** The sole
+model/SQLite owner drains `ModelCommand::Request` and calls `handle_request`
+(`center.rs:2915-2970`) under a two-second reply timeout
+(`center.rs:3330-3336`); a board load, a lock acquisition and two filesystem
+writes there stall every other client and can exceed that timeout under exactly
+the contention this task introduces. `Start` and `Control` already demonstrate
+the alternative: the connection worker intercepts the request, asks the model
+owner only for short identity resolution via `ModelCommand::ResolveRow`, performs
+the blocking work itself, and writes the response
+(`center.rs:3278-3348,3380-3429`). If `0266.1` landed a more specific board-side
+equivalent, use that one.
+
+**Correction 6 — the board is chosen by repository identity, never by the
+center's cwd.** `.internal/tasks` is a CLI-private constant
+(`modules/cli/src/app/tasks.rs:20-26`) and the center serves many repositories;
+it already resolves repository identity through the machine checkout index
+(`state::RepoIndexEntry`, `read_repo_index`, `state.rs:477-558`). A center that
+resolved the board from `current_dir` would create a task on the wrong board —
+the same class of defect `0265.15` records for the config layer stack. This cut
+consumes `0266.1`'s shared board-directory convention rather than copying the
+CLI constant or re-deriving a path.
+
+**Correction 7 — the answer changing is the signal, and there are two ways to get
+that wrong.** The target's contract is that the changed board answer announces
+the result. The first wrong route is a client timer; the TUI already carries the
+one not to reproduce (a two-second fingerprint poll,
+`dashboard.rs:6277-6361`). The second is an optimistic insertion — a face
+appending the row it believes it just created, which is the same
+capability-in-one-face defect in the write direction and diverges the instant a
+refusal is misread. A successful create invokes the single board
+refresh/broadcast route `0266.1` landed, and every face learns about the new task
+the same way, exactly once. The center's existing periodic scan may remain as a
+recovery detector, but it is not the mechanism this cut relies on: a creation
+whose result only appears because a two-second scan happened to notice has not
+satisfied the goal.
+
+**Correction 8 — both TUI Split sites move, and repointing them is not licence to
+change what they do.** The TUI has exactly two production `NewTask` construction
+sites: `apply_split_step`, which creates a confirmed queue child carrying title,
+content, parent, validation and steps (`dashboard.rs:7236-7269`), and
+`TaskAction::Split`, which creates a manually titled child as `NewTask { title,
+parent, ..Default::default() }` (`dashboard.rs:7334-7354`). Both call
+`FilesTaskBoard::open_read_write(...).create(...)` directly. Moving one leaves a
+second product write path around the center, so both move onto one submission
+path. Two consequences: the manual path's local empty-title trim stays a courtesy
+and is not the rule — Correction 2's provider refusal is — and **Split's existing
+status semantics are preserved**. Both sites pass `status: None` today and
+therefore create `Ready`-derived children; the center API accepts the typed
+payload and it is the *new-task* caller that asks for `Draft`. Hard-coding every
+center creation to draft would silently change what Split means and would
+contradict faithful reuse of the existing provider verb. `ctx tasks list`/`show`
+are not the consumer to move: they are one-shot reads that must keep working with
+no center running (parent Correction 10), and the parent explicitly rejects
+inventing a `ctx tasks create` command, which does not exist today
+(`modules/cli/src/app/surface/cli.rs:116-272`).
+'''
+scope = '''
+## GOALS — binding
+
+1. **The center creates a task on request, inside the one task protocol family,
+   off the model owner.** The creation request and its result join whatever task
+   or board request and result family `0266.1` landed, over the same socket the
+   board answer arrives on; a second, parallel, creation-only or GUI-only
+   protocol is a defect. The board is selected from the request's repository
+   identity and `0266.1`'s shared board-directory convention, never from the
+   center process's working directory and never from a copied CLI constant
+   (content Correction 6). The board load, the serialization and the write run
+   outside the sole model/SQLite owner's request handling (content Correction 5).
+   Decided by the declared `proof_center` check over the real socket: a task
+   created into a scratch repository's board while the center process's cwd is
+   elsewhere, the created document present on disk with the requested title and
+   parentage, and the center answering an unrelated request while a board write
+   is in progress, so the isolation is observed rather than asserted. Plus the
+   closing diff read for any board work inside `handle_request`.
+   Excluded: a second task protocol family; a creation reachable only by the
+   desktop; deriving the board directory from `std::env::current_dir` or
+   `Utf8Path::new(".")`; a `git` invocation on the creation path; changing run
+   subscription semantics, the delta reducer or run controls; any center-side
+   read the board answer does not already own.
+
+2. **`TaskProviderMut::create` stays the only writer, and it is hardened at that
+   boundary.** The center and every face reach creation through the existing
+   provider verb (`provider.rs:258-273`, `task_files.rs:345-389`); key
+   assignment, filename derivation, `TaskDocument` construction and the write
+   itself exist in exactly one place and are not reimplemented, wrapped-and-
+   duplicated or partially copied into the center or a face. At that boundary,
+   an empty or whitespace-only title is refused with `WriteError::InvalidField`
+   before anything is written, a created task carries a raised date from the
+   shared UTC date projection, and no placeholder title is ever persisted
+   (content Correction 2).
+   Decided by the declared `ctx-traits-io --lib task_files` check over scratch
+   board directories: an empty title and a whitespace-only title each refused as
+   an invalid field with no file left behind; a valid create storing the
+   owner-supplied title and a `YYYY-MM-DD` raised date; and the existing
+   top-level and child key assignment, parentage, validation and steps round
+   trips still intact.
+   Excluded: a second creation implementation anywhere; a default, generated or
+   placeholder title; a new date or calendar dependency, or a second UTC-date
+   conversion beside `audit_journal::today_date_utc`; changing `slugify`'s
+   fallback, the key allocation rules, or the archived-directory routing; a
+   validation rule beyond the title that no goal here names; any change to
+   `update`, whose refusals are not this cut's.
+
+3. **One center-side serialization point per board, answering rather than
+   queueing.** Concurrent creations for one board pass through a single
+   center-side serialization point, so two concurrent requests cannot mint the
+   same key or overwrite one another's document (content Correction 3). A
+   contender is answered immediately with a typed occupied refusal; it is never
+   queued, never blocked on, and never silently retried on its behalf. A
+   creation for a different board is not made to wait and is not spuriously
+   reported occupied.
+   Decided by the declared `proof_center` check: with contention forced
+   deterministically through a bounded seam rather than by racing threads and
+   hoping, one creation succeeds and the contender is answered with the typed
+   occupied refusal, immediately rather than by waiting out a timeout;
+   separately, a creation issued after the holder releases succeeds without
+   duplicating a key or losing either document; and a concurrent creation on a
+   second board succeeds meanwhile.
+   Excluded: a blocking or bounded-wait acquisition on the request path
+   (`file_lock::lock_exclusive_blocking` is the shape this goal forbids); an
+   internal retry loop, backoff or queue; a global lock that serializes
+   unrelated boards; a sleep or timing window standing in for the proof; making
+   the serialization point a client responsibility.
+
+4. **Refusals are typed data a face can render.** Every expected refusal —
+   invalid title, occupied board, an unknown or ambiguous parent, and whatever
+   absent/unreadable-board outcomes `0266.1` established — reaches the caller as
+   a typed, matchable value in the action-specific result arm, following the
+   established `Start`/`Control` client-helper split where a generic
+   `ResponseResult::Error` means transport or protocol failure only (content
+   Correction 4). The public client helper distinguishes the two.
+   Decided by the declared `proof_center` check: each refusal class asserted as
+   its own typed value over the real socket, distinguishable from one another
+   and from a transport failure, with no task file written for any of them.
+   Excluded: mapping an expected refusal onto `ResponseResult::Error { message
+   }` or onto a stringly-typed status; a face parsing a refusal out of a message
+   string; widening `WriteError` with cases no caller here matches; making
+   refusal rendering this cut's job — the desktop's is `0266.8`'s and the TUI's
+   is goal 6's existing message.
+
+5. **A requested draft is created as a draft, and the changed board answer
+   announces it.** The new-task path explicitly carries `0266.1`'s canonical
+   draft representation, so the created top-level task is `draft` and not a
+   `Ready`-deriving document with an unset status (content Correction 1). After
+   a successful create the center invokes `0266.1`'s single board
+   refresh/broadcast route, so a subscribed face receives the complete changed
+   board answer without issuing a second request and without any timer; the new
+   task appears exactly once, carrying draft status. A refused creation produces
+   no board change.
+   Decided by the declared `proof_center` check over the real socket: a
+   subscriber that has accepted the board answer receiving the changed answer
+   after a creation without asking again, the new task present exactly once with
+   the draft state the answer carries, and a refused creation emitting no board
+   change; plus the declared `ctx-traits-io --lib task_files` check for a
+   requested draft round-tripping through the provider and summarizing as the
+   canonical representation; plus the closing diff read for any client timer,
+   interval, tick or optimistic insertion added on the creation path.
+   Excluded: hard-coding every center creation to `draft`, which would change
+   Split's meaning (content Correction 8); a client-side timer, poll or
+   re-request to observe the result; an optimistic row inserted before or
+   instead of the answer changing; a second board event stream or a
+   creation-specific notification beside `0266.1`'s; relying on the center's
+   periodic scan as the mechanism that carries the result; re-deriving `draft`
+   on any client from a field that does not say so.
+
+6. **Both TUI Split creations go through the center, observably unchanged.**
+   `apply_split_step` and `TaskAction::Split` (`dashboard.rs:7236-7269,
+   7334-7354`) share one submission path to the center's creation, and no direct
+   `open_read_write(...).create(...)` call remains in the TUI. Each site
+   preserves its payload — the queue child's title, content, parent, validation
+   and steps; the manual child's title and parent — its confirmation and skip
+   behaviour, its split-queue progression across accepted and skipped children,
+   its success message naming the created key and parent, and its refusal
+   message. Split's existing status semantics are preserved (content Correction
+   8). Creation success is observed through the center's board answer, not
+   through a new poll and not through an inserted row.
+   Decided by the declared `ctx-traits-cli --lib dashboard` check over scratch
+   fixtures: both sites creating through the center helper, an accepted and a
+   skipped queue child advancing the queue identically to today, a refusal
+   rendering its message without advancing state incorrectly, and no remaining
+   direct provider create call on either path.
+   Excluded: changing what Split creates, when it prompts, what it names, or its
+   queue ordering; adding a `ctx tasks create` command; routing `ctx tasks
+   list`/`show` through the socket, which must keep working with no center
+   running; removing the TUI's existing board reader or its poll, which is
+   `0266.7`'s to remove; building a generic TUI command framework — any widening
+   of the action worker's result is bounded to the demonstrated create result;
+   asserting any TUI test against this repository's own board.
+
+7. **Nothing else is opened, and the workspace does not move.** No task mutation
+   beyond creation — no editing, claiming, closing, status change or deletion —
+   is added; no desktop file is touched; no CLI create command is added; no
+   preview, row-state or header work is done. `ctx-traits-io` still depends only
+   on `ctx-traits-core` and its existing third-party set, with no filesystem
+   watcher and no date/time dependency. Root Cargo resolution and the root
+   `Cargo.lock` stay gpui-free and the per-round workspace gate stays green.
+   Decided by the declared root metadata and lockfile check, the declared `just
+   test` and `ctx-traits-cli --lib tasks` checks, and the closing diff read for
+   the rest. No board check can decide the diff-read half: a check runs in a
+   clean detached worktree of the merged sha with no base to diff against.
+   Excluded: a grep forbidding the string `gpui` in `Justfile` or
+   `.github/workflows/`, since a separate desktop lane there is sanctioned and
+   such a check would red on the sanctioned outcome; adding the desktop project
+   to root workspace members; replacing the files backend or migrating the board
+   store, which `.internal/docs/the-board-one-door.md` lists as future work;
+   anything belonging to `0266.2`, `.4`, `.5`, `.6`, `.7` or `.8`.
+
+8. **The pass is reviewed once and bounded.** The completed diff is read against
+   these goals and the parent's corrections before the task is called done.
+   Exactly one targeted repair-and-rerun round is allowed; if a second would be
+   needed, stop and report the exact failing command with its evidence, or the
+   unresolved refusal, concurrency, board-update or TUI-migration contract,
+   rather than iterating. The work summary names what `0266.1` actually landed
+   for the board answer, the board-directory helper, the draft representation
+   and the board event; where the serialization point and the wire refusal type
+   landed; how contention was forced deterministically; and every deviation from
+   the approach below.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+- Read `0266.1`'s landed surfaces first: the center's task/board request and
+  result family, the board answer's shape and its refresh/broadcast route, the
+  board-presence outcomes, the shared board-directory helper, and the canonical
+  `draft` representation with its `TaskStatus`/`DerivedStatus` spelling. Every
+  name below is a guess against them. If any is absent, report an unmet
+  prerequisite and stop rather than building it here.
+- Read the TUI as it then stands. `0266.7` is a sibling, not a prerequisite, so
+  `Screen::Tasks` may still hold its direct reader and `resync_tasks_board_after_write`
+  (`dashboard.rs:6254-6275`), or may already be on the served answer. Fit the
+  creation to what is there; do not remove `0266.7`'s reader and do not assume it
+  is gone.
+- Read whether the connection worker gained a board-specific "short resolve, then
+  blocking work" helper in `0266.1`. If so, extend it; if not, `Start`/`Control`
+  (`center.rs:3278-3348,3380-3429`) are the shape to follow.
+
+### Edit order
+
+1. `modules/core/src/task/provider.rs`: the serializable wire shape for the
+   creation payload — the cheapest form is `Serialize`/`Deserialize` on `NewTask`
+   itself, which every field supports once `draft` lands — and a serializable
+   creation-refusal type. A dedicated refusal enum is likely leaner than
+   widening `WriteError` with an occupied case and serde derives, given
+   `InvalidField.field` is `&'static str`; either is acceptable if goal 4 holds.
+2. `modules/io/src/task_files.rs`: the title refusal and the raised-date stamp
+   inside `Board::create`, so every caller inherits both (goal 2). Reuse
+   `crate::audit_journal::today_date_utc()` exactly as the close path does
+   (`task_files.rs:518`).
+3. `modules/io/src/center.rs`: the create request and its typed result inside
+   `0266.1`'s family; the connection-worker path that resolves the repository
+   row, acquires the per-board serialization point, calls
+   `FilesTaskBoard::open_read_write(dir).create(payload)`, and on success invokes
+   the landed board refresh/broadcast; and the public client helper mapping
+   protocol failure apart from typed refusal, following `start_trait`/`control`
+   (`center.rs:838-902`).
+4. `modules/cli/src/app/dashboard.rs`: one submission helper both Split sites
+   call, replacing both direct `create` calls, preserving payloads, messages and
+   queue progression (goal 6). If the landed TUI architecture needs the call off
+   the event loop, the existing action worker
+   (`dashboard/worker.rs:119-159`, drained at `dashboard.rs:2813-2818,5908-5927`)
+   is the reuse point, widened only as far as the create result needs.
+5. The focused proofs, then the declared checks in the order under Bounded
+   refinement.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like `Request::CreateTask { id, repo_key, new_task }` and a
+`ResponseResult::CreateTask(CreateWireResult)` inside `0266.1`'s family, with
+`CreateWireResult::{Created(TaskSummary), Occupied, InvalidField { field, reason
+}, ParentMissing, ...}` covering the board-presence outcomes `0266.1` defined; a
+public `center::create_task(new_task, repo_key) -> crate::Result<CreateResult>`
+beside `start_trait`/`control`; the per-board serialization point as a lock file
+under the center's own state directory or the board directory, opened with
+`file_lock::open_lock_file_no_follow` and taken with `try_lock_exclusive`
+(`file_lock.rs:12-42`), whose `Ok(false)` is exactly the occupied answer this
+task wants — but check first whether `0266.1` put a board-scoped guard somewhere
+better; and a `dashboard::submit_task_creation(...)` the two Split sites share.
+Names, module paths and signatures follow whatever conventions the prerequisite
+established. The behaviours goals 1-7 fix are not suggestions; where they live
+and what they are called are.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- Provider, over scratch board directories: empty and whitespace-only titles
+  refused as invalid fields with no file written; a valid create storing the
+  title and a `YYYY-MM-DD` raised date; a requested draft round-tripping and
+  summarizing as the canonical draft state; top-level and child key assignment,
+  parentage, validation and steps unchanged.
+- Center, over the real socket: a creation into a scratch repository selected by
+  repository identity while the center's cwd is elsewhere; the created document
+  on disk carrying the provider's key, filename and formatting; each refusal
+  class as its own typed value; forced contention yielding no duplicate key and
+  an immediate occupied answer; a second board unaffected; an unrelated request
+  served while a board write is in progress.
+- Subscription, in the same harness: a subscriber receiving the changed board
+  answer after a creation without a second request, the new task present exactly
+  once with draft status, and a refused creation emitting no board change.
+- TUI, over scratch fixtures: both Split sites creating through the center
+  helper, accepted and skipped queue progression preserved, and success and
+  refusal messages rendered.
+
+A deterministic contention proof needs a bounded seam around the serialization
+point — a test-only hold or ordering hook — rather than two threads and a
+prayer. Tests use scratch boards, scratch repositories and scratch center tuples
+with arbitrary keys; no test reads or writes this repository's committed
+`.internal/tasks`.
+
+### Reuse points
+
+`TaskProviderMut::create` and `Board::create` with `next_top_level_key`,
+`next_child_key`, `slugify` and `write_document`
+(`task_files.rs:345-389,331-343,735-785`) as the one write implementation;
+`FilesTaskBoard::open_read_write` and `ReadWriteBoard` (`task_files.rs:787-855`)
+as the handle; `WriteError::InvalidField` (`provider.rs:198-222`) as the
+empty-title refusal; `audit_journal::today_date_utc` (`audit_journal.rs:139-149`)
+as the date; `file_lock::open_lock_file_no_follow` and `try_lock_exclusive`
+(`file_lock.rs:12-42`) as the nonblocking, contention-visible primitives, never
+`lock_exclusive_blocking`; the center's connection-worker interception shape and
+`ModelCommand::ResolveRow` (`center.rs:3278-3348,3380-3429`); the public client
+helper pattern of `start_trait`/`control` (`center.rs:838-902`); `read_repo_index`
+and `RepoIndexEntry` (`state.rs:477-558`) for repository identity;
+`0266.1`'s board answer, board-directory helper, draft representation and board
+refresh/broadcast route; `proof_center`'s scratch center, socket and
+snapshot/delta harness, including its two-subscriber patterns
+(`modules/cli/tests/proof_center.rs`), extended rather than duplicated; the
+dashboard's action worker and `ActionResult` drain
+(`dashboard/worker.rs:119-159`; `dashboard.rs:2813-2818,5908-5927`) if the
+creation must leave the event loop.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml`. Keep any repair scoped to the one red command and preserve
+every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The desktop's `new task` binding, its title-entry affordance and its failure
+  rendering (`0266.8`); the board answer, sections and rows themselves
+  (`0266.1`); the header and provenance bar (`0266.2`); the preview column
+  (`0266.4`, `0266.5`); the row's state stack (`0266.6`); the TUI's board
+  listing migration (`0266.7`).
+- Any task mutation other than creation, and any `ctx tasks create` command.
+- Replacing the files backend or migrating the board store, which
+  `.internal/docs/the-board-one-door.md` names as future work.
+- Any edit under `.internal/docs/design/**`, any pencil artifact, any
+  light-column token value, and any desktop file.
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **This is the only write in the whole `0266` slice.** Do not open task mutation as a theme; anything beyond creating a draft is out of scope.
-- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A creation path only the desktop can call is the capability-in-one-face defect, in the write direction.
-- **The board answer's own update is the signal** that a draft exists; the creation must not require a face to re-ask on a timer to see its result.
-- **The center's write must not stall its request loop**, and an occupied board answers a refusal rather than blocking.
-- **No test may depend on committed repo content**, and no test may write into this repository's own `.internal/tasks` — scratch fixtures only.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **This is the only write in the whole `0266` slice.** Do not open task
+  mutation as a theme; anything beyond creating a task is out of scope, and a
+  refactor of `update` is not a rider on this cut.
+- **`NewTask.status = None` is not a draft** (`graph.rs:156-172`). A created
+  top-level draft that derives `Ready` is dispatchable, which is what `0250`
+  says a draft is not. Carry `0266.1`'s canonical representation explicitly, and
+  do not add, widen or reinterpret it here.
+- **Do not hard-code the center's creation to `draft`.** Both TUI Split sites
+  pass `status: None` today (`dashboard.rs:7236-7269,7334-7354`); making every
+  center creation a draft silently changes what Split means. The caller asks.
+- **An empty title is refused at the provider, not at a face.** `create`
+  validates nothing today and `slugify` writes `NNNN-task.toml` for an empty
+  title (`task_files.rs:764-785`); the manual Split path's local trim
+  (`dashboard.rs:7334-7345`) is a courtesy, not the rule. No placeholder title is
+  ever persisted — an invented title reads as evidence.
+- **`raised` is written, from the shared projection.** `create` writes `raised:
+  None` today (`task_files.rs:358-377`) and the screen's `facts` block renders
+  the field. Reuse `audit_journal::today_date_utc` (`audit_journal.rs:139-149`)
+  as the close path does; do not add a date dependency or a second conversion.
+- **Two concurrent creations compute the same key today.** Key allocation and
+  write are one operation or they are broken (`task_files.rs:345-389`,
+  `331-343`). Serialize center-side, one point per board, and **answer** a
+  contender — no blocking acquisition, no retry loop, no queue.
+- **A refusal that becomes `ResponseResult::Error { message }` is swallowed.**
+  Occupied, invalid-title and parent refusals are typed data the face matches
+  on; the generic error arm means transport or protocol failure only
+  (`center.rs:196-209,780-902`).
+- **No board work on the model owner's path.** `handle_request` runs in the sole
+  model/SQLite owner under a two-second reply timeout
+  (`center.rs:2915-2970,3330-3336`); `Start`/`Control` show the connection-worker
+  shape (`center.rs:3278-3429`).
+- **The board comes from the request's repository identity**, never from the
+  center's cwd and never from a copy of the CLI-private `.internal/tasks`
+  constant (`tasks.rs:20-26`).
+- **The board answer's own update is the signal.** No client timer, no
+  re-request, no optimistic row. The TUI's existing two-second board tick
+  (`dashboard.rs:6277-6361`) is the thing not to reproduce, and the center's
+  periodic scan is a recovery detector, not this cut's mechanism.
+- **Both Split sites move or neither does.** Leaving one direct
+  `open_read_write(...).create(...)` behind leaves a second product write path
+  around the center. `ctx tasks list`/`show` stay on their direct provider path
+  so a plain board read still works with no center running.
+- **`0266.7` is a sibling, not a prerequisite.** Inspect the landed TUI rather
+  than assuming either the old `resync_tasks_board_after_write` or a served-board
+  reducer, and do not perform `0266.7`'s removal here.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing
+  third-party set.** No filesystem watcher, no date/time crate, no CLI-level
+  type.
+- **No test may depend on committed repo content**, and no test may read or
+  write this repository's own `.internal/tasks` — scratch boards, scratch
+  repositories and scratch center tuples with arbitrary keys only. No test
+  manufactures contention by scheduling.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full` or the existing CI lanes.
+  Do not declare a check forbidding the string `gpui` in `Justfile` or
+  `.github/workflows/`: a separate desktop lane there is sanctioned, and a check
+  that reds on the sanctioned outcome is a wrong check. Isolate builds with
+  `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X";
+  Rust is pinned to 1.97.1 by `rust-toolchain.toml`.
+- **If `0266.1` has not landed its board answer, board-directory helper, draft
+  representation or board event, the prerequisite is unmet.** Stop and report
+  that. Building any of them here creates the second board implementation the
+  charter forbids.
 
 ## Done when
 
-The center creates a `draft`-status task on request, an existing non-GUI face reaches that same creation, and the new draft appears in the board answer that feeds the sections without any face re-asking on a timer. A refused creation answers a refusal a face can render, and no new task-writing path is introduced beside the existing io-level one. `just test` passes, the CLI task read and write tests pass, and root workspace resolution and the root lockfile remain gpui-free.
-"""
+- `0266.1`'s landed board answer, board-directory convention, draft
+  representation and board refresh/broadcast route were located and recorded in
+  the work summary before any edit, and the creation joined that same protocol
+  family rather than a new one.
+- The center creates a task on request over the same socket the board answer
+  arrives on, with the board chosen by repository identity and the load,
+  serialization and write running off the sole model/SQLite owner's request
+  path; a requested top-level creation is `draft`; the created document is the
+  provider's, with the provider's key, filename and formatting; and the center
+  keeps serving other requests while a board write is in progress. Decided by
+  the declared `proof_center` check and the closing diff read.
+- `TaskProviderMut::create` remains the only writer and now refuses an empty or
+  whitespace-only title as `WriteError::InvalidField` with nothing written, and
+  stamps a UTC `YYYY-MM-DD` raised date, with no placeholder title anywhere and
+  the existing key, parentage, validation and steps behaviour intact. Decided by
+  the declared `ctx-traits-io --lib task_files` check.
+- Concurrent creations for one board pass one center-side serialization point:
+  under forced contention one creation succeeds and the contender is answered
+  immediately with a typed occupied refusal rather than queued or blocked, a
+  creation issued after the holder releases neither duplicates a key nor loses a
+  document, and a second board is neither delayed nor spuriously occupied —
+  proven deterministically through a bounded seam, not by racing. Decided by the
+  declared `proof_center` check.
+- Every expected refusal — invalid title, occupied board, unknown parent, and
+  `0266.1`'s board-presence outcomes — arrives as typed data distinguishable
+  from a transport failure, with no task file written for any of them. Decided
+  by the declared `proof_center` check.
+- A subscriber that has accepted the board answer receives the changed answer
+  after a successful creation without issuing a second request and without any
+  timer, with the new task present exactly once carrying draft status; a refused
+  creation emits no board change. Decided by the declared `proof_center` check
+  and the closing diff read for any added timer, tick or optimistic insertion.
+- Both TUI Split creations submit through the center's creation with no direct
+  provider `create` call left in the TUI, preserving each site's payload,
+  confirmation and skip behaviour, split-queue progression, success message and
+  refusal message, and preserving Split's existing status semantics. Decided by
+  the declared `ctx-traits-cli --lib dashboard` check.
+- No other task mutation, no `ctx tasks create` command, no desktop edit, no new
+  `ctx-traits-io` dependency and no board-store migration is present; the CLI
+  task read and write paths stay green, the per-round workspace gate passes, and
+  root Cargo resolution and the root lockfile remain gpui-free. Decided by the
+  declared `ctx-traits-cli --lib tasks`, `just test` and root-resolution checks
+  plus the closing diff read.
+- All six declared checks exit 0, and the work summary names what `0266.1`
+  landed, where the serialization point and the wire refusal type live, how
+  contention was forced deterministically, the focused test filters actually
+  run, and every deviation from the approach.
+
+## Bounded refinement
+
+Run `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib task_files`, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard`, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks`, then
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`, then
+`CARGO_TARGET_DIR=target just test`, then the root gpui-free check, then the
+closing diff read against the goals and the parent's corrections. The order is
+cheap evidence first, so a defect surfaces next to the boundary that owns it
+rather than inside a long gate; it is guidance and may be reordered.
+
+Permit at most one targeted repair-and-rerun round: repair one named defect,
+then rerun the failed command and every command after it in that order. If a
+second round would be needed, stop and report the exact failing command with its
+evidence, or the unresolved refusal, concurrency, board-update or TUI-migration
+contract, rather than iterating. That is the stop condition, not a judgement
+call.
+'''
 [relations]
 parent = "0266"
 depends-on = ["0266.1"]
 
 [[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1200000
+name = "provider create hardening and the draft round trip stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib task_files"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
+
+[[checks]]
+name = "the center-served creation, its typed refusals, its serialization and the changed board answer stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "both TUI Split creations keep the dashboard green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
 
 [[checks]]
 name = "CLI task read and write paths stay green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
-timeout-ms = 900000
 expect = "test result: ok\\. [1-9]"
+timeout-ms = 900000
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "per-round workspace gate remains green"
+command = "CARGO_TARGET_DIR=target just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 600000
