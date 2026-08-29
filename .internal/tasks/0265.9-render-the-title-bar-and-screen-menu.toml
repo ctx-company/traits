@@ -1,43 +1,559 @@
 schema-version = "0.2"
 key = "0265.9"
 title = "Render the title bar and screen menu"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
-content = """
-The window's own chrome is the last piece of the Sessions frame. The title bar is h 36, padding [0,20], carrying 12px traffic lights, a 34x18 logo, and the screen menu at gap 18 in sans 12.5 with the current entry bright. The window frame itself is the one place a corner radius is legal — radius 10 with clip, 1440x900 for the core screens — and inside the canvas there is none.
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-The menu lists the screens that exist. Today that is Sessions, bright because it is current. The four later screens each add their own entry and the switching to reach it as part of their own charter, so nothing here resolves to an empty pane: an empty pane per menu entry would be a promise the board has not yet paid for, and `screens/merges.md` even fixes where the Merges entry goes when it arrives (between Tasks and Config). This cut renders the frame, the traffic lights, the logo and the menu row, and establishes the menu as the surface those entries slot into.
-"""
-scope = """
-## Decisions
+The window's own chrome is the last piece of the Sessions frame. `tokens.md`
+fixes it: the core screens are 1440×900 with `cornerRadius 10` and clip, and
+the title bar is h 36 at padding [0,20], carrying 12px traffic lights, a 34×18
+logo box, and the screen menu at gap 18 in sans 12.5 (`tokens.md:71-76`). The
+export measures the same frame as a clipped column — title bar first, then one
+flex-filling `Columns` row holding rail · main · preview — with the title bar
+spanning 100% width, centring its children, and pushing the menu right through
+a flex spacer; the bar takes no fill of its own and sits on `canvas #0c0d10`
+(`reference/sessions.html:24-93`). The window frame is the one place a corner
+radius is legal; inside the canvas there is none (`grammar.md:31-37`).
 
-- In scope: the window frame at radius 10 with clip, the 36-high title bar with its traffic lights and logo, and the screen menu rendering the entries that exist with the current one bright.
-- **No empty panes.** A menu entry appears when its screen does. `0266`-`0269` each add their entry and the switch to it in the cut that renders the screen, in the order `screens/merges.md` fixes.
-- Out of scope: the rail (`0265.8`), every screen body, keyboard-shortcut design beyond what the menu needs, and the `ctx gui` launcher and app bundle (`0260`).
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+The menu lists the screens that exist. Today that is exactly one entry —
+`Sessions`, `text-bright` because it is current (`screens/sessions.md:7-10`).
+The export already renders Traits, Tasks and Config beside it
+(`reference/sessions.html:57-83`); parent Correction 1 resolves that as export
+drift, and each later screen adds its own entry together with the switch that
+reaches it (`0266.1`, `0267.1`, `0268.1`, `0269.1` each depend on this task).
+`screens/merges.md:12-15` fixes where the Merges entry lands when it arrives,
+between Tasks and Config, so the eventual order is Sessions · Traits · Tasks ·
+Merges · Config. This cut renders the frame, the traffic controls and the
+one-entry menu row — without a mark, per Correction 1 — and establishes the
+menu as the surface those entries slot into. An entry without a screen behind it is a promise the board
+has not paid for.
 
-## Prerequisite
+## Five corrections to the draft this plan replaces
 
-`0265.8` — the rail the title bar sits above, so the frame is assembled once rather than twice.
-"""
-validation = """
+**Correction 1 — the draft's Done-when contradicts the parent on the logo, and
+this plan resolves it to one outcome: the mark is omitted.** The draft required
+"the 34×18 logo" unconditionally. Every reference file points a
+background-image at `ctx-logo-white.png` (`reference/sessions.html:45-51` and
+the equivalent lines in the other four exports), and `git ls-files
+"*ctx-logo*"` plus a repository-wide logo/icon glob match nothing: no bytes, no
+source shape, no provenance, no licence. Parent Correction 1 permits either a
+real tracked asset inside the desktop project or omission plus a reported gap,
+and forbids assuming that URL resolves (`0265:23-31`). No approved mark exists
+to ship: `0260` owns bundle, icon and packaging work but supplies no title-bar
+asset today (`0260:7-23`), and inventing, generating or approximating one is
+excluded. So this plan takes the grounded branch and binds it — the bar renders
+no mark, and the missing asset is raised as an explicit `0260` finding. Goal 3
+carries that single outcome; there is no alternative acceptance path, and a
+mark appearing anyway does not satisfy this task. If an owner-approved tracked
+mark surfaces before this cell runs, that is an owner correction against this
+plan, raised as a finding rather than resolved inside the cell.
+
+**Correction 2 — this cut extends the landed Sessions frame; it does not
+assemble a second one.** `0265.8` mounts the rail into the Sessions composition
+and explicitly excludes the title bar and screen menu (`0265.8:150-173`,
+`:353-366`, `:437-455`). The frame is assembled once: the title bar is added
+above the existing rail/main/preview row inside the composition that already
+exists, spanning the whole body width. Standing up a parallel root, window,
+mount, asset path or theme path beside the landed one is the failure mode, not
+a shortcut.
+
+**Correction 3 — native versus custom controls is a discovery decision, and
+the three colours are not tokens.** `tokens.md` names no traffic-light colour;
+the export hardcodes the macOS values close `#ff5f57`, minimize `#febc2e`, zoom
+`#28c840` as 12px circles with 8px between them, the cluster measuring 52px
+followed by a 16px gap (`reference/sessions.html:28-50`;
+`reference/traits.html:28-50` expresses the same geometry). Parent Correction 3
+requires that, if custom controls are drawn rather than the platform's being
+used, those three values get one grounded home beside the token set, marked as
+platform chrome rather than as tokens, and never appear as call-site literals
+(`0265:40-42`). Which branch applies depends on what `0256.1` landed for window
+decoration and on the locked gpui revision's window options — inspect both
+before choosing, and never display native chrome and a second hand-drawn bar at
+once. The artifacts require these controls to *render*; they define no click
+behaviour for hand-drawn ones, so this plan claims none and none is invented.
+
+**Correction 4 — "no radius inside the canvas" cannot become a blanket grep.**
+Rule 3 forbids corner radii inside the canvas and reserves radius 10 for the
+window frame (`grammar.md:31-37`), but rule 4's status markers are 5px
+*ellipses* (`grammar.md:39-43`) and the traffic controls are circles that are
+title chrome rather than canvas content. A check or review pass that bans every
+circular or rounded primitive would red on the sanctioned outcome. What is
+forbidden is a rounded *rectangular* element inside the canvas — a chip, pill,
+card or bordered menu item — and that is what the closing read looks for.
+
+**Correction 5 — the draft had no bounded review.** Parent `0265` and the
+rewritten sibling `0265.8` both close on one targeted repair-and-rerun round
+with a hard stop (`0265:137-141`; `0265.8:559-566`). Goal 10 states the same
+finite condition here, so the cell cannot iterate indefinitely against a visual
+contract.
+
+## Grounded at HEAD 2265ed19e
+
+Nothing this task edits exists yet. The top level holds no desktop or app
+crate; no `Cargo.toml` in the tree names gpui; root `Cargo.toml:3-12` lists
+only the existing workspace members and excludes only `packages/cdk`; root
+`Cargo.lock` contains no `name = "gpui"`; and `cargo metadata --no-deps`
+returns only the existing workspace packages. There is no gpui source tree, no
+desktop manifest, no desktop lockfile, no desktop asset directory, no tracked
+font or logo file, no README or `Justfile` desktop command and no desktop CI
+lane. `0256.1` — still `ready` — is the task that establishes the standalone
+project, its manifest and lockfile, window setup, asset mechanism and
+documented non-interactive build-and-test commands (`0256.1:7-17`).
+
+Every desktop path, module name, component name, symbol, signature, gpui API,
+window-options call, asset call, locked gpui revision and command named below
+is therefore a guess to be replaced by discovery against what `0256.1`,
+`0265.1`, `0265.3` and `0265.8` actually landed. Binding them here would be
+fabrication. What is checkable today, and the only board coverage this task can
+honestly declare, is that the workspace stayed gpui-free and its per-round gate
+stayed green.
+
+The desktop lane is nonetheless guaranteed to exist *when this cell runs*, and
+the guarantee is a code fact rather than a hope. An open leaf derives `Blocked`
+while any `depends-on` target is not `Done`
+(`modules/core/src/task/graph.rs:129-172`); this task depends on `0265.8`,
+which depends on `0265.1` and `0265.3`, and `0265.1` depends on all five `0256`
+leaves including `0256.1`. So this task cannot dispatch until the standalone
+shell, the accepted Sessions model, the token/font entry point, the Sessions
+mount, the bottom bar and the rail have all landed. The first act of this cell
+is to locate that lane's documented non-interactive command and record it
+verbatim in the work summary. If no such command is found, the prerequisite
+chain has not in fact landed: stop and report that, rather than substituting a
+workspace command for rendered-behaviour proof. It is deliberately *not*
+declared as a `[[checks]]` entry, because a check must exist in the repository
+at the moment the plan is written and this one does not.
+
+What that lane will actually cover is equally unknown here, so this plan
+promises none of it and pins no coverage mechanics onto it. **Rendered-frame
+evidence**, the phrase the goals below use, means two things taken together:
+the landed lane's documented command, run as it exists and exiting 0; and, for
+every outcome that command does not itself decide, the run's own observation of
+the running frame and the composed element tree, by whatever means that harness
+already supports. Which of the two decided which outcome, and the mechanics
+used, are named in the work summary. Adding coverage inside the landed harness
+is fine where a goal needs it; standing up a second validation lane beside it
+is not.
+
+Two further facts constrain the frame. First, the artifacts do not decide
+whether 1440×900 is OS outer bounds or gpui content bounds, whether the window
+is resizable, or which concrete clipping API applies — bind that geometry to
+the landed shell's actual window/content model rather than to an API guessed
+here. Second, the existing TUI `Screen` enum is CLI-private, holds
+`Sessions, Traits, Merges, Trust, Tasks` in a different order with no `Config`
+(`modules/cli/src/app/dashboard.rs:167-195`), and the parent forbids importing
+CLI-private rendering types into the desktop (`0265:61-63`). Desktop navigation
+stays desktop-local and contains only screens that exist.
+'''
+scope = '''
+## GOALS — binding
+
+1. **One frame, one title bar, above the columns that already landed.** The
+   Sessions frame renders as a single clipped root at the reference 1440×900
+   with the window's radius-10 chrome, whose first child is a full-width 36-high
+   title bar at padding [0,20] with its children vertically centred, and whose
+   remaining space is the rail · main · preview row `0265.8` assembled. The bar
+   takes no fill of its own and sits on `canvas`. The geometry binds to the
+   landed shell's own window/content model rather than to an API named in this
+   file.
+   Decided by rendered-frame evidence — the landed lane's own non-interactive
+   command, discovered at execution time and recorded verbatim in the work
+   summary before any edit, plus the run's observation of what that command
+   does not decide — together with the closing diff read against
+   `tokens.md:71-76` and `reference/sessions.html:24-30,87-93`.
+   Excluded: a second root, window, application initialisation, mount, asset
+   source, theme path or validation lane beside the landed one; re-assembling
+   the rail/main/preview row; any change to the rail, screen body or preview
+   column; any light-column value.
+
+2. **The traffic controls render in the artifacts' order and geometry, from one
+   chrome site.** Close, then minimize, then zoom, at 12px each with 8px
+   between them, the cluster sitting at the bar's leading edge and separated
+   from what follows by 16px. Whether they are the platform's controls or drawn
+   is decided by inspecting what `0256.1` landed for window decoration and what
+   the locked gpui revision offers; exactly one of the two renders, never both.
+   If they are drawn, close `#ff5f57`, minimize `#febc2e` and zoom `#28c840`
+   live once as platform-chrome constants beside the token set — named as
+   platform chrome, not as tokens — and appear at no call site.
+   Decided by rendered-frame evidence showing the three controls in that order
+   at that size and spacing and exactly one chrome surface, plus the closing
+   diff read for a second chrome surface and — in the drawn branch — for the
+   single constant site and for call-site colour literals.
+   Excluded: claiming close, minimize or zoom *behaviour* the artifacts do not
+   define; a window-controls abstraction, trait or platform layer beyond the
+   one bar this cut renders; adding these three values to `tokens.md` or to any
+   design artifact; native chrome plus a hand-drawn bar at the same time.
+
+3. **The mark is omitted and the missing asset is reported for `0260`.** The
+   bar renders no logo: no image, no `ctx-logo-white.png` or other untracked
+   reference, no placeholder or reserved 34×18 box, no substitute mark of any
+   kind. The bar's leading region composes without it — traffic controls, then
+   the flex spacer, then the menu — and the missing tracked title-bar asset is
+   raised as an explicit finding for `0260` in the work summary.
+   Decided by rendered-frame evidence showing no image, box or substitute mark
+   in the bar, plus the closing diff read confirming no asset reference and no
+   reserved mark region was added.
+   Excluded: pointing at `ctx-logo-white.png` or any path not tracked in the
+   repository; an empty, filled or bordered 34×18 box standing in for the mark;
+   an invented, generated or approximated logo; a text wordmark substituted for
+   the missing image; committing a new logo asset in this cut; rendering a
+   broken reference; any bundle, launcher or icon work, which is `0260`'s
+   (`0260:7-23`).
+
+4. **The menu is one plain-text entry, right-aligned, for the one screen that
+   exists.** Exactly one label — `Sessions` — renders in IBM Plex Sans 12.5 at
+   weight 400 in `text-bright` because it is current, inside a menu container
+   at the bar's trailing edge reached through a flex spacer, whose gap is 18.
+   Entries are text, not actions.
+   Decided by rendered-frame evidence showing exactly one menu label with that
+   text, size, family, weight and tone at the trailing edge and no second label
+   of any kind, plus the closing diff read against `screens/sessions.md:7-10`
+   and `reference/sessions.html:57-91` with parent Correction 1 applied.
+   Excluded: a `Traits`, `Tasks`, `Config` or `Merges` entry, a disabled or
+   greyed future entry, and any pane, route or stub behind one — each belongs
+   to `0266.1`, `0267.1`, `0268.1` and `0269.1`; any arrow, icon, badge, count,
+   chip, fill, border, underline or rounded item background; a hover, focus or
+   click affordance; keyboard-shortcut design; a navigation framework, router
+   or screen registry — this cut renders one label and leaves the surface for
+   later entries to slot into, and a switch with one destination is not a
+   switch.
+
+5. **Every presentation value comes from the one token entry point.** All
+   colours, sizes, spacings, families, weights and layout constants in this cut
+   resolve through `0265.1`'s token and font entry point — including
+   `canvas #0c0d10`, `text-bright #eceef2`, sans 12.5 at weight 400, the bar's
+   h 36 and padding [0,20], and the menu gap 18. The only sanctioned literals
+   are goal 2's three platform-chrome constants at their single site.
+   Decided by the closing diff read against `tokens.md:15-76`, plus the landed
+   lane's command exiting 0.
+   Excluded: any colour, size, spacing, weight or family literal at a call site
+   in this cut; a second token module, palette wrapper or theme abstraction; any
+   light-column value; any edit to `tokens.md`.
+
+6. **Radius 10 exists on the window frame and nowhere else.** The title bar,
+   the menu container and every menu entry carry no corner radius, no border and
+   no fill. Circular traffic controls are window chrome and rule 4's 5px status
+   dots are ellipses; neither is a violation. What must not exist anywhere
+   inside the canvas is a rounded rectangular element.
+   Decided by the closing diff read over the whole composed canvas against
+   `grammar.md:31-43`, distinguishing circles and ellipses from rounded
+   rectangles — Correction 4 — plus the landed lane's command exiting 0.
+   Excluded: a blanket ban on rounded or circular primitives, which would red on
+   the sanctioned traffic controls and status dots; a radius, border, shadow or
+   fill on the bar, the menu or any entry; a second clipping or chrome path
+   beside the landed window's.
+
+7. **This is a presentation-only cut over the model that already landed.** The
+   bar renders from static interface text plus the already-landed desktop
+   screen selection. `0256`'s accepted snapshot/delta semantics, its selected-row
+   state and its stale-state posture are preserved unchanged, its
+   `0256.2`-`0256.5` tests pass unmodified, and center absence stays non-fatal —
+   spawn-on-need through a valid executable path, or a visibly stale state,
+   never a hard error and never stale data presented as current. Nothing on this
+   path schedules a timer, interval or poll, performs a filesystem, ledger,
+   store, sidecar or center read, opens a second subscription, or blocks on
+   gpui's UI thread.
+   Decided by the landed lane's command exiting 0 with whatever `0256.2`-
+   `0256.5` proofs it already runs left unmodified, plus the closing diff read
+   for any timer, spawned tick, read, second subscription or blocking receive
+   on the UI thread.
+   Excluded: any center protocol, core, IO, CLI, filesystem, ledger, store,
+   sidecar, Git, reducer, poller, cache or subscription change; a startup center
+   call added by this cut — `center_executable()` falls back to
+   `std::env::current_exe()` (`modules/io/src/center.rs:587-592`) while only
+   the CLI binary interprets `CENTER_PROCESS_SENTINEL`
+   (`modules/cli/src/app/bin/ctx.rs:7-26`), so a separate gpui executable taking
+   that fallback would exec itself as a center; `0256` owns that resolution and
+   this cut neither triggers nor papers over it; altering the Sessions model
+   while wrapping it.
+
+8. **The workspace does not learn about gpui.** Root Cargo resolution and the
+   root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+   member, and the per-round workspace gate stays green and unchanged in cost.
+   Decided by the two declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to `just test`, `just test-full` or the existing macOS and Linux CI
+   lanes; a grep forbidding the word `gpui` in `Justfile` or
+   `.github/workflows/` — a *separate* desktop lane there is sanctioned, so such
+   a check would red on the sanctioned outcome; declaring a board check that
+   executes the desktop lane before `0256.1` has landed one.
+
+9. **The normative artifacts are untouched and the change stays in scope.** No
+   file under `.internal/docs/design/` is modified, no sibling-owned screen
+   region is touched, and no center, core or IO semantics change. A rule, token
+   or example that looks wrong — including the export's four-entry menu and its
+   unresolvable logo URL — is reported in the work summary as an owner
+   correction against the source design, never edited here.
+   Decided by reading the change this cell produced against those exclusions. No
+   board check can decide it, because a check runs in a clean detached worktree
+   of the merged sha with no base to diff against. Reading the task commit's own
+   file list is the suggested way to see it; how the work is arranged into
+   commits is approach, not a goal.
+
+10. **The pass is reviewed once and bounded.** The completed diff is read
+    against `tokens.md:71-76`, `grammar.md:31-43`, `screens/sessions.md:7-10`
+    and `reference/sessions.html:24-93` — with parent Correction 1's
+    no-future-entry and missing-logo resolutions and Correction 4's
+    circle-versus-rounded-rectangle distinction applied — before the task is
+    called done. Exactly one targeted repair cycle is allowed. If a second cycle
+    would be needed, stop and report the exact failing command or the unresolved
+    visual contract rather than iterating. The work summary names the discovered
+    desktop path, the exact desktop command verbatim, the native-versus-drawn
+    controls branch and why, the `0260` missing-mark finding, the proof
+    mechanics actually used where they differ from the suggested route, every
+    owner correction raised, and every deviation from this approach.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against. Read
+what `0256.1`, `0265.1`, `0265.3` and `0265.8` landed; do not carry a guess from
+this file into an edit.
+
+- Find the desktop project from root `Cargo.toml`'s exclude list and the
+  top-level directory listing, then its manifest, README, justfile or CI lane,
+  for the documented non-interactive build-and-test command `0256.1`
+  established. Reusing that harness is suggested over standing up a parallel
+  lane. If no such lane exists, the prerequisite chain has not landed and this
+  task cannot pass — report that rather than substituting workspace commands.
+- Read the landed window setup: how the shell sizes and decorates its window,
+  whether 1440×900 is expressed as outer or content bounds, whether the window
+  is resizable, how the radius-10 clip is achieved, and whether platform title
+  controls are visible. That reading, together with the locked gpui revision's
+  window options, decides goal 2's branch.
+- Read the landed asset mechanism only far enough to confirm this cut adds
+  nothing to it: goal 3 omits the mark, so no asset is loaded, registered or
+  committed here. If a tracked mark turns out to exist after all, that is a
+  finding raised against this plan, not a licence to render one.
+- Read `0265.1`'s token and font entry point and take every value from it.
+- Read `0265.3`'s Sessions mount and `0265.8`'s assembled body, and extend that
+  one composition rather than wrapping it in a second frame.
+
+### Edit order
+
+1. The title-bar component: bar container, traffic-control region, flex spacer,
+   menu container — and no mark region, per goal 3.
+2. The platform-chrome constants, only in the drawn branch, in one place beside
+   the token set.
+3. The desktop-local screen identity and the current-entry tone — only what one
+   entry needs, no enum of screens that do not exist.
+4. The `0260` missing-mark finding, written up rather than built.
+5. The frame composition: title bar first, landed columns filling the rest,
+   inside the landed clipped root.
+6. The focused desktop proofs, then the declared checks.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a `title_bar` component returning the bar, given the
+current screen label; a small `window_chrome` or `platform_chrome` constants
+module in the drawn branch, sitting beside `0265.1`'s tokens rather than inside
+them; and an extension of the landed Sessions frame function that places the bar
+above the existing columns. Names, module paths and signatures follow whatever
+conventions `0256.1`, `0265.1` and `0265.8` established. The behaviours goals
+1-6 fix are not suggestions; where those behaviours live and what they are
+called are.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- One clipped root at the reference size with the window radius, one 36-high
+  full-width bar as its first child, and the landed rail/main/preview row
+  filling the rest — with no second root or second mount in the tree.
+- Three traffic controls in the order close, minimize, zoom at 12px with 8px
+  between them, at the bar's leading edge, and exactly one chrome surface —
+  native or drawn, never both.
+- In the drawn branch, each of the three colours reaching the bar from the one
+  platform-chrome constant site.
+- No mark in the bar at all: no image, no placeholder or reserved 34×18 box, no
+  substitute wordmark, no reference to an untracked asset path.
+- Exactly one menu label reading `Sessions`, sans 12.5 weight 400 in
+  `text-bright`, at the bar's trailing edge — and no second label, no
+  `Traits`/`Tasks`/`Config`/`Merges`, and nothing navigable behind it.
+- No rounded rectangular element anywhere in the composed canvas, with the
+  circular controls and any 5px ellipses unaffected.
+- The `0256.2`-`0256.5` tests still passing unmodified, keeping the
+  snapshot/delta transaction boundary, the stale posture and the absence of a
+  timer proven where they already are.
+
+### Reuse points
+
+The landed shell's single application and window initialisation and its one
+asset source (`0256.1`); `0265.1`'s token and font entry point for every
+colour, size, spacing, family and weight; `0265.3`'s Sessions mount and its
+single `placeholders` module if any interface string needs one; `0265.8`'s
+assembled rail/main/preview body, extended once rather than rebuilt.
+`CenterPublicRow` and the accepted snapshot/delta model are `0256`'s and are
+consumed unchanged — this cut adds no field and reads no new one. The TUI
+`Screen` enum (`modules/cli/src/app/dashboard.rs:167-195`) is CLI-private, has a
+different membership and order, and is explicitly not a reuse point
+(`0265:61-63`).
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find
+X"; a shared cross-worktree target dir flakes gates. Rust is pinned by
+`rust-toolchain.toml` to 1.97.1 and the desktop directory inherits that pin
+unless `0256.1` gave it its own toolchain file. Keep any repair scoped to the
+one red command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- The rail (`0265.8`), the bottom bar (`0265.3`), the frame-row forms
+  (`0265.5`), loop narration and the activity block (`0265.6`), overflow
+  clip-and-fade (`0265.7`), the preview column (`0265.10`-`.12`, `.15`), the
+  header (`0265.13`) and the frame counter (`0265.14`).
+- The four later screens and their menu entries and switches: `0266.1` adds
+  `Tasks`, `0267.1` adds `Traits`, `0268.1` adds `Config`, `0269.1` adds
+  `Merges` between Tasks and Config.
+- Keyboard-shortcut design, window-drag regions, menu interaction, and any
+  behaviour behind the traffic controls that the artifacts do not define.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- Center, core, IO or CLI semantic changes; any read, timer, poller, second
+  subscription or UI-thread block on this path; any startup center call.
+- A design-system phase: component registry, palette abstraction, navigation
+  framework, or primitives extracted for `0266`-`0269` before one of them
+  consumes them.
+- A board check that executes the desktop lane. No such command exists in the
+  repository today, so declaring one now would be a fabrication; the run
+  executes the discovered command and reports its output in the work summary.
+- Packaging, app bundle, launcher, icon and release work (`0260`), the summons
+  surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
+'''
+validation = '''
 ## Watch
 
-- **Radius only on the window frame.** Any rounded corner inside the canvas violates rule 3, and the menu items are text, not chips.
-- **The menu is sans 12.5 with the current entry bright**; entries are not actions and carry no arrows or icons — the glyph set is closed.
-- **Blocking work stays off gpui's UI thread**, including anything the window frame does at startup.
-- **Center-absent behaviour is never a hard error** — spawn-on-need or a visibly stale view, the same posture as the TUI. Note the live hazard for the spawn-on-need path: only `modules/cli/src/app/bin/ctx.rs` interprets `CENTER_PROCESS_SENTINEL` and `center_executable()` falls back to `std::env::current_exe()`, so a gpui binary that triggers spawn-on-need would try to exec itself as a center. That resolution belongs to `0256`; this task must not paper over it.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **The export is measurement; the rules and the screen docs are the
+  specification.** Take geometry from `reference/sessions.html:24-93`; take
+  content from `grammar.md` and `screens/sessions.md` with the parent's
+  corrections applied. The export's four-entry menu and its
+  `ctx-logo-white.png` reference are the two places they already disagree, and
+  both resolve against the export.
+- **No entry without a screen.** A greyed, disabled or inert `Traits`, `Tasks`,
+  `Config` or `Merges` label is the same defect as an empty pane: it reads as a
+  promise. One label renders, and it is `Sessions`.
+- **The logo has no bytes in this repository, so this cut renders no mark.**
+  Neither a broken reference nor a blank box nor an invented mark counts as
+  rendering it, and none of them is an acceptable substitute for the resolved
+  outcome: omit the mark and raise the `0260` finding. Rendering a logo anyway
+  fails goal 3 even if it looks like the export.
+- **Radius only on the window frame** — and Correction 4's distinction holds:
+  the forbidden thing is a rounded *rectangle* inside the canvas, not the
+  circular traffic controls or rule 4's 5px ellipses. A blanket grep against
+  rounded or circular primitives would red on the sanctioned outcome.
+- **One chrome surface, not two.** Displaying the platform's title controls and
+  a hand-drawn bar at the same time is a visible defect that no unit-level proof
+  catches; inspect the running frame.
+- **The three traffic-light colours are not tokens** (`0265:40-42`). In the
+  drawn branch they live once beside the token set as platform chrome, never at
+  a call site, and never inside `tokens.md`.
+- **The menu is text, not actions.** Sans 12.5, weight 400, gap 18, the one
+  current entry bright — no arrows, icons, badges, fills, borders or rounded
+  item backgrounds. The glyph set is closed (`grammar.md:31-37`).
+- **The frame is assembled once.** `0265.8` mounts the rail into Sessions; this
+  cut adds the bar above those columns inside the same composition. A second
+  root, window, mount, asset or theme path is the failure mode.
+- **Blocking work stays off gpui's UI thread**, including anything the window
+  frame does at startup. `center::subscribe` exposes blocking `recv`/
+  `recv_timeout` over a reader thread (`modules/io/src/center.rs:1005-1087`);
+  this cut adds no receive of its own.
+- **Center-absent behaviour is never a hard error** — spawn-on-need or a
+  visibly stale view, the same posture as the TUI. The live hazard stands:
+  only `modules/cli/src/app/bin/ctx.rs` interprets `CENTER_PROCESS_SENTINEL`
+  and `center_executable()` falls back to `std::env::current_exe()`, so a gpui
+  binary that triggers spawn-on-need would try to exec itself as a center. That
+  resolution belongs to `0256`; this task adds no startup center call and must
+  not paper over it.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI
+  lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a
+  phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's
+  desktop behaviour.** They show the workspace stayed gpui-free and green; the
+  rendered frame, bar, controls and menu are decided by rendered-frame evidence
+  in the desktop lane `0256.1` establishes. What that lane covers is unknown at
+  authoring time, so claim only what it actually verifies and observe the
+  remainder directly — an outcome asserted as "covered" without having been
+  observed is the defect this watch item exists for. Its exact non-interactive
+  command becomes declarable as a check on this task once `0256.1` lands.
 
 ## Done when
 
-The window renders at 1440x900 with corner radius 10 and clip, above a 36-high title bar carrying 12px traffic lights, the 34x18 logo and the screen menu in sans 12.5 at gap 18, with Sessions bright as the current entry and no entry present for a screen that does not exist yet. No radius appears anywhere inside the canvas. Root workspace resolution and the root lockfile remain gpui-free.
-"""
+- The desktop lane's documented non-interactive build-and-test command, landed
+  by `0256.1` and therefore present before this task can dispatch
+  (`graph.rs:129-172`), was located first, recorded verbatim in the work
+  summary, and exits 0 with the title bar, the chrome branch and the menu in
+  the tree and whatever `0256.2`-`0256.5` proofs it already runs left
+  unmodified. If that command cannot be found, the prerequisite chain has not
+  landed: the task stops and reports that, and no workspace command is offered
+  in its place.
+- Rendered-frame evidence — that command for what it decides, and the run's own
+  observation of the running frame and composed tree for the rest, with which
+  decided what named in the work summary — shows: one clipped root at 1440×900
+  with the window's radius-10 chrome, whose first child is a full-width 36-high
+  bar at padding [0,20] and whose remaining space is the landed
+  rail · main · preview row; three traffic controls in the order close,
+  minimize, zoom at 12px with 8px between them at the bar's leading edge, with
+  exactly one chrome surface rendering and — in the drawn branch — each colour
+  reaching the bar from one platform-chrome constant site; no mark of any kind
+  in the bar — no image, no placeholder or reserved 34×18 box, no substitute
+  wordmark; and exactly one menu label reading `Sessions` in sans 12.5 weight
+  400 `text-bright` at the bar's trailing edge, with no second label and
+  nothing navigable behind it.
+- The closing diff read shows: `tokens.md:71-76`'s bar height, padding, control
+  size, menu gap and menu type present with no colour, size, spacing,
+  weight or family literal at a call site outside the single platform-chrome
+  site; no rounded rectangular element anywhere inside the canvas, with the
+  circular controls and 5px ellipses untouched; no radius, border or fill on the
+  bar, the menu or any entry; no second root, window, mount, asset, theme or
+  validation path; no future menu entry, pane, route or stub; no asset
+  reference, added asset file or reserved mark region; no CLI-private or
+  ratatui import and no use of the TUI `Screen` enum; no light-column value; and no timer, interval, spawned tick,
+  filesystem/ledger/store/sidecar/center read, second subscription or UI-thread
+  block added on this path.
+- Both declared checks exit 0.
+- The change this cell produced touches no file under `.internal/docs/design/`,
+  no sibling-owned screen region, and no center, core or IO semantics — however
+  the work is arranged into commits.
+- The work summary names the discovered desktop path, the exact desktop command,
+  the native-versus-drawn controls branch and the evidence for it, the explicit
+  `0260` finding raised for the missing title-bar mark, the proof
+  mechanics used where they differ from the suggested route, the owner
+  corrections raised against the design artifacts, and any deviation from the
+  approach.
+
+## Bounded refinement
+
+Run the desktop command, then the root-resolution check, then
+`CARGO_TARGET_DIR=target just test`, then the closing diff read. Permit at most
+one targeted repair-and-rerun round: repair one named defect, then rerun the
+failed command and every command after
+it in that order. If a second round would be needed, stop and report the exact
+failing command with its evidence, or the unresolved visual contract, rather
+than iterating. That is the stop condition, not a judgement call.
+'''
 [relations]
 parent = "0265"
 depends-on = ["0265.8"]
 
 [[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
+command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+expect = "gpui absent from root resolution and lockfile"
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "CARGO_TARGET_DIR=target just test"
+expect = "test result: ok\\. [1-9][0-9]* passed"
+timeout-ms = 1800000
