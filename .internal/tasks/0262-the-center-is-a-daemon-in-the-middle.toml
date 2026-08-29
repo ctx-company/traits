@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0262"
 title = "The center is a daemon in the middle"
-status = "ready"
+status = "done"
 raised = "2026-08-28"
 content = """
 The center's contract, in the owner's words: one daemon in the middle,

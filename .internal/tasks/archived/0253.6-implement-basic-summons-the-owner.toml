@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0253.6"
 title = "implement:basic summons the owner"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-a28f3160dcebc16f5a0b6265b0cb1e08b498edae68c3abd1cc32720dfa630c06 merged as 0a33abd5d5961af11b0c5e4b37e962d4212d518b"
 content = """
 The dogfood consumer — the parent's north-star snippet made real,
 verbatim where it names text.
@@ -47,5 +49,9 @@ with no contradiction never summons and is behaviorally unchanged.
 """
 
 [relations]
-parent = "0253"
 depends-on = ["0253.5"]
+parent = "0253"
+
+[closure]
+mode = "merge"
+commit = "0a33abd5d5961af11b0c5e4b37e962d4212d518b"

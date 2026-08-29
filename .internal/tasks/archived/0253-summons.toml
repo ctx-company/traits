@@ -76,5 +76,3 @@ All children are done. A run whose reviewer needs an owner decision parks
 on round one with the question in the ledger, continues with the answer,
 and the commit message can cite what the owner decided.
 """
-
-[relations]

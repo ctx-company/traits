@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0252.5"
 title = "Delete sessions by group"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-4a9db265edca6f9ca03b128f535d22fa7acc332384015797b71299ef005ac28b merged as 7bcfdb08d907967802c8ad07d2826648238b6c4e"
 content = """
 Parent ruling 7: `ctx traits sessions delete --failed`. Plus the dashboard
 counterpart — deleting a group header deletes that group behind ONE confirm
@@ -665,3 +667,37 @@ expect = "one-implementation"
 name = "group delete passes the landing gate"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "7bcfdb08d907967802c8ad07d2826648238b6c4e"
+
+[[closure.checks]]
+name = "sessions delete --failed selects, skips live, and counts honestly"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_sessions_delete"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "the new panel matches its registry claim and no grammar moved"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_output_style"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "extraction keeps every delete invariant and the group verb holds"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "one destructive implementation, and both surface registries know sessions"
+command = '''S=modules/cli/src/app; n() { grep -rhoE "fn $1\(" "$S" --include='*.rs' | wc -l | tr -d ' '; }; [ "$(n execute_delete)" = 1 ] && [ "$(n execute_confirmed_delete)" = 1 ] && [ "$(n plan_delete)" = 1 ] && ! grep -qE 'fn (execute_delete|execute_confirmed_delete|plan_delete)\(' "$S/dashboard.rs" && grep -q execute_confirmed_delete "$S/dashboard.rs" && [ "$(grep -cE '"sessions"' "$S/presentation.rs")" -ge 2 ] && grep -qE '"sessions"' "$S/help_surface.rs" && echo one-implementation'''
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "group delete passes the landing gate"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

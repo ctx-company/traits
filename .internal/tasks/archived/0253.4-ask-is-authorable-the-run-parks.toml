@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0253.4"
 title = "Ask is authorable; the run parks awaiting-owner"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-0ad0ce1c218af64ec111fe56bfdbd7c37097484baff9f71372d0cabe169887f0 merged as 072d4063aab082301f39cc4a121ccfd5c46a3e6c"
 content = """
 The 0236 reversal, whole surface — that ruling's own terms forbid doing
 half: expose it everywhere or nowhere. This is everywhere.
@@ -43,5 +45,9 @@ guard. A trait with no ask composes byte-identically to today.
 """
 
 [relations]
-parent = "0253"
 depends-on = ["0253.3"]
+parent = "0253"
+
+[closure]
+mode = "merge"
+commit = "072d4063aab082301f39cc4a121ccfd5c46a3e6c"

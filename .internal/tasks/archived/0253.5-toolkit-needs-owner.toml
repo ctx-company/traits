@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0253.5"
 title = "Toolkit: the needs-owner builtin, and the escalation reconcile"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-28"
+origin = "run run-f1564496b1572993682ed33401c6a491c021718306e9474886e9b42ee49bc5de merged as c30f45e3de09c4ce64dfbe9bee70f78dd909a6dc"
 content = """
 ## Shape
 
@@ -37,3 +39,7 @@ adopt the new doctrine text). `just ts-test` green.
 [relations]
 depends-on = ["0253.4"]
 parent = "0253"
+
+[closure]
+mode = "merge"
+commit = "c30f45e3de09c4ce64dfbe9bee70f78dd909a6dc"
