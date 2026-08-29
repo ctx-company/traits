@@ -1,50 +1,738 @@
 schema-version = "0.2"
 key = "0265.5"
 title = "Render the frame list row forms"
-status = "draft"
+status = "ready"
 raised = "2026-08-29"
 content = """
-Render the three frame-row forms `screens/sessions.md` specifies, from the selected run's authoritative reconstruction. The forms are exact, and rendering them is where the shared row vocabulary — semantic colour, state words, the 5px dot, the selection rule and the two voices — becomes real code with a real consumer.
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what decides it, plus what it excludes. The
+APPROACH section is the architect's suggested route — discovery order, file and
+symbol guesses, edit order, proof mechanics. Deviate from any of it whenever a
+goal requires it, and report the deviation in the work summary; a deviation is
+not a violation and needs no escalation.
 
-A **done** row is an `ok` dot, the step name in sans 12.5 `text`, and a right-aligned mono 10.5 elapsed time (`4s`, `3m 12s`). The step names come from the reconstruction's frames; **the elapsed time does not, and the difference matters.** A ledger alone carries no per-step timing — `render_ledger_run_view`'s own contract states it (`modules/cli/src/app/run_view/projection.rs`: `PresentationState`'s `finished_durations` map stays empty because "a ledger alone carries no per-step timing or narration"), and only the run's total `ledger.elapsed_seconds` survives there. The durable per-step evidence is the activity sidecar: `<ledger>.json.activity.jsonl` stamps `at_epoch_ms` beside a `frame_id` at the IO boundary (`modules/io/src/activity_sidecar.rs`), so a finished frame's elapsed span is the distance between its first and last record. That sidecar is derived evidence and deliberately best-effort — writes are swallowed on failure and truncated trailing lines are tolerated — so a frame with no sidecar evidence renders no time at all rather than a computed guess.
+`screens/sessions.md:19-31` specifies the frame list of the Sessions screen:
+rows at gap 4, a **done** row (`ok` dot, step name sans 12.5 `text`, optional
+right-side elapsed time mono 10.5 `text-muted` — `4s`, `3m 12s`), a **current**
+row (`surface-raised` fill, `accent` dot, name `text-bright`, a second
+description line sans `text-secondary` at width 430 / line height 16, and
+`live · round R · <role>` mono 10.5 `accent` on the right), and **pending** rows
+(`dot-idle` dot, name `text-muted`, no right side). The export agrees on the
+geometry: frame-row padding `[6,12]` and current-row padding `[8,12]`, left gap
+10, dot 5px, dot-wrap top offset 6, title/description gap 3, right column top
+offset 2, list gap 4 (`reference/sessions.html:293-347`, `413-459`, `513-572`).
 
-The **current** row is a `surface-raised` fill with an `accent` dot, the name in `text-bright`, a second description line in sans 11.5 `text-secondary` at width 430, and `live · round 2 · smart` in mono 10.5 `accent` on the right: the frame name is data, the seat is `Session.current_agent`, the round is `RunSummary.verdict_rounds`, and the description is `placeholder:` until frames carry intent text. **Pending** rows are a `dot-idle` dot and a `text-muted` name with no right side.
+This is the cut where grammar rules 1, 2, 4 and 5 become code with a real
+consumer: colour chosen from a named state rather than at the call site
+(`grammar.md:6-22`), states rendered as words and never as pills, badges or
+checkmarks (`grammar.md:24-29`), the 5px dot present because a frame list is one
+of the four stateful lists rule 4 admits, the bright-title selection rule held at
+the list level, and sans for the content half of every row against mono for the
+machinery half (`grammar.md:39-56`). The closed glyph set `↰ ↳ → · ∷` and the
+no-corner-radius-inside-the-canvas rule bind here too (`grammar.md:31-37`); the
+5px ellipse is rule 4's state marker, not row chrome.
 
-Grammar rules 1, 2, 4 and 5 all bind here at once, so this is where they are implemented: colour chosen from a named state rather than at the call site, states rendered as words and never as pills or checkmarks, the dot present because a frame list is one of the four stateful lists rule 4 admits, exactly one bright title in the list, and sans for the content half of every row against mono for the machinery half.
+## Five corrections to the draft this plan replaces
+
+**Correction 1 — the description size is a fifth artifact conflict, and it is
+reported rather than smoothed over.** `screens/sessions.md:26-27` and
+`reference/sessions.html:439-445` both fix the current row's description at sans
+11.5; `tokens.md:67` says "Row descriptions inside list rows: sans 11
+secondary". The parent recorded four conflicts and not this one. Ruling, under
+parent Correction 1: `grammar.md` and `screens/sessions.md` are the
+specification, so **11.5 governs** — and the type scale already names 11.5 for
+"sub-descriptions" (`tokens.md:63`), so the value is taken from that step of
+`0265.1`'s scale, not written as a literal. `tokens.md:67` reads as the generic
+default for ordinary list-row descriptions; this leaf is the current frame's
+intent line, which the screen sizes explicitly. The conflict is reported in the
+work summary as an owner correction against the design artifacts. It is not
+resolved by editing `tokens.md`.
+
+**Correction 2 — a failed frame is a fourth row form, and the draft has no place
+for it.** The shared reconstruction carries a real failure state:
+`step_state` returns `Failed` for a `Rejected` sequence status and for the
+exactly-current item when the run stopped without completing
+(`modules/cli/src/app/run_view/planned.rs:708-741`), and `0257.2` binds that
+"running, completed, failed, waiting, and nested frame states must remain
+distinguishable" (`0257.2:13-17`). `screens/sessions.md` names only three forms.
+Collapsing failed into done paints a failure `ok` green and breaks rule 1
+outright; collapsing it into pending erases it. Ruling: this cut renders the
+failed frame in the done row's geometry with rule 1's `danger` role and rule 2's
+word, never a badge or a glyph, and never as one of the other three. That is the
+smallest form the two authorities jointly force, and it too is reported as an
+owner correction against `screens/sessions.md`.
+
+**Correction 3 — "exactly one bright title" is not the invariant that holds.**
+Rule 4 makes bright a property of *selection* — "selected row gets
+`surface-raised` fill + `text-bright` title; unselected row titles are `text`;
+only one bright title per list" (`grammar.md:45-47`) — while the specified done,
+pending and failed forms are all unbright, and a settled reconstruction has no
+current frame at all. The draft's "exactly one row carries a bright title" is
+therefore unprovable for a finished run without changing one of the stated row
+forms. Ruling: the binding invariant is **never more than one bright title in
+the list, and exactly one whenever the list has a selection**; the live current
+frame is the default selection while a run is live, and a settled or failed run
+whose selection `0257` does not supply renders no bright title rather than
+promoting an arbitrary row. The invariant is held at the list level, not by each
+row's caller.
+
+**Correction 4 — the elapsed span is an observed-activity span, and its
+omission conditions are wider than "no records".** The draft says the sidecar
+"stamps `at_epoch_ms` beside a `frame_id`". Only `ActivityRecord::Activity`
+carries a frame id (inside its event) and `Narration` its own; `StepSummary`
+carries a `key` and `SessionTitle` carries no frame identity at all
+(`modules/io/src/activity_sidecar.rs:22-56`). The span is first-to-last
+`Activity` timestamp for one *unambiguous* frame id. That guard is not optional:
+durable activity ids are `frame.item_id` or, absent that, `frame.title`
+(`modules/cli/src/app/drive.rs:3184-3196`, `3923-3967`), while a reconstructed
+step key carries run index, structural path, iteration and role
+(`planned.rs:244-283`, `576-597`), so repeated loop executions share one activity
+id and a first-to-last span across them would silently include the time
+*between* executions. The repository already has these exact semantics in
+CLI-private `story::beat_duration`, which returns `None` when a second beat
+shares the frame key and when `last > first` does not hold
+(`modules/cli/src/app/story.rs:535-554`), proven by
+`shared_frame_duration_is_omitted_but_unique_frame_duration_is_recorded`
+(`story.rs:1213-1229`). Note also what the span is *not*: `ActivityRecorder`
+emits `Dispatching` before harness execution but `finish_frame` appends no
+terminal record (`drive.rs:595-611`), so this is a span of observed activity, not
+guaranteed wall time from dispatch to acceptance. Render it; do not describe it
+as more than it is.
+
+**Correction 5 — `smart` is a role, not a seat name.** `Session.current_agent`
+is an `AgentRole` whose `structural_seat` ordinal is explicitly `#[serde(skip)]`
+(`modules/core/src/procedure/runtime/frames.rs:175-204`), and persisted
+`Provenance.agent_assignments` carries `role`, `harness`, `transport`, `model`,
+`seat_index` and `list_length` but no seat *name*
+(`modules/core/src/procedure/session.rs:159-186`). A reconstructed session has
+lost the ordinal the shared selector needs (`session.rs:205-230`), so picking an
+assignment for a list-backed role would be a guess presented as evidence. Parent
+Correction 2 requires one durable mapping to be chosen and named. Ruling: the
+right-side trailing segment renders `Session.current_agent.role`, the same field
+CLI `active_label` safely exposes (`run_view/session_text.rs:115-138`).
+
+## Grounded against HEAD 10532ec22
+
+Nothing this task edits exists yet. Root `Cargo.toml:1-12` names the existing
+Rust members and excludes only `packages/cdk`; there is no desktop manifest, no
+desktop lockfile, no gpui source tree, no desktop asset directory and no desktop
+command anywhere in the repository. Both prerequisites are `ready` rather than
+done: `0265.3` has not yet created the state presentation or the `placeholders`
+module, and `0257` and its three children have not yet landed the selected-run
+load, the shared frame projection or the live detail reconciliation. Every
+desktop path, module name, symbol and signature named below is therefore a guess
+to be replaced by reading what `0256.1`, `0265.1`, `0265.3` and `0257` actually
+landed.
+
+**No command in this repository executes a gpui render, so none is declared as a
+board check.** There is no desktop lane at this HEAD — `0256.1:15` records the
+same — and a check runs under `sh -c` in a clean detached worktree of the merged
+sha, so a command written here on the expectation that a dependency creates it
+later would read as evidence while being unrunnable. The four declared checks
+are therefore the four commands that exist in this tree today.
+
+**The desktop lane the dependency chain lands is nonetheless the binding gate
+for rendered behaviour.** This task depends on `0265.3` → `0265.1`
+(`0265.3:415`) → `0256.1`-`0256.5` (`0265.1:293`), and `0256.1` does not close
+until "its documented independent build and test commands pass from a clean
+checkout" (`0256.1` Done when), so by execution time that lane and its
+documented non-interactive build-and-test command exist. Read the command out of
+the landed lane's own documentation — manifest, README, justfile or CI lane —
+extend that harness with this cut's cases, run it, and name it verbatim with its
+outcome. Goal 12 and the Done-when clauses bind it: the rendered row forms, the
+list-level brightness, the right-side composition, the atomic candidate commit
+and the reopened-settled render are decided by focused coverage executed in that
+lane. That this file cannot name the command without fabricating it, and cannot
+declare it as a board check, is a naming limit — not a licence to accept runtime
+outcomes unexecuted. If the lane is absent at execution time, the prerequisite
+chain was not honoured: report an unmet dependency and do not pass the task. Do
+not stand up a lane of the run's own, and do not read its absence as licence to
+skip the closing read.
+
+**Static review decides the structural half, and cannot decide the runtime
+half.** The closing reads of `git diff main...HEAD`,
+`git diff --name-only main...HEAD` and `git status --short` establish what a
+running harness cannot see cheaply — duplicated projection or span logic,
+CLI-private imports, literals at call sites, direct sidecar or ledger reads,
+timers and polls, scope, and untouched design artifacts — and they satisfy the
+parent's review clause (`0265:104-112`). They do not establish that a row
+rendered, that a list held its invariant at runtime, or that a reopened run
+reproduced its spans; the desktop lane decides those.
+
+**The workspace half of this cut is decided by commands that exist today.** The
+frame-span derivation, its omission semantics and the compact duration
+formatting are shared core/IO code with the CLI as their second consumer, so
+`just test` — a declared check — carries their whole verdict, including the
+existing CLI omission boundary (`story.rs:1213-1229`) staying green after the
+extraction. The reconstruction filter and the center wire contract are declared
+checks for the same reason: the semantics under the rendered forms are provable
+in this repository even though the render is not.
 """
 scope = """
-## Decisions
+## GOALS — binding
 
-- In scope: the done, current and pending row forms, fed from the selected run's center-served reconstruction, with the semantic colour roles, state words, status dot, selection rule and sans/mono split extracted as reusable primitives while these rows are built.
-- **Per-step elapsed times come from the activity sidecar's `at_epoch_ms` records, delivered with the selected run's center-served detail** — never recomputed on the desktop side, never derived from the run's total elapsed, and never rendered at all for a frame the sidecar has no records for. Whether the center answers the spans or the raw records is the architect's call; that the desktop never opens the sidecar itself is not.
-- **Callers name semantics, not presentation.** A row names a state; the primitive chooses the colour, the word's tone and the dot. Rule 1 is only enforceable if that choice lives in the primitive.
-- **One bright title per list is a list-level invariant**, not a per-row one; a primitive that cannot express it pushes the rule onto every caller.
-- The current row's description is the only `placeholder:` leaf here and comes from the shared `placeholders` module `0265.3` created — frames do not carry intent text today.
-- Out of scope: the loop-narration line and activity block (`0265.6`), overflow clipping and the fade (`0265.7`), the frame counter (`0265.14`), the preview column, the rail and title bar, and the chrome (`0265.3`).
-- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+### What decides these goals
 
-## Prerequisites
+Three mechanisms decide the goals below, and each is used only for what it can
+actually observe.
 
-`0265.3` — the screen shell these rows sit in and the `placeholders` module the current row's description is served from. `0257` — the selected run's authoritative reconstruction and the detail read path these rows and their timing evidence arrive on.
+**The desktop lane, executed.** Rendered row forms, list-level brightness, the
+right-side composition, the atomic candidate commit and the reopened-settled
+render are runtime outcomes; they are decided by focused coverage run in the
+desktop build-and-test lane that `0256.1` lands, whose exact documented
+non-interactive command is discovered at execution time and must exit 0 (goal
+12). No goal names that command, and no check declares it: it does not exist at
+the HEAD this plan was written against (`0256.1:15`), and a board check must
+already exist and run repo-root-relative in a clean detached worktree, so
+writing one now would fabricate it. The obligation is unconditional even though
+the command is unnameable — an absent lane at execution time is an unmet
+dependency that prevents this task from passing, not a permission to accept
+those outcomes on a diff read.
+
+**The four declared checks**, which exist in this repository today and decide
+every workspace-side semantic outcome — including the shared substance of goals
+4 and 8, which this cut lands in the workspace rather than in gpui:
+
+- `just test` — the per-round workspace gate. It decides the shared side of
+  this cut: the extracted frame-span derivation and its omission case list, the
+  compact duration formatting, and the existing CLI coverage of the same
+  omission boundary (`story.rs:1213-1229`) still green after the extraction.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view` — the
+  authoritative reconstruction semantics this cut renders, still green under the
+  existing filter, showing they were consumed rather than forked.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center` —
+  the center wire contract, which must stay green whether or not this cut
+  touches it.
+- The root gpui-free resolution check.
+
+**The closing static read** of the diff printed by `git diff main...HEAD`,
+`git diff --name-only main...HEAD` and `git status --short` — commands that
+exist today — against `screens/sessions.md:19-31`, `grammar.md:6-56`,
+`tokens.md:15-84` and `reference/sessions.html:293-347`, `413-459`, `513-572`.
+Its inspection list is fixed by goal 11: duplicated projection or span logic,
+literals at render call sites, CLI-private imports, direct desktop sidecar or
+ledger reads, timers and polls, invented seat or round values, inline
+placeholder prose, a collapsed failed frame, a partially committed candidate,
+and scope. It decides code shape and forbidden constructs, never that something
+rendered; wherever a goal names a runtime outcome, the desktop lane decides it
+and this read only supplements. It cannot be a board check, because a check runs
+in a clean detached worktree of the merged sha with no base to diff against.
+
+1. **The four row forms render from the selected run's authoritative
+   reconstruction.** The frame list renders done, current, pending and failed
+   rows in the token forms `screens/sessions.md:19-31` names, at list gap 4, with
+   step names and states coming from the shared reconstruction `0257` serves —
+   not from row order, not from the compact `RunSummary`, and not from a second
+   flattening. Every colour, size, spacing, weight and family comes from
+   `0265.1`'s token entry point: no colour, size, spacing, weight or family
+   literal at a call site in this cut. The current row's description renders at
+   the 11.5 step per content Correction 1.
+   Decided by focused coverage in the landed desktop lane (goal 12), exercising
+   a reconstruction that carries done, current, pending and failed frames and
+   observing that each renders its own dot role, title tone and right side, and
+   that step names and states come from the shared reconstruction rather than
+   row order; by the declared
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view` check
+   staying green — the reconstruction semantics this cut consumes were not
+   forked — and, for what a running harness does not show, by the closing static
+   read of `git diff main...HEAD` against `screens/sessions.md:19-31`,
+   `grammar.md:6-56`, `tokens.md:15-84` and `reference/sessions.html:293-347`,
+   `413-459`, `513-572`: the four forms carrying that geometry, the description
+   at the 11.5 step, and no colour, size, spacing, weight or family literal at a
+   call site.
+   Excluded: any second flattening, active-path or state derivation in the
+   desktop (`planned.rs`'s semantics are consumed through `0257`'s shared
+   projection, never reimplemented); any import of CLI-private `run_view` types —
+   `RunStep` and `StepState` are `pub(super)` inside `ctx-traits-cli`
+   (`run_view/model.rs:186-245`); a checkmark, pill, badge, icon or emoji
+   standing in for a state; any glyph outside `↰ ↳ → · ∷`; any corner radius
+   inside the canvas beyond rule 4's 5px ellipse; any light-column value; a
+   design-system phase or row variants for screens that do not exist yet.
+
+2. **A failed frame stays distinguishable.** A frame the shared projection
+   reports as failed renders in rule 1's `danger` role and rule 2's word form,
+   distinct from done, pending and current. It is never painted `ok`, never
+   silently pending, and never a badge or glyph.
+   Decided by focused coverage in the landed desktop lane (goal 12): a
+   `Rejected`-status frame and a run stopped at its current frame both render
+   the failed form, and neither renders as done, pending or current; by the
+   declared `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   run_view` check staying green — the `Failed` derivation this cut renders is
+   still the shared one (`planned.rs:708-741`) — and by the closing static read
+   for structure: the presentation matches exhaustively over the shared
+   projection's states, so no state falls to a shared fallback.
+   Excluded: inventing further states beyond what the shared projection reports;
+   a `danger` wash over the whole row; reordering or hiding failed frames.
+
+3. **At most one bright title, held at the list level.** The list renders never
+   more than one `text-bright` title and exactly one whenever `0257` supplies a
+   selection; the selected row also takes the `surface-raised` fill per rule 4,
+   and unselected titles take `text` or their state's neutral. A settled or
+   failed run with no supplied selection renders no bright title rather than
+   promoting a row. The invariant is expressible by the primitive, so no caller
+   can break it by rendering a row in isolation.
+   Decided by focused coverage in the landed desktop lane (goal 12): a live run
+   with a selection renders exactly one bright title, a completed run and a
+   failed run render never more than one, and a list with no supplied selection
+   renders none; and by the closing static read of `git diff main...HEAD` for
+   the structural half — the invariant is expressed by the list primitive's own
+   signature and state, so a caller holding one row cannot produce a second
+   bright title, and brightness is a function of the supplied selection rather
+   than of a row's state.
+   Excluded: a per-row `is_bright` flag the caller sets freely; promoting the
+   last done row to selected as a fallback; bright as a function of state rather
+   than of selection.
+
+4. **Elapsed time renders only from unambiguous durable evidence, or not at
+   all.** A row's time is the span between the first and last `Activity` record
+   for one unambiguous frame id, delivered with the selected run's center-served
+   detail. It is omitted — with nothing rendered in its place — when there is no
+   frame key, no matching activity records, a single record, a non-increasing
+   first-to-last pair, or a frame id shared by more than one reconstructed
+   execution. It is never derived from `ledger.elapsed_seconds`, from row
+   position, or from a render-time clock. The span derivation lives once, near
+   the sidecar/detail boundary, and the existing CLI omission boundary keeps
+   passing.
+   Decided by the declared `just test` check for the derivation itself, which
+   carries the shared span's own coverage of the whole case list — a unique
+   frame with a positive span, no frame key, no matching records, a single
+   record, an equal or non-increasing pair, a loop-shared frame id, an absent
+   sidecar, and a truncated or malformed trailing line with the valid records
+   before it still honoured — alongside the existing CLI coverage of the same
+   omission boundary (`story.rs:1213-1229`) still green after the extraction; by
+   focused coverage in the landed desktop lane (goal 12) that a row with a
+   positive span renders a compact time and that each omission case renders
+   nothing in its place with the frame tree otherwise intact; and by the closing
+   static read for the consuming half: one span derivation and one duration
+   formatter, both shared, with no second computation and no desktop-side
+   sidecar read, and no branch that substitutes a value where the shared
+   derivation returned none.
+   Excluded: a second span computation in the desktop; the desktop opening
+   `CenterPublicRow.ledger_path` or `<ledger>.json.activity.jsonl` itself; a
+   zero, dash or `—` placeholder where evidence is missing; describing the span
+   as full dispatch-to-acceptance wall time; reusing the zero-padded story clock
+   `elapsed_text` for these compact units.
+
+5. **The current row's right side renders only what is durable.** `live` is the
+   live state word; the round segment renders from `RunSummary.verdict_rounds`
+   with `Some(R)` carrying R and `None` rendering no round segment at all — not
+   `round 0`, not a failure — matching `0265.3`'s Correction 2; the trailing
+   segment renders `Session.current_agent.role` per content Correction 5.
+   Segments join with `·` per rule 2, and a missing segment leaves no dangling
+   separator.
+   Decided by focused coverage in the landed desktop lane (goal 12): `Some(R)`
+   renders the round segment, `None` renders no round segment and no dangling
+   separator, and the trailing segment renders the session's current role, with
+   an absent role leaving no dangling separator either; and by the closing
+   static read of `git diff main...HEAD` for provenance — the round segment
+   reads `RunSummary.verdict_rounds` and the trailing segment reads
+   `Session.current_agent.role`, with no hardcoded `round 2`, `smart` or
+   default-to-zero and no re-derivation of the round inside the desktop.
+   Excluded: `round 0`; re-deriving the round inside the desktop —
+   `verdict_slot_rounds` already projected it onto the row; naming a seat, or
+   selecting an assignment from `agent_assignments` by index for a list-backed
+   role; the design example strings typed as literals.
+
+6. **The description is the `placeholders` module's second entry.** The current
+   row's description resolves through the one module `0265.3` created, adding
+   exactly the current-frame intent entry this cut renders and nothing else,
+   traceable to the `placeholder:` tag in `screens/sessions.md:25-28` that
+   authorises it. No inline sentence at the call site.
+   Decided by the closing static read of `git diff main...HEAD` showing exactly
+   one entry added to that one module and resolved at the call site, with no
+   inline sentence, no duplicate literal and no second `placeholders` module.
+   Excluded: a registry, lookup framework, trait or macro layer; entries no cut
+   renders yet (loop phrasing, header phrasing, in-progress narration, owner
+   handle — each arrives with its consumer); a second `placeholders` module.
+
+7. **The rows read nothing and poll nothing.** No compact row triggers a ledger,
+   store, sidecar, plan or detail read. Selection performs one detail
+   reconstruction, off gpui's UI thread. The list, the selected detail, the
+   spans, the round, the role and the bright selection commit as one candidate on
+   the accepted snapshot/delta model `0256` landed, so a rejected projection
+   leaves the previously accepted list intact and no half-updated or orphaned
+   current row. Live timing evidence arrives on the existing
+   `CenterDelta::ActivityLine` (`modules/io/src/center.rs:265-281`), which
+   already carries the affected row and a typed `ActivityRecord`.
+   Decided by focused coverage in the landed desktop lane (goal 12): a rejected
+   projection leaves the previously accepted list intact with no half-updated or
+   orphaned current row, and an accepted snapshot or delta commits the list,
+   detail, spans, round, role and selection together; by the declared
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`
+   check staying green and by `just test` for the workspace side of that
+   contract; and by the closing static read of `git diff main...HEAD`: the
+   existing `0256.2`-`0256.5` and `0257.3` tests unmodified rather than edited
+   to fit, and no timer, interval, spawned tick, blocking receive on the UI
+   thread, per-row read, direct driver path or desktop filesystem fallback.
+   Excluded: a second detail request beside the one `0257` landed; a parallel GUI
+   event protocol; a poll loop; an optimistic row update ahead of a delta;
+   presenting last-accepted state as current — center or detail failure is
+   rendered loudly, and stale state appears only behind an explicit stale marker
+   and time.
+
+8. **A finished run reopened renders what it rendered live.** Closing and
+   reopening the window on a settled run reproduces the same rows, the same
+   states and the same spans as its final accepted live detail, because every
+   displayed fact comes from durable evidence rather than from GUI memory or
+   process-local timing.
+   Decided by focused coverage in the landed desktop lane (goal 12) that a
+   settled run reconstructed afresh renders the same rows, states and spans as
+   its final accepted live detail; by the declared `just test` check for the
+   durable half — the shared span derivation returning the same span from the
+   same durable records with no process-local input — and by the closing static
+   read for the consuming half: every fact on a rendered row traces to the
+   center-served detail, with no process-local clock, no `Instant` on the
+   desktop side and no rendered row cached across process lifetimes.
+   Excluded: any use of process-local `Instant` durations — the live TUI's
+   `finished_durations` are frozen on active-step transitions
+   (`modules/cli/src/app/run_view.rs:1121-1189`) and cannot survive a restart;
+   caching a rendered row across process lifetimes.
+
+9. **The workspace does not learn about gpui.** Root Cargo resolution and the
+   root `Cargo.lock` stay gpui-free, the desktop project is not a workspace
+   member, and the per-round workspace gate stays green and unchanged in cost —
+   including any shared core/IO extraction this cut lands and its CLI consumer.
+   Decided by the declared checks.
+   Excluded: adding the desktop project to root workspace members; adding gpui
+   cost to the existing CI lanes; a grep forbidding the word `gpui` in
+   `Justfile` or `.github/workflows/` — a *separate* desktop lane there is
+   sanctioned, so such a check would red on the sanctioned outcome; declaring a
+   board check that executes the desktop lane before `0256.1` has landed one.
+
+10. **The normative artifacts are untouched.** No file under
+    `.internal/docs/design/` is modified, and no sibling-owned screen region and
+    no second center detail contract appears in this cut's changes. Content
+    Corrections 1 and 2 are raised as owner corrections against the source
+    design, never edited into it.
+    Decided by `git diff --name-only main...HEAD` — the changed-file list of
+    this cut against its base — containing no path under `.internal/docs/design/`
+    and no file owned by `0265.6`, `0265.7`, `0265.14` or a second detail
+    request. No board check can decide this, because a check runs in a clean
+    detached worktree of the merged sha with no base to diff against; if the run
+    branched from something other than `main`, substitute that base
+    (`git merge-base` resolves it).
+
+11. **The pass is reviewed once and bounded.** Before the task is called done,
+    the diff printed by `git diff main...HEAD` is read against
+    `screens/sessions.md:19-31`, `grammar.md`, `tokens.md` and
+    `reference/sessions.html`, specifically inspecting for: duplicate projection
+    or span logic, literals at render call sites, a direct sidecar or ledger
+    read in the desktop, a timer or poll, a CLI-private import, an invented seat
+    or round value, inline placeholder prose, a collapsed failed frame, and a
+    partially committed candidate. The tree it was read from is the tree that
+    lands: `git status --short` prints nothing.
+    Exactly one targeted repair cycle is allowed: run the commands in the order
+    given under Bounded refinement — the discovered desktop lane command first —
+    repair one named failure, and rerun that command and everything after it. If
+    a second cycle would be needed, stop and report the exact failing command —
+    or the unresolved visual or data contract — with its evidence, rather than
+    iterating.
+
+12. **The landed desktop lane runs green over this cut's cases.** The exact
+    documented non-interactive build-and-test command of the desktop lane
+    `0256.1` landed is discovered at execution time, extended with focused
+    coverage of the outcomes goals 1-8 assign to it — the four rendered row
+    forms, the failed form staying distinct, at-most-one bright title with
+    exactly one under a supplied selection, the right side's round and role
+    segments including their absent cases, elapsed rendered from a positive span
+    and omitted in every omission case, a rejected projection leaving the
+    previously accepted list intact, and a settled run reconstructed afresh
+    reproducing its rows, states and spans — run, and green. It exits 0, and the
+    work summary names it verbatim with its outcome.
+    Decided by that command's exit status, reported verbatim. It is not declared
+    as a board check because no such command exists at the HEAD this plan was
+    written against (`0256.1:15`) and a check must already exist; that is a
+    naming limit, not a relaxation. If the lane is absent at execution time, the
+    prerequisite chain `0265.3` → `0265.1` → `0256.1` was not honoured: that is
+    an unmet dependency, it is reported as one, and this task does not pass.
+    Excluded: standing up a parallel desktop lane of the run's own to satisfy
+    this goal; substituting workspace commands or the closing diff read for it;
+    weakening the coverage to compile-only; declaring it as a board check.
+
+## APPROACH — suggested route, not a boundary
+
+### Discover before editing
+
+None of the desktop side exists at the HEAD this plan was written against, and
+both prerequisites are still open. Read what they landed; do not carry a guess
+from this file into an edit.
+
+- Root `Cargo.toml`'s exclude list and the top-level listing are the suggested
+  way to locate the desktop project; its manifest, README, justfile or CI lane
+  is where its documented command is likely written. Goal 12 is what binds that
+  command; this bullet only suggests where to find it.
+- Read `0265.1`'s token entry point and take every value from it —
+  `surface-raised #16181d`, `text-bright #eceef2`, `text #d7dae0`,
+  `text-secondary #8b909c`, `text-muted #585d68`, `dot-idle #33363d`,
+  `accent #7fb2ff`, `ok #7fc79a` and the layout constants
+  (`tokens.md:15-48`, `71-84`) are that module's contents, not this call site's.
+- Read `0265.3`'s state presentation and extend it with the frame-list dot and
+  the selection concern. Do not create a second colour/word table: `0265.3:65-74`
+  and `0265.3:127-133` already fix that boundary from the other side.
+- Read what `0257.1`-`0257.3` landed for the selected-detail contract, the
+  shared frame projection and the live reconciliation, and consume the one
+  detail contract that exists. If `0257` did not land the frame spans on that
+  detail, extending it is preferred over adding a second detail request.
+
+### Edit order
+
+1. The shared frame-span derivation and its omission semantics, near the
+   sidecar/detail boundary, with the CLI consumer moved onto it.
+2. The compact-unit duration formatting, shared where a second consumer exists.
+3. The row-state presentation: the state-to-(dot role, title tone, right-side
+   form) selection, extending `0265.3`'s mapping rather than duplicating it,
+   exhaustive over the shared projection's states so a new one is a compile
+   error.
+4. The list primitive that owns the bright-title/selection invariant.
+5. The four row forms and their geometry.
+6. The `placeholders` entry for the current-frame description, and the current
+   row's right-side composition.
+7. The focused proofs in the desktop lane and in the workspace, then the desktop
+   command, then the declared checks and the remaining named commands.
+
+### Expected surfaces and signatures — guesses to be replaced by discovery
+
+Something shaped like a shared `frame_span(frame_key, records) -> Option<Duration>`
+carrying the duplicate-key and non-increasing guards, living in IO beside
+`activity_sidecar` or in core beside the story types; a compact
+`human_elapsed_text`-shaped formatter lifted to shared code if and only if a
+second consumer exists; a `frame_row(state, title, right, selected)` desktop
+component and a `frame_list(rows, selection)` that owns the invariant of goal 3.
+Names, module paths and signatures follow whatever conventions `0256`, `0257`
+and `0265.1` established. Whether the center answers compact spans or bounded
+raw records is the run's call — note only that the wire cap is 1 MiB
+(`center.rs:48-52`) and sidecars are append-only and unbounded, so a compact
+center-side projection of just the selected detail's spans is the safer shape.
+
+### What the focused proof is expected to establish
+
+These restate the goals' observable outcomes as coverage suggestions; how to
+observe each one inside the existing harness is the run's call.
+
+- Each of the four forms renders its own dot role, title tone and right side.
+- A rejected-status frame and a stopped-at-current frame both render failed, and
+  neither reads as done or pending.
+- Bright-title count is 1 for a live run with a selection, and never exceeds 1
+  for a completed or failed run.
+- A unique frame with a positive span renders a compact time; absent sidecar, no
+  matching records, one record, equal timestamps, and a frame id shared across
+  loop iterations each render no time, with the frame tree otherwise intact.
+- A truncated trailing sidecar line does not discard the valid records before it.
+- `Some(R)` renders the round segment, `None` renders none, and neither leaves a
+  dangling `·`.
+- The trailing segment renders the session's current role.
+- The description resolves through the `placeholders` module entry.
+- A settled run reconstructed twice renders identical rows and spans.
+- A rejected projection leaves the previously accepted list intact with no
+  orphaned current row; the `0256.2`-`0256.5` and `0257.3` tests pass unmodified.
+
+### Reuse points
+
+`story::beat_duration`'s first/last-with-duplicate-key-guard semantics
+(`story.rs:535-554`) as the span derivation to extract, not to copy;
+`ctx_traits_io::activity_sidecar::{read_activity, ActivityRecord}` for the
+records; `StoryBeat.frame_key` and the item-id-or-title convention
+(`story.rs:657-666`) for frame identity; `tui::human_elapsed_text`'s compact-unit
+behaviour (`modules/cli/src/app/tui.rs:35-47`) for `4s` / `3m 12s`, never
+`elapsed_text`'s zero-padded clock; `0257`'s shared frame projection for the
+tree, states and active path; `CenterDelta::ActivityLine` for live evidence;
+`RunSummary.verdict_rounds` for the round; `Session.current_agent.role` for the
+trailing segment; `0265.3`'s state presentation and `placeholders` module;
+`0265.1`'s token entry point for every value. The landed TUI reducer is the
+semantics to match, not code to import: stage the whole snapshot, project the
+complete candidate, commit only on success, clone accepted rows before applying a
+delta, and retain the previous accepted map on rejection
+(`modules/cli/src/app/dashboard/worker.rs:254-415`). Where the desktop needs
+CLI-private semantics, extract into shared core/IO and land the CLI as the second
+consumer; goal 1 is where the exclusion of CLI-private imports is stated.
+
+### Reporting mechanics — suggestions
+
+What must be reported is fixed by GOALS and Done when; this subsection only
+suggests how. Quoting each executed command in a fenced block with its exit
+status beside it reads better than prose. Naming the discovered desktop path
+next to that lane's command helps the next cut declare it as a board check.
+Stating the two owner corrections under their own heading — the 11.5-vs-11
+description size, and the missing failed row form — keeps them from being read
+as commentary. Deviations from this approach are reported in the work summary as
+deviations; that is a report, not a violation and not an escalation.
+
+### If something is red
+
+Isolate with `CARGO_TARGET_DIR=target` before trusting a phantom "cannot find X";
+a shared cross-worktree target dir flakes gates. Rust is pinned to 1.97.1 by
+`rust-toolchain.toml` and the desktop directory inherits that pin unless
+`0256.1` gave it its own toolchain file. Keep any repair scoped to the one red
+command and preserve every invariant named under Excluded.
+
+## Excluded — not cells here
+
+- Loop narration and the live activity block (`0265.6`), overflow clip-and-fade
+  (`0265.7`), the frame counter (`0265.14`), the preview column, the rail, the
+  title bar, the header and the chrome. This cut consumes `ActivityLine` to keep
+  its elapsed evidence current; it does not own the visible eight-line activity
+  block.
+- The light column of `tokens.md`, and any edit to `.internal/docs/design/**`.
+- A second detail protocol beside `0257`'s; a second projection of the compact
+  row; any ledger, store, sidecar or filesystem read on the desktop side; a GUI
+  poll loop; a blocking receive on gpui's UI thread.
+- A design-system phase: component registry, palette abstraction, or primitives
+  extracted for `0266`-`0269` before one of them consumes them.
+- A `[[checks]]` entry that executes the desktop lane. No such command exists in
+  the repository today, so declaring one now would be a fabrication. The lane
+  still binds: goal 12 requires the run to discover it, extend it, run it green
+  and report it verbatim.
+- Packaging and release work (`0260`), the summons surface (`0259`).
+- Anything discovered beyond these goals: that is board material, not a cell
+  here.
 """
 validation = """
 ## Watch
 
-- **A missing elapsed time is the correct render.** The sidecar is derived evidence, not authority; inferring a duration from the run's total, from row order, or from a render-time clock fabricates timing the system never observed.
-- **No literal values at a call site.** Every colour, size, weight and spacing comes from the token constants; a hex inside a primitive is the same defect as a hex inside a screen.
-- **The glyph set is closed** — `↰ ↳ → · ∷` only. An icon font, an emoji, or a checkmark standing in for a done state violates rules 2 and 3 at once. No corner radius inside the canvas.
-- **Dots belong to stateful lists only.** The frame list qualifies; prose does not, and no later screen may inherit a dot into a prose region because this primitive made one easy.
-- **Compact rows must not each trigger a read.** The frame list belongs to the selected run's single reconstruction; per-row ledger, store or sidecar reads break the ledger-is-authoritative posture.
-- **No poll loop**, and no blocking receive on gpui's UI thread. Row state changes arrive as center deltas.
-- **Snapshot-then-delta ordering is the contract**: a rejected projection must leave no half-updated row and no orphaned current row.
+- **A missing elapsed time is the correct render.** The sidecar is derived
+  evidence, not authority — writes are swallowed on failure and truncated
+  trailing lines are tolerated (`activity_sidecar.rs:13-15`, `177-198`).
+  Inferring a duration from `ledger.elapsed_seconds`, from row order, or from a
+  render-time clock fabricates timing the system never observed.
+- **A shared frame id is ambiguous evidence, not a longer span.** Loop and
+  repeated executions share one durable activity id; first-to-last across them
+  would include the gap between executions and lie. That guard already exists in
+  `beat_duration` and must survive extraction.
+- **The span is observed activity, not wall time.** `finish_frame` appends no
+  terminal record (`drive.rs:595-611`). Render the evidence; do not claim more
+  for it.
+- **Failed must not collapse.** Painting a failed frame `ok` green is the exact
+  lie rule 1 exists to prevent; hiding it as pending is worse.
+- **Bright follows selection, not state.** A row that is bright because it is
+  `Done` breaks rule 4 the moment two rows are done.
+- **No literal values at a call site.** Every colour, size, weight, spacing and
+  family comes from `0265.1`'s token entry point; a hex inside a primitive is
+  the same defect as a hex inside a screen.
+- **The glyph set is closed** — `↰ ↳ → · ∷` only. An icon, an emoji, or a
+  checkmark standing in for a done state violates rules 2 and 3 at once. No
+  corner radius inside the canvas; rule 4's 5px ellipse is the state marker, not
+  row chrome.
+- **Dots belong to stateful lists only.** The frame list qualifies; prose does
+  not, and no later screen may inherit a dot into a prose region because this
+  primitive made one easy.
+- **No design example string is hardcoded.** `round 2` and `smart` illustrate
+  one run. `verdict_rounds: None` is missing coverage, not round zero; an absent
+  current role renders no trailing segment.
+- **Compact rows must not each trigger a read.** The frame list belongs to the
+  selected run's single reconstruction; per-row ledger, store or sidecar reads
+  break the ledger-is-authoritative posture.
+- **No poll loop**, and no blocking receive on gpui's UI thread. Row state
+  changes arrive as center deltas.
+- **Snapshot-then-delta ordering is the contract**: a rejected projection must
+  leave no half-updated row and no orphaned current row.
 - **No inline placeholder literal** for the current row's description.
-- **Fail-loud, no direct-reader fallback**; stale rows are never presented as current, and a failed detail read is stated rather than filled from the filesystem.
-- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
-- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+- **Fail-loud, no direct-reader fallback**; stale rows are never presented as
+  current, and a failed detail read is stated rather than filled from the
+  filesystem.
+- **The export is measurement, the rules are the specification.** Copy geometry
+  from `reference/sessions.html:293-347`, `413-459`, `513-572`; take content and
+  colour semantics from `grammar.md` and `screens/sessions.md`. Content
+  Correction 1 is this cut's fifth conflict and is reported, not smoothed over.
+- **Workspace gate cost must not move**: gpui must not enter root resolution,
+  the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes.
+  Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a
+  phantom "cannot find X".
+- **The declared checks decide the workspace-side invariants and the shared
+  semantics this cut extracts.** They show the workspace stayed gpui-free, that
+  the reconstruction filter and the center wire contract still run and pass,
+  and — through the gate — that the extracted span's omission semantics did not
+  regress. That is the shared substance of goals 4 and 8 and the semantics
+  beneath goal 1.
+- **The rendered outcomes are decided by executing the desktop lane, not by
+  reading the diff.** Goal 12 binds the lane `0256.1` landed: the row forms, the
+  brightness invariant, the right-side segments, the atomic candidate and the
+  reopened-settled render are observed by focused coverage run there. The
+  closing diff read is code-shape review — what is imported, read, duplicated,
+  literal, or out of scope — and it is supplementary wherever a goal names a
+  runtime outcome. None of the declared checks executes a gpui render, and the
+  lane's command is not declared as one only because it does not exist at this
+  HEAD (`0256.1:15`); a later cut declares it once it does. An absent lane at
+  execution time is an unmet dependency and the task does not pass.
 
 ## Done when
 
-The Sessions frame list renders done, current and pending rows in the exact token forms `screens/sessions.md` names, with step names, the current frame's name, seat and round from the selected run's center-served reconstruction, done-row elapsed times from the activity sidecar's durable `at_epoch_ms` evidence delivered with that same detail — and no time rendered for a frame the sidecar has no records for — and the current row's description from the `placeholders` module. Exactly one row carries a bright title. Row state changes arrive as deltas with no timer, no per-row read and no partially committed row after a rejected projection. The semantic colour roles, state words, status dot, selection rule and sans/mono split exist as primitives the later screens compose rather than re-derive. Root workspace resolution and the root lockfile remain gpui-free.
+- Every command the run executed is green, and the work summary names each one
+  verbatim with its outcome. Nothing is called done over a red command.
+- The desktop lane's exact documented non-interactive build-and-test command,
+  discovered from what `0256.1` landed and extended with this cut's cases, exits
+  0, and the work summary names it verbatim with its outcome. Its coverage
+  observes, by running the desktop: the done, current, pending and failed forms
+  each rendering their own dot role, title tone and right side; a
+  `Rejected`-status frame and a stopped-at-current frame both rendering failed
+  and neither reading as done or pending; exactly one bright title for a live
+  run with a supplied selection and never more than one for a completed or
+  failed run, with none when no selection is supplied; `Some(R)` rendering the
+  round segment and `None` rendering none, the trailing segment rendering the
+  session's current role, and neither absence leaving a dangling `·`; a
+  positive-span row rendering a compact time while each omission case — absent
+  sidecar, no matching records, one record, equal timestamps, a loop-shared
+  frame id — renders nothing in its place with the frame tree intact; a rejected
+  projection leaving the previously accepted list intact with no orphaned
+  current row; and a settled run reconstructed afresh reproducing the same rows,
+  states and spans. If that lane is absent, this clause is unmet, it is reported
+  as an unmet dependency on `0265.3` → `0265.1` → `0256.1`, and the task does
+  not pass; no workspace command and no diff read substitutes for it.
+- The closing static read of the diff printed by `git diff main...HEAD`, read
+  against `screens/sessions.md:19-31`, `grammar.md`, `tokens.md` and
+  `reference/sessions.html`, shows the structural half the lane does not
+  observe: the four forms carrying the geometry of
+  `reference/sessions.html:293-347`, `413-459` and `513-572`, with no colour,
+  size, spacing, weight or family literal at a call site; the current
+  description at the 11.5 step, resolved through the single `placeholders`
+  entry rather than an inline literal; the presentation exhaustive over the
+  states the shared projection reports, with no shared fallback; the bright
+  title expressed by the list primitive and never settable per row by a caller;
+  the round and trailing segments reading `verdict_rounds` and
+  `current_agent.role`, with no hardcoded `round 2`, `smart` or default-to-zero;
+  one span derivation and one duration formatter, both shared, with no desktop
+  copy and no substitute value where the derivation returned none; the
+  `0256.2`-`0256.5` and `0257.3` tests unmodified; no CLI-private import; no
+  desktop sidecar, ledger, store or filesystem read; no timer, interval or
+  spawned tick; no blocking receive on the UI thread; and no corner radius
+  inside the canvas beyond the 5px dot.
+- The work summary states the durable role mapping chosen
+  (`Session.current_agent.role`), the failed row form chosen, and the two owner
+  corrections raised against the design artifacts — the 11.5-vs-11 description
+  size, and the missing failed row form — as corrections rather than edits to
+  `.internal/docs/design/**`.
+- The declared root-resolution check, run verbatim from the repository root,
+  exits 0.
+- `just test` exits 0, carrying this cut's shared frame-span derivation and its
+  omission cases — unique frame with a positive span, no frame key, no matching
+  records, a single record, a non-increasing pair, a truncated or malformed
+  trailing line with the valid records before it honoured, and a loop-shared
+  frame id yielding no duration — and the existing CLI coverage of the same
+  boundary (`story.rs:1213-1229`) still green after the extraction.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view` exits 0,
+  run under that existing filter as written, showing the reconstruction
+  semantics this cut renders were consumed, not forked. The closing diff read is
+  what establishes that no second flattening, state derivation or active-path
+  rule was added alongside them.
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`
+  exits 0, whether or not this cut touched the center detail contract.
+- `git diff --name-only main...HEAD` lists no path under `.internal/docs/design/`,
+  no file owned by `0265.6`, `0265.7` or `0265.14`, and no second center detail
+  contract. Substitute the run's actual base branch if it is not `main`.
+- `git status --short` prints nothing, and the closing diff was read from the
+  tree that lands.
+
+## Bounded refinement
+
+Run, in order: the discovered desktop lane command required by goal 12, the
+root-resolution check, `just test`,
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view`, and
+`CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center`, then
+the closing diff read.
+Permit at most one targeted repair-and-rerun round: repair one named defect,
+then rerun the failed command and every command after it in that order. If a
+second round would be needed, stop and report the exact failing command — or the
+unresolved visual or data contract — with its evidence rather than iterating.
+That is the stop condition, not a judgement call.
 """
 [relations]
 parent = "0265"
@@ -52,4 +740,20 @@ depends-on = ["0265.3", "0257"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+timeout-ms = 600000
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "the reconstructed run-view projection stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
+timeout-ms = 900000
+
+[[checks]]
+name = "the center wire contract stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 900000
