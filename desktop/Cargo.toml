@@ -23,6 +23,7 @@ path = "src/main.rs"
 
 [dependencies]
 gpui = "0.2.2"
+ctx-traits-core = { path = "../modules/core" }
 ctx-traits-io = { path = "../modules/io" }
 async-channel = "2"
 

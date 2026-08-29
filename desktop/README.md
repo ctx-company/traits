@@ -74,3 +74,48 @@ cargo run --bin ctx -- traits internal stats --json
 
 then run `just desktop-run` within that center's idle window (300s by
 default).
+
+## Run rows (0256.3)
+
+`src/run_row.rs` projects the raw `CenterPublicRow` snapshot into a
+presentation-ready `RunRow` list. Each row carries the center-supplied
+`repo_key`/`repo_path` as its repository identity, and `ledger_path` (the
+center's own primary key) as the row's identity for later selection and
+delta application — never `run_id`/`session_id`, which collide across an
+unreadable row and across same-named runs in different repositories.
+
+A row shows: a repository label (last path segment of `repo_path`, falling
+back to the raw `repo_key` when the center could not resolve a path — this
+is a real case, not hypothetical), a title (falling back through
+`task_key` → `trait_id` → `run_id` → `session_id`), the run id and trait,
+a state (`live`, a resumable/terminal `SessionState`, or `unreadable`), a
+detail line (the current sequence title, or the parse error for an
+unreadable row), elapsed time, and a compact token count.
+
+`RepoScope` (`All` or `Repo(repo_key)`) is a client-side filter over the
+machine-wide snapshot, driven only by `repo_key` values that already
+arrived over the wire. It is deliberately never derived from the desktop
+process's own working directory — there is no "show my repo" inference
+here, only an explicit scope an owner would set. `Shell::set_scope` makes
+the scoped view exercisable and testable; no scope control exists in the
+window yet; adding one is a later task.
+
+The list is a plain `div().id("run-list").flex_col().overflow_y_scroll()`
+column, one row per `RunRow`, projected fresh on every render call. That
+re-projection and the unvirtualized row list are accepted at this
+walking-skeleton's scale — see 0256.4 for turning the raw row `Vec` into a
+`ledger_path`-keyed map with a cached projection, and `uniform_list` for
+virtualization if the list ever needs it.
+
+`elapsed_text` and `tokens_text` intentionally mirror
+`ctx_traits_cli::app::tui::elapsed_text` and
+`app::dashboard::dashboard_tokens_text_from_summary` byte-for-byte in
+output shape, but are not shared code with the CLI: those functions are
+`pub(crate)` inside `ctx-traits-cli`, which the desktop must not depend on
+(no CLI-private ratatui presentation as a desktop dependency). See the doc
+comment atop `run_row.rs`.
+
+Manual smoke test: with a matching-version center running (see above),
+`just desktop-run` should open a window listing every run the center knows
+about, grouped implicitly by the order above (live first, then newest
+ledger modification, ties broken by `ledger_path`).

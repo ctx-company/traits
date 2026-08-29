@@ -16,9 +16,10 @@ The center model is machine-wide rather than bound to the launch directory. Do n
 ## Done when
 The native window renders the initial compact snapshot as repository-aware run rows, can represent both all-repository and repository-scoped state from center-provided identity, and does so without any full-ledger, store, sidecar, or working-directory-relative lookup. The desktop project's independent tests cover row projection and repository separation, and the workspace per-round gate passes.
 """
+
 [relations]
-parent = "0256"
 depends-on = ["0256.2"]
+parent = "0256"
 
 [[checks]]
 name = "workspace per-round gate passes"

@@ -1,9 +1,10 @@
+use gpui::prelude::*;
 use gpui::{
-    Bounds, Context, IntoElement, ParentElement, Pixels, Render, Size, TitlebarOptions, Window,
-    WindowOptions, div, px, size,
+    Bounds, Context, Pixels, Render, Size, TitlebarOptions, Window, WindowOptions, div, px, size,
 };
 
 use crate::center_link::{self, LinkUpdate};
+use crate::run_row::{self, RepoScope};
 use ctx_traits_io::center::CenterPublicRow;
 
 pub const APP_TITLE: &str = "ctx desktop";
@@ -29,6 +30,7 @@ pub enum CenterState {
 
 pub struct Shell {
     center: CenterState,
+    scope: RepoScope,
 }
 
 impl Shell {
@@ -50,7 +52,14 @@ impl Shell {
         .detach();
         Self {
             center: CenterState::Connecting,
+            scope: RepoScope::All,
         }
+    }
+
+    /// Exposed so the scoped view is exercisable and testable ahead of any UI
+    /// control for it — a control is out of scope for this task.
+    pub fn set_scope(&mut self, scope: RepoScope) {
+        self.scope = scope;
     }
 
     fn apply(&mut self, update: LinkUpdate) {
@@ -69,11 +78,43 @@ impl Render for Shell {
                 div().child(format!("center unavailable: {message}"))
             }
             CenterState::Connected { rows } => {
-                let mut container = div().child(format!("{} runs", rows.len()));
-                for row in rows {
-                    container = container.child(div().child(row.summary.run_id.clone()));
+                // Projected fresh per render at walking-skeleton scale; 0256.4
+                // is where `rows` becomes a `ledger_path`-keyed map and this
+                // projection gets cached against delta application instead.
+                let projected = run_row::project(rows, &self.scope);
+                let header = match &self.scope {
+                    RepoScope::All => format!("{} runs", projected.len()),
+                    RepoScope::Repo(repo_key) => {
+                        format!("{} runs in {repo_key}", projected.len())
+                    }
+                };
+                let mut list = div()
+                    .id("run-list")
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .overflow_y_scroll();
+                for row in &projected {
+                    list = list.child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .gap_2()
+                            .child(row.repo_label.clone())
+                            .child(row.title.clone())
+                            .child(format!("{} / {}", row.run_id, row.trait_id))
+                            .child(row.state_text.clone())
+                            .child(row.detail_text.clone())
+                            .child(row.elapsed_text.clone())
+                            .child(row.tokens_text.clone()),
+                    );
                 }
-                container
+                div()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .child(header)
+                    .child(list)
             }
         }
     }
