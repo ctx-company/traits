@@ -226,6 +226,18 @@ aside h2{font-family:var(--sans);font-size:16px;font-weight:600;color:var(--text
 .kids button:hover{color:var(--accent-bright);text-decoration:underline}
 .kids button span{color:var(--text-muted);font-size:10.5px}
 footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
+.codes{margin:14px 0 0;padding:10px 0 0;border-top:1px solid var(--border-soft)}
+.codeblk{margin:0 0 10px;border:1px solid var(--border-soft);border-radius:4px;background:var(--surface);overflow:hidden}
+.codeblk .ch{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--border-soft);font-family:var(--mono);font-size:10.5px;color:var(--text-fact)}
+.codeblk .ch span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.codeblk .ch a{color:var(--accent);text-decoration:none;margin-left:8px}
+.codeblk .ch a:hover{color:var(--accent-bright);text-decoration:underline}
+.codeblk pre{margin:0;padding:8px 10px;overflow:auto;max-height:340px;font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--text-session)}
+.codeblk .ln{color:var(--text-faint);user-select:none;display:inline-block;min-width:3.2em}
+.codeblk .drift{color:var(--warn);font-family:var(--mono);font-size:10.5px;padding:4px 8px}
+.xref{color:var(--accent);cursor:pointer;border-bottom:1px dashed var(--accent-dim)}
+.xref:hover{color:var(--accent-bright)}
+#tourpos{font-family:var(--mono);font-size:11px;color:var(--text-secondary);white-space:nowrap}
 @media (max-width:820px){main{flex-direction:column}aside{width:auto;max-width:none;border-left:none;border-top:1px solid var(--border-soft)}#map{min-height:340px}}
 </style>
 </head>
@@ -233,16 +245,18 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
 <header>
   <span class="eyebrow">ctx walkthrough</span>
   <nav id="crumbs" aria-label="Path"></nav>
+  <span id="tourpos" aria-live="polite"></span>
   <button id="theme" aria-label="Cycle color theme">theme: auto</button>
 </header>
 <main>
   <div id="map" role="tree" aria-label="Treemap"></div>
   <aside id="panel"></aside>
 </main>
-<footer>click a tile to zoom into it; click a leaf to read it; Esc or Backspace goes up one level · tile area = lines of code the node covers</footer>
+<footer>click a tile to zoom in; Esc/Backspace goes up · j/k or ←/→ walk the tour in reading order · tile area = lines the node covers · code shown is read from the repo at render time</footer>
 <script>
 var DATA = __DATA__;
 var HORIZON = __HORIZON__;
+var REPOROOT = __REPOROOT__;
 (function(){
   var byId = {};
   DATA.forEach(function(n){ byId[n.id] = n; });
@@ -252,12 +266,24 @@ var HORIZON = __HORIZON__;
   function esc(s){
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   }
-  function prose(s){
+  var NAMEIDX = {};
+  DATA.forEach(function(n){
+    if (n.symbol){ NAMEIDX[n.symbol.split(":").pop()] = n.id; }
+  });
+  DATA.forEach(function(n){
+    var m = n.title && n.title.match(/^[A-Za-z_][A-Za-z0-9_]*$/);
+    if (m && !NAMEIDX[n.title]) NAMEIDX[n.title] = n.id;
+  });
+  function prose(s, selfId){
     var parts = String(s).split(/\\n\\s*\\n/);
     var html = "";
     for (var i=0;i<parts.length;i++){
       if (!parts[i].trim()) continue;
-      var p = esc(parts[i].trim()).replace(/`([^`]+)`/g, function(_, c){ return "<code>" + c + "</code>"; });
+      var p = esc(parts[i].trim()).replace(/`([^`]+)`/g, function(_, c){
+        var tid = NAMEIDX[c];
+        if (tid && tid !== selfId) return "<code class=\\"xref\\" data-id=\\"" + tid + "\\">" + c + "</code>";
+        return "<code>" + c + "</code>";
+      });
       html += "<p>" + p + "</p>";
     }
     return html;
@@ -361,20 +387,45 @@ var HORIZON = __HORIZON__;
     });
   }
 
+  function editorLinks(path, start){
+    var abs = REPOROOT + "/" + path;
+    return "<a href=\\"vscode://file" + abs + ":" + start + "\\">code</a>" +
+           "<a href=\\"zed://file" + abs + ":" + start + "\\">zed</a>";
+  }
+  function refStart(r){
+    var m = String(r.lines).match(/^(\\d+)/);
+    return m ? m[1] : "1";
+  }
   function renderPanel(){
     var n = byId[selectedId];
     var kindClass = String(n.kind).toLowerCase().replace(/[^a-z-]/g, "");
     var html = "<span class=\\"kind k-" + kindClass + "\\">" + esc(n.kind) + "</span>" +
                "<h2>" + esc(n.title) + "</h2>" +
                "<p class=\\"sum\\">" + esc(n.summary) + "</p>" +
-               "<div class=\\"exp\\">" + prose(n.explanation) + "</div>";
+               "<div class=\\"exp\\">" + prose(n.explanation, n.id) + "</div>";
     if (n.refs.length){
-      html += "<div class=\\"refs\\"><h3>code</h3>";
-      n.refs.forEach(function(r){ html += "<div>" + esc(r.path) + "<span>:" + esc(r.lines) + "</span></div>"; });
+      html += "<div class=\\"refs\\"><h3>refs</h3>";
+      n.refs.forEach(function(r){ html += "<div>" + esc(r.path) + "<span>:" + esc(r.lines) + "</span> " + editorLinks(r.path, refStart(r)) + "</div>"; });
+      html += "</div>";
+    }
+    if (n.code && n.code.length){
+      html += "<div class=\\"codes\\"><h3>source</h3>";
+      n.code.forEach(function(c){
+        html += "<div class=\\"codeblk\\"><div class=\\"ch\\"><span>" + esc(c.path) + ":" + esc(c.lines) + "</span><span>" + editorLinks(c.path, c.start) + "</span></div>";
+        if (c.drifted) html += "<div class=\\"drift\\">" + esc(c.drifted) + "</div>";
+        if (c.text){
+          var out = "";
+          c.text.split("\\n").forEach(function(line, i){
+            out += "<span class=\\"ln\\">" + (c.start + i) + "</span>" + esc(line) + "\\n";
+          });
+          html += "<pre>" + out + "</pre>";
+        }
+        html += "</div>";
+      });
       html += "</div>";
     }
     if (n.id === "__ROOT__" && HORIZON){
-      html += "<div class=\\"refs\\"><h3>horizon</h3><div class=\\"exp\\">" + prose(HORIZON) + "</div></div>";
+      html += "<div class=\\"refs\\"><h3>horizon</h3><div class=\\"exp\\">" + prose(HORIZON, n.id) + "</div></div>";
     }
     if (n.children.length){
       html += "<div class=\\"kids\\"><h3>inside</h3></div>";
@@ -396,9 +447,41 @@ var HORIZON = __HORIZON__;
     }
   }
 
-  function renderAll(){ renderCrumbs(); renderMap(); renderPanel(); }
+  var ORDER = [];
+  (function walk(id){
+    ORDER.push(id);
+    byId[id].children.slice().sort(function(a,b){ return byId[b].total - byId[a].total; }).forEach(walk);
+  })(ROOT);
+  function jumpTo(id){
+    var n = byId[id];
+    if (!n) return;
+    selectedId = id;
+    focusId = n.children.length ? id : (n.parent || id);
+    renderAll();
+  }
+  function renderTourPos(){
+    var el = document.getElementById("tourpos");
+    var i = ORDER.indexOf(selectedId);
+    el.textContent = i >= 0 ? (i + 1) + " / " + ORDER.length : "";
+  }
+  function renderAll(){ renderCrumbs(); renderMap(); renderPanel(); renderTourPos(); }
+
+  document.getElementById("panel").addEventListener("click", function(e){
+    var t = e.target.closest ? e.target.closest(".xref") : null;
+    if (t && t.getAttribute("data-id")){ jumpTo(t.getAttribute("data-id")); }
+  });
 
   document.addEventListener("keydown", function(e){
+    if (e.key === "j" || e.key === "ArrowRight"){
+      var i = ORDER.indexOf(selectedId);
+      if (i < ORDER.length - 1){ jumpTo(ORDER[i + 1]); e.preventDefault(); }
+      return;
+    }
+    if (e.key === "k" || e.key === "ArrowLeft"){
+      var i2 = ORDER.indexOf(selectedId);
+      if (i2 > 0){ jumpTo(ORDER[i2 - 1]); e.preventDefault(); }
+      return;
+    }
     if (e.key === "Escape" || e.key === "Backspace"){
       var f = byId[focusId];
       if (f.parent){ focusId = f.parent; selectedId = focusId; renderAll(); e.preventDefault(); }
@@ -459,10 +542,57 @@ def merge_inputs(skeleton_arg: str, batches_arg: str):
     return [by_id[nid] for nid in order]
 
 
+CODE_KINDS = {"type", "function"}
+MAX_EMBED_LINES = 90
+
+
+def embed_code(nodes) -> None:
+    """Attach the actual source lines each leaf node's refs cover (read at
+    render time, deterministically, from the working tree). Whole-file spans
+    on upper nodes are skipped; drifted spans are marked, never guessed."""
+    cache = {}
+    for n in nodes:
+        if n.get("kind") not in CODE_KINDS:
+            continue
+        blocks = []
+        for ref in n.get("refs", []):
+            path = ref.get("path", "")
+            if path not in cache:
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        cache[path] = fh.read().splitlines()
+                except OSError:
+                    cache[path] = None
+            lines = cache[path]
+            span = str(ref.get("lines", "")).split(",")[0].strip()
+            bits = span.split("-", 1)
+            try:
+                start = int(bits[0])
+                end = int(bits[1]) if len(bits) > 1 else start
+            except ValueError:
+                continue
+            if lines is None:
+                blocks.append({"path": path, "lines": span, "start": start, "text": "", "drifted": "file unreadable at render time"})
+                continue
+            if start > len(lines):
+                blocks.append({"path": path, "lines": span, "start": start, "text": "", "drifted": "span beyond current file — repo drifted since the run"})
+                continue
+            end = min(end, len(lines))
+            chunk = lines[start - 1 : end]
+            drift = ""
+            if len(chunk) > MAX_EMBED_LINES:
+                chunk = chunk[:MAX_EMBED_LINES]
+                drift = f"trimmed to {MAX_EMBED_LINES} of {end - start + 1} lines"
+            blocks.append({"path": path, "lines": span, "start": start, "text": "\n".join(chunk), "drifted": drift})
+        if blocks:
+            n["code"] = blocks
+
+
 def main() -> None:
     if len(sys.argv) < 5:
         fail("usage: render.py <skeleton> <batches> <horizon-text> <output-html-path>")
     nodes, root_id = normalize(merge_inputs(sys.argv[1], sys.argv[2]))
+    embed_code(nodes)
     horizon = sys.argv[3].strip()
     out_path = sys.argv[4].strip()
     if not out_path:
@@ -471,7 +601,7 @@ def main() -> None:
     root = next(n for n in nodes if n["id"] == root_id)
     data_json = json.dumps(
         [
-            {k: n[k] for k in ("id", "parent", "title", "kind", "summary", "explanation", "refs", "total", "children")}
+            {k: n[k] for k in ("id", "parent", "title", "kind", "summary", "explanation", "refs", "total", "children", "code") if k in n}
             for n in nodes
         ],
         ensure_ascii=False,
@@ -481,6 +611,7 @@ def main() -> None:
         TEMPLATE.replace("__TITLE__", root["title"].replace("<", "").replace(">", "") + " — walkthrough")
         .replace("__DATA__", data_json)
         .replace("__HORIZON__", json.dumps(horizon, ensure_ascii=False).replace("</", "<\\/"))
+        .replace("__REPOROOT__", json.dumps(os.path.abspath(os.getcwd())))
         .replace("__ROOT__", root_id)
     )
 
