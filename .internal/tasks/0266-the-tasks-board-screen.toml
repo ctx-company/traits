@@ -1,0 +1,57 @@
+schema-version = "0.2"
+key = "0266"
+title = "The Tasks (Board) screen"
+status = "draft"
+raised = "2026-08-29"
+content = """
+The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Tasks is the first of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders a board. This charter is that screen — state sections, task rows, the board bar and its `new task` action, and the selected-task preview — built per `.internal/docs/design/screens/tasks.md` on the vocabulary `0265` extracted while rendering Sessions.
+
+The screen is small and fully specified, and its spec tags every leaf. The main pane is a counts-from-data header with a placeholder-phrased italic summary, three state sections (`In progress`, `Ready`, `Draft`) of mono-11 muted headings over task rows, and a bottom bar reading `synced` in ok with `.internal/tasks @ <sha>` provenance and a `new task` action that creates a draft. The 380-wide preview is a headerless lede plus four blocks — `details`, `facts`, `checks`, `landing` — and a footer citing `.internal/tasks` with a sync time. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
+
+What makes this a charter rather than a bare task is a stop condition none of its children owns alone: the board becomes something the center serves. `0265.2` taught the center to answer the task a run claims; this screen needs the whole board — every task with its derived state, its facts, its declared checks and the tasks-tree sha — and the plan document's mechanism admits no alternative. Today the board is reached in-process: the CLI's task read (`modules/cli/src/app/tasks.rs`, over `ctx-traits-io::{task_files, task_board_cache}`) and the TUI's `Screen::Tasks` both walk it directly, and a separate desktop binary can reach none of it. The center's task capability is extended here and an existing face is moved onto the same answer in the same release, so nothing on this screen is a capability that exists in only one face.
+"""
+scope = """
+## Decisions
+
+- **In scope**: the Tasks screen as `screens/tasks.md` specifies it — header, the three state sections, the task row form, the bottom bar with its provenance and `new task` action, and the selected-task preview column — plus the center-side board capability each child needs and the migration of an existing face onto it inside this slice (`0266.7` for the board listing, `0266.3` for the draft creation).
+- **The parity mechanism is the plan document's, not a variant of it.** A feature is something the center serves plus per-face rendering. The desktop does not read task files, the board cache, or the tasks tree; it asks the center, and so does at least one existing face by the time this charter closes — the migration is its own child rather than a rider on a rendering cut, so its regression surface is gated honestly.
+- **Nothing here is deferred to `0261`.** That task's own scope admits no production behaviour beyond reconnect-delay parity, two-version coexistence, shared-index versioning and subscription regressions; a capability assigned to it would be assigned to nothing.
+- **Read-mostly, with one spec-tagged exception.** `screens/tasks.md` tags `new task` as data that creates a draft, so it is wired through a center-served creation with an existing face on the same path. Nothing else on this screen writes.
+- **Out of scope**: the other three new screens (each its own work item), any change to the CLI's or TUI's task surfaces beyond moving them onto the center-served answer, and every shared primitive `0265` already built.
+- **Dark theme only.** `tokens.md` records light values for later; v1 implements the dark column and must not drift the light one.
+
+## Covered work item
+
+`tasks-screen` — the v1 Tasks (Board) screen: state sections, task rows, board bar, task preview, placeholder-marked, dark theme only, chrome citing `.internal/tasks @ <sha>` per grammar rule 12.
+"""
+validation = """
+## Watch
+
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A GUI-only reader — a bespoke task-file parser, a private cache, a directory walk written for the desktop — is the capability-in-one-face defect the plan names, even when the bytes it reads are identical.
+- **No poll loop anywhere in the GUI.** Board updates are event-driven over the center's stream; the plan's third done-criterion has no per-screen exception, and a file-backed screen is exactly where a timer would be smuggled in.
+- **Blocking work stays off gpui's UI thread**, and the center-side reads it gains must not block the center's own request loop.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed board answer says so on the screen; it never falls back to reading the filesystem from the desktop process and never presents stale rows as current.
+- **The TUI stays first-class and must not regress.** Moving `Screen::Tasks` onto the center-served answer preserves its rows, ordering, filtering and error text.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set**; the center-side board capability must not pull CLI-level types or a new heavyweight dependency into the io crate, since the desktop lane inherits everything it drags in.
+- **No test may depend on committed repo content.** Prove behaviour with scratch task fixtures, never by asserting on this repository's own `.internal/tasks` — path/word/file-existence inventories are banned workspace-wide.
+- **Grammar rules are normative**: semantic colour, states as words, the closed glyph set (`↰ ↳ → · ∷`), no corner radius inside the canvas, 5px status dots only in stateful lists (the task list qualifies, the preview's prose does not), one bright title per list, sans for content and mono for machinery, a title plus exactly one italic narrated summary and no breadcrumbs, a bottom bar on every screen, overflow clipping only when content actually overflows, and provenance cited in bars and footers.
+- **Placeholder doctrine**: only leaves the spec tags `placeholder:` come from the shared module, and no placeholder string appears inline. Rendering a `data:` leaf as static content inverts the doctrine.
+- **Workspace gate cost must not move.** gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes.
+- **No desktop board check exists yet**: `0256.1` is still `ready` and no standalone desktop validation command exists in the repository, so no child declares one. Once it lands, the exact desktop command becomes declarable.
+- Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X".
+
+## Done when
+
+Every child task is closed and the stop condition holds: the Tasks screen matches `screens/tasks.md` leaf for leaf — header, the three state sections, every task-row state form, the provenance-citing bottom bar with a working `new task`, and the preview's lede, `details`, `facts`, `checks` and `landing` blocks with its footer — with every `data:` leaf rendering from a capability the center serves and at least one non-GUI face consumes, and the single `placeholder:` leaf served from the shared module. No `data:` leaf closes as an unrendered gap. No poll loop, no blocking read on the UI thread, no filesystem read from the desktop process. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
+"""
+[relations]
+depends-on = ["0265", "0258"]
+
+[[checks]]
+name = "workspace landing gate remains green and gpui-free in cost"
+command = "just test-full"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

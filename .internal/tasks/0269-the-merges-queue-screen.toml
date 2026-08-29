@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0269"
+title = "The Merges (Queue) screen"
+status = "draft"
+raised = "2026-08-29"
+content = """
+The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Merges is the last of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders a merge queue. This charter is that screen — the `Landing` / `Awaiting approval` / `Landed` sections, the landing bottom bar, and the selected-merge preview with its gates, sign-offs and landing blocks — built per `.internal/docs/design/screens/merges.md` on the vocabulary `0265` extracted while rendering Sessions.
+
+`screens/merges.md` opens with a note that governs the whole screen: **no merge-queue surface exists in the backend today.** It is the most placeholder-heavy of v1, rendered design-faithfully from the `placeholders` module, structured so each region can be wired when a merge surface lands. The spec then tags every leaf accordingly — the header summary, all three row forms, the bottom bar, the preview's `merge`, `sign-offs` and `landing` blocks and the queue footer are `placeholder:`; the `gates` block is `data:` with wiring "optional in v1, else placeholder:"; landed rows are `placeholder:` with optional wiring from the default branch's git log, which the note explicitly calls optional rather than required.
+
+That boundary is not a matter of judgement, and the evidence backs it. `RunSummary.landing` is terminal evidence — its own doc comment records that it is `None` mid-run, for a non-worktree run, and for a completed clean-tree run, because the center projection "stays honest on every intermediate update, never guessing ahead of the ledger's own evidence". `merges_from_center_rows` (`modules/cli/src/app/dashboard.rs:2557`) skips non-terminal in-progress rows entirely and classifies the rest as `Mergeable`, `Parked`, `Failed` or `Landed`. There is no actively-landing state in it, no awaiting-approval state, and no queue order. Treating those as derivable would be inventing state, which is the mirror image of the defect the placeholder doctrine exists to prevent.
+
+The stop condition none of the children owns alone is that boundary drawn once and identically across both panes: everything the spec tags `placeholder:` served from the one shared module and structured for later wiring, and only the evidence that actually exists today wired as data.
+"""
+scope = """
+## Decisions
+
+- **In scope**: the Merges screen as `screens/merges.md` specifies it — header, the three sections and their merge-row forms, the landing bottom bar, and the preview column with its `merge`, `gates`, `sign-offs` and `landing` blocks and queue footer — with each region's data/placeholder status taken from the spec's own tags rather than re-decided.
+- **The screen artifact is normative and read-only.** `.internal/docs/design/**` is implementation input; changing a leaf's tag is an owner/assistant change to the design artifact, not a worker ruling made in a task file.
+- **Wire only what exists.** The `gates` block is wired where the selected run's center-served detail actually reaches per-run gate results, and the rows it does not reach stay placeholder-tagged as the spec permits. Landed rows may optionally be wired from the default branch's git log, through a center-served answer if wired at all; the spec calls this optional and no child is failed for leaving it placeholder.
+- **Nothing on this screen infers an active landing.** Neither the `Landing` section, nor the bar's landing state word, nor the awaiting-approval classification, nor the queue ordering may be derived from current center rows, because the projection does not carry them.
+- **`watch` and `hold` are treated alike.** Both are ghost actions with no backing surface; both are represented through the placeholders contract rather than left as untracked dead controls.
+- **Out of scope**: building a merge queue, a merge surface, an approval flow or a sign-off mechanism — this screen renders, it does not create the backend it is waiting for — the other three new screens, and every shared primitive `0265` built.
+- **Read-only and dark theme only.** Nothing here writes; `tokens.md` records light values for later and v1 implements the dark column without drifting the light one.
+
+## Covered work item
+
+`merges-screen` — the v1 Merges (Queue) screen: landing / awaiting / landed sections, gates, sign-offs, read-only, placeholder-marked, dark theme only. The charter's named v1 placeholders (merge-queue contents, sign-off entries) are served design-faithfully from the shared `placeholders` module rather than inline literals.
+"""
+validation = """
+## Watch
+
+- **Do not fabricate merge state.** `RunSummary.landing` is `None` mid-run by design and `merges_from_center_rows` excludes non-terminal rows; deriving an actively-landing run, an awaiting-approval state or a queue order from them invents state that does not exist.
+- **Do not placeholder what a wired region actually reaches either.** Where the selected run's center-served detail supplies a gate result, it renders as data; the spec's "wiring optional" is a permission, not a preference.
+- **No inline placeholder literals anywhere.** Every placeholder string comes from the one shared module, so wiring a region later is a grep rather than an archaeology dig, and each region is structured to make that wiring possible.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A desktop-private merge reader, gate reader or classification is the capability-in-one-face defect the plan names.
+- **No poll loop anywhere in the GUI.** Anything that is wired updates from center deltas; a section list that visibly refreshes is where a timer would be smuggled in.
+- **Snapshot-then-delta ordering is the contract** for whatever is wired: no lost, duplicated or partially committed visible state.
+- **Blocking work stays off gpui's UI thread**, and compact list rows must never trigger ledger, store or sidecar reads — reconstruction happens only on selection.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed center request states the failure rather than re-reading the filesystem or presenting stale merge state as current.
+- **Repository identity comes from the center row**, not the desktop process's cwd; ad-hoc directories carry an `adhoc-` key that `repo_key(root)` alone cannot reproduce.
+- **Grammar rules are normative**: semantic colour including review-purple for the review agent's identity, states as words, the closed glyph set, no corner radius inside the canvas, 5px status dots only in stateful lists (merge rows are one; the preview's prose is not), one bright title per list, sans for content and mono for machinery, a title plus exactly one italic narrated summary and no breadcrumbs, a bottom bar on every screen, overflow clipping only when content actually overflows, and provenance cited in footers.
+- **Fonts**: `tokens.md` names IBM Plex Sans and Mono and the repository ships no font faces; `0265.1` owns that resolution and this screen must not silently fall back to a system face.
+- **Workspace gate cost must not move.** gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes.
+- **No desktop board check exists yet**: `0256.1` is still `ready` and no standalone desktop validation command exists, so no child declares one. Once it lands, the exact desktop command becomes declarable.
+- Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X".
+
+## Done when
+
+Every child task is closed and the stop condition holds: the Merges screen matches `screens/merges.md` leaf for leaf — header, the three sections with their accent / warn / ok row forms, the landing bottom bar, and the preview's `merge`, `gates`, `sign-offs` and `landing` blocks with the queue footer — and the data/placeholder boundary is the spec's own, drawn identically in both panes. Every `placeholder:`-tagged region is served from the one shared module with no inline literal and is structured so it can be wired when a merge surface lands; the only regions rendering as data are the gate results the selected run's center-served detail actually reaches, and — if taken at all — the optional landed-row wiring. No active landing, awaiting-approval state or queue order is inferred from center rows. No poll loop, no blocking read on the UI thread, no direct-reader fallback. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
+"""
+[relations]
+depends-on = ["0265", "0258"]
+
+[[checks]]
+name = "workspace landing gate remains green and gpui-free in cost"
+command = "just test-full"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

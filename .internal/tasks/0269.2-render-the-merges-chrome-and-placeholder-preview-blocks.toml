@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0269.2"
+title = "Render the Merges chrome and placeholder preview blocks"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Render every region of the Merges screen that `screens/merges.md` tags `placeholder:` in full — the chrome above the rows and the three preview blocks that bracket the column. They are one task because they are one job: static, design-faithful content served from the shared `placeholders` module, each region structured so it can be wired when a merge surface lands. Splitting them would produce cuts too small to be worth their own dispatch.
+
+The **header** carries the title `merges — ctx-company/traits` over one italic narrated summary — "One landing now · two awaiting your approval." The spec tags that summary `placeholder:` outright, not merely its phrasing: the counts it states are counts of a queue that does not exist.
+
+The **bottom bar** is `landing` in accent, `· run-1a2b3c → main · deep merge` as the detail, and `watch · hold` as right-side ghost actions — tagged `placeholder:` in full. The evidence agrees: `RunSummary.landing` is `None` mid-run by contract, and `merges_from_center_rows` (`modules/cli/src/app/dashboard.rs:2557`) skips non-terminal rows entirely, so there is no actively-landing run to name. `watch` and `hold` are treated identically — both ghost actions with no backing surface, both represented through the placeholders contract rather than left as untracked dead controls that look pressable and do nothing.
+
+The **preview column** opens here too, with its rule 13 frame and the three blocks the spec tags `placeholder:`:
+
+- **`merge`**: key/value run, target rendered with its merge mode (`main · deep`), and state as a word in accent for a landing merge, followed by a prose description of what is landing. The accent state word is the same active-landing claim the projection does not carry, and the prose has no source at all.
+- **`landing`**: "Merges deep into main · closes 0257 · removes wt-1a2b3c" — rule 13's consequence block, `→`-prefixed. It summarises the consequence of a queued merge, and there is no queue.
+- **Footer**: `merge queue · 3 pending · 2 landed this week` — it counts a queue that does not exist.
+
+The `gates` and `sign-offs` blocks that sit between them are `0269.4`'s, because `gates` is the one region on this screen with real evidence behind it.
+"""
+scope = """
+## Decisions
+
+- In scope: the header with its placeholder-served title summary; the bottom bar's placeholder-served state word, `run → target · deep merge` detail and `watch · hold` ghost actions; and the 380-wide preview column's frame, rule 13 block order, `merge` identity block, `landing` consequence block and queue footer — all served from the shared `placeholders` module in the exact tokens the spec names.
+- **The spec's tags are the contract.** No region here is promoted to data on the argument that a completed run's classification is reachable — a completed classification is not an active landing.
+- **`watch` and `hold` get the same treatment.** Neither is wired; both are tracked placeholder actions.
+- **Each region is structured for wiring** — one entry per region in the shared module, traceable to the spec line that authorises it.
+- **The column follows selection.** It renders for whichever merge row the main pane has selected, and never on a timer.
+- Out of scope: the sections and rows (`0269.1`), the `gates` and `sign-offs` blocks (`0269.4`), building any merge, queue or approval surface, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0269.1` — the pane this chrome wraps, the selection the column follows, and the shared placeholder region structure both continue.
+"""
+validation = """
+## Watch
+
+- **Exactly one narrated summary line**, italic sans 12 `text-secondary`, and no breadcrumbs anywhere.
+- **No inline placeholder literals.** Every string in the header, the bar and all three preview blocks comes from the one shared module, so wiring a region later is a grep rather than an archaeology dig.
+- **Do not derive an active landing, a queue total or a landing consequence** from center rows; each would be invented state the projection does not carry.
+- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas. Actions carry no arrows — `→` belongs to the detail's run-to-target form and to consequence lines, nowhere else here.
+- **A tracked no-op is not a dead control**: pressing `watch` or `hold` must not appear to have done something.
+- **Status dots belong to stateful lists and never to this prose column**; preview footers are right-aligned mono 10 `text-faint` per rule 12.
+- **Selection-driven only**, off gpui's UI thread, with no timer and no compact-row reads.
+- **Overflow clips with a bottom fade and a centred `scroll to end`, and only when content actually overflows.**
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered chrome and column are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Merges screen carries a header titled after the repository over one italic narrated summary, a bottom bar showing the landing state word in accent with its `· run → target · deep merge` detail and `watch · hold` ghost actions, and — on selecting a merge row — a 380-wide preview whose `merge` block shows run, target-with-mode and the accent state word over its prose description, whose `→`-prefixed `landing` block states what the merge closes and removes, and whose right-aligned footer summarises the queue. Every one of those strings is served from the one shared `placeholders` module with no inline literal, each region is structured so it can be wired when a merge surface lands, and no landing, queue or ordering fact is inferred from center rows. `watch` and `hold` behave identically as tracked no-ops, and the column renders on selection only, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0269"
+depends-on = ["0269.1"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

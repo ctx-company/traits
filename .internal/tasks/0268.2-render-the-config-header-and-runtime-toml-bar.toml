@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0268.2"
+title = "Render the Config header and runtime.toml bar"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Give the Config screen its chrome, on the runtime answer `0268.1` made the center serve.
+
+The **header** carries the title `runtime — ctx-company/traits` over one italic narrated summary — "Three seats, two engines, one trust list — runtime.toml as loaded." `screens/config.md` tags the counts `data:` and the phrasing `placeholder:`, so the counts follow the served sections and the prose comes from the shared `placeholders` module.
+
+The **bottom bar** is grammar rule 12's provenance instance for this screen: `valid` in ok, then `· runtime.toml · loaded HH:MM`, with `edit runtime.toml` as the right-hand ghost action. Both left-hand halves are `data:` and neither is decorative. `valid` is a claim about the document the center actually loaded — a malformed or missing runtime document renders the failure, never `valid` over an empty screen — and the load time comes from the served answer rather than from a render-time clock reading, so the bar and the preview footer agree. `edit runtime.toml` is the spec's own `placeholder:` action, served from the shared module, and at most reveals the file in an editor; it never opens an in-app editing surface.
+"""
+scope = """
+## Decisions
+
+- In scope: the header with its data counts and placeholder-served phrasing, the bottom bar's `valid` state word and `runtime.toml · loaded HH:MM` provenance from the center-served answer's own verdict and load time, and the placeholder-served `edit runtime.toml` action.
+- **The load time is served, not sampled.** A clock read at render time would drift from the answer the rows came from and from the preview footer.
+- **`valid` is earned.** It reflects the document's actual resolution result on the center side, mirrored by the CLI report.
+- **Read-only.** This bar opens no editing surface on any face.
+- Out of scope: the sections and rows (`0268.1`), the preview column (`0268.3`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0268.1` — the center-served runtime answer this chrome describes and the pane it sits on.
+"""
+validation = """
+## Watch
+
+- **Exactly one narrated summary line**, italic sans 12 `text-secondary`, and no breadcrumbs anywhere.
+- **No inline placeholder literal** — the summary's phrasing and the `edit runtime.toml` action come from the one shared module; the counts, verdict and load time do not, because they are data.
+- **A malformed or missing document renders the failure**, on this bar and on the CLI report, rather than an empty-but-valid-looking screen.
+- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
+- **States are words, never pills or icons**; the closed glyph set is `↰ ↳ → · ∷`.
+- **No poll loop.** The bar updates when the served answer does; no timer re-reads the load time.
+- **Blocking work stays off gpui's UI thread.**
+- **No test may depend on committed repo content** — scratch runtime documents only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Config screen carries a header titled after the repository over one italic narrated summary whose counts come from the center-served sections and whose phrasing comes from the `placeholders` module, and a bottom bar showing `valid` in ok with `· runtime.toml · loaded HH:MM` from the served answer's own verdict and load time, plus the placeholder-served `edit runtime.toml` ghost action. A malformed or missing runtime document renders a loud failure in place of `valid`, on the screen and on the CLI report alike. `just test` passes, the doctor proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0268"
+depends-on = ["0268.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "doctor's config-reporting proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_doctor"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

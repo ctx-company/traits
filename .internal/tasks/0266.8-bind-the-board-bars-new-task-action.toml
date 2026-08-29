@@ -1,0 +1,44 @@
+schema-version = "0.2"
+key = "0266.8"
+title = "Bind the board bar's new task action"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`0266.2` rendered `new task` in the board bar's ghost-text grammar and `0266.3` made the center create the draft. This cut binds the one to the other, and gets the failure behaviour right.
+
+The observable outcome is end to end: press `new task`, and the new draft arrives in the `Draft` section — of this window and of every other face watching the board — because the board answer changed, not because the window inserted a row it hoped would be confirmed. A refused creation renders as a visible failure in the bar rather than as a press that appears to have done nothing.
+"""
+scope = """
+## Decisions
+
+- In scope: binding the board bar's `new task` action to the center-served creation, rendering the resulting row only through the board answer's own update, and rendering a refusal as a visible failure.
+- **No optimistic insertion.** A face that shows a draft the center has not confirmed is presenting invented state as real, and the row form it would have to invent is `0266.6`'s.
+- **No poll loop waiting for the row to appear** — the board answer's update is the signal.
+- Out of scope: the creation capability itself (`0266.3`), the bar's rendering (`0266.2`), any other task mutation, and the preview column.
+
+## Prerequisites
+
+`0266.2` (the bottom bar this action sits in) and `0266.3` (the center-served creation it calls and the board answer its result arrives through).
+"""
+validation = """
+## Watch
+
+- **No desktop-side write.** The desktop process does not create, name or format a task file; it asks the center, exactly as it asks for everything else on this screen.
+- **Blocking work stays off gpui's UI thread**; the round-trip is background work and the UI reacts to the answer.
+- **Fail-loud.** A refusal is rendered; it is not absorbed into an unchanged-looking bar and not retried silently.
+- **A press that cannot be served must not look successful**, and must not leave the bar in a pending state with no exit.
+- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the pressed action and its rendered outcome are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Pressing `new task` on the board bar issues the center-served creation, and the new draft appears in the `Draft` section of this window and of every other face watching the board because the board answer changed — with no optimistic insertion, no timer and no desktop-side file write. A refused creation renders as a visible failure rather than a press that appears to have done nothing. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.2", "0266.3"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

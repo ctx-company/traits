@@ -1,0 +1,56 @@
+schema-version = "0.2"
+key = "0267.2"
+title = "Render the Traits header and lockfile bar"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Give the Traits screen its chrome, on the inventory-and-trust answer `0267.1` made the center serve.
+
+The **header** carries the title `traits — authored in ctx-company/traits` over one italic narrated summary — "Five traits, all digest-pinned — implement carries the dogfood loop." `screens/traits.md` tags the counts `data:` and the phrasing `placeholder:`, so the counts follow the served section and the prose comes from the shared `placeholders` module.
+
+The **bottom bar** is grammar rule 12's provenance instance for this screen: `pinned` in ok, then `· skill-lock @ <sha> · N digests`, with `author trait` as the right-hand ghost action. The sha and the digest count are `data:` from the lockfile — a sha the app cannot resolve is a stated failure, never a fabricated string — and the center's capability grows the lockfile resolution here so that the bar and the preview footer cite one answer rather than two readers. `author trait` is the one action the spec itself tags a v1 `placeholder:`, so it is served from the shared module as a tracked placeholder rather than left as an untracked dead control.
+"""
+scope = """
+## Decisions
+
+- In scope: the header with its data counts and placeholder-served phrasing, the bottom bar's `pinned` state word and `skill-lock @ <sha> · N digests` provenance from a center-side lockfile resolution reachable by a non-GUI face, and the placeholder-served `author trait` action.
+- **One lockfile resolution.** The bar, the preview footer and the digest count all cite the same center-side answer; a desktop-side sha computation is a second reader that can disagree.
+- **`pinned` is a claim, not a constant.** It reflects the lockfile's actual state; an unresolvable lockfile renders the failure instead.
+- **`author trait` does nothing and says so through the placeholders contract.** This slice opens no authoring surface.
+- Out of scope: the section and rows (`0267.1`), the preview column (`0267.3`, `0267.4`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0267.1` — the center-served inventory and trust answer this chrome describes and the pane it sits on.
+"""
+validation = """
+## Watch
+
+- **Exactly one narrated summary line**, italic sans 12 `text-secondary`, and no breadcrumbs anywhere.
+- **No inline placeholder literal** — the summary's phrasing and the `author trait` action both come from the one shared module; the counts, sha and digest count do not, because they are data.
+- **No second sha resolution**, and no `git` or lockfile read from the desktop process.
+- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
+- **Blocking work stays off gpui's UI thread**, and lockfile resolution on the center side must not stall its request loop.
+- **No poll loop.** The bar updates when the served answer does.
+- **Fail-loud, no direct-reader fallback**; an unresolvable lockfile is a visible failure, not a blank sha.
+- **No test may depend on committed repo content** — scratch fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Traits screen carries a header titled after the authoring repository over one italic narrated summary whose counts come from the center-served section and whose phrasing comes from the `placeholders` module, and a bottom bar showing `pinned` in ok with `· skill-lock @ <sha> · N digests` from a single center-side lockfile resolution, plus the placeholder-served `author trait` ghost action. An unresolvable lockfile renders a failure rather than `pinned`. `just test` passes and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0267"
+depends-on = ["0267.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

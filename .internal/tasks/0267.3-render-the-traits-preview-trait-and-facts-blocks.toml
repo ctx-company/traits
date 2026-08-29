@@ -1,0 +1,64 @@
+schema-version = "0.2"
+key = "0267.3"
+title = "Render the Traits preview trait and facts blocks"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Open the Traits screen's 380-wide preview column with its identity block and its first fact block, per grammar rule 13's order.
+
+The **`trait`** block is key/value: the trait name with its ok-coloured trust word (`implement · trusted`), plus the trait description in sans 11.5 `text-secondary`. Both halves are already carried by the center-served inventory-and-trust answer `0267.1` established.
+
+The **`facts`** block is key/value: version, trust, digest, agents. Version and the trust classification come from that same answer; the digest and the trait's declared agents come from the manifest the center reads while it builds the inventory, so this cut widens the served answer to carry them rather than asking the desktop to re-open a manifest.
+
+`screens/traits.md` tags every leaf in this column `data:`. Nothing here is placeholder-served, and a leaf the served answer does not yet carry is unfinished work rather than a Done state — which is why the manifest facts are added to the capability in this cut instead of being left unrendered.
+"""
+scope = """
+## Decisions
+
+- In scope: the 380-wide preview column's frame and order for this screen, the `trait` block, the `facts` block, and the center-side extension carrying each trait's version, digest and declared agents, reachable by a non-GUI face.
+- **No placeholders in this column.** Every leaf is `data:`; nothing comes from the shared module.
+- **No manifest re-parse and no digest recomputation on the desktop side.** The center already reads the manifests to build the inventory; the facts ride that read.
+- **Reads are selection-triggered.** The column populates when a row is selected, never eagerly per row and never on a timer.
+- Out of scope: the `variants` and `ports` blocks and the footer (`0267.4`), the main pane (`0267.1`, `0267.2`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0267.1` — the center-served inventory and trust answer and the main pane's selection model this column follows.
+"""
+validation = """
+## Watch
+
+- **Trust renders as an ok-coloured word**, never a pill, badge or icon; the `·` in `implement · trusted` is the extent of the glyphs, and no corner radius exists inside the canvas.
+- **Status dots only in stateful lists** — this column is prose and key/value, so it carries none.
+- **Sans is content, mono is machinery**: the description is sans 11.5 `text-secondary`; version, trust word, digest and agent handles follow the mono treatment `tokens.md` names.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach** — including the digest and agent facts this cut adds.
+- **Selection-triggered reads only**, off gpui's UI thread, with no timer; the center must not re-scan the whole inventory to answer one selection.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed answer is stated rather than replaced by last-known values.
+- **No test may depend on committed repo content** — scratch manifest and trust fixtures only.
+- **Fonts**: consume whatever `0265.1` resolved for IBM Plex Sans and Mono; a silent system-face fallback violates the tokens file.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Selecting a trait opens a 380-wide preview whose `trait` block shows the name with its ok-coloured trust word over the description, and whose `facts` block shows version, trust, digest and agents — every value from the center-served answer, extended in this cut to carry the manifest facts, reachable by a non-GUI face, with nothing placeholder-served and no leaf left unrendered. Reads fire only on selection, off the UI thread, with no timer. `just test` passes, the dashboard projections stay green, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0267"
+depends-on = ["0267.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "dashboard trait and trust projections still pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

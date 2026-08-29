@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0266.5"
+title = "Render the Tasks preview facts, checks and landing"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Complete the Tasks preview column with its fact blocks, its consequence block and its provenance footer.
+
+- **`facts`** is key/value: status, raised, parent, depends-on — the task document's own relations and metadata, carried by the center-served board answer.
+- **`checks`** is a block of sans 11.5 `text-secondary` lines, one per declared check on the task. Checks live in the task document's `[[checks]]` tables; the board answer grows them here so the column can name what each task will be verified by.
+- **`landing`** is grammar rule 13's consequence block: "Closes automatically when run-ab12ef lands." That sentence is a join of two facts the center already holds — which run claims the task, and what the configured task-close policy does when a run lands — rendered as a `→`-prefixed consequence line rather than asserted as an accomplished fact.
+- **Footer**: `.internal/tasks · synced 14:52`, grammar rule 12's provenance line in right-aligned mono 10 `text-faint`, citing the same center-side resolution the bottom bar cites.
+
+Every leaf here is tagged `data:` in `screens/tasks.md`. None of it is placeholder-served, and none of it may close as an unrendered gap.
+"""
+scope = """
+## Decisions
+
+- In scope: the `facts` and `checks` blocks, the `landing` consequence block, and the provenance footer, with the center-side extension that carries the task's relations, metadata and declared checks, reachable by a non-GUI face.
+- **The footer and the bar cite one resolution.** A footer time that disagrees with the bar's means two readers exist where there should be one.
+- **`landing` states a consequence, not a result.** A task whose claiming run has already landed is not described as "will close"; the sentence follows the actual state of the claim and the close policy.
+- **No placeholders in this column.** Every leaf is `data:`; nothing comes from the shared module.
+- Out of scope: the lede and `details` block (`0266.4`), the main pane, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0266.4` — the preview column, its selection model and the center-served detail these blocks extend.
+"""
+validation = """
+## Watch
+
+- **Declared checks are listed, not run.** This column names what a task will be verified by; nothing here executes a check command, and a task with no declared checks renders an empty block rather than an invented line.
+- **`depends-on` and `parent` are rendered as the document states them** — the derived state that put the task in its section is a separate fact and belongs to the row, not to `facts`.
+- **Selection-triggered reads only**, off gpui's UI thread, with no timer.
+- **Fail-loud, no silent staleness, no direct-reader fallback**; a failed answer is stated rather than filled with last-known values.
+- **`→` prefixes consequence lines** and appears nowhere else on this screen; the glyph set is closed and no corner radius exists inside the canvas.
+- **Preview footers are right-aligned mono 10 `text-faint`** per rule 12; status dots stay out of this column entirely.
+- **No test may depend on committed repo content** — scratch fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Tasks preview column carries a `facts` key/value block (status, raised, parent, depends-on), a `checks` block listing one line per declared check, a `→`-prefixed `landing` consequence line derived from the claiming run and the configured close policy, and a right-aligned `.internal/tasks · synced <time>` footer citing the same center-side resolution as the bottom bar — every leaf from the center-served answer, none placeholder-served, none left unrendered. Reads fire only on selection, off the UI thread, with no timer. `just test` passes and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.4"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

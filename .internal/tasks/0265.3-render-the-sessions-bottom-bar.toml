@@ -1,0 +1,50 @@
+schema-version = "0.2"
+key = "0265.3"
+title = "Render the Sessions bottom bar"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Grammar rule 8 puts a bottom bar on every v1 screen: border-soft 1, pad [10,14], space-between; left a state word coloured per rule 1 plus a `· detail` string in mono 11 `text-secondary`; right the actions in mono 11, `·`-separated with `text-faint` bullets, primary in `text-bright`, ghost text throughout — no fills, no borders, no icons. `screens/sessions.md` names this screen's instance: `running` accent `· frame 5 of 9 · review round 2` on the left, `watch raw · pause` on the right.
+
+This cut builds the bar and the halves of its detail that the compact center row already carries: the state word follows `RunSummary.status` and `CenterPublicRow.live`, and the review round follows `RunSummary.verdict_rounds`. The `frame N of M` half is not on that row and is not guessed here — the bar's detail is one caller-supplied slot, and `0265.14` fills the structural counter into it once the selected run's reconstruction is being read.
+
+`watch raw` opens the raw view, which `screens/sessions.md` explicitly permits to no-op in v1 and tags `placeholder:` when it does. That makes this the screen's first `placeholder:` leaf, so this cut creates the one `placeholders` module by seeding exactly that entry: design-faithful static content served from one greppable place rather than an inline literal. `pause` renders here as ghost text and is bound to the center's verb by `0265.4`.
+"""
+scope = """
+## Decisions
+
+- In scope: the bottom bar as rule 8 and `screens/sessions.md` specify it, the state word's semantic colour, the review-round detail, the ghost action list, and `watch raw`'s placeholder-served v1 no-op.
+- **The `placeholders` module is created here**, seeded with exactly this one entry, traceable to the `placeholder:` tag in `screens/sessions.md` that authorises it. It is not a framework, not a registry, and not pre-seeded with entries no cut renders yet. Every later placeholder leaf on every screen adds its entry to this module.
+- The bar's left detail is one caller-supplied slot. `0265.14` supplies the frame counter; the four later screens cite grammar rule 12's provenance (`.internal/tasks @ <sha>`, `skill-lock @ <sha>`, `runtime.toml`) through the same slot. The bar renders what it is given and never reads a source itself.
+- **Sources are named, not assumed**: the state word and the review round come from the compact center row. A leaf whose source is not that row does not belong on this bar in this cut.
+- Out of scope: the frame counter (`0265.14`), the verbs themselves and the `pause` binding (`0265.4`), the frame list, the preview column, the rail and title bar.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0265.1` — the token constants and loaded faces this bar renders in, and the leaf that carries the whole of item `0256` for every `0265` child (a charter's `depends-on` is not inherited).
+"""
+validation = """
+## Watch
+
+- **Ghost text only.** A filled or bordered button, or an icon on an action label, violates rules 3 and 8 together. The bar carries no corner radius; radius 10 exists only on the window frame.
+- **Do not invent the counter.** An ordinal derived from list position, row count or `current_run_index` alone is invented structure; the slot stays empty until `0265.14` fills it from the reconstruction.
+- **No poll loop.** The state word and round update from center deltas, never from a timer, and a rejected projection must not leave the bar showing partially committed state.
+- **No inline placeholder literal** for `watch raw`'s no-op — it is the module's first entry, and the module is created by seeding it, not by being designed ahead of a consumer.
+- **States are words, never icons or pills**; the glyph set is closed (`↰ ↳ → · ∷` only); sans is content and mono is machinery.
+- **Compact list rows must never trigger a ledger, store or sidecar read.** Everything this bar shows comes from the row the subscription already carries.
+- **Fail-loud.** A row whose state cannot be resolved shows the failure rather than a plausible word.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions screen carries a bottom bar whose left side shows the state word in `accent` followed by `· review round R` — both from the compact center row — and whose right side shows `watch raw · pause` as `·`-separated ghost actions, with `watch raw`'s v1 no-op served from the newly created `placeholders` module and no inline literal anywhere. The values update from deltas with no timer and no compact-row read, and the detail slot accepts a caller-supplied string without the bar reading any source itself. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.1"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,55 @@
+schema-version = "0.2"
+key = "0268.4"
+title = "Answer the CLI config report from the served resolution"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`0268.1` taught the center to answer the loaded runtime as the Config screen's leaf set. This cut is the parity half, and on this screen it is the sharpest one in the charter: there is no dashboard Config screen to move, so the read-only CLI surface is what keeps this capability from being GUI-first.
+
+`ctx doctor --config` (`modules/cli/src/app/doctor.rs:114`) already reports effective runtime configuration and its winning layer over `ctx_traits_io::harness_config::resolve_config_report`, with expanded `agent.role.<name>` seats and per-knob provenance. Whether that command is extended to answer from the served resolution or a sibling read-only surface does, the ruling is the same: one resolution answers both faces, the existing report is neither duplicated nor contradicted, and no second `runtime.toml` parser appears anywhere.
+"""
+scope = """
+## Decisions
+
+- In scope: the existing read-only CLI configuration surface answering from the same resolution the center serves, covering this screen's shape — seats with model and effort, the engines with their identifying version or path, and the approved-traits summary with its digest count — with each knob's winning layer preserved.
+- **Whether `ctx doctor --config` is extended or a sibling read-only surface is added is the architect's call.** What is fixed is that a non-GUI face reports the same shape from the same resolution, and that the landed report's existing answers do not change.
+- **Read-only.** Nothing here writes `runtime.toml`, mutates trust, acquires a lock or rewrites a stamp; `--migrate-config` and `--apply` are untouched.
+- **Fail-loud on a malformed or missing runtime document**, in the CLI's own idiom, matching what the screen shows rather than reporting a different verdict.
+- Out of scope: the served answer's own shape (`0268.1`), all desktop rendering, and any configuration-editing surface on any face.
+
+## Prerequisite
+
+`0268.1` — the center-served runtime resolution this report answers from.
+"""
+validation = """
+## Watch
+
+- **Do not contradict the landed report.** A second command reporting a different value for the same knob, or the same command reporting a different value than before, is a regression against a surface that already ships.
+- **Where a value is a built-in default rather than something the document states, keep that distinguishable.** Flattening layer and reason into "loaded" misreports configuration, and it is the leaf `0268.3`'s `source` row depends on.
+- **Harness version probes execute a binary.** `probe_harness_version` invokes the harness with its version-probe argv; an engine-version leaf that shells out must be cheap or cached and must never stall the center's request loop.
+- **Read-only means read-only**: no write path, no `--apply`, no trust mutation, no lock acquisition or stamp rewrite dressed up as a read.
+- **No test may depend on committed repo content** — scratch runtime documents and a scratch trust store only, never this repository's own `.ctx/traits/runtime.toml`.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+
+## Done when
+
+A read-only non-GUI surface reports this screen's shape — seats with model and effort, engines with their identifying version or path, the approved-traits summary with its digest count — from the same resolution the center serves, with each knob's winning layer preserved, no second `runtime.toml` parser anywhere, and every answer the landed `ctx doctor --config` already gave unchanged. A malformed or missing runtime document is reported as a loud failure with the same verdict the screen shows. `just test` passes, the doctor proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0268"
+depends-on = ["0268.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "doctor's config-reporting proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_doctor"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

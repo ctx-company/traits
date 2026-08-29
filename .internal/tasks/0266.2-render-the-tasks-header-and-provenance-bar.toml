@@ -1,0 +1,61 @@
+schema-version = "0.2"
+key = "0266.2"
+title = "Render the Tasks header and provenance bar"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Give the Tasks screen its chrome, on the board answer `0266.1` made the center serve.
+
+The **header** carries the title `tasks — ctx-company/traits` over one italic narrated summary — "Seven open across three states — one live run, one waiting on you." `screens/tasks.md` tags the counts `data:` and the phrasing `placeholder:`, so the counts follow the served sections and the prose comes from the shared `placeholders` module until a narrator seat serves it.
+
+The **bottom bar** is grammar rule 12's provenance instance for this screen: `synced` in ok, then `· .internal/tasks @ <sha>`. Both halves are `data:` — the state word is a claim about whether the board answer is current, and the sha is the tasks tree's own. Neither is reachable from the desktop process, so the center's board capability grows the two of them here: the tasks-tree sha it resolved the listing at, and the time it last did so, which the preview's footer will cite as well. The bar's `new task` action renders in this cut as the right-hand ghost action; `0266.3` makes the center create the draft and `0266.8` binds the two together.
+"""
+scope = """
+## Decisions
+
+- In scope: the header with its data counts and placeholder-served phrasing, the bottom bar's `synced` state word and `.internal/tasks @ <sha>` provenance, and the center-side extension that supplies the tasks-tree sha and sync time alongside the board listing, consumed by the same non-GUI face that reads the listing.
+- **The sha is resolved once, centrally.** A sha the desktop computes itself is a second reader and can disagree with the answer the rows came from; the bar and the preview footer must cite the same resolution.
+- **`synced` is a claim, not a constant.** The state word reflects whether the board answer is current, and a stale or failed answer renders the failure rather than the word.
+- Out of scope: the `new task` action's behaviour (`0266.3`, `0266.8`), the sections and rows (`0266.1`, `0266.6`), the preview column, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0266.1` — the center-served board answer this chrome describes and the pane it sits on.
+"""
+validation = """
+## Watch
+
+- **Exactly one narrated summary line**, italic sans 12 `text-secondary`, and no breadcrumbs anywhere.
+- **No inline placeholder literal** — the summary's phrasing comes from the one shared module; its counts do not, because they are data.
+- **No second sha resolution.** The bar, the preview footer and the rows all cite one center-side answer; two resolutions is two readers.
+- **Ghost text only in the bar**, no fills, borders or icons, and no corner radius inside the canvas.
+- **Blocking work stays off gpui's UI thread**, and sha resolution on the center side must not stall its request loop.
+- **No poll loop.** The sync time updates when the board answer does, never on a timer.
+- **Fail-loud, no direct-reader fallback**; a sha the center cannot resolve is a stated failure, not a fabricated string and not a desktop-side `git` call.
+- **No test may depend on committed repo content** — scratch fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Tasks screen carries a header titled after the repository over one italic narrated summary whose counts come from the center-served sections and whose phrasing comes from the `placeholders` module, and a bottom bar showing `synced` in ok with `· .internal/tasks @ <sha>` from the center's own resolution of the tasks tree, plus the `new task` ghost action rendered in the bar's grammar. A stale or failed board answer renders the failure instead of `synced`. `just test` passes, the center proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "center wire proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,66 @@
+schema-version = "0.2"
+key = "0267.1"
+title = "Serve traits and trust and render the library rows"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Teach the center to answer the authored trait library with its trust states, and render the Traits screen's section and rows from it — one cut, because the rendering proves the capability and the capability is what makes the rendering honest.
+
+Today the library is reached in-process only. `load_traits_and_trust()` (`modules/cli/src/app/dashboard.rs:2423`) runs `dashboard_trait_inventory()` and a trust-store read (`modules/io/src/trust.rs`'s `read_store` and `classify_records`) inside the CLI process, then projects that single scan into both the TUI's Traits rows and its Trust rows. A separate desktop binary reaches none of it, and a reader written for the desktop would be a capability that exists in only one face. Moving those two projections onto the served answer is `0267.5`, inside this same slice — the capability is served here and consumed by a non-GUI face before the charter closes.
+
+`screens/traits.md` fixes the forms. One **section**, `Authored — N`. The **trait row** is **deliberately dotless** — traits are not stateful in the frame sense, so grammar rule 4's 5px dots do not apply even though this is a list — with a left stack of the trait name in sans 12.5 (`text`, and `text-bright` over a `surface-raised` fill when selected) over its description in sans 11 `text-secondary`, and a right stack in mono 10.5 carrying `trusted` in ok plus `· N variants` in `text-muted` on top and the variant names in `text-muted` below. Name, description, trust word and variants are all `data:`.
+
+The screen also joins the title bar's menu here — its `Traits` entry and the switch that reaches it, with the current entry bright.
+"""
+scope = """
+## Decisions
+
+- In scope: the center-served trait inventory with its trust classification and per-trait variant list, the `Traits` menu entry and its switch, and the `Authored — N` section with its dotless trait rows rendered from the served answer.
+- **One scan, one trust read, both projections.** The existing path's single-scan property is deliberate; the served answer keeps it, so that when `0267.5` moves the TUI's two projections onto it they still cost one read between them.
+- **Built-in-origin filtering is preserved in the answer's shape.** The Traits projection excludes built-in origins today and the Trust projection does not; that difference is behaviour, not an accident, and the served answer must be able to express both without a second scan.
+- **The desktop reads no manifests and no trust store.** The answer arrives over the center socket the window already holds.
+- Out of scope: moving the TUI's Traits and Trust screens onto the answer (`0267.5`), the header and lockfile bar (`0267.2`), the preview column (`0267.3`, `0267.4`), trait authoring and trust mutation, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.5` — the row vocabulary these rows compose, which chains back through `0265.3` to `0265.1` and the whole of item `0256`. `0265.9` — the title bar this screen's menu entry joins. `0258` — the source places the four new screens after its work item, and a charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs`), so the gate is named on this leaf.
+"""
+validation = """
+## Watch
+
+- **No dots on trait rows.** Rule 4 admits dots into frames, tasks, merges and rail repos only, and `screens/traits.md` calls the omission out explicitly; adding one because "it is a list" is a spec violation.
+- **Trust is a word, not a pill or an icon.** `trusted` renders as the ok-coloured word in mono 10.5; the `·` before `N variants` is the only glyph the row needs.
+- **Design the answer for the move.** `0267.5` re-points the TUI's two projections at it; an answer shaped only for this screen turns that move into a rewrite and risks a second scan.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.**
+- **No poll loop**, and no blocking inventory or trust read on gpui's UI thread; the center's own read must not stall its request loop.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed answer is stated rather than replaced by a stale library.
+- **Every leaf here is `data:`** — name, description, trust word and variants. Nothing on this pane is placeholder-served except what `0267.2` owns, and no leaf may close as an unrendered gap.
+- **One bright title per list**; selection is `surface-raised` fill plus a `text-bright` name, never a border, radius or accent bar.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set.**
+- **No test may depend on committed repo content** — scratch inventory and trust fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the served answer is green and the workspace stayed gpui-free; the rendered pane is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The center answers the authored trait inventory with each trait's name, description, trust classification and variants from one scan and one trust-store read, in a shape that can express both the built-in-filtered Traits projection and the unfiltered Trust one; and the desktop's `Traits` menu entry switches to a pane rendering the `Authored — N` section with dotless trait rows in the exact tokens `screens/traits.md` names, one bright title, and no desktop-side manifest or trust read. Updates are event-driven with no timer, reads stay off the UI thread, and a failed answer fails loud. `just test` passes, the trust-report proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0267"
+depends-on = ["0265.5", "0265.9", "0258"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "trust family report proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_trust_family_report"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

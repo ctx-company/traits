@@ -1,0 +1,46 @@
+schema-version = "0.2"
+key = "0265.12"
+title = "Render the preview slots block"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Add the Sessions preview column's fact block: `slots`, key/value from the slot ledger — `review-verdict-1 · filled · r1`, `work-summary · filled`, `changed-files · 12 files`.
+
+Every leaf is `data:`, and the source is the selected run's authoritative reconstruction. `Session.slot_revisions` records which slots exist, whether each is filled and at which revision, which is exactly what the three example rows show; the same record is what the verdict block beside it reads its typed slots from. Nothing here is re-derived from prompt text or file presence — that would produce a second, disagreeing answer about a fact the ledger already states.
+
+This is the fact-block shape the four later screens compose (`facts`, `checks`, `variants`, `ports` all take it); the consequence-block shape is `0265.15`'s.
+"""
+scope = """
+## Decisions
+
+- In scope: the `slots` key/value block from the run's recorded slot revisions, fed from the selection-triggered reconstruction, positioned per rule 13 between the verdict block and the landing block.
+- **Every leaf here is `data:`.** No part of this block is served from the `placeholders` module.
+- Out of scope: the earlier preview blocks (`0265.10`, `0265.11`), the `landing` consequence block (`0265.15`), and the main pane.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0265.10` — the preview column, its key/value row primitive and its selection-triggered reconstruction.
+"""
+validation = """
+## Watch
+
+- **Slot state is read, not re-derived.** The reconstruction records which slots are filled and at which revision; recomputing that from prompt text or file presence would produce a second, disagreeing answer.
+- **Reads stay on the selection path and off gpui's UI thread**; nothing refreshes on a timer and nothing fires per list row.
+- **A finished run's block must be identical after closing and reopening the window** — the ledger is authoritative, and the block may not depend on in-process state.
+- **Fail-loud, no direct-reader fallback.** A reconstruction failure is stated rather than filled from the filesystem.
+- **Sans is content and mono is machinery**: slot values are mono; block headings are mono 11 `text-muted` lowercase. No status dots in this column, no corner radius inside the canvas.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions preview column carries a `slots` key/value block listing each slot with its filled state and revision from the selected run's recorded slot revisions, in the tokens `screens/sessions.md` names and in rule 13's order. A finished run's block is identical after closing and reopening the window; reads fire only on selection, off the UI thread, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.10"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

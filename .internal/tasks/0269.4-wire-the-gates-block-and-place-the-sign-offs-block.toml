@@ -1,0 +1,52 @@
+schema-version = "0.2"
+key = "0269.4"
+title = "Wire the gates block and place the sign-offs block"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Complete the Merges preview column with its two remaining blocks — the one region on this screen that has real evidence behind it, and the one that has none at all.
+
+The **`gates`** block is key/value, one row per gate (cargo test, drift · embed, ts-format, worktree) with a `pass` or `clean` value in ok. `screens/merges.md` tags it `data:` and adds "gate results exist per run; wiring optional in v1, else `placeholder:`". Wire it wherever the selected run's center-served detail actually reaches those results — the same selection-triggered reconstruction the Sessions preview reads through — and leave placeholder-tagged only the gate rows that detail does not cover. The optional exit is a permission for what is unreachable, not a preference for skipping what is reachable.
+
+The **`sign-offs`** block is rows rather than pairs: the agent identity on the left in mono 10.5 at its identity colour and 0.8 opacity — `architect@1.4`, `security@0.9`, the owner's `@oskar` in the session tone — with role and time on the right in mono 10 `text-faint`. The spec tags it `placeholder: until sign-offs exist`, and no sign-off store exists, so every entry comes from the shared `placeholders` module. Identity colouring is still normative: the review agent renders in review-purple per grammar rule 1, at the 0.8 opacity the rule specifies for small mono handles, because a placeholder must be design-faithful.
+"""
+scope = """
+## Decisions
+
+- In scope: the `gates` block wired from the selected run's center-served detail wherever it reaches per-run gate results, with unreachable rows placeholder-tagged; and the `sign-offs` block served in full from the shared `placeholders` module at the spec's identity colours and opacities.
+- **Wire what is reachable.** A gate result the reconstruction supplies renders as data; taking the spec's optional exit for a region the read actually reaches would hide real coverage and poison the later wiring grep.
+- **Invent nothing for sign-offs.** There is no sign-off store; deriving plausible-looking entries from run evidence would fake state that does not exist.
+- **Identity colour is normative, not decorative**: the review agent in review-purple, the owner's handle in the session tone, both at 0.8 opacity — `tokens.md` constants, not judgement calls.
+- **Reads are selection-triggered**, through the same sanctioned reconstruction path the rest of the family uses; nothing here reads while rendering compact list rows.
+- Out of scope: the `merge`, `landing` and footer blocks and the chrome (`0269.2`), the main pane, building a sign-off mechanism, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0269.2` — the preview column, its selection model and the shared placeholder region structure these blocks continue.
+"""
+validation = """
+## Watch
+
+- **Do not placeholder a reachable gate result, and do not fabricate an unreachable one.** Both directions defeat the doctrine; an unreachable gate row is placeholder-tagged, never a fabricated `pass`.
+- **No inline placeholder literals** — sign-off entries and any unreachable gate row come from the one shared module.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A GUI-only gate or receipt reader is the capability-in-one-face defect; gate results arrive through the center-served detail, not a desktop-side file read.
+- **Compact list rows must never trigger the reconstruction** — only selection does — and the read stays off gpui's UI thread.
+- **The ledger is authoritative**: a finished merge's gates block must reconstruct identically after the window is closed and reopened.
+- **No poll loop.** The column updates on selection and on center deltas for the selected row.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** An unreachable read states the gap in the column rather than falling back to the filesystem or showing stale values as current.
+- **Sign-offs carry no status dots** — rule 4 excludes sign-off rows explicitly — and no corner radius exists inside the canvas.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the wired gates block and the placeholder-served sign-offs are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Merges preview column carries a `gates` block whose rows render `pass` or `clean` in ok from the selected run's center-served detail wherever that detail reaches them, with only the rows it does not reach placeholder-tagged, and a `sign-offs` block whose identities render in mono 10.5 at identity colour and 0.8 opacity (review agent in review-purple, `@oskar` in the session tone) against role and time in mono 10 `text-faint`, served entirely from the one shared `placeholders` module with no inline literal. A finished merge's gates block reconstructs identically after closing and reopening the window; reads fire only on selection, off the UI thread, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0269"
+depends-on = ["0269.2"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

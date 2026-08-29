@@ -1,0 +1,64 @@
+schema-version = "0.2"
+key = "0268"
+title = "The Config (Runtime) screen"
+status = "draft"
+raised = "2026-08-29"
+content = """
+The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Config is one of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders runtime configuration. This charter is that screen — the `Agents` / `Runtime` / `Trust` sections, the `runtime.toml` provenance bar, and the selected-seat preview — built per `.internal/docs/design/screens/config.md` on the vocabulary `0265` extracted while rendering Sessions.
+
+The screen is small and fully specified. The main pane is a header titled after the repo with a counts-from-data italic summary in placeholder phrasing, three sections of **dotless config rows** (config is settings, not state, so grammar rule 4's dots do not apply at all), and a bottom bar reading `valid` in ok with `· runtime.toml · loaded HH:MM` and an `edit runtime.toml` action the spec tags a v1 placeholder. The 380-wide preview is a `seat` block, a `facts` key/value block and a footer citing `runtime.toml · valid · HH:MM`. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
+
+This is the sharpest parity case of the four, and the honest statement is narrower than "no face reaches this". The dashboard has no Config screen — its fifth screen is `Screen::Trust` — but `ctx doctor --config` (`modules/cli/src/app/doctor.rs:114`) already reports effective runtime configuration and its winning layer over `ctx_traits_io::harness_config::resolve_config_report`, including expanded `agent.role.<name>` seats and harness knobs with per-knob provenance, and `modules/io/src/trust.rs` already holds the trust-store read. What no face reaches is this screen's leaf set as one shape: seats with model and effort side by side, the harness/center/store engines, the approved-traits row with its digest count, and a definite `valid` / `loaded at` verdict about the document itself. The stop condition none of the children owns alone is that the center serves that shape and the existing read-only CLI surface answers from it, so nothing here ships GUI-first.
+"""
+scope = """
+## Decisions
+
+- **In scope**: the Config screen as `screens/config.md` specifies it — header, the `Agents` / `Runtime` / `Trust` sections, the config row form, the `runtime.toml` bottom bar, and the selected-seat preview column — plus the center-side runtime-and-trust capability each child needs and the read-only CLI surface answering from it inside this slice (`0268.4`).
+- **The parity mechanism is the plan document's.** A feature is something the center serves plus per-face rendering; the desktop asks the center for the loaded runtime and the trust summary, never `runtime.toml` itself, and the read-only CLI report answers from the same resolution — as its own child rather than a rider on a rendering cut, so its regression surface is gated honestly.
+- **Reuse, do not re-derive.** The runtime document's resolution, layering and winners live in `ctx_traits_io::harness_config`; the trust store has an io-level read. The center shapes a view over those. A second `runtime.toml` parser, a private trust parse, or a duplicated layer resolution is a defect, and the existing doctor report must be neither duplicated nor contradicted.
+- **Nothing here is deferred to `0261`**, whose own scope admits no production behaviour beyond its four named bullets.
+- **Read-only, everywhere in the slice.** Nothing writes `runtime.toml`, mutates trust or edits a seat. `edit runtime.toml` is the spec's own `placeholder:`-tagged action, served from the shared module, and may at most reveal the file in an editor.
+- **Fail-loud on a malformed or missing runtime document** rather than rendering an empty screen as if valid — `valid` is a claim about the loaded file and must be earned, on every face.
+- **Out of scope**: the other three new screens, any runtime-configuration editing surface on any face, any change to `ctx doctor --migrate-config` or `--apply`, and every shared primitive `0265` built.
+- **Dark theme only.** `tokens.md` records light values for later; v1 implements the dark column and must not drift the light one.
+
+## Covered work item
+
+`config-screen` — the v1 Config (Runtime) screen: seats / runtime / trust rows, the `runtime.toml` bar, read-only, placeholder-marked, dark theme only, chrome citing `runtime.toml` per grammar rule 12.
+"""
+validation = """
+## Watch
+
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** This is the sharpest constraint in the charter because the dashboard carries no Config screen; the read-only CLI answer for the same shape lands in the same slice or the region does not ship.
+- **Do not overclaim the gap either.** `ctx doctor --config` already reports effective runtime configuration with winning layers and expanded seats. A second command that re-resolves the document independently, or reports a different answer for the same knob, is a regression against a landed surface.
+- **Where a value is a built-in default rather than something the document states, keep that distinguishable.** The existing report carries layer and reason per knob; flattening that into "loaded" misreports configuration.
+- **Harness version probes execute a binary.** `probe_harness_version` invokes the harness with its version-probe argv; an engine-version leaf that shells out must be cheap or cached, must never sit on a UI thread, and must not stall the center's request loop.
+- **Read-only means read-only** on both faces: no write path, no `--apply`, no trust mutation, no lock acquisition or stamp rewrite dressed up as a read.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A malformed or missing runtime document is surfaced as a failure by every face, never as an empty-but-valid-looking screen.
+- **No poll loop anywhere in the GUI**, and no blocking read on gpui's UI thread.
+- **The TUI stays first-class and must not regress** — its `Trust` screen and every existing config-reporting behaviour keep working.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set.**
+- **No test may depend on committed repo content.** Prove behaviour with a scratch runtime document and a scratch trust store, never against this repository's own `.ctx/traits/runtime.toml`.
+- **Grammar rules are normative**: semantic colour, states as words, the closed glyph set, no corner radius inside the canvas, **status dots nowhere on this screen — config rows carry none by explicit spec**, one bright title per list, sans for content and mono for machinery, a title plus exactly one italic narrated summary and no breadcrumbs, a bottom bar on every screen, overflow clipping only when content actually overflows, and provenance cited in bars and footers.
+- **Placeholder doctrine**: only the spec's `placeholder:` leaves — the summary's phrasing, the `edit runtime.toml` action and the seat's prose description — come from the shared module, and no placeholder string appears inline.
+- **The preview column's scope is the selected seat**, because that is what `screens/config.md` specifies and tags. Preview content for a `Runtime` engine row or the `Trust` row is not defined by any source; it needs an owner/assistant expansion of the design artifact before any task may make it a Done condition.
+- **Fonts**: `tokens.md` names IBM Plex Sans and Mono and the repository ships no font faces; `0265.1` owns that resolution and this screen must not silently fall back to a system face.
+- **Workspace gate cost must not move.** gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes.
+- **No desktop board check exists yet**: `0256.1` is still `ready` and no standalone desktop validation command exists, so no child declares one. Once it lands, the exact desktop command becomes declarable.
+- Rust is pinned to 1.97.1 by `rust-toolchain.toml`. Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X".
+
+## Done when
+
+Every child task is closed and the stop condition holds: the Config screen matches `screens/config.md` leaf for leaf — header, the three sections, the dotless config row with its sans name/description stack and end-aligned mono value/qualifier stack, the `valid · runtime.toml · loaded HH:MM` bottom bar with its placeholder-served `edit runtime.toml` action, and the preview's `seat` and `facts` blocks with the `runtime.toml · valid · HH:MM` footer — with every `data:` leaf rendering from a capability the center serves and the read-only CLI surface answers from, and no `data:` leaf closing as an unrendered gap. Nothing in the slice writes `runtime.toml` or trust. A malformed or missing runtime document fails loudly on every face. No poll loop, no blocking read on the UI thread. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
+"""
+[relations]
+depends-on = ["0265", "0258"]
+
+[[checks]]
+name = "workspace landing gate remains green and gpui-free in cost"
+command = "just test-full"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,50 @@
+schema-version = "0.2"
+key = "0265.11"
+title = "Render the preview in-progress and verdict blocks"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Add the Sessions preview column's two state blocks, between the `run` block and the footer `0265.10` rendered.
+
+The **`in progress`** block is grammar rule 13's bordered "now" item: `row-open` fill, border-soft, pad [8,10], a title in sans 12 with the state word right, and a narrated line in mono 10.5 `text-muted`. `screens/sessions.md` names the instance — title `review — refinement round 2` with `live` in accent, over "reading the diff against 0243.3's contract." The title and the `live` marker are `data:`, from the selected run's reconstruction (its current sequence title and the run's verdict-round count) and the row's live flag. The narrated line is `placeholder:` and comes from the shared `placeholders` module.
+
+The **`verdict — round N`** block is key/value: `status` with a warn-coloured value (`blocked · 2 findings`) plus the blocker lines beneath it in mono 10.5 `text-secondary`. It is `data:` from the run's typed verdict slots, which the selected run's reconstruction carries in its slot record — the same evidence the review verdict itself was written into, read rather than re-derived.
+
+Colour is semantic in both: `live` is accent because it is happening now; the verdict status is warn because it needs the owner. Neither is coloured for emphasis.
+"""
+scope = """
+## Decisions
+
+- In scope: the bordered `in progress` item with its title, `live` state word and placeholder-served narrated line, and the `verdict — round N` block with its warn-coloured `status` value and blocker lines, both fed from the selected run's center-served reconstruction.
+- **Exactly one placeholder here** — the `in progress` narrated line. Rendering the title, the marker, the status or the blocker lines statically would mark wired data as unwired.
+- **The round number in the block heading is data**, not a fixed `1`; a run with no verdict round yet renders no verdict block rather than an empty one labelled round 1.
+- Out of scope: the `run` block and footer (`0265.10`), the `slots` block (`0265.12`), the `landing` block (`0265.15`), and the main pane.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0265.10` — the preview column, its key/value row primitive and its selection-triggered reconstruction.
+"""
+validation = """
+## Watch
+
+- **No inline placeholder literal**: the `in progress` narrated line comes from the one shared module.
+- **Semantic colour only.** Accent marks what is happening right now and warn marks what needs the owner; nothing here is coloured to draw the eye, and rule 1's caution that blue is a pointer rather than a theme applies to a column that already shows accent in the `run` block's task state.
+- **States are words, never pills or icons**; the bordered item's border is border-soft with no corner radius, since radius exists only on the window frame.
+- **Reads stay on the selection path and off gpui's UI thread**; nothing here refreshes on a timer and nothing fires per list row.
+- **Fail-loud.** A reconstruction that cannot supply the verdict evidence reports the failure; it does not fall back to a filesystem read or present stale findings as current.
+- **Narration voice is mono 10.5 `text-muted` inside the bordered item** per rule 13, distinct from the header's italic sans 12 narrated summary.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions preview column shows a bordered `in progress` item whose title and accent `live` marker come from the selected run's reconstruction and whose narrated line comes from the `placeholders` module, and a `verdict — round N` block whose heading round, warn-coloured `status` value and blocker lines all come from the run's typed verdict slots — in the tokens `screens/sessions.md` names, positioned per rule 13's block order. A run with no verdict round shows no verdict block. Reads fire only on selection, off the UI thread, with no timer. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.10"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

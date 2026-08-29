@@ -1,0 +1,46 @@
+schema-version = "0.2"
+key = "0265.8"
+title = "Render the rail"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Grammar rule 10 gives every v1 screen a 260-wide rail on its left, and Sessions is where it lands because Sessions is the first screen. Padding [18,0]. A `Spaces` heading in mono 11 `text-muted` (heading pad [0,18,12,18]), then repo rows — a 5px dot plus the name in sans 13, the active row taking a raised fill with a bright dot and name, rows pad [0,10] gap 3, row pad [8,10] — then a spacer, then the footer at pad [14,18,0,18] gap 6: the owner's handle in mono 10.5 `text-secondary` over `<repo> · local` in mono 10.5 `text-session` / `text-faint` / `text-faint`. Nothing else in v1. Centred 32x1 `border-strong` dividers may separate future rail sections and precede the footer.
+
+Repository identity comes from the center row, never from the desktop process's cwd. `current_repo_key()` handles ad-hoc directories with an `adhoc-` key that `repo_key(root)` alone cannot reproduce, so a cwd-derived rail would name a repo the center does not know by that name, and repo rows are one of the four stateful lists rule 4 admits a dot into. The footer's owner handle is not something the center serves today, so it renders from the shared `placeholders` module under the placeholder doctrine rather than as an inline literal or an invented read.
+"""
+scope = """
+## Decisions
+
+- In scope: the rail at width 260 — `Spaces` heading, repo rows with their dot and active-row treatment, the spacer, and the two-line footer — composed from the token constants and the row vocabulary the frame list established.
+- **Repo rows come from center row data.** The desktop does not derive repository identity from its own working directory, and it does not add a reader to get it: the rows the subscription already carries name their repo and repo path.
+- **The footer's owner handle is placeholder-served.** No center capability supplies it today; the placeholder doctrine covers exactly this case, and the entry lives in the one shared module so wiring it later is a grep.
+- Out of scope: the title bar and the screen menu (`0265.9`), any rail section beyond the three rule 10 names, and every screen body.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0265.1` — the token constants and loaded faces the rail's sans 13 names and mono 10.5 footer render in, and the leaf that carries the whole of item `0256`. That chain is what puts `0256.4`'s live delta stream behind this rail: the rows refresh from deltas, and a charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs`), so the gate has to arrive through this edge rather than through `0265`'s.
+"""
+validation = """
+## Watch
+
+- **Never derive repository identity from the desktop process's cwd.** Ad-hoc directories carry an `adhoc-` key the desktop cannot reproduce; the center row is the source.
+- **The rail carries nothing beyond `Spaces`, repo rows, spacer and footer in v1.** Extra sections are a later-face temptation, not a v1 element.
+- **No poll loop.** The rail refreshes from deltas, never from a timer.
+- **Fail-loud, no direct-reader fallback.** A GUI that silently re-reads the filesystem when a center request fails breaks the family's posture; center-absent is spawn-on-need or a visibly stale view, never a hard error, and stale data is never presented as current.
+- **No inline literal for the owner handle** — it is a placeholder entry, not a string in the rail's code.
+- **No corner radius inside the canvas**; the active row is a raised fill, not a rounded pill or a border.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered rail and its delta-driven refresh are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The window shows a 260-wide rail with its `Spaces` heading, repo rows carrying 5px status dots with the active row in a raised fill and bright dot and name, a spacer, and the two-line footer whose repo line is center-row data and whose owner handle comes from the shared `placeholders` module — all at the paddings, sizes and tones rule 10 names. Repository identity is sourced from center row data rather than the process cwd, and no timer drives any refresh. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.1"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

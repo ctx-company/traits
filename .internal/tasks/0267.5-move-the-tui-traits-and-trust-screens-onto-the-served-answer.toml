@@ -1,0 +1,61 @@
+schema-version = "0.2"
+key = "0267.5"
+title = "Move the TUI Traits and Trust screens onto the served answer"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`0267.1` taught the center to answer the authored trait library with its trust classification. This cut is the parity half: the TUI's `Screen::Traits` and `Screen::Trust` read through that same answer, so the capability is one the center serves and every face renders rather than a desktop-only reader.
+
+The property to preserve is specific and easy to lose. `load_traits_and_trust()` (`modules/cli/src/app/dashboard.rs:2423`) deliberately performs one `dashboard_trait_inventory()` scan and one trust-store read and projects both screens from it. Two center round-trips, or a served answer consumed twice, reintroduces the cost the existing code was written to avoid. The Traits projection also excludes built-in origins while the Trust projection does not — a behavioural difference that survives the move untouched.
+"""
+scope = """
+## Decisions
+
+- In scope: re-pointing the TUI's Traits and Trust projections at the center-served inventory-and-trust answer, with both screens' rows, ordering, built-in-origin filtering and error text unchanged, and with one read still feeding both.
+- **Do not reintroduce a second scan.** One answer feeds both projections; two reads is a cost regression against a documented property.
+- **Center-absent keeps the family's posture** — spawn-on-need or a visibly stale view, never a hard error and never a silent filesystem fallback presented as current.
+- Out of scope: changing what either screen shows, the served answer's own shape (`0267.1`), the desktop rendering, trait authoring and trust mutation.
+
+## Prerequisite
+
+`0267.1` — the center-served inventory and trust answer these two projections move onto.
+"""
+validation = """
+## Watch
+
+- **The TUI must not regress** — same rows, same ordering, same filtering, same error text, same single-read cost. A green build with different output is still a regression.
+- **The built-in-origin difference between the two projections is behaviour**, not an accident of the old code path; flattening it during the move changes what the Traits screen lists.
+- **Do not leave two readers behind** for the screens that moved; the in-process scan stops being a second live answer for them.
+- **Blocking work stays off the TUI's event loop**, and the center's read must not stall its request loop.
+- **Fail-loud, no silent staleness, no direct-reader fallback.**
+- **No test may depend on committed repo content** — scratch inventory and trust fixtures only, never this repository's own trait set.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+
+## Done when
+
+The TUI's Traits and Trust screens render from the center-served inventory-and-trust answer and behave exactly as before — same rows, same ordering, same built-in-origin filtering, same error text — with one read feeding both projections and no second scan anywhere, and center-absent handled with the family's posture rather than a hard error. `just test` passes, the dashboard projections and the trust-report proof pass, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0267"
+depends-on = ["0267.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "dashboard trait and trust projections still pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "trust family report proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_trust_family_report"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,56 @@
+schema-version = "0.2"
+key = "0266.3"
+title = "Create a draft task through the center"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`screens/tasks.md` tags the board bar's right-hand action `data:` and says what it does: `new task` creates a draft. It is the one write on an otherwise read-mostly screen, and the spec gives it no placeholder exit, so it has to work.
+
+This cut builds the write itself: the center creates the draft, an existing non-GUI face reaches the same creation in the same release, and the board answer that already feeds the sections reflects the new task — which is what will later make the row appear without anything polling for it. No desktop process writes a task file, names one, or formats one.
+
+Binding the bar's action to this creation is `0266.8`, deliberately separate: the write is a center capability with per-face rendering, and the rendering half has its own failure behaviour to get right.
+"""
+scope = """
+## Decisions
+
+- In scope: a center-served draft creation — a `draft`-status task, reachable over the same socket the board answer arrives on — plus an existing non-GUI face on the same path, with the resulting task appearing in the board answer that feeds the sections.
+- **No desktop-side write**, and no second write path: the creation goes through the same io-level task write the existing faces use, so two faces cannot disagree about what a created draft looks like.
+- **Occupied and refused cases are answered, not swallowed.** A creation the center refuses answers a refusal that a face can render; refusal is never queued.
+- Out of scope: the desktop binding and its failure rendering (`0266.8`), any other task mutation — no editing, claiming, closing, status changes or deletions — and the preview column.
+
+## Prerequisite
+
+`0266.1` — the center-served board answer the created draft arrives through.
+"""
+validation = """
+## Watch
+
+- **This is the only write in the whole `0266` slice.** Do not open task mutation as a theme; anything beyond creating a draft is out of scope.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A creation path only the desktop can call is the capability-in-one-face defect, in the write direction.
+- **The board answer's own update is the signal** that a draft exists; the creation must not require a face to re-ask on a timer to see its result.
+- **The center's write must not stall its request loop**, and an occupied board answers a refusal rather than blocking.
+- **No test may depend on committed repo content**, and no test may write into this repository's own `.internal/tasks` — scratch fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+
+## Done when
+
+The center creates a `draft`-status task on request, an existing non-GUI face reaches that same creation, and the new draft appears in the board answer that feeds the sections without any face re-asking on a timer. A refused creation answers a refusal a face can render, and no new task-writing path is introduced beside the existing io-level one. `just test` passes, the CLI task read and write tests pass, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "CLI task read and write paths stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

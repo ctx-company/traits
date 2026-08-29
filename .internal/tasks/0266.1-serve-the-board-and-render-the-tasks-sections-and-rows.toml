@@ -1,0 +1,64 @@
+schema-version = "0.2"
+key = "0266.1"
+title = "Serve the board and render the Tasks sections and rows"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Teach the center to answer the board, and render the Tasks screen's sections and rows from it — one cut, because the rendering is what proves the capability and the capability is what makes the rendering honest.
+
+Today the board is reached in-process. The CLI's task read (`modules/cli/src/app/tasks.rs`) and the TUI's `Screen::Tasks` both walk `.internal/tasks` through `ctx-traits-io::{task_files, task_board_cache}`; a separate desktop binary reaches none of it. `0265.2` already taught the center to answer the single task a run claims. This cut widens that to the listing: every task with its title, description and derived state, plus the run-to-task join the center is uniquely placed to make — it already holds the run rows, and each carries the claimed `task_key`.
+
+`screens/tasks.md` fixes the forms. **Sections** (`In progress — 2`, `Ready — 3`, `Draft — 2`) are mono 11 `text-muted` headings over rows at gap 4, membership derived from the task documents. The **task row** is pad [8,12], space-between, alignItems start: on the left a dot column (pad-top 6) beside a stack of title in sans 12.5 `text` (selected: `text-bright` on `surface-raised`) over a description in sans 11 `text-secondary`. That left half, the section membership and the selection model are what this cut renders; the row's right-hand state stack in its four semantic forms is `0266.6`, and moving an existing non-GUI face onto this same answer is `0266.7` — both inside this slice, so the capability is never GUI-only by the time the charter closes.
+
+The screen also joins the title bar's menu here — its `Tasks` entry and the switch that reaches it, with the current entry bright.
+"""
+scope = """
+## Decisions
+
+- In scope: the center-served board listing (each task's title, description, derived state and state detail, plus the run-to-task join that names the claiming run), the `Tasks` menu entry and its switch, and the three state sections with the task row's dot, title, description and selection model rendered from that answer.
+- **The run-to-task join lives on the center side and lands here**, because both the row's live state (`0266.6`) and the preview's `details` block (`0266.4`) read it; two client-side joins over the same two answers is the defect this ruling prevents.
+- **The desktop reads no task files.** Not a parser, not the board cache, not a directory walk; the answer arrives over the center socket the window already holds.
+- **Derived state is computed once, centrally.** The board's own status derivation — a parent deriving from its children, an open leaf deriving `blocked` from an unmet dependency (`modules/core/src/task/graph.rs`) — has one implementation, on the center side, so the faces cannot disagree about which section a task is in.
+- Out of scope: the row's state stack and its four semantic forms (`0266.6`), moving an existing non-GUI face onto this answer (`0266.7`), the header and bottom bar (`0266.2`), draft creation (`0266.3`, `0266.8`), the preview column (`0266.4`, `0266.5`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.5` — the row vocabulary (semantic colour, state words, the status dot and selection rule, the sans/mono split) these rows compose, which chains back through `0265.3` to `0265.1` and the whole of item `0256`, and carries `0257`'s detail read. `0265.9` — the title bar this screen's menu entry joins. `0258` — the source places the four new screens after its work item, and a charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs`), so the gate is named on this leaf.
+"""
+validation = """
+## Watch
+
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A desktop-side task-file read is the capability-in-one-face defect even when the bytes are identical, and the answer this cut adds is the one `0266.7` moves an existing face onto — design it so that move is a re-pointing, not a rewrite.
+- **No poll loop.** Board changes reach the screen as events over the center's stream; a timer on a file-backed screen is exactly the smuggled poll loop the plan forbids.
+- **Blocking work stays off gpui's UI thread**, and the center's board read must not stall its own request loop while it walks the tasks tree.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed board answer is stated on the screen rather than replaced by stale rows or a filesystem re-read.
+- **Every leaf here is `data:`.** No section heading, row title or description is served from the `placeholders` module, and none may close as an unrendered gap.
+- **Grammar rules are normative**: 5px dots because a task list is one of the four stateful lists, exactly one bright title, selection as `surface-raised` plus `text-bright` and never a border or radius, the closed glyph set, sans for content and mono for machinery.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set**; do not pull CLI-level types into it.
+- **No test may depend on committed repo content** — scratch task fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the served answer is green and the workspace stayed gpui-free; the rendered pane is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The center answers the board listing with each task's title, description, derived state and state detail, including the claiming run behind the join, over the existing `task_files` / `task_board_cache` path rather than a new reader; and the desktop's `Tasks` menu entry switches to a pane rendering `In progress` / `Ready` / `Draft` sections whose rows carry the dot, title and description in the exact tokens `screens/tasks.md` names, with one bright title, a working selection model and no desktop-side file read. Updates arrive as events with no timer, reads stay off the UI thread, and a failed answer fails loud. `just test` passes, the center wire proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0265.5", "0265.9", "0258"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "center wire proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

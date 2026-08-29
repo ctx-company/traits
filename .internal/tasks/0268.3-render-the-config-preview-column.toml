@@ -1,0 +1,68 @@
+schema-version = "0.2"
+key = "0268.3"
+title = "Render the Config preview column"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Build the 380-wide preview column `.internal/docs/design/screens/config.md` specifies. The artifact is precise about what it is: **"Preview column (selected seat)"** — the column describes a selected agent seat, and that is the whole of its normative content.
+
+- **`seat` block**: a key/value name such as `smart · strong seat` over a description in sans 11.5 `text-secondary`. The role is `data:` from the center-served runtime answer; the descriptive prose is the column's one `placeholder:` leaf and comes from the shared module.
+- **`facts` block** (key/value): model, effort, used by, source — all `data:`. Model and effort come from the served seat; `used by` reflects what the runtime actually assigns that seat, not a guess from its name; `source` is the layer the value won on, which the resolution `0268.1` serves already carries per knob.
+- **Footer**: `runtime.toml · valid · HH:MM`, grammar rule 12's provenance line, agreeing exactly with the main pane's bottom bar because both cite one served answer.
+
+Selection follows the shared grammar — `surface-raised` fill with a `text-bright` title, one bright title per list — and values render mono, end-aligned, state-coloured only where semantically warranted: the footer's `valid` in ok, and nothing accent, warn or danger merely to draw the eye.
+"""
+scope = """
+## Decisions
+
+- In scope: the `seat` block, the `facts` key/value block and the provenance footer, at 380 wide, fed on selection of an agent seat from the center-served runtime answer, with that answer extended to carry the seat's assignment and winning layer where it does not already.
+- **The selected seat is the boundary.** `screens/config.md` specifies the preview for a selected seat and defines no blocks, leaves or tags for any other row; this task renders the seat case and invents no mapping for the rest. Extending the column to `Runtime` or `Trust` rows requires the design artifact to say what those blocks contain first — an owner/assistant change to `.internal/docs/design/**`, not a worker ruling made here.
+- **One `placeholder:` leaf** — the seat's prose description — from the shared module, never an inline literal. Every other leaf is `data:` and none may close as an unrendered gap.
+- **Where a value is a built-in default rather than something the document states, keep that distinguishable** — the resolution carries layer and reason per knob, and `source` is where that shows.
+- **Read-only.** Selecting a seat reads; it never writes `runtime.toml`, never mutates trust, and opens no editing affordance.
+- Out of scope: the main pane (`0268.1`, `0268.2`), the CLI report (`0268.4`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0268.2` — the main pane whose selection this column follows and whose bottom bar the footer must agree with.
+"""
+validation = """
+## Watch
+
+- **Do not invent preview content the artifact does not specify.** The normative source describes a selected seat; shaping engine or trust data into the `seat` and `facts` blocks would put unfalsifiable visual content behind a `data:` claim.
+- **No private re-parse, re-resolution or trust read in this column.** Facts come from the center-served answer the main pane already uses.
+- **`used by` must reflect the runtime's actual assignment**, not an inference from the seat's name.
+- **The footer must match the bottom bar** — same verdict, same time, from one answer; a mismatch means two readers exist where there should be one.
+- **States are words, never pills or icons**; the `·` in `smart · strong seat` and in the footer is the extent of the glyphs. No corner radius inside the canvas.
+- **Status dots only in stateful lists** — this column carries none, and neither does the pane beside it.
+- **Colour is semantic, not decorative**: ok for the settled-good `valid`, nothing coloured merely to draw the eye.
+- **Sans is content, mono is machinery**: the seat description is sans 11.5 `text-secondary`; model id, effort, source and the footer's time follow the mono, end-aligned treatment `screens/config.md` and `tokens.md` name.
+- **Reads fire on selection, off gpui's UI thread**, never eagerly for the whole list and never on a timer; any engine probe stays off the selection hot path.
+- **Fail-loud, no silent staleness, no direct-reader fallback.**
+- **No test may depend on committed repo content** — scratch runtime documents only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the served answer is green and the workspace stayed gpui-free; the rendered column is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Selecting an agent seat renders a 380-wide preview carrying the `seat` block with its key/value name and placeholder-served prose description, the `facts` key/value block showing model, effort, used by and source from the center-served answer, and a `runtime.toml · valid · HH:MM` footer matching the main pane's bottom bar exactly — in the tokens `screens/config.md` names, with no `data:` leaf left unrendered and no preview content invented beyond what the artifact specifies for a selected seat. Reads fire only on selection, off the UI thread, with no timer. `just test` passes, the doctor proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0268"
+depends-on = ["0268.2"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "doctor's config-reporting proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_doctor"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,63 @@
+schema-version = "0.2"
+key = "0266.4"
+title = "Render the Tasks preview lede and details"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Open the Tasks screen's 380-wide preview column with grammar rule 13's identity region: the headerless lede and the `details` block.
+
+The **lede** is the task title in sans 13 `text-bright` over its full description in sans 11.5 `text-secondary` at line height 1.45 — both already carried by the center-served board answer `0266.1` established.
+
+The **`details`** block is key/value and is where the board meets the runs: the task id and its state (`0243.4 · in review`), the claiming run and its trait (`run-ab12ef · implement`), and the accent live line (`live · frame 5 of 9`). The first is board data. The second is the run-to-task join `0266.1` put on the center side, the same one the row's `live · run-<id>` state reads. The third needs the claiming run's frame ordinal and total, which live in that run's reconstruction rather than on its compact row; the center answers the reconstruction already, so this cut adds the progress leaf to the board answer's detail rather than asking the desktop to fetch and join it.
+
+`screens/tasks.md` tags every leaf in this column `data:`, so none of it is placeholder-served and none of it may close as a gap.
+"""
+scope = """
+## Decisions
+
+- In scope: the 380-wide preview column's frame and order for this screen, the headerless lede, the `details` key/value block, and the center-side extension that carries the claiming run's trait and frame progress alongside the task, with an existing non-GUI face able to reach the same detail.
+- **The join happens on the center side.** A desktop that fetches a task, then fetches a run, then joins them locally has invented a client-side capability the other faces do not have and has put two round-trips on a selection.
+- **No placeholders in this column.** Every leaf is tagged `data:`; nothing here is served from the `placeholders` module, and a leaf that cannot render is unfinished work rather than a Done state.
+- **Detail is selection-triggered.** The column populates when a row is selected, never eagerly per row and never on a timer.
+- Out of scope: the `facts`, `checks` and `landing` blocks and the footer (`0266.5`), the main pane (`0266.1`, `0266.2`, `0266.6`) and its write action (`0266.3`, `0266.8`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0266.1` — the center-served board answer, its run-to-task join, and the main pane's selection model this column follows.
+"""
+validation = """
+## Watch
+
+- **`live · frame N of M` is accent because it is happening right now**, per rule 1; the id and trait values are neutral. Colour is semantic, never decoration.
+- **No poll loop.** The live line follows center updates for the claiming run; if it cannot be fed from an event-driven source, that is a capability to add on the center side, not a refresh loop to add on the client.
+- **Selection-triggered reads only**, off gpui's UI thread; a preview that fetches for every row breaks the family's read posture, and the center must not walk every ledger to answer one selection.
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach** — including the claiming-run and frame-progress facts behind this block.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed detail answer is stated rather than replaced with last-known values.
+- **Status dots only in stateful lists** — this column is prose and key/value, so it carries none. Key/value rows are key sans 11.5 `text-secondary` left, value mono 10.5 right, state-coloured only when the value is a state. No corner radius inside the canvas; the glyph set is closed.
+- **No test may depend on committed repo content** — scratch fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Selecting a task opens a 380-wide preview whose headerless lede shows the task title in sans 13 `text-bright` over its full description, and whose `details` block shows the task id with its state, the claiming run with its trait, and the accent `live · frame N of M` line — every value from a center-served answer that joins board and run state on the center side, reachable by a non-GUI face, with nothing placeholder-served and no leaf left unrendered. Reads fire only on selection, off the UI thread, with no timer. `just test` passes, the center proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "center wire proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

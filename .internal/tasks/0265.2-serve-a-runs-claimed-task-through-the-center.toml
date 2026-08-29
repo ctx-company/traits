@@ -1,0 +1,65 @@
+schema-version = "0.2"
+key = "0265.2"
+title = "Serve a run's claimed task through the center"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`screens/sessions.md` opens the screen with grammar rule 6's header: a title that is the claimed task's id and title (`0243.4 — everyone asks the center`). Both halves are tagged `data:`, and only half of that is served today.
+
+`CenterPublicRow` carries `RunSummary`, and `RunSummary.task_key` is the claimed task's id — verified `data:`. `RunSummary.title` is not the task's title: `RunSummary::from_session` fills it from `Provenance::session_title`'s resolved narrator title, which is optional and may be absent or in flight. The claimed task's title, description and stored status live in the board, and the board is not center-served: the CLI reaches it through `modules/cli/src/app/tasks.rs` over `ctx-traits-io::{task_files, task_board_cache}`, and the TUI's `Screen::Tasks` reaches the same path in-process. A separate desktop binary reaches none of it.
+
+The plan document's mechanism is not negotiable here — "if a face needs something the center does not serve, the center learns to serve it and every face gets it in the same release" — so this cut teaches the center to answer the task a run claims and lands a second, non-GUI consumer of that same answer. It is deliberately the whole of this task: no window, no rendering, no placeholder module. The Sessions header that consumes the answer is `0265.13`, and every later screen's board work (`0266`) widens this same capability from one task to the listing.
+"""
+scope = """
+## Decisions
+
+- In scope: a center-served read of the task a run claims — its key, title, description, stored status, and its own `auto-close` override where the document declares one — reachable over the socket every face already speaks; plus one existing non-GUI face consuming that same answer in the same release.
+- **Which non-GUI surface consumes it is the architect's call** — the CLI's task read or the TUI dashboard's own Sessions projection are both legitimate — but a center capability that no non-GUI face calls has not preserved parity.
+- **The `auto-close` override rides this answer** because the Sessions preview's landing consequence (`0265.15`) needs it beside the resolved `[tasks]` policy; the task document already carries `auto_close` (`modules/core/src/task/mod.rs`), so serving it costs nothing extra here and avoids a second board read later.
+- **Not deferred to `0261`.** That task's scope admits no production behaviour beyond reconnect-delay parity, two-version coexistence, shared-index versioning and subscription regressions; assigning this capability to it would be assigning it to nothing.
+- Out of scope: all desktop rendering (`0265.13` renders the header from this answer), the `placeholders` module (`0265.3` creates it at its first placeholder leaf), the frame counter (`0265.14`), and the whole board-listing capability the Tasks screen needs (`0266.1`).
+
+## Prerequisite
+
+`0265.1` — the first `0265` leaf, which carries the whole of item `0256`. A charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs` evaluates dependencies only for open leaves), so every `0265` child chains through `0265.1` for the item gate.
+"""
+validation = """
+## Watch
+
+- **Do not substitute the session title for the task title.** They are different fields with different lifecycles; `Provenance::session_title` can be unresolved, and answering with it under a leaf that means "title of the claimed task" misreports the screen.
+- **No new board reader.** Reuse the `task_files` / `task_board_cache` path the existing faces use; a second walk of the tasks tree is a second answer that can disagree.
+- **The reads the center adds must not stall its own request loop.**
+- **Fail-loud.** A run whose claimed task cannot be read answers the failure; it does not answer a blank or invented title.
+- **The TUI and CLI must not regress**, and the existing task read's behaviour — row content, filtering, error text — survives whatever re-pointing this cut does.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set**; the center-side task read must not pull CLI-level types or a new heavyweight dependency into the io crate, since the desktop lane inherits everything it drags in.
+- **No test may depend on committed repo content.** Prove behaviour with scratch task fixtures, never by asserting on this repository's own `.internal/tasks` — path/word/file-existence inventories are banned workspace-wide.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+
+## Done when
+
+The center answers, for a given run, the task that run claims — key, title, description, stored status and the document's own `auto-close` override — and an existing non-GUI face reads that task through the same answer with its behaviour unchanged. A run whose claimed task cannot be read answers a loud failure. No face gains a second board reader. `just test` passes, the center wire proof and the CLI task-read tests pass, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "center wire proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "CLI task read path stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

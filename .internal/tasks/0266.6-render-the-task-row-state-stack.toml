@@ -1,0 +1,47 @@
+schema-version = "0.2"
+key = "0266.6"
+title = "Render the task row state stack"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`0266.1` renders the task row's left half — dot, title, description — from the center-served board listing. This cut renders its right half, where the row's whole semantic load actually sits.
+
+`screens/tasks.md` fixes four forms in an end-aligned mono 10.5 stack of state over meta: claimed and live renders `live · run-<id>` in accent; waiting renders `awaiting owner` in warn with a `warn` dot; ready renders `ready` over `deps met` plain; draft renders `draft` over `blocked by <id>` with a `dot-dim` dot. All of it is `data:` — the state and its qualifying detail come from the derived state the board answer already carries, and `live · run-<id>` names the claiming run through the join `0266.1` put on the center side.
+
+Colour is chosen from the named state, never at the call site: accent for what is happening right now, warn for what needs the owner, plain for what is merely ready, dim for what is blocked. This is the first screen after Sessions to exercise that rule across four forms in one list, so it is where the row vocabulary `0265.5` extracted proves it composes rather than needing a second implementation.
+"""
+scope = """
+## Decisions
+
+- In scope: the task row's end-aligned state-over-meta stack in all four forms, with each row's dot tone following the same named state, rendered from the derived state and join the board answer already carries.
+- **No new center capability.** If a form cannot be rendered from the served answer, that is a gap in `0266.1`'s answer to be closed there, not a client-side derivation added here.
+- **The dot and the state word agree by construction.** A row whose dot says one thing and whose word says another is a rule 1 violation the primitive should make impossible.
+- Out of scope: the sections, left stack and selection model (`0266.1`), the chrome (`0266.2`), draft creation (`0266.3`, `0266.8`), the preview column (`0266.4`, `0266.5`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0266.1` — the rendered sections, the row's left half and the center-served board answer with its derived state and run-to-task join.
+"""
+validation = """
+## Watch
+
+- **Every leaf here is `data:`.** No state word, run id or `blocked by <id>` detail is served from the `placeholders` module, and none may close as an unrendered gap.
+- **States are words, never pills, badges or icons**; the glyph set is closed and no corner radius exists inside the canvas.
+- **Colour is semantic, not decorative.** Accent because it is happening now, warn because it needs the owner — never to draw the eye.
+- **No poll loop.** A row whose task becomes claimed switches form from a center event, not from a timer, and a rejected projection leaves no row showing a state its dot contradicts.
+- **Fail-loud, no silent staleness.** A row whose state cannot be resolved states that rather than falling back to `ready`.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered forms are verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Every task row carries the end-aligned state-over-meta stack `screens/tasks.md` names, in all four forms — `live · run-<id>` in accent, `awaiting owner` in warn with a warn dot, `ready` over `deps met`, `draft` over `blocked by <id>` with a dim dot — each rendered from the board answer's derived state and its run-to-task join, with dot and word agreeing by construction and nothing placeholder-served. A row whose task becomes claimed changes form from a center event with no timer. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.1"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

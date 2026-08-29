@@ -1,0 +1,43 @@
+schema-version = "0.2"
+key = "0265.9"
+title = "Render the title bar and screen menu"
+status = "draft"
+raised = "2026-08-29"
+content = """
+The window's own chrome is the last piece of the Sessions frame. The title bar is h 36, padding [0,20], carrying 12px traffic lights, a 34x18 logo, and the screen menu at gap 18 in sans 12.5 with the current entry bright. The window frame itself is the one place a corner radius is legal — radius 10 with clip, 1440x900 for the core screens — and inside the canvas there is none.
+
+The menu lists the screens that exist. Today that is Sessions, bright because it is current. The four later screens each add their own entry and the switching to reach it as part of their own charter, so nothing here resolves to an empty pane: an empty pane per menu entry would be a promise the board has not yet paid for, and `screens/merges.md` even fixes where the Merges entry goes when it arrives (between Tasks and Config). This cut renders the frame, the traffic lights, the logo and the menu row, and establishes the menu as the surface those entries slot into.
+"""
+scope = """
+## Decisions
+
+- In scope: the window frame at radius 10 with clip, the 36-high title bar with its traffic lights and logo, and the screen menu rendering the entries that exist with the current one bright.
+- **No empty panes.** A menu entry appears when its screen does. `0266`-`0269` each add their entry and the switch to it in the cut that renders the screen, in the order `screens/merges.md` fixes.
+- Out of scope: the rail (`0265.8`), every screen body, keyboard-shortcut design beyond what the menu needs, and the `ctx gui` launcher and app bundle (`0260`).
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0265.8` — the rail the title bar sits above, so the frame is assembled once rather than twice.
+"""
+validation = """
+## Watch
+
+- **Radius only on the window frame.** Any rounded corner inside the canvas violates rule 3, and the menu items are text, not chips.
+- **The menu is sans 12.5 with the current entry bright**; entries are not actions and carry no arrows or icons — the glyph set is closed.
+- **Blocking work stays off gpui's UI thread**, including anything the window frame does at startup.
+- **Center-absent behaviour is never a hard error** — spawn-on-need or a visibly stale view, the same posture as the TUI. Note the live hazard for the spawn-on-need path: only `modules/cli/src/app/bin/ctx.rs` interprets `CENTER_PROCESS_SENTINEL` and `center_executable()` falls back to `std::env::current_exe()`, so a gpui binary that triggers spawn-on-need would try to exec itself as a center. That resolution belongs to `0256`; this task must not paper over it.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The window renders at 1440x900 with corner radius 10 and clip, above a 36-high title bar carrying 12px traffic lights, the 34x18 logo and the screen menu in sans 12.5 at gap 18, with Sessions bright as the current entry and no entry present for a screen that does not exist yet. No radius appears anywhere inside the canvas. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.8"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

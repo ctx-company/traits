@@ -1,0 +1,55 @@
+schema-version = "0.2"
+key = "0265.5"
+title = "Render the frame list row forms"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Render the three frame-row forms `screens/sessions.md` specifies, from the selected run's authoritative reconstruction. The forms are exact, and rendering them is where the shared row vocabulary — semantic colour, state words, the 5px dot, the selection rule and the two voices — becomes real code with a real consumer.
+
+A **done** row is an `ok` dot, the step name in sans 12.5 `text`, and a right-aligned mono 10.5 elapsed time (`4s`, `3m 12s`). The step names come from the reconstruction's frames; **the elapsed time does not, and the difference matters.** A ledger alone carries no per-step timing — `render_ledger_run_view`'s own contract states it (`modules/cli/src/app/run_view/projection.rs`: `PresentationState`'s `finished_durations` map stays empty because "a ledger alone carries no per-step timing or narration"), and only the run's total `ledger.elapsed_seconds` survives there. The durable per-step evidence is the activity sidecar: `<ledger>.json.activity.jsonl` stamps `at_epoch_ms` beside a `frame_id` at the IO boundary (`modules/io/src/activity_sidecar.rs`), so a finished frame's elapsed span is the distance between its first and last record. That sidecar is derived evidence and deliberately best-effort — writes are swallowed on failure and truncated trailing lines are tolerated — so a frame with no sidecar evidence renders no time at all rather than a computed guess.
+
+The **current** row is a `surface-raised` fill with an `accent` dot, the name in `text-bright`, a second description line in sans 11.5 `text-secondary` at width 430, and `live · round 2 · smart` in mono 10.5 `accent` on the right: the frame name is data, the seat is `Session.current_agent`, the round is `RunSummary.verdict_rounds`, and the description is `placeholder:` until frames carry intent text. **Pending** rows are a `dot-idle` dot and a `text-muted` name with no right side.
+
+Grammar rules 1, 2, 4 and 5 all bind here at once, so this is where they are implemented: colour chosen from a named state rather than at the call site, states rendered as words and never as pills or checkmarks, the dot present because a frame list is one of the four stateful lists rule 4 admits, exactly one bright title in the list, and sans for the content half of every row against mono for the machinery half.
+"""
+scope = """
+## Decisions
+
+- In scope: the done, current and pending row forms, fed from the selected run's center-served reconstruction, with the semantic colour roles, state words, status dot, selection rule and sans/mono split extracted as reusable primitives while these rows are built.
+- **Per-step elapsed times come from the activity sidecar's `at_epoch_ms` records, delivered with the selected run's center-served detail** — never recomputed on the desktop side, never derived from the run's total elapsed, and never rendered at all for a frame the sidecar has no records for. Whether the center answers the spans or the raw records is the architect's call; that the desktop never opens the sidecar itself is not.
+- **Callers name semantics, not presentation.** A row names a state; the primitive chooses the colour, the word's tone and the dot. Rule 1 is only enforceable if that choice lives in the primitive.
+- **One bright title per list is a list-level invariant**, not a per-row one; a primitive that cannot express it pushes the rule onto every caller.
+- The current row's description is the only `placeholder:` leaf here and comes from the shared `placeholders` module `0265.3` created — frames do not carry intent text today.
+- Out of scope: the loop-narration line and activity block (`0265.6`), overflow clipping and the fade (`0265.7`), the frame counter (`0265.14`), the preview column, the rail and title bar, and the chrome (`0265.3`).
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.3` — the screen shell these rows sit in and the `placeholders` module the current row's description is served from. `0257` — the selected run's authoritative reconstruction and the detail read path these rows and their timing evidence arrive on.
+"""
+validation = """
+## Watch
+
+- **A missing elapsed time is the correct render.** The sidecar is derived evidence, not authority; inferring a duration from the run's total, from row order, or from a render-time clock fabricates timing the system never observed.
+- **No literal values at a call site.** Every colour, size, weight and spacing comes from the token constants; a hex inside a primitive is the same defect as a hex inside a screen.
+- **The glyph set is closed** — `↰ ↳ → · ∷` only. An icon font, an emoji, or a checkmark standing in for a done state violates rules 2 and 3 at once. No corner radius inside the canvas.
+- **Dots belong to stateful lists only.** The frame list qualifies; prose does not, and no later screen may inherit a dot into a prose region because this primitive made one easy.
+- **Compact rows must not each trigger a read.** The frame list belongs to the selected run's single reconstruction; per-row ledger, store or sidecar reads break the ledger-is-authoritative posture.
+- **No poll loop**, and no blocking receive on gpui's UI thread. Row state changes arrive as center deltas.
+- **Snapshot-then-delta ordering is the contract**: a rejected projection must leave no half-updated row and no orphaned current row.
+- **No inline placeholder literal** for the current row's description.
+- **Fail-loud, no direct-reader fallback**; stale rows are never presented as current, and a failed detail read is stated rather than filled from the filesystem.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions frame list renders done, current and pending rows in the exact token forms `screens/sessions.md` names, with step names, the current frame's name, seat and round from the selected run's center-served reconstruction, done-row elapsed times from the activity sidecar's durable `at_epoch_ms` evidence delivered with that same detail — and no time rendered for a frame the sidecar has no records for — and the current row's description from the `placeholders` module. Exactly one row carries a bright title. Row state changes arrive as deltas with no timer, no per-row read and no partially committed row after a rejected projection. The semantic colour roles, state words, status dot, selection rule and sans/mono split exist as primitives the later screens compose rather than re-derive. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.3", "0257"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,56 @@
+schema-version = "0.2"
+key = "0267.4"
+title = "Render the Traits preview variants and ports blocks"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Complete the Traits preview column with its two remaining fact blocks and its provenance footer.
+
+- **`variants`** is key/value, one row per authored variant (`basic`, `quick`, `complex`). The variant names are already on the served answer — the trait row's own right stack lists them — so this block renders the same list with each variant's own facts beside it.
+- **`ports`** is key/value: task and duration. A trait's declared ports live in its manifest, which the center reads while building the inventory, so this cut widens the served answer to carry them.
+- **Footer**: `skill-lock @ <sha> · N digests`, grammar rule 12's provenance line in right-aligned mono 10 `text-faint`, citing the same center-side lockfile resolution the bottom bar cites. A mismatch between bar and footer means two readers exist where there should be one.
+
+Every leaf here is `data:` in `screens/traits.md`. Nothing is placeholder-served, and a leaf the served answer cannot supply is unfinished work rather than a Done state — which is why the port facts are added to the capability in this cut.
+"""
+scope = """
+## Decisions
+
+- In scope: the `variants` and `ports` key/value blocks and the provenance footer, with the center-side extension carrying each trait's declared ports, reachable by a non-GUI face.
+- **No placeholders in this column.** Every leaf is `data:`.
+- **One lockfile resolution** behind both the bar and this footer.
+- **Reads are selection-triggered**, never eager and never on a timer.
+- Out of scope: the `trait` and `facts` blocks (`0267.3`), the main pane, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0267.3` — the preview column, its key/value rows and the center-served detail these blocks extend.
+"""
+validation = """
+## Watch
+
+- **A trait with one variant renders one row**, not a fabricated set; the block follows what the manifest declares.
+- **The footer must agree with the bottom bar** — same sha, same digest count, from the same center-side resolution.
+- **Preview footers are right-aligned mono 10 `text-faint`** per rule 12; no status dots in this column, no corner radius inside the canvas, closed glyph set.
+- **Selection-triggered reads only**, off gpui's UI thread, with no timer.
+- **Fail-loud, no silent staleness, no direct-reader fallback**; no manifest re-parse from the desktop process.
+- **No test may depend on committed repo content** — scratch manifest fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Traits preview column carries a `variants` block with one key/value row per authored variant, a `ports` block naming the trait's declared task and duration ports, and a right-aligned `skill-lock @ <sha> · N digests` footer that matches the bottom bar exactly — every leaf from the center-served answer extended in this cut, none placeholder-served, none left unrendered. Reads fire only on selection, off the UI thread, with no timer. `just test` passes and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0267"
+depends-on = ["0267.3"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0266.7"
+title = "Move the existing task face onto the served board"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`0266.1` taught the center to answer the board. This cut is the other half of the plan document's parity mechanism: an existing non-GUI face reads the board through that same answer, in the same release, so the capability is never one the desktop alone can reach.
+
+Today the board is walked in-process twice over. The CLI's task read (`modules/cli/src/app/tasks.rs`) and the TUI's `Screen::Tasks` both go through `ctx-traits-io::{task_files, task_board_cache}` inside their own process. Which of them moves is the architect's call — the ruling is that at least one does, and that its behaviour is indistinguishable afterwards: same rows, same ordering, same filtering, same error text.
+
+This is the cut where the migration's regression surface is paid for honestly, with the existing task and dashboard tests as its gate rather than as a footnote on a rendering task.
+"""
+scope = """
+## Decisions
+
+- In scope: re-pointing one existing non-GUI face — the CLI's task listing or the TUI's `Screen::Tasks` — at the center-served board answer, with its observable behaviour unchanged.
+- **A green build with different output is still a regression.** Row content, ordering, filtering and error text are the contract, not the implementation beneath them.
+- **Center-absent behaviour keeps the family's posture** on the moved face: spawn-on-need or a visibly stale view, never a hard error, and never a silent fallback that re-reads the filesystem while presenting itself as current.
+- Out of scope: changing what that face shows, the desktop rendering (`0266.1`, `0266.6`), the board answer's own shape (`0266.1`), and any other face.
+
+## Prerequisite
+
+`0266.1` — the center-served board answer this face moves onto.
+"""
+validation = """
+## Watch
+
+- **The TUI stays first-class and must not regress.** It is the parity reference for this whole charter; a moved projection that loses a filter or reorders rows breaks the thing the move exists to prove.
+- **Do not leave two readers behind.** The point of the move is that the walked-in-process path stops being a second answer for the face that moved; leaving both wired is the disagreement this cut is meant to remove.
+- **Blocking work stays off the face's own event loop**, and the center's board read must not stall its request loop.
+- **Fail-loud, no silent staleness.** A failed board answer is reported by the moved face in its own idiom rather than replaced by stale rows.
+- **No test may depend on committed repo content** — scratch task fixtures only, never assertions against this repository's own `.internal/tasks`.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+
+## Done when
+
+An existing non-GUI face reads the board through the center-served answer and behaves exactly as before — same rows, same ordering, same filtering, same error text — with its in-process walk of the tasks tree no longer a second live answer for that face, and center-absent handled with the family's posture rather than a hard error. `just test` passes, the CLI task tests and the dashboard projections pass, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0266"
+depends-on = ["0266.1"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "CLI task read path stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "TUI board projection stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

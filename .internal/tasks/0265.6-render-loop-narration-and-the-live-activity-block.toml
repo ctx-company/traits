@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0265.6"
+title = "Render loop narration and the live activity block"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Two things sit between and beneath the frame rows, and both are live.
+
+The **loop-narration line** goes between frames: italic mono 10.5 `text-faint`, e.g. "round 2 — refinement reviewed, review re-runs". `screens/sessions.md` tags it precisely — the loop marker is `data:`, the copy phrasing is `placeholder:` — so the line appears exactly where the run's own loop evidence puts it, wearing prose from the shared module.
+
+The **activity block** sits under the current row (grammar rule 11): eight mono 10.5 `text-faint` lines, pad-left aligned under the row's text, newest at top at opacity 1.0 fading stepwise to roughly 0.45, gap 3, carrying the agent's actual activity — the charter's example is `review: reading modules/io/src/center.rs`. It is tagged `data: center activity deltas`, and it is the sharpest no-poll-loop surface in the application: the lines arrive as deltas on the subscription channel `0256.4` drives, are received off the UI thread, and are never fetched on a timer.
+"""
+scope = """
+## Decisions
+
+- In scope: the loop-narration line between frames with its data-driven position and placeholder-served phrasing, and the faded activity block under the current row fed from center activity deltas, both as reusable pieces the later screens may compose.
+- **The fade is stepwise and newest-first**, 1.0 down to about 0.45. An even ramp or a reversed order misreads rule 11.
+- **The block owns no timer and no fetch.** It renders the lines the subscription hands it; where those lines come from is the delta stream's concern, not this block's.
+- Out of scope: the subscription and delta reducer (`0256`), overflow clipping and the bottom fade (`0265.7`), the preview column, and every other screen region.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.5` (the frame rows this narration sits between and this block sits under) and `0256.4` (the live delta stream the activity lines arrive on).
+"""
+validation = """
+## Watch
+
+- **No poll loop.** A timer anywhere in this block is the defect the plan's third done-criterion names outright; blocking receives stay off gpui's UI thread.
+- **Snapshot-then-delta ordering is the contract.** Activity lines from a discarded snapshot must not survive a rejected projection, and a rejected projection must leave no partially committed visible state.
+- **Only the narration phrasing is a placeholder.** The loop marker's presence and position are data; serving the marker itself statically would mark a wired region as unwired. No inline literal — the phrasing comes from the one shared module.
+- **Narration is italic mono 10.5 `text-faint`** per rule 5's inline-narration voice, distinct from the header's italic sans 12 narrated summary. Confusing the two collapses rule 5.
+- **Fail-loud, no direct-reader fallback**; a center failure never licenses re-reading the activity sidecar from the desktop process.
+- **Closed glyph set, no corner radius inside the canvas.**
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The frame list shows the loop-narration line at the position the run's own loop evidence puts it, in italic mono 10.5 `text-faint` with its phrasing from the `placeholders` module, and the current row carries a block of up to eight activity lines fed from center activity deltas, newest at top, stepping from full opacity to about 0.45. A live run's activity lines appear as the deltas arrive, with no timer anywhere and no blocking receive on the UI thread. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.5", "0256.4"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

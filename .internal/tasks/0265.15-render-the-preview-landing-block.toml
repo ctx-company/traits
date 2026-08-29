@@ -1,0 +1,63 @@
+schema-version = "0.2"
+key = "0265.15"
+title = "Render the preview landing block"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Close the Sessions preview column with grammar rule 13's consequence block: sans 11.5 `text-secondary` lines, `→`-prefixed, covering the worktree, the merge and the task close. `screens/sessions.md` tags them `data: run config`, and the three lines do not share one source.
+
+Two of them are in the run's own provenance. `Provenance.worktree` carries the prepared `--worktree` evidence and is `None` for a run started without one — a fact to state, not a line to omit. `Provenance.merge_intent` carries the resolved automatic-landing rung, persisted before driving precisely so a resumed run lands the same way, with `merge_frames` recording what has actually happened.
+
+The third is not. **The task-close policy is configuration, not session provenance**: `[tasks] auto-close` is resolved by `ctx_traits_io::harness_config` (`effective_auto_close`) beneath each task document's own `auto_close` override (`modules/core/src/task/mod.rs`). Nothing in `Session` states it. So this line renders from a served resolution of that policy for the run's claimed task — the document's override where it declares one (already on `0265.2`'s answer) and the resolved `[tasks]` value beneath it — rather than from a field the reconstruction does not have. Where the center does not answer that resolution yet, this cut teaches it to and lands the same answer for an existing non-GUI face, per the charter's parity rule.
+"""
+scope = """
+## Decisions
+
+- In scope: the `landing` consequence block — worktree line from `Provenance.worktree`, merge line from `Provenance.merge_intent` and the recorded merge frames, task-close line from a served resolution of the `[tasks] auto-close` policy beneath the claimed task's own override — with the close-policy resolution reachable by an existing non-GUI face in the same release.
+- **Configuration is resolved once, centrally.** A desktop-side read of `runtime.toml`, or a close policy inferred from the task's status, is the one-face capability the plan calls a defect; `harness_config`'s existing resolution is the substrate and a second parser is not written.
+- **Do not present a configured consequence as an accomplished one.** This block states what will happen when the run lands; it is not a landing report, and a finished run's block must not silently become a claim about what did happen.
+- **A run with no worktree and no merge intent says so** in the design's own voice; the lines the run's configuration does not state are not invented, and the block does not shrink to nothing silently.
+- **`→` prefixes consequence lines** and appears nowhere else on this screen; it is a structural glyph, not decoration.
+- Out of scope: the earlier preview blocks (`0265.10`, `0265.11`, `0265.12`), the whole Config screen's runtime capability (`0268`), and the main pane.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisite
+
+`0265.12` — the preview column's fact block, its key/value rows and the selection-triggered reconstruction the worktree and merge evidence arrive on.
+"""
+validation = """
+## Watch
+
+- **The close policy is not in the ledger.** `Session` provenance carries the claimed task's key and digest, not what happens to that task when the run lands; sourcing this line from provenance renders a configuration claim with no backing.
+- **The per-document override wins over the `[tasks]` value.** Reporting the config-level policy for a task that declares its own is a wrong answer that looks right.
+- **No desktop-side configuration read** and no second `runtime.toml` parser anywhere; `ctx doctor --config` and this answer must not disagree about the same knob.
+- **Reads stay on the selection path and off gpui's UI thread**; nothing refreshes on a timer and nothing fires per list row.
+- **A finished run's block must be identical after closing and reopening the window** — the ledger is authoritative for the worktree and merge halves, and neither may depend on in-process state.
+- **Fail-loud, no direct-reader fallback.** An unresolvable policy is stated as unresolved rather than defaulted to a plausible one.
+- **Sans is content and mono is machinery**: the consequence lines are sans 11.5 `text-secondary`; block headings are mono 11 `text-muted` lowercase. No status dots in this column, no corner radius inside the canvas.
+- **No test may depend on committed repo content** — scratch runtime documents and scratch task fixtures only.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and that the served resolution is green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions preview column carries a `→`-prefixed `landing` block whose worktree and merge lines come from the selected run's own provenance and whose task-close line comes from a served resolution of `[tasks] auto-close` beneath the claimed task document's own override — reachable by an existing non-GUI face, never read from the filesystem by the desktop, and stated as unresolved rather than defaulted when it cannot be resolved. A run without a worktree or without a merge intent states that rather than dropping the line, and the block describes what will happen rather than what did. A finished run's block is identical after closing and reopening the window. `just test` passes, the doctor config proof passes, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.12"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "doctor's config-reporting proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_doctor"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

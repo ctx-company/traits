@@ -1,0 +1,52 @@
+schema-version = "0.2"
+key = "0269.1"
+title = "Render the merge sections and rows"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Build the Merges screen's section list per `.internal/docs/design/screens/merges.md`, and join the title bar's menu with the `Merges` entry the spec places between Tasks and Config.
+
+The **sections** are `Landing — 1` / `Awaiting approval — 2` / `Landed — 2`, mono 11 `text-muted` headings over rows. **Merge rows are shaped exactly like task rows**: a status dot beside a stack of title over description on the left, an end-aligned state stack on the right. Landing rows take an `accent` dot with `landing · deep merge` in accent over a gates-and-diffstat line; awaiting rows take a `warn` dot with `awaiting approval` in warn over a muted stats and sign-off line; landed rows take an `ok` dot with `landed` over a muted commit sha. The description line is the run-to-target form — `run-1a2b3c → main · guarded-change · closes 0257`.
+
+Every one of those rows is tagged `placeholder:` in the spec, and the evidence says why. No merge-queue surface exists in the backend, so there is no queue and no ordering to render. `RunSummary.landing` is terminal evidence whose own contract states it is `None` mid-run, and `merges_from_center_rows` (`modules/cli/src/app/dashboard.rs:2557`) skips non-terminal in-progress rows and classifies the rest as `Mergeable`, `Parked`, `Failed` or `Landed` — it carries no actively-landing state and no awaiting-approval state. So the rows render design-faithfully from the shared `placeholders` module, structured so each section can be wired when a merge surface lands. The spec's one optional exception is landed rows, which MAY be derived from the default branch's git log; taking it is optional and, if taken, goes through a center-served answer rather than a desktop-side `git` call.
+"""
+scope = """
+## Decisions
+
+- In scope: the `Merges` menu entry between Tasks and Config with the switch that reaches it, the three sections with their headings, and all three merge-row forms rendered from the shared `placeholders` module in the exact tokens the spec names.
+- **The spec's tags are the contract.** No row form is promoted to data on the argument that something adjacent is derivable; the queue, its ordering, the landing state and the awaiting-approval state have no backing surface.
+- **The optional landed wiring stays optional.** If it is taken, the landed rows' commit evidence arrives through a center-served answer that a non-GUI face can also reach; a desktop-side git invocation is forbidden either way. Leaving landed rows placeholder-served is a complete outcome for this task.
+- **Each placeholder region is structured for wiring** — one module, one entry per region, each traceable to the `placeholder:`-tagged line in `screens/merges.md` that authorises it.
+- Out of scope: the header, bottom bar and the preview column's placeholder-served blocks (`0269.2`), the `gates` and `sign-offs` blocks (`0269.4`), building any merge, queue or approval surface, and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.5` — the row vocabulary these rows compose, which chains back to the `placeholders` module `0265.2` created. `0265.9` — the title bar this screen's menu entry joins. `0258` — the source places the four new screens after its work item.
+"""
+validation = """
+## Watch
+
+- **Do not fabricate merge state.** Deriving an actively-landing run, an awaiting-approval state or a queue order from center rows invents state the projection does not carry; `RunSummary.landing` is `None` mid-run by design.
+- **No inline placeholder literals.** Every string on these rows comes from the one shared module.
+- **Merge rows carry 5px dots** because merges are one of rule 4's four stateful lists — and the dot never appears in prose. One bright title per list; selection is `surface-raised` fill plus `text-bright`, never a border, radius or accent bar.
+- **Colour is semantic**: accent for landing because it is happening right now, warn for what needs the owner, ok for what has settled. Nothing coloured for emphasis.
+- **A section with no rows says so in the design's own voice** rather than being hidden.
+- **No poll loop**, no blocking read on gpui's UI thread, and no compact-row ledger, store or sidecar reads.
+- **Repository identity comes from the center row**, not the desktop process's cwd.
+- **Fail-loud, no direct-reader fallback** for anything that is wired.
+- **Overflow clips with a bottom fade and a centred `scroll to end`, and only when content actually overflows.**
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The desktop's `Merges` menu entry sits between Tasks and Config and switches to a pane rendering `Landing` / `Awaiting approval` / `Landed` sections whose rows carry the dot, title, run-to-target description and end-aligned state stack the spec names, in its exact tokens — every one served from the one shared `placeholders` module with no inline literal, each region structured so it can be wired when a merge surface lands, and no landing, awaiting-approval or ordering fact inferred from center rows. If the optional landed wiring is taken, it arrives through a center-served answer a non-GUI face can also reach. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0269"
+depends-on = ["0265.5", "0265.9", "0258"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

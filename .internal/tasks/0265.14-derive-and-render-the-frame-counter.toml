@@ -1,0 +1,59 @@
+schema-version = "0.2"
+key = "0265.14"
+title = "Derive and render the frame counter"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`frame 5 of 9` appears twice on the Sessions screen — in the bottom bar's detail (`running · frame 5 of 9 · review round 2`) and in the header's narrated summary — and both are tagged `data:`. This cut derives that one counter and fills it into both slots.
+
+**Where it comes from is the whole of this task.** `Session.current_run_index` is not the ordinal: it indexes the run's current sequence, and a session executing inside a loop or a for-each moves along `active_path` and `control_stack` without that index describing progress. The honest derivation already exists on the TUI side: `render_ledger_run_view`'s projection builds the reconstructed step list from the resolved trait plan plus the ledger, marks which items count with `counts_progress` (prompt and command items, not containers), and computes `done` and `total` as the counted steps that are finished against all counted steps (`modules/cli/src/app/run_view/projection.rs`). Nested control is handled where it belongs: `container_progress_text` reports a loop's `iteration k/max` and a for-each's `item k/total` against the resolved list length, rather than flattening either into the top-level counter.
+
+So the counter is a fact about the reconstructed structural plan and the active path, not about a row field — which is why it lands here, after the bar and the header exist and once the selected run's reconstruction is being read, rather than being guessed by either of them.
+"""
+scope = """
+## Decisions
+
+- In scope: deriving `frame N of M` from the selected run's center-served reconstruction — the resolved plan's progress-counting steps and the session's active path — and rendering it into the bottom bar's caller-supplied detail slot and the header's narrated summary, so both show one value from one derivation.
+- **One derivation, two renders.** A second computation for the header is a second answer that can disagree with the bar.
+- **Nested control is not flattened.** A run inside a loop or a for-each reports its container progress the way the existing projection states it (`iteration k/max`, `item k/total` against the resolved list length); the top-level counter counts the plan's progress-counting steps and nothing else.
+- **Reuse the existing derivation rather than re-deriving it.** Whether it is lifted to a shared crate or served by the center is the architect's call; two independent implementations of the same counter is not.
+- Out of scope: the bar itself (`0265.3`), the header (`0265.13`), the frame rows (`0265.5`), and the preview column.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.3` (the bar's detail slot), `0265.13` (the header summary the counter completes) and `0257` (the selected run's authoritative reconstruction the counter is derived from).
+"""
+validation = """
+## Watch
+
+- **`current_run_index` is not an ordinal.** Rendering it as one, or counting ledger frames as if the plan were flat, produces a counter that lies inside every loop and every for-each — the two shapes the dogfood loop uses constantly.
+- **Compact list rows must never trigger the reconstruction.** The counter belongs to the selected run; a bar that reconstructs per visible row breaks the family's read posture and the ledger-is-authoritative rule.
+- **A run whose plan cannot be resolved renders no counter**, not a partial one. Fail-loud beats a plausible number.
+- **No poll loop.** The counter advances from center deltas as frames land, never from a timer, and the reconstruction read stays off gpui's UI thread.
+- **Snapshot-then-delta ordering is the contract**: a rejected projection must not leave the bar and the header disagreeing about N.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and that the existing projection's own tests still pass; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions bottom bar reads `<state> · frame N of M · review round R` and the header's narrated summary carries the same `frame N of M`, both filled from one derivation over the selected run's reconstructed plan — progress-counting steps against total progress-counting steps, with loop and for-each progress reported as the existing projection reports it rather than flattened, and no counter at all when the plan cannot be resolved. The counter advances as frames land, from deltas, with no timer and no reconstruction fired from a compact row. `just test` passes and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.3", "0265.13", "0257"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "the reconstructed run-view projection stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
+timeout-ms = 900000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

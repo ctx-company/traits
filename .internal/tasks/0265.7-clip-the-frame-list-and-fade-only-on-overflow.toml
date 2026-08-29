@@ -1,0 +1,44 @@
+schema-version = "0.2"
+key = "0265.7"
+title = "Clip the frame list and fade only on overflow"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Grammar rule 9 governs what happens when a list is longer than its pane, and the Sessions frame list is the first list in the application that can be. The container sets clip. When — and only when — content overflows, a full-pane-width gradient overlay sits above the bottom bar: canvas colour, alpha 0 at the top rising to opaque at 80% and 100%, height 100, with `scroll to end` centred near its bottom in mono 10.5 `text-faint`.
+
+The rule's teeth are in its last clause: **no fade when content fits.** That makes this a measuring primitive rather than a decorating one — it has to know whether the content actually exceeds the container before it paints anything, and an always-painted fade is the failure mode the rule names explicitly. Building it here, against a real list with a real overflow case, is what makes it reusable by the four later screens without each of them re-deciding when the gradient appears.
+"""
+scope = """
+## Decisions
+
+- In scope: clipping the Sessions frame list, measuring whether its content overflows, and painting the gradient and its centred `scroll to end` label only in the overflow case — as a primitive the later screens' lists compose.
+- **The primitive measures.** A screen that has to tell it "you are overflowing" has had the rule pushed back onto it.
+- The gradient is the canvas colour from the token set, not a hand-mixed value, and carries no corner radius.
+- Out of scope: scroll input handling beyond what clipping requires, the activity fade (`0265.6`, a different rule with a different ramp), the preview column, and every other screen region.
+- The exact measurement mechanism and how it interacts with gpui's layout pass are the architect's call; what is fixed is that the fade's presence is a function of measured overflow and that measuring does not block the UI thread.
+
+## Prerequisite
+
+`0265.5` — the frame list this clips, whose row forms give it something to overflow with.
+"""
+validation = """
+## Watch
+
+- **A fade over content that fits is a rule 9 violation** and the easiest one to ship by accident. It has to be provably absent in the fits case and present in the overflows case, both exercised.
+- **Measurement must not stall the frame.** Layout work that blocks gpui's UI thread is the same defect class as a socket or ledger read on that thread.
+- **The label is `scroll to end`, centred, mono 10.5 `text-faint`** — not a scrollbar, not an arrow glyph, not an icon; the glyph set is closed and no corner radius exists inside the canvas.
+- **The overlay spans the full pane width and sits above the bar**, not inside the list's own scrolled content.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions frame list clips, and paints the canvas-coloured bottom gradient with its centred `scroll to end` label when and only when its content overflows — demonstrated both ways, with a list that fits showing no gradient at all. Measurement runs off gpui's UI thread, the overlay carries no radius, and the primitive is composable by the later screens' lists without each re-deciding the rule. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.5"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,59 @@
+schema-version = "0.2"
+key = "0267"
+title = "The Traits (Library) screen"
+status = "draft"
+raised = "2026-08-29"
+content = """
+The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Traits is one of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders a trait library. This charter is that screen — authored trait rows, trust states, the lockfile provenance bar, and the selected-trait preview — built per `.internal/docs/design/screens/traits.md` on the vocabulary `0265` extracted while rendering Sessions.
+
+The screen is small and fully specified. The main pane is a header titled after the authoring repo with a counts-from-data italic summary in placeholder phrasing, a single `Authored — N` section of deliberately dotless trait rows (a trait is not stateful in the frame sense), and a bottom bar reading `pinned` in ok with `skill-lock @ <sha> · N digests` provenance and an `author trait` action the spec itself tags a v1 placeholder. The 380-wide preview is four key/value blocks — `trait`, `facts`, `variants`, `ports` — and a footer citing the same lockfile provenance; every leaf in that column is `data:`. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
+
+The stop condition none of the children owns alone is the same one the plan document states: the trait library becomes something the center serves. Today it does not. `load_traits_and_trust()` (`modules/cli/src/app/dashboard.rs:2423`) runs `dashboard_trait_inventory()` plus a trust-store read inside the CLI process, and the TUI's `Screen::Traits` and `Screen::Trust` are two projections of that one scan; `modules/io/src/trust.rs` holds `read_store` and `classify_records` beneath it. A separate desktop binary reaches none of it, and a reader written for the desktop — even over the identical bytes — would be the capability-in-one-face defect. So this charter extends the center's inventory-and-trust capability and moves the existing face onto the same answer in the same release.
+"""
+scope = """
+## Decisions
+
+- **In scope**: the Traits screen as `screens/traits.md` specifies it — header, the `Authored — N` section, the trait row form, the lockfile bottom bar, and the selected-trait preview column — plus the center-side inventory, trust and lockfile capability each child needs and the migration of the TUI's Traits and Trust projections onto it inside this slice (`0267.5`).
+- **The parity mechanism is the plan document's.** A feature is something the center serves plus per-face rendering; the desktop asks the center for manifests, trust and the lockfile, and so does at least one existing face by the time this charter closes — the migration is its own child rather than a rider on a rendering cut, so its regression surface is gated honestly.
+- **Nothing here is deferred to `0261`**, whose own scope admits no production behaviour beyond its four named bullets.
+- **Read-only.** The `author trait` action is a `placeholder:`-tagged v1 action per the spec and is served from the shared `placeholders` module; nothing in this slice authors a trait or mutates trust.
+- **The single-scan property survives.** The existing path deliberately builds both the Traits and the Trust projections from one inventory scan and one trust-store read; the center-side capability keeps that, rather than splitting into two reads because it makes the move easier.
+- **Out of scope**: the other three new screens, trait authoring and trust mutation on any face, any change to the trait inventory's or trust store's own semantics, and every shared primitive `0265` built.
+- **Dark theme only.** `tokens.md` records light values for later; v1 implements the dark column and must not drift the light one.
+
+## Covered work item
+
+`traits-screen` — the v1 Traits (Library) screen: authored rows, trust states, lockfile provenance bar, read-only, placeholder-marked, dark theme only, chrome citing `skill-lock @ <sha>` per grammar rule 12.
+"""
+validation = """
+## Watch
+
+- **Nothing is served to the GUI that the TUI and CLI cannot also reach.** A bespoke inventory walk, a private trust-store parse or a manifest scanner written for the desktop is the capability-in-one-face defect even over identical bytes.
+- **The TUI must not regress.** It stays a first-class face and the parity reference; moving `Screen::Traits` and `Screen::Trust` onto the center-served answer preserves their rows, ordering, built-in-origin filtering and error text.
+- **Do not reintroduce a second scan.** One inventory scan and one trust-store read feed both projections today; two reads is a cost regression against a documented property.
+- **Fail-loud, no silent staleness, no direct-reader fallback.** A failed inventory, trust or lockfile answer is stated on the screen rather than replaced by a stale library or a desktop-side filesystem read.
+- **No poll loop anywhere in the GUI**, and no blocking read on gpui's UI thread — inventory scans, trust reads and lockfile sha resolution all included.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set**; the center-side capability must not pull CLI-level types or a new heavyweight dependency into it.
+- **No test may depend on committed repo content.** Prove behaviour with scratch inventory and trust fixtures, never by asserting on this repository's own trait set — path/word/file-existence inventories are banned workspace-wide.
+- **Grammar rules are normative**: semantic colour, states as words, the closed glyph set, no corner radius inside the canvas, **status dots only in stateful lists — trait rows carry none**, one bright title per list, sans for content and mono for machinery, a title plus exactly one italic narrated summary and no breadcrumbs, a bottom bar on every screen, overflow clipping only when content actually overflows, and provenance cited in bars and footers (`skill-lock @ <sha>` here).
+- **Placeholder doctrine**: only leaves the spec tags `placeholder:` — the summary's phrasing and the `author trait` action — come from the shared module, and no placeholder string appears inline. The preview column is entirely `data:` and carries none.
+- **Fonts**: `tokens.md` names IBM Plex Sans and Mono and the repository ships no font faces; `0265.1` owns that resolution and this screen must not silently fall back to a system face.
+- **Workspace gate cost must not move.** gpui must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes.
+- **No desktop board check exists yet**: `0256.1` is still `ready` and no standalone desktop validation command exists, so no child declares one. Once it lands, the exact desktop command becomes declarable.
+- Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X".
+
+## Done when
+
+Every child task is closed and the stop condition holds: the Traits screen matches `screens/traits.md` leaf for leaf — header, the `Authored — N` section, the dotless trait row with its trust and variant stack, the `pinned · skill-lock @ <sha> · N digests` bottom bar with its placeholder-served `author trait` action, and the preview's `trait`, `facts`, `variants` and `ports` blocks with its footer — with every `data:` leaf rendering from a capability the center serves and at least one non-GUI face consumes, and no `data:` leaf closing as an unrendered gap. The TUI's trait and trust screens behave as before, from the same answer. No poll loop, no blocking read on the UI thread, no filesystem read from the desktop process. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
+"""
+[relations]
+depends-on = ["0265", "0258"]
+
+[[checks]]
+name = "workspace landing gate remains green and gpui-free in cost"
+command = "just test-full"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

@@ -1,0 +1,74 @@
+schema-version = "0.2"
+key = "0268.1"
+title = "Serve the loaded runtime and render the Config sections"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Teach the center to answer the loaded runtime as this screen's leaf set, and render the Config screen's three sections from it — one cut, because the rendering proves the capability.
+
+The gap is narrower than "nothing reaches this", and the work must be built on the true shape. `ctx doctor --config` (`modules/cli/src/app/doctor.rs:114`) already reports effective runtime configuration and its winning layer over `ctx_traits_io::harness_config::resolve_config_report`, including expanded `agent.role.<name>` seats and harness knobs with per-knob provenance; `modules/io/src/trust.rs` already reads the trust store. What no face reaches is this screen's shape: seats with model and effort side by side, the runtime engines with their identifying version or path, and the approved-traits row with its digest count. Making that existing read-only CLI report answer from the same resolution is `0268.4`, inside this same slice — this screen's capability is served here and a non-GUI face answers from it before the charter closes.
+
+`screens/config.md` fixes the forms. Sections `Agents` / `Runtime` / `Trust`, rendered as **config rows with no status dots at all**. A config row is a left stack of the name in sans 12.5 (`text`, and `text-bright` over a `surface-raised` fill when selected) over its description in sans 11 `text-secondary`, and an end-aligned right stack in mono 10.5 carrying the value on top in `text-secondary` (a model id, an engine version such as `opencode 0.4.2`, a path) over its qualifier below in `text-muted` (`effort high`, `medium`, `low`). `Agents` lists the smart, worker and scribe seats; `Runtime` lists harness, center and store; `Trust` carries the approved-traits row whose description is the trait names and whose right value is the digest count.
+
+The screen also joins the title bar's menu here — its `Config` entry and the switch that reaches it, with the current entry bright.
+"""
+scope = """
+## Decisions
+
+- In scope: a center-served view of the loaded runtime yielding this screen's leaf set — seats with model and effort, the harness/center/store engines with their identifying version or path, and the approved-traits summary with its digest count — the `Config` menu entry and its switch, and the three sections with their dotless config rows rendered from the served answer.
+- **Reuse the resolution that exists.** `harness_config`'s document resolution, layering and winners and the io-level trust read are the substrate; a second parser is a defect. If `0267`'s center-served trust answer already exists, the trust summary reads through it rather than opening a second trust reader.
+- **Serve the layer, not just the value.** The existing report carries layer and reason per knob; the answer keeps that distinguishable so `0268.4` can report from it without contradicting `ctx doctor --config`, and so `0268.3`'s `source` leaf has a real source.
+- **Effort and model are distinct leaves.** The right stack is value over qualifier; collapsing them into one line, or defaulting a missing effort to a plausible word, misreports configuration.
+- **Read-only.** Nothing here writes `runtime.toml`, mutates trust or edits a seat.
+- Out of scope: the read-only CLI surface answering from the same resolution (`0268.4`), the header and bottom bar (`0268.2`), the preview column (`0268.3`), and every shared primitive `0265` built.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.5` — the row vocabulary these rows compose, which chains back through `0265.3` to `0265.1` and the whole of item `0256`. `0265.9` — the title bar this screen's menu entry joins. `0258` — the source places the four new screens after its work item, and a charter's `depends-on` is not inherited by its children (`modules/core/src/task/graph.rs`), so the gate is named on this leaf.
+"""
+validation = """
+## Watch
+
+- **No `runtime.toml` parse, layer resolution or trust read inside the desktop crate.** Config is where a one-face capability is easiest to ship by accident, because there is no dashboard Config screen to copy from.
+- **Do not duplicate or contradict `ctx doctor --config`.** One resolution must be able to answer both; a served view that re-resolves the document independently is the regression `0268.4` would then have to unpick.
+- **Where a value is a built-in default rather than something the document states, keep that distinguishable.** The report carries layer and reason per knob.
+- **No dots anywhere on this screen.** `screens/config.md` states it outright: config is settings, not state.
+- **Harness version probing executes a binary.** `probe_harness_version` invokes the harness with its version-probe argv; keep it cheap, cached or off the answer path, never on a UI thread and never blocking the center's request loop. If probing is too costly, report the configured engine identity and say which it is rather than silently omitting the leaf.
+- **Fail-loud on a malformed or missing document**; an empty result must never render as `valid`.
+- **No poll loop**, and no blocking read on gpui's UI thread.
+- **Every leaf on this pane is `data:`** and none may close as an unrendered gap.
+- **One bright title per list**; selection is `surface-raised` fill plus a `text-bright` name, never a border, radius or accent bar.
+- **`ctx-traits-io` depends only on `ctx-traits-core` and its existing third-party set.**
+- **No test may depend on committed repo content** — a scratch runtime document and scratch trust store only, never this repository's own `.ctx/traits/runtime.toml`.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the served answer is green and the workspace stayed gpui-free; the rendered pane is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The center answers the loaded runtime as seats with model and effort, engines with their identifying version or path, and the approved-traits summary with its digest count — over the existing `harness_config` resolution and trust read rather than a new parser, carrying each knob's winning layer — and the desktop's `Config` menu entry switches to a pane rendering the `Agents` / `Runtime` / `Trust` sections as dotless config rows in the exact tokens `screens/config.md` names. A malformed or missing runtime document is answered as a failure rather than an empty-but-valid-looking result. No timer, no blocking read on the UI thread, no desktop-side document parse. `just test` passes, the doctor and center proofs pass, and root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0268"
+depends-on = ["0265.5", "0265.9", "0258"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1200000
+
+[[checks]]
+name = "doctor's config-reporting proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_doctor"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "center wire proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1200000
+expect = "test result: ok\\. [1-9]"
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

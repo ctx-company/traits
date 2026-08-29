@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0265.13"
+title = "Render the Sessions header"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Render grammar rule 6's header on the Sessions screen from the answer `0265.2` taught the center to give: a title that is the claimed task's id and title (`0243.4 — everyone asks the center`), one italic narrated summary, and `∷` top-right. Sans 13 heading tone over italic sans 12; exactly one summary line and no breadcrumbs.
+
+The title is straightforward now that the capability exists: `RunSummary.task_key` names the task and the served answer carries its title. **The summary's description leaf is where the care goes.** `screens/sessions.md` tags it `data: run description`, and the run description is not the claimed task's description — substituting one for the other renders a board fact under a leaf that means "what this run is doing". The verified run-level description the system actually holds is the narrator-resolved session title: `Provenance::session_title`, projected onto the compact row as `RunSummary.title` through `resolved_title()` (`modules/io/src/run_summary.rs`). It is optional by contract — `None` means "not yet requested", and a requested title may never resolve — so when it is absent the summary renders its placeholder phrasing without a description rather than reaching for the task's prose or any other nearby field.
+
+The summary's phrasing itself is `placeholder:` until a narrator seat serves it, and comes from the `placeholders` module `0265.3` created.
+"""
+scope = """
+## Decisions
+
+- In scope: the header's title (`<task id> — <task title>`) from the center-served claimed-task answer, the single italic narrated summary with its run description and placeholder-served phrasing, and `∷` top-right, in the tokens `screens/sessions.md` names.
+- **The run description's source is the narrator-resolved session title and nothing else.** The claimed task's description is a different fact under a different leaf; using it here is the substitution this cut exists to avoid. An unresolved title renders no description.
+- The frame counter that completes this summary line arrives with `0265.14`, which owns the reconstruction the counter is derived from. This cut leaves the summary's counter position to that slot.
+- Out of scope: the center capability itself (`0265.2`), the `placeholders` module's creation (`0265.3`), the frame counter (`0265.14`), the frame list, the preview column, and the rail and title bar.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.2` — the center-served claimed-task answer this header renders. `0265.3` — the `placeholders` module the summary's phrasing is served from.
+"""
+validation = """
+## Watch
+
+- **Do not substitute the task description for the run description**, and do not substitute the session title for the task title. Two different leaves, two different sources, both tagged `data:` — a plausible-looking swap misreports the screen in a way no build gate catches.
+- **An absent session title is a real state, not an error and not a gap to fill.** `session_title` is `None` on every ledger written before it existed and on every run whose title has not been requested; the header renders without a description and never invents one.
+- **Exactly one narrated summary line**, and no breadcrumbs anywhere: two lines or none breaks rule 6.
+- **No inline placeholder literal.** The summary's phrasing comes from the shared module; a literal at the call site is the defect the doctrine exists to prevent.
+- **No poll loop and no blocking read on gpui's UI thread.** The title and description update from center deltas as the claimed task and the session title resolve — a title that resolves mid-run appears without a refresh loop, and a rejected projection leaves no partially committed header.
+- **Fail-loud.** A run whose claimed task cannot be read reports the failure; it does not render a blank or invented title.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+The Sessions screen renders `<task id> — <task title>` from the center-served claimed-task answer over exactly one italic narrated summary whose description is the run's narrator-resolved session title — absent when that title is unresolved, never the task's description — and whose phrasing comes from the `placeholders` module, with `∷` top-right in the tokens `screens/sessions.md` names. A session title that resolves while the run is live updates the header from a delta, with no timer and no partially committed state after a rejected projection. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.2", "0265.3"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

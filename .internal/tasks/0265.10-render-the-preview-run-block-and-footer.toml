@@ -1,0 +1,51 @@
+schema-version = "0.2"
+key = "0265.10"
+title = "Render the preview run block and footer"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Open the 380-wide preview column on the Sessions screen with the two blocks that bracket it: the identity block at the top and the provenance footer at the bottom, per grammar rule 13's column order.
+
+The **`run`** block is key/value (rule 7): trait and variant (`implement · basic`), run id and elapsed (`run-ab12ef · 42m`), task and its state (`0243.4 · in review`). All `data:`, and each half has a source. The run id and elapsed come from the compact center row (`RunSummary.run_id`, `elapsed_seconds`); the trait identity comes from the run's own trait provenance as the center carries it, taking the variant from the selected run's reconstruction where the compact row does not name it; the task id and its state come from the center-served claimed-task answer `0265.2` added.
+
+The **footer** is `run-ab12ef · started 13:44` — grammar rule 12's provenance line, right-aligned mono 10 `text-faint` — from the run id and `RunSummary.started_at_epoch`.
+
+Building these two first is what makes the column a column: the key/value row primitive rule 7 describes and the right-aligned preview footer rule 12 describes both land here, and the three remaining blocks slot between them.
+"""
+scope = """
+## Decisions
+
+- In scope: the 380-wide preview column's frame and order, the `run` key/value block, the provenance footer, and the key/value row and preview-footer primitives the later blocks and screens compose.
+- **Reconstruction is selection-triggered only.** No preview read fires per list row, on hover, or on delta arrival for an unselected run — the ledger is authoritative and the compact rows must stay read-free.
+- **Every leaf here is `data:`.** The spec authorises no placeholder in this block, so nothing in it is served from the `placeholders` module; each value renders from the source named above.
+- Out of scope: the `in progress` and `verdict` blocks (`0265.11`), the `slots` and `landing` blocks (`0265.12`), and the main pane.
+- Dark tokens only; the light column of `tokens.md` stays unimplemented.
+
+## Prerequisites
+
+`0265.3` (the screen shell this column sits beside), `0265.2` (the center-served claimed-task answer the `task` row's id and state come from) and `0257` (the selected run's authoritative reconstruction the variant and the column's detail read arrive on).
+"""
+validation = """
+## Watch
+
+- **Compact list rows must never trigger the reconstruction.** Full reconstruction happens only on selection; a preview that fetches eagerly for the whole list breaks the family's read posture.
+- **A finished run's view must be identical after closing and reopening the window.** The ledger is authoritative, so reconstruction must not depend on in-process state that dies with the window.
+- **Blocking work stays off gpui's UI thread** — the reconstruction especially, which is the heaviest read this screen performs.
+- **No poll loop.** Live-follow of the selected run arrives as center deltas; the column never re-reads on a timer.
+- **Fail-loud, no direct-reader fallback.** A failed center request leaves the column fail-loud rather than silently re-reading the filesystem; stale content is never presented as current.
+- **Key/value rows are space-between with the key in sans 11.5 `text-secondary` and the value in mono 10.5 `text`**, state-coloured only when the value is a state — the task's `in review` qualifies, the elapsed time does not.
+- **Status dots belong to stateful lists** — this column is prose and key/value, so it carries none. No corner radius inside the canvas; the glyph set is closed.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared check is a workspace-side invariant, not proof of this task's desktop behaviour.** It shows the workspace stayed gpui-free; the rendered column is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Selecting a run opens a 380-wide preview column carrying the `run` key/value block — trait and variant, run id and elapsed, task id and task state, each from the source named in this task — above a right-aligned mono 10 `text-faint` footer reading `<run id> · started <time>`, in the tokens `screens/sessions.md` names. The reconstruction fires only on selection, off the UI thread, with no timer; a finished run's block and footer are identical after closing and reopening the window. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.2", "0265.3", "0257"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

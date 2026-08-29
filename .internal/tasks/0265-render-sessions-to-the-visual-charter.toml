@@ -1,0 +1,50 @@
+schema-version = "0.2"
+key = "0265"
+title = "Render Sessions to the visual charter"
+status = "draft"
+raised = "2026-08-29"
+content = """
+Work item 0 of the visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) is complete. `tokens.md`, `grammar.md`, `screens/{sessions,tasks,traits,config,merges}.md` and `reference/<screen>.{png,html}` are committed and git-tracked under `.internal/docs/design/`. They are normative implementation input, not a debt: nothing in this charter owes work item 0 any code, and no task here re-opens pencil. Their acceptance clause — a worker implements any v1 screen from those files alone — is a statement about the artifacts, which already hold.
+
+What this charter owes is the first screen. `0256` brings the window, the center subscription and the read-only run list; `0257` adds the selected run's authoritative reconstruction; `0258` adds spawn/interrupt/pause through the center's verbs. All three were authored 2026-08-25, before the visual charter existed, and none of them names `tokens.md`, `grammar.md` or `screens/sessions.md`. This charter renders Sessions to that specification on top of their plumbing, and it does not re-author them: two authorities on one slice is a defect.
+
+Shared rendering vocabulary — the dark token constants and the IBM Plex faces they name, the semantic colour roles and state words, the status dot and selection rule, the sans/mono voice split, key/value rows, the screen header and bottom bar, the overflow clip-and-fade, the faded activity block, the rail, the title-bar screen menu, and the one `placeholders` module — is extracted by the Sessions cut that first renders through it, never ahead of one. There is no design-system phase here; there is a screen, and the reusable parts of it fall out while it is being built. The four later screens (`0266`-`0269`) consume that vocabulary rather than re-deriving it.
+"""
+scope = """
+## Decisions
+
+- **In scope**: the Sessions screen as `screens/sessions.md` specifies it — header, the four frame-row forms, the loop-narration line, the live activity block, the bottom bar, the 380-wide preview column, plus the rail and title bar the screen sits inside — with the shared vocabulary extracted in place as each cut needs it.
+- **Out of scope**: the center subscription and delta reducer (`0256`), the selected-run reconstruction (`0257`), the verbs themselves (`0258`), pencil work of any kind, the light theme (`tokens.md` records light values for later; v1 implements the dark column and must not drift the light one), and the parked surfaces (chat family, plan review, run brief/diff, mobile).
+- **No coverage is claimed over the summons surface (`0259`) or ship shape (`0260`).** That shared chrome or bundled font assets may later be reused by those work items is not coverage of them; they remain wholly their own tasks.
+- **Center parity is a hard rule, not a preference.** Where a `data:` leaf needs something the center does not serve today, the cut that renders that leaf teaches the center to serve it and lands a second, non-GUI consumer in the same release. Nothing is routed around the center by reading the filesystem from the desktop process, and nothing is deferred to `0261` — that task's own scope admits no production behaviour beyond its four named bullets.
+- **The crate lives outside the cargo workspace**, per the plan document's structural ruling: own manifest, own lockfile, own build lane, path dependencies on the io/core crates it consumes. `0256.1` establishes that lane; every child of this charter lands into it.
+- The rail's repository identity comes from the center row, never from the desktop process's cwd — ad-hoc directories carry an `adhoc-` key that `repo_key(root)` alone cannot reproduce.
+- **This charter's `depends-on` gates nothing on its own.** `derived_status` derives a parent's status from its children alone and evaluates `depends-on` only for open leaves (`modules/core/src/task/graph.rs`), so every external prerequisite is named on the earliest child that consumes it and reaches the rest through explicit child-to-child edges: `0265.1` carries the whole of item `0256` and every other child chains to it, `0257` is named on `0265.5`, `0265.10` and `0265.14`, and `0258` on `0265.4`. The table below is documentation of the item order, not the gate.
+"""
+validation = """
+## Watch
+
+- **Workspace gate cost must not move.** gpui is a git dependency on Zed's tree and a multi-minute compile; it must never enter root `Cargo.toml` resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing macOS/Linux CI lanes. A separate desktop lane is consistent with the ruling; extending an existing lane is not.
+- **No desktop board check exists yet.** `0256.1` is still `ready` and no standalone desktop manifest or non-interactive validation command exists in the repository, so no child may declare a check that executes the desktop lane. Each child's own verification runs in whatever lane `0256.1` establishes; the board checks here cover the workspace-side invariants only. Once `0256.1` lands, the exact desktop command becomes declarable and should be added.
+- **No poll loop anywhere in the GUI.** Every update arrives as a center delta.
+- **Snapshot-then-delta ordering is the contract.** The landed TUI reducer stages snapshot rows and commits only on a successful projection; a rejected projection breaks the stream and the center resends a complete snapshot. Lost, duplicated or partially committed visible state is a defect.
+- **The ledger is authoritative**; the center DB, the in-memory model and activity sidecars are derived evidence. Compact list rows must never trigger ledger, store or sidecar reads — full reconstruction happens only on selection.
+- **Fail-loud, no direct-reader fallback.** A failed center request stays fail-loud rather than silently re-reading the filesystem; center-absent is spawn-on-need or a visibly stale view, never a hard error, and stale data is never presented as current.
+- **Blocking work stays off gpui's UI thread** — socket reads, ledger reads, filesystem and overflow measurement.
+- Rust is pinned to 1.97.1 by `rust-toolchain.toml`. Isolate builds with `CARGO_TARGET_DIR=target` when a gate failure looks like a phantom "cannot find X"; a shared cross-worktree target dir flakes gates.
+
+## Done when
+
+Every child task is closed and the stop condition holds: the Sessions screen matches `screens/sessions.md` leaf for leaf — header, four frame-row forms, loop narration, activity block, bottom bar and the six preview blocks — with every `data:` leaf rendering from a real center-served source and every `placeholder:` leaf served from the one `placeholders` module; a live run's detail updates as frames land with no poll loop, and a finished run's view is identical after closing and reopening the window. The shared vocabulary those cuts extracted is what `0266`-`0269` consume, with no screen re-deriving a token, a colour role, a state word, a glyph, a dot rule, a chrome element or a placeholder string. Root workspace resolution and the root lockfile remain gpui-free and `just test-full` passes without building the desktop project.
+"""
+[relations]
+depends-on = ["0256", "0257", "0258"]
+
+[[checks]]
+name = "workspace landing gate remains green and gpui-free in cost"
+command = "just test-full"
+timeout-ms = 1800000
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"

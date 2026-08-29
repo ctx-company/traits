@@ -1,0 +1,44 @@
+schema-version = "0.2"
+key = "0265.4"
+title = "Bind the bottom bar pause action to the center verb"
+status = "draft"
+raised = "2026-08-29"
+content = """
+`screens/sessions.md` tags the bottom bar's right side `data: state + verbs (0243.5)`. `0265.3` renders `watch raw · pause` as grammar-conformant ghost text with `watch raw`'s permitted v1 no-op served from the `placeholders` module. This cut makes `pause` real: pressing it sends the center's pause verb for the selected run and the bar reflects the resulting state as it arrives back over the subscription.
+
+Nothing driver-direct. `0258` owns the verbs — spawn, interrupt, pause/resume through the center's `Control` action — and this task is the Sessions bar's binding to the pause one, not a second implementation of it. The plan document's own done-condition for that work item is that each verb round-trips from the window and every other subscriber observes the effect via deltas; this cut is where the desktop's Sessions bar satisfies the pause half of it.
+"""
+scope = """
+## Decisions
+
+- In scope: binding the bar's `pause` action to `0258`'s center verb for the currently selected run, and rendering the resulting state word from the delta the center publishes rather than from a locally assumed transition.
+- **Optimism is forbidden.** The bar never flips its state word on click; it flips when the center says so. A face that shows `paused` before the center has agreed is presenting stale-in-the-other-direction state as current.
+- Out of scope: the verb implementations themselves (`0258`), spawn and interrupt affordances (the Sessions spec's bar names neither), `watch raw`'s no-op (`0265.3`), and every other region of the screen.
+- Where resume belongs on this bar follows `0258.3`'s durable pause/resume shape; this cut renders whatever that surface exposes for the paused state rather than inventing a second control.
+
+## Prerequisites
+
+`0265.3` (the bar this action sits in) and `0258` (the center's spawn/interrupt/pause verbs).
+"""
+validation = """
+## Watch
+
+- **Through the center's verbs, never driver-direct.** A desktop process that signals a run itself is the capability-in-one-face defect and bypasses every other subscriber.
+- **Every other subscriber must observe the effect.** The TUI dashboard is the parity reference: a pause issued from the window is visible there through the same deltas.
+- **No poll loop and no blocking send on gpui's UI thread.** The verb round-trip is background work; the UI reacts to the delta.
+- **Fail-loud.** A refused, ambiguous or not-live control response is surfaced as such; it is never swallowed into an unchanged-looking bar.
+- **Ghost text only**, closed glyph set, no corner radius inside the canvas.
+- **Workspace gate cost must not move**: gpui must not enter root resolution, the root `Cargo.lock`, `just test`, `just test-full`, or the existing CI lanes. Isolate builds with `CARGO_TARGET_DIR=target` if a failure looks like a phantom "cannot find X".
+- **The declared checks are workspace-side invariants, not proof of this task's desktop behaviour.** They show the workspace stayed gpui-free and green; the rendered outcome is verified in the desktop lane `0256.1` establishes, whose exact non-interactive command becomes declarable as a check on this task once `0256.1` lands.
+
+## Done when
+
+Pressing `pause` on the Sessions bottom bar issues the center's pause verb for the selected run, the run's state word changes only once the center's delta says it has, another subscriber observes the same effect, and a refused or not-live response is rendered as a visible failure rather than silently absorbed. Root workspace resolution and the root lockfile remain gpui-free.
+"""
+[relations]
+parent = "0265"
+depends-on = ["0265.3", "0258"]
+
+[[checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
