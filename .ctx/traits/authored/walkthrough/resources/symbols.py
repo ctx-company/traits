@@ -5,7 +5,7 @@ Modes:
   enumerate <closure-json-or-path>
       Print the TYPED chunk list over the closure's files: every
       fn/struct/enum/trait/mod/impl/type/class/interface definition with its
-      coverage key "path:line:name", sliced into chunks of at most 25
+      coverage key "path:line:name", sliced into chunks of at most 12
       symbols (a chunk is one bounded describe frame's work). A closure
       path that does not exist fails loudly — closure entries are verified
       claims. Ground truth for exhaustiveness.
@@ -116,7 +116,7 @@ def file_symbols(path: str):
     return symbols
 
 
-CHUNK_SIZE = 25
+CHUNK_SIZE = 12
 
 
 def slugify(path: str) -> str:
@@ -158,6 +158,12 @@ def enumerate_mode(closure_arg: str) -> None:
                     "symbols": [{"key": s["key"], "kind": s["kind"]} for s in part],
                 }
             )
+    if len(chunks) > 90:
+        total = sum(len(c["symbols"]) for c in chunks)
+        fail(
+            f"{len(chunks)} chunks ({total} symbols) — over the run's frame budget; "
+            "the closure is too wide for one walkthrough. Narrow the topic or split it, then rerun."
+        )
     out = json.dumps(chunks, ensure_ascii=False, separators=(",", ":"))
     if len(out.encode("utf-8")) > 300_000:
         fail(

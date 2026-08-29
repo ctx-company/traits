@@ -148,7 +148,7 @@ export const symbolChunkSchema: SchemaHandle = schema.object(
       description: 'Which slice of the file this chunk is, as "i/n" — a file with many symbols yields several chunks.',
     }),
     symbols: schema.field(schema.list(symbolEntrySchema), {
-      description: "At most ~25 enumerated symbols; the describing frame owes exactly one node per entry.",
+      description: "at most ~12 enumerated symbols; the describing frame owes exactly one node per entry.",
     }),
   },
   { description: "One bounded unit of exhaustive description work: a file slice with its enumerated symbols inline." },

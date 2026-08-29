@@ -6,11 +6,11 @@ generated-at = "not-recorded"
 [[trait]]
 id = "walkthrough"
 variant = "default"
-requested-version = "0.3.1"
-resolved-version = "0.3.1"
+requested-version = "0.3.2"
+resolved-version = "0.3.2"
 
 [trait.digests]
-source = "sha256:31bebc7c6c64363d11cd8c9797c508052547e6984357074f8aab92a2deda6cc0"
-canonical = "sha256:99c0c7aa2dfd4f3f061b99f2780b2fd2ea3984ae5ea60c23cb6994c327d70e9c"
-model-visible = "sha256:4ccdd7953e8d8daa14d65f2147aee6ab1db7a83557ec5fa3152a90f9bf8fdcac"
-resource-manifest = "sha256:3233d0b6a1771b9e696ffdef6d0f1ec38e0e68e5124349ed28150c62744d41b9"
+source = "sha256:817bb90732ae85f48a6b35bf9da7eb4aa210dc1a7befde9b944a39978a0bb150"
+canonical = "sha256:b47664cf4e4123a7829955c6df09af0f8708829c2824d4f309b6a5c764bd6247"
+model-visible = "sha256:9ed568e55e34cd80ad6cd60a95e1eace8ec4c7743caac30f2c981acef3eb998d"
+resource-manifest = "sha256:b215bcc8920e067d9dff6e1a5d643a42ba3d2d6ae526c08c32051fc4f116ea5a"
