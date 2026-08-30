@@ -1724,6 +1724,9 @@ struct WarmScan {
 /// work summary for the measured steady-state and cold-start cost at this
 /// value.
 const WARM_SLICE: usize = 4;
+// Wall-time bound per warm slice; keeps the owner loop's accept/credit/query
+// servicing responsive regardless of individual ledger parse cost.
+const WARM_SLICE_BUDGET: Duration = Duration::from_millis(300);
 
 struct PendingStart {
     notify: mpsc::SyncSender<String>,
@@ -1933,10 +1936,25 @@ impl CenterModel {
     /// calls is new. Reused by `run_server_at`'s accept loop for both the
     /// initial cold-start build and periodic rescans.
     fn warm_step(&mut self, paths: &CenterPaths, limit: usize) -> crate::Result<()> {
+        // Count alone does not bound wall time: one multi-megabyte session
+        // parse costs hundreds of milliseconds, so a 4-ledger slice over fat
+        // ledgers can exceed the connection worker's STREAM_TIMEOUT reply
+        // budget and every query during warming dies with a silent close
+        // (sampled live 2026-08-30: 40% of owner-loop samples inside one
+        // serde parse). Bound every slice by time as well as count.
+        self.warm_step_deadline(paths, limit, Instant::now() + WARM_SLICE_BUDGET)
+    }
+
+    fn warm_step_deadline(
+        &mut self,
+        paths: &CenterPaths,
+        limit: usize,
+        deadline: Instant,
+    ) -> crate::Result<()> {
         if self.warm.is_none() {
             self.begin_scan(paths)?;
         }
-        self.drain_warm_queue(paths, limit)
+        self.drain_warm_queue(paths, limit, deadline)
     }
 
     fn is_warming(&self) -> bool {
@@ -2036,7 +2054,12 @@ impl CenterModel {
     /// Finalizes (retain + `persist_all`) only once both are empty — running
     /// `retain` against a partially-warmed model would delete rows the scan
     /// has not reached yet.
-    fn drain_warm_queue(&mut self, paths: &CenterPaths, mut budget: usize) -> crate::Result<()> {
+    fn drain_warm_queue(
+        &mut self,
+        paths: &CenterPaths,
+        mut budget: usize,
+        deadline: Instant,
+    ) -> crate::Result<()> {
         // `refresh_ledger_inner` persists each ledger through its own
         // autocommit `persist_row`/`persist_removal` call — correct in
         // isolation, but a fresh fsync-backed commit per ledger made a
@@ -2064,7 +2087,9 @@ impl CenterModel {
         let mut touched: Vec<(Utf8PathBuf, Option<CenterRow>, bool)> = Vec::new();
         let mut confirmed_present: Vec<Utf8PathBuf> = Vec::new();
         loop {
-            if budget == 0 {
+            // Breaking on the deadline is identical to budget exhaustion:
+            // the slice commits what it processed and the next tick resumes.
+            if budget == 0 || Instant::now() >= deadline {
                 break;
             }
             let next = {
@@ -2974,34 +2999,51 @@ impl CenterModel {
     /// the whole set: a missing runs root, and discovery's post-retain
     /// sweep. Must not run once per ledger.
     fn persist_all(&mut self) -> crate::Result<()> {
-        let transaction = self
-            .db
-            .transaction()
+        // A savepoint instead of a `Transaction` guard: scan completion can
+        // reach this whole-set rewrite while a warm slice's raw `BEGIN` is
+        // still open, and `transaction()` then fails with "cannot start a
+        // transaction within a transaction" (observed on the production
+        // center 2026-08-30 after a hand-settled ledger changed mid-warm).
+        // Savepoints are valid both inside and outside an open transaction
+        // and keep the same atomicity for this rewrite.
+        self.db
+            .execute_batch("SAVEPOINT persist_all")
             .map_err(|source| protocol_error(source.to_string()))?;
-        transaction
-            .execute("DELETE FROM center_rows", [])
-            .map_err(|source| protocol_error(source.to_string()))?;
-        for row in self.rows.values() {
-            let (secs, nanos, size, summary) = Self::row_params(row)?;
-            transaction
-                .execute(
-                    "INSERT INTO center_rows VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        row.ledger_path.as_str(),
-                        row.repo_key,
-                        row.repo_path,
-                        secs,
-                        nanos,
-                        size,
-                        summary
-                    ],
-                )
+        let result: crate::Result<()> = (|| {
+            self.db
+                .execute("DELETE FROM center_rows", [])
                 .map_err(|source| protocol_error(source.to_string()))?;
+            for row in self.rows.values() {
+                let (secs, nanos, size, summary) = Self::row_params(row)?;
+                self.db
+                    .execute(
+                        "INSERT INTO center_rows VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![
+                            row.ledger_path.as_str(),
+                            row.repo_key,
+                            row.repo_path,
+                            secs,
+                            nanos,
+                            size,
+                            summary
+                        ],
+                    )
+                    .map_err(|source| protocol_error(source.to_string()))?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => self
+                .db
+                .execute_batch("RELEASE persist_all")
+                .map_err(|source| protocol_error(source.to_string())),
+            Err(error) => {
+                let _ = self
+                    .db
+                    .execute_batch("ROLLBACK TO persist_all; RELEASE persist_all");
+                Err(error)
+            }
         }
-        transaction
-            .commit()
-            .map_err(|source| protocol_error(source.to_string()))?;
-        Ok(())
     }
 
     fn has_live(&self) -> bool {
