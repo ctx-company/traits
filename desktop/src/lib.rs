@@ -5,3 +5,5 @@ pub mod detail_tree;
 pub mod detail_view;
 pub mod run_row;
 pub mod shell;
+pub mod spawn_form;
+pub mod spawn_view;

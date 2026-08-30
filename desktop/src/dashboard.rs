@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use ctx_traits_io::center::{CenterDelta, CenterPublicRow};
 
 use crate::run_row::{self, RepoScope, RunRow};
+use crate::spawn_form::SpawnRepo;
 
 pub struct Dashboard {
     rows: HashMap<String, CenterPublicRow>,
@@ -87,6 +88,42 @@ impl Dashboard {
     fn reproject(&mut self) {
         let values: Vec<CenterPublicRow> = self.rows.values().cloned().collect();
         self.projected = run_row::project(&values, &self.scope);
+    }
+
+    /// Whether `session_id` is present anywhere in the *unfiltered* keyed
+    /// row map — not the scope-filtered `projected` list. A spawn's target
+    /// repository can be hidden by the current `RepoScope` (the picker
+    /// intentionally offers repositories the view itself is not showing),
+    /// so reconciling a `Requested` status against `rows()` would leave the
+    /// form stuck once its row lands in a hidden repository.
+    pub fn contains_session(&self, session_id: &str) -> bool {
+        self.rows
+            .values()
+            .any(|row| row.summary.session_id == session_id)
+    }
+
+    /// Repositories the center currently knows about, derived from the
+    /// *unfiltered* keyed row map — the scope is a view filter and must not
+    /// shrink the set a spawn can target. Deduped by `repo_key`, sorted, and
+    /// filtered to rows carrying an absolute `repo_path`: `repo_path` is
+    /// genuinely empty when the center could not resolve one (see
+    /// `run_row::repo_label_for`), and `run_start` rejects both an empty and
+    /// a relative target.
+    pub fn repositories(&self) -> Vec<SpawnRepo> {
+        let mut seen = std::collections::HashSet::new();
+        let mut repositories: Vec<SpawnRepo> = self
+            .rows
+            .values()
+            .filter(|row| camino::Utf8Path::new(&row.repo_path).is_absolute())
+            .filter(|row| seen.insert(row.repo_key.clone()))
+            .map(|row| SpawnRepo {
+                repo_key: row.repo_key.clone(),
+                repo_path: row.repo_path.clone(),
+                label: run_row::repo_label_for(&row.repo_key, &row.repo_path),
+            })
+            .collect();
+        repositories.sort_by(|left, right| left.repo_key.cmp(&right.repo_key));
+        repositories
     }
 }
 
@@ -301,6 +338,36 @@ mod tests {
         dashboard.set_scope(RepoScope::All);
         assert_eq!(dashboard.len(), 2);
         assert!(dashboard.rows().iter().any(|r| r.run_id == "b-updated"));
+    }
+
+    #[test]
+    fn repositories_dedupes_excludes_empty_and_relative_paths_and_is_unaffected_by_scope() {
+        let mut with_empty_path = row("repo-c", "/c.json", "c", Status::Completed, false, 1);
+        with_empty_path.repo_path = String::new();
+        let mut with_relative_path = row("repo-d", "/d.json", "d", Status::Completed, false, 1);
+        with_relative_path.repo_path = "relative/repo-d".to_string();
+        let snapshot = vec![
+            row("repo-b", "/b1.json", "b1", Status::Completed, false, 1),
+            row("repo-a", "/a.json", "a", Status::Completed, false, 1),
+            row("repo-b", "/b2.json", "b2", Status::Completed, false, 2),
+            with_empty_path,
+            with_relative_path,
+        ];
+        let dashboard = Dashboard::from_snapshot(snapshot, RepoScope::Repo("repo-a".to_string()));
+
+        let repositories = dashboard.repositories();
+        let keys: Vec<_> = repositories.iter().map(|r| r.repo_key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["repo-a", "repo-b"],
+            "deduped, sorted, and not shrunk by the current scope; empty and relative paths excluded"
+        );
+        assert!(
+            repositories
+                .iter()
+                .all(|r| camino::Utf8Path::new(&r.repo_path).is_absolute()),
+            "a row with no resolvable or non-absolute repo_path must be excluded from spawn targets"
+        );
     }
 
     #[test]

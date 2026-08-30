@@ -386,6 +386,63 @@ impl FakePeerConnection {
         self.write_line(&serde_json::json!({"kind": "delta", "delta": delta}));
     }
 
+    /// Read the client's `Start` request — a hand-written duplicate of the
+    /// io crate's private `Request::Start { target: StartTarget::Trait { .. } }`
+    /// wire shape, the same duplication convention documented on
+    /// [`FakePeer`] for the snapshot/delta tags. Returns `(id, args,
+    /// repo_path)`. Asserts the target is a `trait` start — the only shape
+    /// the desktop's spawn form ever sends.
+    pub fn read_start_request(&mut self) -> (String, Vec<String>, String) {
+        let request = self.read_line();
+        assert_eq!(request["kind"], "start", "expected a start request");
+        let id = request["id"]
+            .as_str()
+            .expect("start request id")
+            .to_string();
+        let target = &request["target"];
+        assert_eq!(target["type"], "trait", "expected a trait start target");
+        let args = target["data"]["args"]
+            .as_array()
+            .expect("start request args array")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("start request arg string")
+                    .to_string()
+            })
+            .collect();
+        let repo_path = target["data"]["repo_path"]
+            .as_str()
+            .expect("start request repo_path")
+            .to_string();
+        (id, args, repo_path)
+    }
+
+    /// Respond to a `Start` request with `StartWireResult::Started`.
+    pub fn send_started(&mut self, id: &str, session_id: &str) {
+        self.write_line(&serde_json::json!({
+            "kind": "response",
+            "id": id,
+            "result": {
+                "type": "start",
+                "data": {"type": "started", "session_id": session_id},
+            },
+        }));
+    }
+
+    /// Respond to a `Start` request with `StartWireResult::Exited`.
+    pub fn send_start_exited(&mut self, id: &str, code: Option<i32>, stderr: &str) {
+        self.write_line(&serde_json::json!({
+            "kind": "response",
+            "id": id,
+            "result": {
+                "type": "start",
+                "data": {"type": "exited", "code": code, "stderr": stderr},
+            },
+        }));
+    }
+
     /// Serve a complete snapshot in one call: start, each row, end.
     pub fn serve_snapshot(&mut self, id: &str, rows: &[CenterPublicRow]) {
         self.send_snapshot_start(id);

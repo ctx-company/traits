@@ -554,3 +554,110 @@ header. `tests/detail_stale_recovery.rs` drives `support::FakePeer` by hand
 to prove the disconnect/stale/delta-dropped/resync-once cycle without a
 real center in the loop. Both are env-mutating and stay the sole `#[test]`
 in their target, per the convention `tests/support/mod.rs` documents.
+
+## Spawn (0258.1)
+
+Submitting a trait and arguments from the desktop creates a detached run
+through the **same shared center capability** every face uses — never a
+GUI-private write path.
+
+**The structural problem this slice solves.** `ctx_traits_io::center::
+start_trait` resolves `center_executable()` as `std::env::current_exe()`
+and spawns that executable when no center is serving. For `ctx-desktop`
+that would fork a second copy of the GUI, not a center — exactly the
+hazard `subscribe_existing` was introduced for on the read path (see
+"Center link (0256.2)" above; `subscribe_existing` never spawns either).
+`ctx_traits_io::center::start_trait_existing` is the symmetric write-path
+entry: it connects to an already-serving center only, reporting connection
+failure rather than retrying, and is the one spawn entry this crate calls.
+`modules/cli/tests/proof_center.rs` proves both halves of this at the
+process level: `start_trait_existing_never_spawns_a_center_when_none_is_
+serving` (the regression guard for the fork hazard) and
+`start_trait_existing_reaches_two_subscribers_and_the_run_outlives_the_
+requester` (the desktop-shaped path end to end — dropping the requesting
+subscription immediately after the start is accepted, then asserting only
+the second, untouched subscriber observes the run appear and complete).
+
+**Repository identity comes from center state, never the process's cwd.**
+`Dashboard::repositories()` derives the spawn picker's choices from the
+*unfiltered* keyed row map (the current `RepoScope` is a view filter and
+must not shrink the set a spawn can target), deduped by `repo_key` and
+filtered to rows carrying an absolute `repo_path` (`camino::Utf8Path::
+is_absolute`) — `run_start` rejects an empty or relative path, and
+`repo_path` is genuinely empty whenever the center could not resolve one
+(see "Run rows (0256.3)" above). **Ceiling,
+stated explicitly:** a repository the center has never seen a run in
+cannot be spawned into from the desktop yet. The rigorous version — a
+`Repos` request serving the center's own repo index — is a protocol
+addition with its own proof obligations, deliberately deferred rather than
+smuggled into this slice.
+
+**`spawn_form.rs` is gpui-free**, the same pattern `dashboard.rs`/
+`detail.rs` document: `SpawnForm` holds the submitted text, cursor,
+offered repositories, selection, and a `SpawnStatus` (`Idle` /
+`Invalid(reason)` / `Requesting` / `Requested { session_id }` /
+`Rejected(reason)`). `submit()` validates through
+`ctx_traits_io::spawn_request::parse_spawn_args` — the face-independent
+half of the TUI's spawn validation (one argument per line, `#` comments
+and blanks dropped, a small forbidden-flag list rejected by name), shared
+so the desktop does not copy a security-shaped denylist that can drift —
+and refuses to produce a request while empty, forbidden, unselected, or
+already `Requesting` (one in-flight request per form). `settle` never
+touches `Dashboard`: `SpawnForm` has no field or method that could reach
+one, so optimistic row insertion is impossible by construction, not by
+convention — a spawned run becomes visible only through the same
+subscription-delta path every other row does. `Requested { session_id }`
+is worded as *requested*, not *running*, for exactly this reason, and
+clears itself (`clear_requested_for`) once a delta for that session
+arrives; if it never arrives the message honestly stays.
+
+**`Shell` wiring stays off the UI thread.** `ACTION_TIMEOUT` is 600s:
+`start_trait_existing` can block the calling thread for up to ten minutes
+waiting for the driver to register, so `Shell::submit_spawn` mirrors
+`Shell::spawn_load`'s shape exactly — `cx.spawn` awaiting
+`cx.background_spawn`, landing the result through `SpawnForm::settle`
+behind the same generation guard `RunDetail::apply` uses. The window
+closing (dropping `spawn_task`) is correct and load-bearing, not a leak:
+the center's `run_start` has already spawned the driver detached by the
+time a `Started` response would arrive, so the child keeps running
+regardless — proven at the process level by
+`proof_center::dropping_the_requester_mid_start_leaves_the_detached_
+driver_running`.
+
+**What is deliberately not built.** No `CenterDelta` variant, no new
+`Request` variant, no GUI-specific spawn verb, no local row insertion or
+"pending run" placeholder, no polling timer or `center::list()` call after
+a successful start, no filesystem read anywhere in the spawn path. No
+`control_existing`/`start_session_existing` scaffolding — those belong to
+0258.2/0258.3.
+
+**Text entry.** gpui 0.2.2 has no `TextInput` component and no built-in
+editor element (that lives in Zed's private `ui` crate), so `Shell`
+implements the minimum on a focusable `div`: `on_key_down` appends
+`keystroke.key_char` when present and handles `backspace` / `enter`
+(newline) / `cmd-enter` (submit) / `escape` (close) by `keystroke.key` and
+`modifiers`. No `EntityInputHandler`, no IME, no selection, no clipboard —
+non-ASCII input, dead keys, and paste are imperfect. Accepted ceiling for
+this walking-skeleton form, recorded here as a decision rather than an
+oversight.
+
+**Rendering.** `spawn_view.rs` mirrors `detail_view.rs`: free functions,
+no `Context`, directly callable from a test with no gpui `App`.
+`spawn_element` renders the text/status/hint; the repository picker's
+row (with its click listener) is built in `Shell::render` itself — the
+same "the interactive row lives in `Shell::render`, not in a pure view
+module" split the run list already uses — since it needs a `Context` to
+wire the listener with and `spawn_view.rs` has none.
+
+`tests/spawn_through_center.rs` drives `support::FakePeer` by hand across
+two connections (the snapshot/delta subscription never pipelines a second
+request on the same connection — see `support::FakePeer`'s own doc
+comment): serves a snapshot with a resolvable and an unresolvable-`repo_
+path` row, asserts only the resolvable one is offered, submits a request
+with the process cwd set outside every repository (so a cwd-derived path
+is structurally impossible to confuse with a pass), asserts the argv
+reaching the center is exactly the user's lines with the center-supplied
+`repo_path`, asserts the row does not exist until an `Appeared` delta
+carries it, and then proves a disconnect/recovery cycle neither loses nor
+duplicates the spawned row. Env-mutating and the sole `#[test]` in its
+target, per the same convention.

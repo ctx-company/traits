@@ -11,6 +11,8 @@ use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
 use crate::run_row::{RepoScope, RunRow};
+use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, SubmitRequest};
+use crate::spawn_view;
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -164,6 +166,36 @@ impl CenterFace {
         matches!(self.state, CenterState::Stale { .. })
     }
 
+    /// Whether `session_id` is present in the center's authoritative,
+    /// *unfiltered* row model. Used to reconcile a `Requested` spawn status
+    /// against arrival of the actual row — the row's `Appeared` delta and
+    /// the spawn request's own `Started` response are scheduled on
+    /// independent connections and can land in either order. Delegates to
+    /// `Dashboard::contains_session` rather than `self.rows()` (the
+    /// scope-filtered projection): a spawn's target repository can be
+    /// hidden by the current `RepoScope`, and a view filter must not
+    /// prevent an accepted spawn from reconciling.
+    pub fn contains_session(&self, session_id: &str) -> bool {
+        match &self.state {
+            CenterState::Connecting | CenterState::Unavailable { .. } => false,
+            CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
+                dashboard.contains_session(session_id)
+            }
+        }
+    }
+
+    /// Empty unless `Connected`/`Stale` — see [`CenterFace::rows`]'s same
+    /// reasoning. Delegates to `Dashboard::repositories`, never a second
+    /// source of repository identity.
+    pub fn repositories(&self) -> Vec<SpawnRepo> {
+        match &self.state {
+            CenterState::Connecting | CenterState::Unavailable { .. } => Vec::new(),
+            CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
+                dashboard.repositories()
+            }
+        }
+    }
+
     /// The outage reason, if the face is currently `Stale` — carried into a
     /// fresh detail selection so a row picked from a retained stale list
     /// starts stale itself, rather than looking current while ignoring the
@@ -181,6 +213,27 @@ impl CenterFace {
             RepoScope::Repo(repo_key) => format!("{len} runs in {repo_key}"),
         }
     }
+}
+
+/// Clear `form`'s `Requested` status if its session is already visible in
+/// `face`'s row list. The one reconciliation path — called after every
+/// applied face update, and after a submit settles — because the row's
+/// `Appeared` delta and the request's own `Started` response are scheduled
+/// on independent connections and can land in either order; whichever of
+/// the two arrives second is the one that must observe the session already
+/// visible and clear the status. A free function, not a `Shell` method, so
+/// both call sites and the integration test that proves both orderings
+/// share exactly one implementation. Returns whether it changed anything,
+/// matching the `apply`/`settle` `-> bool` discipline.
+pub fn reconcile_spawn_status(face: &CenterFace, form: &mut SpawnForm) -> bool {
+    let SpawnStatus::Requested { session_id } = form.status() else {
+        return false;
+    };
+    if !face.contains_session(session_id) {
+        return false;
+    }
+    let session_id = session_id.to_string();
+    form.clear_requested_for(&session_id)
 }
 
 fn format_time_of_day(at: SystemTime) -> String {
@@ -201,6 +254,17 @@ pub struct Shell {
     face: CenterFace,
     detail: RunDetail,
     detail_task: Option<gpui::Task<()>>,
+    spawn_form: SpawnForm,
+    spawn_task: Option<gpui::Task<()>>,
+    /// The spawn form panel's one stable focus target, created once here and
+    /// reused by every render's `track_focus` call. `cx.focus_handle()`
+    /// mints a fresh `FocusId` on every call — calling it fresh inside
+    /// `render` and passing that straight into `track_focus`, as an earlier
+    /// version of this panel once did, replaces the focused handle on every
+    /// frame; gpui dispatches key events through the currently focused
+    /// handle, so a key press that calls `cx.notify()` would drop keyboard
+    /// dispatch on the very next frame.
+    spawn_focus_handle: gpui::FocusHandle,
 }
 
 impl Shell {
@@ -214,6 +278,15 @@ impl Shell {
                     // exact for both consumers.
                     let outcome = shell.detail.follow(&update);
                     shell.face.apply(update, SystemTime::now());
+                    shell.spawn_form.set_repositories(shell.face.repositories());
+                    // Reconcile a `Requested` spawn status against the
+                    // now-current row list, not just this update's own
+                    // delta: the row's `Appeared` delta and the request's
+                    // `Started` response are scheduled on independent
+                    // connections and can land in either order, so
+                    // `submit_spawn`'s settle callback runs the same
+                    // reconciliation on its own arrival too.
+                    reconcile_spawn_status(&shell.face, &mut shell.spawn_form);
                     cx.notify();
                     outcome
                 });
@@ -232,6 +305,9 @@ impl Shell {
             face: CenterFace::new(RepoScope::All),
             detail: RunDetail::default(),
             detail_task: None,
+            spawn_form: SpawnForm::default(),
+            spawn_task: None,
+            spawn_focus_handle: cx.focus_handle(),
         }
     }
 
@@ -282,6 +358,100 @@ impl Shell {
                 .await;
             let _ = this.update(cx, |shell, cx| {
                 if shell.detail.apply(generation, outcome) {
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// Open the spawn form, keeping any text already entered, and move
+    /// keyboard focus onto its stable `spawn_focus_handle` so key events
+    /// start reaching it immediately rather than only after the next click.
+    pub fn open_spawn_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.spawn_form.open();
+        self.spawn_focus_handle.focus(window);
+        cx.notify();
+    }
+
+    /// Close the spawn form. Deliberately does not cancel an in-flight
+    /// submit: the driver is already detached once the center accepts it,
+    /// so closing the form must not appear to stop it (see `submit_spawn`).
+    pub fn close_spawn_form(&mut self, cx: &mut Context<Self>) {
+        self.spawn_form.close();
+        cx.notify();
+    }
+
+    pub fn spawn_form(&self) -> &SpawnForm {
+        &self.spawn_form
+    }
+
+    pub fn spawn_insert_char(&mut self, ch: char, cx: &mut Context<Self>) {
+        self.spawn_form.insert_char(ch);
+        cx.notify();
+    }
+
+    pub fn spawn_backspace(&mut self, cx: &mut Context<Self>) {
+        self.spawn_form.backspace();
+        cx.notify();
+    }
+
+    pub fn spawn_newline(&mut self, cx: &mut Context<Self>) {
+        self.spawn_form.newline();
+        cx.notify();
+    }
+
+    pub fn spawn_select_repository(&mut self, repo_key: String, cx: &mut Context<Self>) {
+        self.spawn_form.select_repository(repo_key);
+        cx.notify();
+    }
+
+    /// Validate and submit the form. A rejection surfaces on the form
+    /// itself and never reaches this method's caller as an error.
+    pub fn spawn_submit(&mut self, cx: &mut Context<Self>) {
+        if let Some(request) = self.spawn_form.submit() {
+            self.submit_spawn(request, cx);
+        }
+        cx.notify();
+    }
+
+    /// Send `request` through the center's existing-only spawn entry on
+    /// gpui's background executor — `start_trait_existing` can block for as
+    /// long as `ACTION_TIMEOUT` (600s) waiting for the driver to register,
+    /// and must never run on the UI thread. Dropping this task (e.g. the
+    /// window closing) abandons only the requester's own socket; the
+    /// center's `run_start` has already spawned the driver detached by the
+    /// time a `Started` response would arrive, so the child keeps running
+    /// regardless — proven at the process level by
+    /// `proof_center::dropping_the_requester_mid_start_leaves_the_detached_driver_running`.
+    /// `settle` never touches `self.face`/`Dashboard`: the spawned run
+    /// becomes visible only through a later subscription delta, never from
+    /// this task's own outcome.
+    fn submit_spawn(&mut self, request: SubmitRequest, cx: &mut Context<Self>) {
+        let generation = request.generation;
+        self.spawn_task = Some(cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_spawn(async move {
+                    match ctx_traits_io::center::start_trait_existing(
+                        &request.args,
+                        camino::Utf8Path::new(&request.repo_path),
+                    ) {
+                        Ok(ctx_traits_io::center::StartResult::Started { session_id }) => {
+                            SubmitOutcome::Started { session_id }
+                        }
+                        Ok(ctx_traits_io::center::StartResult::Exited { code, stderr }) => {
+                            SubmitOutcome::Exited { code, stderr }
+                        }
+                        Err(error) => SubmitOutcome::Failed(error.to_string()),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                let settled = shell.spawn_form.settle(generation, outcome);
+                // The row this response's session refers to may already be
+                // visible — the `Appeared` delta can win the race against
+                // this `Started` response arriving on its own connection.
+                let reconciled = reconcile_spawn_status(&shell.face, &mut shell.spawn_form);
+                if settled || reconciled {
                     cx.notify();
                 }
             });
@@ -339,12 +509,68 @@ impl Render for Shell {
             .detail
             .follow_state()
             .and_then(detail_view::follow_element);
+        let spawn_toggle = div()
+            .id("spawn-toggle")
+            .on_click(cx.listener(|shell, _event, window, cx| {
+                if shell.spawn_form.is_open() {
+                    shell.close_spawn_form(cx);
+                } else {
+                    shell.open_spawn_form(window, cx);
+                }
+            }))
+            .child(if self.spawn_form.is_open() {
+                "close spawn"
+            } else {
+                "spawn run"
+            });
         let mut column = div()
             .flex()
             .flex_col()
             .size_full()
             .child(header)
-            .child(list);
+            .child(spawn_toggle);
+        if self.spawn_form.is_open() {
+            let mut repositories = div().id("spawn-repositories").flex().flex_row().gap_2();
+            for repo in self.spawn_form.repositories() {
+                let key = repo.repo_key.clone();
+                let mut item = div()
+                    .id(SharedString::from(format!("spawn-repo-{key}")))
+                    .on_click(cx.listener(move |shell, _event, _window, cx| {
+                        shell.spawn_select_repository(key.clone(), cx);
+                    }))
+                    .child(repo.label.clone());
+                if self.spawn_form.selected_repo() == Some(repo.repo_key.as_str()) {
+                    item = item.bg(gpui::rgb(0x333333));
+                }
+                repositories = repositories.child(item);
+            }
+            column = column.child(
+                div()
+                    .id("spawn-form-panel")
+                    .track_focus(&self.spawn_focus_handle)
+                    .on_key_down(
+                        cx.listener(|shell, event: &gpui::KeyDownEvent, _window, cx| {
+                            let keystroke = &event.keystroke;
+                            match keystroke.key.as_str() {
+                                "escape" => shell.close_spawn_form(cx),
+                                "backspace" => shell.spawn_backspace(cx),
+                                "enter" if keystroke.modifiers.platform => shell.spawn_submit(cx),
+                                "enter" => shell.spawn_newline(cx),
+                                _ => {
+                                    if let Some(text) = &keystroke.key_char {
+                                        for ch in text.chars() {
+                                            shell.spawn_insert_char(ch, cx);
+                                        }
+                                    }
+                                }
+                            }
+                        }),
+                    )
+                    .child(repositories)
+                    .child(spawn_view::spawn_element(&self.spawn_form)),
+            );
+        }
+        column = column.child(list);
         if let Some(banner) = follow_banner {
             column = column.child(banner);
         }
@@ -425,6 +651,126 @@ mod tests {
             face.header().contains("repo-a"),
             "the repo scope must still be reflected in the header after recovery: {}",
             face.header()
+        );
+    }
+
+    /// The regression proof for `contains_session` reading the unfiltered
+    /// row map rather than the scope-filtered `rows()` projection. The
+    /// spawn is into `repo-b`, but the view is scoped to `repo-a` — the
+    /// picker still offers `repo-b` (`Dashboard::repositories` is
+    /// unfiltered), and a completed spawn there must still resolve
+    /// `Requested` back to `Idle` even though `face.rows()` never shows the
+    /// new row at all under this scope.
+    #[test]
+    fn reconcile_spawn_status_clears_requested_even_when_repo_scope_hides_the_new_row() {
+        let scope = RepoScope::Repo("repo-a".to_string());
+        let mut face = CenterFace::new(scope);
+        let now = SystemTime::now();
+        face.apply(
+            LinkUpdate::Snapshot(vec![
+                wire_row("repo-a", "run-1"),
+                wire_row("repo-b", "run-2"),
+            ]),
+            now,
+        );
+        assert_eq!(
+            face.rows().len(),
+            1,
+            "the repo-b row must already be hidden by the current scope"
+        );
+        assert!(
+            face.repositories()
+                .iter()
+                .any(|repo| repo.repo_key == "repo-b"),
+            "the spawn picker must still offer a repository the view scope hides"
+        );
+
+        let mut form = SpawnForm::default();
+        form.set_repositories(face.repositories());
+        form.select_repository("repo-b".to_string());
+        for ch in "fixture-trait".chars() {
+            form.insert_char(ch);
+        }
+        let request = form.submit().expect("a valid, repo-selected request");
+        let generation = request.generation;
+        assert!(form.settle(
+            generation,
+            SubmitOutcome::Started {
+                session_id: "session-hidden".to_string(),
+            },
+        ));
+        assert!(matches!(
+            form.status(),
+            SpawnStatus::Requested { session_id } if session_id == "session-hidden"
+        ));
+
+        let mut hidden_row = wire_row("repo-b", "run-hidden");
+        hidden_row.summary.session_id = "session-hidden".to_string();
+        face.apply(
+            LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::Appeared {
+                row: Box::new(hidden_row),
+            }),
+            now,
+        );
+        assert_eq!(
+            face.rows().len(),
+            1,
+            "the newly spawned row stays hidden by the repo-a scope"
+        );
+
+        assert!(
+            reconcile_spawn_status(&face, &mut form),
+            "reconciliation must see the session through the unfiltered model, not the scoped projection"
+        );
+        assert_eq!(*form.status(), SpawnStatus::Idle);
+    }
+
+    /// The regression proof for the render-local-`FocusHandle` bug: without
+    /// a stable `spawn_focus_handle`, the second keystroke below would not
+    /// reach `on_key_down` at all, because the first keystroke's
+    /// `cx.notify()` forces a rerender that would have tracked a brand-new
+    /// `FocusHandle`, leaving `window.focus`'s id undispatchable in the new
+    /// frame. Drives a real gpui window through `TestAppContext` — the
+    /// gpui-free `CenterFace`/`SpawnForm` tests elsewhere in this crate
+    /// cannot observe key-dispatch routing at all, since that lives entirely
+    /// in gpui's own render/paint/dispatch cycle.
+    #[gpui::test]
+    fn spawn_form_keeps_keyboard_focus_across_key_events_and_rerenders(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = cx
+            .update(|cx| cx.open_window(Default::default(), |_, cx| cx.new(Shell::new)))
+            .unwrap();
+
+        window
+            .update(cx, |shell, window, cx| shell.open_spawn_form(window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        // Six separate keystrokes — three character insertions, a
+        // backspace, and a newline (`enter`) — each one forcing its own
+        // notify-triggered rerender (via `run_until_parked`) before the
+        // next is dispatched. "Multiple key events separated by
+        // rerenders" across all three `on_key_down` branches, not one
+        // batch dispatched against a single frame and not character
+        // insertion alone: a regression that only re-broke the backspace
+        // or newline branch would pass a characters-only proof.
+        for key in ["f", "i", "x", "backspace", "enter"] {
+            cx.dispatch_keystroke(*window, gpui::Keystroke::parse(key).unwrap());
+            cx.run_until_parked();
+        }
+
+        let text = window
+            .update(cx, |shell, _window, _cx| {
+                shell.spawn_form().text().to_string()
+            })
+            .unwrap();
+        assert_eq!(
+            text, "fi\n",
+            "every keystroke after the first must still reach the form despite the \
+             intervening rerenders — the focus target must be the same FocusHandle \
+             every frame — and the backspace/enter branches must still fire, not just \
+             character insertion"
         );
     }
 

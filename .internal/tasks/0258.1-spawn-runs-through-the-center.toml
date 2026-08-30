@@ -22,13 +22,16 @@ Submitting a valid trait and arguments from the desktop creates a detached run t
 """
 
 [relations]
+depends-on = [
+    "0256",
+    "0243.5",
+]
 parent = "0258"
-depends-on = ["0256", "0243.5"]
 
 [[checks]]
 name = "focused center spawn proof passes"
 command = "cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "workspace per-round gate remains green"
@@ -37,4 +40,4 @@ timeout-ms = 600000
 
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''

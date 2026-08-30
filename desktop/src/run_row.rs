@@ -70,7 +70,7 @@ fn state_text_for(state: &RowState) -> String {
     }
 }
 
-fn repo_label_for(repo_key: &str, repo_path: &str) -> String {
+pub(crate) fn repo_label_for(repo_key: &str, repo_path: &str) -> String {
     if repo_path.is_empty() {
         return repo_key.to_string();
     }

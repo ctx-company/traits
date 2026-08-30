@@ -839,8 +839,22 @@ fn request(request: Request) -> crate::Result<ResponseResult> {
 }
 
 fn request_with_timeout(request: Request, timeout: Duration) -> crate::Result<ResponseResult> {
+    request_on(ensure_connected()?, request, timeout)
+}
+
+/// Same request/correlate/decode path as [`request_with_timeout`], but against
+/// a center that is already serving — it never spawns one. Symmetric with
+/// [`subscribe_existing`].
+fn request_existing(request: Request, timeout: Duration) -> crate::Result<ResponseResult> {
+    request_on(connect_existing_at(&center_paths()?)?, request, timeout)
+}
+
+fn request_on(
+    mut stream: UnixStream,
+    request: Request,
+    timeout: Duration,
+) -> crate::Result<ResponseResult> {
     let id = request.id().to_owned();
-    let mut stream = ensure_connected()?;
     write_line(&mut stream, &request)?;
     let reply: WireMessage =
         serde_json::from_slice(&read_line_with_deadline(&mut stream, false, timeout)?).map_err(
@@ -877,17 +891,8 @@ pub enum ControlResult {
     Refused,
 }
 
-pub fn start_trait(args: &[String], repo_path: &Utf8Path) -> crate::Result<StartResult> {
-    match request_with_timeout(
-        Request::Start {
-            id: next_id("start"),
-            target: StartTarget::Trait {
-                args: args.to_vec(),
-                repo_path: repo_path.to_string(),
-            },
-        },
-        ACTION_TIMEOUT,
-    )? {
+fn decode_start(result: ResponseResult) -> crate::Result<StartResult> {
+    match result {
         ResponseResult::Start(StartWireResult::Started { session_id }) => {
             Ok(StartResult::Started { session_id })
         }
@@ -898,8 +903,38 @@ pub fn start_trait(args: &[String], repo_path: &Utf8Path) -> crate::Result<Start
     }
 }
 
+fn trait_start_request(args: &[String], repo_path: &Utf8Path) -> Request {
+    Request::Start {
+        id: next_id("start"),
+        target: StartTarget::Trait {
+            args: args.to_vec(),
+            repo_path: repo_path.to_string(),
+        },
+    }
+}
+
+pub fn start_trait(args: &[String], repo_path: &Utf8Path) -> crate::Result<StartResult> {
+    decode_start(request_with_timeout(
+        trait_start_request(args, repo_path),
+        ACTION_TIMEOUT,
+    )?)
+}
+
+/// Same shared spawn capability as [`start_trait`], but only against a center
+/// that is already serving — it never spawns one. For a caller whose own
+/// executable does not host the center sentinel (`ctx-desktop`), spawn-on-need
+/// would fork an unrelated process rather than a center. Symmetric with
+/// [`subscribe_existing`]. Connection failure is reported, not retried; a
+/// caller wanting bounded retry cadence supplies its own.
+pub fn start_trait_existing(args: &[String], repo_path: &Utf8Path) -> crate::Result<StartResult> {
+    decode_start(request_existing(
+        trait_start_request(args, repo_path),
+        ACTION_TIMEOUT,
+    )?)
+}
+
 pub fn start_session(session_id: &str, repo_key: Option<&str>) -> crate::Result<StartResult> {
-    match request_with_timeout(
+    decode_start(request_with_timeout(
         Request::Start {
             id: next_id("start"),
             target: StartTarget::Session {
@@ -908,15 +943,7 @@ pub fn start_session(session_id: &str, repo_key: Option<&str>) -> crate::Result<
             },
         },
         ACTION_TIMEOUT,
-    )? {
-        ResponseResult::Start(StartWireResult::Started { session_id }) => {
-            Ok(StartResult::Started { session_id })
-        }
-        ResponseResult::Start(StartWireResult::Exited { code, stderr }) => {
-            Ok(StartResult::Exited { code, stderr })
-        }
-        _ => Err(protocol_error("unexpected start response")),
-    }
+    )?)
 }
 
 pub fn control(

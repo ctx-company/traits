@@ -30,3 +30,8 @@ camino = "1"
 
 [dev-dependencies]
 serde_json = "1"
+# gpui's own #[gpui::test]/TestAppContext harness lives behind this feature.
+# It is dev-only — the shipped `ctx-desktop` binary still links plain gpui —
+# and is the one way to prove the spawn form's keyboard focus survives a real
+# gpui key-dispatch + rerender cycle rather than only a plain-Rust model of it.
+gpui = { version = "0.2.2", features = ["test-support"] }

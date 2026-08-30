@@ -5860,31 +5860,7 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
 }
 
 fn spawn_start_request(text: &str) -> Result<(Vec<String>, Option<String>), String> {
-    let user_args: Vec<String> = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_string)
-        .collect();
-    if user_args.is_empty() {
-        return Err("spawn request was empty".to_string());
-    }
-    const FORBIDDEN: &[&str] = &[
-        "--no-drive",
-        "--ephemeral",
-        "--out",
-        "--session-store",
-        "--json",
-        "--progress",
-    ];
-    for arg in &user_args {
-        let flag = arg.split('=').next().unwrap_or(arg);
-        if FORBIDDEN.contains(&flag) {
-            return Err(format!(
-                "{flag} is not permitted in a dashboard spawn request"
-            ));
-        }
-    }
+    let user_args = ctx_traits_io::spawn_request::parse_spawn_args(text)?;
     let mut full_argv: Vec<std::ffi::OsString> = vec!["ctx".into(), "traits".into(), "run".into()];
     full_argv.extend(user_args.iter().map(std::ffi::OsString::from));
     full_argv.push("--progress".into());

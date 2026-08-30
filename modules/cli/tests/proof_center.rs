@@ -2664,6 +2664,137 @@ fn center_started_run_outlives_its_requester_and_appears_once_to_two_subscribers
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The desktop-shaped spawn path end to end: `start_trait_existing` (not
+/// `start_trait`) reaches an already-serving center, the requesting
+/// subscription is dropped immediately after the start is accepted — the
+/// stand-in for the requesting window closing — and only the *second,
+/// untouched* subscriber is asserted against. Combines "closing the
+/// requesting window does not stop it" with "a second subscriber receives
+/// the delta" in one proof.
+#[test]
+fn start_trait_existing_reaches_two_subscribers_and_the_run_outlives_the_requester() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("start-existing-two-subscribers");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let first = ctx_traits_io::center::subscribe(None).expect("first subscription");
+    let second = ctx_traits_io::center::subscribe(None).expect("second subscription");
+    for subscription in [&first, &second] {
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+        ));
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+        ));
+    }
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let result = ctx_traits_io::center::start_trait_existing(
+        &[
+            "--file".to_string(),
+            fixture,
+            "--out".to_string(),
+            ledger.to_string_lossy().into_owned(),
+            "--json".to_string(),
+        ],
+        camino::Utf8Path::from_path(&repo).expect("UTF-8 repository"),
+    )
+    .expect("center start request through the existing-only entry");
+    assert!(matches!(
+        result,
+        ctx_traits_io::center::StartResult::Started { .. }
+    ));
+    // The stand-in for the desktop window closing: the requesting
+    // subscription goes away before the driver has even produced its first
+    // delta. The center's own start-response socket already closed by this
+    // point (the start request/response round trip completed above); this
+    // additionally drops the requester's *subscription* link, which is the
+    // channel a real desktop session would also be tearing down.
+    drop(first);
+    std::fs::write(&release, "release").expect("release fixture frame");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    let mut appeared = 0;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "the second, untouched subscriber did not observe the detached driver's completion"
+        );
+        match second.recv_timeout(remaining) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::Appeared { row },
+            )) if row.ledger_path == ledger.to_string_lossy() => appeared += 1,
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::RowChanged { row },
+            )) if row.ledger_path == ledger.to_string_lossy()
+                && row.summary.last_drive_outcome.as_deref() == Some("completed") =>
+            {
+                break;
+            }
+            Ok(_) => {}
+            Err(error) => panic!("read start delta: {error}"),
+        }
+    }
+    assert_eq!(
+        appeared, 1,
+        "the second subscriber receives exactly one Appeared delta"
+    );
+    drop(second);
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The regression guard for the GUI-forks-itself hazard: unlike
+/// `start_trait`, `start_trait_existing` must never spawn a center of its
+/// own when none is serving. Point `CTX_CENTER_EXECUTABLE` at a
+/// marker-writing script the same way `standalone_subscribe_reaches_a_running_center_and_never_launches_one`
+/// does for the read path, then assert nothing was launched.
+#[test]
+fn start_trait_existing_never_spawns_a_center_when_none_is_serving() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("start-existing-never-spawns");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let spawn_lock = root.join("center.lock");
+    let launch_marker = root.join("launches");
+    let _environment = CenterEnvironment::install(&root);
+
+    let result = ctx_traits_io::center::start_trait_existing(
+        &["fixture".to_string()],
+        camino::Utf8Path::from_path(&root).expect("UTF-8 repository"),
+    );
+    assert!(
+        result.is_err(),
+        "no center is serving, so the existing-only entry must fail rather than spawn one"
+    );
+    assert!(
+        !launch_marker.exists(),
+        "start_trait_existing must never spawn a center: launch marker was written"
+    );
+    assert!(
+        !socket.exists(),
+        "start_trait_existing must never spawn a center: socket was created"
+    );
+    assert!(
+        !spawn_lock.exists(),
+        "start_trait_existing must never enter spawn arbitration: spawn lock was created"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn center_start_of_a_child_that_exits_before_registering_reports_its_stderr() {
     let _serial = SENTINEL_TEST_LOCK
