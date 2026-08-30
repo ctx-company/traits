@@ -1,0 +1,93 @@
+schema-version = "0.2"
+key = "0270"
+title = "Crashed sessions settle and die"
+status = "draft"
+raised = "2026-08-30"
+content = """
+A drive that dies without writing its outcome leaves a record frozen
+mid-flight: `status = awaiting-agent-output`, `last-drive-outcome`
+absent, driver-lock flock held by nobody. Proven live on 2026-08-30
+(session adee849f, 0265.5): the box hit disk-full at ~17:17, the queue
+process group died, and the outcome write — the dying process's last
+job — never landed. The center then faithfully mirrored a session that
+claims to be running forever.
+
+Every verb dead-ends against such a row. Interrupt refuses (correctly —
+nothing holds the lock, there is nothing to signal). Delete loops
+forever on "session eligibility changed; reopen it": the sessions-delete
+flow snapshots the row's class at confirm time and re-verifies at
+execution, and the two code paths classify this ambiguous state
+differently, so every attempt reads as a mid-flight transition. The row
+is not protected; it is stuck between two opinions while the kernel
+flock — the product's own liveness authority — has said "dead" the
+whole time. The owner's manual escape was editing the store record by
+hand to graft a killed-shaped outcome onto it, which is exactly the
+mutation the product should own.
+
+## Owner contract
+
+A session whose drive died without an ending is settled by the product,
+automatically, and then behaves like any other finished session: honest
+bucket, ordinary delete, ordinary archive. Settling writes the truth
+down; it never deletes evidence. No session is ever auto-deleted.
+"""
+scope = """
+## Goals (binding)
+
+1. The center's periodic repair adopts crashed records: driver-lock
+   flock free (kernel probe, the existing `run_control::probe`
+   authority) AND a non-terminal status AND no recorded outcome AND no
+   store/activity change for a bounded quiet window. Adoption writes a
+   synthetic terminal outcome into the session record — outcome value
+   distinguishable from an owner kill (e.g. `crashed` if the vocabulary
+   can grow, else `interrupted` with a provenance marker) — stamped with
+   when it was settled and by what evidence. The ledger and activity
+   files are never moved or rewritten; only the session record's
+   outcome metadata changes.
+2. One classification authority. The sessions-delete flow's
+   confirm-time eligibility and execution-time re-verification compute
+   the row's class through the same classifier the listing uses,
+   anchored on the flock probe. "Eligibility changed" fires only on a
+   real transition (the lock was acquired or the record gained an
+   outcome between confirm and execute), never because two code paths
+   model the same frozen state differently. A settled-or-dead row
+   confirmed for deletion deletes.
+3. The interrupt/kill verb on a flock-free session stops dead-ending:
+   it reports that nothing is alive and offers (or performs, per the
+   surface's idiom) the settle from goal 1 instead. No verb ever
+   pretends a dead session might still answer.
+4. Settling is idempotent and race-safe: a session that acquires its
+   flock during the quiet window is never settled; a settle racing a
+   real writer loses cleanly (the lock holder's write wins); two
+   repair passes cannot double-settle.
+5. Existing teardown semantics are untouched: completed/killed/
+   interrupted sessions written by their own drives keep their shapes;
+   0264's q-detach contract and 0252.2/0252.7 teardown stand.
+
+## Suggested starting points — guidance, not a boundary
+
+- The center's periodic repair / orphan-adoption seams in
+  modules/io/src/center.rs (the paused-orphan repair path is adjacent);
+  `run_control::probe` for the flock authority; the sessions-delete
+  eligibility snapshot and re-verify in the dashboard delete flow
+  (0252.5's post-confirm diagnostics name the refusal sites).
+- The manual settle used on 2026-08-30 grafted the killed-session
+  outcome shape (`outcome`, `recorded-at-epoch`, `effective-budget`,
+  `token-usage`, `exit-code`) onto the record; the product's synthetic
+  outcome should reuse that shape so every reader already parses it.
+- Proof shape: a fixture session with a real (then released) flock and
+  no outcome; assert the repair settles it exactly once, the dashboard
+  reclassifies it, delete succeeds through the normal flow, and a
+  fixture that re-acquires its flock mid-window is left untouched.
+
+## Out of scope
+
+- Auto-deleting or auto-archiving anything (retention stays a separate
+  owner decision).
+- Changing how live sessions are classified or killed.
+- The disk-full failure mode itself (ENOSPC hardening of outcome
+  writes is its own candidate task).
+"""
+
+[relations]
+depends-on = ["0262"]
