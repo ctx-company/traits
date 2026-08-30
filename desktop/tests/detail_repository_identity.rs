@@ -54,7 +54,9 @@ fn selection_resolves_through_center_supplied_identity_not_cwd() {
         .select(row_a)
         .expect("repo-a selection issues a request");
     assert_eq!(
-        ctx_traits_desktop::detail::load(&request_a).expect("repo-a ledger reads"),
+        ctx_traits_desktop::detail::load(&request_a)
+            .expect("repo-a ledger reads")
+            .session,
         fixture_a,
         "the same run-id/session-id in repo-a must resolve to repo-a's own ledger"
     );
@@ -64,7 +66,9 @@ fn selection_resolves_through_center_supplied_identity_not_cwd() {
         .select(row_b)
         .expect("repo-b selection issues a request");
     assert_eq!(
-        ctx_traits_desktop::detail::load(&request_b).expect("repo-b ledger reads"),
+        ctx_traits_desktop::detail::load(&request_b)
+            .expect("repo-b ledger reads")
+            .session,
         fixture_b,
         "the same run-id/session-id in repo-b must resolve to repo-b's own ledger, not repo-a's"
     );

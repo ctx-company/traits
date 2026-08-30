@@ -9,6 +9,7 @@ use gpui::{
 use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, RunDetail};
+use crate::detail_view;
 use crate::run_row::{RepoScope, RunRow};
 
 pub const APP_TITLE: &str = "ctx desktop";
@@ -290,15 +291,23 @@ impl Render for Shell {
             }
             list = list.child(item);
         }
-        // 0257.2 placeholder: a single acknowledgement line, not a design.
-        let detail_strip = self.detail.summary_line().unwrap_or_default();
+        let detail_pane = match self.detail.load_state() {
+            None => div().into_any_element(),
+            Some(detail::DetailLoad::Loading) => detail_view::loading_element(),
+            Some(detail::DetailLoad::Failed(reason)) => detail_view::failed_element(reason),
+            Some(detail::DetailLoad::Loaded(_)) => self
+                .detail
+                .tree()
+                .map(|tree| detail_view::detail_element(&tree))
+                .unwrap_or_else(|| div().into_any_element()),
+        };
         div()
             .flex()
             .flex_col()
             .size_full()
             .child(header)
             .child(list)
-            .child(detail_strip)
+            .child(detail_pane)
     }
 }
 

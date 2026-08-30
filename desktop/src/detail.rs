@@ -26,6 +26,7 @@
 use camino::Utf8PathBuf;
 use ctx_traits_core::procedure::session::Session;
 
+use crate::detail_tree::{self, ActivityOverlay, DetailTree};
 use crate::run_row::RunRow;
 
 /// A background read request for one selection. Carries the generation it
@@ -38,20 +39,44 @@ pub struct LoadRequest {
     pub ledger_path: Utf8PathBuf,
 }
 
-/// The one filesystem read this module performs. Read-only; the io error is
-/// converted to `String` here, inside the (future) background task, so the
-/// value crossing back to the UI thread is plainly `Send`.
-pub fn load(request: &LoadRequest) -> Result<Session, String> {
-    ctx_traits_io::run_session::read_run_session(&request.ledger_path)
-        .map_err(|error| error.to_string())
+/// The authoritative session plus its tolerant activity embellishment,
+/// already folded into a bounded [`ActivityOverlay`] — the raw sidecar
+/// records themselves are never retained past `load`, so a long run's
+/// thousands-of-records sidecar does not stay resident on the UI thread. The
+/// sidecar read has no failure mode that reaches the caller (see
+/// `ctx_traits_io::activity_sidecar::read_activity`), so a bad or absent
+/// sidecar can never turn a good session into [`DetailLoad::Failed`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetailBaseline {
+    pub session: Session,
+    pub activity_overlay: ActivityOverlay,
+    pub skipped_activity_lines: usize,
 }
 
-/// A selected run's load state. `Session` is boxed because it is large
-/// enough to trip `clippy::large_enum_variant` otherwise.
+/// The one filesystem read this module performs, plus the tolerant sidecar
+/// read alongside it. Read-only; the ledger's io error is converted to
+/// `String` here, inside the (future) background task, so the value
+/// crossing back to the UI thread is plainly `Send`. The sidecar's records
+/// are folded into an [`ActivityOverlay`] here, once, rather than carried as
+/// a raw `Vec` and re-folded on every projection.
+pub fn load(request: &LoadRequest) -> Result<DetailBaseline, String> {
+    let session = ctx_traits_io::run_session::read_run_session(&request.ledger_path)
+        .map_err(|error| error.to_string())?;
+    let (activity, skipped_activity_lines) =
+        ctx_traits_io::activity_sidecar::read_activity(&request.ledger_path);
+    Ok(DetailBaseline {
+        session,
+        activity_overlay: ActivityOverlay::from_records(&activity),
+        skipped_activity_lines,
+    })
+}
+
+/// A selected run's load state. `DetailBaseline` is boxed because it is
+/// large enough to trip `clippy::large_enum_variant` otherwise.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DetailLoad {
     Loading,
-    Loaded(Box<Session>),
+    Loaded(Box<DetailBaseline>),
     Failed(String),
 }
 
@@ -60,6 +85,10 @@ struct Selection {
     key: String,
     repo_key: String,
     generation: u64,
+    /// The row's kernel-backed liveness flag, captured at selection time.
+    /// A point-in-time snapshot: a run that finishes while its detail is
+    /// open keeps showing this value until 0257.3's live-follow lands.
+    live: bool,
     load: DetailLoad,
 }
 
@@ -92,6 +121,7 @@ impl RunDetail {
                 key: String::new(),
                 repo_key: row.repo_key.clone(),
                 generation: self.generation,
+                live: row.live,
                 load: DetailLoad::Failed("run row carries no ledger path".to_string()),
             });
             return None;
@@ -109,6 +139,7 @@ impl RunDetail {
             key: row.ledger_path.clone(),
             repo_key: row.repo_key.clone(),
             generation,
+            live: row.live,
             load: DetailLoad::Loading,
         });
         Some(LoadRequest {
@@ -125,7 +156,7 @@ impl RunDetail {
     ///
     /// An outcome tagged with a superseded generation (a stale selection's
     /// result landing late) is ignored.
-    pub fn apply(&mut self, generation: u64, outcome: Result<Session, String>) -> bool {
+    pub fn apply(&mut self, generation: u64, outcome: Result<DetailBaseline, String>) -> bool {
         let Some(selection) = self.selected.as_mut() else {
             return false;
         };
@@ -133,7 +164,7 @@ impl RunDetail {
             return false;
         }
         selection.load = match outcome {
-            Ok(session) => DetailLoad::Loaded(Box::new(session)),
+            Ok(baseline) => DetailLoad::Loaded(Box::new(baseline)),
             Err(reason) => DetailLoad::Failed(reason),
         };
         true
@@ -158,21 +189,23 @@ impl RunDetail {
         self.selected.as_ref().map(|selection| &selection.load)
     }
 
-    /// A single-line acknowledgement of the current selection's state, for
-    /// the thinnest possible on-screen proof of this task's behaviour. This
-    /// is a **0257.2 placeholder** — real detail presentation is that
-    /// task's contract, not this one's.
-    pub fn summary_line(&self) -> Option<String> {
-        match self.load_state()? {
-            DetailLoad::Loading => Some("loading…".to_string()),
-            DetailLoad::Failed(reason) => Some(format!("unreadable: {reason}")),
-            DetailLoad::Loaded(session) => Some(format!(
-                "{} — {} — {}",
-                session.run_id.as_str(),
-                session.trait_id,
-                format!("{:?}", session.status).to_ascii_lowercase(),
-            )),
-        }
+    /// Project the current selection's loaded baseline into a
+    /// [`DetailTree`], or `None` when there is no selection or it has not
+    /// finished loading (`Loading`/`Failed`). `load` already folded the raw
+    /// sidecar into `baseline.activity_overlay` once; this reprojects the
+    /// tree structure from the retained session and that bounded overlay on
+    /// each call rather than caching the tree, which is cheap — the overlay
+    /// fold itself, the part that scales with sidecar size, does not repeat.
+    pub fn tree(&self) -> Option<DetailTree> {
+        let selection = self.selected.as_ref()?;
+        let DetailLoad::Loaded(baseline) = &selection.load else {
+            return None;
+        };
+        Some(detail_tree::project(
+            &baseline.session,
+            &baseline.activity_overlay,
+            selection.live,
+        ))
     }
 }
 
@@ -227,6 +260,14 @@ mod tests {
         .expect("fixture session")
     }
 
+    fn baseline(session: Session) -> DetailBaseline {
+        DetailBaseline {
+            session,
+            activity_overlay: ActivityOverlay::default(),
+            skipped_activity_lines: 0,
+        }
+    }
+
     #[test]
     fn select_yields_a_request_and_performs_no_io() {
         let mut detail = RunDetail::default();
@@ -250,7 +291,7 @@ mod tests {
                 .is_none()
         );
 
-        assert!(detail.apply(request.generation, Ok(session("run-a"))));
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
         assert!(
             detail
                 .select(&row("repo-a", "/repo-a/run.json", "run-a"))
@@ -292,10 +333,10 @@ mod tests {
             .select(&row("repo-a", "/repo-a/run-b.json", "run-b"))
             .unwrap();
 
-        assert!(!detail.apply(first.generation, Ok(session("run-a"))));
+        assert!(!detail.apply(first.generation, Ok(baseline(session("run-a")))));
         assert!(matches!(detail.load_state(), Some(DetailLoad::Loading)));
 
-        assert!(detail.apply(second.generation, Ok(session("run-b"))));
+        assert!(detail.apply(second.generation, Ok(baseline(session("run-b")))));
         assert!(matches!(detail.load_state(), Some(DetailLoad::Loaded(_))));
     }
 
@@ -317,5 +358,18 @@ mod tests {
         let request = detail.select(&row("repo-a", "", "run-a"));
         assert!(request.is_none());
         assert!(matches!(detail.load_state(), Some(DetailLoad::Failed(_))));
+    }
+
+    #[test]
+    fn tree_is_none_until_loaded_then_projects_the_baseline() {
+        let mut detail = RunDetail::default();
+        assert!(detail.tree().is_none());
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.tree().is_none(), "still Loading");
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+        let tree = detail.tree().expect("loaded selection projects a tree");
+        assert_eq!(tree.header.title, "fixture-trait");
     }
 }

@@ -81,21 +81,35 @@ fn repo_label_for(repo_key: &str, repo_path: &str) -> String {
         .unwrap_or_else(|| repo_key.to_string())
 }
 
-fn title_for(row: &CenterPublicRow) -> String {
-    let summary = &row.summary;
+/// The one title-fallback chain, shared by compact rows and detail headers
+/// (`detail_tree.rs`'s `DetailHeader::title`): authoritative `summary.title`
+/// first, then an optional embellishment-only sidecar title (the compact row
+/// has none, so it passes `None`), then `task_key`/`trait_id`/`run_id`, never
+/// landing on an empty string. `pub(crate)` so `detail_tree.rs` reuses this
+/// rather than copying it a second time.
+pub(crate) fn summary_title(
+    summary: &ctx_traits_io::run_summary::RunSummary,
+    sidecar_title: Option<&str>,
+) -> String {
     summary
         .title
         .clone()
         .filter(|value| !value.is_empty())
+        .or_else(|| sidecar_title.map(str::to_string).filter(|v| !v.is_empty()))
         .or_else(|| summary.task_key.clone().filter(|value| !value.is_empty()))
         .or_else(|| Some(summary.trait_id.clone()).filter(|value| !value.is_empty()))
         .or_else(|| Some(summary.run_id.clone()).filter(|value| !value.is_empty()))
         .unwrap_or_else(|| summary.session_id.clone())
 }
 
+fn title_for(row: &CenterPublicRow) -> String {
+    summary_title(&row.summary, None)
+}
+
 /// Mirrors `ctx_traits_cli::app::tui::elapsed_text`: an unbounded,
-/// zero-padded `HH:MM:SS` clock.
-fn elapsed_text(elapsed_seconds: u64) -> String {
+/// zero-padded `HH:MM:SS` clock. `pub(crate)` so `detail_tree.rs` reuses
+/// this sanctioned mirror rather than copying it a second time.
+pub(crate) fn elapsed_text(elapsed_seconds: u64) -> String {
     let hours = elapsed_seconds / 3600;
     let minutes = (elapsed_seconds % 3600) / 60;
     let seconds = elapsed_seconds % 60;
@@ -105,7 +119,7 @@ fn elapsed_text(elapsed_seconds: u64) -> String {
 /// Mirrors `ctx_traits_cli::app::dashboard::dashboard_token_value`'s
 /// compaction: `-` for absent, otherwise a `k`/`m`-compacted count with no
 /// trailing `.0`.
-fn token_value(tokens: Option<u64>) -> String {
+pub(crate) fn token_value(tokens: Option<u64>) -> String {
     let Some(tokens) = tokens else {
         return "-".to_string();
     };
@@ -121,7 +135,7 @@ fn token_value(tokens: Option<u64>) -> String {
 }
 
 /// Mirrors `ctx_traits_cli::app::dashboard::dashboard_tokens_text_from_summary`.
-fn tokens_text(work: Option<u64>, narrator: Option<u64>, guide: Option<u64>) -> String {
+pub(crate) fn tokens_text(work: Option<u64>, narrator: Option<u64>, guide: Option<u64>) -> String {
     if work.is_none() && narrator.is_none() && guide.is_none() {
         return "-".to_string();
     }

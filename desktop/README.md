@@ -280,7 +280,8 @@ stale selection's result landing late) and otherwise transitions
 `Loading -> Loaded | Failed`, returning whether the visible state actually
 changed — the same discipline `Dashboard::apply` established in 0256.4, so
 `Shell` calls `cx.notify()` only on real change. `DetailLoad::Loaded` boxes
-`Session` to keep `clippy::large_enum_variant` quiet.
+`DetailBaseline` (the session plus its activity sidecar read, see 0257.2
+below) to keep `clippy::large_enum_variant` quiet.
 
 `RunDetail` is a **sibling** of `CenterFace`/`Dashboard`, not a member of
 either: a center reconnect installs a fresh `Dashboard` snapshot but leaves
@@ -300,11 +301,8 @@ is its `ledger_path`, unique by construction (it is the center's primary
 key), which is exactly why it — not a shifting list index — is the click
 target's identity.
 
-**Presentation** is a placeholder only: a background tint on the selected
-row and one line below the list (`loading…` / `unreadable: <reason>` / a
-`run_id — trait_id — status` summary once loaded). This is explicitly
-**0257.2**'s territory to replace, not a design — no frame/state/nesting
-projection is built here.
+**Presentation** is the native frame tree — see "Native frame tree (0257.2)"
+below.
 
 Reconstruction fixtures (`tests/detail_reconstruction.rs`) cover a live and a
 finished session baseline written with `write_run_session` (the same writer
@@ -320,5 +318,96 @@ env-mutating and stays the only `#[test]` in its target, per the convention
 A selected run disappearing from the list (an `Ended` delta) or the
 subscription going `Stale` while detail is open are left alone on purpose:
 detail is independent of `Dashboard`, so it simply persists. Reconciling
-those lifecycle edges, live-follow of detail from center activity deltas,
-and the native detail frame tree itself are **0257.2/.3**'s contract.
+those lifecycle edges and live-follow of detail from center activity deltas
+are **0257.3**'s contract.
+
+## Native frame tree (0257.2)
+
+The selected run's loaded ledger is now projected into a **hierarchical**
+detail model and rendered as native gpui elements, replacing 0257.1's
+`summary_line` placeholder strip. No terminal lines, no `tui::Line`, no
+import of the CLI-private ratatui renderer or `ctx-traits-cli` — this crate
+still has no dependency on it at all.
+
+**Projection is gpui-free** (`src/detail_tree.rs`, unit-testable without an
+`App`, the same pattern `dashboard.rs`/`run_row.rs`/`detail.rs` document).
+`detail_tree::project(session, activity, live)` builds a `DetailTree` from
+the session's own durable evidence — never by resolving a trait/plan, which
+is repository-relative work this crate does not do:
+
+- `session.ledger.sequence_statuses` (one entry per reached frame position,
+  in execution order) is grouped by path prefix into nested `DetailNode`s: a
+  loop's body items land under one synthesized iteration group per
+  `#itN`, a branch arm lands under its own group inside the right
+  iteration, and a top-level item's empty `position_path` is normalized to
+  a synthetic single-segment path so one algorithm covers both cases.
+  Grouping keys drop a segment's `index` only where it is a changing child
+  cursor — an intermediate loop/branch/for-each/parallel control segment —
+  and retain it for a path's terminal segment (the one that actually lands
+  a `SequenceStatus`) and for the root `procedure` seat, so distinct
+  anonymous leaves at different declaration positions don't collapse into
+  one node. A landed leaf never inherits a structural group's ordinal
+  either, even when its terminal segment carries an enclosing
+  iteration/item index. See the module doc comment for the full rule, and
+  for the explicit caveat that `parallel`/`for-each` are covered by
+  fixture, not by observation against a real ledger.
+- A **structural** group node (an iteration group, a branch-arm group, an
+  orphan container placeholder) carries no `SequenceStatus` of its own and
+  never fabricates one: a `pending` loop container's own status renders
+  verbatim even while its children read `accepted`. Every other node's
+  state is the durable `SequenceStatusKind` mapped 1:1 (`Accepted -> Done`,
+  etc.) — except the **current** frame (the node whose normalized path
+  equals `next_frame.position_path`, falling back to `active_path`), whose
+  state word instead comes from `SessionState::derive`, the exact function
+  `run_row::row_state` already calls, so `Running`/`WaitingOnAgent`/etc. are
+  decided in one shared place. `live` is a point-in-time capture from
+  `RunRow::live` at selection time (`detail.rs`'s `Selection::live`); a run
+  that finishes while its detail is open keeps showing that captured value
+  until 0257.3's live-follow lands.
+- The header reuses `ctx_traits_io::run_summary::RunSummary::from_session`
+  for every fact (title, task value, elapsed, tokens, landing, stop reason,
+  next frame kind) and `run_row.rs`'s `elapsed_text`/`token_value`/
+  `tokens_text` (promoted to `pub(crate)`) for formatting — nothing is
+  re-derived.
+- Activity is **strictly embellishment**: `detail::load` now also runs
+  `ctx_traits_io::activity_sidecar::read_activity` (tolerant — an absent
+  file or an unparseable/truncated trailing line degrades only the sidecar
+  read, never the caller) and carries the result in `DetailBaseline`
+  alongside the authoritative `Session`. `ActivityOverlay` folds those
+  records and is applied only *after* the durable tree is fully built, so
+  it has no path that can add, remove, reorder, or restate a node. Only the
+  latest `Activity`/`Narration` record for the **current** frame's
+  `frame_id` is attached (an event's `frame_id` is iteration-blind, so
+  attaching it to every historical iteration of a looped item would
+  fabricate evidence); `StepSummary` records are read but never attached —
+  matching them to a node needs the CLI's private `structural_step_key`
+  encoder, which is a follow-up, not this task's scope.
+
+**Native rendering** (`src/detail_view.rs`) is a **free function**,
+`detail_view::detail_element(tree: &DetailTree) -> AnyElement` — no
+`Context`, no `cx.listener`, since this slice has no controls (no
+expand/collapse, no scroll-follow, no click targets) — so it is directly
+callable from a test with no gpui `App`. It emits nested `div()`s, one per
+node with children nested inside their parent, indentation via `.pl(px(..))`
+and state as its own child element; depth, hierarchy and state live in the
+element structure, not in a pre-formatted string. `Shell::render` picks
+`detail_view::loading_element()` / `detail_view::failed_element(reason)` /
+`detail_view::detail_element(&tree)` for the three `DetailLoad` states.
+
+An unvirtualized nested column is accepted at this walking-skeleton scale
+(a 7-iteration x 3-item loop is ~24 nodes; a 20-iteration run is ~60+); if a
+later task needs it, `uniform_list` is the escalation path. Likewise no
+`gpui` `test-support` feature is pulled in — element construction is pure,
+so no `TestAppContext` is needed here; it would be the escalation path for a
+future laid-out/painted assertion.
+
+`desktop/tests/detail_frame_tree.rs` walks the real `RunRow -> select ->
+load -> project` path against a nested-loop ledger (`support::
+write_nested_session_ledger`) and a sidecar with a deliberately truncated
+trailing line (`support::write_activity_sidecar`), asserting the hierarchy,
+the un-fabricated loop-container state, the current-frame activity/
+narration attachment, `skipped_activity_lines == 1`, and that the durable
+tree is unchanged once the sidecar file is deleted entirely — proof that
+the sidecar can only ever embellish. It also builds the real element tree
+via `detail_view::detail_element`, and the `Loading`/`Failed` states, with
+no `App`.

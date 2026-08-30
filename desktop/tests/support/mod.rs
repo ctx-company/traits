@@ -93,6 +93,109 @@ pub fn write_session_ledger(
     session
 }
 
+/// Write a session ledger with a nested loop-body sequence status (one
+/// top-level loop container plus two body items in one iteration), using
+/// the same production writer `write_session_ledger` uses. The loop's
+/// current frame is the second body item's `ready` status, so a caller can
+/// exercise "current node" projection alongside the nested hierarchy.
+pub fn write_nested_session_ledger(path: &Utf8Path, session_id: &str, run_id: &str) -> Session {
+    let session: Session = serde_json::from_value(serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": session_id,
+        "run-id": run_id,
+        "trait-id": "desktop-detail-nested-fixture-trait",
+        "current-run-index": 2,
+        "status": "awaiting-agent-output",
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "desktop-detail-nested-fixture"},
+            "state-source": "test",
+        },
+        "active-path": [
+            {"kind": "procedure", "id": "the-loop", "index": 0},
+            {"kind": "loop", "id": "the-loop-body", "index": 1, "iteration": 0},
+            {"kind": "item", "id": "second-item", "index": 1, "iteration": 0},
+        ],
+        "ledger": {
+            "run-id": run_id,
+            "trait-id": "desktop-detail-nested-fixture-trait",
+            "current-run-index": 2,
+            "final-state": "running",
+            "sequence-statuses": [
+                {
+                    "sequence-index": 0,
+                    "run-index": 0,
+                    "item-id": "the-loop",
+                    "title": "The loop",
+                    "status": "pending",
+                    "reason": "",
+                    "position-path": [],
+                },
+                {
+                    "sequence-index": 1,
+                    "run-index": 1,
+                    "item-id": "first-item",
+                    "title": "First item",
+                    "status": "accepted",
+                    "reason": "",
+                    "position-path": [
+                        {"kind": "procedure", "id": "the-loop", "index": 0},
+                        {"kind": "loop", "id": "the-loop-body", "index": 0, "iteration": 0},
+                        {"kind": "item", "id": "first-item", "index": 0, "iteration": 0},
+                    ],
+                },
+                {
+                    "sequence-index": 2,
+                    "run-index": 2,
+                    "item-id": "second-item",
+                    "title": "Second item",
+                    "status": "ready",
+                    "reason": "",
+                    "position-path": [
+                        {"kind": "procedure", "id": "the-loop", "index": 0},
+                        {"kind": "loop", "id": "the-loop-body", "index": 1, "iteration": 0},
+                        {"kind": "item", "id": "second-item", "index": 1, "iteration": 0},
+                    ],
+                },
+            ],
+        },
+        "state-digest": format!("sha256:desktop-detail-nested-{run_id}"),
+    }))
+    .expect("nested fixture session");
+    ctx_traits_io::run_session::write_run_session(path, &session).expect("write nested ledger");
+    session
+}
+
+/// Append a small activity sidecar next to `ledger_path`: one activity
+/// event and one narration line for `"second-item"`, plus a deliberately
+/// truncated trailing line simulating a process killed mid-write. Returns
+/// nothing — a caller reads it back through `ctx_traits_io::activity_sidecar`
+/// exactly as production does.
+pub fn write_activity_sidecar(ledger_path: &Utf8Path) {
+    use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
+    use ctx_traits_io::activity_sidecar::ActivitySidecarWriter;
+
+    let mut writer = ActivitySidecarWriter::open(ledger_path);
+    writer.append_activity(ActivityEvent {
+        sequence: 1,
+        frame_id: "second-item".to_string(),
+        kind: ActivityKind::RunningTool,
+        text: Some("editing the file".to_string()),
+        tool: Some("edit".to_string()),
+        tokens: None,
+        rate_limit: None,
+    });
+    writer.append_narration("second-item".to_string(), "working on it".to_string());
+    drop(writer);
+
+    let sidecar_path = ctx_traits_io::activity_sidecar::activity_path(ledger_path);
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(sidecar_path.as_std_path())
+        .expect("open sidecar for truncated append");
+    file.write_all(b"{\"record\":\"activity\",\"at-ep")
+        .expect("write truncated trailing line");
+}
+
 pub fn wire_row(repo_key: &str, ledger_path: &str, run_id: &str) -> CenterPublicRow {
     CenterPublicRow {
         summary: RunSummary {

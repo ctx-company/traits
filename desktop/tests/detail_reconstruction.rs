@@ -50,8 +50,8 @@ fn live_and_finished_baselines_reconstruct_and_survive_a_restart() {
         .expect("live selection issues a request");
     let live_outcome = ctx_traits_desktop::detail::load(&live_request);
     assert_eq!(
-        live_outcome.as_ref().expect("live ledger reads"),
-        &live_fixture,
+        live_outcome.as_ref().expect("live ledger reads").session,
+        live_fixture,
         "the reconstructed live session must equal the written fixture"
     );
 
@@ -61,8 +61,11 @@ fn live_and_finished_baselines_reconstruct_and_survive_a_restart() {
         .expect("finished selection issues a request");
     let finished_outcome = ctx_traits_desktop::detail::load(&finished_request);
     assert_eq!(
-        finished_outcome.as_ref().expect("finished ledger reads"),
-        &finished_fixture,
+        finished_outcome
+            .as_ref()
+            .expect("finished ledger reads")
+            .session,
+        finished_fixture,
         "the reconstructed finished session must equal the written fixture"
     );
 
@@ -73,7 +76,9 @@ fn live_and_finished_baselines_reconstruct_and_survive_a_restart() {
         .select(live_row)
         .expect("live selection issues a request after restart");
     assert_eq!(
-        ctx_traits_desktop::detail::load(&restarted_live_request).expect("live ledger reads"),
+        ctx_traits_desktop::detail::load(&restarted_live_request)
+            .expect("live ledger reads")
+            .session,
         live_fixture,
         "the live baseline must reappear identically after a simulated restart"
     );
@@ -84,7 +89,8 @@ fn live_and_finished_baselines_reconstruct_and_survive_a_restart() {
         .expect("finished selection issues a request after restart");
     assert_eq!(
         ctx_traits_desktop::detail::load(&restarted_finished_request)
-            .expect("finished ledger reads"),
+            .expect("finished ledger reads")
+            .session,
         finished_fixture,
         "the finished baseline must reappear identically after a simulated restart"
     );

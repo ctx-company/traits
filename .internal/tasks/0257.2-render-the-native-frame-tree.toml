@@ -16,9 +16,10 @@ Distinguish durable session and frame evidence from tolerant activity-sidecar em
 ## Done when
 Focused desktop tests project representative shared session fixtures, including meaningful frame states and nesting, into a native gpui tree without terminal-line conversion or the ratatui renderer. The rendered hierarchy preserves shared product semantics, tolerates absent derived activity, and `just test` passes.
 """
+
 [relations]
-parent = "0257"
 depends-on = ["0257.1"]
+parent = "0257"
 
 [[checks]]
 name = "workspace per-round gate passes"
