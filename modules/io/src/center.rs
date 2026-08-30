@@ -153,6 +153,11 @@ enum Request {
         dispatched_task: String,
         repo_key: Option<String>,
     },
+    ClaimedTask {
+        id: String,
+        session_id: String,
+        repo_key: Option<String>,
+    },
 }
 
 impl Request {
@@ -170,7 +175,8 @@ impl Request {
             | Self::Resolve { id, .. }
             | Self::FindByRunId { id, .. }
             | Self::Stats { id, .. }
-            | Self::StandingWall { id, .. } => id,
+            | Self::StandingWall { id, .. }
+            | Self::ClaimedTask { id, .. } => id,
         }
     }
 
@@ -208,6 +214,7 @@ enum ResponseResult {
     StandingWall(Option<crate::dispatch_preflight::StandingWall>),
     Start(StartWireResult),
     Control(ControlWireResult),
+    ClaimedTask(ClaimedTaskWireResult),
     Error { message: String },
 }
 
@@ -263,6 +270,15 @@ enum ControlWireResult {
     NotLive,
     Unverifiable,
     Refused,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+enum ClaimedTaskWireResult {
+    Missing,
+    Ambiguous(Vec<String>),
+    Unclaimed,
+    Task(Box<ctx_traits_core::task::provider::ClaimedTask>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1044,6 +1060,47 @@ pub fn control_existing(
     )?)
 }
 
+/// What a run's claimed task resolves to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClaimedTaskResult {
+    Missing,
+    Ambiguous(Vec<String>),
+    Unclaimed,
+    Task(Box<ctx_traits_core::task::provider::ClaimedTask>),
+}
+
+fn decode_claimed_task(result: ResponseResult) -> crate::Result<ClaimedTaskResult> {
+    match result {
+        ResponseResult::ClaimedTask(ClaimedTaskWireResult::Missing) => {
+            Ok(ClaimedTaskResult::Missing)
+        }
+        ResponseResult::ClaimedTask(ClaimedTaskWireResult::Ambiguous(ids)) => {
+            Ok(ClaimedTaskResult::Ambiguous(ids))
+        }
+        ResponseResult::ClaimedTask(ClaimedTaskWireResult::Unclaimed) => {
+            Ok(ClaimedTaskResult::Unclaimed)
+        }
+        ResponseResult::ClaimedTask(ClaimedTaskWireResult::Task(task)) => {
+            Ok(ClaimedTaskResult::Task(task))
+        }
+        _ => Err(protocol_error("unexpected claimed-task response")),
+    }
+}
+
+/// The task a run claims, resolved by session id. Spawn-on-need only — a
+/// caller that cannot spawn a center (`ctx-desktop`) needs an `_existing`
+/// sibling, added when that caller exists rather than ahead of it.
+pub fn claimed_task(session_id: &str, repo_key: Option<&str>) -> crate::Result<ClaimedTaskResult> {
+    decode_claimed_task(request_with_timeout(
+        Request::ClaimedTask {
+            id: next_id("claimed-task"),
+            session_id: session_id.to_owned(),
+            repo_key: repo_key.map(str::to_owned),
+        },
+        ACTION_TIMEOUT,
+    )?)
+}
+
 /// Model-backed query helpers. They deliberately only encode/decode protocol
 /// values: ledger reconstruction belongs exclusively to the center owner.
 pub fn list(repo_key: Option<&str>) -> crate::Result<Vec<CenterPublicRow>> {
@@ -1680,6 +1737,7 @@ struct ResolvedRow {
     repo_path: String,
     live: bool,
     holder: Option<crate::run_control::DriverHolder>,
+    task_key: Option<String>,
 }
 
 enum RowResolution {
@@ -3220,6 +3278,7 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                             repo_path: row.repo_path.clone(),
                             live: row.live,
                             holder: row.live_holder.clone(),
+                            task_key: row.summary.task_key.clone(),
                         }),
                         RowSelection::Ambiguous(rows) => RowResolution::Ambiguous(
                             rows.into_iter()
@@ -3522,6 +3581,20 @@ fn serve_connection_worker(
             let _ = response(&mut stream, id, result);
             return;
         }
+        if let Request::ClaimedTask {
+            session_id,
+            repo_key,
+            ..
+        } = request
+        {
+            let result = run_claimed_task_request(&jobs, session_id, repo_key)
+                .map(ResponseResult::ClaimedTask)
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
         let (reply_sender, reply_receiver) = mpsc::sync_channel::<crate::Result<ResponseResult>>(1);
         let registered_path = match &request {
             Request::Register { registration, .. } => Some(registration.ledger_path.clone()),
@@ -3633,6 +3706,54 @@ fn run_control_request(
             } else {
                 ControlWireResult::Refused
             })
+        }
+    }
+}
+
+fn run_claimed_task_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    session_id: String,
+    repo_key: Option<String>,
+) -> crate::Result<ClaimedTaskWireResult> {
+    use ctx_traits_core::task::provider::TaskProvider;
+
+    match resolve_row(jobs, session_id, repo_key)? {
+        RowResolution::Missing => Ok(ClaimedTaskWireResult::Missing),
+        RowResolution::Ambiguous(ids) => Ok(ClaimedTaskWireResult::Ambiguous(ids)),
+        RowResolution::One(row) => {
+            let Some(key) = row.task_key.filter(|key| !key.is_empty()) else {
+                return Ok(ClaimedTaskWireResult::Unclaimed);
+            };
+            let repo_root = if row.repo_path.is_empty() {
+                ledger_repository_path(&row.ledger_path).ok_or_else(|| {
+                    protocol_error(format!(
+                        "claimed task {key:?} has no usable repository path for ledger {}",
+                        row.ledger_path
+                    ))
+                })?
+            } else {
+                Utf8PathBuf::from(row.repo_path)
+            };
+            if repo_root.as_str().is_empty() || !repo_root.is_absolute() {
+                return Err(protocol_error(format!(
+                    "claimed task {key:?} requires an absolute repository path, got {repo_root:?}"
+                )));
+            }
+            let dir = crate::task_files::repo_board_dir(&repo_root);
+            let board = crate::task_files::FilesTaskBoard::open_read(dir.clone());
+            let resolved = board
+                .get(&key)
+                .map_err(|error| {
+                    protocol_error(format!(
+                        "claimed task {key:?} could not be read from board {dir}: {error}"
+                    ))
+                })?
+                .ok_or_else(|| {
+                    protocol_error(format!("claimed task {key:?} not found in board {dir}"))
+                })?;
+            Ok(ClaimedTaskWireResult::Task(Box::new(
+                ctx_traits_core::task::provider::ClaimedTask::from_document(&resolved.document),
+            )))
         }
     }
 }
@@ -3781,6 +3902,13 @@ fn run_start(
 }
 
 fn ledger_repository_path(ledger: &Utf8Path) -> Option<Utf8PathBuf> {
+    // A relative ledger path's derived repository root is still relative,
+    // and canonicalizing it would resolve against the center process's own
+    // cwd rather than the ledger's true location. Reject before touching
+    // the filesystem so a relative path can never masquerade as absolute.
+    if !ledger.is_absolute() {
+        return None;
+    }
     ledger
         .parent()
         .filter(|runs| runs.file_name() == Some("runs"))
@@ -3965,9 +4093,12 @@ fn handle_request(
                 ),
             ))
         }
-        Request::Subscribe { .. } | Request::Start { .. } | Request::Control { .. } => Err(
-            protocol_error("request is handled by the connection worker"),
-        ),
+        Request::Subscribe { .. }
+        | Request::Start { .. }
+        | Request::Control { .. }
+        | Request::ClaimedTask { .. } => Err(protocol_error(
+            "request is handled by the connection worker",
+        )),
     }
 }
 
@@ -4222,12 +4353,94 @@ mod tests {
             repo_key: Some("repository".to_string()),
             command: ControlAction::Pause,
         };
-        for request in [start, control] {
+        let claimed_task = Request::ClaimedTask {
+            id: "claimed-task".to_string(),
+            session_id: "session".to_string(),
+            repo_key: Some("repository".to_string()),
+        };
+        for request in [start, control, claimed_task] {
             let encoded = serde_json::to_string(&request).expect("encode request");
             let decoded: Request = serde_json::from_str(&encoded).expect("decode request");
             assert_eq!(decoded.id(), request.id());
             assert!(!snapshot_request(&decoded));
         }
+
+        let root = scratch("claimed-task-connection-worker-only");
+        let paths = paths(root.clone());
+        let mut model = CenterModel::open(&paths).expect("open center");
+        let error = handle_request(
+            &mut model,
+            &paths,
+            Request::ClaimedTask {
+                id: "claimed-task".to_string(),
+                session_id: "session".to_string(),
+                repo_key: None,
+            },
+        )
+        .expect_err("claimed-task reaching the model owner is a protocol error");
+        assert!(error.to_string().contains("connection worker"));
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn claimed_task_wire_result_round_trips() {
+        let document = ctx_traits_core::task::TaskDocument {
+            schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
+            key: "fixture".to_string(),
+            title: "Fixture task".to_string(),
+            status: Some(ctx_traits_core::task::TaskStatus::Ready),
+            raised: None,
+            closed: None,
+            wall: None,
+            origin: None,
+            content: "the description".to_string(),
+            scope: String::new(),
+            validation: String::new(),
+            relations: Default::default(),
+            steps: Vec::new(),
+            checks: Vec::new(),
+            auto_close: Some(ctx_traits_core::task::AutoClosePolicy::Checked),
+            closure: None,
+        };
+        let claimed = ctx_traits_core::task::provider::ClaimedTask::from_document(&document);
+        for result in [
+            ClaimedTaskWireResult::Missing,
+            ClaimedTaskWireResult::Ambiguous(vec!["a".to_string(), "b".to_string()]),
+            ClaimedTaskWireResult::Unclaimed,
+            ClaimedTaskWireResult::Task(Box::new(claimed)),
+        ] {
+            let response = ResponseResult::ClaimedTask(result.clone());
+            let encoded = serde_json::to_string(&response).expect("encode response");
+            let decoded: ResponseResult = serde_json::from_str(&encoded).expect("decode response");
+            match (response, decoded) {
+                (ResponseResult::ClaimedTask(a), ResponseResult::ClaimedTask(b)) => {
+                    assert_eq!(
+                        serde_json::to_string(&a).unwrap(),
+                        serde_json::to_string(&b).unwrap()
+                    );
+                }
+                _ => panic!("expected ClaimedTask round trip"),
+            }
+        }
+    }
+
+    #[test]
+    fn ledger_repository_path_rejects_relative_ledgers_even_with_expected_shape() {
+        // A relative ledger with the exact `.ctx/runs/<file>` shape must not
+        // resolve — canonicalizing it would silently pick up the center
+        // process's own cwd as the repository root.
+        let relative = Utf8PathBuf::from(".ctx/runs/session.json");
+        assert_eq!(ledger_repository_path(&relative), None);
+
+        // An absolute ledger with the same shape still resolves.
+        let root = std::env::temp_dir();
+        let root = Utf8PathBuf::from_path_buf(root).expect("temp dir is UTF-8");
+        let root = root.join(format!("ledger-repo-path-test-{}", next_id("ledger-test")));
+        let ctx_runs = root.join(".ctx").join("runs");
+        std::fs::create_dir_all(ctx_runs.as_std_path()).expect("create fixture dirs");
+        let absolute = ctx_runs.join("session.json");
+        assert!(ledger_repository_path(&absolute).is_some());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
     #[test]
@@ -4721,6 +4934,7 @@ mod tests {
                     repo_path: row.repo_path.clone(),
                     live: false,
                     holder: None,
+                    task_key: row.summary.task_key.clone(),
                 })),
                 ControlWireResult::NotLive
             ));
@@ -4746,6 +4960,7 @@ mod tests {
                 repo_path: row.repo_path.clone(),
                 live: true,
                 holder: None,
+                task_key: row.summary.task_key.clone(),
             })),
             ControlWireResult::Unverifiable
         ));
@@ -4766,6 +4981,7 @@ mod tests {
                 repo_path: row.repo_path.clone(),
                 live: true,
                 holder: row.live_holder.clone(),
+                task_key: row.summary.task_key.clone(),
             })),
             ControlWireResult::Unverifiable
         ));

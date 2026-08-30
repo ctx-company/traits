@@ -17,12 +17,12 @@ use crate::app::command_handlers::{print_json_report, resolve_repo_root};
 use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 use crate::app::surface::cli::TaskUpdateStatus;
 
-const DEFAULT_BOARD_DIR: &str = ".internal/tasks";
-
 pub(crate) fn board_dir(board: Option<&str>) -> crate::Result<Utf8PathBuf> {
     match board {
         Some(path) => Ok(Utf8PathBuf::from(path)),
-        None => Ok(resolve_repo_root(None)?.join(DEFAULT_BOARD_DIR)),
+        None => Ok(ctx_traits_io::task_files::repo_board_dir(
+            &resolve_repo_root(None)?,
+        )),
     }
 }
 
@@ -570,11 +570,90 @@ fn effect_label(kind: EffectKind) -> &'static str {
     }
 }
 
+fn stored_status_text(status: Option<TaskDocStatus>) -> &'static str {
+    match status {
+        Some(TaskDocStatus::Ready) => "ready",
+        Some(TaskDocStatus::Done) => "done",
+        Some(TaskDocStatus::Cancelled) => "cancelled",
+        None => "unset",
+    }
+}
+
+fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<()>> {
+    let repo_key = ctx_traits_io::state::current_repo_key().map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+    let claimed = ctx_traits_io::center::claimed_task(session, Some(&repo_key)).map_err(|e| {
+        crate::Error::Command {
+            message: e.to_string(),
+        }
+    })?;
+    let task = match claimed {
+        ctx_traits_io::center::ClaimedTaskResult::Task(task) => *task,
+        ctx_traits_io::center::ClaimedTaskResult::Missing => {
+            return Err(crate::Error::Command {
+                message: format!("no run matching session {session:?}"),
+            });
+        }
+        ctx_traits_io::center::ClaimedTaskResult::Ambiguous(ids) => {
+            return Err(crate::Error::Command {
+                message: format!("session {session:?} is ambiguous: {}", ids.join(", ")),
+            });
+        }
+        ctx_traits_io::center::ClaimedTaskResult::Unclaimed => {
+            return Err(crate::Error::Command {
+                message: format!("run {session:?} has not claimed a task"),
+            });
+        }
+    };
+
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            print_json_report(&Envelope::ok(&task), "tasks show report")?;
+        }
+        OutputMode::Human(mode) => {
+            let mut panel = Panel::new(
+                "ctx",
+                format!("tasks show — {}", task.key),
+                PanelStatus::Passed(stored_status_text(task.stored_status).to_string()),
+            )
+            .row(PanelRow::toned("title", &task.title, RowTone::Default))
+            .row(PanelRow::toned(
+                "status",
+                stored_status_text(task.stored_status),
+                RowTone::Default,
+            ));
+            if let Some(auto_close) = task.auto_close {
+                panel = panel.row(PanelRow::toned(
+                    "auto-close",
+                    format!("{auto_close:?}").to_lowercase(),
+                    RowTone::Default,
+                ));
+            }
+            if !task.description.is_empty() {
+                panel = panel.row(PanelRow::toned(
+                    "description",
+                    &task.description,
+                    RowTone::Default,
+                ));
+            }
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+
+    Ok(CommandOutput::new(()))
+}
+
 pub(crate) fn handle_tasks_show(
-    task: &str,
+    task: Option<&str>,
+    session: Option<&str>,
     board: Option<&str>,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
+    if let Some(session) = session {
+        return show_claimed_task(session, json);
+    }
+    let task = task.expect("clap enforces task or --session");
     let dir = board_dir(board)?;
     let provider = FilesTaskBoard::open_read(dir.clone());
     let key = provider
@@ -683,6 +762,8 @@ pub(crate) fn handle_tasks_show(
 mod tests {
     use super::*;
     use crate::app::test_support::{CenterPeer, read_center_request, write_center_response};
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixStream;
 
     fn tempdir() -> Utf8PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1040,5 +1121,228 @@ mod tests {
     #[test]
     fn reconcile_fails_loudly_when_the_center_request_fails() {
         assert_center_request_failure_is_not_partial(handle_tasks_reconcile);
+    }
+
+    #[test]
+    fn session_show_issues_exactly_one_claimed_task_request_and_renders_it() {
+        let peer_server = CenterPeer::install("tasks-show-session-happy");
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut stream = crate::app::test_support::accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            assert_eq!(request["kind"], "claimed-task");
+            assert_eq!(request["session_id"], "the-session");
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({
+                    "type": "claimed-task",
+                    "data": {
+                        "type": "task",
+                        "data": {
+                            "key": "0001",
+                            "title": "Fixture task",
+                            "description": "the description",
+                            "stored-status": "ready",
+                            "auto-close": "checked"
+                        }
+                    }
+                }),
+            );
+            assert!(
+                read_line_or_eof(&stream).is_none(),
+                "exactly one request expected"
+            );
+        });
+        let result = handle_tasks_show(None, Some("the-session"), None, true);
+        peer.join().expect("join center peer");
+        result.expect("session-addressed show succeeds");
+    }
+
+    #[test]
+    fn session_show_center_error_is_a_loud_failure() {
+        let peer_server = CenterPeer::install("tasks-show-session-error");
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut stream = crate::app::test_support::accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({"type": "error", "data": {"message": "test center failure"}}),
+            );
+        });
+        let result = handle_tasks_show(None, Some("the-session"), None, true);
+        peer.join().expect("join center peer");
+        assert!(
+            result
+                .expect_err("center failure must not produce a partial panel")
+                .to_string()
+                .contains("test center failure")
+        );
+    }
+
+    #[test]
+    fn session_show_missing_unclaimed_and_ambiguous_are_loud_command_errors() {
+        for (data, expected) in [
+            (serde_json::json!({"type": "missing"}), "the-session"),
+            (serde_json::json!({"type": "unclaimed"}), "the-session"),
+            (
+                serde_json::json!({"type": "ambiguous", "data": ["a", "b"]}),
+                "the-session",
+            ),
+        ] {
+            let peer_server = CenterPeer::install("tasks-show-session-missing-unclaimed");
+            let listener = peer_server.listener();
+            let peer = std::thread::spawn(move || {
+                let mut stream = crate::app::test_support::accept_center_client(&listener);
+                let request = read_center_request(&stream);
+                write_center_response(
+                    &mut stream,
+                    &request,
+                    serde_json::json!({"type": "claimed-task", "data": data}),
+                );
+            });
+            let result = handle_tasks_show(None, Some("the-session"), None, true);
+            peer.join().expect("join center peer");
+            let error = result.expect_err("missing/unclaimed/ambiguous must be a command error");
+            assert!(error.to_string().contains(expected));
+        }
+    }
+
+    #[test]
+    fn session_show_ambiguous_names_every_matching_session() {
+        let peer_server = CenterPeer::install("tasks-show-session-ambiguous-names");
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut stream = crate::app::test_support::accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({
+                    "type": "claimed-task",
+                    "data": {"type": "ambiguous", "data": ["dup-a", "dup-b"]}
+                }),
+            );
+        });
+        let result = handle_tasks_show(None, Some("dup"), None, true);
+        peer.join().expect("join center peer");
+        let error = result.expect_err("ambiguous session must be a command error");
+        let message = error.to_string();
+        assert!(message.contains("dup-a"));
+        assert!(message.contains("dup-b"));
+    }
+
+    #[test]
+    fn session_show_renders_the_human_panel() {
+        let peer_server = CenterPeer::install("tasks-show-session-human");
+        let listener = peer_server.listener();
+        let peer = std::thread::spawn(move || {
+            let mut stream = crate::app::test_support::accept_center_client(&listener);
+            let request = read_center_request(&stream);
+            assert_eq!(request["kind"], "claimed-task");
+            write_center_response(
+                &mut stream,
+                &request,
+                serde_json::json!({
+                    "type": "claimed-task",
+                    "data": {
+                        "type": "task",
+                        "data": {
+                            "key": "0001",
+                            "title": "Fixture task",
+                            "description": "the description",
+                            "stored-status": "ready",
+                            "auto-close": "checked"
+                        }
+                    }
+                }),
+            );
+        });
+        let result = handle_tasks_show(None, Some("the-session"), None, false);
+        peer.join().expect("join center peer");
+        result.expect("session-addressed human rendering succeeds");
+    }
+
+    #[test]
+    fn task_addressed_show_never_opens_a_center_connection() {
+        let peer_server = CenterPeer::install("tasks-show-task-addressed-no-connection");
+        let listener = peer_server.listener();
+        let board = task_board();
+        let checker = std::thread::spawn(move || {
+            listener
+                .set_nonblocking(true)
+                .expect("set listener nonblocking");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(
+                listener.accept().is_err(),
+                "task-addressed show must not connect to the center"
+            );
+        });
+        let result = handle_tasks_show(Some("0001"), None, Some(board.as_str()), true);
+        checker.join().expect("join connection checker");
+        result.expect("task-addressed show succeeds without a center");
+        let _ = std::fs::remove_dir_all(board.as_std_path());
+    }
+
+    #[test]
+    fn task_addressed_show_renders_the_human_panel_without_a_center_connection() {
+        let peer_server = CenterPeer::install("tasks-show-task-addressed-human-no-connection");
+        let listener = peer_server.listener();
+        let board = task_board();
+        let checker = std::thread::spawn(move || {
+            listener
+                .set_nonblocking(true)
+                .expect("set listener nonblocking");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(
+                listener.accept().is_err(),
+                "task-addressed show must not connect to the center"
+            );
+        });
+        let result = handle_tasks_show(Some("0001"), None, Some(board.as_str()), false);
+        checker.join().expect("join connection checker");
+        result.expect("task-addressed human rendering succeeds without a center");
+        let _ = std::fs::remove_dir_all(board.as_std_path());
+    }
+
+    #[test]
+    fn task_addressed_show_missing_task_is_a_loud_error_without_a_center_connection() {
+        let peer_server = CenterPeer::install("tasks-show-task-addressed-missing-no-connection");
+        let listener = peer_server.listener();
+        let board = task_board();
+        let checker = std::thread::spawn(move || {
+            listener
+                .set_nonblocking(true)
+                .expect("set listener nonblocking");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(
+                listener.accept().is_err(),
+                "task-addressed show must not connect to the center"
+            );
+        });
+        let result = handle_tasks_show(Some("no-such-task"), None, Some(board.as_str()), true);
+        checker.join().expect("join connection checker");
+        let error = result.expect_err("a missing task must fail loudly");
+        assert!(
+            error
+                .to_string()
+                .contains("no task matching \"no-such-task\"")
+        );
+        let _ = std::fs::remove_dir_all(board.as_std_path());
+    }
+
+    fn read_line_or_eof(stream: &UnixStream) -> Option<String> {
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+            .expect("set peer read timeout");
+        let mut line = String::new();
+        match BufReader::new(stream.try_clone().expect("clone peer stream")).read_line(&mut line) {
+            Ok(0) => None,
+            Ok(_) if line.is_empty() => None,
+            Ok(_) => Some(line),
+            Err(_) => None,
+        }
     }
 }

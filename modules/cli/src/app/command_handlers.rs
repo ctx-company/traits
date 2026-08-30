@@ -919,9 +919,17 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 archived,
                 json,
             }) => crate::app::tasks::handle_tasks_list(board.as_deref(), archived, json),
-            Some(cli::TasksCommand::Show { task, board, json }) => {
-                crate::app::tasks::handle_tasks_show(&task, board.as_deref(), json)
-            }
+            Some(cli::TasksCommand::Show {
+                task,
+                session,
+                board,
+                json,
+            }) => crate::app::tasks::handle_tasks_show(
+                task.as_deref(),
+                session.as_deref(),
+                board.as_deref(),
+                json,
+            ),
             Some(cli::TasksCommand::Update {
                 task,
                 board,

@@ -807,6 +807,29 @@ fn spawn_sentinel(
     )
 }
 
+fn spawn_sentinel_with_cwd(
+    root: &std::path::Path,
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    idle_ms: &str,
+    cwd: &std::path::Path,
+) -> ChildGuard {
+    ChildGuard(
+        std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .arg("__ctx-center")
+            .env("CTX_CENTER_SOCKET", socket)
+            .env("CTX_CENTER_SPAWN_LOCK", root.join("center.lock"))
+            .env("CTX_CENTER_RUNS_ROOT", root)
+            .env("CTX_CENTER_INDEX", index)
+            .env("CTX_CENTER_IDLE_MS", idle_ms)
+            .env("CTX_CENTER_SCAN_MS", "20")
+            .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
+            .current_dir(cwd)
+            .spawn()
+            .expect("spawn private sentinel with a fixed cwd"),
+    )
+}
+
 fn spawn_sentinel_with_home(
     root: &std::path::Path,
     socket: &std::path::Path,
@@ -4568,4 +4591,305 @@ fn standalone_subscribe_reaches_a_running_center_and_never_launches_one() {
     child.0.kill().expect("stop standalone-subscribe center");
     child.0.wait().expect("reap standalone-subscribe center");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+fn write_claimed_ledger_at(
+    ledger: &Utf8PathBuf,
+    session_id: &str,
+    run_id: &str,
+    task_key: Option<&str>,
+) {
+    let mut provenance = serde_json::json!({
+        "started-by": {"surface": "test", "caller": "proof-center"},
+        "state-source": "test",
+        "started-at-epoch": 1000,
+    });
+    if let Some(task_key) = task_key {
+        provenance["task-key"] = serde_json::json!(task_key);
+    }
+    let session = serde_json::from_value(serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": session_id,
+        "run-id": run_id,
+        "trait-id": "center-proof-trait",
+        "current-run-index": 0,
+        "status": "awaiting-agent-output",
+        "provenance": provenance,
+        "ledger": {
+            "run-id": run_id,
+            "trait-id": "center-proof-trait",
+            "current-run-index": 0,
+            "final-state": "running",
+        },
+        "state-digest": "sha256:center-proof",
+    }))
+    .expect("claimed-task fixture session");
+    ctx_traits_io::run_session::write_run_session(ledger, &session)
+        .expect("write claimed-task fixture ledger");
+}
+
+/// End-to-end wire proof for `Request::ClaimedTask` (0265.2): the center
+/// answers a run-addressed claimed-task read over the real socket, every
+/// unresolvable case fails loudly, `TaskProvider::get`'s live-then-archived
+/// resolution comes through unchanged, and the center and a direct
+/// `FilesTaskBoard` read agree on the same board directory (Done-when 1, 2,
+/// 6, 7), including a direct ambiguous-session assertion below. The
+/// unusable-repository-path failure class has its own dedicated real-socket
+/// proof, `claimed_task_fails_loudly_for_a_flat_store_row_with_no_usable_repository_path`,
+/// since it requires a row that is queryable yet still carries no
+/// repository path — a fixture this proof's rows do not produce.
+#[test]
+fn claimed_task_answers_over_the_real_socket_and_fails_loudly_when_unresolvable() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("claimed-task-wire-proof");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let repo = scratch("claimed-task-wire-proof-repo");
+    std::fs::create_dir_all(&repo).expect("create scratch repo");
+    let repo = Utf8PathBuf::from_path_buf(repo).expect("UTF-8 scratch repo");
+
+    let board = repo.join(".internal/tasks");
+    std::fs::create_dir_all(board.as_std_path()).expect("create scratch board");
+    std::fs::write(
+        board.join("center-task.toml").as_std_path(),
+        "schema-version = \"0.2\"\n\
+         key = \"center-task\"\n\
+         title = \"Center proof task\"\n\
+         status = \"ready\"\n\
+         auto-close = \"checked\"\n\
+         content = \"\"\"\nfirst paragraph\n\nsecond paragraph\n\"\"\"\n",
+    )
+    .expect("write claimed-task board fixture");
+    std::fs::write(
+        board.join("bad-schema.toml").as_std_path(),
+        "schema-version = \"9.9\"\nkey = \"bad-schema\"\ntitle = \"t\"\n",
+    )
+    .expect("write unparseable board fixture");
+
+    let liveness_root = Utf8PathBuf::from_path_buf(root.join("liveness"))
+        .expect("UTF-8 liveness root")
+        .clone();
+    let mut held_locks = Vec::new();
+    let sessions = [
+        ("claimed-task-happy", "run-happy", Some("center-task")),
+        ("claimed-task-unclaimed", "run-unclaimed", None),
+        (
+            "claimed-task-key-absent",
+            "run-key-absent",
+            Some("no-such-key"),
+        ),
+        (
+            "claimed-task-unparseable",
+            "run-unparseable",
+            Some("bad-schema"),
+        ),
+        ("claimed-task-dup-a", "run-dup-a", Some("center-task")),
+        ("claimed-task-dup-b", "run-dup-b", Some("center-task")),
+    ];
+    for (session_id, run_id, task_key) in sessions {
+        let ledger = repo.join(format!(".ctx/runs/{session_id}.json"));
+        write_claimed_ledger_at(&ledger, session_id, run_id, task_key);
+        let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+        let lock = ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path)
+            .expect("open driver lock");
+        ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold driver lock");
+        ctx_traits_io::run_liveness::upsert_row(
+            &liveness_root,
+            &ctx_traits_io::run_liveness::LiveRunFacts {
+                session_id: session_id.to_string(),
+                run_id: run_id.to_string(),
+                repo_key: "claimed-task-wire-proof-repo".to_string(),
+                repo_path: repo.to_string(),
+                ledger_path: ledger.clone(),
+                worktree_path: None,
+                branch: None,
+                log_path: None,
+            },
+            std::process::id(),
+            1000,
+        )
+        .expect("seed the liveness index with the fixture ledger");
+        held_locks.push(lock);
+    }
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let child = spawn_sentinel(&root, &socket, &index, "120000");
+    drop(await_socket(&socket));
+    let _environment = CenterEnvironment::install(&root);
+
+    // Done-when 1: every field answers, `description` is `content` verbatim.
+    let happy = ctx_traits_io::center::claimed_task("claimed-task-happy", None)
+        .expect("claimed-task happy path succeeds");
+    let task = match happy {
+        ctx_traits_io::center::ClaimedTaskResult::Task(task) => *task,
+        other => panic!("expected a claimed task, got {other:?}"),
+    };
+    assert_eq!(task.key, "center-task");
+    assert_eq!(task.title, "Center proof task");
+    assert_eq!(task.description, "first paragraph\n\nsecond paragraph\n");
+    assert_eq!(
+        task.stored_status,
+        Some(ctx_traits_core::task::TaskStatus::Ready)
+    );
+    assert_eq!(
+        task.auto_close,
+        Some(ctx_traits_core::task::AutoClosePolicy::Checked)
+    );
+
+    // Done-when 7: the center and a direct `FilesTaskBoard` read agree —
+    // one board directory, one document, two faces.
+    use ctx_traits_core::task::provider::TaskProvider as _;
+    let direct_dir = ctx_traits_io::task_files::repo_board_dir(&repo);
+    assert_eq!(direct_dir, board);
+    let direct = ctx_traits_io::task_files::FilesTaskBoard::open_read(direct_dir)
+        .get("center-task")
+        .expect("direct board read")
+        .expect("direct board read finds the fixture task");
+    assert_eq!(direct.document.key, task.key);
+    assert_eq!(direct.document.title, task.title);
+    assert_eq!(direct.document.content, task.description);
+    assert_eq!(direct.document.status, task.stored_status);
+
+    // Done-when 6: an archived claimed task still answers, unchanged.
+    let archived_dir = board.join("archived");
+    std::fs::create_dir_all(archived_dir.as_std_path()).expect("create archived dir");
+    std::fs::rename(
+        board.join("center-task.toml").as_std_path(),
+        archived_dir.join("center-task.toml").as_std_path(),
+    )
+    .expect("archive the fixture task");
+    let archived = ctx_traits_io::center::claimed_task("claimed-task-happy", None)
+        .expect("claimed-task still answers once the document is archived");
+    match archived {
+        ctx_traits_io::center::ClaimedTaskResult::Task(archived_task) => {
+            assert_eq!(
+                *archived_task, task,
+                "archived resolution must be unchanged"
+            );
+        }
+        other => panic!("expected the archived task to still answer, got {other:?}"),
+    }
+
+    // Done-when 2: every unresolvable case is a loud failure, never blank.
+    assert_eq!(
+        ctx_traits_io::center::claimed_task("claimed-task-missing-session", None)
+            .expect("missing session is a typed result, not an error"),
+        ctx_traits_io::center::ClaimedTaskResult::Missing
+    );
+    assert_eq!(
+        ctx_traits_io::center::claimed_task("claimed-task-unclaimed", None)
+            .expect("unclaimed session is a typed result, not an error"),
+        ctx_traits_io::center::ClaimedTaskResult::Unclaimed
+    );
+    let key_absent_error = ctx_traits_io::center::claimed_task("claimed-task-key-absent", None)
+        .expect_err("a claimed key absent from the board must fail loudly");
+    assert!(key_absent_error.to_string().contains("no-such-key"));
+    let unparseable_error = ctx_traits_io::center::claimed_task("claimed-task-unparseable", None)
+        .expect_err("a claimed document the loader skips must fail loudly, not answer blank");
+    assert!(unparseable_error.to_string().contains("bad-schema"));
+
+    // A session-id prefix matching several rows, none exact, must answer
+    // `Ambiguous` naming every match — the same `resolve_row` classification
+    // `Control`/`Start` share, exercised here through `ClaimedTask` itself.
+    let mut ambiguous_ids = match ctx_traits_io::center::claimed_task("claimed-task-dup", None)
+        .expect("an ambiguous session-id prefix is a typed result, not an error")
+    {
+        ctx_traits_io::center::ClaimedTaskResult::Ambiguous(ids) => ids,
+        other => panic!("expected an ambiguous result, got {other:?}"),
+    };
+    ambiguous_ids.sort();
+    assert_eq!(
+        ambiguous_ids,
+        vec![
+            "claimed-task-dup-a".to_string(),
+            "claimed-task-dup-b".to_string()
+        ]
+    );
+
+    drop(held_locks);
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+/// Real-socket regression proof for the relative-ledger-cwd-fallback
+/// blocker: a *queryable* row whose repository path cannot be recovered —
+/// a flat-store ledger discovered directly under the center's runs root,
+/// exactly the shape `CTX_CENTER_RUNS_ROOT` scanning produces for a ledger
+/// outside any repository-local `.ctx/runs` tree — must fail the public
+/// `claimed_task` call with a key-identifying error, never silently answer
+/// from a board that happens to sit under the center process's own cwd.
+/// This exercises `run_claimed_task_request`'s unusable-repository-path
+/// branch directly, which the superseded relative-ledger fixture never
+/// reached: that ledger was rejected by `refresh_ledger_inner` before a row
+/// entered the model at all, so the call only ever re-proved the
+/// missing-session class.
+#[test]
+fn claimed_task_fails_loudly_for_a_flat_store_row_with_no_usable_repository_path() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("claimed-task-unusable-repo-path");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let cwd = scratch("claimed-task-unusable-repo-path-cwd");
+    std::fs::create_dir_all(&cwd).expect("create scratch cwd");
+    let cwd = Utf8PathBuf::from_path_buf(cwd).expect("UTF-8 scratch cwd");
+
+    // A trap board sitting directly under the center's own cwd. If the
+    // claimed-task worker ever fell back to reading relative to the
+    // process's cwd instead of failing, the request would answer from here.
+    let trap_board = cwd.join(".internal/tasks");
+    std::fs::create_dir_all(trap_board.as_std_path()).expect("create trap board");
+    std::fs::write(
+        trap_board.join("center-task.toml").as_std_path(),
+        "schema-version = \"0.2\"\n\
+         key = \"center-task\"\n\
+         title = \"Trap task read via a cwd fallback\"\n\
+         status = \"ready\"\n\
+         content = \"trap\"\n",
+    )
+    .expect("write trap board fixture");
+
+    // A flat-store ledger absolute under the runs root, but not shaped as a
+    // repository-local `.ctx/runs` ledger: its parent directory is a
+    // repo-key directory, not `runs`. `ledger_repository_path` returns
+    // `None` for it, and with no repo-index entry for that key, the scanned
+    // row's `repo_path` resolves to empty — a row that is fully queryable,
+    // yet carries no usable repository path either way.
+    let root_utf8 = Utf8PathBuf::from_path_buf(root.clone()).expect("UTF-8 scratch root");
+    let ledger = root_utf8.join("claimed-task-unusable-repo-key/claimed-task-unusable.json");
+    write_claimed_ledger_at(
+        &ledger,
+        "claimed-task-unusable",
+        "run-unusable",
+        Some("center-task"),
+    );
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let child = spawn_sentinel_with_cwd(&root, &socket, &index, "120000", cwd.as_std_path());
+    drop(await_socket(&socket));
+    let _environment = CenterEnvironment::install(&root);
+
+    // The row is queryable (not `Missing`) — the flat-store scan discovers
+    // and parses it — but the claimed-task read must fail loudly, naming
+    // the claimed key, rather than reading the trap board under the
+    // center's cwd or answering with any of the typed non-error results.
+    let result = ctx_traits_io::center::claimed_task("claimed-task-unusable", None)
+        .expect_err("a row with no usable repository path must fail loudly, not answer blank");
+    let message = result.to_string();
+    assert!(
+        message.contains("center-task"),
+        "error must name the claimed key, got: {message}"
+    );
+    assert!(
+        !message.contains("trap"),
+        "the trap board under the center's cwd must never be read: {message}"
+    );
+
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(cwd);
 }

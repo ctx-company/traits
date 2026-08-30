@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::graph::{CyclePaths, DerivedStatus, ResolvedRelations};
-use super::{Step, TaskDocument, TaskStatus};
+use super::{AutoClosePolicy, Step, TaskDocument, TaskStatus};
 
 /// A task reduced to what a list view needs: identity, title, and both the
 /// stored and derived status (they can differ — a `Ready`-stored task with
@@ -33,6 +33,35 @@ pub struct TaskSummary {
     pub stored_status: Option<TaskStatus>,
     pub derived_status: DerivedStatus,
     pub archived: bool,
+}
+
+/// The task a run claims, reduced to what a face renders without a second
+/// lookup. `description` is `TaskDocument.content` verbatim — there is no
+/// stored `description` field, and no consumer derives a second one.
+/// `stored_status` is the document's own optional status, never a derived
+/// board state. `auto_close` is the document's override only; resolving it
+/// against `[tasks]` config belongs to the consumer that needs the
+/// effective policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ClaimedTask {
+    pub key: String,
+    pub title: String,
+    pub description: String,
+    pub stored_status: Option<TaskStatus>,
+    pub auto_close: Option<AutoClosePolicy>,
+}
+
+impl ClaimedTask {
+    pub fn from_document(document: &TaskDocument) -> Self {
+        Self {
+            key: document.key.clone(),
+            title: document.title.clone(),
+            description: document.content.clone(),
+            stored_status: document.status,
+            auto_close: document.auto_close,
+        }
+    }
 }
 
 /// A single task fully resolved: its document plus every relation edge

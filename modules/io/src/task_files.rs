@@ -28,6 +28,15 @@ const ARCHIVED_DIR: &str = "archived";
 /// (0063.6).
 const BOARD_CONFIG_FILE: &str = "board.toml";
 
+/// The board directory every repository carries, relative to its root.
+/// Single-sourced here so the CLI's default board and any center-side
+/// board read resolve the same directory from the same repository root.
+pub const BOARD_DIR_NAME: &str = ".internal/tasks";
+
+pub fn repo_board_dir(repo_root: &Utf8Path) -> Utf8PathBuf {
+    repo_root.join(BOARD_DIR_NAME)
+}
+
 /// Per-board effect declarations (0063.6), loaded from an optional
 /// `board.toml` in the board directory. `deny_unknown_fields` on both
 /// levels makes an undeclared effect name a load error rather than a

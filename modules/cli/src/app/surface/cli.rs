@@ -177,7 +177,14 @@ pub enum TasksCommand {
     /// Show one task, fully resolved (relations included).
     Show {
         /// The task's key, filename, or filename stem.
-        task: String,
+        #[arg(required_unless_present = "session", conflicts_with = "session")]
+        task: Option<String>,
+
+        /// Show the task claimed by this run instead. The board is the one
+        /// at the run's own repository, resolved by the center — not the
+        /// caller's.
+        #[arg(long, conflicts_with = "board")]
+        session: Option<String>,
 
         /// Board directory. Defaults to `.internal/tasks`.
         #[arg(long)]
@@ -3112,7 +3119,7 @@ pub fn command() -> clap::Command {
 
 #[cfg(test)]
 mod task_flag_conflict_tests {
-    use super::parse;
+    use super::{Command, TasksCommand, parse};
 
     /// 0195: `--task` supersedes the single-run invocation shape, so every
     /// `SessionStartArgs` field it cannot honor is refused at parse time —
@@ -3182,6 +3189,55 @@ mod task_flag_conflict_tests {
     fn trailing_trait_args_conflict_with_task() {
         assert_task_conflict_refused(&[
             "ctx", "traits", "run", "--task", "0001", "--", "some", "args",
+        ]);
+    }
+
+    #[test]
+    fn tasks_show_session_parses_without_a_task_selector() {
+        let owned: Vec<std::ffi::OsString> = ["ctx", "tasks", "show", "--session", "sess-1"]
+            .into_iter()
+            .map(std::ffi::OsString::from)
+            .collect();
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                parse(owned)
+                    .expect("parse succeeds")
+                    .expect("a command is present")
+            })
+            .expect("spawn parse thread");
+        let command = handle.join().expect("parse thread panicked");
+        match command {
+            Command::Tasks {
+                subcommand: Some(TasksCommand::Show { task, session, .. }),
+            } => {
+                assert_eq!(task, None);
+                assert_eq!(session.as_deref(), Some("sess-1"));
+            }
+            other => panic!("expected TasksCommand::Show, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tasks_show_requires_a_task_or_session() {
+        assert_task_conflict_refused(&["ctx", "tasks", "show"]);
+    }
+
+    #[test]
+    fn tasks_show_task_and_session_are_mutually_exclusive() {
+        assert_task_conflict_refused(&["ctx", "tasks", "show", "0001", "--session", "sess-1"]);
+    }
+
+    #[test]
+    fn tasks_show_session_and_board_are_mutually_exclusive() {
+        assert_task_conflict_refused(&[
+            "ctx",
+            "tasks",
+            "show",
+            "--session",
+            "sess-1",
+            "--board",
+            "some/board",
         ]);
     }
 }

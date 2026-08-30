@@ -104,9 +104,10 @@ Suggested route, not a boundary. Every symbol below is named because the groundi
 
 One final review pass: read the completed diff against the Done-when list and the watch items above, then run the four declared checks. At most one targeted repair-and-rerun cycle. If a second repair would be needed, stop and report the exact failing command and its output, or the exact unresolved consumer-contract mismatch — do not open a third cycle.
 """
+
 [relations]
-parent = "0265"
 depends-on = ["0265.1"]
+parent = "0265"
 
 [[checks]]
 name = "per-round workspace gate remains green"
@@ -117,14 +118,14 @@ timeout-ms = 1200000
 name = "center wire proof still passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
 timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "CLI task read path stays green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
 timeout-ms = 900000
-expect = "test result: ok\\. [1-9]"
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
