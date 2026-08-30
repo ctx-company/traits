@@ -7,9 +7,15 @@
 use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
-use crate::bottom_bar::{ActionTone, BarAction, BottomBar};
+use crate::bottom_bar::{ActionTone, BarAction, BarActionId, BottomBar};
 use crate::run_row::StateRole;
 use crate::tokens;
+
+/// A click handler for a bound bar action. Boxed rather than generic so
+/// `bar_element` keeps one signature for both the bound and unbound cases,
+/// and so a test can pass `None` without a turbofish.
+pub type BarActionHandler =
+    Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
 
 fn role_color(role: StateRole) -> u32 {
     match role {
@@ -28,19 +34,29 @@ fn mono_11(color: u32) -> gpui::Div {
         .text_color(rgb(color))
 }
 
-fn action_element(action: &BarAction) -> AnyElement {
+fn action_element(action: &BarAction, handler: Option<BarActionHandler>) -> AnyElement {
     let color = match action.tone {
         ActionTone::Primary => tokens::TEXT_BRIGHT,
         ActionTone::Secondary => tokens::TEXT_SECONDARY,
     };
-    mono_11(color)
-        .child(action.label.clone())
-        .into_any_element()
+    let element = mono_11(color).child(action.label.clone());
+    match handler {
+        // gpui requires a stateful element (`.id(...)`) for `.on_click` to
+        // attach; invisible in paint — no geometry, no tone.
+        Some(handler) => element
+            .id("bottom-bar-pause")
+            .on_click(handler)
+            .into_any_element(),
+        None => element.into_any_element(),
+    }
 }
 
 /// Build the native element tree for a [`BottomBar`]. Pure: no `Context`, no
-/// `App` required to call it.
-pub fn bar_element(bar: &BottomBar) -> AnyElement {
+/// `App` required to call it. `on_pause` is attached to the `Pause` action
+/// only when supplied — the caller (`Shell::render`) decides eligibility;
+/// this component still binds no behaviour of its own beyond wiring the one
+/// handler it is given.
+pub fn bar_element(bar: &BottomBar, on_pause: Option<BarActionHandler>) -> AnyElement {
     let mut left = div()
         .id("bottom-bar-state")
         .flex()
@@ -58,11 +74,17 @@ pub fn bar_element(bar: &BottomBar) -> AnyElement {
         .flex_row()
         .items_center()
         .gap(tokens::BOTTOM_BAR_GAP);
+    let mut on_pause = on_pause;
     for (index, action) in bar.actions.iter().enumerate() {
         if index > 0 {
             right = right.child(mono_11(tokens::TEXT_FAINT).child("·"));
         }
-        right = right.child(action_element(action));
+        let handler = if action.id == BarActionId::Pause {
+            on_pause.take()
+        } else {
+            None
+        };
+        right = right.child(action_element(action, handler));
     }
 
     div()
@@ -113,10 +135,10 @@ mod tests {
             modified_epoch_secs: 0,
             verdict_rounds: Some(2),
         };
-        let bar = sessions_bar(&row);
+        let bar = sessions_bar(&row, None);
         // Constructing the element must not panic and must reach an
         // `AnyElement` — proof this render path needs no `App`/`Context`.
-        let _element: AnyElement = bar_element(&bar);
+        let _element: AnyElement = bar_element(&bar, None);
     }
 
     #[test]
@@ -129,6 +151,31 @@ mod tests {
             detail: Vec::new(),
             actions: Vec::new(),
         };
-        let _element: AnyElement = bar_element(&bar);
+        let _element: AnyElement = bar_element(&bar, None);
+    }
+
+    #[test]
+    fn bar_element_builds_with_a_bound_pause_handler() {
+        let row = RunRow {
+            ledger_path: "/repo/session.json".to_string(),
+            session_id: "session".to_string(),
+            run_id: "run".to_string(),
+            repo_key: "repo".to_string(),
+            repo_path: "/repo".to_string(),
+            repo_label: "repo".to_string(),
+            title: "title".to_string(),
+            trait_id: "fixture-trait".to_string(),
+            state: RowState::Live,
+            state_text: "running".to_string(),
+            detail_text: String::new(),
+            elapsed_text: "00:00:00".to_string(),
+            tokens_text: "-".to_string(),
+            live: true,
+            modified_epoch_secs: 0,
+            verdict_rounds: None,
+        };
+        let bar = sessions_bar(&row, None);
+        let handler: BarActionHandler = Box::new(|_, _, _| {});
+        let _element: AnyElement = bar_element(&bar, Some(handler));
     }
 }

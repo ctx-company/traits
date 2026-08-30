@@ -447,9 +447,13 @@ stop and report the exact failing command or the unmet observable boundary with
 its evidence rather than iterating. That is the stop condition, not a judgement
 call.
 """
+
 [relations]
+depends-on = [
+    "0265.3",
+    "0258",
+]
 parent = "0265"
-depends-on = ["0265.3", "0258"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"

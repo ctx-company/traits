@@ -824,7 +824,22 @@ impl Render for Shell {
                 .iter()
                 .find(|row| row.ledger_path == selected)
         {
-            column = column.child(bottom_bar_view::bar_element(&bottom_bar::sessions_bar(row)));
+            let bar = bottom_bar::sessions_bar(row, self.row_controls.status(&row.ledger_path));
+            // Only a live row is eligible for pause
+            // (`RowControls::request`'s client-side check) — the same rule
+            // the run-list's own pause action uses above: attach no handler
+            // rather than issuing a request the machine would refuse
+            // without reaching the wire.
+            let on_pause: Option<bottom_bar_view::BarActionHandler> =
+                (row.state == crate::run_row::RowState::Live).then(|| {
+                    let pause_path = row.ledger_path.clone();
+                    Box::new(
+                        cx.listener(move |shell, _event: &gpui::ClickEvent, _window, cx| {
+                            shell.request_row_control(pause_path.clone(), RowVerb::Pause, cx);
+                        }),
+                    ) as bottom_bar_view::BarActionHandler
+                });
+            column = column.child(bottom_bar_view::bar_element(&bar, on_pause));
         }
         column
     }
