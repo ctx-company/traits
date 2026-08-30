@@ -249,6 +249,18 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
 .overlay .ocol{max-width:1020px;margin:0 auto;padding:0 24px}
 .overlay .ocol .exp p{font-size:15px;line-height:1.65}
 .overlay .codeblk pre{max-height:none;font-size:12.5px;line-height:1.55}
+.story-col{max-width:920px;margin:0 auto;padding:8px 24px 80px}
+.card{background:var(--card);border:1px solid var(--border-soft);border-radius:6px;padding:18px 20px;margin:0 0 14px}
+.card.flash{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card .chead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.card .chead h2{margin:0;font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text-heading)}
+.card .chead .cpos{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text-faint)}
+.card .codeblk pre{max-height:300px}
+.scard{margin:34px 0 16px;padding:0 0 8px;border-bottom:1px solid var(--border-soft)}
+.scard h2{margin:0 0 6px;font-family:var(--sans);font-size:19px;font-weight:600;color:var(--text-heading)}
+.scard.file h2{font-size:16px}
+.scard .sum{margin:0 0 8px}
+.scard .exp p{font-size:13.5px}
 .ego{margin:14px 0}
 .ego svg{max-width:100%;height:auto;display:block}
 .xref{color:var(--accent);cursor:pointer;border-bottom:1px dashed var(--accent-dim)}
@@ -272,11 +284,15 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
   <div class="obar"><span class="kind" id="rkind"></span><span class="t" id="rtitle"></span><span id="rpos" style="font-family:var(--mono);font-size:11px;color:var(--text-secondary)"></span><button id="rclose">esc closes</button></div>
   <div class="obody"><div class="ocol" id="rbody"></div></div>
 </div>
+<div class="overlay" id="story" role="dialog" aria-label="Narration">
+  <div class="obar"><span class="t" id="stitle">narration — reading order</span><button id="sclose">esc closes</button></div>
+  <div class="obody" id="sbodywrap"><div class="story-col" id="sbody"></div></div>
+</div>
 <div class="overlay" id="graph" role="dialog" aria-label="File graph">
   <div class="obar"><span class="t">file connections — mechanical name-matches inside described spans</span><button id="gclose">esc closes</button></div>
   <div class="obody"><div class="ocol" id="gbody"></div></div>
 </div>
-<footer>click a tile to zoom in; Esc goes up · j/k walk the tour · Enter opens the reader (big source) · g opens the file graph · connections are name-matches, not call analysis · code read from the repo at render time</footer>
+<footer>click a tile to zoom in; Esc goes up · j/k walk the tour · Enter reader · n narration · g file graph · connections are name-matches, not call analysis · code read from the repo at render time</footer>
 <script>
 var DATA = __DATA__;
 var HORIZON = __HORIZON__;
@@ -503,6 +519,63 @@ var REPOROOT = __REPOROOT__;
     while (cur && cur.kind !== "file" && cur.parent) cur = byId[cur.parent];
     return cur && cur.kind === "file" ? cur.id : null;
   }
+  var storyOpen = false, storyBuilt = false;
+  var SECTION_KINDS = { overview: 1, area: 1, file: 1, flow: 1 };
+  function cardBody(n){
+    return "<div class=\\"exp\\">" + prose(n.explanation, n.id) + "</div>" +
+           (SECTION_KINDS[n.kind] ? "" : egoSvg(n)) + codeBlocksHtml(n) +
+           (n.id === "__ROOT__" && HORIZON ? "<div class=\\"refs\\"><h3>horizon</h3><div class=\\"exp\\">" + prose(HORIZON, n.id) + "</div></div>" : "");
+  }
+  function buildStory(){
+    var col = document.getElementById("sbody");
+    var frag = document.createDocumentFragment();
+    ORDER.forEach(function(id, idx){
+      var n = byId[id];
+      var el = document.createElement(SECTION_KINDS[n.kind] ? "section" : "article");
+      el.className = SECTION_KINDS[n.kind] ? ("scard " + n.kind) : "card";
+      el.setAttribute("data-card", id);
+      var kindClass = String(n.kind).toLowerCase().replace(/[^a-z-]/g, "");
+      el.innerHTML = "<div class=\\"chead\\"><span class=\\"kind k-" + kindClass + "\\">" + esc(n.kind) + "</span><h2>" + esc(n.title) + "</h2><span class=\\"cpos\\">" + (idx + 1) + " / " + ORDER.length + "</span></div>" +
+                     "<p class=\\"sum\\">" + esc(n.summary) + "</p><div class=\\"cbody\\"></div>";
+      frag.appendChild(el);
+    });
+    col.appendChild(frag);
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if (!en.isIntersecting) return;
+        var el = en.target, id = el.getAttribute("data-card");
+        var body = el.querySelector(".cbody");
+        if (body && !body.getAttribute("data-filled")){
+          body.setAttribute("data-filled", "1");
+          body.innerHTML = cardBody(byId[id]);
+        }
+        io.unobserve(el);
+      });
+    }, { root: document.getElementById("sbodywrap"), rootMargin: "1200px 0px" });
+    col.querySelectorAll("[data-card]").forEach(function(el){ io.observe(el); });
+    storyBuilt = true;
+  }
+  function scrollToCard(id){
+    var el = document.querySelector("[data-card=\\"" + id + "\\"]");
+    if (!el) return;
+    var body = el.querySelector(".cbody");
+    if (body && !body.getAttribute("data-filled")){
+      body.setAttribute("data-filled", "1");
+      body.innerHTML = cardBody(byId[id]);
+    }
+    el.scrollIntoView({ block: "start" });
+    el.classList.add("flash");
+    setTimeout(function(){ el.classList.remove("flash"); }, 900);
+    selectedId = id;
+  }
+  function setStory(open){
+    storyOpen = open;
+    document.getElementById("story").className = "overlay" + (open ? " open" : "");
+    if (open){
+      if (!storyBuilt) buildStory();
+      scrollToCard(selectedId);
+    }
+  }
   var graphOpen = false, graphBuilt = false;
   function renderGraph(){
     var files = DATA.filter(function(n){ return n.kind === "file"; });
@@ -600,6 +673,7 @@ var REPOROOT = __REPOROOT__;
   function jumpDelegate(e){
     var t = e.target.closest ? e.target.closest(".xref, .chip, .gnode") : null;
     if (t && t.getAttribute("data-id")){
+      if (storyOpen){ scrollToCard(t.getAttribute("data-id")); return; }
       if (graphOpen) setGraph(false);
       jumpTo(t.getAttribute("data-id"));
     }
@@ -607,10 +681,17 @@ var REPOROOT = __REPOROOT__;
   document.getElementById("panel").addEventListener("click", jumpDelegate);
   document.getElementById("reader").addEventListener("click", jumpDelegate);
   document.getElementById("graph").addEventListener("click", jumpDelegate);
+  document.getElementById("story").addEventListener("click", jumpDelegate);
+  document.getElementById("sclose").addEventListener("click", function(){ setStory(false); renderAll(); });
   document.getElementById("rclose").addEventListener("click", function(){ setReader(false); });
   document.getElementById("gclose").addEventListener("click", function(){ setGraph(false); });
 
   document.addEventListener("keydown", function(e){
+    if (e.key === "n" && !readerOpen && !graphOpen){ setStory(!storyOpen); if (!storyOpen) renderAll(); e.preventDefault(); return; }
+    if (storyOpen){
+      if (e.key === "Escape"){ setStory(false); renderAll(); e.preventDefault(); }
+      return;
+    }
     if (e.key === "Enter" && !graphOpen){ setReader(!readerOpen); e.preventDefault(); return; }
     if (e.key === "g"){ setGraph(!graphOpen); e.preventDefault(); return; }
     if ((e.key === "Escape" || e.key === "Backspace") && (readerOpen || graphOpen)){
