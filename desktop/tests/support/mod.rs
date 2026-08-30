@@ -267,6 +267,36 @@ pub fn complete_session(path: &Utf8Path) -> Session {
     session
 }
 
+/// Rewrite an already-written ledger to a paused, resumable state (a
+/// non-terminal `status` with `last_drive_outcome` set to `paused`), using
+/// the same reader/writer production uses, and return the rewritten
+/// `Session`. `last_drive_outcome` must be set alongside `status` for the
+/// same reason `complete_session` documents: `SessionState::derive` folds
+/// the outcome into the derived state, so a paused row's projection depends
+/// on both fields agreeing, not `status` alone.
+pub fn pause_session(path: &Utf8Path) -> Session {
+    use ctx_traits_core::procedure::session::{DriveOutcome, DriveOutcomeKind, Status};
+
+    let mut session =
+        ctx_traits_io::run_session::read_run_session(path).expect("read ledger to pause it");
+    session.status = Status::AwaitingInput;
+    session.last_drive_outcome = Some(DriveOutcome {
+        outcome: DriveOutcomeKind::Paused,
+        recorded_at_epoch: 0,
+        provider_credits_pause: None,
+        effective_budget: None,
+        token_usage: None,
+        exit_code: None,
+        rate_limit: None,
+        budget_pause: None,
+        tokens_by_model: None,
+        summons: None,
+    });
+    ctx_traits_io::run_session::write_run_session(path, &session)
+        .expect("rewrite ledger as paused");
+    session
+}
+
 /// Append one narration line to the sidecar next to `ledger_path`, for a
 /// caller driving a real live-follow scenario that needs a specific
 /// `frame_id` rather than the fixed one `write_activity_sidecar` writes.
@@ -417,6 +447,27 @@ impl FakePeerConnection {
             .expect("start request repo_path")
             .to_string();
         (id, args, repo_path)
+    }
+
+    /// Read the client's `Start` request whose target is a resume-by-
+    /// session-id (`StartTarget::Session`), the shape resume sends —
+    /// distinct from [`FakePeerConnection::read_start_request`]'s
+    /// trait-spawn target. Returns `(id, session_id, repo_key)`.
+    pub fn read_session_start_request(&mut self) -> (String, String, Option<String>) {
+        let request = self.read_line();
+        assert_eq!(request["kind"], "start", "expected a start request");
+        let id = request["id"]
+            .as_str()
+            .expect("start request id")
+            .to_string();
+        let target = &request["target"];
+        assert_eq!(target["type"], "session", "expected a session start target");
+        let session_id = target["data"]["session_id"]
+            .as_str()
+            .expect("start request session_id")
+            .to_string();
+        let repo_key = target["data"]["repo_key"].as_str().map(str::to_string);
+        (id, session_id, repo_key)
     }
 
     /// Respond to a `Start` request with `StartWireResult::Started`.

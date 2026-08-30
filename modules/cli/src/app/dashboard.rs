@@ -8630,10 +8630,20 @@ mod tests {
             ctx_traits_io::center::ControlResult::Refused,
         ]
         .iter()
-        .map(|result| result.message("session"))
+        .map(|result| result.message(ctx_traits_io::center::ControlAction::Interrupt, "session"))
         .collect::<HashSet<_>>();
         assert_eq!(messages.len(), 6);
         assert!(messages.iter().all(|message| !message.is_empty()));
+    }
+
+    #[test]
+    fn control_message_renders_the_pause_verb_distinctly_from_stop() {
+        let stop = ctx_traits_io::center::ControlResult::Acknowledged
+            .message(ctx_traits_io::center::ControlAction::Interrupt, "session");
+        let pause = ctx_traits_io::center::ControlResult::Acknowledged
+            .message(ctx_traits_io::center::ControlAction::Pause, "session");
+        assert_ne!(stop, pause);
+        assert!(pause.contains("pause"));
     }
 
     #[test]

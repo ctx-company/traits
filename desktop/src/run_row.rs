@@ -31,6 +31,7 @@ pub enum RepoScope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowState {
     Live,
+    Paused,
     Resumable(SessionState),
     Terminal(SessionState),
     Unreadable,
@@ -60,9 +61,18 @@ pub struct RunRow {
     pub modified_epoch_secs: u64,
 }
 
+impl RunRow {
+    /// The desktop analogue of `ctx_traits_cli::app::dashboard`'s
+    /// `SessionClass::can_resume`: non-live, non-terminal, readable.
+    pub fn can_resume(&self) -> bool {
+        matches!(self.state, RowState::Resumable(_) | RowState::Paused)
+    }
+}
+
 fn state_text_for(state: &RowState) -> String {
     match state {
         RowState::Live => "live".to_string(),
+        RowState::Paused => "paused".to_string(),
         RowState::Resumable(state) | RowState::Terminal(state) => {
             format!("{state:?}").to_ascii_lowercase()
         }
@@ -161,6 +171,8 @@ fn row_state(row: &CenterPublicRow) -> RowState {
         RowState::Live
     } else if state.is_terminal() {
         RowState::Terminal(state)
+    } else if outcome == Some(DriveOutcomeKind::Paused) {
+        RowState::Paused
     } else {
         RowState::Resumable(state)
     }
@@ -367,6 +379,84 @@ mod tests {
             project_one(&interrupted_row).state,
             RowState::Terminal(SessionState::Cancelled)
         ));
+    }
+
+    #[test]
+    fn paused_outcome_projects_to_row_state_paused_and_is_resumable() {
+        let mut paused_summary = readable_summary("run", "session", Status::AwaitingInput);
+        paused_summary.last_drive_outcome = Some("paused".to_string());
+        let paused_row = row(
+            "repo",
+            "/repo",
+            "/repo/paused.json",
+            paused_summary,
+            false,
+            1,
+        );
+        let projected = project_one(&paused_row);
+        assert_eq!(projected.state, RowState::Paused);
+        assert_eq!(projected.state_text, "paused");
+        assert!(projected.can_resume());
+    }
+
+    #[test]
+    fn other_settled_pause_outcomes_still_project_resumable_not_paused() {
+        for outcome in [
+            "paused-provider-credits",
+            "paused-budget-exhausted",
+            "awaiting-owner",
+        ] {
+            let mut summary = readable_summary("run", "session", Status::AwaitingInput);
+            summary.last_drive_outcome = Some(outcome.to_string());
+            let outcome_row = row(
+                "repo",
+                "/repo",
+                &format!("/repo/{outcome}.json"),
+                summary,
+                false,
+                1,
+            );
+            let projected = project_one(&outcome_row);
+            assert!(
+                matches!(projected.state, RowState::Resumable(_)),
+                "{outcome} must project Resumable, got {:?}",
+                projected.state
+            );
+            assert!(projected.can_resume());
+        }
+    }
+
+    #[test]
+    fn can_resume_is_false_for_live_terminal_and_unreadable_rows() {
+        let live_row = row(
+            "repo",
+            "/repo",
+            "/repo/live.json",
+            readable_summary("run", "session", Status::Completed),
+            true,
+            1,
+        );
+        assert!(!project_one(&live_row).can_resume());
+
+        let terminal_row = row(
+            "repo",
+            "/repo",
+            "/repo/terminal.json",
+            readable_summary("run", "session", Status::Completed),
+            false,
+            1,
+        );
+        assert!(!project_one(&terminal_row).can_resume());
+
+        let unreadable_row = row(
+            "repo",
+            "/repo",
+            "/repo/unreadable.json",
+            RunSummary::unreadable("session".to_string(), "bad json".to_string()),
+            false,
+            1,
+        );
+        assert!(!project_one(&unreadable_row).can_resume());
     }
 
     #[test]

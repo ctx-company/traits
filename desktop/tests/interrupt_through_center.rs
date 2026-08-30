@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use camino::Utf8PathBuf;
 use ctx_traits_desktop::center_link::LinkUpdate;
-use ctx_traits_desktop::interrupt::{InterruptOutcome, InterruptStatus, Interrupts};
-use ctx_traits_desktop::shell::{CenterFace, reconcile_interrupts};
+use ctx_traits_desktop::row_control::{RowControls, RowOutcome, RowStatus, RowVerb};
+use ctx_traits_desktop::shell::{CenterFace, reconcile_row_controls};
 use ctx_traits_io::center::{CenterDelta, ControlAction, ControlResult};
 
 fn recv_snapshot(
@@ -95,8 +95,10 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
     assert_eq!(row.state, ctx_traits_desktop::run_row::RowState::Live);
 
     // --- Ordering A: acknowledgement lands, then the row's own delta. ---
-    let mut interrupts = Interrupts::default();
-    let request = interrupts.request(&row).expect("a live row is eligible");
+    let mut interrupts = RowControls::default();
+    let request = interrupts
+        .request(&row, RowVerb::Interrupt)
+        .expect("a live row is eligible");
     assert_eq!(request.session_id, "session-live");
     assert_eq!(request.repo_key, "repo-a");
 
@@ -137,18 +139,18 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
     let settled = interrupts.settle(
         &request.ledger_path,
         request.generation,
-        InterruptOutcome::Result(control_result),
+        RowOutcome::Control(control_result),
     );
     assert!(settled);
     assert!(matches!(
         interrupts.status(&request.ledger_path),
-        Some(InterruptStatus::Requested { .. })
+        Some(RowStatus::Requested { .. })
     ));
 
     // Acknowledgement alone must not resolve anything: the row must still
     // be live in the face.
     assert!(
-        !reconcile_interrupts(&face, &mut interrupts),
+        !reconcile_row_controls(&face, &mut interrupts),
         "acknowledgement alone must not resolve a pending interrupt"
     );
     assert!(
@@ -170,7 +172,7 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
     face.apply(LinkUpdate::Delta(delta), std::time::SystemTime::now());
 
     assert!(
-        reconcile_interrupts(&face, &mut interrupts),
+        reconcile_row_controls(&face, &mut interrupts),
         "reconciliation must resolve the pending interrupt once the delta lands"
     );
     assert!(interrupts.status(&request.ledger_path).is_none());
@@ -212,7 +214,7 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
     );
 
     let second_request = interrupts
-        .request(&second_row)
+        .request(&second_row, RowVerb::Interrupt)
         .expect("a live row is eligible");
     let second_session_id = second_request.session_id.clone();
     let second_repo_key = second_request.repo_key.clone();
@@ -238,7 +240,7 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
         std::time::SystemTime::now(),
     );
     assert!(
-        !reconcile_interrupts(&face, &mut interrupts),
+        !reconcile_row_controls(&face, &mut interrupts),
         "reconciliation must not fire while the entry is still Requesting, not Requested"
     );
 
@@ -250,11 +252,11 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
     let second_settled = interrupts.settle(
         &second_request.ledger_path,
         second_request.generation,
-        InterruptOutcome::Result(second_control_result),
+        RowOutcome::Control(second_control_result),
     );
     assert!(second_settled);
     assert!(
-        reconcile_interrupts(&face, &mut interrupts),
+        reconcile_row_controls(&face, &mut interrupts),
         "the row was already non-live when the response arrived, so reconciliation must fire at settle time"
     );
     assert!(interrupts.status(&second_request.ledger_path).is_none());
@@ -285,7 +287,7 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
         .clone();
 
     let third_request = interrupts
-        .request(&third_projected_row)
+        .request(&third_projected_row, RowVerb::Interrupt)
         .expect("a live row is eligible");
     let third_session_id = third_request.session_id.clone();
     let third_repo_key = third_request.repo_key.clone();
@@ -307,12 +309,12 @@ fn interrupting_a_live_row_reaches_the_center_and_resolves_only_through_a_delta(
     let third_settled = interrupts.settle(
         &third_request.ledger_path,
         third_request.generation,
-        InterruptOutcome::Result(third_control_result),
+        RowOutcome::Control(third_control_result),
     );
     assert!(third_settled);
     assert!(matches!(
         interrupts.status(&third_request.ledger_path),
-        Some(InterruptStatus::Refused(_))
+        Some(RowStatus::Refused(_))
     ));
 
     connection.shutdown();

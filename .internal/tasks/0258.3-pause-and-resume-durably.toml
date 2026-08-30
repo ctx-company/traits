@@ -22,13 +22,16 @@ The desktop pauses a live run through the center at a frame boundary; another su
 """
 
 [relations]
+depends-on = [
+    "0256",
+    "0243.5",
+]
 parent = "0258"
-depends-on = ["0256", "0243.5"]
 
 [[checks]]
 name = "focused center pause and resume proofs pass"
 command = "cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "workspace landing gate remains green"
@@ -37,4 +40,4 @@ timeout-ms = 900000
 
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''

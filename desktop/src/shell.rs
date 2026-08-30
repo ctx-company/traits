@@ -12,7 +12,7 @@ use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
-use crate::interrupt::{self, InterruptOutcome, InterruptRequest, Interrupts};
+use crate::row_control::{self, RowControls, RowRequest, RowVerb};
 use crate::run_row::{RepoScope, RunRow};
 use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, SubmitRequest};
 use crate::spawn_view;
@@ -257,26 +257,53 @@ pub fn reconcile_spawn_status(face: &CenterFace, form: &mut SpawnForm) -> bool {
     form.clear_requested_for(&session_id)
 }
 
-/// Resolve every pending `Requested` interrupt entry against `face`'s
-/// current unfiltered row model. The row's own delta and the control
+/// Resolve every pending `Requested` row-control entry against `face`'s
+/// current unfiltered row model. The row's own delta and the control/start
 /// response are scheduled on independent connections and can land in
-/// either order, so both call sites — the update loop and `interrupt_row`'s
-/// settle callback — run this one shared implementation, mirroring
-/// `reconcile_spawn_status` exactly. Early-returns without touching any
-/// entry when the face holds no model at all
+/// either order, so both call sites — the update loop and
+/// `request_row_control`'s settle callback — run this one shared
+/// implementation, mirroring `reconcile_spawn_status` exactly. Early-returns
+/// without touching any entry when the face holds no model at all
 /// (`Connecting`/`Unavailable`): a `None` there means "no model yet," never
-/// "the row ended," and must not be read as an observed stop.
-pub fn reconcile_interrupts(face: &CenterFace, interrupts: &mut Interrupts) -> bool {
+/// "the row ended," and must not be read as an observed stop or resume.
+pub fn reconcile_row_controls(face: &CenterFace, row_controls: &mut RowControls) -> bool {
     let mut changed = false;
-    for ledger_path in interrupts.pending_ledger_paths() {
+    for ledger_path in row_controls.pending_ledger_paths() {
         let Some(liveness) = face.row_liveness(&ledger_path) else {
             // No model at all yet — cannot distinguish "row ended" from
             // "we haven't connected", so every pending entry is left alone.
             return changed;
         };
-        changed |= interrupts.observe(&ledger_path, liveness);
+        changed |= row_controls.observe(&ledger_path, liveness);
     }
     changed
+}
+
+/// Refused row-control entries whose `ledger_path` is no longer among
+/// `face.rows()` — the case `RowControls::observe` documents: an `Ended`
+/// delta during a pending resume removes the row and moves the entry to
+/// `Refused` rather than silently clearing it, but a `RunRow` no longer
+/// exists to hang that refusal off of in the per-row render loop. A free
+/// function, not a `Shell` method, so `Shell::render` and the unit test that
+/// proves this visibility share exactly one implementation — the same
+/// discipline `reconcile_row_controls` documents. Returns `(display_id,
+/// message)` pairs; ledger_path is not returned since nothing keys off it
+/// once the row is gone.
+pub fn detached_row_notices(
+    face: &CenterFace,
+    row_controls: &RowControls,
+) -> Vec<(String, String)> {
+    row_controls
+        .refused_entries()
+        .into_iter()
+        .filter(|(ledger_path, _, _)| {
+            !face
+                .rows()
+                .iter()
+                .any(|row| &row.ledger_path == ledger_path)
+        })
+        .map(|(_, display_id, message)| (display_id, message))
+        .collect()
 }
 
 fn format_time_of_day(at: SystemTime) -> String {
@@ -299,13 +326,13 @@ pub struct Shell {
     detail_task: Option<gpui::Task<()>>,
     spawn_form: SpawnForm,
     spawn_task: Option<gpui::Task<()>>,
-    interrupts: Interrupts,
+    row_controls: RowControls,
     /// Keyed by `ledger_path`, not a single `Option` slot like `spawn_task`:
-    /// several rows can be interrupted independently, and a single slot
-    /// would cancel an unrelated in-flight interrupt when a second row's
+    /// several rows can be controlled independently, and a single slot
+    /// would cancel an unrelated in-flight request when a second row's
     /// request is issued. The entry for a `ledger_path` is removed once
     /// that row's request settles.
-    interrupt_tasks: HashMap<String, gpui::Task<()>>,
+    row_control_tasks: HashMap<String, gpui::Task<()>>,
     /// The spawn form panel's one stable focus target, created once here and
     /// reused by every render's `track_focus` call. `cx.focus_handle()`
     /// mints a fresh `FocusId` on every call — calling it fresh inside
@@ -337,7 +364,7 @@ impl Shell {
                     // `submit_spawn`'s settle callback runs the same
                     // reconciliation on its own arrival too.
                     reconcile_spawn_status(&shell.face, &mut shell.spawn_form);
-                    reconcile_interrupts(&shell.face, &mut shell.interrupts);
+                    reconcile_row_controls(&shell.face, &mut shell.row_controls);
                     cx.notify();
                     outcome
                 });
@@ -358,8 +385,8 @@ impl Shell {
             detail_task: None,
             spawn_form: SpawnForm::default(),
             spawn_task: None,
-            interrupts: Interrupts::default(),
-            interrupt_tasks: HashMap::new(),
+            row_controls: RowControls::default(),
+            row_control_tasks: HashMap::new(),
             spawn_focus_handle: cx.focus_handle(),
         }
     }
@@ -511,18 +538,22 @@ impl Shell {
         }));
     }
 
-    /// Request an interrupt for the row carrying `ledger_path`. Looks the
-    /// row up in the face's current unfiltered row list, asks
-    /// `Interrupts::request` for client-side eligibility, and on `Some`
-    /// dispatches the center round trip through `control_existing` on
-    /// gpui's background executor — `control_existing` inherits
-    /// `ACTION_TIMEOUT` (600s) and must never run on the UI thread, the same
-    /// hazard `submit_spawn` documents. On completion, `settle` on the UI
-    /// thread, then run `reconcile_interrupts` (the response may have lost
-    /// the race to the row's own delta), and `cx.notify()` only on real
-    /// change — the `settled || reconciled` pattern `submit_spawn` already
-    /// uses.
-    pub fn interrupt_row(&mut self, ledger_path: String, cx: &mut Context<Self>) {
+    /// Request `verb` for the row carrying `ledger_path`. Looks the row up
+    /// in the face's current unfiltered row list, asks
+    /// `RowControls::request` for client-side eligibility, and on `Some`
+    /// dispatches the center round trip on gpui's background executor —
+    /// every verb's call inherits `ACTION_TIMEOUT` (600s) and must never
+    /// run on the UI thread, the same hazard `submit_spawn` documents. On
+    /// completion, `settle` on the UI thread, then run
+    /// `reconcile_row_controls` (the response may have lost the race to the
+    /// row's own delta), and `cx.notify()` only on real change — the
+    /// `settled || reconciled` pattern `submit_spawn` already uses.
+    pub fn request_row_control(
+        &mut self,
+        ledger_path: String,
+        verb: RowVerb,
+        cx: &mut Context<Self>,
+    ) {
         let Some(row) = self
             .face
             .rows()
@@ -531,48 +562,41 @@ impl Shell {
         else {
             return;
         };
-        let Some(request) = self.interrupts.request(row) else {
+        let Some(request) = self.row_controls.request(row, verb) else {
             cx.notify();
             return;
         };
-        self.dispatch_interrupt(request, cx);
+        self.dispatch_row_control(request, cx);
         cx.notify();
     }
 
-    fn dispatch_interrupt(&mut self, request: InterruptRequest, cx: &mut Context<Self>) {
-        let InterruptRequest {
-            ledger_path,
-            session_id,
-            repo_key,
-            generation,
-        } = request;
-        let ledger_path_for_task = ledger_path.clone();
+    /// Runs the one production dispatcher, [`row_control::dispatch`], on
+    /// gpui's background executor. That function owns the verb-to-center-
+    /// call mapping (`control_existing` for `Interrupt`/`Pause`,
+    /// `start_session_existing` for `Resume`) so it is reused verbatim by
+    /// the fake-peer integration tests — there is exactly one place this
+    /// mapping is expressed, not a copy here and a copy in the tests.
+    fn dispatch_row_control(&mut self, request: RowRequest, cx: &mut Context<Self>) {
+        let ledger_path_for_task = request.ledger_path.clone();
+        let ledger_path = request.ledger_path.clone();
+        let generation = request.generation;
         let task = cx.spawn(async move |this, cx| {
             let outcome = cx
-                .background_spawn(async move {
-                    match ctx_traits_io::center::control_existing(
-                        &session_id,
-                        Some(&repo_key),
-                        ctx_traits_io::center::ControlAction::Interrupt,
-                    ) {
-                        Ok(result) => InterruptOutcome::Result(result),
-                        Err(error) => InterruptOutcome::Failed(error.to_string()),
-                    }
-                })
+                .background_spawn(async move { row_control::dispatch(&request) })
                 .await;
             let _ = this.update(cx, |shell, cx| {
-                let settled = shell.interrupts.settle(&ledger_path, generation, outcome);
-                // The row's own delta may have already carried it into a
-                // non-live state, winning the race against this response
+                let settled = shell.row_controls.settle(&ledger_path, generation, outcome);
+                // The row's own delta may have already carried it into the
+                // observed state, winning the race against this response
                 // arriving on its own connection.
-                let reconciled = reconcile_interrupts(&shell.face, &mut shell.interrupts);
-                shell.interrupt_tasks.remove(&ledger_path);
+                let reconciled = reconcile_row_controls(&shell.face, &mut shell.row_controls);
+                shell.row_control_tasks.remove(&ledger_path);
                 if settled || reconciled {
                     cx.notify();
                 }
             });
         });
-        self.interrupt_tasks.insert(ledger_path_for_task, task);
+        self.row_control_tasks.insert(ledger_path_for_task, task);
     }
 }
 
@@ -596,13 +620,31 @@ impl Render for Shell {
             if live {
                 let stop_path = row.ledger_path.clone();
                 stop = stop.on_click(cx.listener(move |shell, _event, _window, cx| {
-                    shell.interrupt_row(stop_path.clone(), cx);
+                    shell.request_row_control(stop_path.clone(), RowVerb::Interrupt, cx);
+                }));
+            }
+            let mut pause = div()
+                .id(SharedString::from(format!("pause-{}", row.ledger_path)))
+                .child("pause");
+            if live {
+                let pause_path = row.ledger_path.clone();
+                pause = pause.on_click(cx.listener(move |shell, _event, _window, cx| {
+                    shell.request_row_control(pause_path.clone(), RowVerb::Pause, cx);
+                }));
+            }
+            let mut resume = div()
+                .id(SharedString::from(format!("resume-{}", row.ledger_path)))
+                .child("resume");
+            if row.can_resume() {
+                let resume_path = row.ledger_path.clone();
+                resume = resume.on_click(cx.listener(move |shell, _event, _window, cx| {
+                    shell.request_row_control(resume_path.clone(), RowVerb::Resume, cx);
                 }));
             }
             let status = self
-                .interrupts
+                .row_controls
                 .status(&row.ledger_path)
-                .map(interrupt::status_text)
+                .map(row_control::status_text)
                 .unwrap_or_default();
             let mut item = div()
                 .id(SharedString::from(row.ledger_path.clone()))
@@ -620,6 +662,8 @@ impl Render for Shell {
                 .child(row.elapsed_text.clone())
                 .child(row.tokens_text.clone())
                 .child(stop)
+                .child(pause)
+                .child(resume)
                 .child(status);
             if stale {
                 item = item.opacity(0.6);
@@ -628,6 +672,22 @@ impl Render for Shell {
                 item = item.bg(gpui::rgb(0x333333));
             }
             list = list.child(item);
+        }
+        // A refused row-control entry whose row has already left the row
+        // list (e.g. an `Ended` delta during a pending resume) has no
+        // `RunRow` to render against inside the loop above — render it as
+        // its own detached notice instead, so the refusal is not simply
+        // invisible.
+        for (display_id, message) in detached_row_notices(&self.face, &self.row_controls) {
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("detached-notice-{display_id}")))
+                    .flex()
+                    .flex_row()
+                    .gap_2()
+                    .child(display_id)
+                    .child(format!("refused: {message}")),
+            );
         }
         let detail_pane = match self.detail.load_state() {
             None => div().into_any_element(),
@@ -715,6 +775,7 @@ impl Render for Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::row_control::RowOutcome;
     use ctx_traits_io::center::CenterPublicRow;
     use ctx_traits_io::run_summary::RunSummary;
 
@@ -728,6 +789,31 @@ mod tests {
             repo_path: format!("/{repo_key}"),
             ledger_path: format!("/{repo_key}/session.json"),
             live: true,
+            modified_epoch_secs: 0,
+        }
+    }
+
+    /// A readable, non-live, `last_drive_outcome: "paused"` wire row — unlike
+    /// `wire_row`, whose `parse_error` always projects to `RowState::Unreadable`
+    /// regardless of `live`. Used by tests that need `run_row::project` to
+    /// actually derive `RowState::Paused` from the face's own snapshot rather
+    /// than from a separately synthesized `RunRow`.
+    fn paused_wire_row(repo_key: &str, session_id: &str) -> CenterPublicRow {
+        use ctx_traits_core::procedure::session::Status;
+        CenterPublicRow {
+            summary: RunSummary {
+                session_id: session_id.to_string(),
+                run_id: session_id.to_string(),
+                trait_id: "fixture-trait".to_string(),
+                status: Status::AwaitingInput,
+                last_drive_outcome: Some("paused".to_string()),
+                parse_error: None,
+                ..RunSummary::unreadable(session_id.to_string(), String::new())
+            },
+            repo_key: repo_key.to_string(),
+            repo_path: format!("/{repo_key}"),
+            ledger_path: format!("/{repo_key}/session.json"),
+            live: false,
             modified_epoch_secs: 0,
         }
     }
@@ -901,21 +987,23 @@ mod tests {
             "the repo-b row must already be hidden by the current scope"
         );
 
-        let mut interrupts = Interrupts::default();
+        let mut row_controls = RowControls::default();
         let row = live_run_row("repo-b", "/repo-b/session.json", "run-2");
-        let request = interrupts.request(&row).expect("a live row is eligible");
-        interrupts.settle(
+        let request = row_controls
+            .request(&row, RowVerb::Interrupt)
+            .expect("a live row is eligible");
+        row_controls.settle(
             &request.ledger_path,
             request.generation,
-            InterruptOutcome::Result(ctx_traits_io::center::ControlResult::Acknowledged),
+            RowOutcome::Control(ctx_traits_io::center::ControlResult::Acknowledged),
         );
         assert!(matches!(
-            interrupts.status("/repo-b/session.json"),
-            Some(crate::interrupt::InterruptStatus::Requested { .. })
+            row_controls.status("/repo-b/session.json"),
+            Some(crate::row_control::RowStatus::Requested { .. })
         ));
 
         assert!(
-            !reconcile_interrupts(&face, &mut interrupts),
+            !reconcile_row_controls(&face, &mut row_controls),
             "no delta has landed yet"
         );
 
@@ -929,10 +1017,10 @@ mod tests {
         );
 
         assert!(
-            reconcile_interrupts(&face, &mut interrupts),
+            reconcile_row_controls(&face, &mut row_controls),
             "reconciliation must see the row through the unfiltered model, not the scoped projection"
         );
-        assert!(interrupts.status("/repo-b/session.json").is_none());
+        assert!(row_controls.status("/repo-b/session.json").is_none());
     }
 
     /// A `Down` alone must never resolve a pending interrupt — the stale
@@ -945,34 +1033,117 @@ mod tests {
         let now = SystemTime::now();
         face.apply(LinkUpdate::Snapshot(vec![wire_row("repo", "run-x")]), now);
 
-        let mut interrupts = Interrupts::default();
+        let mut row_controls = RowControls::default();
         let row = live_run_row("repo", "/repo/session.json", "run-x");
-        let request = interrupts.request(&row).expect("a live row is eligible");
-        interrupts.settle(
+        let request = row_controls
+            .request(&row, RowVerb::Interrupt)
+            .expect("a live row is eligible");
+        row_controls.settle(
             &request.ledger_path,
             request.generation,
-            InterruptOutcome::Result(ctx_traits_io::center::ControlResult::Acknowledged),
+            RowOutcome::Control(ctx_traits_io::center::ControlResult::Acknowledged),
         );
 
         face.apply(LinkUpdate::Down("subscription closed".to_string()), now);
         assert!(matches!(face.state(), CenterState::Stale { .. }));
         assert!(
-            !reconcile_interrupts(&face, &mut interrupts),
+            !reconcile_row_controls(&face, &mut row_controls),
             "a Down alone must not resolve a pending interrupt"
         );
         assert!(matches!(
-            interrupts.status("/repo/session.json"),
-            Some(crate::interrupt::InterruptStatus::Requested { .. })
+            row_controls.status("/repo/session.json"),
+            Some(crate::row_control::RowStatus::Requested { .. })
         ));
 
         // Recovery snapshot no longer carries the row: it ended while the
         // center was unreachable.
         face.apply(LinkUpdate::Snapshot(vec![]), now);
         assert!(
-            reconcile_interrupts(&face, &mut interrupts),
+            reconcile_row_controls(&face, &mut row_controls),
             "a recovery snapshot that no longer carries the row must resolve the pending interrupt"
         );
-        assert!(interrupts.status("/repo/session.json").is_none());
+        assert!(row_controls.status("/repo/session.json").is_none());
+    }
+
+    /// The blocker this closes: an `Ended` delta during a pending resume
+    /// removes the row and moves the entry to `Refused` (per
+    /// `RowControls::observe`), but `Shell::render`'s per-row loop iterates
+    /// `face.rows()` — with the row gone, that loop alone would render
+    /// nothing at all, silently indistinguishable from the request having
+    /// been quietly dropped. `detached_row_notices` is the projection
+    /// `Shell::render` also calls; this proves it surfaces the refusal
+    /// without any `RunRow` to hang it off of.
+    #[test]
+    fn resume_row_gone_refusal_is_visible_as_a_detached_notice_once_the_row_leaves_the_face() {
+        let mut face = CenterFace::new(RepoScope::All);
+        let now = SystemTime::now();
+        let paused_wire = paused_wire_row("repo", "run-paused");
+        face.apply(LinkUpdate::Snapshot(vec![paused_wire.clone()]), now);
+
+        let row = face
+            .rows()
+            .iter()
+            .find(|r| r.ledger_path == "/repo/session.json")
+            .expect("the paused row must already be projected by the face")
+            .clone();
+        assert_eq!(
+            row.state,
+            crate::run_row::RowState::Paused,
+            "the wire row's own last_drive_outcome must project to Paused"
+        );
+
+        let mut row_controls = RowControls::default();
+        let request = row_controls
+            .request(&row, RowVerb::Resume)
+            .expect("a paused row is eligible for resume");
+        row_controls.settle(
+            &request.ledger_path,
+            request.generation,
+            RowOutcome::Start(ctx_traits_io::center::StartResult::Started {
+                session_id: "run-paused".to_string(),
+            }),
+        );
+        assert!(matches!(
+            row_controls.status("/repo/session.json"),
+            Some(crate::row_control::RowStatus::Requested {
+                verb: RowVerb::Resume,
+                ..
+            })
+        ));
+        assert!(
+            detached_row_notices(&face, &row_controls).is_empty(),
+            "the row is still present, so no detached notice is warranted yet"
+        );
+
+        // The row's own Ended delta arrives while the resume is still
+        // pending — the actual subscription event path, not a snapshot
+        // replacement with a separately synthesized row.
+        face.apply(
+            LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::Ended {
+                row: Box::new(paused_wire),
+            }),
+            now,
+        );
+        assert!(reconcile_row_controls(&face, &mut row_controls));
+        assert!(
+            !face
+                .rows()
+                .iter()
+                .any(|r| r.ledger_path == "/repo/session.json"),
+            "the row must be gone from the face"
+        );
+        assert!(matches!(
+            row_controls.status("/repo/session.json"),
+            Some(crate::row_control::RowStatus::Refused(_))
+        ));
+
+        let notices = detached_row_notices(&face, &row_controls);
+        assert_eq!(
+            notices.len(),
+            1,
+            "the refusal must surface even with no RunRow to render it against"
+        );
+        assert!(notices[0].1.contains("is no longer listed"));
     }
 
     /// The regression proof for the render-local-`FocusHandle` bug: without

@@ -894,20 +894,25 @@ pub enum ControlResult {
 impl ControlResult {
     /// Render a center-owned control result for display. Shared by every
     /// consumer of [`control`]/[`control_existing`] so the product wording
-    /// exists once.
-    pub fn message(&self, display_id: &str) -> String {
+    /// exists once. `action` picks the verb noun so the same six outcomes
+    /// read correctly for a stop or a pause request.
+    pub fn message(&self, action: ControlAction, display_id: &str) -> String {
+        let verb = match action {
+            ControlAction::Interrupt => "stop",
+            ControlAction::Pause => "pause",
+        };
         match self {
-            ControlResult::Acknowledged => format!("stop requested for {display_id}"),
-            ControlResult::Missing => format!("stop refused: {display_id} is no longer listed"),
-            ControlResult::Ambiguous(_) => format!("stop refused: {display_id} is ambiguous"),
+            ControlResult::Acknowledged => format!("{verb} requested for {display_id}"),
+            ControlResult::Missing => format!("{verb} refused: {display_id} is no longer listed"),
+            ControlResult::Ambiguous(_) => format!("{verb} refused: {display_id} is ambiguous"),
             ControlResult::NotLive => {
-                format!("stop not sent for {display_id}; center will settle it")
+                format!("{verb} not sent for {display_id}; center will settle it")
             }
             ControlResult::Unverifiable => {
-                format!("stop refused: {display_id}'s live driver cannot be verified")
+                format!("{verb} refused: {display_id}'s live driver cannot be verified")
             }
             ControlResult::Refused => {
-                format!("stop refused: {display_id}'s driver did not acknowledge the request")
+                format!("{verb} refused: {display_id}'s driver did not acknowledge the request")
             }
         }
     }
@@ -955,15 +960,36 @@ pub fn start_trait_existing(args: &[String], repo_path: &Utf8Path) -> crate::Res
     )?)
 }
 
+fn session_start_request(session_id: &str, repo_key: Option<&str>) -> Request {
+    Request::Start {
+        id: next_id("start"),
+        target: StartTarget::Session {
+            session_id: session_id.to_owned(),
+            repo_key: repo_key.map(str::to_owned),
+        },
+    }
+}
+
 pub fn start_session(session_id: &str, repo_key: Option<&str>) -> crate::Result<StartResult> {
     decode_start(request_with_timeout(
-        Request::Start {
-            id: next_id("start"),
-            target: StartTarget::Session {
-                session_id: session_id.to_owned(),
-                repo_key: repo_key.map(str::to_owned),
-            },
-        },
+        session_start_request(session_id, repo_key),
+        ACTION_TIMEOUT,
+    )?)
+}
+
+/// Same shared spawn-by-session-id capability as [`start_session`], but only
+/// against a center that is already serving — it never spawns one. For a
+/// caller whose own executable does not host the center sentinel
+/// (`ctx-desktop`), spawn-on-need would fork an unrelated process rather than
+/// a center. Symmetric with [`subscribe_existing`]. Connection failure is
+/// reported, not retried; a caller wanting bounded retry cadence supplies its
+/// own.
+pub fn start_session_existing(
+    session_id: &str,
+    repo_key: Option<&str>,
+) -> crate::Result<StartResult> {
+    decode_start(request_existing(
+        session_start_request(session_id, repo_key),
         ACTION_TIMEOUT,
     )?)
 }

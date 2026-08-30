@@ -3118,6 +3118,229 @@ fn center_pause_in_flight_persists_before_its_delta_and_resume_continues_at_the_
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The desktop-shaped pause path end to end, mirroring
+/// `control_existing_interrupt_reaches_two_subscribers_and_the_run_outlives_the_requester`:
+/// `control_existing` (not `control`) reaches an already-serving center, two
+/// subscribers are attached *before* the request so neither can miss the
+/// delta, the acknowledgement window is proven silent (an ack is not an
+/// outcome — reusing the same 100ms negative-window pattern
+/// `center_pause_in_flight_persists_before_its_delta_and_resume_continues_at_the_next_frame`
+/// already proves for the single-subscriber case), and once the frame
+/// settles both subscribers observe the durable `"paused"` delta — plus the
+/// ledger on disk carries it too, read directly, so durability is asserted
+/// independent of the center's own in-memory state.
+#[test]
+fn pause_through_the_existing_only_control_entry_reaches_two_subscribers_with_a_durable_outcome() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("pause-existing-two-subscribers");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_two_frame_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let first = ctx_traits_io::center::subscribe(None).expect("first subscription");
+    let second = ctx_traits_io::center::subscribe(None).expect("second subscription");
+    for subscription in [&first, &second] {
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+        ));
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+        ));
+    }
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let session_id = start_fixture(&repo, &fixture, &ledger);
+    let result = ctx_traits_io::center::control_existing(
+        &session_id,
+        None,
+        ctx_traits_io::center::ControlAction::Pause,
+    )
+    .expect("center pause request through the existing-only entry");
+    assert!(matches!(
+        result,
+        ctx_traits_io::center::ControlResult::Acknowledged
+    ));
+
+    // An acknowledgement is not an outcome: neither subscriber may see a
+    // "paused" delta inside this window, before the frame boundary settles.
+    let acknowledgement_deadline = Instant::now() + Duration::from_millis(100);
+    for subscription in [&first, &second] {
+        while Instant::now() < acknowledgement_deadline {
+            match subscription
+                .recv_timeout(acknowledgement_deadline.saturating_duration_since(Instant::now()))
+            {
+                Ok(ctx_traits_io::center::CenterEvent::Delta(
+                    ctx_traits_io::center::CenterDelta::RowChanged { row },
+                )) if row.ledger_path == ledger.to_string_lossy()
+                    && row.summary.last_drive_outcome.as_deref() == Some("paused") =>
+                {
+                    panic!("a control acknowledgement must not publish a state delta");
+                }
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(error) => panic!("read acknowledgement window: {error}"),
+            }
+        }
+    }
+
+    std::fs::write(&release, "release first frame").expect("release first frame");
+    await_outcome(&ledger, "paused");
+
+    for subscription in [&first, &second] {
+        let deadline = Instant::now() + PROCESS_DEADLINE;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "a subscriber did not observe the durable pause delta"
+            );
+            match subscription.recv_timeout(remaining) {
+                Ok(ctx_traits_io::center::CenterEvent::Delta(
+                    ctx_traits_io::center::CenterDelta::RowChanged { row },
+                )) if row.ledger_path == ledger.to_string_lossy()
+                    && row.summary.last_drive_outcome.as_deref() == Some("paused") =>
+                {
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => panic!("read pause delta: {error}"),
+            }
+        }
+    }
+
+    let paused_session = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
+    )
+    .expect("read paused ledger directly from disk");
+    assert_eq!(
+        paused_session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.as_str()),
+        Some("paused"),
+        "the pause must be durable in the ledger itself, not only in the center's own memory"
+    );
+
+    drop(first);
+    drop(second);
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The desktop-shaped resume-after-restart path end to end, mirroring
+/// `center_interrupt_stops_a_run_rediscovered_after_a_center_restart`:
+/// pause and let it settle durably, kill the center with SIGKILL (never a
+/// graceful shutdown — the durability claim is meaningless if the center
+/// gets to clean up first), remove the stale socket, restart it, attach two
+/// *fresh* subscribers (no carried-over in-memory state), resume through
+/// `start_session_existing` (the desktop's entry, never `start_session`),
+/// and assert both subscribers observe the row return to live, the run
+/// completes, and the fixture's own invocation counter is exactly `2` — no
+/// gap (the resumed frame never ran) and no duplicate (the paused frame did
+/// not silently re-run).
+#[test]
+fn paused_run_resumes_through_the_center_after_a_center_restart_and_reaches_two_subscribers() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("resume-existing-after-restart");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_two_frame_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let count_file = root.join("fixture-harness.sh.invocations");
+    let session_id = start_fixture(&repo, &fixture, &ledger);
+    await_control(&session_id, ctx_traits_io::center::ControlAction::Pause);
+    std::fs::write(&release, "release first frame").expect("release first frame");
+    await_outcome(&ledger, "paused");
+    assert_eq!(std::fs::read_to_string(&count_file).unwrap().trim(), "1");
+
+    sentinel.0.kill().expect("kill original sentinel");
+    sentinel.0.wait().expect("reap original sentinel");
+    std::fs::remove_file(&socket).expect("remove stale socket after SIGKILL");
+    let mut restarted =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+
+    // Fresh subscribers only — no state carried over from before the
+    // restart, mirroring the GUI-restart case this task's face must
+    // survive.
+    let first = ctx_traits_io::center::subscribe(None).expect("first fresh subscription");
+    let second = ctx_traits_io::center::subscribe(None).expect("second fresh subscription");
+    for subscription in [&first, &second] {
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+        ));
+        // The paused row is already present at subscribe time, so at least
+        // one snapshot row arrives between start and end — drain it (and
+        // any others) rather than assuming end follows start directly.
+        loop {
+            match subscription.recv_timeout(PROCESS_DEADLINE) {
+                Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd) => break,
+                Ok(_) => {}
+                Err(error) => panic!("read post-restart snapshot: {error}"),
+            }
+        }
+    }
+
+    let resumed = ctx_traits_io::center::start_session_existing(&session_id, None)
+        .expect("resume through the existing-only entry after a center restart");
+    match resumed {
+        ctx_traits_io::center::StartResult::Started { .. } => {}
+        ctx_traits_io::center::StartResult::Exited { code, stderr } => {
+            panic!("resume exited before registering ({code:?}): {stderr}")
+        }
+    }
+
+    for subscription in [&first, &second] {
+        let deadline = Instant::now() + PROCESS_DEADLINE;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "a subscriber did not observe the row return to live after resume"
+            );
+            match subscription.recv_timeout(remaining) {
+                Ok(ctx_traits_io::center::CenterEvent::Delta(
+                    ctx_traits_io::center::CenterDelta::RowChanged { row }
+                    | ctx_traits_io::center::CenterDelta::Appeared { row },
+                )) if row.ledger_path == ledger.to_string_lossy() && row.live => {
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => panic!("read resume-live delta: {error}"),
+            }
+        }
+    }
+
+    std::fs::write(&release, "release second frame").expect("release second frame");
+    await_outcome(&ledger, "completed");
+    assert_eq!(
+        std::fs::read_to_string(&count_file).unwrap().trim(),
+        "2",
+        "resume must run exactly the second frame — no gap, no duplicate"
+    );
+
+    drop(first);
+    drop(second);
+    restarted.0.kill().expect("stop restarted sentinel");
+    restarted.0.wait().expect("reap restarted sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn paused_worktree_run_retains_its_worktree_and_resume_reuses_it() {
     let _serial = SENTINEL_TEST_LOCK
