@@ -23,11 +23,23 @@
 //! boundary (symlink rejection, typed parse errors) — never a hand-rolled
 //! `std::fs::read_to_string` + `serde_json` in this crate.
 
+use std::collections::VecDeque;
+
 use camino::Utf8PathBuf;
 use ctx_traits_core::procedure::session::Session;
+use ctx_traits_io::activity_sidecar::ActivityRecord;
+use ctx_traits_io::center::{CenterDelta, CenterPublicRow};
+use ctx_traits_io::run_summary::RunSummary;
 
+use crate::center_link::LinkUpdate;
 use crate::detail_tree::{self, ActivityOverlay, DetailTree};
 use crate::run_row::RunRow;
+
+/// How many activity records a `Loading`/resync-in-flight selection buffers
+/// before it starts dropping the oldest. The overlay is last-write-wins per
+/// `frame_id`, so the oldest buffered record is precisely the one whose loss
+/// is invisible once a newer record for the same frame lands.
+const PENDING_CAP: usize = 256;
 
 /// A background read request for one selection. Carries the generation it
 /// was issued under, so a caller can tell a stale outcome from the current
@@ -80,22 +92,94 @@ pub enum DetailLoad {
     Failed(String),
 }
 
+/// Whether a selection is still tracking the live center stream. `Ended`
+/// gets its own wording inside `Stale` rather than a third variant — two
+/// states is enough to be honest about "current vs not".
+#[derive(Debug, Clone, PartialEq)]
+pub enum FollowState {
+    Following,
+    Stale { reason: String },
+}
+
+/// The ledger evidence a loaded-or-requested baseline corresponds to:
+/// `(row.modified_epoch_secs, row.summary with title cleared)`. `title` is
+/// excluded because the center rewrites it from a sidecar `SessionTitle`
+/// line the overlay already carries, immediately followed by a
+/// `RowChanged` that must not itself cost a ledger read. `modified_epoch_secs`
+/// is 1-second resolution, so two ledger writes inside one second that leave
+/// every other summary fact identical collapse to a single re-read — bounded
+/// and self-healing on the next write.
+#[derive(Debug, Clone, PartialEq)]
+struct Fingerprint {
+    modified_epoch_secs: u64,
+    summary: RunSummary,
+}
+
+impl Fingerprint {
+    fn from_row(row: &CenterPublicRow) -> Self {
+        let mut summary = row.summary.clone();
+        summary.title = None;
+        Self {
+            modified_epoch_secs: row.modified_epoch_secs,
+            summary,
+        }
+    }
+}
+
+/// What a `follow` call yielded: whether the visible state changed, and an
+/// authoritative re-read the caller must run on a background executor, if
+/// one was warranted.
+#[derive(Debug, Default)]
+pub struct FollowOutcome {
+    pub changed: bool,
+    pub request: Option<LoadRequest>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Selection {
     key: String,
     repo_key: String,
     generation: u64,
-    /// The row's kernel-backed liveness flag, captured at selection time.
-    /// A point-in-time snapshot: a run that finishes while its detail is
-    /// open keeps showing this value until 0257.3's live-follow lands.
+    /// The row's kernel-backed liveness flag. Refreshed from every
+    /// `RowChanged`/`Appeared`/`Ended` delta while `Following` — no longer a
+    /// point-in-time capture once `follow` starts observing the stream.
     live: bool,
     load: DetailLoad,
+    follow: FollowState,
+    /// The `modified_epoch_secs` carried by the `RunRow` this selection was
+    /// made from — retained so a successful *first* load can derive its own
+    /// fingerprint (see `apply`) without waiting for a delta to supply one.
+    modified_epoch_secs: u64,
+    fingerprint: Option<Fingerprint>,
+    /// `Some(generation)` while a load (seed or resync) issued under that
+    /// generation has not yet settled via `apply`. Distinct from `load`,
+    /// which stays `Loaded` with the previous baseline during a resync so
+    /// the display never flashes back to `Loading` — this is the flag that
+    /// tells `follow_delta` an activity record must also be captured into
+    /// `pending`, not just applied to the (about to be replaced) displayed
+    /// overlay.
+    in_flight: Option<u64>,
+    /// Activity records that arrived while a read (seed or resync) was in
+    /// flight, replayed onto the fresh overlay once it lands.
+    pending: VecDeque<ActivityRecord>,
+}
+
+impl Selection {
+    fn resync_request(&self, generation: u64) -> LoadRequest {
+        LoadRequest {
+            generation,
+            repo_key: self.repo_key.clone(),
+            ledger_path: Utf8PathBuf::from(self.key.clone()),
+        }
+    }
 }
 
 /// The desktop's run-detail state. A sibling of `CenterFace`/`Dashboard`, not
 /// a member of either: a center reconnect installs a fresh `Dashboard`
-/// snapshot but leaves detail untouched (no re-read — "exactly once" holds
-/// across reconnects), and a delta cannot reach detail at all in this slice.
+/// snapshot but leaves the current selection in place — `select` still holds
+/// its "exactly once" rule across reconnects — while every `LinkUpdate` also
+/// reaches `follow`, which is how a selection advances and recovers without
+/// polling or a second ledger read per delta.
 #[derive(Default)]
 pub struct RunDetail {
     selected: Option<Selection>,
@@ -116,6 +200,24 @@ impl RunDetail {
     /// always populates it): it installs a `Failed` selection and performs
     /// no read, since there is no path to read from.
     pub fn select(&mut self, row: &RunRow) -> Option<LoadRequest> {
+        self.select_inner(row, None)
+    }
+
+    /// As [`RunDetail::select`], but the selection starts `Stale` with
+    /// `reason` rather than `Following` — used when the row being selected
+    /// was served from an already-`Stale` `CenterFace` (a retained row from
+    /// before an outage). Without this, a selection made during an outage
+    /// would appear current and would ignore the eventual recovery
+    /// `Snapshot`, so a change made while disconnected could never resync.
+    pub fn select_stale(&mut self, row: &RunRow, reason: String) -> Option<LoadRequest> {
+        self.select_inner(row, Some(reason))
+    }
+
+    fn select_inner(&mut self, row: &RunRow, stale_reason: Option<String>) -> Option<LoadRequest> {
+        let follow = match stale_reason {
+            Some(reason) => FollowState::Stale { reason },
+            None => FollowState::Following,
+        };
         if row.ledger_path.is_empty() {
             self.selected = Some(Selection {
                 key: String::new(),
@@ -123,6 +225,11 @@ impl RunDetail {
                 generation: self.generation,
                 live: row.live,
                 load: DetailLoad::Failed("run row carries no ledger path".to_string()),
+                follow,
+                modified_epoch_secs: row.modified_epoch_secs,
+                fingerprint: None,
+                in_flight: None,
+                pending: VecDeque::new(),
             });
             return None;
         }
@@ -141,6 +248,16 @@ impl RunDetail {
             generation,
             live: row.live,
             load: DetailLoad::Loading,
+            follow,
+            modified_epoch_secs: row.modified_epoch_secs,
+            // `None` rather than derived from `row`: `RunRow` is a flattened
+            // projection with no retained `RunSummary`. `apply` derives the
+            // real fingerprint from the loaded `Session` the moment the seed
+            // read lands (see below), so this is only ever observed by a
+            // delta that races the seed read itself.
+            fingerprint: None,
+            in_flight: Some(generation),
+            pending: VecDeque::new(),
         });
         Some(LoadRequest {
             generation,
@@ -156,6 +273,23 @@ impl RunDetail {
     ///
     /// An outcome tagged with a superseded generation (a stale selection's
     /// result landing late) is ignored.
+    ///
+    /// A resync's failure (the selection was already `Loaded` when the read
+    /// was issued) keeps the previous baseline on screen and marks the
+    /// selection `Stale` instead of clobbering good state with `Failed` — a
+    /// *first* load's failure still lands as `Failed`, since a fresh
+    /// selection is never `Loaded` when its read is issued.
+    ///
+    /// A successful load that lands with no fingerprint yet on record (the
+    /// seed read, or a delta-free race with the seed read) establishes one
+    /// from the loaded `Session` itself, so the *next* delta — even the very
+    /// first one this selection ever observes — can tell "nothing changed"
+    /// from "structure moved" without an unconditional confirming re-read.
+    /// A fingerprint already on record (set by a delta that raced ahead of
+    /// this same read, or carried over from a prior generation) is left
+    /// alone; the generation check above already ensures this outcome
+    /// belongs to the current selection, so there is nothing newer to
+    /// preserve against.
     pub fn apply(&mut self, generation: u64, outcome: Result<DetailBaseline, String>) -> bool {
         let Some(selection) = self.selected.as_mut() else {
             return false;
@@ -163,11 +297,169 @@ impl RunDetail {
         if selection.generation != generation {
             return false;
         }
-        selection.load = match outcome {
-            Ok(baseline) => DetailLoad::Loaded(Box::new(baseline)),
-            Err(reason) => DetailLoad::Failed(reason),
-        };
+        selection.in_flight = None;
+        match outcome {
+            Ok(mut baseline) => {
+                for record in selection.pending.drain(..) {
+                    baseline.activity_overlay.apply_live_record(&record);
+                }
+                if selection.fingerprint.is_none() {
+                    let mut summary = RunSummary::from_session(&baseline.session);
+                    summary.title = None;
+                    selection.fingerprint = Some(Fingerprint {
+                        modified_epoch_secs: selection.modified_epoch_secs,
+                        summary,
+                    });
+                }
+                selection.load = DetailLoad::Loaded(Box::new(baseline));
+            }
+            Err(reason) => {
+                if matches!(selection.load, DetailLoad::Loaded(_)) {
+                    selection.follow = FollowState::Stale { reason };
+                } else {
+                    selection.load = DetailLoad::Failed(reason);
+                }
+            }
+        }
         true
+    }
+
+    /// Fold one `LinkUpdate` into the current selection, mirroring
+    /// `CenterFace::apply`'s shape. Takes `update` by reference so `Shell`
+    /// can feed detail first and then hand the owned update to the face
+    /// unchanged, preserving stream order exactly.
+    ///
+    /// A `None` selection, or a delta for a different `ledger_path`, is a
+    /// no-op — checked before anything is cloned.
+    pub fn follow(&mut self, update: &LinkUpdate) -> FollowOutcome {
+        match update {
+            LinkUpdate::Snapshot(rows) => self.follow_snapshot(rows),
+            LinkUpdate::Delta(delta) => self.follow_delta(delta),
+            LinkUpdate::Down(reason) => self.follow_down(reason),
+        }
+    }
+
+    fn follow_down(&mut self, reason: &str) -> FollowOutcome {
+        let Some(selection) = self.selected.as_mut() else {
+            return FollowOutcome::default();
+        };
+        let stale = FollowState::Stale {
+            reason: reason.to_string(),
+        };
+        let changed = selection.follow != stale;
+        selection.follow = stale;
+        FollowOutcome {
+            changed,
+            request: None,
+        }
+    }
+
+    fn follow_delta(&mut self, delta: &CenterDelta) -> FollowOutcome {
+        let Some(selection) = self.selected.as_mut() else {
+            return FollowOutcome::default();
+        };
+        if selection.key != delta.ledger_path() {
+            return FollowOutcome::default();
+        }
+        // Stale is an absorbing state until a recovery `Snapshot` explicitly
+        // closes it (`follow_snapshot`): every delta variant is a no-op
+        // while stale, not just activity/row-change. Checked once, ahead of
+        // the match, so a variant added later inherits the guard instead of
+        // needing its own copy.
+        if !matches!(selection.follow, FollowState::Following) {
+            return FollowOutcome::default();
+        }
+        match delta {
+            CenterDelta::ActivityLine { activity, .. } => {
+                // The displayed baseline (if any) gets the record right
+                // away, for immediate feedback. Independently, while a load
+                // is in flight (seed or resync — `load` staying `Loaded`
+                // during a resync must not be mistaken for "settled"), the
+                // record is also captured into `pending` so it survives the
+                // wholesale baseline replacement `apply` performs when that
+                // load lands, even if the record post-dates the read.
+                let mut changed = false;
+                if let DetailLoad::Loaded(baseline) = &mut selection.load {
+                    changed = baseline.activity_overlay.apply_live_record(activity);
+                }
+                if selection.in_flight.is_some() {
+                    if selection.pending.len() >= PENDING_CAP {
+                        selection.pending.pop_front();
+                    }
+                    selection.pending.push_back(activity.clone());
+                }
+                FollowOutcome {
+                    changed,
+                    request: None,
+                }
+            }
+            CenterDelta::RowChanged { row } | CenterDelta::Appeared { row } => {
+                let mut changed = false;
+                if selection.live != row.live {
+                    selection.live = row.live;
+                    changed = true;
+                }
+                let fingerprint = Fingerprint::from_row(row);
+                if selection.fingerprint.as_ref() != Some(&fingerprint) {
+                    selection.fingerprint = Some(fingerprint);
+                    self.generation += 1;
+                    selection.generation = self.generation;
+                    selection.in_flight = Some(self.generation);
+                    return FollowOutcome {
+                        changed: true,
+                        request: Some(selection.resync_request(self.generation)),
+                    };
+                }
+                FollowOutcome {
+                    changed,
+                    request: None,
+                }
+            }
+            CenterDelta::Ended { .. } => {
+                let mut changed = false;
+                if selection.live {
+                    selection.live = false;
+                    changed = true;
+                }
+                let stale = FollowState::Stale {
+                    reason: "run no longer indexed by the center".to_string(),
+                };
+                if selection.follow != stale {
+                    selection.follow = stale;
+                    changed = true;
+                }
+                FollowOutcome {
+                    changed,
+                    request: None,
+                }
+            }
+        }
+    }
+
+    /// The recovery edge: a `Stale` selection returns to `Following` and
+    /// issues exactly one resync, whether or not the recovery snapshot still
+    /// carries a matching row — the ledger is authoritative either way. An
+    /// already-`Following` selection (the first snapshot, or a duplicate)
+    /// issues nothing.
+    fn follow_snapshot(&mut self, rows: &[CenterPublicRow]) -> FollowOutcome {
+        let Some(selection) = self.selected.as_mut() else {
+            return FollowOutcome::default();
+        };
+        if !matches!(selection.follow, FollowState::Stale { .. }) {
+            return FollowOutcome::default();
+        }
+        if let Some(row) = rows.iter().find(|row| row.ledger_path == selection.key) {
+            selection.live = row.live;
+            selection.fingerprint = Some(Fingerprint::from_row(row));
+        }
+        selection.follow = FollowState::Following;
+        self.generation += 1;
+        selection.generation = self.generation;
+        selection.in_flight = Some(self.generation);
+        FollowOutcome {
+            changed: true,
+            request: Some(selection.resync_request(self.generation)),
+        }
     }
 
     /// The current selection's key (`ledger_path`), if any.
@@ -187,6 +479,11 @@ impl RunDetail {
     /// The current selection's load state, if any.
     pub fn load_state(&self) -> Option<&DetailLoad> {
         self.selected.as_ref().map(|selection| &selection.load)
+    }
+
+    /// The current selection's live-follow state, if any.
+    pub fn follow_state(&self) -> Option<&FollowState> {
+        self.selected.as_ref().map(|selection| &selection.follow)
     }
 
     /// Project the current selection's loaded baseline into a
@@ -266,6 +563,99 @@ mod tests {
             activity_overlay: ActivityOverlay::default(),
             skipped_activity_lines: 0,
         }
+    }
+
+    /// A session whose sole `SequenceStatus` is also its current frame, so a
+    /// live activity/narration record attached to `frame_id` is visible on
+    /// `tree().roots[0]` for assertion.
+    fn session_with_active_frame(run_id: &str, frame_id: &str) -> Session {
+        serde_json::from_value(serde_json::json!({
+            "schema-version": "0.1.0",
+            "session-id": format!("{run_id}-session"),
+            "run-id": run_id,
+            "trait-id": "fixture-trait",
+            "current-run-index": 0,
+            "status": "awaiting-agent-output",
+            "provenance": {
+                "started-by": {"surface": "test", "caller": "detail-fixture"},
+                "state-source": "test",
+            },
+            "active-path": [{"kind": "procedure", "id": frame_id, "index": 0}],
+            "ledger": {
+                "run-id": run_id,
+                "trait-id": "fixture-trait",
+                "current-run-index": 0,
+                "final-state": "running",
+                "sequence-statuses": [{
+                    "sequence-index": 0,
+                    "run-index": 0,
+                    "item-id": frame_id,
+                    "title": frame_id,
+                    "status": "ready",
+                    "reason": "",
+                    "position-path": [],
+                }],
+            },
+            "state-digest": format!("sha256:fixture-{run_id}"),
+        }))
+        .expect("fixture session")
+    }
+
+    fn wire_row(
+        repo_key: &str,
+        ledger_path: &str,
+        run_id: &str,
+        live: bool,
+        modified_epoch_secs: u64,
+    ) -> CenterPublicRow {
+        CenterPublicRow {
+            summary: RunSummary {
+                run_id: run_id.to_string(),
+                ..RunSummary::unreadable(run_id.to_string(), "fixture".to_string())
+            },
+            repo_key: repo_key.to_string(),
+            repo_path: format!("/{repo_key}"),
+            ledger_path: ledger_path.to_string(),
+            live,
+            modified_epoch_secs,
+        }
+    }
+
+    /// A wire row whose `summary` is derived from `session` the same way
+    /// `apply`'s just-established fingerprint is — so a delta built from
+    /// this row against an already-`Loaded` `session` is genuinely
+    /// "nothing changed", not merely two independently hand-built
+    /// `RunSummary`s that happen to differ.
+    fn matching_wire_row(
+        session: &Session,
+        repo_key: &str,
+        ledger_path: &str,
+        live: bool,
+        modified_epoch_secs: u64,
+    ) -> CenterPublicRow {
+        CenterPublicRow {
+            summary: RunSummary::from_session(session),
+            repo_key: repo_key.to_string(),
+            repo_path: format!("/{repo_key}"),
+            ledger_path: ledger_path.to_string(),
+            live,
+            modified_epoch_secs,
+        }
+    }
+
+    fn narration(at_epoch_ms: u64, frame_id: &str, text: &str) -> ActivityRecord {
+        ActivityRecord::Narration {
+            at_epoch_ms,
+            frame_id: frame_id.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    fn activity_delta(row: &CenterPublicRow, record: ActivityRecord) -> LinkUpdate {
+        LinkUpdate::Delta(CenterDelta::ActivityLine {
+            row: Box::new(row.clone()),
+            activity: record,
+        })
     }
 
     #[test]
@@ -371,5 +761,432 @@ mod tests {
         assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
         let tree = detail.tree().expect("loaded selection projects a tree");
         assert_eq!(tree.header.title, "fixture-trait");
+    }
+
+    #[test]
+    fn activity_deltas_for_the_selected_run_mutate_the_overlay_and_issue_no_request() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(
+            request.generation,
+            Ok(baseline(session_with_active_frame("run-a", "the-frame")))
+        ));
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+
+        for (index, text) in ["first", "second", "third"].iter().enumerate() {
+            let outcome = detail.follow(&activity_delta(
+                &wire,
+                narration(index as u64 + 1, "the-frame", text),
+            ));
+            assert!(outcome.request.is_none(), "no re-read from activity alone");
+            assert!(outcome.changed);
+        }
+        let tree = detail.tree().unwrap();
+        assert_eq!(tree.roots[0].narration.as_deref(), Some("third"));
+    }
+
+    #[test]
+    fn row_changed_issues_a_request_only_when_the_fingerprint_moves() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 10);
+        // This wire row's summary was hand-built (`wire_row`, not
+        // `matching_wire_row`), so it genuinely differs from the fingerprint
+        // `apply` just established from the loaded session — the first
+        // delta below is a real structural move, not an artifact of an
+        // unestablished fingerprint.
+        let moving = LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(wire.clone()),
+        });
+        assert!(detail.follow(&moving).request.is_some());
+
+        let same_fingerprint = LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(wire.clone()),
+        });
+        let outcome = detail.follow(&same_fingerprint);
+        assert!(
+            outcome.request.is_none(),
+            "identical fingerprint issues no request"
+        );
+
+        let mut moved = wire.clone();
+        moved.modified_epoch_secs = 20;
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(moved),
+        }));
+        assert!(
+            outcome.request.is_some(),
+            "a moved fingerprint issues exactly one request"
+        );
+    }
+
+    #[test]
+    fn first_identical_row_after_seed_issues_no_request() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let session = session("run-a");
+        assert!(detail.apply(request.generation, Ok(baseline(session.clone()))));
+
+        // Same modified_epoch_secs as `row()`'s fixture default (0) and a
+        // summary derived from the very session that was just loaded: this
+        // is the honest "nothing changed" case for the first delta a fresh
+        // selection ever observes.
+        let wire = matching_wire_row(&session, "repo-a", "/repo-a/run.json", true, 0);
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(wire),
+        }));
+        assert!(
+            outcome.request.is_none(),
+            "the first row update after the seed load must not force a re-read \
+             when nothing actually changed"
+        );
+    }
+
+    #[test]
+    fn session_title_activity_then_row_changed_issues_no_request() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let session = session("run-a");
+        assert!(detail.apply(request.generation, Ok(baseline(session.clone()))));
+
+        let wire = matching_wire_row(&session, "repo-a", "/repo-a/run.json", true, 0);
+
+        // The center's own ordering (`center.rs:2539-2554`): a `SessionTitle`
+        // sidecar line lands as an `ActivityLine` first, immediately
+        // followed by a `RowChanged` carrying the rewritten title. Neither
+        // must cost a ledger read — the overlay already has the title, and
+        // the fingerprint clears `title` before comparing.
+        let title_line = detail.follow(&activity_delta(
+            &wire,
+            ActivityRecord::SessionTitle {
+                at_epoch_ms: 1,
+                title: "a live title".to_string(),
+            },
+        ));
+        assert!(
+            title_line.request.is_none(),
+            "an activity line never issues a ledger read"
+        );
+
+        let mut retitled = wire;
+        retitled.summary.title = Some("a live title".to_string());
+        let row_changed = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(retitled),
+        }));
+        assert!(
+            row_changed.request.is_none(),
+            "a title-only rewrite following SessionTitle must not force a re-read"
+        );
+    }
+
+    #[test]
+    fn deltas_for_a_different_ledger_path_never_touch_the_selection() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+
+        let other = wire_row("repo-a", "/repo-a/other.json", "other-run", true, 999);
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(other.clone()),
+        }));
+        assert!(!outcome.changed);
+        assert!(outcome.request.is_none());
+
+        let outcome = detail.follow(&activity_delta(&other, narration(1, "x", "text")));
+        assert!(!outcome.changed);
+        assert!(outcome.request.is_none());
+    }
+
+    #[test]
+    fn activity_arriving_while_loading_is_replayed_after_the_baseline_lands_and_stale_ones_are_dropped()
+     {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+
+        // Arrives while still Loading: buffered.
+        let outcome = detail.follow(&activity_delta(
+            &wire,
+            narration(5, "the-frame", "buffered-first"),
+        ));
+        assert!(outcome.request.is_none());
+        assert!(
+            !outcome.changed,
+            "a buffered record has nothing to show yet"
+        );
+
+        // A second, newer record buffers too.
+        detail.follow(&activity_delta(
+            &wire,
+            narration(10, "the-frame", "buffered-second"),
+        ));
+
+        // The seed's sidecar already carried a record at ms=8, so the
+        // baseline's overlay watermark is 8 when the load lands.
+        let mut seed_overlay = ActivityOverlay::default();
+        seed_overlay.apply_record(&narration(8, "the-frame", "seed"));
+        let mut seeded_baseline = baseline(session_with_active_frame("run-a", "the-frame"));
+        seeded_baseline.activity_overlay = seed_overlay;
+        assert!(detail.apply(request.generation, Ok(seeded_baseline)));
+
+        // ms=5 predates the watermark (8) and must not roll ms=10 back; the
+        // replay order (5 before 10) does not matter since apply_live_record
+        // rejects on watermark, not arrival order.
+        let tree = detail.tree().unwrap();
+        assert_eq!(
+            tree.roots[0].narration.as_deref(),
+            Some("buffered-second"),
+            "the newer replayed record wins; the stale one is dropped"
+        );
+    }
+
+    #[test]
+    fn down_marks_stale_a_delta_while_stale_is_dropped_and_a_recovery_snapshot_resyncs_once() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+
+        let outcome = detail.follow(&LinkUpdate::Down("subscription closed".to_string()));
+        assert!(outcome.changed);
+        assert!(matches!(
+            detail.follow_state(),
+            Some(FollowState::Stale { .. })
+        ));
+
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 50);
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(wire.clone()),
+        }));
+        assert!(!outcome.changed, "a delta while stale must change nothing");
+        assert!(outcome.request.is_none());
+
+        let outcome = detail.follow(&LinkUpdate::Snapshot(vec![wire]));
+        assert!(outcome.changed);
+        assert_eq!(
+            outcome
+                .request
+                .expect("exactly one resync request")
+                .ledger_path,
+            Utf8PathBuf::from("/repo-a/run.json")
+        );
+        assert!(matches!(
+            detail.follow_state(),
+            Some(FollowState::Following)
+        ));
+
+        // A duplicate/first snapshot while already Following issues nothing.
+        let again = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 50);
+        let outcome = detail.follow(&LinkUpdate::Snapshot(vec![again]));
+        assert!(outcome.request.is_none());
+    }
+
+    #[test]
+    fn ended_for_the_selection_marks_it_not_live_and_stale_with_no_request() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::Ended {
+            row: Box::new(wire),
+        }));
+        assert!(outcome.changed);
+        assert!(outcome.request.is_none());
+        assert!(matches!(
+            detail.follow_state(),
+            Some(FollowState::Stale { .. })
+        ));
+        assert!(
+            detail.tree().is_some(),
+            "the last authoritative tree stays visible"
+        );
+    }
+
+    #[test]
+    fn a_resync_failure_keeps_the_previous_tree_and_reports_stale() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+
+        let mut moved = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 99);
+        moved.summary.run_id = "run-a".to_string();
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(moved),
+        }));
+        let resync = outcome.request.expect("fingerprint moved, resync issued");
+
+        assert!(detail.apply(resync.generation, Err("transient read error".to_string())));
+        assert!(matches!(
+            detail.follow_state(),
+            Some(FollowState::Stale { .. })
+        ));
+        let tree = detail
+            .tree()
+            .expect("the previous Loaded tree stays visible");
+        assert_eq!(tree.header.title, "fixture-trait");
+    }
+
+    #[test]
+    fn a_live_flip_via_row_changed_unfreezes_the_header_with_no_ledger_read() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let session = session("run-a");
+        assert!(detail.apply(request.generation, Ok(baseline(session.clone()))));
+        let before = detail.tree().unwrap().header.run_state;
+
+        // The first row delta this selection observes: same fingerprint as
+        // the just-loaded session, only `live` flips — the fact the ledger
+        // does not own. No establishing delta needed; `apply` already set
+        // the fingerprint from the loaded session.
+        let live = matching_wire_row(&session, "repo-a", "/repo-a/run.json", true, 0);
+        let mut flipped = live;
+        flipped.live = false;
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(flipped),
+        }));
+        assert!(outcome.changed);
+        assert!(
+            outcome.request.is_none(),
+            "a live flip alone costs no re-read"
+        );
+        let after = detail.tree().unwrap().header.run_state;
+        assert_ne!(before, after, "the frozen live capture must unfreeze");
+    }
+
+    #[test]
+    fn activity_arriving_during_loaded_resync_survives_baseline_replacement() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(
+            request.generation,
+            Ok(baseline(session_with_active_frame("run-a", "the-frame")))
+        ));
+
+        // Fingerprint moves, issuing a resync while `load` stays `Loaded`
+        // with the old baseline (no loading flash).
+        let mut moved = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 99);
+        moved.summary.run_id = "run-a".to_string();
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(moved.clone()),
+        }));
+        let resync = outcome.request.expect("fingerprint moved, resync issued");
+
+        // An activity record arrives while that resync is in flight.
+        let outcome = detail.follow(&activity_delta(
+            &moved,
+            narration(50, "the-frame", "during-resync"),
+        ));
+        assert!(
+            outcome.changed,
+            "the displayed old overlay updates immediately for feedback"
+        );
+
+        // The background read lands with a fresh baseline that does not
+        // carry the record above (it was read before/independently of the
+        // sidecar append).
+        assert!(detail.apply(
+            resync.generation,
+            Ok(baseline(session_with_active_frame("run-a", "the-frame")))
+        ));
+
+        let tree = detail.tree().unwrap();
+        assert_eq!(
+            tree.roots[0].narration.as_deref(),
+            Some("during-resync"),
+            "a record that arrived during a resync must survive the baseline replacement"
+        );
+    }
+
+    #[test]
+    fn ended_while_stale_is_ignored() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+
+        detail.follow(&LinkUpdate::Down("subscription closed".to_string()));
+        let before_follow = detail.follow_state().cloned();
+        let before_tree = detail.tree();
+
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::Ended {
+            row: Box::new(wire),
+        }));
+        assert!(
+            !outcome.changed,
+            "Ended must be a no-op while already stale"
+        );
+        assert!(outcome.request.is_none());
+        assert_eq!(detail.follow_state().cloned(), before_follow);
+        assert_eq!(detail.tree(), before_tree);
+
+        let activity = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+        let outcome = detail.follow(&activity_delta(&activity, narration(1, "x", "text")));
+        assert!(!outcome.changed, "a delta must also be a no-op while stale");
+        assert_eq!(detail.tree(), before_tree);
+    }
+
+    #[test]
+    fn selection_created_while_center_is_stale_resyncs_on_recovery() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select_stale(
+                &row("repo-a", "/repo-a/run.json", "run-a"),
+                "subscription closed".to_string(),
+            )
+            .unwrap();
+        assert!(matches!(
+            detail.follow_state(),
+            Some(FollowState::Stale { .. })
+        ));
+        assert!(detail.apply(request.generation, Ok(baseline(session("run-a")))));
+        assert!(
+            matches!(detail.follow_state(), Some(FollowState::Stale { .. })),
+            "the selection must stay stale after its own initial load lands"
+        );
+
+        // A delta arriving before recovery must not resync or un-stale it.
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 50);
+        let outcome = detail.follow(&LinkUpdate::Delta(CenterDelta::RowChanged {
+            row: Box::new(wire.clone()),
+        }));
+        assert!(!outcome.changed);
+        assert!(outcome.request.is_none());
+
+        let outcome = detail.follow(&LinkUpdate::Snapshot(vec![wire]));
+        assert!(outcome.changed);
+        assert!(
+            outcome.request.is_some(),
+            "recovery must issue exactly one resync request"
+        );
+        assert!(matches!(
+            detail.follow_state(),
+            Some(FollowState::Following)
+        ));
     }
 }

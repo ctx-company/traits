@@ -16,9 +16,10 @@ Do not lose or duplicate activity at the boundary between the authoritative seed
 ## Done when
 An integration proof opens a live run, observes its native frame tree update as frames land through center deltas with no polling or repeated ledger reads, and demonstrates explicit stale or recovery behavior after subscription loss. After the run finishes, closing and reopening the application produces detail identical to the final live view from authoritative reconstruction. The standalone desktop lane and `just test-full` pass without adding gpui to root workspace resolution or existing CI cost.
 """
+
 [relations]
-parent = "0257"
 depends-on = ["0257.2"]
+parent = "0257"
 
 [[checks]]
 name = "workspace landing gate remains green"
@@ -27,4 +28,4 @@ timeout-ms = 900000
 
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''

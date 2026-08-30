@@ -7,6 +7,7 @@
 use gpui::prelude::*;
 use gpui::{AnyElement, SharedString, div, px};
 
+use crate::detail::FollowState;
 use crate::detail_tree::{DetailNode, DetailTree, FrameState};
 
 fn state_word(state: FrameState) -> &'static str {
@@ -136,6 +137,24 @@ pub fn failed_element(reason: &str) -> AnyElement {
         .into_any_element()
 }
 
+/// The live-follow banner: `None` while `Following` (nothing to say), a
+/// labelled strip while `Stale` — worded to mirror `CenterFace::header`'s
+/// existing staleness shape ("detail unreachable — showing state as of …;
+/// retrying") so the two faces never word the same condition two ways.
+pub fn follow_element(follow: &FollowState) -> Option<AnyElement> {
+    match follow {
+        FollowState::Following => None,
+        FollowState::Stale { reason } => Some(
+            div()
+                .id("detail-follow-stale")
+                .child(format!(
+                    "detail unreachable — showing last known state ({reason}); retrying"
+                ))
+                .into_any_element(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +206,14 @@ mod tests {
     fn loading_and_failed_states_build_without_a_tree() {
         let _loading: AnyElement = loading_element();
         let _failed: AnyElement = failed_element("bad json");
+    }
+
+    #[test]
+    fn follow_element_is_absent_while_following_and_present_while_stale() {
+        assert!(follow_element(&FollowState::Following).is_none());
+        let _stale: AnyElement = follow_element(&FollowState::Stale {
+            reason: "subscription closed".to_string(),
+        })
+        .expect("a stale follow state renders a banner");
     }
 }

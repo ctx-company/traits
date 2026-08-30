@@ -8,7 +8,7 @@ use gpui::{
 
 use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
-use crate::detail::{self, RunDetail};
+use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
 use crate::run_row::{RepoScope, RunRow};
 
@@ -164,6 +164,17 @@ impl CenterFace {
         matches!(self.state, CenterState::Stale { .. })
     }
 
+    /// The outage reason, if the face is currently `Stale` — carried into a
+    /// fresh detail selection so a row picked from a retained stale list
+    /// starts stale itself, rather than looking current while ignoring the
+    /// eventual recovery snapshot.
+    pub fn stale_reason(&self) -> Option<&str> {
+        match &self.state {
+            CenterState::Stale { reason, .. } => Some(reason.as_str()),
+            _ => None,
+        }
+    }
+
     fn connected_header(&self, len: usize) -> String {
         match &self.scope {
             RepoScope::All => format!("{len} runs"),
@@ -197,14 +208,22 @@ impl Shell {
         let updates = center_link::start(None);
         cx.spawn(async move |this, cx| {
             while let Ok(update) = updates.recv().await {
-                if this
-                    .update(cx, |shell, cx| {
-                        shell.face.apply(update, SystemTime::now());
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    break;
+                let outcome = this.update(cx, |shell, cx| {
+                    // Detail sees the update first — it reads nothing from
+                    // the face, and feeding it first keeps stream order
+                    // exact for both consumers.
+                    let outcome = shell.detail.follow(&update);
+                    shell.face.apply(update, SystemTime::now());
+                    cx.notify();
+                    outcome
+                });
+                match outcome {
+                    Ok(outcome) => {
+                        if let Some(request) = outcome.request {
+                            let _ = this.update(cx, |shell, cx| shell.spawn_load(request, cx));
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
         })
@@ -236,10 +255,26 @@ impl Shell {
         else {
             return;
         };
-        let Some(request) = self.detail.select(row) else {
+        let request = match self.face.stale_reason() {
+            Some(reason) => self.detail.select_stale(row, reason.to_string()),
+            None => self.detail.select(row),
+        };
+        let Some(request) = request else {
             cx.notify();
             return;
         };
+        self.spawn_load(request, cx);
+        cx.notify();
+    }
+
+    /// Run one background full-session read for `request` and fold its
+    /// outcome back into `self.detail`. The one background-executor /
+    /// generation-guard / notify-on-real-change path, shared by the initial
+    /// selection and every follow-driven resync. `detail_task` stays a
+    /// single slot; assigning a new task cancels a superseded in-flight
+    /// read, a courtesy on top of the generation guard rather than the guard
+    /// itself — reads are read-only, so a cancelled one loses nothing.
+    fn spawn_load(&mut self, request: LoadRequest, cx: &mut Context<Self>) {
         let generation = request.generation;
         self.detail_task = Some(cx.spawn(async move |this, cx| {
             let outcome = cx
@@ -251,7 +286,6 @@ impl Shell {
                 }
             });
         }));
-        cx.notify();
     }
 }
 
@@ -301,13 +335,20 @@ impl Render for Shell {
                 .map(|tree| detail_view::detail_element(&tree))
                 .unwrap_or_else(|| div().into_any_element()),
         };
-        div()
+        let follow_banner = self
+            .detail
+            .follow_state()
+            .and_then(detail_view::follow_element);
+        let mut column = div()
             .flex()
             .flex_col()
             .size_full()
             .child(header)
-            .child(list)
-            .child(detail_pane)
+            .child(list);
+        if let Some(banner) = follow_banner {
+            column = column.child(banner);
+        }
+        column.child(detail_pane)
     }
 }
 

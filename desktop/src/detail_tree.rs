@@ -41,8 +41,11 @@
 //! `SessionState::derive`, the same function `run_row::row_state` already
 //! calls, so `Running`/`WaitingOnHuman`/`WaitingOnAgent`/`Blocked`/`Failed`/
 //! `Cancelled` are decided in exactly one place shared with the list.
-//! `live` is a point-in-time capture from `RunRow::live` at selection time;
-//! refreshing it live is 0257.3's job, not this one's.
+//! `live` is refreshed from every `RowChanged`/`Appeared`/`Ended` delta while
+//! a selection is following the center stream (`detail::RunDetail::follow`)
+//! — no longer the point-in-time capture from `RunRow::live` at selection
+//! time it started as; `project` still just takes the current value as a
+//! parameter and has nothing more to do with how it advances.
 //!
 //! # Activity: strictly embellishment
 //!
@@ -393,6 +396,11 @@ pub struct ActivityOverlay {
     session_title: Option<String>,
     activity_by_frame: HashMap<String, ActivityLine>,
     narration_by_frame: HashMap<String, String>,
+    /// The latest `at_epoch_ms` folded in so far. Used only by
+    /// `apply_live_record` to reject a record older than what has already
+    /// been folded — a live-stream boundary guard, not a durable-evidence
+    /// concern, so `from_records`' historical fold never needs it.
+    watermark_ms: u64,
 }
 
 impl ActivityOverlay {
@@ -406,9 +414,10 @@ impl ActivityOverlay {
 
     /// `pub(crate)` rather than private: this is the exact fold seam
     /// `detail::load` uses to build the retained overlay once, and the seam
-    /// 0257.3's live delta reducer will feed `CenterDelta::ActivityLine`
-    /// into — never rebuilt on each projection.
+    /// `detail::follow` feeds every `CenterDelta::ActivityLine` into —
+    /// never rebuilt on each projection.
     pub(crate) fn apply_record(&mut self, record: &ActivityRecord) {
+        self.watermark_ms = self.watermark_ms.max(record.at_epoch_ms());
         match record {
             ActivityRecord::Activity { event, .. } => {
                 self.activity_by_frame.insert(
@@ -433,6 +442,22 @@ impl ActivityOverlay {
         }
     }
 
+    /// Fold one record that arrived live, rejecting it if it is strictly
+    /// older than the watermark: a `pending` record replayed from before the
+    /// seed's sidecar read must never roll a newer, already-folded line back
+    /// to a superseded one. Equal timestamps are kept — millisecond-
+    /// resolution collisions are idempotent under `apply_record`'s
+    /// last-write-wins fold. Wall-clock is the stamp source, so a backwards
+    /// clock jump can drop one derived line; tolerable for derived evidence.
+    /// Returns whether the overlay actually changed.
+    pub(crate) fn apply_live_record(&mut self, record: &ActivityRecord) -> bool {
+        if record.at_epoch_ms() < self.watermark_ms {
+            return false;
+        }
+        self.apply_record(record);
+        true
+    }
+
     fn activity_for(&self, frame_id: &str) -> Option<ActivityLine> {
         self.activity_by_frame.get(frame_id).cloned()
     }
@@ -443,11 +468,13 @@ impl ActivityOverlay {
 }
 
 /// Project `session` (plus its already-folded, bounded activity overlay)
-/// into a [`DetailTree`]. `live` is the row's kernel-backed liveness flag,
-/// captured at selection time. The overlay is folded once by the caller
-/// (`detail::load`) — this function never re-folds a raw sidecar, so it
-/// stays cheap to call on every render regardless of a long run's sidecar
-/// size.
+/// into a [`DetailTree`]. `live` is the row's kernel-backed liveness flag, as
+/// currently tracked by the caller's selection (`detail::RunDetail` keeps it
+/// refreshed from every `RowChanged`/`Appeared`/`Ended` delta, not just its
+/// value at selection time) — this function itself just takes whatever value
+/// it is handed. The overlay is folded once by the caller (`detail::load`)
+/// — this function never re-folds a raw sidecar, so it stays cheap to call
+/// on every render regardless of a long run's sidecar size.
 pub fn project(session: &Session, overlay: &ActivityOverlay, live: bool) -> DetailTree {
     let summary = RunSummary::from_session(session);
     let header = build_header(session, &summary, overlay, live);
@@ -998,6 +1025,38 @@ mod tests {
         assert_eq!(
             overlay.narration_for("the-frame").as_deref(),
             Some("second narration")
+        );
+    }
+
+    #[test]
+    fn apply_live_record_rejects_a_record_older_than_the_watermark() {
+        let mut overlay = ActivityOverlay::default();
+        overlay.apply_record(&ActivityRecord::Narration {
+            at_epoch_ms: 10,
+            frame_id: "the-frame".to_string(),
+            text: "newer".to_string(),
+        });
+        let changed = overlay.apply_live_record(&ActivityRecord::Narration {
+            at_epoch_ms: 5,
+            frame_id: "the-frame".to_string(),
+            text: "stale".to_string(),
+        });
+        assert!(!changed, "an older record must be rejected, not applied");
+        assert_eq!(
+            overlay.narration_for("the-frame").as_deref(),
+            Some("newer"),
+            "the watermark must protect the already-folded newer line"
+        );
+
+        let changed = overlay.apply_live_record(&ActivityRecord::Narration {
+            at_epoch_ms: 10,
+            frame_id: "the-frame".to_string(),
+            text: "equal-timestamp".to_string(),
+        });
+        assert!(changed, "an equal timestamp is kept, not rejected");
+        assert_eq!(
+            overlay.narration_for("the-frame").as_deref(),
+            Some("equal-timestamp")
         );
     }
 

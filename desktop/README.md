@@ -284,9 +284,13 @@ changed — the same discipline `Dashboard::apply` established in 0256.4, so
 below) to keep `clippy::large_enum_variant` quiet.
 
 `RunDetail` is a **sibling** of `CenterFace`/`Dashboard`, not a member of
-either: a center reconnect installs a fresh `Dashboard` snapshot but leaves
-detail untouched (no re-read — "exactly once" holds across reconnects too),
-and a delta cannot reach detail at all in this slice.
+either: a center reconnect installs a fresh `Dashboard` snapshot, and
+`select`'s "exactly once" rule still holds across reconnects — a selection
+is never re-read merely because the center reconnected. What changed in
+0257.3: every `LinkUpdate` now also reaches detail via `RunDetail::follow`,
+which is how a selection advances live and recovers from an outage without
+polling or a second ledger read per delta — see "Live follow (0257.3)"
+below.
 
 **gpui wiring** (`src/shell.rs`) is deliberately thin: `Shell::select_ledger`
 looks the row up by ledger path, calls `RunDetail::select`, and — only when
@@ -316,10 +320,8 @@ env-mutating and stays the only `#[test]` in its target, per the convention
 `tests/support/mod.rs` documents.
 
 A selected run disappearing from the list (an `Ended` delta) or the
-subscription going `Stale` while detail is open are left alone on purpose:
-detail is independent of `Dashboard`, so it simply persists. Reconciling
-those lifecycle edges and live-follow of detail from center activity deltas
-are **0257.3**'s contract.
+subscription going `Stale` while detail is open are reconciled by
+`RunDetail::follow` — see "Live follow (0257.3)" below.
 
 ## Native frame tree (0257.2)
 
@@ -360,10 +362,11 @@ is repository-relative work this crate does not do:
   equals `next_frame.position_path`, falling back to `active_path`), whose
   state word instead comes from `SessionState::derive`, the exact function
   `run_row::row_state` already calls, so `Running`/`WaitingOnAgent`/etc. are
-  decided in one shared place. `live` is a point-in-time capture from
-  `RunRow::live` at selection time (`detail.rs`'s `Selection::live`); a run
-  that finishes while its detail is open keeps showing that captured value
-  until 0257.3's live-follow lands.
+  decided in one shared place. `live` is kept refreshed from every
+  `RowChanged`/`Appeared`/`Ended` delta while a selection is following the
+  center stream (`detail.rs`'s `Selection::live`, driven by `RunDetail::
+  follow` — see "Live follow (0257.3)" below) rather than the point-in-time
+  capture from `RunRow::live` at selection time it started as.
 - The header reuses `ctx_traits_io::run_summary::RunSummary::from_session`
   for every fact (title, task value, elapsed, tokens, landing, stop reason,
   next frame kind) and `run_row.rs`'s `elapsed_text`/`token_value`/
@@ -411,3 +414,143 @@ tree is unchanged once the sidecar file is deleted entirely — proof that
 the sidecar can only ever embellish. It also builds the real element tree
 via `detail_view::detail_element`, and the `Loading`/`Failed` states, with
 no `App`.
+
+## Live follow (0257.3)
+
+An open detail view now stays current as frames land, without polling and
+without re-reading the ledger for every update.
+
+**The two-lane rule.** `CenterPublicRow.summary` (`RunSummary`) does not
+carry `ledger.sequence_statuses`, so the frame tree's node set can never be
+advanced from a delta's payload alone — only a ledger re-read can grow or
+reshape it. Activity, by contrast, arrives on the wire in full
+(`CenterDelta::ActivityLine`'s `ActivityRecord`) and needs no read at all.
+So: **activity advances from deltas with zero IO; frame structure advances
+from a coalesced, evidence-gated re-read of the ledger**, gated on
+center-supplied evidence that the ledger actually changed, at most once per
+landed frame, never once per delta. `RunDetail::follow(&LinkUpdate)` is the
+one entry point this drives through, mirroring `CenterFace::apply`'s shape
+and taking the update by reference so `Shell` can feed detail first (it
+reads nothing from the face) and hand the owned update to the face
+unchanged — preserving stream order exactly for both consumers.
+
+**The fingerprint.** `(row.modified_epoch_secs, row.summary with title
+cleared)`. `RunSummary` derives `PartialEq`, so this catches every
+ledger-derived fact the center projects — status, `current_sequence_title`,
+elapsed, tokens, landing, stop reason, and so on — while ignoring `title`,
+which the center rewrites from a sidecar `SessionTitle` line the overlay
+already carries, immediately followed by a `RowChanged` that must not
+itself cost a read. A `RowChanged`/`Appeared` whose fingerprint is
+unchanged from the selection's current one issues nothing; one whose
+fingerprint moved bumps the generation and returns exactly one
+`LoadRequest`, coalescing for free through the existing generation guard —
+the newest trigger always supersedes an in-flight read, so there is no
+extra in-flight bookkeeping and no way to starve.
+
+Accepted, documented bound: `modified_epoch_secs` is **1-second
+resolution** — this is a property of the wire itself
+(`CenterPublicRow`), not just this crate's own comparison, and is easy to
+observe directly: two ledger writes landed inside the same wall-clock
+second produce identical `CenterPublicRow`s and the center emits no
+`RowChanged` between them at all (`detail_live_follow.rs` has to space its
+frame-landing writes past a full second for exactly this reason). Bounded
+and self-healing — the tree converges on the next write that crosses a
+second boundary, and always on the terminal transition (a status change is
+a fingerprint change). The rigorous fix, carrying the session's
+`state_digest` on `CenterPublicRow`, is an `io`-crate change outside this
+slice's scope.
+
+The CLI's `refresh_attached_view`
+(`modules/cli/src/app/dashboard.rs:3518`) solves the same "did the ledger
+change" question with a `state_digest` compare on a poll tick. The desktop
+does the same digest-vs-sidecar split but on a push stream instead of a
+tick — parity of design, not shared code (the desktop must not depend on
+`ctx-traits-cli`, and a tick is exactly what this task forbids).
+
+**Activity replay at the seed/resync boundary.** An `ActivityLine` for the
+selected run, while `Following`, folds straight into the *displayed*
+`ActivityOverlay` (`ActivityOverlay::apply_live_record`) whenever `load` is
+already `Loaded` — for immediate feedback. Independently, `Selection`
+tracks `in_flight: Option<u64>` — the generation of a load (seed or resync)
+that has not yet settled — separately from `load`, precisely because a
+resync deliberately *keeps* `load` at `Loaded` with the old baseline so the
+display never flashes back to `Loading`; `load`'s own state can therefore
+not be used to tell "is a read in flight". Whenever `in_flight` is set, the
+same record is *also* buffered in a capped `pending` queue (256, oldest
+dropped: the overlay is last-write-wins per `frame_id`, so the oldest
+buffered record is precisely the one whose loss is invisible) and replayed
+once that read lands — this is what stops a wholesale baseline replacement
+from silently dropping a record that arrived mid-resync. `ActivityOverlay`
+carries a `watermark_ms` (the latest `at_epoch_ms` folded in) so a replayed
+record from before the seed's own sidecar read can never roll a newer,
+already-folded line back to a superseded one — equal timestamps are kept,
+since millisecond-resolution collisions are idempotent under the
+last-write-wins fold.
+
+**Failure and recovery.** `Stale` is absorbing: `follow_delta` checks
+`selection.follow == Following` once, ahead of the whole `CenterDelta`
+match, so every delta variant — activity, `RowChanged`/`Appeared`, and
+`Ended` alike — is a no-op while stale, not just the two that had their own
+copy of the check historically. Only a recovery `Snapshot` closes it.
+
+- `Down(reason)` marks the selection `Stale { reason }`; the last
+  authoritative tree stays visible and labelled (`detail_view::
+  follow_element`, worded to mirror `CenterFace::header`'s existing
+  staleness shape so the two faces never word the same condition two ways).
+- A selection made from a row served by an already-`Stale` `CenterFace`
+  (`RunDetail::select_stale`, used by `Shell::select_ledger` whenever
+  `CenterFace::stale_reason()` is `Some`) starts `Stale` too, rather than
+  looking current: without this, a run picked from a retained stale list
+  would ignore the eventual recovery snapshot and could never resync a
+  change made during the outage.
+- `Ended` for the selected run — reserved by the center for a ledger that
+  has actually disappeared — sets `live = false` and `Stale` with a
+  distinct reason, and issues **no** re-read: reading a deleted ledger
+  would only turn a good tree into `Failed`.
+- A recovery `Snapshot` while `Stale` returns to `Following` and issues
+  **exactly one** resync `LoadRequest`, whether or not the snapshot still
+  carries a matching row — the ledger is authoritative either way. An
+  already-`Following` selection (the first snapshot, or a duplicate) issues
+  nothing.
+- A **resync**'s failure keeps the previous `Loaded` baseline on screen and
+  reports `Stale` instead of clobbering it with `Failed` — the rule is
+  state-based (`Loaded` at the time of the error means "this was a
+  resync"), so it needs no extra flag on the request. A *first* load's
+  failure still lands as `Failed`, since a fresh selection is never
+  `Loaded` when its read is issued. The currently displayed baseline is
+  never flashed back to `Loading` during a resync either, for the same
+  reason.
+
+**Reuse.** `Shell::spawn_load` is the one background-executor /
+generation-guard / notify-on-real-change path, extracted so both the
+initial selection and every follow-driven resync share it; `detail_task`
+staying a single slot means assigning a new task cancels a superseded
+in-flight read as a courtesy on top of the generation guard (reads are
+read-only, so nothing is lost), not the correctness guard itself — the
+generation carried on the request already is.
+
+**Restart identity.** A closed-and-reopened process discards all derived
+in-memory detail (`RunDetail`, `ActivityOverlay`, `pending`, `follow`
+state) and reconstructs a fresh `DetailTree` from the ledger and its
+sidecar alone, exactly as the very first `select`/`load` does — there is no
+persisted live-follow state to go stale. `detail_live_follow.rs` proves
+this directly, and proves it is not merely a coincidence of the two paths
+happening to agree on the parts it checks: a freshly constructed
+`RunDetail` selecting the same row produces a `DetailTree` that is
+`assert_eq!`-equal, whole-struct, to the live-followed tree — and reading
+the ledger to build it leaves the ledger's bytes on disk unchanged.
+
+`tests/detail_live_follow.rs` drives a real in-process center (the
+`live_deltas.rs` pattern): seeds a one-frame ledger, lands two more frames
+by rewriting the ledger directly (the honest stand-in for a driver's
+frame-boundary write — no driver, no desktop-owned write path), and drains
+updates in stages — asserting the tree is exactly two nodes after the
+first landing and exactly three after the second, each transition costing
+**exactly one** re-read, never one per delta the scan-driven center happens
+to emit for the same write. It then appends sidecar narration for the last
+frame, rewrites the ledger to a genuinely terminal (`completed`) state, and
+asserts that transition too costs exactly one re-read and lands a terminal
+header. `tests/detail_stale_recovery.rs` drives `support::FakePeer` by hand
+to prove the disconnect/stale/delta-dropped/resync-once cycle without a
+real center in the loop. Both are env-mutating and stay the sole `#[test]`
+in their target, per the convention `tests/support/mod.rs` documents.

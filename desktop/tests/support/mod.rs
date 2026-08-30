@@ -196,6 +196,113 @@ pub fn write_activity_sidecar(ledger_path: &Utf8Path) {
         .expect("write truncated trailing line");
 }
 
+/// Append one more landed frame (`accepted`, top-level, no nesting) to an
+/// already-written ledger, using the same reader/writer production uses, and
+/// return the rewritten `Session`. The honest stand-in for "a frame lands"
+/// this task's Watch calls for — no driver, no desktop-owned write path.
+/// `active_path` is pointed at the new frame, mirroring the real invariant
+/// that the frame which just landed is the run's current position — the
+/// desktop tree only attaches activity/narration to the `current` node
+/// (`detail_tree::attach_overlay`), so a caller that wants live evidence to
+/// show up needs this, not just the `SequenceStatus`.
+pub fn append_landed_frame(path: &Utf8Path, item_id: &str, title: &str) -> Session {
+    use ctx_traits_core::procedure::runtime::{PathSegment, SequenceStatus, SequenceStatusKind};
+
+    let mut session =
+        ctx_traits_io::run_session::read_run_session(path).expect("read ledger to append a frame");
+    let sequence_index = session.ledger.sequence_statuses.len();
+    session.ledger.sequence_statuses.push(SequenceStatus {
+        sequence_index,
+        run_index: sequence_index,
+        item_id: Some(item_id.to_string()),
+        title: title.to_string(),
+        status: SequenceStatusKind::Accepted,
+        reason: String::new(),
+        position_path: Vec::new(),
+    });
+    session.active_path = vec![PathSegment {
+        kind: "procedure".to_string(),
+        id: Some(item_id.to_string()),
+        index: sequence_index,
+        iteration: None,
+        item_index: None,
+    }];
+    ctx_traits_io::run_session::write_run_session(path, &session)
+        .expect("rewrite ledger with the new frame");
+    session
+}
+
+/// Rewrite an already-written ledger to a terminal `completed` state (status,
+/// `ledger.final_state`, and `last_drive_outcome` all agreeing on
+/// `completed`), using the same reader/writer production uses, and return the
+/// rewritten `Session`. `last_drive_outcome` must be set alongside `status`:
+/// `SessionState::derive` treats a still-`interrupted`/`killed` outcome as
+/// authoritative over a `completed` status (a held driver lock's disposition
+/// outlives a later status edit), and this fixture's earlier orphan-repair
+/// pass (the center marks a nonterminal ledger with no live process as
+/// interrupted) would otherwise leave a `completed` status permanently
+/// reading as `Cancelled`.
+pub fn complete_session(path: &Utf8Path) -> Session {
+    use ctx_traits_core::procedure::runtime::FinalState;
+    use ctx_traits_core::procedure::session::{DriveOutcome, DriveOutcomeKind, Status};
+
+    let mut session =
+        ctx_traits_io::run_session::read_run_session(path).expect("read ledger to complete it");
+    session.status = Status::Completed;
+    session.ledger.final_state = FinalState::Completed;
+    session.last_drive_outcome = Some(DriveOutcome {
+        outcome: DriveOutcomeKind::Completed,
+        recorded_at_epoch: 0,
+        provider_credits_pause: None,
+        effective_budget: None,
+        token_usage: None,
+        exit_code: None,
+        rate_limit: None,
+        budget_pause: None,
+        tokens_by_model: None,
+        summons: None,
+    });
+    ctx_traits_io::run_session::write_run_session(path, &session)
+        .expect("rewrite ledger as completed");
+    session
+}
+
+/// Append one narration line to the sidecar next to `ledger_path`, for a
+/// caller driving a real live-follow scenario that needs a specific
+/// `frame_id` rather than the fixed one `write_activity_sidecar` writes.
+pub fn append_narration(ledger_path: &Utf8Path, frame_id: &str, text: &str) {
+    use ctx_traits_io::activity_sidecar::ActivitySidecarWriter;
+
+    let mut writer = ActivitySidecarWriter::open(ledger_path);
+    writer.append_narration(frame_id.to_string(), text.to_string());
+}
+
+/// Build a `CenterPublicRow` from a written ledger, exactly as the center
+/// would project it: `summary` via `RunSummary::from_session`,
+/// `modified_epoch_secs` from the ledger's own mtime. For hand-feeding a
+/// `follow` call in a test with no real center in the loop.
+pub fn row_from_ledger(
+    repo_key: &str,
+    ledger_path: &Utf8Path,
+    session: &Session,
+    live: bool,
+) -> CenterPublicRow {
+    let modified_epoch_secs = std::fs::metadata(ledger_path.as_std_path())
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    CenterPublicRow {
+        summary: RunSummary::from_session(session),
+        repo_key: repo_key.to_string(),
+        repo_path: format!("/{repo_key}"),
+        ledger_path: ledger_path.to_string(),
+        live,
+        modified_epoch_secs,
+    }
+}
+
 pub fn wire_row(repo_key: &str, ledger_path: &str, run_id: &str) -> CenterPublicRow {
     CenterPublicRow {
         summary: RunSummary {
