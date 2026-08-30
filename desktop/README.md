@@ -242,5 +242,83 @@ server-side subscriber until the center or process exits.
 served snapshot, drops the receiver while the peer stays silent, and asserts
 the peer observes client EOF within a bounded deadline.
 
-Row selection, run detail, control verbs, and virtualization remain out of
-scope for the dashboard entirely, for now.
+Control verbs and virtualization remain out of scope for the dashboard
+entirely, for now. Row selection and run detail are covered next.
+
+## Run detail (0257.1)
+
+Clicking a compact row now seeds **detail state**: one background,
+authoritative full-session read of that run's ledger, through
+`ctx_traits_io::run_session::read_run_session` — the same IO store boundary
+the CLI's own attach path uses — never a hand-rolled `std::fs::read_to_string`
++ `serde_json` in this crate.
+
+**Resolution.** A selection resolves to `RunRow::ledger_path`, the center's
+own primary key for a run, keyed alongside `repo_key` so two same-named runs
+in different repositories stay distinct at this layer too (matching
+`run_row.rs`'s `repository_separation_keeps_same_named_runs_distinct`
+guarantee for the list layer). This is deliberately **not** re-derived from
+`ctx_traits_io::state::global_runs_root(&row.repo_key)` plus
+`run_session::session_store_path(..)`: the center's runs root is
+env-overridable (`CTX_CENTER_RUNS_ROOT`), so that derivation diverges from
+the row's real `ledger_path` whenever the center is not serving out of the
+global runs root — including in this crate's own integration tests — and it
+would re-perform, from a second source, a resolution the center already
+shipped on the wire. Nothing in this slice reaches `current_repo_key()`,
+`current_global_runs_root()`, or `default_session_store()` (the one call in
+`run_session` that reads cwd); resolution is always center-supplied.
+
+**State machine** (`src/detail.rs`, gpui-free — unit-testable without an
+`App`, the same pattern `dashboard.rs` and `run_row.rs` document):
+`RunDetail::select` returns a `LoadRequest` the caller must run on a
+background executor, or `None` when no read is needed. Re-selecting the
+already-current selection is a no-op in every state (`Loading`, `Loaded`,
+`Failed`) — the "exactly once" rule; there is no retry-on-reclick, since a
+silent second full-ledger read is exactly what this task's contract forbids.
+`RunDetail::apply` ignores an outcome tagged with a superseded generation (a
+stale selection's result landing late) and otherwise transitions
+`Loading -> Loaded | Failed`, returning whether the visible state actually
+changed — the same discipline `Dashboard::apply` established in 0256.4, so
+`Shell` calls `cx.notify()` only on real change. `DetailLoad::Loaded` boxes
+`Session` to keep `clippy::large_enum_variant` quiet.
+
+`RunDetail` is a **sibling** of `CenterFace`/`Dashboard`, not a member of
+either: a center reconnect installs a fresh `Dashboard` snapshot but leaves
+detail untouched (no re-read — "exactly once" holds across reconnects too),
+and a delta cannot reach detail at all in this slice.
+
+**gpui wiring** (`src/shell.rs`) is deliberately thin: `Shell::select_ledger`
+looks the row up by ledger path, calls `RunDetail::select`, and — only when
+that returns a request — runs `detail::load` on gpui's **background**
+executor (`cx.background_spawn`, inside a foreground `cx.spawn` that does
+nothing but await it and hand the result back), so the filesystem read never
+blocks the UI thread. The generation carried on the request, not `Task`
+drop, is the correctness guard against a stale read overwriting a newer
+selection — storing the `Task` in `Shell::detail_task` (instead of
+`.detach()`) is a courtesy cancellation, not the rule. Each row's `ElementId`
+is its `ledger_path`, unique by construction (it is the center's primary
+key), which is exactly why it — not a shifting list index — is the click
+target's identity.
+
+**Presentation** is a placeholder only: a background tint on the selected
+row and one line below the list (`loading…` / `unreadable: <reason>` / a
+`run_id — trait_id — status` summary once loaded). This is explicitly
+**0257.2**'s territory to replace, not a design — no frame/state/nesting
+projection is built here.
+
+Reconstruction fixtures (`tests/detail_reconstruction.rs`) cover a live and a
+finished session baseline written with `write_run_session` (the same writer
+production uses), walk the real row -> selection -> load path with no
+center, and prove the same baseline reappears from a freshly constructed
+`RunDetail` — a simulated process restart. `tests/detail_repository_identity.rs`
+points `HOME` at an empty scratch directory and the process cwd outside any
+ctx repository, then proves two rows sharing a `run_id`/`session_id` but
+carrying different `repo_key`s each resolve to their own ledger — it is
+env-mutating and stays the only `#[test]` in its target, per the convention
+`tests/support/mod.rs` documents.
+
+A selected run disappearing from the list (an `Ended` delta) or the
+subscription going `Stale` while detail is open are left alone on purpose:
+detail is independent of `Dashboard`, so it simply persists. Reconciling
+those lifecycle edges, live-follow of detail from center activity deltas,
+and the native detail frame tree itself are **0257.2/.3**'s contract.

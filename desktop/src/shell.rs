@@ -2,11 +2,13 @@ use std::time::SystemTime;
 
 use gpui::prelude::*;
 use gpui::{
-    Bounds, Context, Pixels, Render, Size, TitlebarOptions, Window, WindowOptions, div, px, size,
+    Bounds, Context, Pixels, Render, SharedString, Size, TitlebarOptions, Window, WindowOptions,
+    div, px, size,
 };
 
 use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
+use crate::detail::{self, RunDetail};
 use crate::run_row::{RepoScope, RunRow};
 
 pub const APP_TITLE: &str = "ctx desktop";
@@ -185,6 +187,8 @@ fn format_time_of_day(at: SystemTime) -> String {
 
 pub struct Shell {
     face: CenterFace,
+    detail: RunDetail,
+    detail_task: Option<gpui::Task<()>>,
 }
 
 impl Shell {
@@ -206,6 +210,8 @@ impl Shell {
         .detach();
         Self {
             face: CenterFace::new(RepoScope::All),
+            detail: RunDetail::default(),
+            detail_task: None,
         }
     }
 
@@ -214,12 +220,45 @@ impl Shell {
     pub fn set_scope(&mut self, scope: RepoScope) {
         self.face.set_scope(scope);
     }
+
+    /// Select the row carrying `ledger_path` and, unless it is already the
+    /// current selection, run one background full-session read for it. The
+    /// filesystem read itself happens on gpui's background executor
+    /// (`cx.background_spawn`) — the foreground `cx.spawn` future here does
+    /// nothing but await it and hand the result back.
+    pub fn select_ledger(&mut self, ledger_path: String, cx: &mut Context<Self>) {
+        let Some(row) = self
+            .face
+            .rows()
+            .iter()
+            .find(|row| row.ledger_path == ledger_path)
+        else {
+            return;
+        };
+        let Some(request) = self.detail.select(row) else {
+            cx.notify();
+            return;
+        };
+        let generation = request.generation;
+        self.detail_task = Some(cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_spawn(async move { detail::load(&request) })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.detail.apply(generation, outcome) {
+                    cx.notify();
+                }
+            });
+        }));
+        cx.notify();
+    }
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let header = self.face.header();
         let stale = self.face.is_stale();
+        let selected_key = self.detail.selected_key().map(str::to_string);
         let mut list = div()
             .id("run-list")
             .flex()
@@ -227,10 +266,15 @@ impl Render for Shell {
             .size_full()
             .overflow_y_scroll();
         for row in self.face.rows() {
+            let path = row.ledger_path.clone();
             let mut item = div()
+                .id(SharedString::from(row.ledger_path.clone()))
                 .flex()
                 .flex_row()
                 .gap_2()
+                .on_click(cx.listener(move |shell, _event, _window, cx| {
+                    shell.select_ledger(path.clone(), cx);
+                }))
                 .child(row.repo_label.clone())
                 .child(row.title.clone())
                 .child(format!("{} / {}", row.run_id, row.trait_id))
@@ -241,14 +285,20 @@ impl Render for Shell {
             if stale {
                 item = item.opacity(0.6);
             }
+            if selected_key.as_deref() == Some(row.ledger_path.as_str()) {
+                item = item.bg(gpui::rgb(0x333333));
+            }
             list = list.child(item);
         }
+        // 0257.2 placeholder: a single acknowledgement line, not a design.
+        let detail_strip = self.detail.summary_line().unwrap_or_default();
         div()
             .flex()
             .flex_col()
             .size_full()
             .child(header)
             .child(list)
+            .child(detail_strip)
     }
 }
 

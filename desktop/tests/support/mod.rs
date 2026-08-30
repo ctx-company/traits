@@ -8,6 +8,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use camino::Utf8Path;
+use ctx_traits_core::procedure::session::Session;
 use ctx_traits_io::center::CenterPublicRow;
 use ctx_traits_io::run_summary::RunSummary;
 
@@ -49,6 +51,46 @@ pub unsafe fn install_center_env(root: &std::path::Path) -> std::path::PathBuf {
         std::env::set_var("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"));
     }
     socket
+}
+
+/// Write a session ledger with the same writer production uses
+/// (`write_run_session`, atomic), and return the fixture `Session` so a test
+/// can assert a later read reproduces it exactly. `live` selects a
+/// non-terminal status with no terminal drive outcome (a live baseline) vs.
+/// a completed status (a finished baseline).
+pub fn write_session_ledger(
+    path: &Utf8Path,
+    session_id: &str,
+    run_id: &str,
+    live: bool,
+) -> Session {
+    let status = if live {
+        "awaiting-agent-output"
+    } else {
+        "completed"
+    };
+    let session: Session = serde_json::from_value(serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": session_id,
+        "run-id": run_id,
+        "trait-id": "desktop-detail-fixture-trait",
+        "current-run-index": 0,
+        "status": status,
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "desktop-detail-fixture"},
+            "state-source": "test",
+        },
+        "ledger": {
+            "run-id": run_id,
+            "trait-id": "desktop-detail-fixture-trait",
+            "current-run-index": 0,
+            "final-state": if live { "running" } else { "completed" },
+        },
+        "state-digest": format!("sha256:desktop-detail-{run_id}"),
+    }))
+    .expect("fixture session");
+    ctx_traits_io::run_session::write_run_session(path, &session).expect("write ledger");
+    session
 }
 
 pub fn wire_row(repo_key: &str, ledger_path: &str, run_id: &str) -> CenterPublicRow {
