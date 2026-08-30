@@ -58,6 +58,19 @@ pub struct StatePresentation {
     pub role: StateRole,
 }
 
+/// The one role → token mapping, shared by the bottom bar (`bottom_bar_view`)
+/// and the frame list (`frame_list_view`) — moved here beside [`StateRole`]
+/// when it gained its second consumer in `0265.5`.
+pub fn role_color(role: StateRole) -> u32 {
+    match role {
+        StateRole::Accent => crate::tokens::ACCENT,
+        StateRole::Ok => crate::tokens::OK,
+        StateRole::Warn => crate::tokens::WARN,
+        StateRole::Danger => crate::tokens::DANGER,
+        StateRole::Neutral => crate::tokens::TEXT,
+    }
+}
+
 /// Exhaustive over all seven [`SessionState`] variants, no catch-all arm.
 /// `Cancelled` and `WaitingOnAgent` are judgement calls: rule 1 gives no role
 /// to "terminal but not a failure" or "in flight but not driven", so both

@@ -164,6 +164,21 @@ pub const LIST_ROW_DOT_SIZE: Pixels = px(5.);
 pub const ROW_DOT_TEXT_GAP_MIN: Pixels = px(10.);
 pub const ROW_DOT_TEXT_GAP_MAX: Pixels = px(12.);
 
+// Frame list row geometry the export (`reference/sessions.html:293-347,
+// 413-459, 513-572`) fixes but `tokens.md` does not record — see `0265.5`'s
+// work summary for the corresponding owner correction. Named the same way
+// `BOTTOM_BAR_GAP` above already established the precedent for.
+pub const FRAME_DOT_WRAP_PAD_TOP: Pixels = px(6.);
+pub const FRAME_ROW_TEXT_GAP: Pixels = px(3.);
+pub const FRAME_ROW_RIGHT_PAD_TOP: Pixels = px(2.);
+pub const FRAME_ROW_DESC_WIDTH: Pixels = px(430.);
+pub const FRAME_ROW_DESC_LINE_HEIGHT: Pixels = px(16.);
+/// One depth-indent step for nested/structural rows, keeping 0257.2's
+/// hierarchy legible per its landed "nested frame states must remain
+/// distinguishable" contract. Not fixed by the export (which has no nested
+/// rows); chosen to read clearly beside the row's own `ROW_DOT_TEXT_GAP_MIN`.
+pub const FRAME_ROW_DEPTH_INDENT: Pixels = px(16.);
+
 // blocks
 pub const BLOCK_GAP: Pixels = px(8.);
 pub const BLOCK_BOTTOM_PADDING: Pixels = px(20.);

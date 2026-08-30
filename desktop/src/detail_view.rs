@@ -5,76 +5,12 @@
 //! state live in the element structure, not in a pre-formatted string.
 
 use gpui::prelude::*;
-use gpui::{AnyElement, SharedString, div, px};
+use gpui::{AnyElement, div};
 
 use crate::detail::FollowState;
-use crate::detail_tree::{DetailNode, DetailTree, FrameState};
-
-fn state_word(state: FrameState) -> &'static str {
-    match state {
-        FrameState::Pending => "pending",
-        FrameState::Ready => "ready",
-        FrameState::Done => "done",
-        FrameState::Rejected => "rejected",
-        FrameState::Blocked => "blocked",
-        FrameState::Skipped => "skipped",
-        FrameState::Routed => "routed",
-        FrameState::Structural => "—",
-    }
-}
-
-fn node_element(node: &DetailNode, depth: usize, path: &str) -> AnyElement {
-    let mut label = node.title.clone();
-    if let Some(ordinal) = node.ordinal
-        && !label.contains(char::is_numeric)
-    {
-        label = format!("{label} {ordinal}");
-    }
-    let mut row = div()
-        .id(SharedString::from(format!(
-            "detail-node-{path}-{}-{}",
-            node.kind,
-            node.id.clone().unwrap_or_default()
-        )))
-        .flex()
-        .flex_row()
-        .gap_2()
-        .pl(px(depth as f32 * 16.))
-        .child(label)
-        .child(if node.current {
-            "current".to_string()
-        } else {
-            String::new()
-        })
-        .child(
-            node.session_state
-                .map(|state| format!("{state:?}"))
-                .unwrap_or_else(|| state_word(node.state).to_string()),
-        );
-    if !node.reason.is_empty() {
-        row = row.child(node.reason.clone());
-    }
-    if let Some(activity) = &node.activity {
-        row = row.child(format!(
-            "{:?}{}",
-            activity.kind,
-            activity
-                .text
-                .as_ref()
-                .map(|text| format!(": {text}"))
-                .unwrap_or_default()
-        ));
-    }
-    if let Some(narration) = &node.narration {
-        row = row.child(narration.clone());
-    }
-
-    let mut column = div().flex().flex_col().child(row);
-    for (index, child) in node.children.iter().enumerate() {
-        column = column.child(node_element(child, depth + 1, &format!("{path}.{index}")));
-    }
-    column.into_any_element()
-}
+use crate::detail_tree::DetailTree;
+use crate::frame_list::FrameList;
+use crate::frame_list_view::frame_list_element;
 
 fn header_element(tree: &DetailTree) -> AnyElement {
     let header = &tree.header;
@@ -106,18 +42,19 @@ fn header_element(tree: &DetailTree) -> AnyElement {
 }
 
 /// Build the native element tree for a loaded [`DetailTree`]. Pure: no
-/// `Context`, no `App` required to call it.
+/// `Context`, no `App` required to call it. The frame rows themselves are
+/// `frame_list_view::frame_list_element`'s — this function only supplies the
+/// header above them.
 pub fn detail_element(tree: &DetailTree) -> AnyElement {
-    let mut column = div()
+    let list = FrameList::from_tree(tree);
+    div()
         .id("detail-pane")
         .flex()
         .flex_col()
         .gap_1()
-        .child(header_element(tree));
-    for (index, root) in tree.roots.iter().enumerate() {
-        column = column.child(node_element(root, 0, &index.to_string()));
-    }
-    column.into_any_element()
+        .child(header_element(tree))
+        .child(frame_list_element(&list))
+        .into_any_element()
 }
 
 /// Native "loading" state, painted while a selection's background read is

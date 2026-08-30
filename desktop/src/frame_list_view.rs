@@ -1,0 +1,493 @@
+//! Native gpui element tree for a [`FrameList`]. A free function, not a
+//! `Shell` method — the `bottom_bar_view.rs`/`detail_view.rs` convention: no
+//! `Context`, no `cx.listener`, directly callable from a test with no
+//! `App`. Geometry, colour and font all come from `tokens::`; word/role
+//! come from the model — no literal, no invented value at a call site.
+
+use gpui::prelude::*;
+use gpui::{AnyElement, SharedString, div, rgb};
+
+use ctx_traits_core::procedure::activity::compact_elapsed_text;
+
+use crate::frame_list::{DotTone, FrameList, FrameRow, RightSide, RowForm};
+use crate::run_row::role_color;
+use crate::tokens;
+
+fn dot_color(tone: DotTone) -> u32 {
+    match tone {
+        DotTone::Ok => tokens::OK,
+        DotTone::Accent => tokens::ACCENT,
+        DotTone::Idle => tokens::DOT_IDLE,
+        DotTone::Dim => tokens::DOT_DIM,
+        DotTone::Warn => tokens::WARN,
+        DotTone::Danger => tokens::DANGER,
+    }
+}
+
+/// Rule 4's 5px ellipse (`tokens::LIST_ROW_DOT_SIZE`), never a canvas
+/// radius: `rounded_full` here is the dot marker, not a container corner.
+fn dot_element(tone: DotTone) -> AnyElement {
+    div()
+        .size(tokens::LIST_ROW_DOT_SIZE)
+        .rounded_full()
+        .bg(rgb(dot_color(tone)))
+        .into_any_element()
+}
+
+fn right_side_text(right: &RightSide) -> Option<(String, u32)> {
+    match right {
+        RightSide::None => None,
+        RightSide::Elapsed(span) => {
+            span.map(|duration| (compact_elapsed_text(duration), tokens::TEXT_MUTED))
+        }
+        RightSide::Word(presentation) => {
+            Some((presentation.word.to_string(), role_color(presentation.role)))
+        }
+        RightSide::Live { state, round, role } => {
+            let mut segments = vec![state.word.to_string()];
+            if let Some(round) = round {
+                segments.push(format!("round {round}"));
+            }
+            if let Some(role) = role {
+                segments.push(role.clone());
+            }
+            Some((segments.join(" · "), role_color(state.role)))
+        }
+    }
+}
+
+/// Left padding for a row at `depth`: the row's base horizontal padding plus
+/// one `tokens::FRAME_ROW_DEPTH_INDENT` step per depth. `gpui`'s `.pl()` and
+/// `.px()` both assign `style.padding.left`, so whichever is called last
+/// wins — never call both on the same element; use this for the left edge
+/// and `tokens::LIST_ROW_PAD_X_MAX` alone for the right.
+fn depth_pad_left(depth: usize) -> gpui::Pixels {
+    tokens::LIST_ROW_PAD_X_MAX + tokens::FRAME_ROW_DEPTH_INDENT * depth
+}
+
+fn settled_row_element(row: &FrameRow, index: usize, bright: bool) -> AnyElement {
+    let title_color = if bright {
+        tokens::TEXT_BRIGHT
+    } else if row.form == RowForm::Pending {
+        tokens::TEXT_MUTED
+    } else {
+        tokens::TEXT
+    };
+    let mut left = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(tokens::ROW_DOT_TEXT_GAP_MIN);
+    if let Some(dot) = row.dot {
+        left = left.child(dot_element(dot));
+    }
+    left = left.child(
+        div()
+            .font_family(tokens::FONT_SANS)
+            .text_size(tokens::SIZE_12_5)
+            .text_color(rgb(title_color))
+            .child(row.title.clone()),
+    );
+
+    let mut element = div()
+        .id(SharedString::from(format!("frame-row-{index}")))
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .pl(depth_pad_left(row.depth))
+        .pr(tokens::LIST_ROW_PAD_X_MAX)
+        .py(tokens::LIST_ROW_PAD_Y_COMPACT)
+        .child(left);
+
+    if let Some((text, color)) = right_side_text(&row.right) {
+        element = element.child(
+            div()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(color))
+                .child(text),
+        );
+    }
+    element.into_any_element()
+}
+
+fn group_row_element(row: &FrameRow, index: usize) -> AnyElement {
+    div()
+        .id(SharedString::from(format!("frame-row-{index}")))
+        .flex()
+        .flex_row()
+        .items_center()
+        .pl(depth_pad_left(row.depth))
+        .pr(tokens::LIST_ROW_PAD_X_MAX)
+        .py(tokens::LIST_ROW_PAD_Y_COMPACT)
+        .child(
+            div()
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_12_5)
+                .text_color(rgb(tokens::TEXT_MUTED))
+                .child(row.title.clone()),
+        )
+        .into_any_element()
+}
+
+fn current_row_element(row: &FrameRow, index: usize, bright: bool) -> AnyElement {
+    let title_color = if bright {
+        tokens::TEXT_BRIGHT
+    } else {
+        tokens::TEXT
+    };
+    let dot = row
+        .dot
+        .map(dot_element)
+        .unwrap_or_else(|| div().into_any_element());
+
+    let mut text_column = div()
+        .flex()
+        .flex_col()
+        .gap(tokens::FRAME_ROW_TEXT_GAP)
+        .child(
+            div()
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_12_5)
+                .text_color(rgb(title_color))
+                .child(row.title.clone()),
+        );
+    if let Some(description) = &row.description {
+        text_column = text_column.child(
+            div()
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_11_5)
+                .text_color(rgb(tokens::TEXT_SECONDARY))
+                .w(tokens::FRAME_ROW_DESC_WIDTH)
+                .line_height(tokens::FRAME_ROW_DESC_LINE_HEIGHT)
+                .child(description.clone()),
+        );
+    }
+
+    let mut element = div()
+        .id(SharedString::from(format!("frame-row-{index}")))
+        .flex()
+        .flex_row()
+        .justify_between()
+        .bg(rgb(tokens::SURFACE_RAISED))
+        .pl(depth_pad_left(row.depth))
+        .pr(tokens::LIST_ROW_PAD_X_MAX)
+        .py(tokens::LIST_ROW_PAD_Y_OPEN)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
+                .child(div().pt(tokens::FRAME_DOT_WRAP_PAD_TOP).child(dot))
+                .child(text_column),
+        );
+
+    if let Some((text, color)) = right_side_text(&row.right) {
+        element = element.child(
+            div()
+                .pt(tokens::FRAME_ROW_RIGHT_PAD_TOP)
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(color))
+                .child(text),
+        );
+    }
+    element.into_any_element()
+}
+
+fn row_element(row: &FrameRow, index: usize, bright: bool) -> AnyElement {
+    match row.form {
+        RowForm::Current => current_row_element(row, index, bright),
+        RowForm::Group => group_row_element(row, index),
+        RowForm::Done | RowForm::Pending => settled_row_element(row, index, bright),
+    }
+}
+
+/// Build the native element tree for a [`FrameList`]. Pure: no `Context`, no
+/// `App` required to call it.
+pub fn frame_list_element(list: &FrameList) -> AnyElement {
+    let mut column = div()
+        .id("frame-list")
+        .flex()
+        .flex_col()
+        .gap(tokens::LIST_ROWS_GAP_MAX);
+    for (index, row) in list.rows().iter().enumerate() {
+        column = column.child(row_element(row, index, list.is_bright(index)));
+    }
+    column.into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::detail_tree::{self, ActivityOverlay};
+    use ctx_traits_core::procedure::session::Session;
+
+    fn session_with(status_wire: &str, final_state: &str, sequence_status: &str) -> Session {
+        serde_json::from_value(serde_json::json!({
+            "schema-version": "0.1.0",
+            "session-id": "session-fixture",
+            "run-id": "run-fixture",
+            "trait-id": "fixture-trait",
+            "current-run-index": 0,
+            "status": status_wire,
+            "provenance": {
+                "started-by": {"surface": "test", "caller": "frame-list-view-fixture"},
+                "state-source": "test",
+            },
+            "active-path": [{"kind": "procedure", "id": "item", "index": 0}],
+            "ledger": {
+                "run-id": "run-fixture",
+                "trait-id": "fixture-trait",
+                "current-run-index": 0,
+                "final-state": final_state,
+                "sequence-statuses": [{
+                    "sequence-index": 0,
+                    "run-index": 0,
+                    "item-id": "item",
+                    "title": "Item",
+                    "status": sequence_status,
+                    "reason": "",
+                    "position-path": [],
+                }],
+            },
+            "state-digest": "sha256:fixture",
+        }))
+        .expect("fixture session")
+    }
+
+    /// One live run whose sequence carries a done, a pending, a rejected
+    /// (failed), and a current item, in that order — so `FrameList::rows()`
+    /// contains all four row forms in a single list.
+    fn session_with_all_four_forms() -> Session {
+        serde_json::from_value(serde_json::json!({
+            "schema-version": "0.1.0",
+            "session-id": "session-fixture",
+            "run-id": "run-fixture",
+            "trait-id": "fixture-trait",
+            "current-run-index": 0,
+            "status": "awaiting-agent-output",
+            "provenance": {
+                "started-by": {"surface": "test", "caller": "frame-list-view-fixture"},
+                "state-source": "test",
+            },
+            "active-path": [{"kind": "procedure", "id": "item-current", "index": 0}],
+            "ledger": {
+                "run-id": "run-fixture",
+                "trait-id": "fixture-trait",
+                "current-run-index": 0,
+                "final-state": "running",
+                "sequence-statuses": [
+                    {
+                        "sequence-index": 0,
+                        "run-index": 0,
+                        "item-id": "item-done",
+                        "title": "Done item",
+                        "status": "accepted",
+                        "reason": "",
+                        "position-path": [],
+                    },
+                    {
+                        "sequence-index": 1,
+                        "run-index": 0,
+                        "item-id": "item-pending",
+                        "title": "Pending item",
+                        "status": "pending",
+                        "reason": "",
+                        "position-path": [],
+                    },
+                    {
+                        "sequence-index": 2,
+                        "run-index": 0,
+                        "item-id": "item-rejected",
+                        "title": "Rejected item",
+                        "status": "rejected",
+                        "reason": "",
+                        "position-path": [],
+                    },
+                    {
+                        "sequence-index": 3,
+                        "run-index": 0,
+                        "item-id": "item-current",
+                        "title": "Current item",
+                        "status": "ready",
+                        "reason": "",
+                        "position-path": [],
+                    },
+                ],
+            },
+            "state-digest": "sha256:fixture",
+        }))
+        .expect("fixture session")
+    }
+
+    #[test]
+    fn right_side_text_composes_the_live_segments_with_no_dangling_separator() {
+        use crate::run_row::{StatePresentation, StateRole};
+
+        let state = StatePresentation {
+            word: "running",
+            role: StateRole::Accent,
+        };
+
+        let none_none = right_side_text(&RightSide::Live {
+            state,
+            round: None,
+            role: None,
+        });
+        assert_eq!(
+            none_none.as_ref().map(|(text, _)| text.as_str()),
+            Some("running"),
+            "no round, no role: exactly the state word, no separator"
+        );
+
+        let some_round_only = right_side_text(&RightSide::Live {
+            state,
+            round: Some(2),
+            role: None,
+        });
+        assert_eq!(
+            some_round_only.as_ref().map(|(text, _)| text.as_str()),
+            Some("running · round 2")
+        );
+
+        let role_only = right_side_text(&RightSide::Live {
+            state,
+            round: None,
+            role: Some("plan".to_string()),
+        });
+        assert_eq!(
+            role_only.as_ref().map(|(text, _)| text.as_str()),
+            Some("running · plan")
+        );
+
+        let both = right_side_text(&RightSide::Live {
+            state,
+            round: Some(3),
+            role: Some("plan".to_string()),
+        });
+        assert_eq!(
+            both.as_ref().map(|(text, _)| text.as_str()),
+            Some("running · round 3 · plan")
+        );
+    }
+
+    #[test]
+    fn right_side_text_omits_an_absent_elapsed_span_and_renders_a_present_one() {
+        assert_eq!(right_side_text(&RightSide::None), None);
+        assert_eq!(right_side_text(&RightSide::Elapsed(None)), None);
+        let (text, _) = right_side_text(&RightSide::Elapsed(Some(std::time::Duration::from_secs(
+            128,
+        ))))
+        .expect("a present span renders");
+        assert_eq!(text, "2m 8s");
+    }
+
+    #[test]
+    fn depth_pad_left_adds_the_indent_token_without_losing_base_padding() {
+        assert_eq!(
+            depth_pad_left(0),
+            tokens::LIST_ROW_PAD_X_MAX,
+            "a depth-zero row keeps exactly the base horizontal padding"
+        );
+        assert_eq!(
+            depth_pad_left(1),
+            tokens::LIST_ROW_PAD_X_MAX + tokens::FRAME_ROW_DEPTH_INDENT,
+            "one nesting step adds exactly one indent token on top of the base"
+        );
+        assert_eq!(
+            depth_pad_left(2),
+            tokens::LIST_ROW_PAD_X_MAX + tokens::FRAME_ROW_DEPTH_INDENT * 2,
+            "indentation accumulates per depth"
+        );
+    }
+
+    #[test]
+    fn frame_list_element_builds_for_every_form_with_no_app() {
+        let done = session_with("completed", "completed", "accepted");
+        let pending = session_with("completed", "completed", "pending");
+        let rejected = session_with("completed", "completed", "rejected");
+        let live = session_with("awaiting-agent-output", "running", "ready");
+
+        for (session, is_live) in [
+            (done, false),
+            (pending, false),
+            (rejected, false),
+            (live, true),
+        ] {
+            let tree = detail_tree::project(&session, &ActivityOverlay::default(), is_live);
+            let list = crate::frame_list::FrameList::from_tree(&tree);
+            let _element: AnyElement = frame_list_element(&list);
+        }
+    }
+
+    /// One real gpui window rendering a list of done, current, pending and
+    /// failed rows together — the required-runtime proof `desktop-render-
+    /// proof-incomplete` asked for. Asserts the model's dot/selection/right-
+    /// side semantics first (so a regression there fails loudly, not just
+    /// silently under paint), then retains the window handle and drives
+    /// `run_until_parked` so `FrameListProbe::render` actually executes,
+    /// mirroring `shell.rs`'s established real-frame precedent (the
+    /// `open_window(...).unwrap()` handle kept, not dropped).
+    #[gpui::test]
+    fn frame_list_paints_all_four_forms(cx: &mut gpui::TestAppContext) {
+        let session = session_with_all_four_forms();
+        let tree = detail_tree::project(&session, &ActivityOverlay::default(), true);
+        let list = crate::frame_list::FrameList::from_tree(&tree);
+
+        let rows = list.rows();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            (rows[0].form, rows[0].dot),
+            (RowForm::Done, Some(DotTone::Ok))
+        );
+        assert_eq!(
+            (rows[1].form, rows[1].dot),
+            (RowForm::Pending, Some(DotTone::Idle))
+        );
+        assert_eq!(
+            (rows[2].form, rows[2].dot),
+            (RowForm::Done, Some(DotTone::Danger)),
+            "a rejected frame renders the failed form, never done/ok"
+        );
+        assert_eq!(
+            (rows[3].form, rows[3].dot),
+            (RowForm::Current, Some(DotTone::Accent))
+        );
+        assert_eq!(list.selected(), Some(3));
+        assert!((0..4).filter(|&index| list.is_bright(index)).count() == 1);
+
+        // The handle is kept (not dropped before `run_until_parked`, unlike
+        // the prior version of this test) so the window and its one render
+        // pass are not torn down before the frame actually runs.
+        let _window = cx
+            .update(|cx| {
+                let bounds =
+                    gpui::Bounds::centered(None, gpui::size(gpui::px(400.), gpui::px(300.)), cx);
+                cx.open_window(
+                    gpui::WindowOptions {
+                        window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                        ..Default::default()
+                    },
+                    |_, cx| cx.new(|_| FrameListProbe { list: list.clone() }),
+                )
+            })
+            .expect("open a real window");
+        cx.run_until_parked();
+    }
+
+    struct FrameListProbe {
+        list: crate::frame_list::FrameList,
+    }
+
+    impl gpui::Render for FrameListProbe {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            frame_list_element(&self.list)
+        }
+    }
+}

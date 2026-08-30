@@ -1,5 +1,8 @@
 //! Normalized, provider-independent drive activity.
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -153,6 +156,112 @@ impl From<&ActivityEvent> for CurrentActivity {
     }
 }
 
+/// A bounded fold of one (first-observed, last-observed) `at_epoch_ms` stamp
+/// pair per frame id, extracted from
+/// `ctx_traits_cli::app::story::beat_duration`'s span semantics so every
+/// consumer (the CLI story, the desktop frame list) shares one derivation.
+/// Clock-free: every stamp is a caller-supplied argument, so this type never
+/// reads wall-clock time itself. "First"/"last" are call-order, not
+/// magnitude-sorted — a caller that observes stamps out of chronological
+/// order gets a non-increasing pair back, which `span` then correctly omits
+/// rather than silently reordering evidence into a fabricated positive span.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FrameSpans {
+    stamps: HashMap<String, (u64, u64)>,
+}
+
+impl FrameSpans {
+    /// Unconditionally folds `at_epoch_ms` into the first/last stamp pair for
+    /// `frame_id`, in call order — a plain, sequence-free append-order fold.
+    /// This is the shared derivation used both by a full, single-pass
+    /// historical scan and by a live delta stream; it is not itself
+    /// identity-aware, so a caller that hands it the same durable record
+    /// twice (a seed/pending overlap) is treated as two observations. A
+    /// no-op skip is retained only for the trivial case of redelivering the
+    /// stamp already stored as *last* — semantically inert either way, but
+    /// avoids marking `changed` on a pure repeat of the tail.
+    ///
+    /// Deliberately not keyed on `ActivityEvent::sequence`: production does
+    /// not provide `sequence` as a durable identity —
+    /// `ActivityRecorder::flush_pending` persists every coalesced record
+    /// with `sequence: 0`, and each drive's recorder restarts its own
+    /// sequence counter — so a sequence-keyed dedup drops ordinary later
+    /// durable records that happen to reuse or reset a sequence value.
+    ///
+    /// Reconciling a genuine seed/pending overlap (the exact same durable
+    /// record folded once by a seed's historical read and once more as a
+    /// replayed live delta) is deliberately **not** this fold's job: with
+    /// only the first/last pair retained, an interior record's stamp is
+    /// indistinguishable from a genuinely new one once it has been folded
+    /// away, so any point-patch here that special-cases a stamp matching a
+    /// stored endpoint either fails to recognize an interior replay (when it
+    /// matches neither endpoint) or discards a genuine record that happens
+    /// to share a stamp with an endpoint (see
+    /// `historical_fold_keeps_a_final_stamp_equal_to_first` below).
+    /// Reconciliation instead belongs at the caller's boundary, where the
+    /// full set of already-folded records is still available to match
+    /// against by bounded occurrence — see
+    /// `desktop::detail_tree::ActivityOverlay` and
+    /// `desktop::detail::RunDetail::apply`. Returns whether the fold
+    /// actually changed the stored pair.
+    pub fn observe(&mut self, frame_id: &str, at_epoch_ms: u64) -> bool {
+        let mut changed = false;
+        self.stamps
+            .entry(frame_id.to_string())
+            .and_modify(|(_, last)| {
+                if *last != at_epoch_ms {
+                    *last = at_epoch_ms;
+                    changed = true;
+                }
+            })
+            .or_insert_with(|| {
+                changed = true;
+                (at_epoch_ms, at_epoch_ms)
+            });
+        changed
+    }
+
+    pub fn from_events<'a>(events: impl Iterator<Item = (&'a str, u64)>) -> Self {
+        let mut spans = Self::default();
+        for (frame_id, at_epoch_ms) in events {
+            spans.observe(frame_id, at_epoch_ms);
+        }
+        spans
+    }
+
+    /// `None` unless `frame_id` occurs exactly once in the reconstruction the
+    /// caller counted `executions` over, and its first/last stamps actually
+    /// advance — ambiguity (a second execution sharing the same identity, or
+    /// a single non-increasing stamp pair) always resolves to "omit", never
+    /// to a guessed duration.
+    pub fn span(&self, frame_id: &str, executions: usize) -> Option<Duration> {
+        if executions != 1 {
+            return None;
+        }
+        let (first, last) = *self.stamps.get(frame_id)?;
+        (last > first).then(|| Duration::from_millis(last - first))
+    }
+}
+
+/// Format a relative duration in compact human-readable units (`4s`,
+/// `3m 12s`, `2h 3m 4s`) — the shared home for what
+/// `ctx_traits_cli::app::tui::human_elapsed_text` used to compute inline, so
+/// the desktop gets the identical rendering without depending on the CLI
+/// crate.
+pub fn compact_elapsed_text(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let seconds = seconds % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m {seconds}s")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +282,105 @@ mod tests {
         assert_eq!(
             SessionState::derive(&Status::Failed, Some(&DriveOutcomeKind::Killed), false),
             SessionState::Cancelled
+        );
+    }
+
+    #[test]
+    fn frame_spans_reports_a_positive_span_for_a_unique_frame() {
+        let spans = FrameSpans::from_events(vec![("frame", 1_000), ("frame", 3_000)].into_iter());
+        assert_eq!(spans.span("frame", 1), Some(Duration::from_millis(2_000)));
+    }
+
+    #[test]
+    fn frame_spans_omits_when_no_records_match() {
+        let spans = FrameSpans::default();
+        assert_eq!(spans.span("frame", 1), None);
+    }
+
+    #[test]
+    fn frame_spans_omits_a_single_record() {
+        let spans = FrameSpans::from_events(vec![("frame", 1_000)].into_iter());
+        assert_eq!(spans.span("frame", 1), None);
+    }
+
+    #[test]
+    fn frame_spans_omits_equal_stamps() {
+        let spans = FrameSpans::from_events(vec![("frame", 1_000), ("frame", 1_000)].into_iter());
+        assert_eq!(spans.span("frame", 1), None);
+    }
+
+    #[test]
+    fn frame_spans_omits_a_non_increasing_pair() {
+        let mut spans = FrameSpans::default();
+        spans.observe("frame", 5_000);
+        spans.observe("frame", 1_000);
+        assert_eq!(spans.span("frame", 1), None);
+    }
+
+    #[test]
+    fn frame_spans_omits_when_the_frame_id_occurs_more_than_once() {
+        let spans = FrameSpans::from_events(vec![("frame", 1_000), ("frame", 3_000)].into_iter());
+        assert_eq!(spans.span("frame", 2), None);
+    }
+
+    #[test]
+    fn observe_folds_every_new_stamp_even_when_it_does_not_advance() {
+        // Append order 1_000, 3_000, 2_000: `observe` must fold every one of
+        // them in call order — magnitude plays no role in whether a call
+        // folds, only in what `span` later reports.
+        let mut spans = FrameSpans::default();
+        assert!(spans.observe("frame", 1_000));
+        assert!(spans.observe("frame", 3_000));
+        assert!(spans.observe("frame", 2_000));
+        assert_eq!(spans.span("frame", 1), Some(Duration::from_millis(1_000)));
+    }
+
+    #[test]
+    fn observe_reports_no_change_when_a_redelivered_stamp_is_reobserved() {
+        let mut spans = FrameSpans::default();
+        assert!(spans.observe("frame", 1_000));
+        assert!(spans.observe("frame", 3_000));
+        assert!(
+            !spans.observe("frame", 3_000),
+            "reobserving the same last stamp is idempotent, not a change"
+        );
+        assert_eq!(spans.span("frame", 1), Some(Duration::from_millis(2_000)));
+    }
+
+    #[test]
+    fn historical_fold_keeps_a_final_stamp_equal_to_first() {
+        // Append order 1_000, 3_000, 1_000 — a single-pass historical scan
+        // (not a seed/pending overlap) whose last-folded stamp genuinely
+        // equals the first. `observe` folds every call in order, with no
+        // identity guard that could mistake this for a redelivered "first"
+        // stamp and discard it: the fold must retain 1_000 as the final
+        // `last`, making the pair non-increasing and `span` must omit it
+        // (review-verdict-1 blocker `live-span-reopen-divergence` —
+        // reconciliation of an actual seed/pending overlap belongs at the
+        // caller's boundary, not inside this identity-free fold).
+        let spans = FrameSpans::from_events(
+            vec![("frame", 1_000), ("frame", 3_000), ("frame", 1_000)].into_iter(),
+        );
+        assert_eq!(spans.span("frame", 1), None);
+    }
+
+    #[test]
+    fn observe_folds_every_durable_record_even_when_sequence_is_reused_as_zero() {
+        // `ActivityRecorder::flush_pending` persists every coalesced record
+        // with `sequence: 0`; `FrameSpans` must not depend on `sequence` at
+        // all, so two same-frame records that both carry `sequence: 0` still
+        // both fold.
+        let spans = FrameSpans::from_events(vec![("frame", 1_000), ("frame", 4_000)].into_iter());
+        assert_eq!(spans.span("frame", 1), Some(Duration::from_millis(3_000)));
+    }
+
+    #[test]
+    fn compact_elapsed_text_uses_compact_units() {
+        assert_eq!(compact_elapsed_text(Duration::from_secs(8)), "8s");
+        assert_eq!(compact_elapsed_text(Duration::from_secs(128)), "2m 8s");
+        assert_eq!(
+            compact_elapsed_text(Duration::from_secs(93_784)),
+            "26h 3m 4s"
         );
     }
 }

@@ -300,9 +300,23 @@ impl RunDetail {
         selection.in_flight = None;
         match outcome {
             Ok(mut baseline) => {
+                // `apply_pending_record`, not `apply_live_record`: a pending
+                // record buffered while this seed/resync read was in flight
+                // may be a redelivery of a record the seed's own historical
+                // fold already folded (a seed/pending overlap), which
+                // `apply_pending_record` reconciles by bounded
+                // record-occurrence accounting before feeding a genuinely
+                // new record through the ordinary span fold — see its doc
+                // comment and review-verdict-1 blocker
+                // `live-span-reopen-divergence`.
                 for record in selection.pending.drain(..) {
-                    baseline.activity_overlay.apply_live_record(&record);
+                    baseline.activity_overlay.apply_pending_record(&record);
                 }
+                // Reconciliation is a one-shot event against this seed's own
+                // historical fold; the index it uses must not survive into
+                // the accepted, retained overlay (review-verdict-1 blocker
+                // `live-span-reopen-divergence`).
+                baseline.activity_overlay.clear_seed_occurrences();
                 if selection.fingerprint.is_none() {
                     let mut summary = RunSummary::from_session(&baseline.session);
                     summary.title = None;
@@ -652,6 +666,22 @@ mod tests {
         }
     }
 
+    fn activity(at_epoch_ms: u64, frame_id: &str, sequence: u64) -> ActivityRecord {
+        use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
+        ActivityRecord::Activity {
+            at_epoch_ms,
+            event: ActivityEvent {
+                sequence,
+                frame_id: frame_id.to_string(),
+                kind: ActivityKind::Thinking,
+                text: None,
+                tool: None,
+                tokens: None,
+                rate_limit: None,
+            },
+        }
+    }
+
     fn activity_delta(row: &CenterPublicRow, record: ActivityRecord) -> LinkUpdate {
         LinkUpdate::Delta(CenterDelta::ActivityLine {
             row: Box::new(row.clone()),
@@ -952,6 +982,211 @@ mod tests {
             tree.roots[0].narration.as_deref(),
             Some("buffered-second"),
             "the newer replayed record wins; the stale one is dropped"
+        );
+    }
+
+    /// Review-verdict-1 blocker `live-span-reopen-divergence`: the seed's
+    /// sidecar read already contains a unique frame's two durable `Activity`
+    /// stamps (1_000, 3_000), while the pending queue — buffered because the
+    /// same non-tail record raced the seed read and arrived live before it
+    /// landed — contains only a replay of the seed's *non-tail* 1_000
+    /// record, never the 3_000 record. `apply` must still accept a 2-second
+    /// span for that frame, matching a fresh reconstruction of the same
+    /// seed records with no later `Activity` and no resync required to
+    /// heal it.
+    #[test]
+    fn seed_pending_overlap_replays_a_non_tail_activity_once() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+
+        // The seed's own non-tail record races the seed read and is
+        // buffered live while the load is still in flight.
+        let outcome = detail.follow(&activity_delta(&wire, activity(1_000, "the-frame", 1)));
+        assert!(
+            !outcome.changed,
+            "a buffered record has nothing to show yet"
+        );
+
+        let seed_records = [
+            activity(1_000, "the-frame", 1),
+            activity(3_000, "the-frame", 2),
+        ];
+        let mut seeded_baseline = baseline(session_with_active_frame("run-a", "the-frame"));
+        seeded_baseline.activity_overlay = ActivityOverlay::from_records(&seed_records);
+        assert!(detail.apply(request.generation, Ok(seeded_baseline)));
+
+        let tree = detail.tree().unwrap();
+        assert_eq!(
+            tree.roots[0].span,
+            Some(std::time::Duration::from_millis(2_000)),
+            "the seed's own non-tail record replayed live must not shorten the span"
+        );
+
+        let reopened = detail_tree::project(
+            &session_with_active_frame("run-a", "the-frame"),
+            &ActivityOverlay::from_records(&seed_records),
+            false,
+        );
+        assert_eq!(
+            tree.roots[0].span, reopened.roots[0].span,
+            "the accepted live span must equal a fresh reconstruction of the same seed records"
+        );
+    }
+
+    /// Review-verdict-1 blocker `live-span-reopen-divergence`: the seed's
+    /// sidecar read already contains a unique frame's *three* durable
+    /// `Activity` stamps (1_000, 2_000, 3_000), while the pending queue
+    /// contains only a replay of the seed's *interior* 2_000 record — one
+    /// `FrameSpans` has already folded away, since it retains only the
+    /// first/last pair. A point-patch that reconciles only against the two
+    /// retained endpoints cannot recognize this replay and would fold it as
+    /// new, rolling the span's `last` stamp back to 2_000 and shortening the
+    /// accepted live span from 2s to 1s. `apply`'s bounded
+    /// record-occurrence reconciliation must still accept a 2-second span,
+    /// matching a fresh reconstruction of the same seed records with no
+    /// later `Activity` and no resync required to heal it.
+    #[test]
+    fn seed_pending_overlap_replays_an_interior_activity_once() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+
+        // The seed's own interior record races the seed read and is
+        // buffered live while the load is still in flight — a genuine
+        // redelivery, so its content (including `sequence`) matches the
+        // seed's own interior record exactly.
+        let outcome = detail.follow(&activity_delta(&wire, activity(2_000, "the-frame", 2)));
+        assert!(
+            !outcome.changed,
+            "a buffered record has nothing to show yet"
+        );
+
+        let seed_records = [
+            activity(1_000, "the-frame", 1),
+            activity(2_000, "the-frame", 2),
+            activity(3_000, "the-frame", 3),
+        ];
+        let mut seeded_baseline = baseline(session_with_active_frame("run-a", "the-frame"));
+        seeded_baseline.activity_overlay = ActivityOverlay::from_records(&seed_records);
+        assert!(detail.apply(request.generation, Ok(seeded_baseline)));
+
+        let tree = detail.tree().unwrap();
+        assert_eq!(
+            tree.roots[0].span,
+            Some(std::time::Duration::from_millis(2_000)),
+            "the seed's own interior record replayed live must not shorten the span"
+        );
+
+        let reopened = detail_tree::project(
+            &session_with_active_frame("run-a", "the-frame"),
+            &ActivityOverlay::from_records(&seed_records),
+            false,
+        );
+        assert_eq!(
+            tree.roots[0].span, reopened.roots[0].span,
+            "the accepted live span must equal a fresh reconstruction of the same seed records"
+        );
+    }
+
+    /// Review-verdict-1 blocker `live-span-reopen-divergence`: a genuinely
+    /// new pending record can share the exact `(frame_id, at_epoch_ms)` pair
+    /// of one of the seed's own non-tail records — a millisecond collision,
+    /// not a replay — while carrying a distinct payload (a different
+    /// `ActivityKind`). `apply` must recognize this by full record content
+    /// and fold it as new evidence, never mistaking it for the seed's own
+    /// record and silently dropping it. Folding a genuine third stamp at
+    /// `1_000` (append order `1_000, 3_000, 1_000`) makes the span
+    /// non-increasing, so the accepted span must be `None`, matching a fresh
+    /// reconstruction of `[Thinking@1_000, Thinking@3_000, Stalled@1_000]`.
+    #[test]
+    fn seed_pending_timestamp_collision_is_not_a_replay() {
+        use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
+
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+
+        // A genuinely new record races the seed read, colliding on stamp
+        // with the seed's own non-tail record but carrying a distinct kind.
+        let collision = ActivityRecord::Activity {
+            at_epoch_ms: 1_000,
+            event: ActivityEvent {
+                sequence: 99,
+                frame_id: "the-frame".to_string(),
+                kind: ActivityKind::Stalled,
+                text: None,
+                tool: None,
+                tokens: None,
+                rate_limit: None,
+            },
+        };
+        let outcome = detail.follow(&activity_delta(&wire, collision.clone()));
+        assert!(
+            !outcome.changed,
+            "a buffered record has nothing to show yet"
+        );
+
+        let seed_records = [
+            activity(1_000, "the-frame", 1),
+            activity(3_000, "the-frame", 2),
+        ];
+        let mut seeded_baseline = baseline(session_with_active_frame("run-a", "the-frame"));
+        seeded_baseline.activity_overlay = ActivityOverlay::from_records(&seed_records);
+        assert!(detail.apply(request.generation, Ok(seeded_baseline)));
+
+        let tree = detail.tree().unwrap();
+        assert_eq!(
+            tree.roots[0].span, None,
+            "the distinct pending record must fold as new evidence, not be mistaken \
+             for a replay of the seed's own record at the same stamp"
+        );
+
+        let all_records = [seed_records[0].clone(), seed_records[1].clone(), collision];
+        let reopened = detail_tree::project(
+            &session_with_active_frame("run-a", "the-frame"),
+            &ActivityOverlay::from_records(&all_records),
+            false,
+        );
+        assert_eq!(
+            tree.roots[0].span, reopened.roots[0].span,
+            "the accepted live span must equal a fresh reconstruction of all three records"
+        );
+    }
+
+    /// Review-verdict-1 blocker `live-span-reopen-divergence`: the seed's
+    /// reconciliation index must not survive past the one `apply` call that
+    /// drains pending against it — the accepted, retained overlay carries
+    /// only per-frame folded state, never a resident index sized to the
+    /// seed's historical record count.
+    #[test]
+    fn accepted_overlay_drops_seed_occurrence_index() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+
+        let seed_records = [
+            activity(1_000, "the-frame", 1),
+            activity(3_000, "the-frame", 2),
+        ];
+        let mut seeded_baseline = baseline(session_with_active_frame("run-a", "the-frame"));
+        seeded_baseline.activity_overlay = ActivityOverlay::from_records(&seed_records);
+        assert!(detail.apply(request.generation, Ok(seeded_baseline)));
+
+        let DetailLoad::Loaded(baseline) = &detail.selected.as_ref().unwrap().load else {
+            panic!("expected a loaded baseline");
+        };
+        assert!(
+            baseline.activity_overlay.seed_occurrences_is_empty(),
+            "the seed-occurrence reconciliation index must be discarded once apply \
+             has drained the (empty) pending queue against it"
         );
     }
 

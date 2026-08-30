@@ -10,6 +10,8 @@ use std::io::{IsTerminal, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ctx_traits_core::procedure::activity::compact_elapsed_text;
+
 const RESET: &str = "\x1b[0m";
 const FAINT: &str = "\x1b[2m";
 const GREEN: &str = "\x1b[32m";
@@ -32,19 +34,11 @@ pub(crate) enum Tone {
     Bold,
 }
 
-/// Format a relative duration in compact human-readable units.
+/// Format a relative duration in compact human-readable units. Delegates to
+/// the shared core formatter (`ctx_traits_core::procedure::activity`) so the
+/// desktop gets byte-identical rendering without depending on this crate.
 pub(crate) fn human_elapsed_text(duration: Duration) -> String {
-    let seconds = duration.as_secs();
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let seconds = seconds % 60;
-    if hours > 0 {
-        format!("{hours}h {minutes}m {seconds}s")
-    } else if minutes > 0 {
-        format!("{minutes}m {seconds}s")
-    } else {
-        format!("{seconds}s")
-    }
+    compact_elapsed_text(duration)
 }
 
 /// Format an elapsed duration as an unbounded, zero-padded clock.

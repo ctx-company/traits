@@ -10,7 +10,7 @@ use camino::Utf8PathBuf;
 
 use std::collections::BTreeMap;
 
-use ctx_traits_core::procedure::activity::ActivityKind;
+use ctx_traits_core::procedure::activity::{ActivityKind, FrameSpans};
 use ctx_traits_core::procedure::runtime::FinalState;
 use ctx_traits_core::procedure::runtime::PathSegment;
 use ctx_traits_core::procedure::session::{
@@ -534,23 +534,18 @@ fn beat_mark(beat: &StoryBeat) -> &'static str {
 
 fn beat_duration(beat: &StoryBeat, report: &StoryReport) -> Option<String> {
     let key = beat.frame_key.as_deref()?;
-    if report
+    let executions = report
         .beats
         .iter()
         .filter(|other| other.frame_key.as_deref() == Some(key))
-        .nth(1)
-        .is_some()
-    {
-        return None;
-    }
-    let mut times = report
-        .detailed_timeline
-        .iter()
-        .filter(|event| event.event.frame_id == key)
-        .map(|event| event.at_epoch_ms);
-    let first = times.next()?;
-    let last = times.next_back().unwrap_or(first);
-    (last > first).then(|| tui::elapsed_text(std::time::Duration::from_millis(last - first)))
+        .count();
+    let spans = FrameSpans::from_events(
+        report
+            .detailed_timeline
+            .iter()
+            .map(|event| (event.event.frame_id.as_str(), event.at_epoch_ms)),
+    );
+    spans.span(key, executions).map(tui::elapsed_text)
 }
 
 fn blocker_rows(report: &StoryReport) -> Vec<String> {

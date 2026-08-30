@@ -8,7 +8,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
 use crate::bottom_bar::{ActionTone, BarAction, BarActionId, BottomBar};
-use crate::run_row::StateRole;
+use crate::run_row::role_color;
 use crate::tokens;
 
 /// A click handler for a bound bar action. Boxed rather than generic so
@@ -16,16 +16,6 @@ use crate::tokens;
 /// and so a test can pass `None` without a turbofish.
 pub type BarActionHandler =
     Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
-
-fn role_color(role: StateRole) -> u32 {
-    match role {
-        StateRole::Accent => tokens::ACCENT,
-        StateRole::Ok => tokens::OK,
-        StateRole::Warn => tokens::WARN,
-        StateRole::Danger => tokens::DANGER,
-        StateRole::Neutral => tokens::TEXT,
-    }
-}
 
 fn mono_11(color: u32) -> gpui::Div {
     div()
@@ -107,7 +97,7 @@ pub fn bar_element(bar: &BottomBar, on_pause: Option<BarActionHandler>) -> AnyEl
 mod tests {
     use super::*;
     use crate::bottom_bar::sessions_bar;
-    use crate::run_row::{RowState, RunRow, StatePresentation};
+    use crate::run_row::{RowState, RunRow, StatePresentation, StateRole};
     use gpui::px;
 
     #[test]
