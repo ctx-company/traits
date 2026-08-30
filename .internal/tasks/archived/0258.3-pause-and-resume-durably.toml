@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0258.3"
 title = "Pause and resume durably"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-30"
+origin = "run run-9ef9581e6999eb4afc3542bde22778e5dcd4b149242c502a446ae46c4854e8c6 merged as 2f42188882f29eced5a0413ac29b8af5ac6e2d53"
 content = """
 Add desktop pause and resume affordances that use the shared center capabilities and present outcomes from subscription deltas. Pause must settle at a frame boundary and persist a resumable outcome; resume must recover from authoritative run evidence rather than center-only or GUI-only memory.
 
@@ -41,3 +43,25 @@ timeout-ms = 900000
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
 command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+
+[closure]
+mode = "merge"
+commit = "2f42188882f29eced5a0413ac29b8af5ac6e2d53"
+
+[[closure.checks]]
+name = "focused center pause and resume proofs pass"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+outcome = "unrunnable"
+detail = "timed out before it could report a verdict"
+
+[[closure.checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"

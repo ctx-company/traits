@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0256.3"
 title = "Render repository-aware run rows"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-29"
+origin = "run run-10d6cdf68fd3737a89746ac11c48e5015c0bfcb840bb9bfa1ba7e008bb723b2c merged as 37a781c1c570d32e74fbfa95f4d41d5f056d0360"
 content = """
 Build the walking skeleton's read-only dashboard from the compact run rows in the center subscription snapshot. Render enough native row state to identify and understand live and finished runs while preserving the repository identity supplied by the machine-wide center, so the same model can support all-repository and repository-scoped views without depending on the desktop process's working directory.
 """
@@ -25,3 +27,13 @@ parent = "0256"
 name = "workspace per-round gate passes"
 command = "just test"
 timeout-ms = 600000
+
+[closure]
+mode = "merge"
+commit = "37a781c1c570d32e74fbfa95f4d41d5f056d0360"
+
+[[closure.checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

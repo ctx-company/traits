@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0256.2"
 title = "Receive the initial center snapshot"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-29"
+origin = "run run-abeae6693a19476865f0e18899735e28d3444767381f3670a0d50dd70e254f46 merged as d86e4600d313c1132c423a910146900d8ac091a8"
 content = """
 Connect the standalone desktop process to the machine-local run center and receive the coherent initial run-list snapshot through the typed public query and subscription client owned by IO. The integration proves that a fresh non-CLI executable can speak the same uid- and package-version-scoped Unix-socket contract as other faces while keeping synchronous, potentially indefinite socket receives off gpui's UI thread.
 """
@@ -26,3 +28,13 @@ name = "existing center protocol proofs pass"
 command = "cargo test -p ctx-traits-cli --test proof_center"
 timeout-ms = 300000
 expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[closure]
+mode = "merge"
+commit = "d86e4600d313c1132c423a910146900d8ac091a8"
+
+[[closure.checks]]
+name = "existing center protocol proofs pass"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0, expect matched"

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0258.2"
 title = "Interrupt runs through the center"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-30"
+origin = "run run-92152093afd042d7c303c108befd9ddfaf25739cd99f0d5010425c180e03e7e1 merged as 3bc2a2cb4d012cdc732dbe29df734c406f3542b7"
 content = """
 Add desktop interrupt affordances that invoke the shared center control capability and reflect the resulting run state only when subscription deltas arrive. This preserves authenticated driver-channel handling behind the center and prevents the native face from creating a second control path.
 
@@ -32,3 +34,13 @@ parent = "0258"
 name = "focused center interrupt proof passes"
 command = "cargo test -p ctx-traits-cli --test proof_center"
 expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[closure]
+mode = "merge"
+commit = "3bc2a2cb4d012cdc732dbe29df734c406f3542b7"
+
+[[closure.checks]]
+name = "focused center interrupt proof passes"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+outcome = "unrunnable"
+detail = "timed out before it could report a verdict"

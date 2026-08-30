@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0257.3"
 title = "Follow live detail and preserve reconstruction"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-30"
+origin = "run run-6442ea20b5f6ded35e85d572f862fde032e6676113973a02f90b5a9c683f2369 merged as 7c138c5a56831c7e223699410a3d263e9ea7a7e8"
 content = """
 Keep an open native frame tree current by applying center activity deltas after its authoritative startup reconstruction. Reconcile live derived evidence with the ledger-seeded session so detail advances as frames land without polling or rereading the ledger for every update, while finished detail remains reproducible after the desktop process is closed and reopened.
 """
@@ -29,3 +31,19 @@ timeout-ms = 900000
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
 command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+
+[closure]
+mode = "merge"
+commit = "7c138c5a56831c7e223699410a3d263e9ea7a7e8"
+
+[[closure.checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"

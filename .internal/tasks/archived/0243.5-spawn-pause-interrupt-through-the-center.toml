@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0243.5"
 title = "Spawn, interrupt, and pause go through the center"
-status = "ready"
+status = "done"
 raised = "2026-08-24"
+closed = "2026-08-29"
+origin = "run run-cc0b0a598be65c4565efc39e32d3ba5429521457a43ccd548e6e4bf8162ee0b0 merged as 7aa98e6a6177183e3f09f8f237a4f42163783607"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 Done-when names an observable outcome and the existing command that decides
@@ -352,3 +354,43 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "per-round workspace gate remains green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "7aa98e6a6177183e3f09f8f237a4f42163783607"
+
+[[closure.checks]]
+name = "paused outcome kind and the single settled-pause predicate hold"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core pause"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "typed control command, unacknowledged invalid byte, and pause request pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io run_control"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "center protocol, start correlation, control resolution, and paused orphan repair pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "dashboard spawn, resume, and interrupt routing regressions pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "center process proofs cover start, interrupt after restart, pause, and resume continuity"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

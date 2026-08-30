@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0252.9"
 title = "No loose prose on exit"
-status = "ready"
+status = "done"
 raised = "2026-08-27"
+closed = "2026-08-29"
+origin = "run run-702c9e139824027454bb6a3d26f5221d30134acd5a59d148bf366855a19d17b1 merged as 0ba8e152a512ff2b051bc8ef44445f9d1f7f0916"
 content = """
 With the live view on the alternate screen (0252.7), an exit already
 restores a clean shell. The bare prose one-liners that used to explain a
@@ -489,3 +491,43 @@ expect = "exit-prose-clean"
 name = "the landing gate stays green"
 command = "just test-full"
 timeout-ms = 3600000
+
+[closure]
+mode = "merge"
+commit = "0ba8e152a512ff2b051bc8ef44445f9d1f7f0916"
+
+[[closure.checks]]
+name = "the run-view exit path restores the shell with no kill note"
+command = "cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "a startup interrupt restores cooked mode and prints no loose prose"
+command = "cargo test -p ctx-traits-cli --test proof_run_startup_progress"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "the queue reports one panel with the remaining count and no halt sentence"
+command = "cargo test -p ctx-traits-cli --test proof_task_queue_refusal_teardown --test proof_task_queue_pane_handoff"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "panel construction units hold and ordinary run output is unchanged"
+command = "cargo test -p ctx-traits-cli --lib --test proof_output_style"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "the three prose producers are gone and the three fallback diagnostics remain"
+command = """! rg -n 'terminal restored' modules/cli/src && ! rg -n 'to run the remaining queue anyway' modules/cli/src && test "$(rg -o 'run tui unavailable; falling back to status progress' modules/cli/src | wc -l | tr -d ' ')" = 3 && echo exit-prose-clean"""
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "the landing gate stays green"
+command = "just test-full"
+outcome = "failed"
+detail = "exited 1"

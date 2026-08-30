@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0263"
 title = "Fixture centers die with their tests"
-status = "ready"
+status = "done"
 raised = "2026-08-28"
+closed = "2026-08-29"
+origin = "run run-0152a184a44eba049d2bd44cb3b52483526165ecae70cd6e6c50d1567eb7bf06 merged as e63bf585aee0947319ae2c23d785761741b2334a"
 content = """
 Isolated fixture centers (0252.8's tuple isolation) spawn correctly but
 outlive their tests: 586 leaked `__ctx-center` daemons and hundreds of
@@ -613,3 +615,31 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "landing gate stays green"
 command = "just test-full"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "e63bf585aee0947319ae2c23d785761741b2334a"
+
+[[closure.checks]]
+name = "the completed battery leaves no live center it launched and no fixture artifacts"
+command = '''d=/tmp/ctx-fix-bat-$$; mkdir -p "$d"; ids() { for p in $(pgrep -f '__ctx-cente[r]' 2>/dev/null); do st=$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ' '_'); [ -n "$st" ] && echo "$p|$st"; done; }; ids > "$d/.before"; TMPDIR="$d" cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown --test proof_run_startup_progress --test proof_task_queue_pane_handoff --test proof_task_queue_refusal_teardown; rc=$?; end=$(($(date +%s)+60)); while :; do alive=""; for id in $(ids); do grep -qxF -- "$id" "$d/.before" || alive="$alive $id"; done; [ -z "$alive" ] && break; [ "$(date +%s)" -ge "$end" ] && break; sleep 1; done; leaks=$(find "$d" -maxdepth 1 \( -name 'ctx-*.sock' -o -name 'ctx-*.log' -o -name 'ctx-*.owner' -o -name 'ctx-*.spawn' -o -name 'ctx-traits-cli-test-*' \) ); echo "post-battery survivors:[$alive] leaks:[$leaks]"; rm -rf "$d"; [ $rc -eq 0 ] && [ -z "$alive" ] && [ -z "$leaks" ]'''
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "fixture center death, tuple-scoped cleanup and held-driver-lock survival are proven"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "production center lifecycle is unchanged"
+command = "cargo test -p ctx-traits-io center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "landing gate stays green"
+command = "just test-full"
+outcome = "failed"
+detail = "exited 1"

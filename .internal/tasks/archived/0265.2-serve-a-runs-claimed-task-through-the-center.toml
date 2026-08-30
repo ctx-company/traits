@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0265.2"
 title = "Serve a run's claimed task through the center"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-08-30"
+origin = "run run-f424c39e46bff1f577db6b531b2c5884d2a6843c2baacf7761a3727c38c72f97 merged as 2bbe3811b6f69289e4bbbe51d2244fe21403a1e1"
 content = """
 `screens/sessions.md:14-18` opens the screen with grammar rule 6's header: a title that is the claimed task's id and title (`0243.4 — everyone asks the center`). Both halves are tagged `data:`, and only half of that is served today.
 
@@ -129,3 +131,31 @@ expect = 'test result: ok\. [1-9]'
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
 command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+
+[closure]
+mode = "merge"
+commit = "2bbe3811b6f69289e4bbbe51d2244fe21403a1e1"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "center wire proof still passes"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "CLI task read path stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"

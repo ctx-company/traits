@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0257.1"
 title = "Load the selected run from its ledger"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-30"
+origin = "run run-586d8bb0cd8daeeba90acdd9936358050e0d36532c8c169618668a20a08c517e merged as 13514825e11c5c74c7f6ba7d6eccd25f0d120171"
 content = """
 Make dashboard selection open detail state seeded by one authoritative full-session read through the existing IO store path. Resolve the selected run from the repository identity carried by its compact center row and perform the filesystem work away from gpui's UI thread, establishing a restart-safe detail baseline without expanding the dashboard list contract.
 """
@@ -25,3 +27,13 @@ parent = "0257"
 name = "workspace per-round gate passes"
 command = "just test"
 timeout-ms = 600000
+
+[closure]
+mode = "merge"
+commit = "13514825e11c5c74c7f6ba7d6eccd25f0d120171"
+
+[[closure.checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

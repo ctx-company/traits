@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0256.4"
 title = "Drive the dashboard from live deltas"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-29"
+origin = "run run-917c25cd6d1d454677886ec1ab3e1b3b57851d90d6ca89e43569595408922714 merged as 580d9a57baec38f4e093bc9b81732a0050893766"
 content = """
 Continue the dashboard subscription after its initial snapshot and bridge run-list deltas from the blocking background receiver into gpui state. Inserts and updates must reach the native rows in subscription order, making the center's snapshot-plus-delta stream the exclusive source of dashboard changes and proving that work started outside the desktop becomes visible without a polling loop.
 """
@@ -31,3 +33,19 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "workspace per-round gate passes"
 command = "just test"
 timeout-ms = 600000
+
+[closure]
+mode = "merge"
+commit = "580d9a57baec38f4e093bc9b81732a0050893766"
+
+[[closure.checks]]
+name = "existing center subscription proofs pass"
+command = "cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

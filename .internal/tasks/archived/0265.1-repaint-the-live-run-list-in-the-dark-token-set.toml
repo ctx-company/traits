@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0265.1"
 title = "Repaint the live run list in the dark token set"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-08-30"
+origin = "run run-32d31a6ac5de98e5a2718650fe21c10bbd4935f8ffa07785c6dd20a240645c7b merged as 7cb607596d7d25d7f12a015200b294a54a6bd883"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 one names an observable outcome and what decides it. The APPROACH section is
@@ -289,15 +291,37 @@ validation = """
 """
 
 [relations]
+depends-on = [
+    "0256.1",
+    "0256.2",
+    "0256.3",
+    "0256.4",
+    "0256.5",
+]
 parent = "0265"
-depends-on = ["0256.1", "0256.2", "0256.3", "0256.4", "0256.5"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = '''test -f Cargo.lock && metadata="$(cargo metadata --format-version 1)" && ! printf '%s' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+command = """test -f Cargo.lock && metadata="$(cargo metadata --format-version 1)" && ! printf '%s' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock"""
 timeout-ms = 600000
 
 [[checks]]
 name = "per-round workspace gate remains green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "7cb607596d7d25d7f12a015200b294a54a6bd883"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = """test -f Cargo.lock && metadata="$(cargo metadata --format-version 1)" && ! printf '%s' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock"""
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

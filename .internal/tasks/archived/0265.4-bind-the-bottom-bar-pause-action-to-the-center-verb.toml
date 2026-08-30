@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0265.4"
 title = "Bind the bottom bar pause action to the center verb"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-08-30"
+origin = "run run-5f593af91c7503eb07325510e4ed68cd37ad88024b0dcd5911cd8781c6b880ab merged as df9eba19867acfe4ff5fc3a1a1979e11594fc74c"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome and what decides it, plus what it excludes. The
@@ -464,3 +466,19 @@ timeout-ms = 600000
 name = "per-round workspace gate remains green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "df9eba19867acfe4ff5fc3a1a1979e11594fc74c"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

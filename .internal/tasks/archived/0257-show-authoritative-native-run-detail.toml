@@ -16,5 +16,6 @@ Ledgers and kernel-backed driver liveness remain authoritative; center and activ
 ## Done when
 Every child task is closed and the stop condition holds: selecting a live run shows an authoritative native frame tree that updates as frames land without a GUI poll loop, and a finished run's detail is identical after closing and reopening the application.
 """
+
 [relations]
 depends-on = ["0256"]

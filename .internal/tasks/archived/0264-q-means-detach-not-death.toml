@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0264"
 title = "q means detach, not death"
-status = "ready"
+status = "done"
 raised = "2026-08-28"
+closed = "2026-08-29"
+origin = "run run-20f45c4697c1212e73b3d2a4e23ab325bbea4f49395f77679c749819f52a7fe0 merged as 592433acc420b6588cea241d89943b13f30af70b"
 content = """
 Quitting the live view with `q` prints "live view closed; run continues —
 reattach with ctx traits dashboard" (modules/cli/src/app/run_view.rs:1428)
@@ -487,3 +489,25 @@ timeout-ms = 1800000
 name = "landing gate stays green"
 command = "CARGO_TARGET_DIR=target just test-full"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "592433acc420b6588cea241d89943b13f30af70b"
+
+[[closure.checks]]
+name = "q on a live driving run leaves the drive alive, and every abnormal-exit contract still holds"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_run_view_exit_teardown"
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "run-view, terminal and dashboard classification unit coverage stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "landing gate stays green"
+command = "CARGO_TARGET_DIR=target just test-full"
+outcome = "failed"
+detail = "exited 1"

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0256.1"
 title = "Establish the standalone desktop shell"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-29"
+origin = "run run-6d76e4d5b4cf8db8428f25eba3967406b1daa46d221aab4126148fd8fd53441e merged as 76c223132a49794383b17183b4c1bb55a3a7461e"
 content = """
 Create the minimal gpui application as a standalone desktop project that opens a basic native window. Give it its own Cargo manifest, lockfile, and independent build and test commands, with path dependencies on the existing core and IO crates only where shared semantics or boundaries are needed. This establishes a real desktop compilation surface without adding gpui's dependency graph or compile cost to the Rust workspace binary and its established gates.
 """
@@ -32,3 +34,19 @@ timeout-ms = 900000
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
 command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+
+[closure]
+mode = "merge"
+commit = "76c223132a49794383b17183b4c1bb55a3a7461e"
+
+[[closure.checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"

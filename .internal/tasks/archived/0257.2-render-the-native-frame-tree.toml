@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0257.2"
 title = "Render the native frame tree"
-status = "ready"
+status = "done"
 raised = "2026-08-25"
+closed = "2026-08-30"
+origin = "run run-9566460bb97aad0919c8810401831612afa3ff8e5fff268637a5267ed8baa7f7 merged as 434b17cf1023be4bb4187b38c1c645eed1b90740"
 content = """
 Present the selected full session as a native gpui frame tree derived from the shared core session, frame, and activity semantics. Cover the meaningful frame states needed to inspect a run while keeping product meaning in shared core and IO boundaries rather than translating the session into terminal-oriented output.
 """
@@ -25,3 +27,13 @@ parent = "0257"
 name = "workspace per-round gate passes"
 command = "just test"
 timeout-ms = 600000
+
+[closure]
+mode = "merge"
+commit = "434b17cf1023be4bb4187b38c1c645eed1b90740"
+
+[[closure.checks]]
+name = "workspace per-round gate passes"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"
