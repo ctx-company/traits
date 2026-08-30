@@ -603,16 +603,22 @@ var REPOROOT = __REPOROOT__;
     var kc = String(t.kind).toLowerCase().replace(/[^a-z-]/g, "");
     return "<div class=\\"minicard\\" data-id=\\"" + id + "\\"><span class=\\"kind k-" + kc + "\\">" + esc(t.kind) + "</span><h4>" + esc(t.title) + "</h4><p>" + esc(t.summary) + "</p></div>";
   }
+  function xGroup(label, ids, cap){
+    if (!ids.length) return "";
+    var html = "<div class=\\"xlabel\\">" + label + "</div>" + ids.slice(0, cap).map(miniCard).join("");
+    if (ids.length > cap) html += "<div class=\\"xlabel\\">+" + (ids.length - cap) + " more</div>";
+    return html;
+  }
   function renderExplore(){
     if (!exploreOpen) return;
     var n = byId[selectedId];
-    var ins = (USEDBY[n.id] || []).slice(0, 8), outs = (n.uses || []).slice(0, 8);
-    var insMore = (USEDBY[n.id] || []).length - ins.length, outsMore = (n.uses || []).length - outs.length;
     var kc = String(n.kind).toLowerCase().replace(/[^a-z-]/g, "");
     var center = "<div class=\\"card\\" id=\\"xcenter-card\\"><div class=\\"chead\\"><span class=\\"kind k-" + kc + "\\">" + esc(n.kind) + "</span><h2>" + esc(n.title) + "</h2></div>" +
       "<p class=\\"sum\\">" + esc(n.summary) + "</p><div class=\\"exp\\">" + prose(n.explanation, n.id) + "</div>" + codeBlocksHtml(n) + "</div>";
-    var left = "<div class=\\"xlabel\\">← used by</div>" + ins.map(miniCard).join("") + (insMore > 0 ? "<div class=\\"xlabel\\">+" + insMore + " more</div>" : "");
-    var right = "<div class=\\"xlabel\\">uses →</div>" + outs.map(miniCard).join("") + (outsMore > 0 ? "<div class=\\"xlabel\\">+" + outsMore + " more</div>" : "");
+    var left = xGroup("part of", n.parent ? [n.parent] : [], 1) + xGroup("← used by", USEDBY[n.id] || [], 8);
+    var right = xGroup("contains", n.children || [], 8) + xGroup("uses →", n.uses || [], 8);
+    if (!left) left = "<div class=\\"xlabel\\">nothing points here</div>";
+    if (!right) right = "<div class=\\"xlabel\\">no outgoing relations</div>";
     document.getElementById("xbody").innerHTML =
       "<svg id=\\"xedges\\"></svg><div class=\\"xcol\\" id=\\"xleft\\">" + left + "</div><div class=\\"xcenter\\">" + center + "</div><div class=\\"xcol\\" id=\\"xright\\">" + right + "</div>";
     requestAnimationFrame(drawXEdges);
