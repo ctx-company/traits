@@ -16,10 +16,18 @@ authors = ["Oskar Cieslik"]
 license = "Apache-2.0"
 repository = "https://github.com/ctx-company/traits"
 publish = false
+# `just desktop-run`/`desktop-build` run bare `cargo run`/`cargo build` with
+# no `--bin`; a second `[[bin]]` (the font proof) makes that ambiguous
+# without this.
+default-run = "ctx-desktop"
 
 [[bin]]
 name = "ctx-desktop"
 path = "src/main.rs"
+
+[[bin]]
+name = "ctx-desktop-font-proof"
+path = "src/bin/font_proof.rs"
 
 [dependencies]
 gpui = "0.2.2"

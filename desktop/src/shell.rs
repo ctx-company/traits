@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use gpui::prelude::*;
 use gpui::{
     Bounds, Context, Pixels, Render, SharedString, Size, TitlebarOptions, Window, WindowOptions,
-    div, px, size,
+    div, px, rgb, size,
 };
 
 use std::collections::HashMap;
@@ -16,6 +16,7 @@ use crate::row_control::{self, RowControls, RowRequest, RowVerb};
 use crate::run_row::{RepoScope, RunRow};
 use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, SubmitRequest};
 use crate::spawn_view;
+use crate::tokens;
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -605,36 +606,54 @@ impl Render for Shell {
         let header = self.face.header();
         let stale = self.face.is_stale();
         let selected_key = self.detail.selected_key().map(str::to_string);
+        // `tokens.md:64` "mono meta: states, handles, times, values,
+        // activity lines, hints" — the one place that role is styled, reused
+        // by every mono-meta child a row emits below.
+        let mono_meta = |text: SharedString| {
+            div()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(tokens::TEXT_MUTED))
+                .child(text)
+        };
+        // `tokens.md:63` "mono actions" — stop/pause/resume and row-control
+        // status share this role. No state-dependent colour: that is
+        // `0265.5`'s.
+        let mono_action = |text: &'static str| {
+            div()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_11)
+                .text_color(rgb(tokens::TEXT_SECONDARY))
+                .child(text)
+        };
         let mut list = div()
             .id("run-list")
             .flex()
             .flex_col()
+            .gap(tokens::LIST_ROWS_GAP_MIN)
             .size_full()
             .overflow_y_scroll();
         for row in self.face.rows() {
             let path = row.ledger_path.clone();
             let live = row.state == crate::run_row::RowState::Live;
-            let mut stop = div()
-                .id(SharedString::from(format!("stop-{}", row.ledger_path)))
-                .child("stop");
+            let mut stop =
+                mono_action("stop").id(SharedString::from(format!("stop-{}", row.ledger_path)));
             if live {
                 let stop_path = row.ledger_path.clone();
                 stop = stop.on_click(cx.listener(move |shell, _event, _window, cx| {
                     shell.request_row_control(stop_path.clone(), RowVerb::Interrupt, cx);
                 }));
             }
-            let mut pause = div()
-                .id(SharedString::from(format!("pause-{}", row.ledger_path)))
-                .child("pause");
+            let mut pause =
+                mono_action("pause").id(SharedString::from(format!("pause-{}", row.ledger_path)));
             if live {
                 let pause_path = row.ledger_path.clone();
                 pause = pause.on_click(cx.listener(move |shell, _event, _window, cx| {
                     shell.request_row_control(pause_path.clone(), RowVerb::Pause, cx);
                 }));
             }
-            let mut resume = div()
-                .id(SharedString::from(format!("resume-{}", row.ledger_path)))
-                .child("resume");
+            let mut resume =
+                mono_action("resume").id(SharedString::from(format!("resume-{}", row.ledger_path)));
             if row.can_resume() {
                 let resume_path = row.ledger_path.clone();
                 resume = resume.on_click(cx.listener(move |shell, _event, _window, cx| {
@@ -650,26 +669,36 @@ impl Render for Shell {
                 .id(SharedString::from(row.ledger_path.clone()))
                 .flex()
                 .flex_row()
-                .gap_2()
+                .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
+                .px(tokens::LIST_ROW_PAD_X_MAX)
+                .py(tokens::LIST_ROW_PAD_Y_COMPACT)
                 .on_click(cx.listener(move |shell, _event, _window, cx| {
                     shell.select_ledger(path.clone(), cx);
                 }))
-                .child(row.repo_label.clone())
+                .child(mono_meta(row.repo_label.clone().into()))
                 .child(row.title.clone())
-                .child(format!("{} / {}", row.run_id, row.trait_id))
-                .child(row.state_text.clone())
-                .child(row.detail_text.clone())
-                .child(row.elapsed_text.clone())
-                .child(row.tokens_text.clone())
+                .child(mono_meta(
+                    format!("{} / {}", row.run_id, row.trait_id).into(),
+                ))
+                .child(mono_meta(row.state_text.clone().into()))
+                .child(
+                    div()
+                        .font_family(tokens::FONT_SANS)
+                        .text_size(tokens::SIZE_11)
+                        .text_color(rgb(tokens::TEXT_SECONDARY))
+                        .child(row.detail_text.clone()),
+                )
+                .child(mono_meta(row.elapsed_text.clone().into()))
+                .child(mono_meta(row.tokens_text.clone().into()))
                 .child(stop)
                 .child(pause)
                 .child(resume)
-                .child(status);
+                .child(mono_meta(status.into()));
             if stale {
                 item = item.opacity(0.6);
             }
             if selected_key.as_deref() == Some(row.ledger_path.as_str()) {
-                item = item.bg(gpui::rgb(0x333333));
+                item = item.bg(rgb(tokens::SURFACE_RAISED));
             }
             list = list.child(item);
         }
@@ -684,9 +713,15 @@ impl Render for Shell {
                     .id(SharedString::from(format!("detached-notice-{display_id}")))
                     .flex()
                     .flex_row()
-                    .gap_2()
-                    .child(display_id)
-                    .child(format!("refused: {message}")),
+                    .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
+                    .child(mono_meta(display_id.into()))
+                    .child(
+                        div()
+                            .font_family(tokens::FONT_MONO)
+                            .text_size(tokens::SIZE_10_5)
+                            .text_color(rgb(tokens::TEXT_SECONDARY))
+                            .child(format!("refused: {message}")),
+                    ),
             );
         }
         let detail_pane = match self.detail.load_state() {
@@ -721,6 +756,11 @@ impl Render for Shell {
             .flex()
             .flex_col()
             .size_full()
+            .bg(rgb(tokens::CANVAS))
+            .font_family(tokens::FONT_SANS)
+            .text_size(tokens::SIZE_12_5)
+            .text_color(rgb(tokens::TEXT))
+            .font_weight(tokens::WEIGHT_NORMAL)
             .child(header)
             .child(spawn_toggle);
         if self.spawn_form.is_open() {
@@ -734,7 +774,11 @@ impl Render for Shell {
                     }))
                     .child(repo.label.clone());
                 if self.spawn_form.selected_repo() == Some(repo.repo_key.as_str()) {
-                    item = item.bg(gpui::rgb(0x333333));
+                    // Deviation beyond the row path: identical "selected
+                    // fill" role as the row's own selection background —
+                    // substituted here too rather than leaving the one
+                    // remaining hard-coded hex in the lane.
+                    item = item.bg(rgb(tokens::SURFACE_RAISED));
                 }
                 repositories = repositories.child(item);
             }

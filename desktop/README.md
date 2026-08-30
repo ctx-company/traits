@@ -758,3 +758,46 @@ after `Acknowledged` alone, and that a `RowChanged { live: false }` delta
 resolves it — covering both the ack-then-delta and delta-then-ack
 orderings, plus one refusal path. Env-mutating and the sole `#[test]` in
 its target, per the same convention.
+
+## Dark token set and bundled faces (0265.1)
+
+`src/tokens.rs` is the one entry point for `.internal/docs/design/tokens.md`'s
+dark column: every named colour, the three literal diff washes, the type
+scale, the used weight, both font-family names and every layout constant,
+each defined exactly once. `tokens.md` stays the only source of the values —
+there is no second palette, no theme trait, and the light column is recorded
+there and unimplemented here. `Shell::render` is the only consumer so far,
+repainting the run list; every other surface still renders in gpui's
+defaults until its own cut lands.
+
+`tokens.md`'s five layout entries that are ranges rather than single values
+(list-row pad, rows gap, dot-text gap, bordered-box pad, rail-divider pad)
+are named as endpoint pairs — e.g. `LIST_ROW_PAD_Y_COMPACT`/`_OPEN` — rather
+than silently collapsed to one number. This needs an owner ruling before
+later cuts inherit the convention.
+
+**Fonts are bundled, not fetched.** IBM Plex Sans and Mono (Regular only)
+are vendored into `assets/fonts/` from a pinned upstream commit — see
+`assets/fonts/README.md` for the exact source and per-file hashes — with the
+SIL OFL 1.1 text beside the bytes. `src/fonts.rs` is the one registration
+path (`include_bytes!` straight into `TextSystem::add_fonts`, not an
+`AssetSource`: `0256.1` established no asset mechanism, and introducing one
+to hand two static blobs to a byte-taking API would be the extra mechanism,
+not the reuse — `0260` can revisit when the app bundle needs a resource
+path) and the one verification (`verify_bundled`), both called from
+`main.rs` before the window opens. A registration or resolution failure is
+an `.expect()` panic at startup — loud, not a quiet fallback render.
+
+`TestAppContext`/`#[gpui::test]` cannot prove font resolution: gpui's test
+platform installs a no-op text system that resolves and "adds" fonts
+without touching real data, so a `TestAppContext` version of this check
+would pass with nothing vendored at all. The proof runs against the real
+platform text system instead, via `gpui::Application::headless()` in the
+standalone `ctx-desktop-font-proof` binary (`src/bin/font_proof.rs`), which
+`tests/bundled_fonts.rs` drives as a subprocess in two modes: default
+(register, then the bundled families must resolve to a bundled `FontId`,
+not gpui's fallback stack) and `--skip-registration` (registration
+skipped, and the resolution check must itself fail — the forced-negative
+control proving the positive check is not vacuous). Driving it as a
+subprocess test keeps the proof inside plain `cargo test` / `just
+desktop-test` without any `Justfile` change.
