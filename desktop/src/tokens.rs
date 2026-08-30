@@ -175,6 +175,10 @@ pub const BORDERED_BOX_PAD_X_MAX: Pixels = px(12.);
 pub const BOTTOM_BAR_PAD_Y: Pixels = px(10.);
 pub const BOTTOM_BAR_PAD_X: Pixels = px(14.);
 pub const BOTTOM_BAR_BORDER: Pixels = px(1.);
+/// `tokens.md:83` records the bar's pad and border but not a gap between its
+/// two halves' children; sourced from `sessions.html:579,597` instead. See
+/// the work summary for the corresponding owner correction.
+pub const BOTTOM_BAR_GAP: Pixels = px(8.);
 
 // bottom fade
 pub const BOTTOM_FADE_HEIGHT: Pixels = px(100.);

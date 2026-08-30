@@ -320,6 +320,7 @@ mod tests {
             tokens_text: "-".to_string(),
             live: true,
             modified_epoch_secs: 0,
+            verdict_rounds: None,
         }
     }
 

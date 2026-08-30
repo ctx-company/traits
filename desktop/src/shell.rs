@@ -8,6 +8,8 @@ use gpui::{
 
 use std::collections::HashMap;
 
+use crate::bottom_bar;
+use crate::bottom_bar_view;
 use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
@@ -812,7 +814,19 @@ impl Render for Shell {
         if let Some(banner) = follow_banner {
             column = column.child(banner);
         }
-        column.child(detail_pane)
+        column = column.child(detail_pane);
+        // The Sessions bar describes the selected run; with no selection
+        // there is nothing to describe, so no bar renders.
+        if let Some(selected) = selected_key.as_deref()
+            && let Some(row) = self
+                .face
+                .rows()
+                .iter()
+                .find(|row| row.ledger_path == selected)
+        {
+            column = column.child(bottom_bar_view::bar_element(&bottom_bar::sessions_bar(row)));
+        }
+        column
     }
 }
 
@@ -1006,6 +1020,7 @@ mod tests {
             tokens_text: "-".to_string(),
             live: true,
             modified_epoch_secs: 0,
+            verdict_rounds: None,
         }
     }
 

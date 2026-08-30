@@ -37,6 +37,88 @@ pub enum RowState {
     Unreadable,
 }
 
+/// `grammar.md` rule 1's colour roles for a state word. `Neutral` is not one
+/// of rule 1's named roles — it is this projection's answer for the two
+/// `SessionState` variants rule 1 does not assign a role to (see
+/// [`session_state_presentation`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateRole {
+    Accent,
+    Ok,
+    Warn,
+    Danger,
+    Neutral,
+}
+
+/// A state word paired with the colour role it renders in — the bottom bar's
+/// left-hand presentation of a [`RowState`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatePresentation {
+    pub word: &'static str,
+    pub role: StateRole,
+}
+
+/// Exhaustive over all seven [`SessionState`] variants, no catch-all arm.
+/// `Cancelled` and `WaitingOnAgent` are judgement calls: rule 1 gives no role
+/// to "terminal but not a failure" or "in flight but not driven", so both
+/// render `Neutral` rather than borrowing a role rule 1 reserves for
+/// something else.
+pub fn session_state_presentation(state: SessionState) -> StatePresentation {
+    match state {
+        SessionState::Running => StatePresentation {
+            word: "running",
+            role: StateRole::Accent,
+        },
+        SessionState::WaitingOnHuman => StatePresentation {
+            word: "awaiting owner",
+            role: StateRole::Warn,
+        },
+        SessionState::Blocked => StatePresentation {
+            word: "blocked",
+            role: StateRole::Warn,
+        },
+        SessionState::Completed => StatePresentation {
+            word: "complete",
+            role: StateRole::Ok,
+        },
+        SessionState::Failed => StatePresentation {
+            word: "failed",
+            role: StateRole::Danger,
+        },
+        SessionState::Cancelled => StatePresentation {
+            word: "cancelled",
+            role: StateRole::Neutral,
+        },
+        SessionState::WaitingOnAgent => StatePresentation {
+            word: "awaiting agent",
+            role: StateRole::Neutral,
+        },
+    }
+}
+
+/// Exhaustive over all five [`RowState`] variants, no catch-all arm. `Live`
+/// and `Unreadable` are not `SessionState` values, so they get their own
+/// arms rather than being forced through [`session_state_presentation`].
+pub fn presentation(state: &RowState) -> StatePresentation {
+    match state {
+        RowState::Live => StatePresentation {
+            word: "running",
+            role: StateRole::Accent,
+        },
+        RowState::Paused => StatePresentation {
+            word: "paused",
+            role: StateRole::Warn,
+        },
+        RowState::Resumable(state) | RowState::Terminal(state) => {
+            session_state_presentation(*state)
+        }
+        RowState::Unreadable => StatePresentation {
+            word: "unreadable",
+            role: StateRole::Danger,
+        },
+    }
+}
+
 /// A presentation-ready run row. Identity fields are retained even when the
 /// scope filters a row out of the currently painted list, so later selection
 /// and delta application (0256.4) have something to key on.
@@ -59,6 +141,7 @@ pub struct RunRow {
     pub tokens_text: String,
     pub live: bool,
     pub modified_epoch_secs: u64,
+    pub verdict_rounds: Option<u64>,
 }
 
 impl RunRow {
@@ -70,14 +153,7 @@ impl RunRow {
 }
 
 fn state_text_for(state: &RowState) -> String {
-    match state {
-        RowState::Live => "live".to_string(),
-        RowState::Paused => "paused".to_string(),
-        RowState::Resumable(state) | RowState::Terminal(state) => {
-            format!("{state:?}").to_ascii_lowercase()
-        }
-        RowState::Unreadable => "unreadable".to_string(),
-    }
+    presentation(state).word.to_string()
 }
 
 pub(crate) fn repo_label_for(repo_key: &str, repo_path: &str) -> String {
@@ -207,6 +283,7 @@ fn project_one(row: &CenterPublicRow) -> RunRow {
         ),
         live: row.live,
         modified_epoch_secs: row.modified_epoch_secs,
+        verdict_rounds: summary.verdict_rounds,
     }
 }
 
@@ -559,6 +636,106 @@ mod tests {
         summary.task_key = None;
         let row = row("repo", "/repo", "/repo/session.json", summary, false, 1);
         assert_eq!(project_one(&row).title, "fixture-trait");
+    }
+
+    #[test]
+    fn session_state_presentation_covers_every_variant() {
+        let cases = [
+            (SessionState::Running, "running", StateRole::Accent),
+            (
+                SessionState::WaitingOnHuman,
+                "awaiting owner",
+                StateRole::Warn,
+            ),
+            (SessionState::Blocked, "blocked", StateRole::Warn),
+            (SessionState::Completed, "complete", StateRole::Ok),
+            (SessionState::Failed, "failed", StateRole::Danger),
+            (SessionState::Cancelled, "cancelled", StateRole::Neutral),
+            (
+                SessionState::WaitingOnAgent,
+                "awaiting agent",
+                StateRole::Neutral,
+            ),
+        ];
+        for (state, word, role) in cases {
+            let presented = session_state_presentation(state);
+            assert_eq!(presented.word, word, "{state:?}");
+            assert_eq!(presented.role, role, "{state:?}");
+        }
+    }
+
+    #[test]
+    fn row_state_presentation_covers_live_paused_and_unreadable() {
+        assert_eq!(
+            presentation(&RowState::Live),
+            StatePresentation {
+                word: "running",
+                role: StateRole::Accent,
+            }
+        );
+        assert_eq!(
+            presentation(&RowState::Paused),
+            StatePresentation {
+                word: "paused",
+                role: StateRole::Warn,
+            }
+        );
+        assert_eq!(
+            presentation(&RowState::Unreadable),
+            StatePresentation {
+                word: "unreadable",
+                role: StateRole::Danger,
+            }
+        );
+    }
+
+    #[test]
+    fn a_non_live_completed_row_presents_ok_not_accent() {
+        let completed_row = row(
+            "repo",
+            "/repo",
+            "/repo/completed.json",
+            readable_summary("run", "session", Status::Completed),
+            false,
+            1,
+        );
+        let projected = project_one(&completed_row);
+        let presented = presentation(&projected.state);
+        assert_eq!(presented.word, "complete");
+        assert_eq!(presented.role, StateRole::Ok);
+    }
+
+    #[test]
+    fn unreadable_row_presents_danger_with_the_parse_error_as_detail() {
+        let unreadable_row = row(
+            "repo",
+            "/repo",
+            "/repo/unreadable.json",
+            RunSummary::unreadable("session".to_string(), "bad json".to_string()),
+            false,
+            1,
+        );
+        let projected = project_one(&unreadable_row);
+        assert_eq!(presentation(&projected.state).role, StateRole::Danger);
+        assert_eq!(projected.detail_text, "bad json");
+    }
+
+    #[test]
+    fn verdict_rounds_projects_through_from_the_summary() {
+        let mut summary = readable_summary("run", "session", Status::Completed);
+        summary.verdict_rounds = Some(3);
+        let rounds_row = row("repo", "/repo", "/repo/rounds.json", summary, false, 1);
+        assert_eq!(project_one(&rounds_row).verdict_rounds, Some(3));
+
+        let none_row = row(
+            "repo",
+            "/repo",
+            "/repo/no-rounds.json",
+            readable_summary("run", "session", Status::Completed),
+            false,
+            1,
+        );
+        assert_eq!(project_one(&none_row).verdict_rounds, None);
     }
 
     #[test]
