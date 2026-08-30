@@ -2795,6 +2795,130 @@ fn start_trait_existing_never_spawns_a_center_when_none_is_serving() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The desktop-shaped interrupt path end to end, mirroring
+/// `start_trait_existing_reaches_two_subscribers_and_the_run_outlives_the_requester`:
+/// `control_existing` (not `control`) reaches an already-serving center, the
+/// requesting subscription is dropped immediately after the request is
+/// acknowledged — the stand-in for the requesting window closing — and only
+/// the *second, untouched* subscriber is asserted against for the effect.
+/// This is the one proof that carries the task's "Done when" clause end to
+/// end.
+#[test]
+fn control_existing_interrupt_reaches_two_subscribers_and_the_run_outlives_the_requester() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("control-existing-two-subscribers");
+    let release = root.join("release-frame");
+    let (repo, home, fixture) =
+        prepare_drive_fixture(&root, FixtureRelease::WhenFileAppears(&release));
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let first = ctx_traits_io::center::subscribe(None).expect("first subscription");
+    let second = ctx_traits_io::center::subscribe(None).expect("second subscription");
+    for subscription in [&first, &second] {
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+        ));
+        assert!(matches!(
+            subscription.recv_timeout(PROCESS_DEADLINE),
+            Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+        ));
+    }
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let session_id = start_fixture(&repo, &fixture, &ledger);
+    let result = ctx_traits_io::center::control_existing(
+        &session_id,
+        None,
+        ctx_traits_io::center::ControlAction::Interrupt,
+    )
+    .expect("center control request through the existing-only entry");
+    assert!(matches!(
+        result,
+        ctx_traits_io::center::ControlResult::Acknowledged
+    ));
+    // The stand-in for the desktop window closing: the requesting
+    // subscription goes away before the driver has even produced the delta
+    // that establishes the interrupted effect.
+    drop(first);
+    std::fs::write(&release, "release").expect("release fixture frame");
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "the second, untouched subscriber did not observe the interrupted effect"
+        );
+        match second.recv_timeout(remaining) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(delta)) => {
+                let row = match &delta {
+                    ctx_traits_io::center::CenterDelta::RowChanged { row }
+                    | ctx_traits_io::center::CenterDelta::Ended { row } => Some(row),
+                    _ => None,
+                };
+                if let Some(row) = row
+                    && row.ledger_path == ledger.to_string_lossy()
+                    && row.summary.last_drive_outcome.as_deref() == Some("interrupted")
+                {
+                    break;
+                }
+            }
+            Ok(_) => {}
+            Err(error) => panic!("read interrupt delta: {error}"),
+        }
+    }
+    await_outcome(&ledger, "interrupted");
+    drop(second);
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The regression guard for the GUI-forks-itself hazard, mirroring
+/// `start_trait_existing_never_spawns_a_center_when_none_is_serving`:
+/// `control_existing` must never spawn a center of its own when none is
+/// serving.
+#[test]
+fn control_existing_never_spawns_a_center_when_none_is_serving() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("control-existing-never-spawns");
+    std::fs::create_dir_all(&root).expect("create scratch root");
+    let socket = root.join("center.sock");
+    let spawn_lock = root.join("center.lock");
+    let launch_marker = root.join("launches");
+    let _environment = CenterEnvironment::install(&root);
+
+    let result = ctx_traits_io::center::control_existing(
+        "session-does-not-matter",
+        None,
+        ctx_traits_io::center::ControlAction::Interrupt,
+    );
+    assert!(
+        result.is_err(),
+        "no center is serving, so the existing-only entry must fail rather than spawn one"
+    );
+    assert!(
+        !launch_marker.exists(),
+        "control_existing must never spawn a center: launch marker was written"
+    );
+    assert!(
+        !socket.exists(),
+        "control_existing must never spawn a center: socket was created"
+    );
+    assert!(
+        !spawn_lock.exists(),
+        "control_existing must never enter spawn arbitration: spawn lock was created"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn center_start_of_a_child_that_exits_before_registering_reports_its_stderr() {
     let _serial = SENTINEL_TEST_LOCK

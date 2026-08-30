@@ -22,10 +22,13 @@ Interrupting a live run from the desktop sends only the shared center verb, the 
 """
 
 [relations]
+depends-on = [
+    "0256",
+    "0243.5",
+]
 parent = "0258"
-depends-on = ["0256", "0243.5"]
 
 [[checks]]
 name = "focused center interrupt proof passes"
 command = "cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9][0-9]* passed"
+expect = 'test result: ok\. [1-9][0-9]* passed'

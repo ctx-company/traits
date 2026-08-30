@@ -443,6 +443,53 @@ impl FakePeerConnection {
         }));
     }
 
+    /// Read the client's `Control` request — a hand-written duplicate of
+    /// the io crate's private `Request::Control` wire shape, the same
+    /// duplication convention documented on [`FakePeer`] for the snapshot/
+    /// delta/start tags. Returns `(id, session_id, repo_key, command)`,
+    /// where `command` is the wire string (`"interrupt"`/`"pause"`).
+    pub fn read_control_request(&mut self) -> (String, String, Option<String>, String) {
+        let request = self.read_line();
+        assert_eq!(request["kind"], "control", "expected a control request");
+        let id = request["id"]
+            .as_str()
+            .expect("control request id")
+            .to_string();
+        let session_id = request["session_id"]
+            .as_str()
+            .expect("control request session_id")
+            .to_string();
+        let repo_key = request["repo_key"].as_str().map(str::to_string);
+        let command = request["command"]
+            .as_str()
+            .expect("control request command")
+            .to_string();
+        (id, session_id, repo_key, command)
+    }
+
+    /// Respond to a `Control` request with the `ControlWireResult` variant
+    /// named by `tag` (its kebab-case wire name, e.g. `"missing"`), and
+    /// `data` for the one variant (`ambiguous`) that carries a payload.
+    pub fn send_control_result(&mut self, id: &str, tag: &str, data: Option<serde_json::Value>) {
+        let control_data = match data {
+            Some(data) => serde_json::json!({"type": tag, "data": data}),
+            None => serde_json::json!({"type": tag}),
+        };
+        self.write_line(&serde_json::json!({
+            "kind": "response",
+            "id": id,
+            "result": {
+                "type": "control",
+                "data": control_data,
+            },
+        }));
+    }
+
+    /// Respond to a `Control` request with `ControlWireResult::Acknowledged`.
+    pub fn send_control_acknowledged(&mut self, id: &str) {
+        self.send_control_result(id, "acknowledged", None);
+    }
+
     /// Serve a complete snapshot in one call: start, each row, end.
     pub fn serve_snapshot(&mut self, id: &str, rows: &[CenterPublicRow]) {
         self.send_snapshot_start(id);

@@ -4968,30 +4968,6 @@ impl DeleteEligibility {
     }
 }
 
-/// Render a center-owned control result for the dashboard footer.
-fn control_message(result: &ctx_traits_io::center::ControlResult, display_id: &str) -> String {
-    match result {
-        ctx_traits_io::center::ControlResult::Acknowledged => {
-            format!("stop requested for {display_id}")
-        }
-        ctx_traits_io::center::ControlResult::Missing => {
-            format!("stop refused: {display_id} is no longer listed")
-        }
-        ctx_traits_io::center::ControlResult::Ambiguous(_) => {
-            format!("stop refused: {display_id} is ambiguous")
-        }
-        ctx_traits_io::center::ControlResult::NotLive => {
-            format!("stop not sent for {display_id}; center will settle it")
-        }
-        ctx_traits_io::center::ControlResult::Unverifiable => {
-            format!("stop refused: {display_id}'s live driver cannot be verified")
-        }
-        ctx_traits_io::center::ControlResult::Refused => {
-            format!("stop refused: {display_id}'s driver did not acknowledge the request")
-        }
-    }
-}
-
 /// Applies a resolved SESSIONS modal outcome (§3.3): a `Cancelled` outcome
 /// never mutates anything for any tag, including `Exit` — cancelling leaves
 /// `quit == false` and sets no stop flag (the pane's own
@@ -8654,7 +8630,7 @@ mod tests {
             ctx_traits_io::center::ControlResult::Refused,
         ]
         .iter()
-        .map(|result| control_message(result, "session"))
+        .map(|result| result.message("session"))
         .collect::<HashSet<_>>();
         assert_eq!(messages.len(), 6);
         assert!(messages.iter().all(|message| !message.is_empty()));

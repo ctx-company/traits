@@ -148,7 +148,7 @@ impl Handle {
         std::thread::spawn(move || {
             let message =
                 match ctx_traits_io::center::control(&session_id, repo_key.as_deref(), action) {
-                    Ok(result) => super::control_message(&result, &display_id),
+                    Ok(result) => result.message(&display_id),
                     Err(error) => format!("stop failed for {display_id}: {error}"),
                 };
             let _ = sender.send(ActionResult {

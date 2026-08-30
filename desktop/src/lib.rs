@@ -3,6 +3,7 @@ pub mod dashboard;
 pub mod detail;
 pub mod detail_tree;
 pub mod detail_view;
+pub mod interrupt;
 pub mod run_row;
 pub mod shell;
 pub mod spawn_form;

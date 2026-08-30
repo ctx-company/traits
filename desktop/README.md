@@ -661,3 +661,100 @@ reaching the center is exactly the user's lines with the center-supplied
 carries it, and then proves a disconnect/recovery cycle neither loses nor
 duplicates the spawned row. Env-mutating and the sole `#[test]` in its
 target, per the same convention.
+
+## Interrupt (0258.2)
+
+Requesting a stop for a live run from the desktop invokes the **same
+shared center control capability** every face uses — never a driver-facing
+verb, and never a completion inferred from the request's own
+acknowledgement.
+
+**`control_existing` is `control`'s existing-only sibling.**
+`ctx_traits_io::center::control` resolves `center_executable()` as
+`std::env::current_exe()` and spawns that executable when no center is
+serving — for `ctx-desktop` that forks a second copy of the GUI, exactly
+the hazard `start_trait_existing` (0258.1) and `subscribe_existing`
+(0256.2) exist for on the write and read paths respectively.
+`control_existing` is the write-path entry this crate calls: it connects
+to an already-serving center only, reporting connection failure rather
+than retrying. `control`/`control_existing` share one request builder and
+one decode (`control_request`/`decode_control`), the same
+`trait_start_request`/`decode_start` shape 0258.1 established, so the two
+entry points differ only in which transport helper they call.
+`ControlResult::message` — the six-case wording the TUI footer renders —
+moved from `ctx-traits-cli`'s private `control_message` into
+`ctx-traits-io` alongside `ControlResult` itself, so the desktop's status
+line and the TUI's footer share exactly one wording source rather than a
+hand-copied duplicate (the crate boundary forbids the desktop depending on
+`ctx-traits-cli`). `modules/cli/tests/proof_center.rs` proves both halves
+of the transport at the process level:
+`control_existing_never_spawns_a_center_when_none_is_serving` (the
+regression guard for the fork hazard) and
+`control_existing_interrupt_reaches_two_subscribers_and_the_run_outlives_
+the_requester` (the desktop-shaped path end to end — dropping the
+requesting subscription immediately after the request is acknowledged,
+then asserting only the second, untouched subscriber observes the
+interrupted effect).
+
+**`interrupt.rs` is gpui-free**, the same discipline `spawn_form.rs`
+documents: no field, method, or dependency here can reach a `Dashboard`,
+so the type system — not a convention — forbids optimistic row mutation.
+`Interrupts` is a `HashMap<ledger_path, _>`, not a single slot like
+`SpawnForm`: several rows can be interrupted independently. `request`
+refuses (returning `None`, touching nothing) when the row is not
+`RowState::Live` or already `Requesting` for that `ledger_path` — the
+client-side guard, `SpawnForm::submit`'s `Invalid`/`Requesting` analogues.
+`settle` is generation-guarded exactly as `SpawnForm::settle` is:
+`ControlResult::Acknowledged` moves to `Requested { session_id }`, worded
+*"stop requested — waiting for the center"* and never *"stopped"* — the
+same reasoning `SpawnStatus::Requested`'s wording documents, since
+acknowledgement means the driver accepted the request, not that the run
+stopped. Every other `ControlResult` variant, and a transport `Failed`,
+move to `Refused(message)`. `observe` is the **only** path that clears a
+`Requested` entry: the row is gone from the model (an `Ended` delta
+removed it) or is present and no longer live — acknowledgement never
+clears it, only an observed delta does.
+
+**Reconciliation reads the unfiltered row model, not the scoped
+projection.** `Dashboard::row_liveness`/`CenterFace::row_liveness` sit
+beside `contains_session` and reuse its unfiltered-map doctrine: a run
+whose repository the current `RepoScope` hides must still resolve a
+pending interrupt (the exact blocker class 0258.1 had to reopen for
+spawn). `CenterFace::row_liveness` returns `Option<Option<bool>>` rather
+than collapsing "no model yet" (`Connecting`/`Unavailable`) and "the row
+ended" (present in a `Connected`/`Stale` model but absent from the keyed
+map) into the same bare `None` — the two must be treated oppositely, and
+`reconcile_interrupts` early-returns on the former so an outage can never
+be mistaken for an observed stop. `reconcile_interrupts` is a free
+function beside `reconcile_spawn_status`, walking every `Requested` entry
+`Interrupts` currently tracks: the row's own delta and the control
+response are scheduled on independent connections and can land in either
+order, so both the update loop and `Shell::interrupt_row`'s settle
+callback run this one shared implementation.
+
+**`Shell` wiring stays off the UI thread.** `control_existing` inherits
+`ACTION_TIMEOUT` (600s), so `Shell::interrupt_row` mirrors
+`Shell::submit_spawn`'s shape exactly — `cx.spawn` awaiting
+`cx.background_spawn`, landing the result through `Interrupts::settle`
+behind the generation guard, then running `reconcile_interrupts` again
+(the response may have lost the race to the row's own delta), and
+notifying only on real change. `interrupt_tasks` is a
+`HashMap<ledger_path, gpui::Task<()>>`, not a single `Option` slot like
+`spawn_task`: a single slot would cancel an unrelated in-flight interrupt
+for a different row.
+
+**What is deliberately not built.** No new `CenterDelta` variant, no new
+`Request` variant, no GUI-specific control verb, no local row mutation on
+acknowledgement, no ledger write, no direct driver contact. Pause/resume
+(0258.3), detail-pane rendering, and summons are out of scope here.
+
+`tests/interrupt_through_center.rs` drives `support::FakePeer` by hand
+across two connections (the snapshot/delta subscription and the control
+request/response round trip never share one connection), asserting the
+control request's wire shape (`kind: "control"`, `command: "interrupt"`,
+`session_id`/`repo_key` exactly as the center supplied them, with the
+process cwd moved outside any repository first), that the row stays live
+after `Acknowledged` alone, and that a `RowChanged { live: false }` delta
+resolves it — covering both the ack-then-delta and delta-then-ack
+orderings, plus one refusal path. Env-mutating and the sole `#[test]` in
+its target, per the same convention.

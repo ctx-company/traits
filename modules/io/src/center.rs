@@ -891,6 +891,28 @@ pub enum ControlResult {
     Refused,
 }
 
+impl ControlResult {
+    /// Render a center-owned control result for display. Shared by every
+    /// consumer of [`control`]/[`control_existing`] so the product wording
+    /// exists once.
+    pub fn message(&self, display_id: &str) -> String {
+        match self {
+            ControlResult::Acknowledged => format!("stop requested for {display_id}"),
+            ControlResult::Missing => format!("stop refused: {display_id} is no longer listed"),
+            ControlResult::Ambiguous(_) => format!("stop refused: {display_id} is ambiguous"),
+            ControlResult::NotLive => {
+                format!("stop not sent for {display_id}; center will settle it")
+            }
+            ControlResult::Unverifiable => {
+                format!("stop refused: {display_id}'s live driver cannot be verified")
+            }
+            ControlResult::Refused => {
+                format!("stop refused: {display_id}'s driver did not acknowledge the request")
+            }
+        }
+    }
+}
+
 fn decode_start(result: ResponseResult) -> crate::Result<StartResult> {
     match result {
         ResponseResult::Start(StartWireResult::Started { session_id }) => {
@@ -946,20 +968,17 @@ pub fn start_session(session_id: &str, repo_key: Option<&str>) -> crate::Result<
     )?)
 }
 
-pub fn control(
-    session_id: &str,
-    repo_key: Option<&str>,
-    command: ControlAction,
-) -> crate::Result<ControlResult> {
-    match request_with_timeout(
-        Request::Control {
-            id: next_id("control"),
-            session_id: session_id.to_owned(),
-            repo_key: repo_key.map(str::to_owned),
-            command,
-        },
-        ACTION_TIMEOUT,
-    )? {
+fn control_request(session_id: &str, repo_key: Option<&str>, command: ControlAction) -> Request {
+    Request::Control {
+        id: next_id("control"),
+        session_id: session_id.to_owned(),
+        repo_key: repo_key.map(str::to_owned),
+        command,
+    }
+}
+
+fn decode_control(result: ResponseResult) -> crate::Result<ControlResult> {
+    match result {
         ResponseResult::Control(ControlWireResult::Acknowledged) => Ok(ControlResult::Acknowledged),
         ResponseResult::Control(ControlWireResult::Missing) => Ok(ControlResult::Missing),
         ResponseResult::Control(ControlWireResult::Ambiguous(ids)) => {
@@ -970,6 +989,33 @@ pub fn control(
         ResponseResult::Control(ControlWireResult::Refused) => Ok(ControlResult::Refused),
         _ => Err(protocol_error("unexpected control response")),
     }
+}
+
+pub fn control(
+    session_id: &str,
+    repo_key: Option<&str>,
+    command: ControlAction,
+) -> crate::Result<ControlResult> {
+    decode_control(request_with_timeout(
+        control_request(session_id, repo_key, command),
+        ACTION_TIMEOUT,
+    )?)
+}
+
+/// Same shared control capability as [`control`], but only against a center
+/// that is already serving — it never spawns one. For a caller whose own
+/// executable does not host the center sentinel (`ctx-desktop`), spawn-on-need
+/// would fork an unrelated process rather than a center. Symmetric with
+/// [`subscribe_existing`].
+pub fn control_existing(
+    session_id: &str,
+    repo_key: Option<&str>,
+    command: ControlAction,
+) -> crate::Result<ControlResult> {
+    decode_control(request_existing(
+        control_request(session_id, repo_key, command),
+        ACTION_TIMEOUT,
+    )?)
 }
 
 /// Model-backed query helpers. They deliberately only encode/decode protocol

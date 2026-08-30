@@ -6,10 +6,13 @@ use gpui::{
     div, px, size,
 };
 
+use std::collections::HashMap;
+
 use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
+use crate::interrupt::{self, InterruptOutcome, InterruptRequest, Interrupts};
 use crate::run_row::{RepoScope, RunRow};
 use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, SubmitRequest};
 use crate::spawn_view;
@@ -184,6 +187,24 @@ impl CenterFace {
         }
     }
 
+    /// `Some(liveness)` from the unfiltered keyed model when the face holds
+    /// one (`Connected`/`Stale`) and the row is present; `Some(None)` when
+    /// the face holds a model but the row is not in it (an `Ended` delta
+    /// removed it, or it never existed); `None` when the face holds no
+    /// model at all (`Connecting`/`Unavailable`). Nested so a caller can
+    /// never mistake "no model yet" for "the row ended" — the two would
+    /// otherwise both collapse to a bare `None`, and reconciliation must
+    /// treat them oppositely: the former must never resolve a pending
+    /// interrupt, the latter always does.
+    pub fn row_liveness(&self, ledger_path: &str) -> Option<Option<bool>> {
+        match &self.state {
+            CenterState::Connecting | CenterState::Unavailable { .. } => None,
+            CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
+                Some(dashboard.row_liveness(ledger_path))
+            }
+        }
+    }
+
     /// Empty unless `Connected`/`Stale` — see [`CenterFace::rows`]'s same
     /// reasoning. Delegates to `Dashboard::repositories`, never a second
     /// source of repository identity.
@@ -236,6 +257,28 @@ pub fn reconcile_spawn_status(face: &CenterFace, form: &mut SpawnForm) -> bool {
     form.clear_requested_for(&session_id)
 }
 
+/// Resolve every pending `Requested` interrupt entry against `face`'s
+/// current unfiltered row model. The row's own delta and the control
+/// response are scheduled on independent connections and can land in
+/// either order, so both call sites — the update loop and `interrupt_row`'s
+/// settle callback — run this one shared implementation, mirroring
+/// `reconcile_spawn_status` exactly. Early-returns without touching any
+/// entry when the face holds no model at all
+/// (`Connecting`/`Unavailable`): a `None` there means "no model yet," never
+/// "the row ended," and must not be read as an observed stop.
+pub fn reconcile_interrupts(face: &CenterFace, interrupts: &mut Interrupts) -> bool {
+    let mut changed = false;
+    for ledger_path in interrupts.pending_ledger_paths() {
+        let Some(liveness) = face.row_liveness(&ledger_path) else {
+            // No model at all yet — cannot distinguish "row ended" from
+            // "we haven't connected", so every pending entry is left alone.
+            return changed;
+        };
+        changed |= interrupts.observe(&ledger_path, liveness);
+    }
+    changed
+}
+
 fn format_time_of_day(at: SystemTime) -> String {
     let seconds = at
         .duration_since(std::time::UNIX_EPOCH)
@@ -256,6 +299,13 @@ pub struct Shell {
     detail_task: Option<gpui::Task<()>>,
     spawn_form: SpawnForm,
     spawn_task: Option<gpui::Task<()>>,
+    interrupts: Interrupts,
+    /// Keyed by `ledger_path`, not a single `Option` slot like `spawn_task`:
+    /// several rows can be interrupted independently, and a single slot
+    /// would cancel an unrelated in-flight interrupt when a second row's
+    /// request is issued. The entry for a `ledger_path` is removed once
+    /// that row's request settles.
+    interrupt_tasks: HashMap<String, gpui::Task<()>>,
     /// The spawn form panel's one stable focus target, created once here and
     /// reused by every render's `track_focus` call. `cx.focus_handle()`
     /// mints a fresh `FocusId` on every call — calling it fresh inside
@@ -287,6 +337,7 @@ impl Shell {
                     // `submit_spawn`'s settle callback runs the same
                     // reconciliation on its own arrival too.
                     reconcile_spawn_status(&shell.face, &mut shell.spawn_form);
+                    reconcile_interrupts(&shell.face, &mut shell.interrupts);
                     cx.notify();
                     outcome
                 });
@@ -307,6 +358,8 @@ impl Shell {
             detail_task: None,
             spawn_form: SpawnForm::default(),
             spawn_task: None,
+            interrupts: Interrupts::default(),
+            interrupt_tasks: HashMap::new(),
             spawn_focus_handle: cx.focus_handle(),
         }
     }
@@ -457,6 +510,70 @@ impl Shell {
             });
         }));
     }
+
+    /// Request an interrupt for the row carrying `ledger_path`. Looks the
+    /// row up in the face's current unfiltered row list, asks
+    /// `Interrupts::request` for client-side eligibility, and on `Some`
+    /// dispatches the center round trip through `control_existing` on
+    /// gpui's background executor — `control_existing` inherits
+    /// `ACTION_TIMEOUT` (600s) and must never run on the UI thread, the same
+    /// hazard `submit_spawn` documents. On completion, `settle` on the UI
+    /// thread, then run `reconcile_interrupts` (the response may have lost
+    /// the race to the row's own delta), and `cx.notify()` only on real
+    /// change — the `settled || reconciled` pattern `submit_spawn` already
+    /// uses.
+    pub fn interrupt_row(&mut self, ledger_path: String, cx: &mut Context<Self>) {
+        let Some(row) = self
+            .face
+            .rows()
+            .iter()
+            .find(|row| row.ledger_path == ledger_path)
+        else {
+            return;
+        };
+        let Some(request) = self.interrupts.request(row) else {
+            cx.notify();
+            return;
+        };
+        self.dispatch_interrupt(request, cx);
+        cx.notify();
+    }
+
+    fn dispatch_interrupt(&mut self, request: InterruptRequest, cx: &mut Context<Self>) {
+        let InterruptRequest {
+            ledger_path,
+            session_id,
+            repo_key,
+            generation,
+        } = request;
+        let ledger_path_for_task = ledger_path.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_spawn(async move {
+                    match ctx_traits_io::center::control_existing(
+                        &session_id,
+                        Some(&repo_key),
+                        ctx_traits_io::center::ControlAction::Interrupt,
+                    ) {
+                        Ok(result) => InterruptOutcome::Result(result),
+                        Err(error) => InterruptOutcome::Failed(error.to_string()),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                let settled = shell.interrupts.settle(&ledger_path, generation, outcome);
+                // The row's own delta may have already carried it into a
+                // non-live state, winning the race against this response
+                // arriving on its own connection.
+                let reconciled = reconcile_interrupts(&shell.face, &mut shell.interrupts);
+                shell.interrupt_tasks.remove(&ledger_path);
+                if settled || reconciled {
+                    cx.notify();
+                }
+            });
+        });
+        self.interrupt_tasks.insert(ledger_path_for_task, task);
+    }
 }
 
 impl Render for Shell {
@@ -472,6 +589,21 @@ impl Render for Shell {
             .overflow_y_scroll();
         for row in self.face.rows() {
             let path = row.ledger_path.clone();
+            let live = row.state == crate::run_row::RowState::Live;
+            let mut stop = div()
+                .id(SharedString::from(format!("stop-{}", row.ledger_path)))
+                .child("stop");
+            if live {
+                let stop_path = row.ledger_path.clone();
+                stop = stop.on_click(cx.listener(move |shell, _event, _window, cx| {
+                    shell.interrupt_row(stop_path.clone(), cx);
+                }));
+            }
+            let status = self
+                .interrupts
+                .status(&row.ledger_path)
+                .map(interrupt::status_text)
+                .unwrap_or_default();
             let mut item = div()
                 .id(SharedString::from(row.ledger_path.clone()))
                 .flex()
@@ -486,7 +618,9 @@ impl Render for Shell {
                 .child(row.state_text.clone())
                 .child(row.detail_text.clone())
                 .child(row.elapsed_text.clone())
-                .child(row.tokens_text.clone());
+                .child(row.tokens_text.clone())
+                .child(stop)
+                .child(status);
             if stale {
                 item = item.opacity(0.6);
             }
@@ -723,6 +857,122 @@ mod tests {
             "reconciliation must see the session through the unfiltered model, not the scoped projection"
         );
         assert_eq!(*form.status(), SpawnStatus::Idle);
+    }
+
+    fn live_run_row(repo_key: &str, ledger_path: &str, session_id: &str) -> RunRow {
+        RunRow {
+            ledger_path: ledger_path.to_string(),
+            session_id: session_id.to_string(),
+            run_id: session_id.to_string(),
+            repo_key: repo_key.to_string(),
+            repo_path: format!("/{repo_key}"),
+            repo_label: repo_key.to_string(),
+            title: "title".to_string(),
+            trait_id: "fixture-trait".to_string(),
+            state: crate::run_row::RowState::Live,
+            state_text: "live".to_string(),
+            detail_text: String::new(),
+            elapsed_text: "00:00:00".to_string(),
+            tokens_text: "-".to_string(),
+            live: true,
+            modified_epoch_secs: 0,
+        }
+    }
+
+    /// The interrupt analogue of `reconcile_spawn_status_clears_requested_even_when_repo_scope_hides_the_new_row`:
+    /// a `Requested` interrupt entry for a row the current `RepoScope` hides
+    /// must still resolve once that row's own delta carries it into a
+    /// non-live state.
+    #[test]
+    fn reconcile_interrupts_resolves_a_pending_stop_whose_repository_the_scope_hides() {
+        let scope = RepoScope::Repo("repo-a".to_string());
+        let mut face = CenterFace::new(scope);
+        let now = SystemTime::now();
+        face.apply(
+            LinkUpdate::Snapshot(vec![
+                wire_row("repo-a", "run-1"),
+                wire_row("repo-b", "run-2"),
+            ]),
+            now,
+        );
+        assert_eq!(
+            face.rows().len(),
+            1,
+            "the repo-b row must already be hidden by the current scope"
+        );
+
+        let mut interrupts = Interrupts::default();
+        let row = live_run_row("repo-b", "/repo-b/session.json", "run-2");
+        let request = interrupts.request(&row).expect("a live row is eligible");
+        interrupts.settle(
+            &request.ledger_path,
+            request.generation,
+            InterruptOutcome::Result(ctx_traits_io::center::ControlResult::Acknowledged),
+        );
+        assert!(matches!(
+            interrupts.status("/repo-b/session.json"),
+            Some(crate::interrupt::InterruptStatus::Requested { .. })
+        ));
+
+        assert!(
+            !reconcile_interrupts(&face, &mut interrupts),
+            "no delta has landed yet"
+        );
+
+        let mut ended_row = wire_row("repo-b", "run-2");
+        ended_row.live = false;
+        face.apply(
+            LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::RowChanged {
+                row: Box::new(ended_row),
+            }),
+            now,
+        );
+
+        assert!(
+            reconcile_interrupts(&face, &mut interrupts),
+            "reconciliation must see the row through the unfiltered model, not the scoped projection"
+        );
+        assert!(interrupts.status("/repo-b/session.json").is_none());
+    }
+
+    /// A `Down` alone must never resolve a pending interrupt — the stale
+    /// dashboard retains the row exactly as last observed, still live — but
+    /// a recovery `Snapshot` that no longer carries the row is authoritative
+    /// and does resolve it.
+    #[test]
+    fn a_down_alone_does_not_resolve_a_pending_stop_but_a_recovery_snapshot_does() {
+        let mut face = CenterFace::new(RepoScope::All);
+        let now = SystemTime::now();
+        face.apply(LinkUpdate::Snapshot(vec![wire_row("repo", "run-x")]), now);
+
+        let mut interrupts = Interrupts::default();
+        let row = live_run_row("repo", "/repo/session.json", "run-x");
+        let request = interrupts.request(&row).expect("a live row is eligible");
+        interrupts.settle(
+            &request.ledger_path,
+            request.generation,
+            InterruptOutcome::Result(ctx_traits_io::center::ControlResult::Acknowledged),
+        );
+
+        face.apply(LinkUpdate::Down("subscription closed".to_string()), now);
+        assert!(matches!(face.state(), CenterState::Stale { .. }));
+        assert!(
+            !reconcile_interrupts(&face, &mut interrupts),
+            "a Down alone must not resolve a pending interrupt"
+        );
+        assert!(matches!(
+            interrupts.status("/repo/session.json"),
+            Some(crate::interrupt::InterruptStatus::Requested { .. })
+        ));
+
+        // Recovery snapshot no longer carries the row: it ended while the
+        // center was unreachable.
+        face.apply(LinkUpdate::Snapshot(vec![]), now);
+        assert!(
+            reconcile_interrupts(&face, &mut interrupts),
+            "a recovery snapshot that no longer carries the row must resolve the pending interrupt"
+        );
+        assert!(interrupts.status("/repo/session.json").is_none());
     }
 
     /// The regression proof for the render-local-`FocusHandle` bug: without

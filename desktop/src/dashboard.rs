@@ -102,6 +102,17 @@ impl Dashboard {
             .any(|row| row.summary.session_id == session_id)
     }
 
+    /// Whether `ledger_path` is present in the *unfiltered* keyed row map,
+    /// and if so whether it is currently live. `None` means the row is not
+    /// in the model at all — the same "row is gone" case an `Ended` delta
+    /// produces. Deliberately not `rows()` (the scope-filtered projection):
+    /// a run whose repository the current `RepoScope` hides must still
+    /// reconcile a pending interrupt, the same shape `contains_session`
+    /// documents.
+    pub fn row_liveness(&self, ledger_path: &str) -> Option<bool> {
+        self.rows.get(ledger_path).map(|row| row.live)
+    }
+
     /// Repositories the center currently knows about, derived from the
     /// *unfiltered* keyed row map — the scope is a view filter and must not
     /// shrink the set a spawn can target. Deduped by `repo_key`, sorted, and
@@ -368,6 +379,26 @@ mod tests {
                 .all(|r| camino::Utf8Path::new(&r.repo_path).is_absolute()),
             "a row with no resolvable or non-absolute repo_path must be excluded from spawn targets"
         );
+    }
+
+    #[test]
+    fn row_liveness_finds_a_row_the_current_scope_hides() {
+        let snapshot = vec![
+            row("repo-a", "/a.json", "a", Status::Completed, true, 1),
+            row("repo-b", "/b.json", "b", Status::Completed, true, 2),
+        ];
+        let dashboard = Dashboard::from_snapshot(snapshot, RepoScope::Repo("repo-a".to_string()));
+        assert_eq!(
+            dashboard.rows().len(),
+            1,
+            "the repo-b row must already be hidden by the current scope"
+        );
+        assert_eq!(
+            dashboard.row_liveness("/b.json"),
+            Some(true),
+            "row_liveness must find a row the scope hides"
+        );
+        assert_eq!(dashboard.row_liveness("/missing.json"), None);
     }
 
     #[test]
