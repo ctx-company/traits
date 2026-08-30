@@ -124,8 +124,8 @@ fn link_delivers_exactly_one_coherent_snapshot_and_stays_open() {
         ctx_traits_desktop::center_link::LinkUpdate::Delta(_) => {
             panic!("a delta must not arrive before the initial snapshot")
         }
-        ctx_traits_desktop::center_link::LinkUpdate::Unavailable(message) => {
-            panic!("center link reported unavailable: {message}")
+        ctx_traits_desktop::center_link::LinkUpdate::Down(message) => {
+            panic!("center link reported down: {message}")
         }
     };
     assert!(
@@ -138,7 +138,7 @@ fn link_delivers_exactly_one_coherent_snapshot_and_stays_open() {
     // stays open; deltas are 0256.4's, and a live center may emit unrelated
     // ones (e.g. periodic discovery re-confirming the seeded row) at any
     // time. Drain and tolerate those; a second `Snapshot` or an
-    // `Unavailable` would mean the coherent-snapshot guarantee broke.
+    // `Down` would mean the coherent-snapshot guarantee broke.
     let drain_until = Instant::now() + Duration::from_millis(200);
     while Instant::now() < drain_until {
         match updates.try_recv() {
@@ -146,8 +146,8 @@ fn link_delivers_exactly_one_coherent_snapshot_and_stays_open() {
             Ok(ctx_traits_desktop::center_link::LinkUpdate::Snapshot(_)) => {
                 panic!("a second snapshot arrived; the initial snapshot was not exclusive")
             }
-            Ok(ctx_traits_desktop::center_link::LinkUpdate::Unavailable(message)) => {
-                panic!("center link reported unavailable: {message}")
+            Ok(ctx_traits_desktop::center_link::LinkUpdate::Down(message)) => {
+                panic!("center link reported down: {message}")
             }
             Err(async_channel::TryRecvError::Empty) => {
                 std::thread::sleep(Duration::from_millis(20));

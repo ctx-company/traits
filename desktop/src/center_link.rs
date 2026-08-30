@@ -6,14 +6,31 @@
 //! source of dashboard change; nothing here scans a run directory or polls
 //! the center.
 
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
+
 use ctx_traits_io::center::{self, CenterDelta, CenterEvent, CenterPublicRow};
+
+/// Fixed reconnect backoff, parity with the CLI dashboard worker's
+/// `wait_for_retry` (`modules/cli/src/app/dashboard/worker.rs`).
+const RECONNECT_DELAY: Duration = Duration::from_millis(500);
+
+/// How often an idle pump wakes up to check whether the UI receiver was
+/// dropped. Bounds how long a subscription can be leaked (thread, socket,
+/// server-side subscriber) after the consumer is gone but the center itself
+/// stays silent — see `pump`.
+const CONSUMER_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// One update the UI thread may act on, in the exact order the center
 /// produced it.
 pub enum LinkUpdate {
     Snapshot(Vec<CenterPublicRow>),
     Delta(CenterDelta),
-    Unavailable(String),
+    /// The subscription is down, with a reason. Absent-at-first-contact vs.
+    /// mid-stream loss vs. eviction are indistinguishable on this wire and
+    /// must stay that way — the face classifies the transition, not the
+    /// link (see `shell::CenterFace`).
+    Down(String),
 }
 
 /// Stages snapshot rows between `SnapshotStart` and `SnapshotEnd`, mirroring
@@ -70,33 +87,145 @@ impl SnapshotAssembler {
     }
 }
 
+/// What one bounded wait on the subscription yielded.
+enum PumpEvent {
+    Event(CenterEvent),
+    /// No event arrived within `CONSUMER_POLL_INTERVAL`; the subscription is
+    /// still open. The caller re-checks `tx.is_closed()` and waits again.
+    Timeout,
+    /// The stream ended (center exit, disconnect, or backpressure eviction —
+    /// all the same signal on this wire).
+    Closed,
+}
+
+/// How `pump` ended.
+enum PumpOutcome {
+    /// The subscription's stream ended on its own. Carries whether at least
+    /// one `Snapshot` was delivered this run, which is what lets the caller
+    /// clear its outage memo — a stream that dies mid-snapshot publishes
+    /// nothing, so no partial snapshot can ever reach the UI.
+    StreamEnded { snapshot_sent: bool },
+    /// The UI consumer is gone. The caller must drop the subscription and
+    /// stop retrying without announcing a `Down` — there is no one left to
+    /// show it to.
+    ConsumerGone,
+}
+
+/// Forward one subscription's events until it ends or the UI consumer is
+/// gone. `next` is polled on a bounded timeout rather than a blocking
+/// `recv()`, so an idle subscription (connected, but with no events in
+/// flight) still notices a dropped `tx` within `CONSUMER_POLL_INTERVAL`
+/// instead of leaking the thread, socket and server-side subscriber for the
+/// life of the process.
+fn pump(
+    mut next: impl FnMut(Duration) -> PumpEvent,
+    assembler: &mut SnapshotAssembler,
+    tx: &async_channel::Sender<LinkUpdate>,
+) -> PumpOutcome {
+    let mut snapshot_sent = false;
+    loop {
+        if tx.is_closed() {
+            return PumpOutcome::ConsumerGone;
+        }
+        match next(CONSUMER_POLL_INTERVAL) {
+            PumpEvent::Event(event) => {
+                for update in assembler.accept(event) {
+                    if matches!(update, LinkUpdate::Snapshot(_)) {
+                        snapshot_sent = true;
+                    }
+                    if tx.send_blocking(update).is_err() {
+                        return PumpOutcome::ConsumerGone;
+                    }
+                }
+            }
+            PumpEvent::Timeout => {}
+            PumpEvent::Closed => return PumpOutcome::StreamEnded { snapshot_sent },
+        }
+    }
+}
+
 /// Start the background link thread and return the channel its updates
 /// arrive on. Connecting and forwarding both happen off the caller's thread.
-/// The blocking `recv()` loop stays on this dedicated thread — never on
+/// The bounded-wait pump loop stays on this dedicated thread — never on
 /// gpui's UI thread — and feeds one unbounded channel, which is what
 /// preserves subscription order end to end.
+///
+/// The thread is a supervisor: a connect failure or a mid-stream stream end
+/// (center exit, disconnect, or backpressure eviction — all the same signal
+/// on this wire, see `ctx_traits_io::center`) is announced as a `Down` and
+/// retried after a fixed backoff, forever, until the receiver is dropped.
+/// A lost consumer ends the thread immediately, without announcing a
+/// `Down` — there is no one left to show it to — whether it is noticed
+/// before subscribing or, via `pump`'s periodic check, while an otherwise
+/// idle subscription is open.
 pub fn start(repo_key: Option<String>) -> async_channel::Receiver<LinkUpdate> {
     let (tx, rx) = async_channel::unbounded();
     std::thread::spawn(move || {
-        let subscription = match center::subscribe_existing(repo_key.as_deref()) {
-            Ok(subscription) => subscription,
-            Err(error) => {
-                let _ = tx.send_blocking(LinkUpdate::Unavailable(error.to_string()));
+        // De-duplicates repeated identical outages so a permanently absent
+        // center does not produce (and repaint) a `Down` every backoff tick
+        // for the life of the process. Cleared whenever a snapshot is
+        // delivered, so the next distinct outage is announced again.
+        let mut last_down: Option<String> = None;
+        loop {
+            if tx.is_closed() {
                 return;
             }
-        };
-        let mut assembler = SnapshotAssembler::default();
-        while let Ok(event) = subscription.recv() {
-            for update in assembler.accept(event) {
-                if tx.send_blocking(update).is_err() {
-                    return;
+            match center::subscribe_existing(repo_key.as_deref()) {
+                Ok(subscription) => {
+                    let mut assembler = SnapshotAssembler::default();
+                    let outcome = pump(
+                        |timeout| match subscription.recv_timeout(timeout) {
+                            Ok(event) => PumpEvent::Event(event),
+                            Err(RecvTimeoutError::Timeout) => PumpEvent::Timeout,
+                            Err(RecvTimeoutError::Disconnected) => PumpEvent::Closed,
+                        },
+                        &mut assembler,
+                        &tx,
+                    );
+                    // The subscription's `Drop` shuts the socket down,
+                    // freeing the server-side subscriber immediately rather
+                    // than waiting for its idle timeout. This runs whether
+                    // the stream ended on its own or the consumer went away.
+                    drop(subscription);
+                    match outcome {
+                        PumpOutcome::StreamEnded { snapshot_sent } => {
+                            if snapshot_sent {
+                                last_down = None;
+                            }
+                            if announce(&tx, &mut last_down, "subscription closed".to_string())
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        // No Down to announce: there is no consumer left to
+                        // show it to.
+                        PumpOutcome::ConsumerGone => return,
+                    }
+                }
+                Err(error) => {
+                    if announce(&tx, &mut last_down, error.to_string()).is_err() {
+                        return;
+                    }
                 }
             }
+            std::thread::sleep(RECONNECT_DELAY);
         }
-        // `recv()` returning Err means the center closed; deciding what the
-        // UI does about that is 0256.5's.
     });
     rx
+}
+
+/// Emit a `Down` only when its reason differs from the last one emitted.
+fn announce(
+    tx: &async_channel::Sender<LinkUpdate>,
+    last_down: &mut Option<String>,
+    reason: String,
+) -> Result<(), ()> {
+    if last_down.as_deref() == Some(reason.as_str()) {
+        return Ok(());
+    }
+    *last_down = Some(reason.clone());
+    tx.send_blocking(LinkUpdate::Down(reason)).map_err(|_| ())
 }
 
 #[cfg(test)]
@@ -245,5 +374,151 @@ mod tests {
     fn snapshot_end_without_a_start_emits_nothing() {
         let mut assembler = SnapshotAssembler::default();
         assert!(assembler.accept(CenterEvent::SnapshotEnd).is_empty());
+    }
+
+    fn drain(
+        tx_pair: &(
+            async_channel::Sender<LinkUpdate>,
+            async_channel::Receiver<LinkUpdate>,
+        ),
+    ) -> Vec<LinkUpdate> {
+        let (_, rx) = tx_pair;
+        let mut updates = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            updates.push(update);
+        }
+        updates
+    }
+
+    /// Adapts a fixed event list to `pump`'s bounded-wait signature: each
+    /// call returns the next event immediately (never `Timeout`), and
+    /// `Closed` once the list is exhausted — i.e. a stream that ends on its
+    /// own, not a dropped consumer.
+    fn from_events(events: Vec<CenterEvent>) -> impl FnMut(Duration) -> PumpEvent {
+        let mut events = events.into_iter();
+        move |_timeout| match events.next() {
+            Some(event) => PumpEvent::Event(event),
+            None => PumpEvent::Closed,
+        }
+    }
+
+    fn expect_stream_ended(outcome: PumpOutcome) -> bool {
+        match outcome {
+            PumpOutcome::StreamEnded { snapshot_sent } => snapshot_sent,
+            PumpOutcome::ConsumerGone => panic!("expected the stream to end, not the consumer"),
+        }
+    }
+
+    #[test]
+    fn pump_forwards_snapshot_then_delta_in_order() {
+        let mut assembler = SnapshotAssembler::default();
+        let channel = async_channel::unbounded();
+        let outcome = pump(
+            from_events(vec![
+                CenterEvent::SnapshotStart,
+                CenterEvent::SnapshotRow(row("a")),
+                CenterEvent::SnapshotEnd,
+                CenterEvent::Delta(ended_delta("later")),
+            ]),
+            &mut assembler,
+            &channel.0,
+        );
+        assert!(expect_stream_ended(outcome), "a snapshot was delivered");
+        let updates = drain(&channel);
+        assert_eq!(snapshot_run_ids(&updates), vec!["a"]);
+        assert!(matches!(updates[0], LinkUpdate::Snapshot(_)));
+        assert!(matches!(updates[1], LinkUpdate::Delta(_)));
+    }
+
+    #[test]
+    fn pump_publishes_nothing_when_the_stream_dies_mid_snapshot() {
+        let mut assembler = SnapshotAssembler::default();
+        let channel = async_channel::unbounded();
+        let outcome = pump(
+            from_events(vec![
+                CenterEvent::SnapshotStart,
+                CenterEvent::SnapshotRow(row("orphaned")),
+            ]),
+            &mut assembler,
+            &channel.0,
+        );
+        assert!(
+            !expect_stream_ended(outcome),
+            "no snapshot should be published mid-boundary"
+        );
+        assert!(drain(&channel).is_empty());
+    }
+
+    #[test]
+    fn a_second_subscriptions_snapshot_after_a_dead_one_carries_only_new_rows() {
+        let channel = async_channel::unbounded();
+
+        let mut assembler = SnapshotAssembler::default();
+        pump(
+            from_events(vec![
+                CenterEvent::SnapshotStart,
+                CenterEvent::SnapshotRow(row("orphaned")),
+            ]),
+            &mut assembler,
+            &channel.0,
+        );
+
+        // A fresh assembler per attempt, exactly as `start` builds one per
+        // reconnect: nothing from the dead attempt can leak in.
+        let mut assembler = SnapshotAssembler::default();
+        let outcome = pump(
+            from_events(vec![
+                CenterEvent::SnapshotStart,
+                CenterEvent::SnapshotRow(row("kept")),
+                CenterEvent::SnapshotEnd,
+            ]),
+            &mut assembler,
+            &channel.0,
+        );
+        assert!(expect_stream_ended(outcome));
+        let updates = drain(&channel);
+        assert_eq!(snapshot_run_ids(&updates), vec!["kept"]);
+    }
+
+    #[test]
+    fn pump_stops_when_the_consumer_is_gone_immediately() {
+        let (tx, rx) = async_channel::unbounded();
+        drop(rx);
+        let mut assembler = SnapshotAssembler::default();
+        let outcome = pump(
+            from_events(vec![CenterEvent::SnapshotStart, CenterEvent::SnapshotEnd]),
+            &mut assembler,
+            &tx,
+        );
+        assert!(matches!(outcome, PumpOutcome::ConsumerGone));
+    }
+
+    #[test]
+    fn pump_stops_when_the_consumer_is_gone_while_idle() {
+        // The subscription itself never ends (always `Timeout`, never
+        // `Closed`); only the periodic `tx.is_closed()` check between waits
+        // can end this pump. Proves the idle-consumer fix: a dropped
+        // receiver is noticed even with no events in flight, after waiting
+        // through a few timeouts rather than on the very first check.
+        let (tx, rx) = async_channel::unbounded();
+        let mut rx = Some(rx);
+        let mut assembler = SnapshotAssembler::default();
+        let mut waits = 0;
+        let outcome = pump(
+            |_timeout| {
+                waits += 1;
+                if waits == 3 {
+                    rx.take();
+                }
+                PumpEvent::Timeout
+            },
+            &mut assembler,
+            &tx,
+        );
+        assert!(matches!(outcome, PumpOutcome::ConsumerGone));
+        assert!(
+            waits >= 3,
+            "pump must wait through idle timeouts before noticing: {waits}"
+        );
     }
 }

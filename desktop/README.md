@@ -124,9 +124,9 @@ ledger modification, ties broken by `ledger_path`).
 ## Live deltas (0256.4)
 
 Past the initial snapshot, the background link thread keeps forwarding
-`CenterDelta` events off the same blocking `recv()` loop, over the same
-single unbounded `async-channel`, to the same single `cx.spawn` consumer in
-`Shell`. `SnapshotAssembler::accept` now returns a `Vec<LinkUpdate>` (usually
+`CenterDelta` events off the same bounded-wait `recv_timeout()` loop (see
+below), over the same single unbounded `async-channel`, to the same single
+`cx.spawn` consumer in `Shell`. `SnapshotAssembler::accept` now returns a `Vec<LinkUpdate>` (usually
 empty or one element) instead of `Option<Vec<row>>`, so a delta that races a
 `SnapshotStart..SnapshotEnd` boundary is buffered and replayed immediately
 after the snapshot it raced, rather than dropped or reordered. One thread
@@ -169,9 +169,78 @@ an unvirtualized list is accepted deliberately at this scale, same as the
 unvirtualized-list note above; the incremental-insert option was considered
 and declined for the same one-code-path reason.
 
-Not yet built (0256.5's): recovering from an absent center, a mid-stream
-disconnect, bounded-subscriber eviction/backpressure (today's channel is
-unbounded — the real backpressure is the center's own bounded subscriber
-queue), resubscription, and any stale-state presentation. Row selection, run
-detail, control verbs, and virtualization remain out of scope for the
-dashboard entirely, for now.
+## Recovering from center loss (0256.5)
+
+The link thread (`src/center_link.rs`) is a supervisor: connect, pump events,
+and on any stream end — a connect failure, a mid-stream disconnect, or a
+server-side backpressure eviction — announce a `LinkUpdate::Down(reason)`
+and retry after a fixed 500ms backoff (parity with the CLI dashboard
+worker's `wait_for_retry`), forever, until the receiver is dropped. A fresh
+`SnapshotAssembler` is built per attempt, so a stream that dies mid-snapshot
+can never leak staged rows or buffered deltas into the next subscription.
+Repeated identical outages are de-duplicated (one `Down` per distinct
+reason, cleared once a snapshot lands again) so a permanently absent center
+does not repaint the window every backoff tick for the life of the process.
+
+A center exit, a plain disconnect, and eviction are indistinguishable on
+this wire by design: `modules/io/src/center.rs`'s backpressure eviction is
+*defined* to end in a bare `shutdown(Both)`, exactly the wire shape of any
+other stream end, and the client must not try to tell them apart — all
+three recover through the same reconnect-and-resnapshot path. One
+corollary of that: the link drains its socket into an *unbounded*
+`async-channel`, so it can never be evicted for its own slowness (a slow
+gpui UI thread would grow that channel unboundedly instead) — accepted at
+this walking-skeleton's scale, not fixed here.
+
+`src/shell.rs`'s `CenterFace` is where the link's one fact ("the
+subscription is down, with a reason") becomes a presentation state. It adds
+a fourth `CenterState` alongside the three 0256.1–.4 already established:
+
+- `Connecting` / `Unavailable { reason }` — never held rows; first contact
+  with no matching center serving.
+- `Connected { dashboard }` — unchanged.
+- `Stale { dashboard, reason, since }` — a prior `Connected` dashboard that
+  lost its subscription. Rows stay visible, labelled: the header always
+  reads "center unreachable — showing state as of HH:MM:SS (reason);
+  retrying — N runs", never a bare "N runs", so stale data is never
+  presented as current.
+
+The two rules that made recovery possible from 0256.4 onward needed no
+rework, only a fourth state to transition into: a `Snapshot` always
+installs a coherent `Connected` dashboard, wholesale-replacing whatever
+came before it (including a `Stale` one) — never a merge of an uncertain
+old stream with a new snapshot — and a `Delta` is folded in only while
+`Connected`, so a delta arriving while `Stale` changes nothing.
+
+The desktop **never spawns a center** to recover, in any of these cases:
+`center::subscribe` (spawn-on-need) resolves its own executable, which for
+`ctx-desktop` would fork a second copy of the GUI, not a center. Locating a
+version-matching `ctx` binary on `PATH` is launcher work, out of scope for
+0256. A visibly-stale or -unavailable view plus indefinite retry is the
+sanctioned alternative.
+
+`desktop/tests/support/mod.rs` holds shared scratch/env helpers plus a
+`FakePeer` — a hand-driven `UnixListener` speaking the io crate's wire
+protocol — so the failure paths (`absent_center.rs`, `center_disconnect.rs`,
+`subscriber_eviction.rs`, `idle_consumer_link_leak.rs`) can be reproduced
+deterministically: there is no way to stop an in-process `run_server()` on
+cue, and a live subscriber keeps it alive past its idle timeout.
+`subscriber_eviction.rs` reproduces the wire *shape* eviction is defined to
+produce (a delta backlog then a bare shutdown), not a full-stack
+backpressure trip against a real bounded channel — see the file's own
+comment for why that trade was made.
+
+The pump inside `center_link.rs` waits on `CenterSubscription::recv_timeout`
+on a fixed `CONSUMER_POLL_INTERVAL` (200ms) rather than a blocking `recv()`,
+and re-checks whether the UI receiver has been dropped between waits. A
+plain `tx.is_closed()` check made only before subscribing (the 0256.5 first
+pass) misses exactly one case: the UI is gone but the subscription is
+otherwise idle, with no event arriving to wake a blocking `recv()` and
+notice the closed channel — that leaks the link thread, the socket, and the
+server-side subscriber until the center or process exits.
+`idle_consumer_link_leak.rs` reproduces that case directly: it drains a
+served snapshot, drops the receiver while the peer stays silent, and asserts
+the peer observes client EOF within a bounded deadline.
+
+Row selection, run detail, control verbs, and virtualization remain out of
+scope for the dashboard entirely, for now.

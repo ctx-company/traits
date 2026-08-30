@@ -137,8 +137,8 @@ fn a_run_started_outside_the_desktop_becomes_visible_with_no_polling() {
             Ok(LinkUpdate::Snapshot(_)) => {
                 panic!("a second snapshot arrived; the stream must stay exclusive")
             }
-            Ok(LinkUpdate::Unavailable(message)) => {
-                panic!("center link reported unavailable: {message}")
+            Ok(LinkUpdate::Down(message)) => {
+                panic!("center link reported down: {message}")
             }
             Err(async_channel::TryRecvError::Empty) => {
                 if Instant::now() >= deadline {

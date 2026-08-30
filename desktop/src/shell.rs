@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use gpui::prelude::*;
 use gpui::{
     Bounds, Context, Pixels, Render, Size, TitlebarOptions, Window, WindowOptions, div, px, size,
@@ -5,7 +7,7 @@ use gpui::{
 
 use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
-use crate::run_row::RepoScope;
+use crate::run_row::{RepoScope, RunRow};
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -22,15 +24,167 @@ pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     }
 }
 
+/// The degraded lifecycle's face states. `Stale` is the recoverable
+/// disconnected view: rows already on screen are kept, labelled, and never
+/// merged with a later stream — only a fresh `Snapshot` replaces them.
 pub enum CenterState {
     Connecting,
-    Connected { dashboard: Dashboard },
-    Unavailable { message: String },
+    /// Never held rows: first contact with no matching center serving.
+    Unavailable {
+        reason: String,
+    },
+    Connected {
+        dashboard: Dashboard,
+    },
+    Stale {
+        dashboard: Dashboard,
+        reason: String,
+        since: Option<SystemTime>,
+    },
+}
+
+/// The center's degraded lifecycle, kept gpui-free (plain Rust — no gpui
+/// types — so it is unit-testable without an `App`, the same pattern
+/// `dashboard.rs` documents for `Dashboard`). `Shell` holds one of these and
+/// delegates every `LinkUpdate` to it.
+pub struct CenterFace {
+    state: CenterState,
+    scope: RepoScope,
+    last_snapshot_at: Option<SystemTime>,
+}
+
+impl CenterFace {
+    pub fn new(scope: RepoScope) -> Self {
+        Self {
+            state: CenterState::Connecting,
+            scope,
+            last_snapshot_at: None,
+        }
+    }
+
+    pub fn state(&self) -> &CenterState {
+        &self.state
+    }
+
+    pub fn set_scope(&mut self, scope: RepoScope) {
+        self.scope = scope.clone();
+        match &mut self.state {
+            CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
+                dashboard.set_scope(scope);
+            }
+            CenterState::Connecting | CenterState::Unavailable { .. } => {}
+        }
+    }
+
+    /// Fold one `LinkUpdate` into the face. `now` is a parameter, not a
+    /// `SystemTime::now()` call inside, so header formatting stays testable
+    /// without a clock.
+    pub fn apply(&mut self, update: LinkUpdate, now: SystemTime) {
+        match update {
+            LinkUpdate::Snapshot(rows) => {
+                // A snapshot always installs a coherent `Connected` state,
+                // replacing whatever came before it — including a `Stale`
+                // dashboard. This is the "must not merge an uncertain old
+                // stream with a new snapshot" rule.
+                self.state = CenterState::Connected {
+                    dashboard: Dashboard::from_snapshot(rows, self.scope.clone()),
+                };
+                self.last_snapshot_at = Some(now);
+            }
+            LinkUpdate::Delta(delta) => {
+                // Applied only in `Connected`. Dropping a delta in `Stale`
+                // is the second half of the no-merge rule above; a delta
+                // before any snapshot cannot occur in a conformant ordered
+                // stream either way.
+                if let CenterState::Connected { dashboard } = &mut self.state {
+                    dashboard.apply(delta);
+                }
+            }
+            LinkUpdate::Down(reason) => {
+                self.state = match std::mem::replace(&mut self.state, CenterState::Connecting) {
+                    CenterState::Connected { dashboard } => CenterState::Stale {
+                        dashboard,
+                        reason,
+                        since: self.last_snapshot_at,
+                    },
+                    CenterState::Stale {
+                        dashboard, since, ..
+                    } => CenterState::Stale {
+                        dashboard,
+                        reason,
+                        since,
+                    },
+                    CenterState::Connecting | CenterState::Unavailable { .. } => {
+                        CenterState::Unavailable { reason }
+                    }
+                };
+            }
+        }
+    }
+
+    /// The single place staleness is worded, mirroring the TUI's
+    /// `center_unreachable` shape (`worker.rs`) without depending on
+    /// `ctx-traits-cli`.
+    pub fn header(&self) -> String {
+        match &self.state {
+            CenterState::Connecting => "connecting to center…".to_string(),
+            CenterState::Unavailable { reason } => {
+                format!("center unavailable — no run list yet ({reason}); retrying")
+            }
+            CenterState::Connected { dashboard } => self.connected_header(dashboard.len()),
+            CenterState::Stale {
+                dashboard,
+                reason,
+                since,
+            } => {
+                let as_of = since.map_or_else(|| "unknown time".to_string(), format_time_of_day);
+                format!(
+                    "center unreachable — showing state as of {as_of} ({reason}); retrying — {} runs",
+                    dashboard.len()
+                )
+            }
+        }
+    }
+
+    /// Empty unless `Connected`/`Stale` — nothing is shown as current while
+    /// absent, and stale rows stay visible until a fresh snapshot arrives.
+    pub fn rows(&self) -> &[RunRow] {
+        match &self.state {
+            CenterState::Connecting | CenterState::Unavailable { .. } => &[],
+            CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
+                dashboard.rows()
+            }
+        }
+    }
+
+    pub fn is_stale(&self) -> bool {
+        matches!(self.state, CenterState::Stale { .. })
+    }
+
+    fn connected_header(&self, len: usize) -> String {
+        match &self.scope {
+            RepoScope::All => format!("{len} runs"),
+            RepoScope::Repo(repo_key) => format!("{len} runs in {repo_key}"),
+        }
+    }
+}
+
+fn format_time_of_day(at: SystemTime) -> String {
+    let seconds = at
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        % 86_400;
+    format!(
+        "{:02}:{:02}:{:02}",
+        seconds / 3600,
+        (seconds / 60) % 60,
+        seconds % 60,
+    )
 }
 
 pub struct Shell {
-    center: CenterState,
-    scope: RepoScope,
+    face: CenterFace,
 }
 
 impl Shell {
@@ -40,7 +194,7 @@ impl Shell {
             while let Ok(update) = updates.recv().await {
                 if this
                     .update(cx, |shell, cx| {
-                        shell.apply(update);
+                        shell.face.apply(update, SystemTime::now());
                         cx.notify();
                     })
                     .is_err()
@@ -51,95 +205,128 @@ impl Shell {
         })
         .detach();
         Self {
-            center: CenterState::Connecting,
-            scope: RepoScope::All,
+            face: CenterFace::new(RepoScope::All),
         }
     }
 
     /// Exposed so the scoped view is exercisable and testable ahead of any UI
     /// control for it — a control is out of scope for this task.
     pub fn set_scope(&mut self, scope: RepoScope) {
-        self.scope = scope.clone();
-        if let CenterState::Connected { dashboard } = &mut self.center {
-            dashboard.set_scope(scope);
-        }
-    }
-
-    fn apply(&mut self, update: LinkUpdate) {
-        match update {
-            LinkUpdate::Snapshot(rows) => {
-                // A snapshot always installs a coherent `Connected` state,
-                // replacing whatever came before it (including a prior
-                // `Connected` dashboard — 0256.5's recovery case).
-                self.center = CenterState::Connected {
-                    dashboard: Dashboard::from_snapshot(rows, self.scope.clone()),
-                };
-            }
-            LinkUpdate::Delta(delta) => {
-                // A delta before any snapshot cannot occur in a conformant
-                // ordered stream; drop it rather than paint incomplete state
-                // as coherent.
-                if let CenterState::Connected { dashboard } = &mut self.center {
-                    dashboard.apply(delta);
-                }
-            }
-            LinkUpdate::Unavailable(message) => {
-                self.center = CenterState::Unavailable { message };
-            }
-        }
+        self.face.set_scope(scope);
     }
 }
 
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        match &self.center {
-            CenterState::Connecting => div().child("connecting to center…"),
-            CenterState::Unavailable { message } => {
-                div().child(format!("center unavailable: {message}"))
+        let header = self.face.header();
+        let stale = self.face.is_stale();
+        let mut list = div()
+            .id("run-list")
+            .flex()
+            .flex_col()
+            .size_full()
+            .overflow_y_scroll();
+        for row in self.face.rows() {
+            let mut item = div()
+                .flex()
+                .flex_row()
+                .gap_2()
+                .child(row.repo_label.clone())
+                .child(row.title.clone())
+                .child(format!("{} / {}", row.run_id, row.trait_id))
+                .child(row.state_text.clone())
+                .child(row.detail_text.clone())
+                .child(row.elapsed_text.clone())
+                .child(row.tokens_text.clone());
+            if stale {
+                item = item.opacity(0.6);
             }
-            CenterState::Connected { dashboard } => {
-                let projected = dashboard.rows();
-                let header = match &self.scope {
-                    RepoScope::All => format!("{} runs", projected.len()),
-                    RepoScope::Repo(repo_key) => {
-                        format!("{} runs in {repo_key}", projected.len())
-                    }
-                };
-                let mut list = div()
-                    .id("run-list")
-                    .flex()
-                    .flex_col()
-                    .size_full()
-                    .overflow_y_scroll();
-                for row in projected {
-                    list = list.child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .gap_2()
-                            .child(row.repo_label.clone())
-                            .child(row.title.clone())
-                            .child(format!("{} / {}", row.run_id, row.trait_id))
-                            .child(row.state_text.clone())
-                            .child(row.detail_text.clone())
-                            .child(row.elapsed_text.clone())
-                            .child(row.tokens_text.clone()),
-                    );
-                }
-                div()
-                    .flex()
-                    .flex_col()
-                    .size_full()
-                    .child(header)
-                    .child(list)
-            }
+            list = list.child(item);
         }
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .child(header)
+            .child(list)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ctx_traits_io::center::CenterPublicRow;
+    use ctx_traits_io::run_summary::RunSummary;
+
+    fn wire_row(repo_key: &str, run_id: &str) -> CenterPublicRow {
+        CenterPublicRow {
+            summary: RunSummary {
+                run_id: run_id.to_string(),
+                ..RunSummary::unreadable(run_id.to_string(), "fixture".to_string())
+            },
+            repo_key: repo_key.to_string(),
+            repo_path: format!("/{repo_key}"),
+            ledger_path: format!("/{repo_key}/session.json"),
+            live: true,
+            modified_epoch_secs: 0,
+        }
+    }
+
+    #[test]
+    fn scoped_center_face_projection_survives_a_down_and_recovery_cycle() {
+        let scope = RepoScope::Repo("repo-a".to_string());
+        let mut face = CenterFace::new(scope.clone());
+        let now = SystemTime::now();
+
+        face.apply(
+            LinkUpdate::Snapshot(vec![
+                wire_row("repo-a", "run-1"),
+                wire_row("repo-b", "run-2"),
+            ]),
+            now,
+        );
+        let CenterState::Connected { dashboard } = face.state() else {
+            panic!("expected Connected after the first snapshot");
+        };
+        assert_eq!(
+            dashboard
+                .rows()
+                .iter()
+                .map(|r| r.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run-1"],
+            "the scope must already filter out the other repo's row"
+        );
+        assert!(face.header().contains("repo-a"));
+
+        face.apply(LinkUpdate::Down("subscription closed".to_string()), now);
+        assert!(matches!(face.state(), CenterState::Stale { .. }));
+
+        face.apply(
+            LinkUpdate::Snapshot(vec![
+                wire_row("repo-a", "run-3"),
+                wire_row("repo-b", "run-4"),
+            ]),
+            now,
+        );
+        let CenterState::Connected { dashboard } = face.state() else {
+            panic!("expected Connected after the recovery snapshot");
+        };
+        assert_eq!(
+            dashboard
+                .rows()
+                .iter()
+                .map(|r| r.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run-3"],
+            "the scoped projection must survive the Down/recovery cycle unchanged"
+        );
+        assert!(
+            face.header().contains("repo-a"),
+            "the repo scope must still be reflected in the header after recovery: {}",
+            face.header()
+        );
+    }
 
     #[test]
     fn window_options_carries_title_and_bounds() {

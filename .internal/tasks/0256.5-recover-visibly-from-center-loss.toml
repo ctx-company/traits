@@ -16,9 +16,10 @@ The center drops consumers whose bounded subscriber queues overflow; handle that
 ## Done when
 Tests cover no-center startup, disconnect, bounded-subscriber loss, visible stale state, and recovery from a fresh snapshot without lost or duplicated rows. The application stays open and never labels stale data current, running work continues independently, the standalone desktop build and test lane passes, `just test-full` passes, and gpui remains absent from root workspace resolution and the root lockfile.
 """
+
 [relations]
-parent = "0256"
 depends-on = ["0256.4"]
+parent = "0256"
 
 [[checks]]
 name = "workspace landing gate remains green"
@@ -27,4 +28,4 @@ timeout-ms = 900000
 
 [[checks]]
 name = "root Cargo resolution, lockfile, and workspace membership remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
