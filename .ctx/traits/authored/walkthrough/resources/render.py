@@ -249,6 +249,20 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
 .overlay .ocol{max-width:1020px;margin:0 auto;padding:0 24px}
 .overlay .ocol .exp p{font-size:15px;line-height:1.65}
 .overlay .codeblk pre{max-height:none;font-size:12.5px;line-height:1.55}
+#navback,#navfwd{font-family:var(--mono);font-size:12px;color:var(--text-secondary);background:var(--button);border:1px solid var(--border-soft);border-radius:4px;padding:3px 9px;cursor:pointer}
+#navback:hover,#navfwd:hover{color:var(--text-bright);border-color:var(--border-strong)}
+.xbody{position:relative;display:flex;gap:26px;align-items:flex-start;max-width:1360px;margin:0 auto;padding:22px 24px 60px}
+.xcol{width:250px;flex:none;display:flex;flex-direction:column;gap:12px}
+.xcol .xlabel{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--text-muted)}
+.xcenter{flex:1;min-width:0}
+.minicard{background:var(--card);border:1px solid var(--border-soft);border-radius:6px;padding:10px 12px;cursor:pointer}
+.minicard:hover{border-color:var(--accent)}
+.minicard h4{margin:2px 0 4px;font-family:var(--sans);font-size:13px;font-weight:600;color:var(--text-heading)}
+.minicard p{margin:0;font-family:var(--sans);font-size:11.5px;color:var(--text-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.minicard .kind{margin-bottom:0;font-size:8.5px;padding:1px 5px}
+#xedges{position:absolute;inset:0;pointer-events:none}
+.conns h3[data-explore]{cursor:pointer}
+.conns h3[data-explore]:hover{color:var(--accent)}
 .story-col{max-width:920px;margin:0 auto;padding:8px 24px 80px}
 .card{background:var(--card);border:1px solid var(--border-soft);border-radius:6px;padding:18px 20px;margin:0 0 14px}
 .card.flash{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
@@ -273,6 +287,8 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
 <header>
   <span class="eyebrow">ctx walkthrough</span>
   <nav id="crumbs" aria-label="Path"></nav>
+  <button id="navback" aria-label="Back" title="back">‹</button>
+  <button id="navfwd" aria-label="Forward" title="forward">›</button>
   <span id="tourpos" aria-live="polite"></span>
   <button id="theme" aria-label="Cycle color theme">theme: auto</button>
 </header>
@@ -288,11 +304,15 @@ footer{border-top:1px solid var(--border);padding:8px 16px;font-family:var(--mon
   <div class="obar"><span class="t" id="stitle">narration — reading order</span><button id="sclose">esc closes</button></div>
   <div class="obody" id="sbodywrap"><div class="story-col" id="sbody"></div></div>
 </div>
+<div class="overlay" id="explore" role="dialog" aria-label="Card explorer">
+  <div class="obar"><span class="t">explorer — a card and its relationships</span><button id="xclose">esc closes</button></div>
+  <div class="obody"><div class="xbody" id="xbody"><svg id="xedges"></svg></div></div>
+</div>
 <div class="overlay" id="graph" role="dialog" aria-label="File graph">
   <div class="obar"><span class="t">file connections — mechanical name-matches inside described spans</span><button id="gclose">esc closes</button></div>
   <div class="obody"><div class="ocol" id="gbody"></div></div>
 </div>
-<footer>click a tile to zoom in; Esc goes up · j/k walk the tour · Enter reader · n narration · g file graph · connections are name-matches, not call analysis · code read from the repo at render time</footer>
+<footer>click a tile to zoom in; Esc goes up · j/k walk the tour · Enter reader · n narration · e card explorer · g file graph · ‹/› or browser back-forward retrace your path · connections are name-matches, not call analysis · code read from the repo at render time</footer>
 <script>
 var DATA = __DATA__;
 var HORIZON = __HORIZON__;
@@ -469,7 +489,7 @@ var REPOROOT = __REPOROOT__;
   function connsHtml(n){
     var uses = n.uses || [], usedBy = USEDBY[n.id] || [];
     if (!uses.length && !usedBy.length) return "";
-    var html = "<div class=\\"conns\\"><h3>connections · name-matches</h3>";
+    var html = "<div class=\\"conns\\"><h3 data-explore=\\"1\\" title=\\"open card explorer\\">connections · name-matches ⤢</h3>";
     if (uses.length) html += "<div><span class=\\"more\\">uses → </span>" + chipList(uses, 14) + "</div>";
     if (usedBy.length) html += "<div><span class=\\"more\\">← used by </span>" + chipList(usedBy, 14) + "</div>";
     return html + "</div>";
@@ -576,6 +596,71 @@ var REPOROOT = __REPOROOT__;
       scrollToCard(selectedId);
     }
   }
+  var exploreOpen = false;
+  function miniCard(id){
+    var t = byId[id];
+    if (!t) return "";
+    var kc = String(t.kind).toLowerCase().replace(/[^a-z-]/g, "");
+    return "<div class=\\"minicard\\" data-id=\\"" + id + "\\"><span class=\\"kind k-" + kc + "\\">" + esc(t.kind) + "</span><h4>" + esc(t.title) + "</h4><p>" + esc(t.summary) + "</p></div>";
+  }
+  function renderExplore(){
+    if (!exploreOpen) return;
+    var n = byId[selectedId];
+    var ins = (USEDBY[n.id] || []).slice(0, 8), outs = (n.uses || []).slice(0, 8);
+    var insMore = (USEDBY[n.id] || []).length - ins.length, outsMore = (n.uses || []).length - outs.length;
+    var kc = String(n.kind).toLowerCase().replace(/[^a-z-]/g, "");
+    var center = "<div class=\\"card\\" id=\\"xcenter-card\\"><div class=\\"chead\\"><span class=\\"kind k-" + kc + "\\">" + esc(n.kind) + "</span><h2>" + esc(n.title) + "</h2></div>" +
+      "<p class=\\"sum\\">" + esc(n.summary) + "</p><div class=\\"exp\\">" + prose(n.explanation, n.id) + "</div>" + codeBlocksHtml(n) + "</div>";
+    var left = "<div class=\\"xlabel\\">← used by</div>" + ins.map(miniCard).join("") + (insMore > 0 ? "<div class=\\"xlabel\\">+" + insMore + " more</div>" : "");
+    var right = "<div class=\\"xlabel\\">uses →</div>" + outs.map(miniCard).join("") + (outsMore > 0 ? "<div class=\\"xlabel\\">+" + outsMore + " more</div>" : "");
+    document.getElementById("xbody").innerHTML =
+      "<svg id=\\"xedges\\"></svg><div class=\\"xcol\\" id=\\"xleft\\">" + left + "</div><div class=\\"xcenter\\">" + center + "</div><div class=\\"xcol\\" id=\\"xright\\">" + right + "</div>";
+    requestAnimationFrame(drawXEdges);
+  }
+  function drawXEdges(){
+    var body = document.getElementById("xbody");
+    var svg = document.getElementById("xedges");
+    var center = document.getElementById("xcenter-card");
+    if (!body || !svg || !center) return;
+    var b = body.getBoundingClientRect(), c = center.getBoundingClientRect();
+    svg.setAttribute("viewBox", "0 0 " + b.width + " " + b.height);
+    svg.setAttribute("width", b.width); svg.setAttribute("height", b.height);
+    var s = "";
+    body.querySelectorAll("#xleft .minicard").forEach(function(el){
+      var r = el.getBoundingClientRect();
+      s += "<path d=\\"M " + (r.right - b.left) + " " + (r.top + r.height/2 - b.top) + " C " + (r.right - b.left + 40) + " " + (r.top + r.height/2 - b.top) + ", " + (c.left - b.left - 40) + " " + (c.top + 60 - b.top) + ", " + (c.left - b.left) + " " + (c.top + 60 - b.top) + "\\" fill=\\"none\\" stroke=\\"var(--accent-dim)\\" stroke-width=\\"1.4\\" opacity=\\"0.8\\"/>";
+    });
+    body.querySelectorAll("#xright .minicard").forEach(function(el){
+      var r = el.getBoundingClientRect();
+      s += "<path d=\\"M " + (c.right - b.left) + " " + (c.top + 60 - b.top) + " C " + (c.right - b.left + 40) + " " + (c.top + 60 - b.top) + ", " + (r.left - b.left - 40) + " " + (r.top + r.height/2 - b.top) + ", " + (r.left - b.left) + " " + (r.top + r.height/2 - b.top) + "\\" fill=\\"none\\" stroke=\\"var(--accent-dim)\\" stroke-width=\\"1.4\\" opacity=\\"0.8\\"/>";
+    });
+    svg.innerHTML = s;
+  }
+  function setExplore(open){
+    exploreOpen = open;
+    document.getElementById("explore").className = "overlay" + (open ? " open" : "");
+    if (open) renderExplore();
+  }
+  window.addEventListener("resize", function(){ if (exploreOpen) drawXEdges(); });
+  var navApplying = false;
+  function nav(id){
+    if (!byId[id]) return;
+    if (location.hash !== "#" + id){ location.hash = id; }
+    else applyNav(id);
+  }
+  function applyNav(id){
+    navApplying = true;
+    selectedId = id;
+    if (exploreOpen){ renderExplore(); }
+    else if (storyOpen){ scrollToCard(id); }
+    else { jumpTo(id); }
+    renderTourPos();
+    navApplying = false;
+  }
+  window.addEventListener("hashchange", function(){
+    var id = decodeURIComponent(location.hash.slice(1));
+    if (byId[id]) applyNav(id);
+  });
   var graphOpen = false, graphBuilt = false;
   function renderGraph(){
     var files = DATA.filter(function(n){ return n.kind === "file"; });
@@ -671,12 +756,14 @@ var REPOROOT = __REPOROOT__;
   function renderAll(){ renderCrumbs(); renderMap(); renderPanel(); renderTourPos(); renderReader(); }
 
   function jumpDelegate(e){
-    var t = e.target.closest ? e.target.closest(".xref, .chip, .gnode") : null;
+    var t = e.target.closest ? e.target.closest(".xref, .chip, .gnode, .minicard") : null;
     if (t && t.getAttribute("data-id")){
-      if (storyOpen){ scrollToCard(t.getAttribute("data-id")); return; }
       if (graphOpen) setGraph(false);
-      jumpTo(t.getAttribute("data-id"));
+      nav(t.getAttribute("data-id"));
+      return;
     }
+    var x = e.target.closest ? e.target.closest("[data-explore]") : null;
+    if (x){ setReader(false); setExplore(true); nav(selectedId); }
   }
   document.getElementById("panel").addEventListener("click", jumpDelegate);
   document.getElementById("reader").addEventListener("click", jumpDelegate);
@@ -685,8 +772,17 @@ var REPOROOT = __REPOROOT__;
   document.getElementById("sclose").addEventListener("click", function(){ setStory(false); renderAll(); });
   document.getElementById("rclose").addEventListener("click", function(){ setReader(false); });
   document.getElementById("gclose").addEventListener("click", function(){ setGraph(false); });
+  document.getElementById("explore").addEventListener("click", jumpDelegate);
+  document.getElementById("xclose").addEventListener("click", function(){ setExplore(false); renderAll(); });
+  document.getElementById("navback").addEventListener("click", function(){ history.back(); });
+  document.getElementById("navfwd").addEventListener("click", function(){ history.forward(); });
 
   document.addEventListener("keydown", function(e){
+    if (e.key === "e" && !graphOpen && !readerOpen){ setExplore(!exploreOpen); if (exploreOpen) renderExplore(); else renderAll(); e.preventDefault(); return; }
+    if (exploreOpen){
+      if (e.key === "Escape"){ setExplore(false); renderAll(); e.preventDefault(); }
+      return;
+    }
     if (e.key === "n" && !readerOpen && !graphOpen){ setStory(!storyOpen); if (!storyOpen) renderAll(); e.preventDefault(); return; }
     if (storyOpen){
       if (e.key === "Escape"){ setStory(false); renderAll(); e.preventDefault(); }
