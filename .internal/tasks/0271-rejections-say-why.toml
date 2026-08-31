@@ -1,0 +1,91 @@
+schema-version = "0.2"
+key = "0271"
+title = "Rejections say why: retry feedback carries the validator's verdict"
+status = "draft"
+raised = "2026-08-31"
+content = """
+When a frame's required slot fails to land, the runtime tells the worker
+only "missing slot(s) X" (modules/cli/src/app/drive.rs:3709) — even when
+the worker demonstrably submitted a payload and the runtime rejected it
+for a specific, known reason. The validator holds the exact verdict at
+rejection time and throws it away.
+
+Proven live on 2026-08-31 (notify walkthrough, session c543c475, chunk
+c-crates-notify-host-src-egress-slack-rs-4): the worker narrated
+"Described the Slack egress chunk" — it submitted — yet was told
+"missing slot(s) node-batches" three attempts in a row, spent its
+retries misdiagnosing in the dark ("investigating node-batches JSON
+error", "diagnosing API return formatting", "planning duplicate symbol
+identification"), and the run died after an hour of banked progress.
+The chunk contains repeated symbol names (`SlackHttpResponse` three
+times), making duplicate node identities the prime suspect — a fact the
+worker could have fixed in one retry had the rejection been relayed.
+Every trait with structured outputs inherits this blindness.
+
+## Owner contract
+
+A failed acceptance tells the worker what actually happened. The retry
+prompt (and the activity log, for post-mortems) names the affected
+slot, a failure category, and the validator's specific detail — path
+into the payload, offending value, expected-versus-got, byte position
+where relevant. The word "missing" is reserved for the one category
+where no submission for the slot arrived at all. Echoed payload content
+is sanitized and length-capped so a poisoned or huge payload cannot
+damage the prompt or the activity stream.
+"""
+scope = """
+## Goals (binding)
+
+1. The retry feedback distinguishes, at minimum, these categories, each
+   with its specific detail:
+   - genuinely-absent: no submission for the slot in the reply (the only
+     category that may say "missing");
+   - unparseable: a submission arrived but is not valid JSON — include
+     the parse error and position, and whether truncation is evident;
+   - schema-shape mismatch: required field absent, unknown field, wrong
+     type, enum out of range — include the JSON path and expected-vs-got;
+   - constraint violation inside a valid shape: duplicate identities
+     where uniqueness is required, references to ids absent from the
+     same payload, bounds and cardinality violations — include the
+     offending value and where it collides;
+   - size/ceiling rejection: the payload exceeded a transport or capture
+     limit — include the limit and observed size;
+   - wrong slot: a submission arrived addressed to a slot this frame
+     does not expect — name what was received and what was expected;
+   - encoding hazard: NUL bytes, invalid UTF-8, sequences the canonical
+     layer refuses — name the class and offset;
+   - conflicting duplicates: the same slot submitted more than once in
+     one turn with differing values — name the ambiguity;
+   - transport/harness failure: the submission channel itself failed or
+     the stream was cut — say so, distinguishing it from worker error.
+2. The same categorized reason is recorded in the session's activity
+   stream at rejection time, so a dead run's ledger answers "why" without
+   reconstructing it from worker narrations.
+3. Echoed detail is bounded and sanitized: length-capped, control
+   characters escaped, never raw enough to break the prompt, the
+   activity JSON lines, or downstream renderers.
+4. "missing slot(s)" language appears only for the genuinely-absent
+   category; every other rejection names its category.
+5. Slot schemas themselves are unchanged; this is feedback, not contract
+   change.
+
+## Suggested starting points — guidance, not a boundary
+
+- The retry message at modules/cli/src/app/drive.rs:3709 and the
+  outcome taxonomy already sketched at drive.rs:6449 ("guard failures,
+  invalid output, missing slot(s), unparseable output,
+  RejectedCorrectionRequired") — the categories partially exist
+  internally and are collapsed at the reporting seam.
+- Proof shape: one focused regression per category above, asserting the
+  retry prompt and the activity record both carry the category and the
+  specific detail; plus one sanitization proof feeding a NUL-poisoned
+  and an over-long payload and asserting the prompt survives.
+
+## Out of scope
+
+- Carrying a prior attempt's draft forward across retries (its own
+  candidate; verbatim feedback removes most of its urgency).
+- Attempt counts, budgets, or retry pacing.
+- The walkthrough chunker's collision-prone node ids (trait-side fix,
+  walkthrough 0.3.4).
+"""
