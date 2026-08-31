@@ -126,6 +126,9 @@ def slugify(path: str) -> str:
     return out.strip("-")
 
 
+SUPPORTED_EXTS = {".rs", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".py"}
+
+
 def enumerate_mode(closure_arg: str) -> None:
     closure = load_json(closure_arg, "closure")
     if not isinstance(closure, list):
@@ -141,6 +144,15 @@ def enumerate_mode(closure_arg: str) -> None:
             missing.append(path)
         else:
             files.append({"path": path, "symbols": symbols})
+    unsupported = sorted({f["path"] for f in files if os.path.splitext(f["path"])[1] not in SUPPORTED_EXTS})
+    if unsupported:
+        fail(
+            "closure contains files the enumerator cannot exhaustively index ("
+            + ", ".join(unsupported[:8])
+            + (", ..." if len(unsupported) > 8 else "")
+            + ") — the every-symbol promise cannot be kept for them. Keep such files on the horizon, "
+            "or extend symbols.py for their language (supported: .rs .ts/.tsx .js/.mjs/.jsx .py)."
+        )
     if missing:
         fail(
             "closure names files that do not exist (closure entries are verified claims): " + ", ".join(missing)
