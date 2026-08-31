@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0273"
 title = "Implement runs narrate to ctx-notify"
-status = "draft"
+status = "ready"
 raised = "2026-08-31"
 content = """
 Owner delegation 2026-08-31: the default (basic) implement flow mirrors
@@ -13,74 +13,227 @@ the run's live narrator, via the notification pipeline this org built.
 
 The wiring was fully authored and script-tested on 2026-08-31 but could
 not land because implement is unbuildable from source (0272's blocker);
-this task carries that finished design through once 0272 clears.
+this task carries that finished design through once 0272 lands. Start
+from 0272's regenerated baseline — do not preserve or reason from the
+stale canonical diff that predates it.
 
-Verified CLI facts to build against: `ctx-notify begin --json <TITLE>`
-prints `{"activity_id":"<uuid>",...}` (`--quiet` suppresses it — do not
+Verified CLI facts to build against (`/Users/rpunkfu/.cargo/bin/`
+observed 2026-08-31): `ctx-notify begin --json <TITLE>` prints
+`{"activity_id":"<uuid>",...}` (`--quiet` suppresses it — never
 combine); `update <ID> --status <TEXT>` works; `--line` is
 single-occurrence today (two flags = usage_error), so per-point updates
-issue one call per line until ctx-notify 0017 makes it repeatable;
-`finish <--ok|--fail|--cancel> <ID>` closes the activity.
+issue one process call per line until ctx-notify 0017 makes it
+repeatable; `finish <--ok|--fail|--cancel> <ID>` closes the activity.
+This task binds only `finish --ok` on normal fall-through completion —
+no failure/cancel finalization, no general finally mechanism.
 
 ## Owner contract
 
-Every basic-variant run opens one notify activity titled from its task,
-updates it after each step with the step's title, follows every review
-verdict with the verdict status plus one line per still-open reviewer
-point, and finishes it on completion. Notification trouble never
-affects the run: every notify step is failure-tolerant and records
-'unavailable'/'skipped' instead of failing.
+Every basic-variant run opens one notify activity titled
+`implement: <task port value>`, updates it after each step with the
+step's title, follows every review verdict with the verdict status plus
+one line per still-open reviewer point, and finishes it on completion.
+Notification trouble never affects the run: every notify step is
+failure-tolerant and records 'unavailable'/'skipped' instead of
+failing.
 """
 scope = """
-## Goals (binding)
+This plan separates GOALS from APPROACH. The Goals below are binding:
+each Done-when states an observable outcome and the existing command or
+review that decides it. Everything under Approach is the architect's
+suggested route — expected files, symbols, edit order, commands, and
+proof mechanics are guidance, never a boundary; the run may deviate
+from any of it whenever a goal requires it, reporting the deviation in
+its work summary rather than treating it as a violation.
 
-1. Shared helper `shared/step/notify.ts` with begin/update/
-   reviewUpdate/finish command steps; slots `notify-id`, `notify-log`,
-   `review-status`, `review-points` in shared data. begin extracts
-   activity_id from `begin --json` and stores 'unavailable' on any
-   failure; every later step no-ops on 'unavailable'.
-2. The basic variant weaves: begin before the baseline; an update after
-   baseline, draft, implement, and commit; reviewUpdate after the
-   review step inside the loop (fires each round); finish after the
-   commit block. Titles match the step titles.
-3. reviewUpdate projects the verdict (`status` and `blockers` via
-   cdk.step.project into text slots — object slots do not interpolate
-   into argv), sends `update --status "review: <status>"`, then one
-   `update --line <open step text, 200-char cap>` per still-open
-   blocker step, all failure-tolerant with bounded timeouts.
-4. No notify step can fail a run: nonzero ctx-notify exits, timeouts,
-   and absent binaries all degrade to recorded no-ops.
-5. Quick and complex variants are untouched (basic is the default and
-   the owner's ask); a later task may extend them.
+## Goals — Done-when (binding)
 
-## Suggested starting points — guidance, not a boundary
+1. A shared notify helper layer exists in the implement trait source
+   with four failure-tolerant command operations — begin, update,
+   reviewUpdate, finish — and four shared slots: `notify-id`,
+   `notify-log`, `review-status`, `review-points`. begin runs
+   `ctx-notify begin --json` (without `--quiet`), extracts
+   `activity_id`, and stores the literal `unavailable` on any failure
+   to start or parse; every later operation no-ops when `notify-id` is
+   `unavailable`. Decided by: the regenerated basic canonical carrying
+   the wiring (`grep -F 'ctx-notify'
+   .ctx/traits/authored/implement/generated/basic/index.toml` matches —
+   declared in [[checks]]) plus the requirement-by-requirement diff
+   review of goal 3's ordering and argv.
+2. Notification failure never alters run success: a missing
+   `ctx-notify` executable, malformed begin JSON, nonzero child exit,
+   or child timeout each degrade to an `unavailable`/`skipped` marker
+   in the output slot and a zero exit of the wrapping command step. The
+   whole review update has exactly one finite stop: every child call
+   runs under a caught per-call timeout and the whole open-point loop
+   runs under one caught overall deadline inside the wrapper, after
+   which the wrapper stops sending and still exits zero — never the
+   runtime's outer kill (a runtime-level timeout or nonzero exit fails
+   the step and would break this contract). Decided by: committed
+   automated coverage of all five failure behaviours — missing
+   binary, malformed begin JSON, nonzero child exit, child timeout
+   past both deadlines, and the `unavailable` short-circuit — that
+   passes only when each behaviour yields a zero exit with degraded
+   evidence instead of a failure; the existing `just test-full`
+   runner executes that coverage (declared in [[checks]]) and passes
+   with it enabled. How the coverage observes these behaviours is the
+   run's choice; the Approach below suggests one route.
+3. The regenerated basic canonical contains exactly this notification
+   sequence and no more: one begin before the baseline step; one status
+   update after each of baseline (`Capture the session base`), draft
+   (`Draft the implementation plan`), implement (`Implement the task`),
+   and commit (`Commit the work`, inside the Maybe Commit branch); one
+   reviewUpdate immediately after the review step inside the
+   refinement loop (so it fires every round, before the owner-ruling
+   branch) sending `review: <approved|revise>` then one
+   `update --line` process call per still-open blocker step (exact
+   `status == "open"`, `step` text capped at 200 characters; approved
+   verdicts send only the status); one `finish --ok` after the complete
+   Maybe Commit branch, so a clean-tree run still finishes. Decided
+   by: committed automated verification against the regenerated
+   `.ctx/traits/authored/implement/generated/basic/index.toml` that
+   confirms the notification count, this ordering and loop/branch
+   placement, and the argv constraints — `begin --json` without
+   `--quiet`, `--quiet` on status updates and finish, one `--line`
+   per child invocation, the 200-character cap present,
+   `finish --ok` — without freezing the whole file as a golden; the
+   existing `just test-full` runner executes it (declared in
+   [[checks]]) and passes with it enabled, and the substantive diff
+   review in the bounded loop below closes the same list a second
+   time. How the verification reads the canonical is the run's
+   choice; the Approach below suggests one route.
+4. Quick and complex variant flows gain no notification behaviour:
+   their flow source files are unedited and their regenerated
+   canonicals contain no `ctx-notify` invocation (the negative grep in
+   [[checks]] decides this; shared slot declarations and source maps
+   may still legitimately change in those canonicals because shared
+   data is minted at module load). Decided by: the [[checks]] grep plus
+   the diff review.
+5. The implement family (version 0.25.0, no bump) is rebuilt from
+   source with the repository-built CLI after the edits; all six
+   generated `index.toml`/`index.map` artifacts and `trait.lock` are
+   regenerated and committed together with the source; `just test` and
+   `just test-full` pass. Decided by: the build command completing, the
+   committed regenerated artifacts, and `just test-full` (declared in
+   [[checks]]).
 
-The complete tested implementation from 2026-08-31 (gate scripts
-verified standalone; build blocked only by 0272):
+Exclusions, restated so the diff review can close them: no change to
+ctx-notify itself (repeatable `--line` is notify board 0017); no
+notification wiring in quick/complex flow source; no change to review
+or summon semantics; no version bump or release change; no CDK, core,
+or runtime change; no edit to `modules/builtin/templates/implement`;
+no failure/cancel finalization path; no second review schema, blocker
+parser, slugifier, or notification abstraction.
 
-- BEGIN: sh -c script: `out=$(ctx-notify begin --json "implement: $1")
-  || printf unavailable`; extract activity_id via python json; argv
-  carries the task port; output notify-id.
+## Approach — suggested route, not a boundary
+
+Sequencing: 0272 must land first (encoded in relations); it fixes
+signal-field parsing/runtime resolution and regenerates the family.
+Rebase onto that landed baseline before starting.
+
+Named reuse points: `agents.reviewVerdictSchema` and
+`agents.blockerSchema` (packages/toolkit/src/schema.ts:311-365, 79-174)
+for the verdict shape; `cdk.step.project`
+(packages/cdk/src/functional/registrars.ts:292-300) to project
+`verdict1.status` -> `review-status` (text) and `verdict1.blockers` ->
+`review-points` (a `cdk.slot.list(agents.blockerSchema, ...)` slot —
+project validation requires exact schema equality, so `slot.any` or
+plain text is not a substitute); `cdk.idFromTitle`
+(packages/cdk/src/index.ts:248) for notification step ids; the
+positional sh -c argv pattern of
+`.ctx/traits/authored/brainstorm/source/shared/step/gate.ts:9-34`
+(`["sh", "-c", SCRIPT, "_", slot...]`) so runtime text never enters
+shell source. Note: the runtime now renders list/object slots as
+compact JSON in command argv, so the projected `review-points` slot can
+pass as one argv token to python; projection is still required because
+command interpolation accepts slot/port/setting/resource handles, not
+verdict field-refs.
+
+Suggested shape (the 2026-08-31 script-tested design):
+- New `source/shared/step/notify.ts`, exported via
+  `export * as notify from "./notify.ts"` in `shared/step/index.ts`;
+  the four slots added to the exported `slot` object in
+  `shared/data.ts`. Title-dependent helpers placing
+  `cdk.step.command(title, ...)` inline keep ctx-notify argv out of
+  quick/complex canonicals; keep the literal `ctx-notify` out of
+  shared slot descriptions too, so the [[checks]] negative grep
+  measures invocations only.
+- BEGIN: sh -c script `out=$(ctx-notify begin --json "implement: $1")`
+  falling back to `unavailable`; extract activity_id via python json;
+  task port as positional argv; stdout -> `notify-id`.
 - UPDATE: `[ "$1" = unavailable ] && exit 0; ctx-notify update "$1"
-  --quiet --status "$2" || true`; step ids derived from slugified
-  titles; output notify-log.
-- REVIEW: cdk.step.project verdict1.status -> review-status,
-  verdict1.blockers -> review-points; script sends the status update
-  then pipes review-points JSON to python which loops blockers'
-  open steps calling `ctx-notify update <id> --quiet --line <text>`
-  per point (subprocess, check=False, timeout 15).
-- FINISH: `ctx-notify finish --ok "$1" --quiet || true`.
-- Weave points in variant/basic/index.ts: begin before
+  --quiet --status "$2" || true`; then print a concise marker ->
+  `notify-log` (a failed/timed-out command lands no output, so the
+  wrapper must exit zero and print its own evidence).
+- REVIEW: one project step for both verdict fields, then a script that
+  sends the status update and pipes `review-points` JSON to python,
+  which loops the blockers' open steps calling one
+  `ctx-notify update <id> --quiet --line <text>` per point via
+  `subprocess.run(..., check=False, timeout=15)`, catching
+  `TimeoutExpired`/`FileNotFoundError`, under a caught overall
+  deadline; always exits zero.
+- FINISH: `ctx-notify finish --ok "$1" --quiet || true` behind the
+  same `unavailable` guard.
+- Weave points in `variant/basic/index.ts`: begin before
   diff.baseline; updates after baseline/draft/implement; reviewUpdate
-  after review.primarySummoning; update after git.commitSubmit inside
-  the Maybe Commit when-block; finish after that block.
+  directly after `review.primarySummoning("Review the implementation")`
+  and before the owner-ruling branch; update after
+  `git.commitSubmit("Commit the work")` inside the Maybe Commit
+  when-block; finish after that block.
+- Timeouts: per-child control (python `timeout=15` / bounded shell)
+  caught inside the wrapper is the contract; a step-level `timeoutMs`
+  is only a larger runaway backstop, never the expected failure path
+  (the IO default wall timeout is 120s and a runtime kill cannot be
+  made successful).
+- Focused checks (goals 2 and 3): export each wrapper script text as
+  a named constant from `notify.ts` so tests run the shipped script
+  verbatim; exercise them via `sh -c` with a scratch directory
+  prepended to PATH holding a fake `ctx-notify` that emits good JSON,
+  garbage, a nonzero exit, or sleeps past the deadlines — plus one
+  run with no binary on PATH and one with `unavailable` as the id —
+  asserting zero exit and the expected marker. The structural check
+  parses the regenerated basic canonical TOML and computes counts,
+  positions, and argv properties; it never embeds a full-file
+  expected fixture. Seat both in a test tree `just test-full` already
+  executes (its TS-test or workspace-test sweep); confirming the
+  exact seat is the run's call, and moving them is a reportable
+  deviation, not a violation.
+- Build: `just ts-build` only if package dist trees are stale;
+  `cargo build -p ctx-traits-cli` then
+  `target/debug/ctx traits build implement` (do not trust the
+  installed ctx 0.4.0 to contain 0272's core fix); commit source +
+  all six generated artifacts + `trait.lock`.
 
-## Out of scope
+## Validation order and bounded refinement
 
-- Repeatable `--line` in ctx-notify itself (notify board 0017).
-- Wiring quick/complex variants.
-- Any change to review or summon semantics.
+Cheap evidence first: the goal-2 focused failure-mode checks run
+directly, then the family build, then the goal-3 structural check
+plus the requirement-by-requirement read of the regenerated basic
+canonical, and the quick/complex canonicals against goal 4, then
+`just test`, then `just test-full` (which must execute the new
+focused checks).
+After the gates, one substantive closing review walks every Done-when
+and every exclusion against the actual diff before the task is called
+done. Repair is bounded: on a failure, fix, rerun the failed
+verification and all later ones, and stop after at most three repair
+rounds — if still red, stop and report the residue honestly instead of
+iterating further. Reordering or folding these steps is a reportable
+deviation, not a violation.
 """
 
 [relations]
 depends-on = ["0272"]
+
+[[checks]]
+name = "basic canonical carries the ctx-notify wiring"
+command = "grep -F 'ctx-notify' .ctx/traits/authored/implement/generated/basic/index.toml"
+expect = "ctx-notify"
+
+[[checks]]
+name = "quick and complex canonicals contain no ctx-notify invocation"
+command = "test -f .ctx/traits/authored/implement/generated/quick/index.toml && test -f .ctx/traits/authored/implement/generated/complex/index.toml && ! grep -q -F 'ctx-notify' .ctx/traits/authored/implement/generated/quick/index.toml .ctx/traits/authored/implement/generated/complex/index.toml"
+
+[[checks]]
+name = "workspace landing gate remains green"
+command = "just test-full"
+timeout-ms = 1800000
