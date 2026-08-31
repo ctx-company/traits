@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 use camino::Utf8PathBuf;
 use ctx_traits_desktop::center_link::LinkUpdate;
 use ctx_traits_desktop::detail::{self, DetailLoad, PreviewState, RunDetail};
-use ctx_traits_desktop::preview::{sessions_now_item, sessions_verdict_block};
+use ctx_traits_desktop::preview::{
+    sessions_now_item, sessions_slots_block, sessions_verdict_block,
+};
 use ctx_traits_desktop::run_row;
 
 fn recv_snapshot(
@@ -61,6 +63,10 @@ fn preview_state_blocks_selected_detail_and_verdict_round() {
     an_implement_shaped_run_renders_a_verdict_block_and_a_plain_run_renders_none();
     no_read_fires_for_an_unselected_row_change();
     a_finished_run_reopened_after_restart_reproduces_the_same_blocks();
+    a_non_verdict_slot_written_to_an_already_selected_run_reconciles_through_the_served_detail_path(
+    );
+    no_slots_block_without_evidence_and_a_block_with_it();
+    a_selection_change_to_a_run_without_slot_evidence_leaves_no_rows_behind();
 }
 
 /// D1 — a verdict written to an already-selected run reconciles through the
@@ -487,6 +493,211 @@ fn a_finished_run_reopened_after_restart_reproduces_the_same_blocks() {
     assert_eq!(
         before, after,
         "durable evidence must reproduce the same block"
+    );
+
+    drop(updates);
+}
+
+/// Goal 8's central claim, widened past the verdict slot D1 already covers:
+/// an arbitrary **non-verdict** slot written to an already-selected run
+/// becomes visible through the one served detail path `0265.11` landed —
+/// no second request kind, no timer.
+fn a_non_verdict_slot_written_to_an_already_selected_run_reconciles_through_the_served_detail_path()
+{
+    let guard = support::scratch("preview-state-blocks-slots-d1");
+    let root = guard.0.clone();
+    // SAFETY: see module doc.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_path =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("session.json")).expect("UTF-8 path");
+    let session = support::write_session_ledger(&ledger_path, "session-a", "run-a", true);
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let wire_row = support::row_from_ledger("repo", &ledger_path, &session, true);
+    connection.serve_snapshot(&subscribe_id, std::slice::from_ref(&wire_row));
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+    let row = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_path.as_str())
+        .expect("seeded row present");
+
+    let mut detail = RunDetail::default();
+    let request = detail.select(row).expect("selection issues a request");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    assert!(
+        sessions_slots_block(detail.preview_state().as_ref()).is_none(),
+        "no slot evidence yet: no block"
+    );
+
+    let scratch_session = support::write_session_ledger_with_slot(
+        &ledger_path,
+        "session-a",
+        "run-a",
+        true,
+        "scratch-note",
+        serde_json::json!("arbitrary evidence"),
+    );
+    let mut moved_row = support::row_from_ledger("repo", &ledger_path, &scratch_session, true);
+    // A non-verdict slot write never moves `RunSummary.verdict_rounds`, so
+    // the fingerprint here rests entirely on `modified_epoch_secs`; force it
+    // past the write's own mtime rather than trust two writes inside one
+    // wall-clock second to land in different seconds (the plan's own
+    // documented same-second reconciliation bound).
+    moved_row.modified_epoch_secs = wire_row.modified_epoch_secs + 1;
+
+    let follow_outcome = detail.follow(&LinkUpdate::Delta(
+        ctx_traits_io::center::CenterDelta::RowChanged {
+            row: Box::new(moved_row),
+        },
+    ));
+    let resync = follow_outcome
+        .request
+        .expect("a moved fingerprint issues exactly one resync request");
+
+    let resync_outcome = load_serving_claimed_task(&peer, &resync, "unclaimed", None);
+    assert!(detail.apply(resync.generation, resync_outcome));
+
+    let block = sessions_slots_block(detail.preview_state().as_ref())
+        .expect("the resync-committed baseline carries the slots block");
+    assert_eq!(block.heading, "slots");
+    assert_eq!(block.rows.len(), 1);
+    assert_eq!(block.rows[0].key, "scratch-note");
+    assert_eq!(block.rows[0].value[0].text, "filled");
+
+    drop(updates);
+}
+
+/// No block at all for a run with no slot evidence; the block is present for
+/// one that has it (goal 2).
+fn no_slots_block_without_evidence_and_a_block_with_it() {
+    let guard = support::scratch("preview-state-blocks-slots-presence");
+    let root = guard.0.clone();
+    // SAFETY: see module doc.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_none =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("none.json")).expect("UTF-8 path");
+    let ledger_some =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("some.json")).expect("UTF-8 path");
+    let session_none =
+        support::write_session_ledger(&ledger_none, "session-none", "run-none", false);
+    let session_some = support::write_session_ledger_with_slot(
+        &ledger_some,
+        "session-some",
+        "run-some",
+        false,
+        "scratch-note",
+        serde_json::json!("arbitrary evidence"),
+    );
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let row_none = support::row_from_ledger("repo", &ledger_none, &session_none, false);
+    let row_some = support::row_from_ledger("repo", &ledger_some, &session_some, false);
+    connection.serve_snapshot(&subscribe_id, &[row_none, row_some]);
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+
+    let selected_none = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_none.as_str())
+        .expect("no-evidence row present");
+    let mut detail = RunDetail::default();
+    let request = detail
+        .select(selected_none)
+        .expect("selects no-evidence run");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    assert!(
+        sessions_slots_block(detail.preview_state().as_ref()).is_none(),
+        "a run with no slot evidence renders no slots block"
+    );
+
+    let selected_some = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_some.as_str())
+        .expect("evidence row present");
+    let request = detail.select(selected_some).expect("selects evidence run");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    let block = sessions_slots_block(detail.preview_state().as_ref())
+        .expect("a run with slot evidence renders a slots block");
+    assert_eq!(block.rows.len(), 1);
+    assert_eq!(block.rows[0].key, "scratch-note");
+
+    drop(updates);
+}
+
+/// A selection change from a run with rows to a run without leaves no rows
+/// behind (goal 2's second half): the atomic selection transaction, not a
+/// half-replaced or stale block.
+fn a_selection_change_to_a_run_without_slot_evidence_leaves_no_rows_behind() {
+    let guard = support::scratch("preview-state-blocks-slots-transition");
+    let root = guard.0.clone();
+    // SAFETY: see module doc.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_some =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("some.json")).expect("UTF-8 path");
+    let ledger_none =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("none.json")).expect("UTF-8 path");
+    let session_some = support::write_session_ledger_with_slot(
+        &ledger_some,
+        "session-some",
+        "run-some",
+        false,
+        "scratch-note",
+        serde_json::json!("arbitrary evidence"),
+    );
+    let session_none =
+        support::write_session_ledger(&ledger_none, "session-none", "run-none", false);
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let row_some = support::row_from_ledger("repo", &ledger_some, &session_some, false);
+    let row_none = support::row_from_ledger("repo", &ledger_none, &session_none, false);
+    connection.serve_snapshot(&subscribe_id, &[row_some, row_none]);
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+
+    let selected_some = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_some.as_str())
+        .expect("evidence row present");
+    let mut detail = RunDetail::default();
+    let request = detail.select(selected_some).expect("selects evidence run");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    assert!(sessions_slots_block(detail.preview_state().as_ref()).is_some());
+
+    let selected_none = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_none.as_str())
+        .expect("no-evidence row present");
+    let request = detail
+        .select(selected_none)
+        .expect("selects no-evidence run");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    assert!(
+        sessions_slots_block(detail.preview_state().as_ref()).is_none(),
+        "the prior selection's rows must never survive a selection change"
     );
 
     drop(updates);

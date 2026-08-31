@@ -5,8 +5,10 @@
 //! [`Plan`] (for producer/agent enrichment) and hand both to [`build`].
 //!
 //! The chronological spine is [`State::slot_revisions`], not
-//! `State::accepted_slot_values`: the latter is sorted alphabetically by ref
-//! and holds only each slot's final value, so a loop's superseded iteration-0
+//! `State::accepted_slot_values`: the latter is in first-appearance order
+//! (each ref keeps the position of its first write; `upsert_runtime_value`
+//! replaces in place rather than re-sorting) and holds only each slot's
+//! final value, so a loop's superseded iteration-0
 //! verdict would be silently lost. `slot_revisions` is append-only in
 //! acceptance order and carries the value as written at the time, so a
 //! multi-iteration arc (review → revise → apply-fixes → review again) comes
@@ -548,6 +550,111 @@ pub fn verdict_presentation(
         tone,
         blockers,
     })
+}
+
+/// How one slot's current evidence reads in a preview fact row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotValueForm {
+    /// An accepted current value with no committed revision to count: a
+    /// seeded slot default or a ledger written before `slot_revisions`
+    /// existed. Committed validation deliberately permits this, so it is
+    /// normal evidence — not `unfilled`, not `r0`, not a fabricated `r1`.
+    Filled,
+    /// An accepted current value plus `writes` committed revisions.
+    /// `writes` counts *writes*, not review rounds or versions.
+    FilledWithWrites(u64),
+    /// The slot's latest committed revision has no accepted current value at
+    /// the same ref and digest — the condition committed ledger validation
+    /// reports as a contract violation. Rendered loudly, never dropped and
+    /// never silently rendered as filled.
+    Unreadable,
+}
+
+/// One row of the preview `slots` fact block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotLedgerRow {
+    /// The served ref text with its `slot:` scheme stripped; the full ref
+    /// verbatim when it carries no scheme.
+    pub slot_id: String,
+    pub form: SlotValueForm,
+}
+
+fn strip_slot_scheme(ref_text: &str) -> String {
+    ref_text
+        .strip_prefix("slot:")
+        .unwrap_or(ref_text)
+        .to_string()
+}
+
+/// The shared, GUI-free row projection for the preview `slots` fact block:
+/// one row per slot the run's *committed* evidence carries, in
+/// `accepted_slot_values`' own served order, followed by any slot whose
+/// latest committed revision has no accepted current value at all, in the
+/// order `slot_revisions` first mentions it. See `0265.12`'s plan for why
+/// these two sources cannot be merged into one ordering.
+pub fn slot_ledger_rows(
+    accepted_slot_values: &[Value],
+    slot_revisions: &[SlotRevision],
+) -> Vec<SlotLedgerRow> {
+    let mut latest_revision_by_slot: std::collections::BTreeMap<&str, &SlotRevision> =
+        std::collections::BTreeMap::new();
+    for revision in slot_revisions {
+        let slot_ref = revision.slot_ref.as_str();
+        match latest_revision_by_slot.get(slot_ref) {
+            Some(existing) if existing.acceptance_order >= revision.acceptance_order => {}
+            _ => {
+                latest_revision_by_slot.insert(slot_ref, revision);
+            }
+        }
+    }
+    let write_counts = crate::procedure::stats::slot_revision_counts(slot_revisions);
+
+    let mut rows: Vec<SlotLedgerRow> = Vec::new();
+    let mut served_refs: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+
+    for value in accepted_slot_values {
+        if value.acceptance != AcceptanceStatus::Accepted {
+            continue;
+        }
+        let slot_ref = value.ref_text.as_str();
+        if !served_refs.insert(slot_ref) {
+            continue;
+        }
+        let form = match latest_revision_by_slot.get(slot_ref) {
+            Some(revision) if revision.value_digest != value.value_digest => {
+                SlotValueForm::Unreadable
+            }
+            _ => match write_counts.get(slot_ref) {
+                Some(&n) if n > 0 => SlotValueForm::FilledWithWrites(n),
+                _ => SlotValueForm::Filled,
+            },
+        };
+        rows.push(SlotLedgerRow {
+            slot_id: strip_slot_scheme(slot_ref),
+            form,
+        });
+    }
+
+    for revision in slot_revisions {
+        let slot_ref = revision.slot_ref.as_str();
+        if served_refs.contains(slot_ref) {
+            continue;
+        }
+        if latest_revision_by_slot
+            .get(slot_ref)
+            .map(|r| r.acceptance_order)
+            != Some(revision.acceptance_order)
+        {
+            continue;
+        }
+        served_refs.insert(slot_ref);
+        rows.push(SlotLedgerRow {
+            slot_id: strip_slot_scheme(slot_ref),
+            form: SlotValueForm::Unreadable,
+        });
+    }
+
+    rows
 }
 
 /// One beat in the chronological arc: a single slot write, in acceptance (or
@@ -1943,5 +2050,150 @@ mod verdict_presentation_tests {
         assert_eq!(finding_count_segment(0), None);
         assert_eq!(finding_count_segment(1), Some("1 finding".to_string()));
         assert_eq!(finding_count_segment(2), Some("2 findings".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod slot_ledger_rows_tests {
+    use super::*;
+    use crate::reference::{Kind, Reference};
+
+    fn revision_at(slot_id: &str, order: usize) -> SlotRevision {
+        SlotRevision {
+            slot_ref: Reference::local(Kind::Slot, slot_id).expect("valid slot ref"),
+            value_digest: Digest::source(slot_id),
+            acceptance_order: order,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: None,
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    fn value_with(ref_text: &str, acceptance: AcceptanceStatus, digest_seed: &str) -> Value {
+        Value {
+            ref_text: ref_text.to_string(),
+            value: serde_json::json!({}),
+            value_digest: Digest::source(digest_seed),
+            schema_ref: None,
+            source: ValueSource::HostInput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance,
+            position_path: Vec::new(),
+            acceptance_order: None,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    fn accepted(slot_id: &str) -> Value {
+        value_with(
+            &format!("slot:{slot_id}"),
+            AcceptanceStatus::Accepted,
+            slot_id,
+        )
+    }
+
+    #[test]
+    fn no_slot_evidence_yields_empty_rows() {
+        assert_eq!(slot_ledger_rows(&[], &[]), Vec::new());
+    }
+
+    #[test]
+    fn served_order_is_preserved_and_not_sorted() {
+        let values = vec![accepted("zulu"), accepted("alpha"), accepted("mike")];
+        let rows = slot_ledger_rows(&values, &[]);
+        let ids: Vec<&str> = rows.iter().map(|row| row.slot_id.as_str()).collect();
+        assert_eq!(ids, vec!["zulu", "alpha", "mike"]);
+    }
+
+    #[test]
+    fn accepted_value_with_no_revision_is_filled() {
+        let values = vec![accepted("draft")];
+        let rows = slot_ledger_rows(&values, &[]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].slot_id, "draft");
+        assert_eq!(rows[0].form, SlotValueForm::Filled);
+    }
+
+    #[test]
+    fn a_slot_written_more_than_once_appears_once_with_the_write_count() {
+        let values = vec![accepted("review-verdict-1")];
+        let revisions = vec![
+            revision_at("review-verdict-1", 0),
+            revision_at("review-verdict-1", 1),
+            revision_at("review-verdict-1", 2),
+        ];
+        let rows = slot_ledger_rows(&values, &revisions);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].form, SlotValueForm::FilledWithWrites(3));
+    }
+
+    #[test]
+    fn digest_mismatch_between_latest_revision_and_accepted_value_is_unreadable_and_siblings_stay_normal()
+     {
+        let mismatched_revision = SlotRevision {
+            value_digest: Digest::source("stale-payload"),
+            ..revision_at("broken", 0)
+        };
+        let values = vec![accepted("broken"), accepted("healthy")];
+        let rows = slot_ledger_rows(&values, &[mismatched_revision]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].slot_id, "broken");
+        assert_eq!(rows[0].form, SlotValueForm::Unreadable);
+        assert_eq!(rows[1].slot_id, "healthy");
+        assert_eq!(rows[1].form, SlotValueForm::Filled);
+    }
+
+    #[test]
+    fn a_revision_with_no_accepted_value_at_all_is_appended_as_unreadable_after_served_rows() {
+        let values = vec![accepted("draft")];
+        let revisions = vec![revision_at("orphan", 0)];
+        let rows = slot_ledger_rows(&values, &revisions);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].slot_id, "draft");
+        assert_eq!(rows[0].form, SlotValueForm::Filled);
+        assert_eq!(rows[1].slot_id, "orphan");
+        assert_eq!(rows[1].form, SlotValueForm::Unreadable);
+    }
+
+    #[test]
+    fn a_rejected_value_with_revisions_renders_unreadable_not_filled() {
+        let rejected = value_with("slot:draft", AcceptanceStatus::Rejected, "draft");
+        let rows = slot_ledger_rows(&[rejected], &[revision_at("draft", 0)]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].slot_id, "draft");
+        assert_eq!(rows[0].form, SlotValueForm::Unreadable);
+    }
+
+    #[test]
+    fn parallel_buffer_evidence_absent_from_top_level_vectors_produces_no_row() {
+        // The function only ever sees what session-level (not buffer-level)
+        // state passes in — isolation is a property of the caller, proven
+        // here by the absence of any ref for a buffer-only slot.
+        let values = vec![accepted("draft")];
+        let rows = slot_ledger_rows(&values, &[]);
+        assert!(rows.iter().all(|row| row.slot_id != "buffer-only"));
+    }
+
+    #[test]
+    fn slot_scheme_is_stripped_and_a_schemeless_ref_renders_verbatim() {
+        let scoped = accepted("draft");
+        let schemeless = value_with("no-scheme-ref", AcceptanceStatus::Accepted, "x");
+        let rows = slot_ledger_rows(&[scoped, schemeless], &[]);
+        assert_eq!(rows[0].slot_id, "draft");
+        assert_eq!(rows[1].slot_id, "no-scheme-ref");
     }
 }

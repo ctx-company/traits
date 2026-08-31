@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use ctx_traits_core::procedure::activity::compact_elapsed_text;
 use ctx_traits_core::procedure::runtime::{loop_rounds, loop_rounds_label};
-use ctx_traits_core::procedure::story::{VerdictTone, finding_count_segment, verdict_presentation};
+use ctx_traits_core::procedure::story::{
+    SlotValueForm, VerdictTone, finding_count_segment, verdict_presentation,
+};
 use ctx_traits_io::center::ClaimedTaskResult;
 use ctx_traits_io::run_summary::RunSummary;
 
@@ -437,6 +439,64 @@ pub fn sessions_verdict_block(state: Option<&PreviewState<'_>>) -> Option<Verdic
         heading,
         status_row,
         blocker_lines,
+    })
+}
+
+/// `None` unless the selection is `Accepted`, settled (not `stale`, not
+/// `refreshing`), readable, and the run's committed evidence carries at
+/// least one slot row (goal 2 — no evidence renders no block, not an empty
+/// heading). Reuses [`NamedBlock`]/`named_block_element` unchanged: this is
+/// the same heading-over-key/value-rows composition `0265.10` already
+/// paints, not a new form (goal 6).
+pub fn sessions_slots_block(state: Option<&PreviewState<'_>>) -> Option<NamedBlock> {
+    let Some(PreviewState::Accepted {
+        baseline,
+        stale,
+        refreshing,
+        ..
+    }) = state
+    else {
+        return None;
+    };
+    if stale.is_some() || *refreshing {
+        return None;
+    }
+    if baseline.row.state == RowState::Unreadable {
+        return None;
+    }
+
+    let ledger_rows = ctx_traits_core::procedure::story::slot_ledger_rows(
+        &baseline.session.accepted_slot_values,
+        &baseline.session.slot_revisions,
+    );
+    if ledger_rows.is_empty() {
+        return None;
+    }
+
+    let rows = ledger_rows
+        .into_iter()
+        .map(|row| {
+            let value = match row.form {
+                SlotValueForm::Filled => vec![ValueSegment::neutral("filled")],
+                SlotValueForm::FilledWithWrites(n) => vec![
+                    ValueSegment::neutral("filled"),
+                    ValueSegment::dot(),
+                    ValueSegment::neutral(format!("r{n}")),
+                ],
+                SlotValueForm::Unreadable => {
+                    vec![ValueSegment::toned("unreadable", StateRole::Danger)]
+                }
+            };
+            KeyValueRow {
+                key: row.slot_id,
+                value,
+            }
+        })
+        .collect();
+
+    Some(NamedBlock {
+        heading: "slots".to_string(),
+        rows,
     })
 }
 
@@ -1238,5 +1298,139 @@ mod now_and_verdict_tests {
         )];
         let state = accepted_state(&baseline_value);
         assert!(sessions_verdict_block(Some(&state)).is_none());
+    }
+
+    #[test]
+    fn slots_block_none_for_non_accepted_and_no_evidence_states() {
+        let baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let state = accepted_state(&baseline_value);
+        assert!(
+            sessions_slots_block(Some(&state)).is_none(),
+            "no slot evidence renders no block"
+        );
+
+        let mut not_live = baseline_value.clone();
+        not_live.row.live = false;
+        not_live.session.accepted_slot_values =
+            vec![accepted_value("draft", serde_json::json!({}))];
+        let state = accepted_state(&not_live);
+        assert!(sessions_slots_block(Some(&state)).is_some());
+
+        let mut unreadable = baseline_value.clone();
+        unreadable.row.state = RowState::Unreadable;
+        unreadable.session.accepted_slot_values =
+            vec![accepted_value("draft", serde_json::json!({}))];
+        let state = accepted_state(&unreadable);
+        assert!(sessions_slots_block(Some(&state)).is_none());
+
+        assert!(sessions_slots_block(Some(&PreviewState::Failed("bad"))).is_none());
+        assert!(sessions_slots_block(Some(&PreviewState::Loading)).is_none());
+        assert!(sessions_slots_block(None).is_none());
+    }
+
+    #[test]
+    fn stale_or_refreshing_accepted_preview_yields_no_slots_block() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.accepted_slot_values =
+            vec![accepted_value("draft", serde_json::json!({}))];
+
+        let stale = PreviewState::Accepted {
+            baseline: &baseline_value,
+            stale: Some("subscription closed"),
+            refreshing: false,
+            live: baseline_value.row.live,
+        };
+        assert!(sessions_slots_block(Some(&stale)).is_none());
+
+        let refreshing = PreviewState::Accepted {
+            baseline: &baseline_value,
+            stale: None,
+            refreshing: true,
+            live: baseline_value.row.live,
+        };
+        assert!(sessions_slots_block(Some(&refreshing)).is_none());
+    }
+
+    #[test]
+    fn slots_block_heading_is_exactly_slots() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.accepted_slot_values =
+            vec![accepted_value("draft", serde_json::json!({}))];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_slots_block(Some(&state)).expect("slots block");
+        assert_eq!(block.heading, "slots");
+    }
+
+    #[test]
+    fn slots_block_renders_filled_and_write_counted_rows_with_the_dot_separator() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.accepted_slot_values = vec![
+            accepted_value("draft", serde_json::json!({})),
+            accepted_value("review-verdict-1", serde_json::json!({})),
+        ];
+        let matching_revision = SlotRevision {
+            value_digest: canonical_digest(&serde_json::json!({})).expect("digest"),
+            ..slot_revision("review-verdict-1")
+        };
+        baseline_value.session.slot_revisions = vec![matching_revision.clone(), matching_revision];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_slots_block(Some(&state)).expect("slots block");
+
+        let draft_row = block
+            .rows
+            .iter()
+            .find(|row| row.key == "draft")
+            .expect("draft row");
+        let joined: String = draft_row.value.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(joined, "filled");
+        assert!(draft_row.value.iter().all(|segment| segment.role.is_none()));
+
+        let verdict_row = block
+            .rows
+            .iter()
+            .find(|row| row.key == "review-verdict-1")
+            .expect("verdict row");
+        let joined: String = verdict_row.value.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(joined, "filled \u{b7} r2");
+        assert_eq!(joined.matches('\u{b7}').count(), 1);
+        assert!(
+            verdict_row
+                .value
+                .iter()
+                .all(|segment| segment.role.is_none())
+        );
+    }
+
+    #[test]
+    fn slots_block_renders_unreadable_in_danger_tone() {
+        let broken = SlotRevision {
+            value_digest: ctx_traits_core::digest::Digest::source("stale"),
+            ..slot_revision("broken")
+        };
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.accepted_slot_values =
+            vec![accepted_value("broken", serde_json::json!({}))];
+        baseline_value.session.slot_revisions = vec![broken];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_slots_block(Some(&state)).expect("slots block");
+
+        assert_eq!(block.rows.len(), 1);
+        assert_eq!(block.rows[0].value.len(), 1);
+        assert_eq!(block.rows[0].value[0].text, "unreadable");
+        assert_eq!(block.rows[0].value[0].role, Some(StateRole::Danger));
+    }
+
+    #[test]
+    fn slots_block_row_order_matches_the_ledger_projection() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.accepted_slot_values = vec![
+            accepted_value("zulu", serde_json::json!({})),
+            accepted_value("alpha", serde_json::json!({})),
+            accepted_value("mike", serde_json::json!({})),
+        ];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_slots_block(Some(&state)).expect("slots block");
+        let keys: Vec<&str> = block.rows.iter().map(|row| row.key.as_str()).collect();
+        assert_eq!(keys, vec!["zulu", "alpha", "mike"]);
     }
 }

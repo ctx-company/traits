@@ -168,6 +168,67 @@ pub fn write_session_ledger_with_verdict(
     session
 }
 
+/// Write a session ledger carrying one accepted, arbitrary (non-verdict)
+/// slot value with a matching `slot-revisions` entry — `0265.12`'s scratch
+/// fixture for the preview `slots` fact block, deliberately distinct from
+/// [`write_session_ledger_with_verdict`]'s `review-verdict-1` scheme so no
+/// test depends on a verdict-shaped ref.
+pub fn write_session_ledger_with_slot(
+    path: &Utf8Path,
+    session_id: &str,
+    run_id: &str,
+    live: bool,
+    slot_id: &str,
+    value: serde_json::Value,
+) -> Session {
+    let ledger_status = if live {
+        "awaiting-agent-output"
+    } else {
+        "completed"
+    };
+    let session_json = serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": session_id,
+        "run-id": run_id,
+        "trait-id": "desktop-detail-fixture-trait",
+        "current-run-index": 0,
+        "status": ledger_status,
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "desktop-detail-fixture"},
+            "state-source": "test",
+        },
+        "ledger": {
+            "run-id": run_id,
+            "trait-id": "desktop-detail-fixture-trait",
+            "current-run-index": 0,
+            "final-state": if live { "running" } else { "completed" },
+        },
+        "slot-revisions": [
+            {
+                "slot-ref": format!("slot:{slot_id}"),
+                "value-digest": format!("sha256:desktop-detail-{slot_id}"),
+                "acceptance-order": 0,
+                "operation": "replace",
+                "source": "model-output",
+            },
+        ],
+        "accepted-slot-values": [
+            {
+                "ref-text": format!("slot:{slot_id}"),
+                "value": value,
+                "value-digest": format!("sha256:desktop-detail-{slot_id}"),
+                "source": "model-output",
+                "acceptance": "accepted",
+            },
+        ],
+        "state-digest": format!("sha256:desktop-detail-{run_id}"),
+    });
+    let session: Session =
+        serde_json::from_value(session_json).expect("fixture session with slot evidence");
+    ctx_traits_io::run_session::write_run_session(path, &session).expect("write ledger");
+    session
+}
+
 /// Write a session ledger with a nested loop-body sequence status (one
 /// top-level loop container plus two body items in one iteration), using
 /// the same production writer `write_session_ledger` uses. The loop's

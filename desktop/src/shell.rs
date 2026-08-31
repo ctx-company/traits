@@ -879,6 +879,9 @@ impl Render for Shell {
             if let Some(verdict) = crate::preview::sessions_verdict_block(Some(&state)) {
                 body.push(preview_view::verdict_block_element(&verdict));
             }
+            if let Some(slots) = crate::preview::sessions_slots_block(Some(&state)) {
+                body.push(preview_view::named_block_element("slots", &slots));
+            }
             let footer = preview_view::preview_footer_element(&crate::preview::sessions_footer(
                 Some(&state),
             ));

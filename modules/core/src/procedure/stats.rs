@@ -124,18 +124,26 @@ pub fn is_verdict_slot_ref(slot_ref: &str) -> bool {
     }
 }
 
+/// Per-slot committed-revision counts, keyed by slot ref. The number counts
+/// *writes*: a revision may be `replace`, `append`, `merge`, `set-field` or
+/// `increment` (`trait/procedure/model.rs`), so this is neither a review
+/// round, a semantic version, nor a retry count.
+pub fn slot_revision_counts(slot_revisions: &[SlotRevision]) -> BTreeMap<&str, u64> {
+    let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
+    for revision in slot_revisions {
+        *counts.entry(revision.slot_ref.as_str()).or_insert(0) += 1;
+    }
+    counts
+}
+
 /// Per-slot recognised-verdict-revision counts, keyed by slot ref.
 /// [`verdict_slot_rounds`] is this map's maximum; the multi-slot verdict
 /// presentation needs the whole map to decide round membership.
 pub fn verdict_slot_revision_counts(slot_revisions: &[SlotRevision]) -> BTreeMap<&str, u64> {
-    let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
-    for revision in slot_revisions {
-        let slot_text = revision.slot_ref.as_str();
-        if is_verdict_slot_ref(slot_text) {
-            *counts.entry(slot_text).or_insert(0) += 1;
-        }
-    }
-    counts
+    slot_revision_counts(slot_revisions)
+        .into_iter()
+        .filter(|(slot_ref, _)| is_verdict_slot_ref(slot_ref))
+        .collect()
 }
 
 /// Highest per-slot revision count among `slot_revisions` whose slot
@@ -733,6 +741,58 @@ mod tests {
         for malformed in ["review-verdict-", "review-verdict-abc"] {
             assert!(!is_verdict_slot_ref(malformed), "{malformed}");
         }
+    }
+
+    #[test]
+    fn slot_revision_counts_over_empty_single_and_repeated_refs() {
+        assert!(slot_revision_counts(&[]).is_empty());
+
+        let one = vec![verdict_revision("draft")];
+        assert_eq!(
+            slot_revision_counts(&one).into_iter().collect::<Vec<_>>(),
+            vec![("slot:draft", 1)]
+        );
+
+        let repeated = vec![
+            verdict_revision("draft"),
+            verdict_revision("draft"),
+            verdict_revision("draft"),
+        ];
+        assert_eq!(
+            slot_revision_counts(&repeated)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![("slot:draft", 3)]
+        );
+
+        let interleaved = vec![
+            verdict_revision("alpha"),
+            verdict_revision("beta"),
+            verdict_revision("alpha"),
+            verdict_revision("gamma"),
+            verdict_revision("beta"),
+            verdict_revision("alpha"),
+        ];
+        let counts: BTreeMap<&str, u64> = slot_revision_counts(&interleaved);
+        assert_eq!(counts.get("slot:alpha"), Some(&3));
+        assert_eq!(counts.get("slot:beta"), Some(&2));
+        assert_eq!(counts.get("slot:gamma"), Some(&1));
+    }
+
+    #[test]
+    fn verdict_slot_revision_counts_filters_the_unfiltered_extraction() {
+        let revisions = vec![
+            verdict_revision("review-verdict-1"),
+            verdict_revision("review-verdict-1"),
+            verdict_revision("review-verdict-2"),
+            verdict_revision("draft"),
+            verdict_revision("verdict-notes"),
+        ];
+        let counts = verdict_slot_revision_counts(&revisions);
+        assert_eq!(counts.get("slot:review-verdict-1"), Some(&2));
+        assert_eq!(counts.get("slot:review-verdict-2"), Some(&1));
+        assert_eq!(counts.get("slot:draft"), None);
+        assert_eq!(counts.get("slot:verdict-notes"), None);
     }
 
     #[test]
