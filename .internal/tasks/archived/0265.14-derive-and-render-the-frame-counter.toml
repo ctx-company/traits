@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0265.14"
 title = "Derive and render the frame counter"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-08-31"
+origin = "run run-c7e53a618b503cb25cc0ee6906373cd1894ae682e168341f7269cf4c4c535729 merged as 340f68e76976b0d258b8e0a45a16f1ea209481ec"
 content = """
 `frame 5 of 9` appears twice on the Sessions screen — inside the bottom bar's
 detail (`running · frame 5 of 9 · review round 2`, rule 8,
@@ -610,3 +612,25 @@ expect = 'test result: ok\. [1-9]'
 name = "root Cargo resolution and lockfile remain gpui-free"
 command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
 timeout-ms = 600000
+
+[closure]
+mode = "merge"
+commit = "340f68e76976b0d258b8e0a45a16f1ea209481ec"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "the run-view projection survives the extraction"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"

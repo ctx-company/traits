@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0265.12"
 title = "Render the preview slots block"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-08-31"
+origin = "run run-34579f0eee267dc31d4dbb4cd287f8928354d5af440ffd8ac83661902779f741 merged as e45c317a16191f07dc512075a22559e78588a49e"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
@@ -738,3 +740,31 @@ timeout-ms = 1800000
 name = "center wire and selected-detail contract stay green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "e45c317a16191f07dc512075a22559e78588a49e"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "per-slot revision counting and the verdict round helper stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core --lib procedure::stats"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "shared projection and its retained consumers keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "center wire and selected-detail contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0"

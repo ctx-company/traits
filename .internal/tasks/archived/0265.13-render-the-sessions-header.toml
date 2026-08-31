@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0265.13"
 title = "Render the Sessions header"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-08-31"
+origin = "run run-3acdd71b5503f0fef6d642e2eec1060f846771de2f4c3fbb9d56139f603d150d merged as 100e0c60b91255c503d0218ee9da866c17d48b86"
 content = """
 Grammar rule 6 opens every v1 screen with a title block: a title in sans 13
 `text-heading` over exactly one italic narrated summary in sans 12
@@ -582,3 +584,25 @@ timeout-ms = 1800000
 name = "center wire and claimed-task contract stay green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
 timeout-ms = 1200000
+
+[closure]
+mode = "merge"
+commit = "100e0c60b91255c503d0218ee9da866c17d48b86"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "center wire and claimed-task contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0"

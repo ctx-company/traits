@@ -1,9 +1,11 @@
 schema-version = "0.2"
 key = "0265.10"
 title = "Render the preview run block and footer"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
-content = '''
+closed = "2026-08-31"
+origin = "run run-d8e208d05212910128f3c6b2bf0465d22f855256d1645a6eb2123033958e3213 merged as adb67be6f730e7de6209f03f3f44885ccf3b49e8"
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — discovery order, file and symbol
@@ -188,8 +190,8 @@ connection worker (`center.rs:3278-3333,3380-3429`). The second is the
 precedent. Bind to the one selected-detail contract `0257` actually lands; do
 not add a second detail protocol, and do not inherit the model-owner blocking
 shape merely because it exists now.
-'''
-scope = '''
+"""
+scope = """
 ## GOALS — binding
 
 1. **One reusable preview column, ordered, with slots the siblings fill.** The
@@ -556,8 +558,8 @@ command and preserve every invariant named under Excluded.
   executes the discovered command and reports its output in the work summary.
 - Anything discovered beyond these goals: that is board material, not a cell
   here.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **`grammar.md` and `screens/sessions.md` are the specification; the export is
@@ -686,10 +688,15 @@ repair one named defect, then rerun the failed command and every command after
 it in that order. If a second round would be needed, stop and report the exact
 failing command with its evidence, or the unresolved data or render contract,
 rather than iterating. That is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0265.2",
+    "0265.3",
+    "0257",
+]
 parent = "0265"
-depends-on = ["0265.2", "0265.3", "0257"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
@@ -710,3 +717,31 @@ timeout-ms = 900000
 name = "center wire and claimed-task contract stay green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "adb67be6f730e7de6209f03f3f44885ccf3b49e8"
+
+[[closure.checks]]
+name = "root Cargo resolution and lockfile remain gpui-free"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "shared formatting extractions and their retained consumers keep the per-round gate green"
+command = "CARGO_TARGET_DIR=target just test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "authoritative selected-run reconstruction semantics stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "center wire and claimed-task contract stay green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+outcome = "passed"
+detail = "exit 0"
