@@ -103,9 +103,44 @@ fn run_row_row(row: &RunRow) -> KeyValueRow {
     }
 }
 
+/// The one claimed-task-outcome mapping, shared by [`task_row`] and
+/// `screen_header::sessions_header` so the preview and the header can never
+/// disagree about the same run's same claimed-task answer on the same
+/// screen. `Task` carries the served value itself (the caller composes its
+/// own presentation from it); the other four outcomes carry the one
+/// non-success wording each renders, everywhere.
+pub(crate) enum ClaimedTaskWording<'a> {
+    Task(&'a ctx_traits_core::task::provider::ClaimedTask),
+    Wording { text: &'static str, danger: bool },
+}
+
+pub(crate) fn claimed_task_wording(
+    claimed_task: &Result<ClaimedTaskResult, String>,
+) -> ClaimedTaskWording<'_> {
+    match claimed_task {
+        Ok(ClaimedTaskResult::Task(task)) => ClaimedTaskWording::Task(task),
+        Ok(ClaimedTaskResult::Unclaimed) => ClaimedTaskWording::Wording {
+            text: "no task claimed",
+            danger: false,
+        },
+        Ok(ClaimedTaskResult::Missing) => ClaimedTaskWording::Wording {
+            text: "task unavailable: missing",
+            danger: true,
+        },
+        Ok(ClaimedTaskResult::Ambiguous(_)) => ClaimedTaskWording::Wording {
+            text: "task unavailable: ambiguous session",
+            danger: true,
+        },
+        Err(_reason) => ClaimedTaskWording::Wording {
+            text: "task unavailable: center error",
+            danger: true,
+        },
+    }
+}
+
 fn task_row(baseline: &DetailBaseline) -> KeyValueRow {
-    let value = match &baseline.claimed_task {
-        Ok(ClaimedTaskResult::Task(task)) => {
+    let value = match claimed_task_wording(&baseline.claimed_task) {
+        ClaimedTaskWording::Task(task) => {
             let mut value = vec![ValueSegment::neutral(task.key.clone())];
             if let Some(status) = task.stored_status {
                 let presented = task_status_presentation(status);
@@ -114,21 +149,13 @@ fn task_row(baseline: &DetailBaseline) -> KeyValueRow {
             }
             value
         }
-        Ok(ClaimedTaskResult::Unclaimed) => vec![ValueSegment::neutral("no task claimed")],
-        Ok(ClaimedTaskResult::Missing) => {
-            vec![ValueSegment::toned(
-                "task unavailable: missing",
-                StateRole::Danger,
-            )]
+        ClaimedTaskWording::Wording {
+            text,
+            danger: false,
+        } => vec![ValueSegment::neutral(text)],
+        ClaimedTaskWording::Wording { text, danger: true } => {
+            vec![ValueSegment::toned(text, StateRole::Danger)]
         }
-        Ok(ClaimedTaskResult::Ambiguous(_)) => vec![ValueSegment::toned(
-            "task unavailable: ambiguous session",
-            StateRole::Danger,
-        )],
-        Err(_reason) => vec![ValueSegment::toned(
-            "task unavailable: center error",
-            StateRole::Danger,
-        )],
     };
     KeyValueRow {
         key: "task".to_string(),
@@ -214,13 +241,25 @@ fn unreadable_row_block(row: &RunRow) -> NamedBlock {
 /// the last-accepted facts; a retained baseline behind a lost connection
 /// reads `run · stale` — never silently identical to current (review-
 /// verdict-1 blocker `selected-preview-not-atomic`).
-fn accepted_heading(stale: Option<&str>, refreshing: bool) -> String {
+/// The one stale/refreshing marker word, shared by every block that must
+/// not paint a resync-in-flight or connection-lost baseline as if it were
+/// current — `sessions_run_block`'s heading, `sessions_footer`, and
+/// `screen_header::sessions_header` all resolve through this rather than
+/// inventing their own wording for the same two postures.
+pub(crate) fn staleness_word(stale: Option<&str>, refreshing: bool) -> Option<&'static str> {
     if stale.is_some() {
-        "run \u{b7} stale".to_string()
+        Some("stale")
     } else if refreshing {
-        "run \u{b7} refreshing".to_string()
+        Some("refreshing")
     } else {
-        "run".to_string()
+        None
+    }
+}
+
+fn accepted_heading(stale: Option<&str>, refreshing: bool) -> String {
+    match staleness_word(stale, refreshing) {
+        Some(word) => format!("run \u{b7} {word}"),
+        None => "run".to_string(),
     }
 }
 
@@ -342,6 +381,7 @@ pub fn sessions_now_item(state: Option<&PreviewState<'_>>) -> Option<NowItem> {
         stale,
         refreshing,
         live,
+        ..
     }) = state
     else {
         return None;
@@ -545,6 +585,7 @@ mod tests {
             repo_path: "/repo".to_string(),
             repo_label: "repo".to_string(),
             title: run_id.to_string(),
+            session_title: None,
             trait_id: trait_id.to_string(),
             state: RowState::Live,
             state_text: "live".to_string(),
@@ -583,6 +624,7 @@ mod tests {
             stale: None,
             refreshing: false,
             live: baseline.row.live,
+            session_title: None,
         }
     }
 
@@ -775,18 +817,21 @@ mod tests {
             stale: None,
             refreshing: false,
             live: baseline.row.live,
+            session_title: None,
         };
         let refreshing = PreviewState::Accepted {
             baseline: &baseline,
             stale: None,
             refreshing: true,
             live: baseline.row.live,
+            session_title: None,
         };
         let stale = PreviewState::Accepted {
             baseline: &baseline,
             stale: Some("subscription closed"),
             refreshing: true,
             live: baseline.row.live,
+            session_title: None,
         };
 
         let current_block = sessions_run_block(Some(&current));
@@ -940,6 +985,7 @@ mod now_and_verdict_tests {
             repo_path: "/repo".to_string(),
             repo_label: "repo".to_string(),
             title: "run-1".to_string(),
+            session_title: None,
             trait_id: "implement-phase".to_string(),
             state: RowState::Live,
             state_text: "live".to_string(),
@@ -960,6 +1006,7 @@ mod now_and_verdict_tests {
             stale: None,
             refreshing: false,
             live: baseline.row.live,
+            session_title: None,
         }
     }
 
@@ -993,6 +1040,7 @@ mod now_and_verdict_tests {
             stale: Some("subscription closed"),
             refreshing: false,
             live: baseline.row.live,
+            session_title: None,
         };
         assert!(sessions_now_item(Some(&stale)).is_none());
         assert!(sessions_verdict_block(Some(&stale)).is_none());
@@ -1002,6 +1050,7 @@ mod now_and_verdict_tests {
             stale: None,
             refreshing: true,
             live: baseline.row.live,
+            session_title: None,
         };
         assert!(sessions_now_item(Some(&refreshing)).is_none());
         assert!(sessions_verdict_block(Some(&refreshing)).is_none());
@@ -1020,6 +1069,7 @@ mod now_and_verdict_tests {
             stale: None,
             refreshing: false,
             live: false,
+            session_title: None,
         };
         assert!(sessions_now_item(Some(&live_now_finished)).is_none());
     }
@@ -1070,6 +1120,7 @@ mod now_and_verdict_tests {
             stale: None,
             refreshing: false,
             live: true,
+            session_title: None,
         };
         let item = sessions_now_item(Some(&state)).expect("now item");
         assert_eq!(item.state_role, StateRole::Accent);
@@ -1339,6 +1390,7 @@ mod now_and_verdict_tests {
             stale: Some("subscription closed"),
             refreshing: false,
             live: baseline_value.row.live,
+            session_title: None,
         };
         assert!(sessions_slots_block(Some(&stale)).is_none());
 
@@ -1347,6 +1399,7 @@ mod now_and_verdict_tests {
             stale: None,
             refreshing: true,
             live: baseline_value.row.live,
+            session_title: None,
         };
         assert!(sessions_slots_block(Some(&refreshing)).is_none());
     }

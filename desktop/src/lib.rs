@@ -16,6 +16,8 @@ pub mod rail;
 pub mod rail_view;
 pub mod row_control;
 pub mod run_row;
+pub mod screen_header;
+pub mod screen_header_view;
 pub mod shell;
 pub mod spawn_form;
 pub mod spawn_view;

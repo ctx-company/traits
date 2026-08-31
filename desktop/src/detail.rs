@@ -164,6 +164,15 @@ pub enum PreviewState<'a> {
         /// without a resync, so the `in progress` block's presence follows
         /// the current center posture rather than the last-loaded snapshot.
         live: bool,
+        /// The selection's current raw session title, refreshed from every
+        /// `RowChanged`/`Appeared`/recovery `Snapshot` delta — distinct from
+        /// `baseline.row.session_title`, which is frozen at the load this
+        /// baseline was accepted from. `Fingerprint` deliberately clears
+        /// `summary.title` before comparing (see [`Fingerprint::from_row`]),
+        /// so a `RowChanged` right after a live `SessionTitle` sidecar line
+        /// never triggers a resync; this field is what lets that rewritten
+        /// title still reach the header without one.
+        session_title: Option<&'a str>,
     },
 }
 
@@ -244,6 +253,12 @@ struct Selection {
     /// by every `RowChanged`/`Appeared`/recovery `Snapshot` that reprojects
     /// this selection's row, never by the read outcome itself.
     row: RunRow,
+    /// The selection's current raw session title — a delta-refreshed,
+    /// fingerprint-exempt fact, mirroring `live`'s threading exactly.
+    /// Refreshed from `row.summary.title` by `follow_delta`'s
+    /// `RowChanged`/`Appeared` arm (before the fingerprint comparison) and
+    /// by `follow_snapshot`'s recovery, never by the read outcome itself.
+    session_title: Option<String>,
 }
 
 impl Selection {
@@ -316,6 +331,7 @@ impl RunDetail {
                 in_flight: None,
                 pending: VecDeque::new(),
                 row: row.clone(),
+                session_title: row.session_title.clone(),
             });
             return None;
         }
@@ -346,6 +362,7 @@ impl RunDetail {
             in_flight: Some(generation),
             pending: VecDeque::new(),
             row: row.clone(),
+            session_title: row.session_title.clone(),
         });
         Some(LoadRequest {
             generation,
@@ -503,6 +520,15 @@ impl RunDetail {
                     selection.live = row.live;
                     changed = true;
                 }
+                // Refreshed before the fingerprint comparison: the
+                // fingerprint deliberately clears `summary.title` (see
+                // `Fingerprint::from_row`), so a title-only rewrite must
+                // still move this field even on the no-resync branch below.
+                let fresh_title = row.summary.title.clone().filter(|title| !title.is_empty());
+                if selection.session_title != fresh_title {
+                    selection.session_title = fresh_title;
+                    changed = true;
+                }
                 let fingerprint = Fingerprint::from_row(row);
                 if selection.fingerprint.as_ref() != Some(&fingerprint) {
                     selection.fingerprint = Some(fingerprint);
@@ -557,6 +583,7 @@ impl RunDetail {
             selection.live = row.live;
             selection.fingerprint = Some(Fingerprint::from_row(row));
             selection.row = crate::run_row::project_one(row);
+            selection.session_title = row.summary.title.clone().filter(|title| !title.is_empty());
         }
         selection.follow = FollowState::Following;
         self.generation += 1;
@@ -618,6 +645,7 @@ impl RunDetail {
                     stale,
                     refreshing,
                     live: selection.live,
+                    session_title: selection.session_title.as_deref(),
                 })
             }
         }
@@ -656,6 +684,7 @@ mod tests {
             repo_path: format!("/{repo_key}"),
             repo_label: repo_key.to_string(),
             title: run_id.to_string(),
+            session_title: None,
             trait_id: "fixture-trait".to_string(),
             state: crate::run_row::RowState::Live,
             state_text: "live".to_string(),

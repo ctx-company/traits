@@ -17,6 +17,7 @@ use std::borrow::Cow;
 use crate::tokens::{FONT_MONO, FONT_SANS};
 
 const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf");
+const SANS_ITALIC: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Italic.ttf");
 const MONO_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
 const MONO_ITALIC: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Italic.ttf");
 
@@ -44,6 +45,7 @@ pub fn register(cx: &App) -> Result<(), String> {
     cx.text_system()
         .add_fonts(vec![
             Cow::Borrowed(SANS_REGULAR),
+            Cow::Borrowed(SANS_ITALIC),
             Cow::Borrowed(MONO_REGULAR),
             Cow::Borrowed(MONO_ITALIC),
         ])
@@ -100,7 +102,8 @@ pub fn verify_family_resolves(
 pub fn verify_bundled(cx: &App) -> Result<(), String> {
     verify_family_resolves(cx, FONT_SANS, FONT_MONO)?;
     verify_family_resolves(cx, FONT_MONO, FONT_SANS)?;
-    verify_italic_bundled(cx)?;
+    verify_italic_bundled(cx, FONT_SANS)?;
+    verify_italic_bundled(cx, FONT_MONO)?;
     Ok(())
 }
 
@@ -108,16 +111,18 @@ pub fn verify_bundled(cx: &App) -> Result<(), String> {
 /// bundled, but family membership cannot see a style — CoreText will
 /// silently synthesize an oblique for a missing italic weight, which this
 /// task treats as a failure, not a fallback. The discriminator: an italic
-/// query for the bundled mono family must resolve to a different `FontId`
-/// than the upright query for that same family, proving a real italic face
-/// (not a synthesized slant of the regular face) was registered.
-pub fn verify_italic_bundled(cx: &App) -> Result<(), String> {
+/// query for `family` must resolve to a different `FontId` than the upright
+/// query for that same family, proving a real italic face (not a
+/// synthesized slant of the regular face) was registered. Generalised over
+/// `family` in `0265.13` so both the mono (`0265.6`) and sans (rule 6's
+/// header summary) italic faces share one proof.
+pub fn verify_italic_bundled(cx: &App, family: &'static str) -> Result<(), String> {
     let text_system = cx.text_system();
-    let upright_id = text_system.resolve_font(&font(FONT_MONO));
-    let italic_id = text_system.resolve_font(&font(FONT_MONO).italic());
+    let upright_id = text_system.resolve_font(&font(family));
+    let italic_id = text_system.resolve_font(&font(family).italic());
     if upright_id == italic_id {
         return Err(format!(
-            "{FONT_MONO} italic resolved to the same FontId as upright — the italic face did not register and CoreText is synthesizing an oblique instead"
+            "{family} italic resolved to the same FontId as upright — the italic face did not register and CoreText is synthesizing an oblique instead"
         ));
     }
     Ok(())

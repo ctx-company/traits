@@ -169,6 +169,13 @@ pub struct RunRow {
     // presentation
     pub repo_label: String,
     pub title: String,
+    /// The raw `RunSummary.title`, non-empty-filtered — a sibling of
+    /// `title`, not a replacement for its fallback chain. `title` may fall
+    /// back to a task key/trait id/run id/session id for the row's own
+    /// presentation; this field must not, so a screen-header description
+    /// leaf built from it never renders an identity value as if it were a
+    /// narrated description.
+    pub session_title: Option<String>,
     pub trait_id: String,
     pub state: RowState,
     pub state_text: String,
@@ -314,6 +321,7 @@ pub(crate) fn project_one(row: &CenterPublicRow) -> RunRow {
         repo_path: row.repo_path.clone(),
         repo_label: repo_label_for(&row.repo_key, &row.repo_path),
         title: title_for(row),
+        session_title: summary.title.clone().filter(|title| !title.is_empty()),
         trait_id: summary.trait_id.clone(),
         state,
         state_text,

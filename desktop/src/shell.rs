@@ -785,6 +785,14 @@ impl Render for Shell {
             .text_color(rgb(tokens::TEXT))
             .font_weight(tokens::WEIGHT_NORMAL)
             .child(header)
+            .child({
+                let screen_header =
+                    crate::screen_header::sessions_header(self.detail.preview_state().as_ref());
+                crate::screen_header_view::screen_header_element(
+                    &screen_header.title,
+                    &screen_header.summary,
+                )
+            })
             .child(spawn_toggle);
         if self.spawn_form.is_open() {
             let mut repositories = div().id("spawn-repositories").flex().flex_row().gap_2();
@@ -1095,6 +1103,7 @@ mod tests {
             repo_path: format!("/{repo_key}"),
             repo_label: repo_key.to_string(),
             title: "title".to_string(),
+            session_title: None,
             trait_id: "fixture-trait".to_string(),
             state: crate::run_row::RowState::Live,
             state_text: "live".to_string(),

@@ -312,6 +312,7 @@ mod tests {
             repo_path: "/repo-a".to_string(),
             repo_label: "repo-a".to_string(),
             title: "title".to_string(),
+            session_title: None,
             trait_id: "fixture-trait".to_string(),
             state: RowState::Live,
             state_text: "live".to_string(),

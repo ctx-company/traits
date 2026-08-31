@@ -238,6 +238,14 @@ pub const ACTIVITY_BLOCK_PAD_BOTTOM: Pixels = px(6.);
 /// equal to that sum in a unit test below (`Pixels` addition is not `const`).
 pub const ACTIVITY_BLOCK_PAD_LEFT: Pixels = px(27.);
 
+// screen header (rule 6) — grammar.md:58-66 fixes width 560 and pad [2,8];
+// the 5px stack gap is export-only (reference/sessions.html:259), the same
+// owner-correction class BOTTOM_BAR_GAP / FRAME_ROW_* already carry.
+pub const SCREEN_HEADER_STACK_GAP: Pixels = px(5.);
+pub const SCREEN_HEADER_SUMMARY_WIDTH: Pixels = px(560.);
+pub const SCREEN_HEADER_ACTION_PAD_Y: Pixels = px(2.);
+pub const SCREEN_HEADER_ACTION_PAD_X: Pixels = px(8.);
+
 // rail divider
 pub const RAIL_DIVIDER_WIDTH: Pixels = px(32.);
 pub const RAIL_DIVIDER_HEIGHT: Pixels = px(1.);
