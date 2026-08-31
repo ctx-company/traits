@@ -1,24 +1,24 @@
-// 0253.7, implemented directly by owner delegation (2026-08-28): the
-// plan-approval gate, served by the owner's own plannotator UI. After
-// the critic approves an iteration, the run opens the plan in
-// plannotator's annotation view (`--gate --json --require-approval`) and
-// blocks until the owner decides there:
-//   approve  -> exit 0 -> this step emits the literal "approved" and the
-//               refinement loop exits; the run commits/merges as usual.
-//   annotate -> exit 1 with the decision JSON (annotations included) on
-//               stdout -> emitted verbatim as the owner's binding
-//               corrections for the next rewrite iteration.
-// The plan file is copied to a .md sibling for the annotation view
-// (plannotator opens md/txt/html); the copy is removed after the
-// decision. The frame budget is the outer bound on how long the owner
-// has per iteration. 0253.4's ask machinery may later replace the
-// transport; the loop semantics stay.
+// Owner plan-approval gate, served by the owner's ctx-annotate tool
+// (owner delegation 2026-08-31; supersedes the plannotator transport of
+// 2026-08-28). After the critic approves an iteration, the plan file is
+// piped to `ctx-annotate --stdin`, which returns a JSON decision:
+//   {"source":{"kind":"stdin"},"annotations":[]}      -> accepted: this
+//     step emits the literal "approved" and the refinement loop exits;
+//     the run commits/merges as usual.
+//   {"source":...,"annotations":[{"lines":[a,b],"text":...},...]} ->
+//     emitted verbatim as the owner's binding corrections for the next
+//     rewrite iteration; line ranges refer to the plan file as piped.
+// A gate-tool failure is surfaced as a non-approval with the captured
+// output so the loop continues visibly rather than dying silently.
+// The frame budget is the outer bound on how long the owner has per
+// iteration. 0253.4's ask machinery may later replace the transport;
+// the loop semantics stay.
 //
 // The `owner-gate` port selects the transport per dispatch: the default
-// 'plannotator' parks on the owner's UI; 'off' emits the approval
-// immediately so an unattended batch exits the loop on the critic's
-// verdict alone. The loop shape is identical either way — only who
-// answers changes.
+// 'annotate' pipes to the owner's ctx-annotate; 'off' emits the
+// approval immediately so an unattended batch exits the loop on the
+// critic's verdict alone. The loop shape is identical either way —
+// only who answers changes.
 import * as cdk from "@ctx-traits/cdk";
 
 import { ownerAnswer, ownerGate, targetFile } from "../data.ts";
@@ -28,14 +28,12 @@ const GATE_SCRIPT = [
   "  printf approved",
   "  exit 0",
   "fi",
-  'd=$(pwd); c="$d/.plan-review.md"',
-  'cp "$1" "$c"',
-  'if out=$(plannotator annotate "$c" --gate --json --require-approval); then',
+  'out=$(ctx-annotate --stdin < "$1")',
+  'if printf \'%s\' "$out" | python3 -c \'import json,sys; sys.exit(0 if json.load(sys.stdin).get("annotations")==[] else 1)\' 2>/dev/null; then',
   "  printf approved",
   "else",
-  '  printf "%s" "$out"',
+  '  if [ -n "$out" ]; then printf \'%s\' "$out"; else printf \'annotation gate returned no decision; retrying next iteration\'; fi',
   "fi",
-  'rm -f "$c"',
 ].join("\n");
 
 export function approvalGate(title: string): void {

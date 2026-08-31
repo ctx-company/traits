@@ -59,9 +59,9 @@ export const task = cdkPort.input.text({
 export const ownerGate = cdkPort.input.text({
   id: "owner-gate",
   description:
-    "Owner plan-approval transport: 'plannotator' (default) parks each critic-approved iteration in the owner's plannotator UI; 'off' auto-approves so unattended batches exit the loop on the critic's verdict alone.",
+    "Owner plan-approval transport: 'annotate' (default) pipes each critic-approved plan to the owner's ctx-annotate; 'off' auto-approves so unattended batches exit the loop on the critic's verdict alone.",
   optional: true,
-  default: { value: "plannotator" },
+  default: { value: "annotate" },
 });
 export const receipts = cdkPort.output.of("receipts", receiptSchema, {
   description: "The resolved task's in-place rewrite receipt.",

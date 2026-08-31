@@ -1,0 +1,102 @@
+{
+  "agent:smart": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/agent.ts",
+    "start": 3,
+    "end": 3
+  },
+  "port:owner-gate": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 8,
+    "end": 8
+  },
+  "port:receipts": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 39,
+    "end": 39
+  },
+  "port:topic": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 3,
+    "end": 3
+  },
+  "prompt:apply-owner-annotations": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/compose.ts",
+    "start": 37,
+    "end": 37
+  },
+  "prompt:research-and-compose": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/compose.ts",
+    "start": 19,
+    "end": 19
+  },
+  "resource:brainstorms": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/resource.ts",
+    "start": 3,
+    "end": 3
+  },
+  "sequence:ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-annotations-then/apply-owner-annotations": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/compose.ts",
+    "start": 35,
+    "end": 35
+  },
+  "sequence:owner-acceptance-body/apply-owner-annotations": {
+    "file": ".ctx/traits/authored/brainstorm/source/variant/default/index.ts",
+    "start": 27,
+    "end": 27
+  },
+  "sequence:owner-acceptance-body/owner-acceptance-gate": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/gate.ts",
+    "start": 30,
+    "end": 30
+  },
+  "sequence:procedure/commit-brainstorm": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/commit.ts",
+    "start": 6,
+    "end": 6
+  },
+  "sequence:procedure/derive-slug": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/slugify.ts",
+    "start": 13,
+    "end": 13
+  },
+  "sequence:procedure/owner-acceptance": {
+    "file": ".ctx/traits/authored/brainstorm/source/variant/default/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "sequence:procedure/research-and-compose": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/step/compose.ts",
+    "start": 17,
+    "end": 17
+  },
+  "slot:commit-log": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 34,
+    "end": 34
+  },
+  "slot:owner-answer": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 25,
+    "end": 25
+  },
+  "slot:proposal": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 20,
+    "end": 20
+  },
+  "slot:revision-note": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 30,
+    "end": 30
+  },
+  "slot:slug": {
+    "file": ".ctx/traits/authored/brainstorm/source/shared/data.ts",
+    "start": 16,
+    "end": 16
+  },
+  "trait:brainstorm": {
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
+  }
+}

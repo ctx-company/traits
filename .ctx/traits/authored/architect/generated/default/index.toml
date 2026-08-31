@@ -62,10 +62,10 @@ id = "owner-gate"
 direction = "input"
 schema = "schema:text"
 optional = true
-description = "Owner plan-approval transport: 'plannotator' (default) parks each critic-approved iteration in the owner's plannotator UI; 'off' auto-approves so unattended batches exit the loop on the critic's verdict alone."
+description = "Owner plan-approval transport: 'annotate' (default) pipes each critic-approved plan to the owner's ctx-annotate; 'off' auto-approves so unattended batches exit the loop on the critic's verdict alone."
 
 [port.default]
-value = "plannotator"
+value = "annotate"
 
 [[port]]
 id = "receipts"
@@ -522,14 +522,12 @@ if [ "$2" = "off" ]; then
   printf approved
   exit 0
 fi
-d=$(pwd); c="$d/.plan-review.md"
-cp "$1" "$c"
-if out=$(plannotator annotate "$c" --gate --json --require-approval); then
+out=$(ctx-annotate --stdin < "$1")
+if printf '%s' "$out" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("annotations")==[] else 1)' 2>/dev/null; then
   printf approved
 else
-  printf "%s" "$out"
-fi
-rm -f "$c"""",
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf 'annotation gate returned no decision; retrying next iteration'; fi
+fi""",
     "_",
     "{slot:target-file}",
     "{port:owner-gate}",
@@ -620,7 +618,7 @@ id = "architect-refinement"
 title = "Architect refinement"
 kind = "loop"
 sequence = "sequence:architect-refinement-body"
-max-iterations = 24
+max-iterations = 500
 on-exhausted = "abort"
 
 [[procedure.sequence.until.all]]

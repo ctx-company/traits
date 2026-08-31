@@ -2,6 +2,7 @@ export * as commit from "./commit.ts";
 export * as derive from "./derive.ts";
 export * as distill from "./distill.ts";
 export * as ingest from "./ingest.ts";
+export * as owner from "./owner.ts";
 export * as refine from "./refine.ts";
 export * as renumber from "./renumber.ts";
 export * as review from "./review.ts";

@@ -1,0 +1,16 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "brainstorm"
+variant = "default"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:1e73cd18b98adc829b0507c2e807d6270cff6d7c5b08d04fd2738e8d0248bdc5"
+canonical = "sha256:3ae6c978773679332f413dcbde6a204206b96fea5c2fcc19634454e817596a83"
+model-visible = "sha256:39bf4fb43c065f78264f3ab2a271b4efd4e02a0ef19a825c8e1af567a4d684d3"
+resource-manifest = "sha256:7ac6351509fb946a3484754a4eb608ce7722230741a4e7206192bc014a663c18"

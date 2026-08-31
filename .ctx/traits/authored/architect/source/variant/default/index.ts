@@ -23,7 +23,10 @@ export default function () {
     // ("approved") or becomes binding corrections for the next rewrite.
     // The snapshot refresh after the gate legalizes plan edits the owner
     // made by hand while the run waited.
-    loop.maxIterations(24, { onExhausted: cdk.signal.Abort });
+    // Effectively endless per the owner's ruling: the ceiling is the
+    // owner's empty-annotations acceptance, never a count. 500 is a
+    // runaway backstop only.
+    loop.maxIterations(500, { onExhausted: cdk.signal.Abort });
     shared.step.snapshot.assertUnchanged("Assert task unchanged before rewrite");
     shared.step.rewrite.inPlace("Rewrite the task in place");
     shared.step.snapshot.capture("Refresh rewritten task snapshot");

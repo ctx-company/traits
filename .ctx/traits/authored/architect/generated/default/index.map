@@ -21,8 +21,8 @@
   },
   "prompt:criticize-open-endedness": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 33,
+    "end": 33
   },
   "prompt:ground-the-task": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
@@ -36,8 +36,8 @@
   },
   "prompt:rewrite-the-task-in-place": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
-    "start": 28,
-    "end": 28
+    "start": 31,
+    "end": 31
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/architect/source/shared/resource.ts",
@@ -101,13 +101,13 @@
   },
   "sequence:architect-refinement-body/criticize-open-endedness": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 33,
+    "end": 33
   },
   "sequence:architect-refinement-body/present-the-plan-to-the-owner": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 35,
+    "end": 35
   },
   "sequence:architect-refinement-body/refresh-rewritten-task-snapshot": {
     "file": ".ctx/traits/authored/architect/source/shared/step/snapshot.ts",
@@ -116,13 +116,13 @@
   },
   "sequence:architect-refinement-body/rewrite-the-task-in-place": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
-    "start": 28,
-    "end": 28
+    "start": 31,
+    "end": 31
   },
   "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then/owner-approval-gate": {
     "file": ".ctx/traits/authored/architect/source/shared/step/owner.ts",
-    "start": 42,
-    "end": 42
+    "start": 40,
+    "end": 40
   },
   "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then/refresh-snapshot-after-owner-review": {
     "file": ".ctx/traits/authored/architect/source/shared/step/snapshot.ts",

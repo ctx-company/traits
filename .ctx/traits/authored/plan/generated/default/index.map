@@ -16,8 +16,13 @@
   },
   "port:final-keys": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 170,
-    "end": 170
+    "start": 187,
+    "end": 187
+  },
+  "port:owner-gate": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 173,
+    "end": 173
   },
   "port:task": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -26,8 +31,13 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 164,
-    "end": 164
+    "start": 181,
+    "end": 181
+  },
+  "prompt:apply-owner-corrections": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/owner.ts",
+    "start": 44,
+    "end": 44
   },
   "prompt:ingest": {
     "file": ".ctx/traits/authored/plan/source/shared/step/ingest.ts",
@@ -114,6 +124,21 @@
     "start": 36,
     "end": 36
   },
+  "sequence:ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-corrections-then/apply-owner-corrections": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/owner.ts",
+    "start": 42,
+    "end": 42
+  },
+  "sequence:owner-acceptance-body/apply-owner-corrections": {
+    "file": ".ctx/traits/authored/plan/source/variant/default/index.ts",
+    "start": 51,
+    "end": 51
+  },
+  "sequence:owner-acceptance-body/owner-acceptance-gate": {
+    "file": ".ctx/traits/authored/plan/source/shared/step/owner.ts",
+    "start": 34,
+    "end": 34
+  },
   "sequence:planning-body/split": {
     "file": ".ctx/traits/authored/plan/source/shared/step/split.ts",
     "start": 34,
@@ -143,6 +168,11 @@
     "file": ".ctx/traits/authored/plan/source/shared/step/ingest.ts",
     "start": 12,
     "end": 12
+  },
+  "sequence:procedure/owner-acceptance": {
+    "file": ".ctx/traits/authored/plan/source/variant/default/index.ts",
+    "start": 48,
+    "end": 48
   },
   "sequence:procedure/planning": {
     "file": ".ctx/traits/authored/plan/source/shared/step/split.ts",
@@ -224,6 +254,11 @@
     "start": 123,
     "end": 123
   },
+  "slot:owner-answer": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 164,
+    "end": 164
+  },
   "slot:raised-date": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 133,
@@ -243,6 +278,11 @@
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 160,
     "end": 160
+  },
+  "slot:revision-note": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 169,
+    "end": 169
   },
   "slot:slice-plan": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",

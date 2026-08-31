@@ -161,6 +161,23 @@ export const revisionLog = slot.text({
   id: "revision-log",
   description: "The revise pass's account of the task files it changed or added, one path per line.",
 });
+export const ownerAnswer = slot.text({
+  id: "owner-answer",
+  description:
+    "The owner's verdict on the written board from the acceptance gate: the literal string 'approved' ends the loop; any other content is the ctx-annotate decision JSON whose annotations are binding corrections for the next revision.",
+});
+export const revisionNote = slot.text({
+  id: "revision-note",
+  description: "What the correction pass changed, per annotation, so the next gate iteration is reviewable against it.",
+});
+export const ownerGate = port.input.text({
+  id: "owner-gate",
+  description:
+    "Owner acceptance transport: 'annotate' (default) pipes the written board to the owner's ctx-annotate; 'off' auto-approves so unattended batches finish on the internal review alone.",
+  optional: true,
+  default: { value: "annotate" },
+});
+
 export const writtenFiles = port.output.of("written-files", schema.list(writeReceiptSchema), {
   title: "Written Task Files",
   description:

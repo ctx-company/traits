@@ -57,6 +57,16 @@ title = "Final Board Keys"
 value = "slot:key-map"
 
 [[port]]
+id = "owner-gate"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner acceptance transport: 'annotate' (default) pipes the written board to the owner's ctx-annotate; 'off' auto-approves so unattended batches finish on the internal review alone."
+
+[port.default]
+value = "annotate"
+
+[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -102,6 +112,11 @@ schema = "schema:text"
 description = """The renumber step's mapping, one "KEY<n> -> NNNN" line per assigned key — derived mechanically from the live board at the end of the run, never agent arithmetic."""
 
 [[slot]]
+id = "owner-answer"
+schema = "schema:text"
+description = "The owner's verdict on the written board from the acceptance gate: the literal string 'approved' ends the loop; any other content is the ctx-annotate decision JSON whose annotations are binding corrections for the next revision."
+
+[[slot]]
 id = "raised-date"
 schema = "schema:text"
 description = "Today's date (YYYY-MM-DD), derived by a command step — the Raised stamp every written task carries."
@@ -120,6 +135,11 @@ description = "Independent reviewer's verdict on the written board slice(s)."
 id = "revision-log"
 schema = "schema:text"
 description = "The revise pass's account of the task files it changed or added, one path per line."
+
+[[slot]]
+id = "revision-note"
+schema = "schema:text"
+description = "What the correction pass changed, per annotation, so the next gate iteration is reviewable against it."
 
 [[slot]]
 id = "slice-plan"
@@ -393,6 +413,14 @@ id = "smart-2"
 description = "Independent strong model: one bounded review pass of the written board, separately from smart-1."
 summary = "Simple review role."
 
+[prompt.apply-owner-corrections]
+text = """
+The owner reviewed the concatenated written task files (each introduced by an '==> path <==' header, in sorted path order) and returned this ctx-annotate decision; its annotations reference line numbers of that concatenated stream and are binding corrections: {slot:owner-answer}
+
+Apply every annotation to the correct file and lines, editing the task files in place. Change nothing an annotation does not ask for; keys, relations and file names stay unless an annotation demands otherwise. Report each annotation and the exact edit made for it."""
+input = ["slot:owner-answer"]
+output = ["slot:revision-note"]
+
 [prompt.ingest]
 text = """
 Read the source of the described work: {port:task}. When it references a document (a research report, an MVP plan, a spec) by path, read that document from the repository; otherwise the description itself is the source.
@@ -633,6 +661,54 @@ prompt = "prompt:revise-the-board"
 input = ["slot:review-verdict"]
 output = ["slot:revision-log"]
 
+[[sequence.ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-corrections-then.sequence]]
+id = "apply-owner-corrections"
+title = "Apply the owner's annotations"
+agent = "agent:smart-1"
+prompt = "prompt:apply-owner-corrections"
+input = ["slot:owner-answer"]
+output = ["slot:revision-note"]
+
+[[sequence.owner-acceptance-body.sequence]]
+id = "owner-acceptance-gate"
+title = "Present the board to the owner"
+input = ["port:owner-gate"]
+output = ["slot:owner-answer"]
+
+[sequence.owner-acceptance-body.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    '''
+if [ "$1" = "off" ]; then
+  printf approved
+  exit 0
+fi
+files=$(git status --porcelain .internal/tasks | awk '{print $NF}' | sort)
+if [ -z "$files" ]; then
+  printf 'annotation gate found no written task files; retrying next iteration'
+  exit 0
+fi
+out=$({ for f in $files; do printf '==> %s <==\n' "$f"; cat "$f"; done; } | ctx-annotate --stdin)
+if printf '%s' "$out" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("annotations")==[] else 1)' 2>/dev/null; then
+  printf approved
+else
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf 'annotation gate returned no decision; retrying next iteration'; fi
+fi''',
+    "_",
+    "{port:owner-gate}",
+]
+
+[[sequence.owner-acceptance-body.sequence]]
+id = "apply-owner-corrections"
+title = "Apply owner corrections"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-corrections-then"
+
+[sequence.owner-acceptance-body.sequence.when.not]
+slot = "slot:owner-answer"
+equals = "approved"
+
 [[sequence.planning-body.sequence]]
 id = "split"
 title = "Split the work into slices"
@@ -696,6 +772,7 @@ operation = "append"
 description = "Extract the source's work items and done criteria, ground the work in the codebase, split it into a symbolic-keyed typed slice plan shaped as the work demands, write each slice's TaskDocument TOML files in its own frame, run one bounded independent review pass, then assign final board keys mechanically from the live board and commit the written files."
 input = [
     "port:duration",
+    "port:owner-gate",
     "port:task",
 ]
 output = [
@@ -893,6 +970,18 @@ git worktree list --porcelain 2>/dev/null | awk '/^worktree /{sub(/^worktree /,"
   }
 }''',
 ]
+
+[[procedure.sequence]]
+id = "owner-acceptance"
+title = "Owner acceptance"
+kind = "loop"
+sequence = "sequence:owner-acceptance-body"
+max-iterations = 500
+on-exhausted = "abort"
+
+[[procedure.sequence.until.all]]
+slot = "slot:owner-answer"
+equals = "approved"
 
 [[procedure.sequence]]
 id = "commit-tasks"

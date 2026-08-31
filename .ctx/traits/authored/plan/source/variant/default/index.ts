@@ -4,6 +4,7 @@
 // then write each slice's TaskDocument TOML files in its own for-each frame
 // — the composing seat writes its own deliverable, there is no
 // transcription hop — and return the typed receipts.
+import * as cdk from "@ctx-traits/cdk";
 import { defineVariant, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
@@ -39,6 +40,23 @@ export default function () {
   shared.step.writeSlices.tasks(smart1, shared.step.split.MAX_SLICES);
   shared.step.review.simple(smart2, smart1);
   shared.step.renumber.finalKeysStep();
+  // Owner acceptance (2026-08-31): after final keys, the written board is
+  // piped to the owner's ctx-annotate; empty annotations accept and the
+  // board commits, anything else becomes binding corrections applied by
+  // the composing seat before the next gate iteration. Effectively
+  // endless — 500 is a runaway backstop, the ceiling is acceptance.
+  cdk.flow.loop("Owner acceptance", (loop) => {
+    loop.maxIterations(500, { onExhausted: cdk.signal.Abort });
+    shared.step.owner.acceptanceGate("Present the board to the owner");
+    cdk.flow.when(
+      "Apply owner corrections",
+      cdk.condition.not(cdk.condition.equals(shared.data.ownerAnswer, "approved")),
+      () => {
+        shared.step.owner.applyCorrections(smart1, "Apply the owner's annotations");
+      },
+    );
+    loop.untilAll([cdk.condition.equals(shared.data.ownerAnswer, "approved")]);
+  });
   shared.step.commit.boardCommitStep();
 
   return { writtenFiles: shared.data.writtenFiles, finalKeys: shared.data.finalKeys };

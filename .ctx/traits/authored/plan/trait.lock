@@ -12,7 +12,7 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:c6078242b72f044dc6e2603c372d718a07a346a83822b9cb1b17de4cbd1baa25"
 canonical = "sha256:e9d854b4ec341918aa7dbf85de9c22238741ab83ceeecf7ed59343dcb25bfaf9"
-model-visible = "sha256:7dad68f028bbd01cb9771ac2ce4ad27648afb20c76edc2984e573f88d1b1308a"
+model-visible = "sha256:9807fd8e98213b2b3f00e02b39b4a32ebcc930a5544d9a6b99ea891aa461d026"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait]]
@@ -22,9 +22,9 @@ requested-version = "0.5.0"
 resolved-version = "0.5.0"
 
 [trait.digests]
-source = "sha256:57b295b6cb0cbefce2f13318a32bb8e67c8aa3da9c80d25c8486304bf46146dd"
-canonical = "sha256:cda983017733b69dce0614f1956ab22a43be9118aa536cb948c13e439c32ceef"
-model-visible = "sha256:15afe47faa63662ab068e395b5c6d646e1fcaa6a3b39ec546916a7b14cb9801a"
+source = "sha256:fc0f61b4cab27de2b662dec7a54cea0b8d17574f6787dd660d4c9eb827c14a0f"
+canonical = "sha256:3a26f43966d9df7a59dae0017986247c63b10a3b365d6efef64c4f286d1caff8"
+model-visible = "sha256:ddc58f6451f471318f33292d8a130950d3d6fe43950af88f3ba513ba7171fb90"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -69,7 +69,7 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:29d806dc53db887151a5a925fb0518778abd7ba68b63341562d1c1f67249c835"
 canonical = "sha256:f96ea06ab93be923d580a68b62c6e7806e41f825f842e712436483820ee52941"
-model-visible = "sha256:7f4fbc78f4d1653492edccb54af80c27ffce93b514d6499d4bb4215a86ea9412"
+model-visible = "sha256:477ac8971a7c924ddc626b46ffa1d19bd3f677a2f382d06635923cae5aba6118"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait]]
@@ -81,5 +81,5 @@ resolved-version = "0.5.0"
 [trait.digests]
 source = "sha256:53259d283ef908204714435bb586cc73a306718598c3bd39c070f01cde484a79"
 canonical = "sha256:90d3744f9c559e88b9dcc32bddd5340c38acf24ba69e612a169ea0d9011ced37"
-model-visible = "sha256:5426e27127acd16c2e8de6b125a63b77a0b360068ca75e78199d2452c91f6ee8"
+model-visible = "sha256:085f932a2cabe863355cb05b68b5ad2055620f3df5b3073ae985e863dc68a01f"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"

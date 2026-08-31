@@ -1,0 +1,261 @@
+id = "brainstorm"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Default"
+description = "Research a feature idea online, ground it in this codebase, and refine a two-artifact proposal (markdown + HTML diagram) until the owner accepts it through ctx-annotate."
+variant = "default"
+
+[metadata]
+tag = [
+    "brainstorm",
+    "research",
+    "architecture",
+]
+
+[[intent.require]]
+id = "correctness"
+
+[[intent.require]]
+id = "leanness"
+
+[[intent.require]]
+id = "reuse-over-reimplement"
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.avoid]]
+id = "over-engineering"
+
+[[intent.avoid]]
+id = "duplication"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[intent.avoid]]
+id = "unbounded-loop"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "owner-gate"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner acceptance transport: 'annotate' (default) opens the diagram and pipes the proposal to ctx-annotate; 'off' auto-approves for unattended runs."
+
+[port.default]
+value = "annotate"
+
+[[port]]
+id = "receipts"
+direction = "output"
+schema = "schema:text"
+description = "output port receipts."
+
+[[port]]
+id = "topic"
+direction = "input"
+schema = "schema:text"
+description = "The idea to brainstorm, in your own words: the feature or capability to explore for this system. Rough is fine."
+
+[[slot]]
+id = "commit-log"
+schema = "schema:text"
+description = "Git's own output for the brainstorm artifacts commit."
+
+[[slot]]
+id = "owner-answer"
+schema = "schema:text"
+description = "The owner's verdict from the acceptance gate: the literal string 'approved' ends the loop; any other content is the ctx-annotate decision JSON whose annotations are binding corrections for the next revision."
+
+[[slot]]
+id = "proposal"
+schema = "schema:text"
+description = "The composed proposal receipt: the two artifact paths written (markdown sibling and HTML diagram), the researched sources consulted (URLs), and a one-paragraph summary of the recommended approach."
+
+[[slot]]
+id = "revision-note"
+schema = "schema:text"
+description = "What the correction pass changed in both artifacts, per annotation."
+
+[[slot]]
+id = "slug"
+schema = "schema:text"
+description = "Filesystem slug derived from the topic; both artifacts are named by it under .internal/brainstorms/."
+
+[[resource]]
+id = "brainstorms"
+path = ".internal/brainstorms"
+root = "repo"
+hint = "Repo-root directory brainstorm proposals and their diagrams are written under."
+trigger = "on-demand"
+
+[[agent]]
+id = "smart"
+description = "Researches online, grounds in the codebase, composes both artifacts, and applies the owner's annotations."
+summary = "Research + composition + revision role."
+
+[prompt.apply-owner-annotations]
+text = """
+The owner reviewed .internal/brainstorms/{slot:slug}.md through ctx-annotate and returned this decision; its annotations reference that markdown file's line numbers and are binding corrections: {slot:owner-answer}
+
+Apply every annotation to the markdown, then update the sibling .internal/brainstorms/{slot:slug}.html so the diagram still presents the same (now corrected) proposal. Research further online only where an annotation demands it. Change nothing an annotation does not ask for. Report each annotation and the exact edits made to both artifacts for it."""
+input = [
+    "slot:slug",
+    "slot:owner-answer",
+]
+output = ["slot:revision-note"]
+
+[prompt.research-and-compose]
+text = """
+Brainstorm an implementation proposal for this system.
+
+Topic: {port:topic}
+
+Research the topic online first: current approaches, technologies, and prior art; keep the handful of sources that actually informed you. Ground the proposal in THIS repository second: name the real modules, traits, and seams it would touch. Then decide a recommended approach and its alternatives, with tradeoffs.
+
+Write exactly two files, creating .internal/brainstorms/ if needed, both named by the slug {slot:slug}:
+1. .internal/brainstorms/<slug>.md — the full proposal as plain markdown: the idea, the researched grounding (with source URLs), the recommended approach, alternatives and tradeoffs, the concrete touchpoints in this repo, and open questions for the owner.
+2. .internal/brainstorms/<slug>.html — one self-contained HTML file (inline CSS/JS, no external resources) presenting the proposed flow or architecture as a diagram. Follow the diagram standards at .ctx/traits/authored/brainstorm/resources/diagram-standards.md — read that file before composing. Choose the diagram form the content demands (topology, sequence, process, state); legible labels and clear direction come before any interaction.
+
+Both artifacts must present the same proposal; where detail differs, the markdown is authoritative. Return the receipt: both artifact paths, the source URLs consulted, and a one-paragraph summary of the recommended approach."""
+input = [
+    "port:topic",
+    "slot:slug",
+]
+output = ["slot:proposal"]
+
+[[sequence.ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-annotations-then.sequence]]
+id = "apply-owner-annotations"
+title = "Apply the owner's annotations to both artifacts"
+agent = "agent:smart"
+prompt = "prompt:apply-owner-annotations"
+input = [
+    "slot:slug",
+    "slot:owner-answer",
+]
+output = ["slot:revision-note"]
+
+[[sequence.owner-acceptance-body.sequence]]
+id = "owner-acceptance-gate"
+title = "Present the proposal to the owner"
+input = [
+    "slot:slug",
+    "port:owner-gate",
+]
+output = ["slot:owner-answer"]
+
+[sequence.owner-acceptance-body.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """
+if [ "$2" = "off" ]; then
+  printf approved
+  exit 0
+fi
+md=".internal/brainstorms/$1.md"
+html=".internal/brainstorms/$1.html"
+[ -f "$html" ] && open "$html" >/dev/null 2>&1 || true
+if [ ! -f "$md" ]; then
+  printf 'annotation gate: %s does not exist; compose must write it' "$md"
+  exit 0
+fi
+out=$(ctx-annotate --stdin < "$md")
+if printf '%s' "$out" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("annotations")==[] else 1)' 2>/dev/null; then
+  printf approved
+else
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf 'annotation gate returned no decision; retrying next iteration'; fi
+fi""",
+    "_",
+    "{slot:slug}",
+    "{port:owner-gate}",
+]
+
+[[sequence.owner-acceptance-body.sequence]]
+id = "apply-owner-annotations"
+title = "Apply owner annotations"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-annotations-then"
+
+[sequence.owner-acceptance-body.sequence.when.not]
+slot = "slot:owner-answer"
+equals = "approved"
+
+[procedure]
+description = "Research a feature idea online, ground it in this codebase, and refine a two-artifact proposal (markdown + HTML diagram) until the owner accepts it through ctx-annotate."
+input = [
+    "port:owner-gate",
+    "port:topic",
+]
+
+[[procedure.sequence]]
+id = "derive-slug"
+title = "Derive the artifact slug"
+input = ["port:topic"]
+output = ["slot:slug"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'printf %s "$1" | tr "[:upper:]" "[:lower:]" | sed -e "s/[^a-z0-9]/-/g" -e "s/--*/-/g" -e "s/^-//" -e "s/-$//" | cut -c1-60',
+    "_",
+    "{port:topic}",
+]
+
+[[procedure.sequence]]
+id = "research-and-compose"
+title = "Research and compose the proposal"
+agent = "agent:smart"
+prompt = "prompt:research-and-compose"
+input = [
+    "port:topic",
+    "slot:slug",
+]
+output = ["slot:proposal"]
+
+[[procedure.sequence]]
+id = "owner-acceptance"
+title = "Owner acceptance"
+kind = "loop"
+sequence = "sequence:owner-acceptance-body"
+max-iterations = 500
+on-exhausted = "abort"
+
+[[procedure.sequence.until.all]]
+slot = "slot:owner-answer"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "commit-brainstorm"
+title = "Commit the accepted brainstorm"
+input = ["slot:slug"]
+output = ["slot:commit-log"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'git add .internal/brainstorms && { git commit -m "brainstorm: $1" -- .internal/brainstorms 2>&1 || echo "nothing to commit"; }',
+    "_",
+    "{slot:slug}",
+]
