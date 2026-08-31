@@ -190,6 +190,16 @@ pub const BLOCK_BOTTOM_PADDING: Pixels = px(20.);
 pub const BORDERED_BOX_PAD_Y: Pixels = px(8.);
 pub const BORDERED_BOX_PAD_X_MIN: Pixels = px(10.);
 pub const BORDERED_BOX_PAD_X_MAX: Pixels = px(12.);
+/// `tokens.md` does not record the `in progress` now-item's internal gap or
+/// border width; sourced from `reference/sessions.html:709,731` instead,
+/// same owner-correction class `FRAME_ROW_*`/`BOTTOM_BAR_GAP` above already
+/// carry.
+pub const NOW_ITEM_GAP: Pixels = px(5.);
+pub const NOW_ITEM_BORDER: Pixels = px(1.);
+/// The now item's narrated line height. `FRAME_ROW_DESC_LINE_HEIGHT` is also
+/// `px(16.)` but is 0265.5-owned and semantically a different leaf — this is
+/// its own token, not a borrow.
+pub const NOW_NARRATION_LINE_HEIGHT: Pixels = px(16.);
 
 // bottom bar
 pub const BOTTOM_BAR_PAD_Y: Pixels = px(10.);

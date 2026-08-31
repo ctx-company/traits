@@ -15,10 +15,16 @@
 use std::time::Duration;
 
 use ctx_traits_core::procedure::activity::compact_elapsed_text;
+use ctx_traits_core::procedure::runtime::{loop_rounds, loop_rounds_label};
+use ctx_traits_core::procedure::story::{VerdictTone, finding_count_segment, verdict_presentation};
 use ctx_traits_io::center::ClaimedTaskResult;
+use ctx_traits_io::run_summary::RunSummary;
 
 use crate::detail::{DetailBaseline, PreviewState};
-use crate::run_row::{RowState, RunRow, StateRole, task_status_presentation};
+use crate::detail_tree::current_position_path;
+use crate::run_row::{
+    RowState, RunRow, StateRole, presentation as row_presentation, task_status_presentation,
+};
 
 /// A value segment with its own tone. `None` marks "identity, deliberately
 /// not a state" (rule 7's actual distinction) — resolved to `tokens::TEXT`
@@ -224,6 +230,7 @@ pub fn sessions_run_block(state: Option<&PreviewState<'_>>) -> NamedBlock {
             baseline,
             stale,
             refreshing,
+            ..
         }) => {
             if baseline.row.state == RowState::Unreadable {
                 return unreadable_row_block(&baseline.row);
@@ -259,6 +266,7 @@ pub fn sessions_footer(state: Option<&PreviewState<'_>>) -> String {
             baseline,
             stale,
             refreshing,
+            ..
         }) => {
             if baseline.row.state == RowState::Unreadable {
                 let text = if baseline.row.detail_text.is_empty() {
@@ -285,6 +293,151 @@ pub fn sessions_footer(state: Option<&PreviewState<'_>>) -> String {
             }
         }
     }
+}
+
+/// The `in progress` block's one bordered "now" item: a served frame title
+/// (or the fixed absence literal, muted) opposite the served state word,
+/// plus a narrated line. Present only while the selection is live and
+/// readable (goal 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NowItem {
+    pub title: String,
+    pub title_muted: bool,
+    pub state_word: String,
+    pub state_role: StateRole,
+    pub narration: String,
+}
+
+/// The `verdict` block: a heading round, one `status` key/value row, and
+/// zero or more blocker lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerdictBlock {
+    pub heading: String,
+    pub status_row: KeyValueRow,
+    pub blocker_lines: Vec<String>,
+}
+
+fn verdict_tone_to_state_role(tone: VerdictTone) -> StateRole {
+    match tone {
+        VerdictTone::Ok => StateRole::Ok,
+        VerdictTone::Warn => StateRole::Warn,
+        VerdictTone::Neutral => StateRole::Neutral,
+        VerdictTone::Danger => StateRole::Danger,
+    }
+}
+
+/// `None` unless the selection is `Accepted`, settled (not `stale`, not
+/// `refreshing`), readable (not `RowState::Unreadable`), and currently
+/// live — `live` is the selection's current liveness, refreshed from every
+/// center delta, never the frozen `baseline.row.live` a stale or refreshing
+/// selection may have loaded under. Returning `None` (not a block with a
+/// dropped marker) is what makes the whole block vanish on a live-to-finished
+/// transition, including a fingerprint-identical one that never triggers a
+/// resync.
+pub fn sessions_now_item(state: Option<&PreviewState<'_>>) -> Option<NowItem> {
+    let Some(PreviewState::Accepted {
+        baseline,
+        stale,
+        refreshing,
+        live,
+    }) = state
+    else {
+        return None;
+    };
+    if stale.is_some() || *refreshing {
+        return None;
+    }
+    if baseline.row.state == RowState::Unreadable || !*live {
+        return None;
+    }
+
+    let summary = RunSummary::from_session(&baseline.session);
+    let rounds = loop_rounds(&current_position_path(&baseline.session));
+    let round_label = loop_rounds_label(&rounds);
+
+    let (title, title_muted) = match summary
+        .current_sequence_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+    {
+        Some(title) => {
+            let title = match round_label {
+                Some(round) => format!("{title} \u{b7} {round}"),
+                None => title.to_string(),
+            };
+            (title, false)
+        }
+        None => ("no current frame".to_string(), true),
+    };
+
+    // `*live` is already established true above; derive the marker from the
+    // shared live presentation rather than the frozen `baseline.row.state`,
+    // which a fingerprint-identical liveness-only delta never replaces.
+    let state_presentation = row_presentation(&RowState::Live);
+
+    Some(NowItem {
+        title,
+        title_muted,
+        state_word: state_presentation.word.to_string(),
+        state_role: state_presentation.role,
+        narration: crate::placeholders::NOW_NARRATION.label.to_string(),
+    })
+}
+
+/// `None` unless the selection is `Accepted`, settled (not `stale`, not
+/// `refreshing`), readable, and recognised verdict evidence carries a round
+/// (goals 5, 6, 7). Withholding the block while stale or refreshing keeps it
+/// from presenting last-accepted evidence as current.
+pub fn sessions_verdict_block(state: Option<&PreviewState<'_>>) -> Option<VerdictBlock> {
+    let Some(PreviewState::Accepted {
+        baseline,
+        stale,
+        refreshing,
+        ..
+    }) = state
+    else {
+        return None;
+    };
+    if stale.is_some() || *refreshing {
+        return None;
+    }
+    if baseline.row.state == RowState::Unreadable {
+        return None;
+    }
+
+    let presentation = verdict_presentation(
+        &baseline.session.accepted_slot_values,
+        &baseline.session.slot_revisions,
+    )?;
+
+    let heading = format!("verdict \u{b7} round {}", presentation.round);
+
+    let role = verdict_tone_to_state_role(presentation.tone);
+    let mut value = vec![ValueSegment::toned(presentation.status_word.clone(), role)];
+    if let Some(segment) = finding_count_segment(presentation.finding_count) {
+        value.push(ValueSegment::dot());
+        value.push(ValueSegment::neutral(segment));
+    }
+    let status_row = KeyValueRow {
+        key: "status".to_string(),
+        value,
+    };
+
+    let blocker_lines = presentation
+        .blockers
+        .into_iter()
+        .map(|blocker| match blocker.what {
+            Some(what) => format!("{} \u{b7} {what}", blocker.id),
+            None => blocker.id,
+        })
+        .collect();
+
+    Some(VerdictBlock {
+        heading,
+        status_row,
+        blocker_lines,
+    })
 }
 
 #[cfg(test)]
@@ -369,6 +522,7 @@ mod tests {
             baseline,
             stale: None,
             refreshing: false,
+            live: baseline.row.live,
         }
     }
 
@@ -560,16 +714,19 @@ mod tests {
             baseline: &baseline,
             stale: None,
             refreshing: false,
+            live: baseline.row.live,
         };
         let refreshing = PreviewState::Accepted {
             baseline: &baseline,
             stale: None,
             refreshing: true,
+            live: baseline.row.live,
         };
         let stale = PreviewState::Accepted {
             baseline: &baseline,
             stale: Some("subscription closed"),
             refreshing: true,
+            live: baseline.row.live,
         };
 
         let current_block = sessions_run_block(Some(&current));
@@ -629,5 +786,457 @@ mod tests {
         let footer = sessions_footer(Some(&state));
         assert!(footer.contains("trailing comma"));
         assert!(!footer.contains("started"), "no fabricated provenance");
+    }
+}
+
+#[cfg(test)]
+mod now_and_verdict_tests {
+    use super::*;
+    use ctx_traits_core::digest::canonical_digest;
+    use ctx_traits_core::procedure::runtime::{AcceptanceStatus, SlotRevision, Value, ValueSource};
+    use ctx_traits_core::reference::{Kind, Reference};
+    use ctx_traits_io::center::ClaimedTaskResult;
+
+    fn base_session(run_id: &str, trait_id: &str, elapsed_seconds: u64) -> serde_json::Value {
+        serde_json::json!({
+            "schema-version": "0.1.0",
+            "session-id": "session",
+            "run-id": run_id,
+            "trait-id": trait_id,
+            "current-run-index": 0,
+            "status": "completed",
+            "provenance": {
+                "started-by": {"surface": "test", "caller": "preview-fixture"},
+                "state-source": "test",
+            },
+            "ledger": {
+                "run-id": run_id,
+                "trait-id": trait_id,
+                "current-run-index": 0,
+                "final-state": "completed",
+                "elapsed-seconds": elapsed_seconds,
+            },
+            "state-digest": "sha256:fixture",
+        })
+    }
+
+    fn slot_revision(slot_id: &str) -> SlotRevision {
+        SlotRevision {
+            slot_ref: Reference::local(Kind::Slot, slot_id).expect("valid slot ref"),
+            value_digest: ctx_traits_core::digest::Digest::source(slot_id),
+            acceptance_order: 0,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: None,
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    fn accepted_value(slot_id: &str, value: serde_json::Value) -> Value {
+        Value {
+            ref_text: format!("slot:{slot_id}"),
+            value_digest: canonical_digest(&value).expect("digest"),
+            value,
+            schema_ref: None,
+            source: ValueSource::HostInput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    fn baseline(row: RunRow, session_json: serde_json::Value) -> DetailBaseline {
+        DetailBaseline {
+            session: serde_json::from_value(session_json).expect("fixture session"),
+            activity_overlay: crate::detail_tree::ActivityOverlay::default(),
+            skipped_activity_lines: 0,
+            variant: Ok(None),
+            claimed_task: Ok(ClaimedTaskResult::Unclaimed),
+            row,
+        }
+    }
+
+    fn live_row() -> RunRow {
+        RunRow {
+            ledger_path: "/repo/run-1.json".to_string(),
+            session_id: "session".to_string(),
+            run_id: "run-1".to_string(),
+            repo_key: "repo".to_string(),
+            repo_path: "/repo".to_string(),
+            repo_label: "repo".to_string(),
+            title: "run-1".to_string(),
+            trait_id: "implement-phase".to_string(),
+            state: RowState::Live,
+            state_text: "live".to_string(),
+            detail_text: String::new(),
+            elapsed_text: String::new(),
+            tokens_text: "-".to_string(),
+            live: true,
+            modified_epoch_secs: 0,
+            verdict_rounds: None,
+            elapsed_seconds: 10,
+            started_at_epoch: None,
+        }
+    }
+
+    fn accepted_state(baseline: &DetailBaseline) -> PreviewState<'_> {
+        PreviewState::Accepted {
+            baseline,
+            stale: None,
+            refreshing: false,
+            live: baseline.row.live,
+        }
+    }
+
+    #[test]
+    fn now_item_present_only_for_a_live_readable_selection() {
+        let baseline = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let state = accepted_state(&baseline);
+        assert!(sessions_now_item(Some(&state)).is_some());
+
+        let mut not_live = baseline.clone();
+        not_live.row.live = false;
+        let state = accepted_state(&not_live);
+        assert!(sessions_now_item(Some(&state)).is_none());
+
+        let mut unreadable = baseline.clone();
+        unreadable.row.state = RowState::Unreadable;
+        let state = accepted_state(&unreadable);
+        assert!(sessions_now_item(Some(&state)).is_none());
+
+        assert!(sessions_now_item(Some(&PreviewState::Failed("bad"))).is_none());
+        assert!(sessions_now_item(Some(&PreviewState::Loading)).is_none());
+        assert!(sessions_now_item(None).is_none());
+    }
+
+    #[test]
+    fn stale_or_refreshing_accepted_preview_yields_neither_state_block() {
+        let baseline = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+
+        let stale = PreviewState::Accepted {
+            baseline: &baseline,
+            stale: Some("subscription closed"),
+            refreshing: false,
+            live: baseline.row.live,
+        };
+        assert!(sessions_now_item(Some(&stale)).is_none());
+        assert!(sessions_verdict_block(Some(&stale)).is_none());
+
+        let refreshing = PreviewState::Accepted {
+            baseline: &baseline,
+            stale: None,
+            refreshing: true,
+            live: baseline.row.live,
+        };
+        assert!(sessions_now_item(Some(&refreshing)).is_none());
+        assert!(sessions_verdict_block(Some(&refreshing)).is_none());
+    }
+
+    #[test]
+    fn a_live_only_transition_drops_the_now_item_without_touching_the_frozen_baseline() {
+        let baseline = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        assert!(baseline.row.live, "fixture starts live");
+
+        // A fingerprint-identical `RowChanged` moves the selection's current
+        // liveness without replacing the accepted baseline — `baseline.row.live`
+        // stays `true` while the served `live` flag has already flipped.
+        let live_now_finished = PreviewState::Accepted {
+            baseline: &baseline,
+            stale: None,
+            refreshing: false,
+            live: false,
+        };
+        assert!(sessions_now_item(Some(&live_now_finished)).is_none());
+    }
+
+    #[test]
+    fn now_item_title_falls_back_to_the_absence_literal_when_absent() {
+        let baseline = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let state = accepted_state(&baseline);
+        let item = sessions_now_item(Some(&state)).expect("now item");
+        assert_eq!(item.title, "no current frame");
+        assert!(item.title_muted);
+        assert!(!item.title.contains(" \u{b7} "));
+    }
+
+    #[test]
+    fn now_item_title_falls_back_to_the_absence_literal_when_blank() {
+        let mut session_json = base_session("run-1", "implement-phase", 10);
+        session_json["current-sequence-title"] = serde_json::json!("   ");
+        let baseline = baseline(live_row(), session_json);
+        let state = accepted_state(&baseline);
+        let item = sessions_now_item(Some(&state)).expect("now item");
+        assert_eq!(item.title, "no current frame");
+        assert!(item.title_muted);
+        assert!(!item.title.contains(" \u{b7} "));
+    }
+
+    #[test]
+    fn now_item_state_word_is_accent_for_a_live_row() {
+        let baseline = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let state = accepted_state(&baseline);
+        let item = sessions_now_item(Some(&state)).expect("now item");
+        assert_eq!(item.state_role, StateRole::Accent);
+        assert_eq!(item.state_word, "running");
+    }
+
+    #[test]
+    fn now_item_state_word_is_accent_when_live_moves_true_without_a_baseline_replace() {
+        // A fingerprint-identical liveness-only delta updates `PreviewState`'s
+        // current `live` without replacing `baseline.row.state`, which can
+        // still read a stale non-live row state from before the transition.
+        let mut row = live_row();
+        row.state = RowState::Paused;
+        row.state_text = "paused".to_string();
+        row.live = false;
+        let baseline = baseline(row, base_session("run-1", "implement-phase", 10));
+        let state = PreviewState::Accepted {
+            baseline: &baseline,
+            stale: None,
+            refreshing: false,
+            live: true,
+        };
+        let item = sessions_now_item(Some(&state)).expect("now item");
+        assert_eq!(item.state_role, StateRole::Accent);
+        assert_eq!(item.state_word, "running");
+    }
+
+    #[test]
+    fn now_item_title_with_no_loop_round_position_is_the_served_title_alone() {
+        let mut session_json = base_session("run-1", "implement-phase", 10);
+        session_json["current-sequence-title"] = serde_json::json!("review the plan");
+        let baseline = baseline(live_row(), session_json);
+        let state = accepted_state(&baseline);
+        let item = sessions_now_item(Some(&state)).expect("now item");
+        assert_eq!(item.title, "review the plan");
+        assert!(!item.title_muted);
+        assert!(!item.title.contains(" \u{b7} "));
+    }
+
+    #[test]
+    fn now_item_title_appends_the_loop_round_when_the_position_is_inside_a_loop() {
+        let mut session_json = base_session("run-1", "implement-phase", 10);
+        session_json["current-sequence-title"] = serde_json::json!("review the plan");
+        session_json["active-path"] = serde_json::json!([
+            {"kind": "procedure", "id": "root", "index": 0},
+            {"kind": "loop", "id": "the-loop", "index": 0, "iteration": 1},
+            {"kind": "item", "id": "current", "index": 0, "iteration": 1},
+        ]);
+        let baseline = baseline(live_row(), session_json);
+        let state = accepted_state(&baseline);
+        let item = sessions_now_item(Some(&state)).expect("now item");
+        assert_eq!(item.title, "review the plan \u{b7} 2");
+    }
+
+    #[test]
+    fn verdict_block_is_none_without_recognised_evidence() {
+        let baseline = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let state = accepted_state(&baseline);
+        assert!(sessions_verdict_block(Some(&state)).is_none());
+
+        assert!(sessions_verdict_block(Some(&PreviewState::Failed("bad"))).is_none());
+        assert!(sessions_verdict_block(Some(&PreviewState::Loading)).is_none());
+        assert!(sessions_verdict_block(None).is_none());
+    }
+
+    #[test]
+    fn verdict_block_heading_and_status_row_use_the_dot_never_an_em_dash() {
+        let mut baseline_value: DetailBaseline =
+            baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![slot_revision("review-verdict")];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({"status": "revise", "blockers": [{"id": "b1"}, {"id": "b2"}]}),
+        )];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        assert_eq!(block.heading, "verdict \u{b7} round 1");
+        assert!(!block.heading.contains('\u{2014}'));
+        assert_eq!(block.status_row.value[0].role, Some(StateRole::Neutral));
+        let joined: String = block
+            .status_row
+            .value
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect();
+        assert_eq!(joined, "revise \u{b7} 2 findings");
+        assert!(!joined.contains('\u{2014}'));
+        assert_eq!(
+            block.blocker_lines,
+            vec!["b1".to_string(), "b2".to_string()]
+        );
+    }
+
+    /// review-verdict-1 blocker `required-rendered-preview-evidence-missing`:
+    /// a second recognised verdict revision must move the rendered heading
+    /// to `round 2`, not silently stay at `round 1`.
+    #[test]
+    fn verdict_block_heading_advances_with_a_second_revision() {
+        let mut baseline_value: DetailBaseline =
+            baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![
+            slot_revision("review-verdict"),
+            slot_revision("review-verdict"),
+        ];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({"status": "approved"}),
+        )];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        assert_eq!(block.heading, "verdict \u{b7} round 2");
+        assert_ne!(block.heading, "verdict \u{b7} round 1");
+    }
+
+    #[test]
+    fn verdict_block_approved_has_no_count_segment() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![slot_revision("review-verdict")];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({"status": "approved"}),
+        )];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        assert_eq!(block.status_row.value.len(), 1);
+        assert_eq!(block.status_row.value[0].text, "approved");
+        assert_eq!(block.status_row.value[0].role, Some(StateRole::Ok));
+        assert!(block.blocker_lines.is_empty());
+    }
+
+    #[test]
+    fn verdict_block_singular_finding_count_reads_finding_not_findings() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![slot_revision("review-verdict")];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({"status": "revise", "blockers": [{"id": "b1"}]}),
+        )];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        let joined: String = block
+            .status_row
+            .value
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect();
+        assert_eq!(joined, "revise \u{b7} 1 finding");
+    }
+
+    #[test]
+    fn verdict_block_partial_round_with_no_revise_member_is_pending_with_no_count_segment() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![
+            SlotRevision {
+                acceptance_order: 1,
+                ..slot_revision("review-verdict-1")
+            },
+            SlotRevision {
+                acceptance_order: 0,
+                ..slot_revision("review-verdict-2")
+            },
+        ];
+        baseline_value.session.accepted_slot_values = vec![
+            accepted_value(
+                "review-verdict-1",
+                serde_json::json!({"status": "approved"}),
+            ),
+            accepted_value(
+                "review-verdict-2",
+                serde_json::json!({"status": "approved"}),
+            ),
+        ];
+        // Only slot 1 has a second (round-2) revision: the round is 2, but
+        // slot 2's accepted value is still its round-1 value, so it lags.
+        baseline_value.session.slot_revisions.push(SlotRevision {
+            acceptance_order: 2,
+            ..slot_revision("review-verdict-1")
+        });
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        assert_eq!(block.status_row.value.len(), 1);
+        assert_eq!(block.status_row.value[0].text, "pending");
+        assert_eq!(block.status_row.value[0].role, Some(StateRole::Neutral));
+        assert!(block.blocker_lines.is_empty());
+    }
+
+    #[test]
+    fn verdict_tone_maps_exhaustively_to_state_role() {
+        assert_eq!(verdict_tone_to_state_role(VerdictTone::Ok), StateRole::Ok);
+        assert_eq!(
+            verdict_tone_to_state_role(VerdictTone::Warn),
+            StateRole::Warn
+        );
+        assert_eq!(
+            verdict_tone_to_state_role(VerdictTone::Neutral),
+            StateRole::Neutral
+        );
+        assert_eq!(
+            verdict_tone_to_state_role(VerdictTone::Danger),
+            StateRole::Danger
+        );
+    }
+
+    #[test]
+    fn verdict_block_unreadable_has_no_segment_and_no_blocker_lines() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![slot_revision("review-verdict")];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({"status": "scratch-status-outside-pair", "blockers": [{"id": "b1"}]}),
+        )];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        assert_eq!(block.status_row.value.len(), 1);
+        assert_eq!(block.status_row.value[0].role, Some(StateRole::Danger));
+        assert!(block.blocker_lines.is_empty());
+    }
+
+    #[test]
+    fn verdict_block_blocker_lines_render_id_alone_or_id_dot_what() {
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![slot_revision("review-verdict")];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({
+                "status": "revise",
+                "blockers": [{"id": "b1"}, {"id": "b2", "what": "the defect"}],
+            }),
+        )];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_verdict_block(Some(&state)).expect("verdict block");
+        assert_eq!(
+            block.blocker_lines,
+            vec!["b1".to_string(), "b2 \u{b7} the defect".to_string()]
+        );
+    }
+
+    #[test]
+    fn verdict_block_returns_none_for_an_unreadable_row_even_with_evidence() {
+        let mut row = live_row();
+        row.state = RowState::Unreadable;
+        let mut baseline_value = baseline(row, base_session("run-1", "implement-phase", 10));
+        baseline_value.session.slot_revisions = vec![slot_revision("review-verdict")];
+        baseline_value.session.accepted_slot_values = vec![accepted_value(
+            "review-verdict",
+            serde_json::json!({"status": "approved"}),
+        )];
+        let state = accepted_state(&baseline_value);
+        assert!(sessions_verdict_block(Some(&state)).is_none());
     }
 }

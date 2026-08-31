@@ -869,13 +869,20 @@ impl Render for Shell {
         // which run, or which generation of that run, they describe
         // (review-verdict-1 blocker `selected-preview-not-atomic`).
         let preview = self.detail.preview_state().map(|state| {
-            let block = preview_view::named_block_element(&crate::preview::sessions_run_block(
-                Some(&state),
-            ));
+            let mut body = vec![preview_view::named_block_element(
+                "run",
+                &crate::preview::sessions_run_block(Some(&state)),
+            )];
+            if let Some(now) = crate::preview::sessions_now_item(Some(&state)) {
+                body.push(preview_view::now_item_element(&now));
+            }
+            if let Some(verdict) = crate::preview::sessions_verdict_block(Some(&state)) {
+                body.push(preview_view::verdict_block_element(&verdict));
+            }
             let footer = preview_view::preview_footer_element(&crate::preview::sessions_footer(
                 Some(&state),
             ));
-            preview_view::preview_column_element(vec![block], Some(footer))
+            preview_view::preview_column_element(body, Some(footer))
         });
         let mut body = div()
             .debug_selector(|| "window-body".to_string())

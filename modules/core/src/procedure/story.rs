@@ -30,13 +30,14 @@ use crate::digest::Digest;
 use crate::procedure::activity::ActivityEvent;
 use crate::procedure::run::{Plan, PlannedSequenceItem};
 use crate::procedure::runtime::{
-    BranchDecision, CommandExecutionEvidence, ConditionalInputDecision, FailureRouteRecord,
-    FinalState, ParallelPanelRecord, PathSegment, SequenceStatus, SequenceStatusKind, SlotRevision,
-    State, StopReason, ValueSource,
+    AcceptanceStatus, BranchDecision, CommandExecutionEvidence, ConditionalInputDecision,
+    FailureRouteRecord, FinalState, ParallelPanelRecord, PathSegment, SequenceStatus,
+    SequenceStatusKind, SlotRevision, State, StopReason, Value, ValueSource,
 };
 use crate::procedure::session::{
     CompletionNotification, DriveOutcome, MergeFrame, Session, Status, select_agent_assignment,
 };
+use crate::procedure::stats::verdict_slot_revision_counts;
 use crate::r#trait::condition::ConditionEvaluation;
 use crate::r#trait::procedure::WriteOperation;
 
@@ -233,14 +234,59 @@ pub enum ActivityProvenance {
 pub struct ValueGloss {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub blockers: Vec<String>,
+    /// Wire shape is the established `blockers[]` string-id array —
+    /// `story --json`'s schema predates `what` and must not change shape.
+    /// `what` stays in-process only; desktop and core code that need it read
+    /// [`ValueGloss::blockers`] directly rather than through the report.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_blocker_ids",
+        deserialize_with = "deserialize_blocker_ids"
+    )]
+    #[schemars(with = "Vec<String>")]
+    pub blockers: Vec<BlockerGloss>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escalation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advisory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic: Option<GenericGloss>,
+}
+
+/// One blocker off a conventional value's `blockers[]`: its stable id and,
+/// when the value carries one, the `what` text (the defect and the concrete
+/// failure it causes). `what` is bounded the same as every other gloss
+/// field; an empty string is treated as absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct BlockerGloss {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub what: Option<String>,
+}
+
+fn serialize_blocker_ids<S: serde::Serializer>(
+    blockers: &[BlockerGloss],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = serializer.serialize_seq(Some(blockers.len()))?;
+    for blocker in blockers {
+        seq.serialize_element(&blocker.id)?;
+    }
+    seq.end()
+}
+
+fn deserialize_blocker_ids<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<BlockerGloss>, D::Error> {
+    let ids: Vec<String> = Vec::deserialize(deserializer)?;
+    Ok(ids
+        .into_iter()
+        .map(|id| BlockerGloss { id, what: None })
+        .collect())
 }
 
 /// Fallback gloss for a value that carries none of the recognized
@@ -256,6 +302,26 @@ pub struct GenericGloss {
     pub byte_len: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub element_count: Option<usize>,
+}
+
+/// Insert one blocker id/`what` pair into a sorted blocker map, keeping the
+/// first non-empty `what` for a duplicated id. The single place this
+/// first-non-empty rule lives — both the raw conventional reader and the
+/// multi-slot verdict aggregation route through this instead of each
+/// re-implementing the merge.
+fn merge_blocker(
+    blockers: &mut std::collections::BTreeMap<String, Option<String>>,
+    id: String,
+    what: Option<String>,
+) {
+    blockers
+        .entry(id)
+        .and_modify(|existing| {
+            if existing.is_none() {
+                *existing = what.clone();
+            }
+        })
+        .or_insert(what);
 }
 
 /// Bound `text` to [`GLOSS_CHAR_BOUND`] characters, appending an ellipsis
@@ -286,16 +352,22 @@ pub fn value_gloss(value: &JsonValue) -> ValueGloss {
         .and_then(|v| v.as_str())
         .map(bounded);
 
-    let mut blockers: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut blockers: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
     if let Some(entries) = object.get("blockers").and_then(|v| v.as_array()) {
         for entry in entries {
-            let id = entry
-                .as_object()
-                .and_then(|o| o.get("id"))
-                .and_then(|v| v.as_str());
-            if let Some(id) = id {
-                blockers.insert(id.to_string());
-            }
+            let Some(entry_object) = entry.as_object() else {
+                continue;
+            };
+            let Some(id) = entry_object.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let what = entry_object
+                .get("what")
+                .and_then(|v| v.as_str())
+                .map(bounded)
+                .filter(|text| !text.is_empty());
+            merge_blocker(&mut blockers, id.to_string(), what);
         }
     }
 
@@ -316,7 +388,10 @@ pub fn value_gloss(value: &JsonValue) -> ValueGloss {
 
     ValueGloss {
         status,
-        blockers: blockers.into_iter().collect(),
+        blockers: blockers
+            .into_iter()
+            .map(|(id, what)| BlockerGloss { id, what })
+            .collect(),
         escalation,
         advisory,
         generic: None,
@@ -339,6 +414,140 @@ fn generic_gloss(value: &JsonValue) -> ValueGloss {
         }),
         ..Default::default()
     }
+}
+
+/// Rule 1's semantic role for a rendered verdict value. Core-side so the
+/// tone decision is shared; a caller maps it to its own tone/colour type but
+/// owns no rule of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerdictTone {
+    Ok,
+    Warn,
+    Neutral,
+    Danger,
+}
+
+/// The shared, GUI-free rendering of "the latest verdict evidence", derived
+/// from `slot_revisions` (round membership) and `accepted_slot_values`
+/// (current values) alone — see [`verdict_presentation`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerdictPresentation {
+    pub round: u64,
+    pub status_word: String,
+    pub tone: VerdictTone,
+    pub finding_count: usize,
+    pub blockers: Vec<BlockerGloss>,
+}
+
+/// Compose the `<N> findings` / `1 finding` segment for a blocker count, or
+/// `None` for zero — the count is derived from the rendered blocker set, so
+/// this lives beside it rather than being formatted again by a caller.
+pub fn finding_count_segment(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some("1 finding".to_string()),
+        n => Some(format!("{n} findings")),
+    }
+}
+
+/// The shared multi-slot verdict presentation: recognise the current round
+/// `R` (the highest per-slot recognised-verdict-revision count), gather the
+/// slots participating at `R`, gloss their current accepted values, and
+/// decide a single status word, tone and blocker set for the round.
+///
+/// `None` when no recognised verdict revision exists at all — the caller
+/// renders no verdict block, never an empty one and never round 0.
+pub fn verdict_presentation(
+    accepted_slot_values: &[Value],
+    slot_revisions: &[SlotRevision],
+) -> Option<VerdictPresentation> {
+    let counts = verdict_slot_revision_counts(slot_revisions);
+    let round = counts.values().copied().max()?;
+    let members: Vec<&str> = counts
+        .iter()
+        .filter(|(_, count)| **count == round)
+        .map(|(slot_ref, _)| *slot_ref)
+        .collect();
+    let complete_round = counts.values().all(|count| *count == round);
+
+    let unreadable = || VerdictPresentation {
+        round,
+        status_word: "unreadable".to_string(),
+        tone: VerdictTone::Danger,
+        finding_count: 0,
+        blockers: Vec::new(),
+    };
+
+    let mut member_status: Vec<String> = Vec::new();
+    let mut any_needs_owner = false;
+    let mut blockers: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
+
+    for slot_ref in &members {
+        let Some(value) = accepted_slot_values.iter().find(|value| {
+            value.ref_text == *slot_ref && value.acceptance == AcceptanceStatus::Accepted
+        }) else {
+            return Some(unreadable());
+        };
+        let gloss = value_gloss(&value.value);
+        let Some(status) = gloss.status.as_deref() else {
+            return Some(unreadable());
+        };
+        if status != "approved" && status != "revise" {
+            return Some(unreadable());
+        }
+        member_status.push(status.to_string());
+        if gloss.escalation.as_deref() == Some("needs-owner") {
+            any_needs_owner = true;
+        }
+        for blocker in gloss.blockers {
+            merge_blocker(&mut blockers, blocker.id, blocker.what);
+        }
+    }
+
+    let any_revise = member_status.iter().any(|status| status == "revise");
+
+    let (status_word, base_tone, count_blockers) = if complete_round {
+        if any_revise {
+            ("revise".to_string(), VerdictTone::Neutral, true)
+        } else {
+            ("approved".to_string(), VerdictTone::Ok, true)
+        }
+    } else if any_revise {
+        ("revise".to_string(), VerdictTone::Neutral, true)
+    } else {
+        // Partial round, no member revise: `pending`. Findings are suppressed
+        // here only — a lagging slot's readable members may hold blockers
+        // that belong to an earlier round, not this one, so no aggregate
+        // finding count or blocker set is rendered for `pending`.
+        ("pending".to_string(), VerdictTone::Neutral, false)
+    };
+
+    // `needs-owner` on any readable member outranks the status/round-derived
+    // tone — the escalation rule applies across every readable aggregate,
+    // not only inside the `revise` branches (unreadable stays Danger).
+    let tone = if any_needs_owner {
+        VerdictTone::Warn
+    } else {
+        base_tone
+    };
+
+    let blockers: Vec<BlockerGloss> = if count_blockers {
+        blockers
+            .into_iter()
+            .map(|(id, what)| BlockerGloss { id, what })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Some(VerdictPresentation {
+        round,
+        finding_count: blockers.len(),
+        status_word,
+        tone,
+        blockers,
+    })
 }
 
 /// One beat in the chronological arc: a single slot write, in acceptance (or
@@ -1213,5 +1422,526 @@ mod activity_enrichment_tests {
         assert!(summary.is_none());
         assert!(source.is_none());
         assert!(bullets.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod value_gloss_blocker_tests {
+    use super::*;
+
+    #[test]
+    fn value_gloss_blockers_serialize_as_a_plain_id_array() {
+        let gloss = ValueGloss {
+            status: Some("revise".to_string()),
+            blockers: vec![BlockerGloss {
+                id: "b1".to_string(),
+                what: Some("the defect".to_string()),
+            }],
+            escalation: None,
+            advisory: None,
+            generic: None,
+        };
+        let json = serde_json::to_value(&gloss).expect("serialize");
+        assert_eq!(json["blockers"], serde_json::json!(["b1"]));
+    }
+
+    #[test]
+    fn a_blocker_with_what_is_glossed() {
+        let value = serde_json::json!({
+            "status": "revise",
+            "blockers": [{"id": "b1", "what": "the defect"}],
+        });
+        let gloss = value_gloss(&value);
+        assert_eq!(
+            gloss.blockers,
+            vec![BlockerGloss {
+                id: "b1".to_string(),
+                what: Some("the defect".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_blocker_without_what_glosses_id_alone() {
+        let value = serde_json::json!({
+            "status": "revise",
+            "blockers": [{"id": "b1"}],
+        });
+        let gloss = value_gloss(&value);
+        assert_eq!(
+            gloss.blockers,
+            vec![BlockerGloss {
+                id: "b1".to_string(),
+                what: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_blocker_with_empty_what_renders_id_alone() {
+        let value = serde_json::json!({
+            "status": "revise",
+            "blockers": [{"id": "b1", "what": ""}],
+        });
+        let gloss = value_gloss(&value);
+        assert_eq!(gloss.blockers[0].what, None);
+    }
+
+    #[test]
+    fn duplicate_ids_collapse_keeping_the_first_non_empty_what() {
+        let value = serde_json::json!({
+            "status": "revise",
+            "blockers": [
+                {"id": "b1"},
+                {"id": "b1", "what": "kept"},
+                {"id": "b1", "what": "ignored"},
+            ],
+        });
+        let gloss = value_gloss(&value);
+        assert_eq!(gloss.blockers.len(), 1);
+        assert_eq!(gloss.blockers[0].what.as_deref(), Some("kept"));
+    }
+
+    #[test]
+    fn a_value_with_none_of_the_conventional_fields_degrades_to_generic() {
+        let value = serde_json::json!({"other": "field"});
+        let gloss = value_gloss(&value);
+        assert!(gloss.generic.is_some());
+        assert!(gloss.blockers.is_empty());
+    }
+
+    #[test]
+    fn a_non_object_value_degrades_to_generic() {
+        let value = serde_json::json!("plain string");
+        let gloss = value_gloss(&value);
+        assert!(gloss.generic.is_some());
+    }
+
+    /// The required public-surface regression: a `StoryBeat` whose gloss
+    /// carries a blocker with `what` still serializes `gloss.blockers` as a
+    /// plain array of id strings — proved one layer above
+    /// `value_gloss_blockers_serialize_as_a_plain_id_array`, which only
+    /// serializes the bare `ValueGloss` and could stay green even if a
+    /// future `StoryBeat`/`StoryReport` field-level change bypassed the
+    /// compatibility shape.
+    #[test]
+    fn a_story_beat_containing_a_blocker_with_what_still_serializes_blockers_as_id_strings() {
+        let beat = StoryBeat {
+            acceptance_order: 0,
+            position_path: Vec::new(),
+            title: None,
+            reason: String::new(),
+            actor: "unrecorded".to_string(),
+            ref_text: "slot:review-verdict".to_string(),
+            value_digest: None,
+            operation: None,
+            source: None,
+            gloss: ValueGloss {
+                status: Some("revise".to_string()),
+                blockers: vec![BlockerGloss {
+                    id: "b1".to_string(),
+                    what: Some("the defect".to_string()),
+                }],
+                escalation: None,
+                advisory: None,
+                generic: None,
+            },
+            command: None,
+            summary_line: None,
+            summary_source: None,
+            frame_key: None,
+            bullets: Vec::new(),
+            assisted_prose: None,
+        };
+        let json = serde_json::to_value(&beat).expect("serialize");
+        assert_eq!(json["gloss"]["blockers"], serde_json::json!(["b1"]));
+    }
+
+    /// The prior verdict's exact falsifiable check: the *public* `StoryReport`
+    /// envelope — not just a bare `StoryBeat` — still serializes
+    /// `beats[].gloss.blockers` as a plain array of id strings when a
+    /// blocker carries `what`.
+    #[test]
+    fn a_story_report_containing_a_blocker_with_what_still_serializes_blockers_as_id_strings() {
+        let beat = StoryBeat {
+            acceptance_order: 0,
+            position_path: Vec::new(),
+            title: None,
+            reason: String::new(),
+            actor: "unrecorded".to_string(),
+            ref_text: "slot:review-verdict".to_string(),
+            value_digest: None,
+            operation: None,
+            source: None,
+            gloss: ValueGloss {
+                status: Some("revise".to_string()),
+                blockers: vec![BlockerGloss {
+                    id: "b1".to_string(),
+                    what: Some("the defect".to_string()),
+                }],
+                escalation: None,
+                advisory: None,
+                generic: None,
+            },
+            command: None,
+            summary_line: None,
+            summary_source: None,
+            frame_key: None,
+            bullets: Vec::new(),
+            assisted_prose: None,
+        };
+        let report = StoryReport {
+            schema_version: "scratch".to_string(),
+            run_id: "run-scratch".to_string(),
+            trait_id: "trait-scratch".to_string(),
+            spine: StorySpine::SlotRevisions,
+            enrichment: StoryEnrichment::LedgerOnly,
+            status: Status::Completed,
+            final_state: FinalState::Completed,
+            elapsed_seconds: 0,
+            stop_reason: None,
+            beats: vec![beat],
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panels: Vec::new(),
+            emitted_signals: 0,
+            rejected_submissions: 0,
+            last_drive: None,
+            completion: None,
+            merge_frames: Vec::new(),
+            activity_provenance: ActivityProvenance::Absent,
+            detailed_timeline: Vec::new(),
+            assisted_narrator_tokens: None,
+            assisted_unavailable: None,
+        };
+        let json = serde_json::to_value(&report).expect("serialize");
+        assert_eq!(
+            json["beats"][0]["gloss"]["blockers"],
+            serde_json::json!(["b1"])
+        );
+    }
+}
+
+#[cfg(test)]
+mod verdict_presentation_tests {
+    use super::*;
+    use crate::reference::{Kind, Reference};
+
+    fn revision(slot_id: &str) -> SlotRevision {
+        SlotRevision {
+            slot_ref: Reference::local(Kind::Slot, slot_id).expect("valid slot ref"),
+            value_digest: Digest::source(slot_id),
+            acceptance_order: 0,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: None,
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    fn accepted_value(slot_id: &str, value: JsonValue) -> Value {
+        Value {
+            ref_text: format!("slot:{slot_id}"),
+            value_digest: crate::digest::canonical_digest(&value).expect("digest"),
+            value,
+            schema_ref: None,
+            source: ValueSource::HostInput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    fn json_status(status: &str, blockers: &[&str], escalation: Option<&str>) -> JsonValue {
+        let blockers: Vec<JsonValue> = blockers
+            .iter()
+            .map(|id| serde_json::json!({"id": id}))
+            .collect();
+        let mut object = serde_json::json!({"status": status, "blockers": blockers});
+        if let Some(escalation) = escalation {
+            object["escalation"] = serde_json::json!(escalation);
+        }
+        object
+    }
+
+    #[test]
+    fn no_recognised_verdict_revision_yields_none() {
+        assert_eq!(verdict_presentation(&[], &[]), None);
+        assert_eq!(
+            verdict_presentation(&[], &[revision("draft")]),
+            None,
+            "a non-verdict slot never contributes a round"
+        );
+    }
+
+    #[test]
+    fn approved_with_no_blockers() {
+        let revisions = vec![revision("review-verdict")];
+        let values = vec![accepted_value(
+            "review-verdict",
+            json_status("approved", &[], None),
+        )];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "approved");
+        assert_eq!(presentation.tone, VerdictTone::Ok);
+        assert_eq!(presentation.finding_count, 0);
+        assert_eq!(presentation.round, 1);
+    }
+
+    /// review-verdict-1 blocker `approved-verdict-blockers-silently-dropped`:
+    /// a structurally readable approved verdict carrying blocker evidence
+    /// must still render the retained blocker union — findings are
+    /// suppressed only for the partial-round `pending` form, never for a
+    /// complete approved round.
+    #[test]
+    fn approved_with_a_blocker_retains_it() {
+        let revisions = vec![revision("review-verdict")];
+        let values = vec![accepted_value(
+            "review-verdict",
+            json_status("approved", &["b1"], None),
+        )];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "approved");
+        assert_eq!(presentation.tone, VerdictTone::Ok);
+        assert_eq!(presentation.blockers.len(), 1);
+        assert_eq!(presentation.blockers[0].id, "b1");
+        assert_eq!(presentation.finding_count, presentation.blockers.len());
+        assert_eq!(presentation.finding_count, 1);
+    }
+
+    #[test]
+    fn revise_with_escalation_none_is_neutral() {
+        let revisions = vec![revision("review-verdict")];
+        let values = vec![accepted_value(
+            "review-verdict",
+            json_status("revise", &["b1"], Some("none")),
+        )];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "revise");
+        assert_eq!(presentation.tone, VerdictTone::Neutral);
+        assert_eq!(presentation.finding_count, 1);
+    }
+
+    #[test]
+    fn revise_with_needs_owner_is_warn() {
+        let revisions = vec![revision("review-verdict")];
+        let values = vec![accepted_value(
+            "review-verdict",
+            json_status("revise", &["b1"], Some("needs-owner")),
+        )];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.tone, VerdictTone::Warn);
+    }
+
+    #[test]
+    fn approved_with_needs_owner_is_warn_not_ok() {
+        let revisions = vec![revision("review-verdict-1"), revision("review-verdict-2")];
+        let values = vec![
+            accepted_value("review-verdict-1", json_status("approved", &[], None)),
+            accepted_value(
+                "review-verdict-2",
+                json_status("approved", &[], Some("needs-owner")),
+            ),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "approved");
+        assert_eq!(presentation.tone, VerdictTone::Warn);
+        assert_eq!(presentation.finding_count, 0);
+    }
+
+    #[test]
+    fn partial_round_pending_with_needs_owner_is_warn_not_neutral() {
+        let revisions = vec![
+            revision("review-verdict-1"),
+            revision("review-verdict-1"),
+            revision("review-verdict-2"),
+        ];
+        let values = vec![
+            accepted_value(
+                "review-verdict-1",
+                json_status("approved", &[], Some("needs-owner")),
+            ),
+            accepted_value("review-verdict-2", json_status("approved", &[], None)),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "pending");
+        assert_eq!(presentation.tone, VerdictTone::Warn);
+        assert_eq!(presentation.finding_count, 0);
+    }
+
+    #[test]
+    fn one_reviewer() {
+        let revisions = vec![revision("review-verdict-1")];
+        let values = vec![accepted_value(
+            "review-verdict-1",
+            json_status("approved", &[], None),
+        )];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "approved");
+        assert_eq!(presentation.round, 1);
+    }
+
+    #[test]
+    fn two_reviewers_agreeing_at_round() {
+        let revisions = vec![revision("review-verdict-1"), revision("review-verdict-2")];
+        let values = vec![
+            accepted_value("review-verdict-1", json_status("approved", &[], None)),
+            accepted_value("review-verdict-2", json_status("approved", &[], None)),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "approved");
+    }
+
+    #[test]
+    fn two_reviewers_disagreeing_at_round() {
+        let revisions = vec![revision("review-verdict-1"), revision("review-verdict-2")];
+        let values = vec![
+            accepted_value("review-verdict-1", json_status("approved", &[], None)),
+            accepted_value(
+                "review-verdict-2",
+                json_status("revise", &["b1"], Some("none")),
+            ),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "revise");
+        assert_eq!(presentation.finding_count, 1);
+    }
+
+    #[test]
+    fn partial_round_with_lagging_approved_slot_is_pending_with_no_findings() {
+        let revisions = vec![
+            revision("review-verdict-1"),
+            revision("review-verdict-1"),
+            revision("review-verdict-2"),
+        ];
+        let values = vec![
+            accepted_value("review-verdict-1", json_status("approved", &[], None)),
+            accepted_value(
+                "review-verdict-2",
+                json_status("approved", &["lagging-blocker"], None),
+            ),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "pending");
+        assert_eq!(presentation.tone, VerdictTone::Neutral);
+        assert_eq!(presentation.finding_count, 0);
+        assert!(
+            presentation
+                .blockers
+                .iter()
+                .all(|blocker| blocker.id != "lagging-blocker"),
+            "the lagging slot's blockers never contribute"
+        );
+    }
+
+    #[test]
+    fn partial_round_with_a_member_revise_reports_revise_and_its_findings() {
+        let revisions = vec![
+            revision("review-verdict-1"),
+            revision("review-verdict-1"),
+            revision("review-verdict-2"),
+        ];
+        let values = vec![
+            accepted_value(
+                "review-verdict-1",
+                json_status("revise", &["b1"], Some("none")),
+            ),
+            accepted_value("review-verdict-2", json_status("approved", &[], None)),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "revise");
+        assert_eq!(presentation.finding_count, 1);
+    }
+
+    #[test]
+    fn status_outside_the_pair_is_unreadable() {
+        let revisions = vec![revision("review-verdict")];
+        let values = vec![accepted_value(
+            "review-verdict",
+            json_status("scratch-status-outside-pair", &[], None),
+        )];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "unreadable");
+        assert_eq!(presentation.tone, VerdictTone::Danger);
+        assert_eq!(presentation.finding_count, 0);
+    }
+
+    #[test]
+    fn a_missing_accepted_value_is_unreadable() {
+        let revisions = vec![revision("review-verdict")];
+        let presentation = verdict_presentation(&[], &revisions).expect("some");
+        assert_eq!(presentation.status_word, "unreadable");
+    }
+
+    #[test]
+    fn a_malformed_value_is_unreadable() {
+        let revisions = vec![revision("review-verdict")];
+        let values = vec![accepted_value("review-verdict", serde_json::json!("plain"))];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "unreadable");
+    }
+
+    #[test]
+    fn multi_member_aggregation_dedups_blocker_ids_keeping_the_first_non_empty_what() {
+        let revisions = vec![revision("review-verdict-1"), revision("review-verdict-2")];
+        let values = vec![
+            accepted_value(
+                "review-verdict-1",
+                serde_json::json!({
+                    "status": "revise",
+                    "blockers": [
+                        {"id": "b1"},
+                        {"id": "shared", "what": "kept"},
+                    ],
+                }),
+            ),
+            accepted_value(
+                "review-verdict-2",
+                serde_json::json!({
+                    "status": "revise",
+                    "blockers": [
+                        {"id": "shared", "what": "ignored"},
+                        {"id": "b2", "what": "second"},
+                    ],
+                }),
+            ),
+        ];
+        let presentation = verdict_presentation(&values, &revisions).expect("some");
+        assert_eq!(presentation.status_word, "revise");
+        assert_eq!(presentation.finding_count, 3);
+        let shared = presentation
+            .blockers
+            .iter()
+            .find(|blocker| blocker.id == "shared")
+            .expect("the shared blocker id survives the merge");
+        assert_eq!(
+            shared.what.as_deref(),
+            Some("kept"),
+            "the shared rule governs multi-slot aggregation too: first non-empty `what` wins"
+        );
+    }
+
+    #[test]
+    fn finding_count_segment_composes_singular_and_plural() {
+        assert_eq!(finding_count_segment(0), None);
+        assert_eq!(finding_count_segment(1), Some("1 finding".to_string()));
+        assert_eq!(finding_count_segment(2), Some("2 findings".to_string()));
     }
 }

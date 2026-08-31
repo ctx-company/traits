@@ -106,19 +106,46 @@ impl RunRecord {
     }
 }
 
-/// Highest per-slot revision count among `slot_revisions` whose slot
-/// reference ends in [`VERDICT_SLOT_SUFFIX`], across every loop that wrote
-/// one. `None` when no revision matches (missing coverage, not zero
-/// rounds).
-pub fn verdict_slot_rounds(slot_revisions: &[SlotRevision]) -> Option<u64> {
+/// A verdict slot ref: `<name>-verdict`, or the numbered reviewer form
+/// `<name>-verdict-<n>` the implement family declares (`review-verdict-1`,
+/// `review-verdict-2`). Never a ref that merely *contains* "verdict" —
+/// `verdict-notes` is not a verdict slot.
+pub fn is_verdict_slot_ref(slot_ref: &str) -> bool {
+    if slot_ref.ends_with(VERDICT_SLOT_SUFFIX) {
+        return true;
+    }
+    match slot_ref.rsplit_once('-') {
+        Some((head, tail)) => {
+            !tail.is_empty()
+                && tail.bytes().all(|b| b.is_ascii_digit())
+                && head.ends_with(VERDICT_SLOT_SUFFIX)
+        }
+        None => false,
+    }
+}
+
+/// Per-slot recognised-verdict-revision counts, keyed by slot ref.
+/// [`verdict_slot_rounds`] is this map's maximum; the multi-slot verdict
+/// presentation needs the whole map to decide round membership.
+pub fn verdict_slot_revision_counts(slot_revisions: &[SlotRevision]) -> BTreeMap<&str, u64> {
     let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
     for revision in slot_revisions {
         let slot_text = revision.slot_ref.as_str();
-        if slot_text.ends_with(VERDICT_SLOT_SUFFIX) {
+        if is_verdict_slot_ref(slot_text) {
             *counts.entry(slot_text).or_insert(0) += 1;
         }
     }
-    counts.into_values().max()
+    counts
+}
+
+/// Highest per-slot revision count among `slot_revisions` whose slot
+/// reference is a recognised verdict slot ([`is_verdict_slot_ref`]), across
+/// every loop that wrote one. `None` when no revision matches (missing
+/// coverage, not zero rounds).
+pub fn verdict_slot_rounds(slot_revisions: &[SlotRevision]) -> Option<u64> {
+    verdict_slot_revision_counts(slot_revisions)
+        .into_values()
+        .max()
 }
 
 /// Which outcome bucket a record belongs in, per the precedence documented
@@ -681,6 +708,31 @@ mod tests {
         assert_eq!(verdict_slot_rounds(&revisions), Some(3));
         assert_eq!(verdict_slot_rounds(&[verdict_revision("draft")]), None);
         assert_eq!(verdict_slot_rounds(&[]), None);
+    }
+
+    #[test]
+    fn verdict_slot_rounds_recognises_numbered_reviewer_refs() {
+        let revisions = vec![
+            verdict_revision("review-verdict-1"),
+            verdict_revision("review-verdict-1"),
+            verdict_revision("review-verdict-2"),
+            verdict_revision("review-verdict-2"),
+        ];
+        assert_eq!(verdict_slot_rounds(&revisions), Some(2));
+
+        let uneven = vec![
+            verdict_revision("review-verdict-1"),
+            verdict_revision("review-verdict-1"),
+            verdict_revision("review-verdict-2"),
+        ];
+        assert_eq!(verdict_slot_rounds(&uneven), Some(2));
+
+        for non_verdict in ["verdict-notes", "verdicts", "pre-verdict-x"] {
+            assert!(!is_verdict_slot_ref(non_verdict), "{non_verdict}");
+        }
+        for malformed in ["review-verdict-", "review-verdict-abc"] {
+            assert!(!is_verdict_slot_ref(malformed), "{malformed}");
+        }
     }
 
     #[test]

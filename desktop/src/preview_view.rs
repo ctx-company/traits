@@ -7,7 +7,7 @@
 use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
-use crate::preview::{KeyValueRow, NamedBlock, ValueSegment};
+use crate::preview::{KeyValueRow, NamedBlock, NowItem, ValueSegment, VerdictBlock};
 use crate::run_row::role_color;
 use crate::tokens;
 
@@ -51,9 +51,19 @@ pub fn kv_row_element(row: &KeyValueRow) -> AnyElement {
         .into_any_element()
 }
 
-pub fn named_block_element(block: &NamedBlock) -> AnyElement {
+/// The one shell every preview body block renders through: block gap, bottom
+/// padding, full width, and the heading typography, with `slug` distinguishing
+/// this block's debug selectors from any other block mounted in the same tree
+/// (`preview-block-{slug}` / `preview-heading-{slug}`) — with three blocks in
+/// one preview column, a hardcoded selector would make `debug_bounds`
+/// ambiguous. `named_block_element`, `now_item_element` and
+/// `verdict_block_element` all compose their own body children and delegate
+/// the container and heading to this — one place owns the block geometry.
+fn named_block_shell(slug: &str, heading: &str, children: Vec<AnyElement>) -> AnyElement {
+    let slug_owned = slug.to_string();
+    let heading_slug = slug.to_string();
     let mut element = div()
-        .debug_selector(|| "preview-run-block".to_string())
+        .debug_selector(move || format!("preview-block-{slug_owned}"))
         .flex()
         .flex_col()
         .gap(tokens::BLOCK_GAP)
@@ -61,16 +71,111 @@ pub fn named_block_element(block: &NamedBlock) -> AnyElement {
         .w_full()
         .child(
             div()
-                .debug_selector(|| "preview-run-heading".to_string())
+                .debug_selector(move || format!("preview-heading-{heading_slug}"))
                 .font_family(tokens::FONT_MONO)
                 .text_size(tokens::SIZE_11)
                 .text_color(rgb(tokens::TEXT_MUTED))
-                .child(block.heading.clone()),
+                .child(heading.to_string()),
         );
-    for row in &block.rows {
-        element = element.child(kv_row_element(row));
+    for child in children {
+        element = element.child(child);
     }
     element.into_any_element()
+}
+
+/// `slug` distinguishes this block's debug selectors from any other block
+/// mounted in the same tree (`preview-block-{slug}` /
+/// `preview-heading-{slug}`) — with three blocks in one preview column, a
+/// hardcoded selector would make `debug_bounds` ambiguous.
+pub fn named_block_element(slug: &str, block: &NamedBlock) -> AnyElement {
+    let rows = block.rows.iter().map(kv_row_element).collect();
+    named_block_shell(slug, &block.heading, rows)
+}
+
+/// The `in progress` block: the reusable named-block heading, then one
+/// bordered "now" item — a `space-between` title/state-word row, then a
+/// full-width non-italic narration line.
+/// The now item's title color: `TEXT_MUTED` for the absence literal,
+/// `TEXT` for a served title. Shared by the renderer and its color-
+/// resolution test so the two can never diverge.
+fn now_item_title_color(item: &NowItem) -> u32 {
+    if item.title_muted {
+        tokens::TEXT_MUTED
+    } else {
+        tokens::TEXT
+    }
+}
+
+pub fn now_item_element(item: &NowItem) -> AnyElement {
+    let title_color = now_item_title_color(item);
+    let inner = div()
+        .debug_selector(|| "preview-now-item".to_string())
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(tokens::NOW_ITEM_GAP)
+        .bg(rgb(tokens::ROW_OPEN))
+        .border(tokens::NOW_ITEM_BORDER)
+        .border_color(rgb(tokens::BORDER_SOFT))
+        .py(tokens::BORDERED_BOX_PAD_Y)
+        .px(tokens::BORDERED_BOX_PAD_X_MIN)
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_row()
+                .justify_between()
+                .items_center()
+                .child(
+                    div()
+                        .debug_selector(|| "preview-now-title".to_string())
+                        .font_family(tokens::FONT_SANS)
+                        .text_size(tokens::SIZE_12)
+                        .text_color(rgb(title_color))
+                        .child(item.title.clone()),
+                )
+                .child(
+                    div()
+                        .debug_selector(|| "preview-now-marker".to_string())
+                        .font_family(tokens::FONT_MONO)
+                        .text_size(tokens::SIZE_10_5)
+                        .text_color(rgb(role_color(item.state_role)))
+                        .child(item.state_word.clone()),
+                ),
+        )
+        .child(
+            div()
+                .debug_selector(|| "preview-now-narration".to_string())
+                .w_full()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(tokens::TEXT_MUTED))
+                .line_height(tokens::NOW_NARRATION_LINE_HEIGHT)
+                .child(item.narration.clone()),
+        );
+
+    named_block_shell("now", "in progress", vec![inner.into_any_element()])
+}
+
+/// The `verdict` block: one heading form (mirroring [`named_block_element`]),
+/// the one `status` row, then zero or more full-width blocker lines — all as
+/// siblings in a single container, the same "one heading form, one row form"
+/// invariant `named_block_element` establishes.
+pub fn verdict_block_element(verdict: &VerdictBlock) -> AnyElement {
+    let mut children = vec![kv_row_element(&verdict.status_row)];
+    for (index, line) in verdict.blocker_lines.iter().enumerate() {
+        children.push(
+            div()
+                .debug_selector(move || format!("preview-blocker-{index}"))
+                .w_full()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(tokens::TEXT_SECONDARY))
+                .child(line.clone())
+                .into_any_element(),
+        );
+    }
+    named_block_shell("verdict", &verdict.heading, children)
 }
 
 pub fn preview_footer_element(text: &str) -> AnyElement {
@@ -125,7 +230,7 @@ mod tests {
     #[test]
     fn preview_elements_build_from_a_projected_block_with_no_app() {
         let block = sessions_run_block(None);
-        let block_element = named_block_element(&block);
+        let block_element = named_block_element("run", &block);
         let footer_element = preview_footer_element("run-1");
         let _element: AnyElement =
             preview_column_element(vec![block_element], Some(footer_element));
@@ -160,6 +265,40 @@ mod tests {
         }
     }
 
+    fn fixture_now_item() -> NowItem {
+        NowItem {
+            title: "review \u{b7} 2".to_string(),
+            title_muted: false,
+            state_word: "running".to_string(),
+            state_role: crate::run_row::StateRole::Accent,
+            narration: "working on this frame now".to_string(),
+        }
+    }
+
+    fn fixture_verdict_block() -> VerdictBlock {
+        VerdictBlock {
+            heading: "verdict \u{b7} round 1".to_string(),
+            status_row: KeyValueRow {
+                key: "status".to_string(),
+                value: vec![
+                    ValueSegment {
+                        text: "revise".to_string(),
+                        role: Some(crate::run_row::StateRole::Neutral),
+                    },
+                    ValueSegment {
+                        text: " \u{b7} ".to_string(),
+                        role: None,
+                    },
+                    ValueSegment {
+                        text: "1 finding".to_string(),
+                        role: None,
+                    },
+                ],
+            },
+            blocker_lines: vec!["b1 \u{b7} the defect".to_string()],
+        }
+    }
+
     /// A minimal `Render` root — mirrors `Shell`'s pattern but paints only
     /// the preview column, with an extra probe body element so the frame's
     /// "ordered slot" contract (an inserted block sits between the identity
@@ -167,11 +306,16 @@ mod tests {
     /// `Shell`/center harness.
     struct PreviewHarness {
         extra: bool,
+        now_and_verdict: bool,
     }
 
     impl Render for PreviewHarness {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            let mut body = vec![named_block_element(&fixture_block())];
+            let mut body = vec![named_block_element("run", &fixture_block())];
+            if self.now_and_verdict {
+                body.push(now_item_element(&fixture_now_item()));
+                body.push(verdict_block_element(&fixture_verdict_block()));
+            }
             if self.extra {
                 body.push(
                     div()
@@ -190,6 +334,14 @@ mod tests {
         cx: &mut gpui::TestAppContext,
         extra: bool,
     ) -> gpui::WindowHandle<PreviewHarness> {
+        open_harness_full(cx, extra, false)
+    }
+
+    fn open_harness_full(
+        cx: &mut gpui::TestAppContext,
+        extra: bool,
+        now_and_verdict: bool,
+    ) -> gpui::WindowHandle<PreviewHarness> {
         let window = cx
             .update(|cx| {
                 let bounds = Bounds::new(gpui::point(px(0.), px(0.)), size(px(900.), px(700.)));
@@ -198,7 +350,12 @@ mod tests {
                         window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
                         ..Default::default()
                     },
-                    |_, cx| cx.new(|_| PreviewHarness { extra }),
+                    |_, cx| {
+                        cx.new(|_| PreviewHarness {
+                            extra,
+                            now_and_verdict,
+                        })
+                    },
                 )
             })
             .unwrap();
@@ -220,7 +377,7 @@ mod tests {
         assert_eq!(column.size.height, px(700.));
 
         let block = vcx
-            .debug_bounds("preview-run-block")
+            .debug_bounds("preview-block-run")
             .expect("the run block actually painted this frame");
         assert_eq!(
             block.origin.x - column.origin.x,
@@ -243,7 +400,7 @@ mod tests {
 
         let column = vcx.debug_bounds("preview-column").expect("column painted");
         let block = vcx
-            .debug_bounds("preview-run-block")
+            .debug_bounds("preview-block-run")
             .expect("block painted");
         let spacer = vcx.debug_bounds("preview-spacer").expect("spacer painted");
         let footer = vcx.debug_bounds("preview-footer").expect("footer painted");
@@ -271,7 +428,7 @@ mod tests {
         let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
 
         let block = vcx
-            .debug_bounds("preview-run-block")
+            .debug_bounds("preview-block-run")
             .expect("block painted");
         let probe = vcx.debug_bounds("preview-probe").expect("probe painted");
         let spacer = vcx.debug_bounds("preview-spacer").expect("spacer painted");
@@ -299,7 +456,7 @@ mod tests {
         let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
 
         let heading = vcx
-            .debug_bounds("preview-run-heading")
+            .debug_bounds("preview-heading-run")
             .expect("heading painted");
         let trait_row = vcx
             .debug_bounds("preview-row-trait")
@@ -322,7 +479,7 @@ mod tests {
         );
 
         let block = vcx
-            .debug_bounds("preview-run-block")
+            .debug_bounds("preview-block-run")
             .expect("block painted");
         assert!(
             (block.size.width - trait_row.size.width).abs() <= px(1.),
@@ -346,7 +503,7 @@ mod tests {
 
         let column = vcx.debug_bounds("preview-column").expect("column painted");
         let block = vcx
-            .debug_bounds("preview-run-block")
+            .debug_bounds("preview-block-run")
             .expect("block painted");
         let spacer = vcx.debug_bounds("preview-spacer").expect("spacer painted");
         let footer = vcx.debug_bounds("preview-footer").expect("footer painted");
@@ -378,7 +535,7 @@ mod tests {
         let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
 
         let block = vcx
-            .debug_bounds("preview-run-block")
+            .debug_bounds("preview-block-run")
             .expect("block painted");
         let key = vcx
             .debug_bounds("preview-row-trait-key")
@@ -428,5 +585,230 @@ mod tests {
         };
         assert_eq!(segment_color(&state), role_color(StateRole::Ok));
         assert_ne!(segment_color(&state), tokens::TEXT);
+    }
+
+    #[gpui::test]
+    fn now_item_and_verdict_block_insert_between_identity_block_and_spacer_footer_still_last(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = open_harness_full(cx, false, true);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+
+        let block = vcx
+            .debug_bounds("preview-block-run")
+            .expect("run block painted");
+        let now = vcx
+            .debug_bounds("preview-block-now")
+            .expect("now block painted");
+        let verdict = vcx
+            .debug_bounds("preview-block-verdict")
+            .expect("verdict block painted");
+        let spacer = vcx.debug_bounds("preview-spacer").expect("spacer painted");
+        let footer = vcx.debug_bounds("preview-footer").expect("footer painted");
+
+        assert!(now.origin.y >= block.origin.y + block.size.height);
+        assert!(verdict.origin.y >= now.origin.y + now.size.height);
+        assert!(spacer.origin.y >= verdict.origin.y + verdict.size.height);
+        assert!(footer.origin.y >= spacer.origin.y + spacer.size.height);
+    }
+
+    #[gpui::test]
+    fn now_item_is_bordered_row_open_filled_with_the_internal_gap_and_no_radius(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = open_harness_full(cx, false, true);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+
+        let item = vcx
+            .debug_bounds("preview-now-item")
+            .expect("now item container painted");
+        let title = vcx
+            .debug_bounds("preview-now-title")
+            .expect("now title painted");
+        let marker = vcx
+            .debug_bounds("preview-now-marker")
+            .expect("now marker painted");
+        let narration = vcx
+            .debug_bounds("preview-now-narration")
+            .expect("now narration painted");
+
+        assert!(
+            marker.origin.x > title.origin.x + title.size.width,
+            "title and marker must not overlap"
+        );
+
+        let gap = narration.origin.y - (title.origin.y + title.size.height);
+        assert!(
+            (gap - tokens::NOW_ITEM_GAP).abs() <= px(1.),
+            "the title row and narration are separated by the internal gap: got {gap:?}"
+        );
+        assert!(
+            narration.size.height >= tokens::NOW_NARRATION_LINE_HEIGHT,
+            "the narration paints at least its line height"
+        );
+
+        // Leading/trailing/top inner edges reach [8,10] padding, not a
+        // full-width container proving nothing about the padded box.
+        let leading_pad = title.origin.x - item.origin.x;
+        assert!(
+            (leading_pad - tokens::BORDERED_BOX_PAD_X_MIN).abs() <= px(1.),
+            "the title's leading edge must sit BORDERED_BOX_PAD_X_MIN in from the item's own \
+             leading edge: got {leading_pad:?}"
+        );
+        let trailing_pad =
+            (item.origin.x + item.size.width) - (marker.origin.x + marker.size.width);
+        assert!(
+            (trailing_pad - tokens::BORDERED_BOX_PAD_X_MIN).abs() <= px(1.),
+            "the marker's trailing edge must sit BORDERED_BOX_PAD_X_MIN in from the item's own \
+             trailing edge: got {trailing_pad:?}"
+        );
+        let top_pad = title.origin.y - item.origin.y;
+        assert!(
+            (top_pad - tokens::BORDERED_BOX_PAD_Y).abs() <= px(1.),
+            "the title's top edge must sit BORDERED_BOX_PAD_Y down from the item's own top \
+             edge: got {top_pad:?}"
+        );
+        let expected_narration_width =
+            item.size.width - (tokens::BORDERED_BOX_PAD_X_MIN + tokens::NOW_ITEM_BORDER) * 2.;
+        assert!(
+            (narration.size.width - expected_narration_width).abs() <= px(1.),
+            "the narration reaches exactly the item's padded content width, not merely narrower \
+             than the outer box: got {:?}, expected {expected_narration_width:?}",
+            narration.size.width
+        );
+        let bottom_pad =
+            (item.origin.y + item.size.height) - (narration.origin.y + narration.size.height);
+        assert!(
+            (bottom_pad - tokens::BORDERED_BOX_PAD_Y).abs() <= px(1.),
+            "the narration's bottom edge must sit BORDERED_BOX_PAD_Y up from the item's own \
+             bottom edge: got {bottom_pad:?}"
+        );
+    }
+
+    /// The two new blocks carry the same block gap and bottom padding as the
+    /// existing `run` block — one block-shell form, not a second geometry.
+    #[gpui::test]
+    fn now_and_verdict_blocks_carry_the_shared_block_gap_and_bottom_padding(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = open_harness_full(cx, false, true);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+
+        let now_block = vcx
+            .debug_bounds("preview-block-now")
+            .expect("now block painted");
+        let now_heading = vcx
+            .debug_bounds("preview-heading-now")
+            .expect("now heading painted");
+        let now_item = vcx
+            .debug_bounds("preview-now-item")
+            .expect("now item painted");
+        let verdict_block = vcx
+            .debug_bounds("preview-block-verdict")
+            .expect("verdict block painted");
+        let verdict_heading = vcx
+            .debug_bounds("preview-heading-verdict")
+            .expect("verdict heading painted");
+        let status_row = vcx
+            .debug_bounds("preview-row-status")
+            .expect("status row painted");
+
+        assert!(
+            (now_item.size.width - now_block.size.width).abs() <= px(1.),
+            "the now item reaches the full width of its enclosing block, not a narrower \
+             child: item {:?}, block {:?}",
+            now_item.size.width,
+            now_block.size.width
+        );
+
+        let now_gap = now_item.origin.y - (now_heading.origin.y + now_heading.size.height);
+        assert!(
+            (now_gap - tokens::BLOCK_GAP).abs() <= px(1.),
+            "the now block's heading-to-item gap must be BLOCK_GAP: got {now_gap:?}"
+        );
+        let verdict_gap =
+            status_row.origin.y - (verdict_heading.origin.y + verdict_heading.size.height);
+        assert!(
+            (verdict_gap - tokens::BLOCK_GAP).abs() <= px(1.),
+            "the verdict block's heading-to-row gap must be BLOCK_GAP: got {verdict_gap:?}"
+        );
+
+        let now_bottom_gap = (now_block.origin.y + now_block.size.height)
+            - (now_item.origin.y + now_item.size.height);
+        assert!(
+            (now_bottom_gap - tokens::BLOCK_BOTTOM_PADDING).abs() <= px(1.),
+            "the now block's last-child-to-block-bottom gap must be exactly \
+             BLOCK_BOTTOM_PADDING: got {now_bottom_gap:?}"
+        );
+        // The fixture verdict block carries one blocker line, so the block's
+        // actual last child is `preview-blocker-0`, not the status row —
+        // measuring from the status row alone let a dropped bottom-padding
+        // regression pass (review-verdict-1 blocker
+        // `required-rendered-preview-evidence-missing`).
+        let last_blocker = vcx
+            .debug_bounds("preview-blocker-0")
+            .expect("blocker line painted");
+        assert!(
+            last_blocker.origin.y >= status_row.origin.y + status_row.size.height,
+            "the blocker line must sit below the status row: blocker {last_blocker:?}, \
+             status row {status_row:?}"
+        );
+        let verdict_bottom_gap = (verdict_block.origin.y + verdict_block.size.height)
+            - (last_blocker.origin.y + last_blocker.size.height);
+        assert!(
+            (verdict_bottom_gap - tokens::BLOCK_BOTTOM_PADDING).abs() <= px(1.),
+            "the verdict block's last-child-to-block-bottom gap must be exactly \
+             BLOCK_BOTTOM_PADDING, measured from the blocker line: got {verdict_bottom_gap:?}"
+        );
+    }
+
+    /// Direct colour-resolution proof (no window) that a live now item's
+    /// accent marker resolves through `role_color(StateRole::Accent)` and a
+    /// muted absence title resolves through `tokens::TEXT_MUTED` — the same
+    /// class of assertion `segment_color_resolves_...` makes for the run
+    /// block's rows.
+    #[test]
+    fn now_item_accent_marker_and_muted_title_resolve_through_the_shared_tables() {
+        assert_eq!(
+            role_color(crate::run_row::StateRole::Accent),
+            tokens::ACCENT
+        );
+
+        let muted = NowItem {
+            title: "no current frame".to_string(),
+            title_muted: true,
+            state_word: "running".to_string(),
+            state_role: crate::run_row::StateRole::Accent,
+            narration: "working on this frame now".to_string(),
+        };
+        assert_eq!(now_item_title_color(&muted), tokens::TEXT_MUTED);
+        assert_ne!(now_item_title_color(&muted), tokens::TEXT);
+
+        let served = NowItem {
+            title_muted: false,
+            ..muted
+        };
+        assert_eq!(now_item_title_color(&served), tokens::TEXT);
+    }
+
+    #[gpui::test]
+    fn verdict_block_renders_heading_status_row_and_blocker_line_in_order(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = open_harness_full(cx, false, true);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+
+        let heading = vcx
+            .debug_bounds("preview-heading-verdict")
+            .expect("verdict heading painted");
+        let status_row = vcx
+            .debug_bounds("preview-row-status")
+            .expect("status row painted");
+        let blocker = vcx
+            .debug_bounds("preview-blocker-0")
+            .expect("blocker line painted");
+
+        assert!(heading.origin.y < status_row.origin.y);
+        assert!(status_row.origin.y < blocker.origin.y);
     }
 }
