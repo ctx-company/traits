@@ -17,4 +17,5 @@ pub mod run_row;
 pub mod shell;
 pub mod spawn_form;
 pub mod spawn_view;
+pub mod title_bar_view;
 pub mod tokens;

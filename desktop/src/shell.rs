@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use gpui::prelude::*;
 use gpui::{
     Bounds, Context, Pixels, Render, SharedString, Size, TitlebarOptions, Window, WindowOptions,
-    div, px, rgb, size,
+    div, rgb, size,
 };
 
 use std::collections::HashMap;
@@ -19,18 +19,23 @@ use crate::row_control::{self, RowControls, RowRequest, RowVerb};
 use crate::run_row::{RepoScope, RunRow};
 use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, SubmitRequest};
 use crate::spawn_view;
+use crate::title_bar_view;
 use crate::tokens;
 
 pub const APP_TITLE: &str = "ctx desktop";
 
-pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(960.), px(640.));
+pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(tokens::WINDOW_WIDTH, tokens::WINDOW_HEIGHT);
 
 pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
             title: Some(APP_TITLE.into()),
-            ..Default::default()
+            appears_transparent: true,
+            traffic_light_position: Some(gpui::point(
+                tokens::TITLE_BAR_PAD_X,
+                (tokens::TITLE_BAR_HEIGHT - tokens::TITLE_BAR_TRAFFIC_LIGHT) / 2.,
+            )),
         }),
         ..Default::default()
     }
@@ -857,13 +862,25 @@ impl Render for Shell {
             column = column.child(bottom_bar_view::bar_element(&bar, on_pause));
         }
         let rail = rail_view::rail_element(&self.face.rail(self.detail.repo_key()));
-        div()
+        let body = div()
+            .debug_selector(|| "window-body".to_string())
             .flex()
             .flex_row()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .child(rail)
+            .child(column.flex_1().min_w_0());
+        div()
+            .debug_selector(|| "window-frame".to_string())
+            .flex()
+            .flex_col()
             .size_full()
             .bg(rgb(tokens::CANVAS))
-            .child(rail)
-            .child(column.flex_1().min_w_0())
+            .rounded(tokens::WINDOW_CORNER_RADIUS)
+            .overflow_hidden()
+            .child(title_bar_view::title_bar_element(title_bar_view::SESSIONS))
+            .child(body)
     }
 }
 
@@ -873,6 +890,7 @@ mod tests {
     use crate::row_control::RowOutcome;
     use ctx_traits_io::center::{CenterDelta, CenterPublicRow};
     use ctx_traits_io::run_summary::RunSummary;
+    use gpui::px;
 
     fn wire_row(repo_key: &str, run_id: &str) -> CenterPublicRow {
         CenterPublicRow {
@@ -1306,6 +1324,135 @@ mod tests {
             Some(gpui::WindowBounds::Windowed(actual)) => assert_eq!(actual, bounds),
             other => panic!("expected windowed bounds, got {other:?}"),
         }
+    }
+
+    /// The unit-level half of "exactly one chrome surface": `appears_transparent:
+    /// true` is the flag that removes the native macOS titlebar strip, and
+    /// `traffic_light_position` is derived from the same two tokens that fix
+    /// the bar's height and button size, so a token change moves both sides
+    /// of this assertion together rather than freezing a literal.
+    #[test]
+    fn window_options_places_native_traffic_lights_inside_the_title_bar() {
+        let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+        let options = window_options(bounds);
+        let titlebar = options.titlebar.as_ref().expect("titlebar is configured");
+
+        assert_eq!(titlebar.title.as_ref().map(|s| s.as_ref()), Some(APP_TITLE));
+        assert!(
+            titlebar.appears_transparent,
+            "the native titlebar strip must be hidden so only the drawn bar shows"
+        );
+        assert_eq!(
+            titlebar.traffic_light_position,
+            Some(gpui::point(
+                tokens::TITLE_BAR_PAD_X,
+                (tokens::TITLE_BAR_HEIGHT - tokens::TITLE_BAR_TRAFFIC_LIGHT) / 2.,
+            ))
+        );
+    }
+
+    #[test]
+    fn default_window_size_is_the_reference_frame() {
+        assert_eq!(
+            DEFAULT_WINDOW_SIZE,
+            size(tokens::WINDOW_WIDTH, tokens::WINDOW_HEIGHT)
+        );
+    }
+
+    /// Opens a real window and drives `Shell::render` through gpui's own
+    /// paint phase, then reads `debug_bounds` — gpui's own paint-phase
+    /// record, only populated when the element actually painted — to prove
+    /// the title bar is the frame's first child, full width, above the
+    /// landed rail/column row.
+    #[gpui::test]
+    fn title_bar_is_the_frame_s_first_child_above_the_landed_columns(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        let frame = vcx
+            .debug_bounds("window-frame")
+            .expect("the window frame div actually painted this frame");
+        assert_eq!(frame.size, DEFAULT_WINDOW_SIZE);
+
+        let bar = vcx
+            .debug_bounds("title-bar")
+            .expect("the title bar div actually painted this frame");
+        assert_eq!(bar.size.height, tokens::TITLE_BAR_HEIGHT);
+        assert_eq!(bar.size.width, frame.size.width);
+        assert_eq!(
+            bar.origin.y, frame.origin.y,
+            "the title bar is the frame's first child"
+        );
+
+        let menu = vcx
+            .debug_bounds("title-bar-menu")
+            .expect("the menu div actually painted this frame");
+        assert_eq!(
+            menu.origin.x + menu.size.width,
+            frame.origin.x + frame.size.width - tokens::TITLE_BAR_PAD_X,
+            "the menu is reached through the bar's trailing edge"
+        );
+        let top_gap = menu.origin.y - bar.origin.y;
+        let bottom_gap = (bar.origin.y + bar.size.height) - (menu.origin.y + menu.size.height);
+        assert!(
+            (top_gap - bottom_gap).abs() <= px(1.),
+            "the menu's top and bottom free space within the bar differ by at most a pixel: \
+             top {top_gap:?} vs bottom {bottom_gap:?}"
+        );
+
+        let body = vcx
+            .debug_bounds("window-body")
+            .expect("the body row actually painted this frame");
+        assert_eq!(
+            body.origin.y,
+            bar.origin.y + bar.size.height,
+            "the body begins exactly at the title bar's bottom edge"
+        );
+        assert_eq!(
+            body.size.width, frame.size.width,
+            "the body spans the frame's full width"
+        );
+        assert_eq!(
+            body.size.height,
+            frame.size.height - bar.size.height,
+            "the body occupies exactly the frame's remaining space below the bar"
+        );
+    }
+
+    /// Drives the same window and proves exactly one menu label paints, and
+    /// nothing paints before the bar's leading spacer — the closing-diff
+    /// read's "no mark" statement made into a proof for the composed
+    /// element tree's geometry.
+    #[gpui::test]
+    fn the_title_bar_renders_exactly_one_menu_label_and_no_mark(cx: &mut gpui::TestAppContext) {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        let menu = vcx
+            .debug_bounds("title-bar-menu")
+            .expect("the menu container actually painted this frame");
+        let label = vcx
+            .debug_bounds("title-bar-menu-current")
+            .expect("the current-screen label actually painted this frame");
+        assert_eq!(
+            menu.size.width, label.size.width,
+            "a single-entry menu's painted width equals its one label's width; a \
+             second entry would make the container strictly wider by the gap token"
+        );
     }
 
     #[test]

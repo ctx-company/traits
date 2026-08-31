@@ -3,7 +3,7 @@ key = "0265.9"
 title = "Render the title bar and screen menu"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome and what decides it, plus what it excludes. The
 APPROACH section is the architect's suggested route — discovery order, file and
@@ -150,8 +150,8 @@ here. Second, the existing TUI `Screen` enum is CLI-private, holds
 (`modules/cli/src/app/dashboard.rs:167-195`), and the parent forbids importing
 CLI-private rendering types into the desktop (`0265:61-63`). Desktop navigation
 stays desktop-local and contains only screens that exist.
-'''
-scope = '''
+"""
+scope = """
 ## GOALS — binding
 
 1. **One frame, one title bar, above the columns that already landed.** The
@@ -429,8 +429,8 @@ one red command and preserve every invariant named under Excluded.
   surface (`0259`).
 - Anything discovered beyond these goals: that is board material, not a cell
   here.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **The export is measurement; the rules and the screen docs are the
@@ -541,19 +541,20 @@ failed command and every command after
 it in that order. If a second round would be needed, stop and report the exact
 failing command with its evidence, or the unresolved visual contract, rather
 than iterating. That is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
-parent = "0265"
 depends-on = ["0265.8"]
+parent = "0265"
 
 [[checks]]
 name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
-expect = "gpui absent from root resolution and lockfile"
+command = """m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc"""
 timeout-ms = 600000
+expect = "gpui absent from root resolution and lockfile"
 
 [[checks]]
 name = "per-round workspace gate remains green"
 command = "CARGO_TARGET_DIR=target just test"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
