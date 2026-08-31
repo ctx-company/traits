@@ -195,8 +195,15 @@ pub const BOTTOM_BAR_BORDER: Pixels = px(1.);
 /// the work summary for the corresponding owner correction.
 pub const BOTTOM_BAR_GAP: Pixels = px(8.);
 
-// bottom fade
+// bottom fade — height and opaque stop are recorded at `tokens.md:84`
+// ("bottom fade | h 100, full pane width, stops: canvas-alpha 0 -> opaque at
+// 0.8 -> 1"). The angle and the label's bottom padding are export-only
+// geometry (`reference/sessions.html:575-577,620-630`) `tokens.md` does not
+// record, same owner-correction class `FRAME_ROW_*` above already carries.
 pub const BOTTOM_FADE_HEIGHT: Pixels = px(100.);
+pub const BOTTOM_FADE_OPAQUE_STOP: f32 = 0.8;
+pub const BOTTOM_FADE_ANGLE_DEG: f32 = 180.;
+pub const BOTTOM_FADE_LABEL_PAD_BOTTOM: Pixels = px(12.);
 
 // loop-narration line and activity block — export-only geometry
 // (`reference/sessions.html:349-359, 460-511`) `tokens.md` does not record,

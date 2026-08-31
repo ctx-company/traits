@@ -8,6 +8,7 @@ pub mod detail_view;
 pub mod fonts;
 pub mod frame_list;
 pub mod frame_list_view;
+pub mod overflow_fade;
 pub mod placeholders;
 pub mod row_control;
 pub mod run_row;

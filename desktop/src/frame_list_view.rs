@@ -298,6 +298,74 @@ pub fn frame_list_element(list: &FrameList) -> AnyElement {
     column.into_any_element()
 }
 
+/// One live run whose sequence carries a done, a pending, a rejected
+/// (failed), and a current item, in that order — so `FrameList::rows()`
+/// contains all four row forms in a single list. `pub(crate)` and lifted out
+/// of `mod tests` so `overflow_fade.rs`'s runtime proofs can drive the
+/// container with real `FrameList` content instead of copying the fixture.
+#[cfg(test)]
+pub(crate) fn session_with_all_four_forms() -> ctx_traits_core::procedure::session::Session {
+    serde_json::from_value(serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": "session-fixture",
+        "run-id": "run-fixture",
+        "trait-id": "fixture-trait",
+        "current-run-index": 0,
+        "status": "awaiting-agent-output",
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "frame-list-view-fixture"},
+            "state-source": "test",
+        },
+        "active-path": [{"kind": "procedure", "id": "item-current", "index": 0}],
+        "ledger": {
+            "run-id": "run-fixture",
+            "trait-id": "fixture-trait",
+            "current-run-index": 0,
+            "final-state": "running",
+            "sequence-statuses": [
+                {
+                    "sequence-index": 0,
+                    "run-index": 0,
+                    "item-id": "item-done",
+                    "title": "Done item",
+                    "status": "accepted",
+                    "reason": "",
+                    "position-path": [],
+                },
+                {
+                    "sequence-index": 1,
+                    "run-index": 0,
+                    "item-id": "item-pending",
+                    "title": "Pending item",
+                    "status": "pending",
+                    "reason": "",
+                    "position-path": [],
+                },
+                {
+                    "sequence-index": 2,
+                    "run-index": 0,
+                    "item-id": "item-rejected",
+                    "title": "Rejected item",
+                    "status": "rejected",
+                    "reason": "",
+                    "position-path": [],
+                },
+                {
+                    "sequence-index": 3,
+                    "run-index": 0,
+                    "item-id": "item-current",
+                    "title": "Current item",
+                    "status": "ready",
+                    "reason": "",
+                    "position-path": [],
+                },
+            ],
+        },
+        "state-digest": "sha256:fixture",
+    }))
+    .expect("fixture session")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,71 +399,6 @@ mod tests {
                     "reason": "",
                     "position-path": [],
                 }],
-            },
-            "state-digest": "sha256:fixture",
-        }))
-        .expect("fixture session")
-    }
-
-    /// One live run whose sequence carries a done, a pending, a rejected
-    /// (failed), and a current item, in that order — so `FrameList::rows()`
-    /// contains all four row forms in a single list.
-    fn session_with_all_four_forms() -> Session {
-        serde_json::from_value(serde_json::json!({
-            "schema-version": "0.1.0",
-            "session-id": "session-fixture",
-            "run-id": "run-fixture",
-            "trait-id": "fixture-trait",
-            "current-run-index": 0,
-            "status": "awaiting-agent-output",
-            "provenance": {
-                "started-by": {"surface": "test", "caller": "frame-list-view-fixture"},
-                "state-source": "test",
-            },
-            "active-path": [{"kind": "procedure", "id": "item-current", "index": 0}],
-            "ledger": {
-                "run-id": "run-fixture",
-                "trait-id": "fixture-trait",
-                "current-run-index": 0,
-                "final-state": "running",
-                "sequence-statuses": [
-                    {
-                        "sequence-index": 0,
-                        "run-index": 0,
-                        "item-id": "item-done",
-                        "title": "Done item",
-                        "status": "accepted",
-                        "reason": "",
-                        "position-path": [],
-                    },
-                    {
-                        "sequence-index": 1,
-                        "run-index": 0,
-                        "item-id": "item-pending",
-                        "title": "Pending item",
-                        "status": "pending",
-                        "reason": "",
-                        "position-path": [],
-                    },
-                    {
-                        "sequence-index": 2,
-                        "run-index": 0,
-                        "item-id": "item-rejected",
-                        "title": "Rejected item",
-                        "status": "rejected",
-                        "reason": "",
-                        "position-path": [],
-                    },
-                    {
-                        "sequence-index": 3,
-                        "run-index": 0,
-                        "item-id": "item-current",
-                        "title": "Current item",
-                        "status": "ready",
-                        "reason": "",
-                        "position-path": [],
-                    },
-                ],
             },
             "state-digest": "sha256:fixture",
         }))

@@ -11,6 +11,7 @@ use crate::detail::FollowState;
 use crate::detail_tree::DetailTree;
 use crate::frame_list::FrameList;
 use crate::frame_list_view::frame_list_element;
+use crate::overflow_fade::clipped_with_overflow_fade;
 
 fn header_element(tree: &DetailTree) -> AnyElement {
     let header = &tree.header;
@@ -51,9 +52,10 @@ pub fn detail_element(tree: &DetailTree) -> AnyElement {
         .id("detail-pane")
         .flex()
         .flex_col()
+        .size_full()
         .gap_1()
         .child(header_element(tree))
-        .child(frame_list_element(&list))
+        .child(clipped_with_overflow_fade(frame_list_element(&list)))
         .into_any_element()
 }
 

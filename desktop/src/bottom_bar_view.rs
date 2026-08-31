@@ -79,6 +79,11 @@ pub fn bar_element(bar: &BottomBar, on_pause: Option<BarActionHandler>) -> AnyEl
 
     div()
         .id("bottom-bar")
+        // `debug_selector` is a gpui-provided no-op outside test/test-support
+        // builds; it lets a composition proof read this element's actual
+        // painted bounds via `VisualTestContext::debug_bounds` instead of a
+        // caller-recomputed proxy.
+        .debug_selector(|| "bottom-bar".to_string())
         .w_full()
         .flex()
         .flex_row()
