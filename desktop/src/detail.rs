@@ -1190,6 +1190,43 @@ mod tests {
         );
     }
 
+    /// Review-verdict-1 blocker `seed-pending-activity-replay-duplicates-line`,
+    /// exercised end to end through `RunDetail::apply`: the seed's newest
+    /// `Activity` record races the seed read and is buffered live, then
+    /// replayed against the seed's own historical fold once the seed lands.
+    /// The accepted tree must show exactly one visible activity line for it,
+    /// not the seed's line plus a live duplicate — mirroring the
+    /// ActivityOverlay-level coverage of the ambiguous and distinct-payload
+    /// cases in `detail_tree`'s test module.
+    #[test]
+    fn seed_pending_overlap_shows_one_activity_line_not_a_duplicate() {
+        let mut detail = RunDetail::default();
+        let request = detail
+            .select(&row("repo-a", "/repo-a/run.json", "run-a"))
+            .unwrap();
+        let wire = wire_row("repo-a", "/repo-a/run.json", "run-a", true, 0);
+
+        // The seed's own newest record races the seed read and is buffered
+        // live while the load is still in flight — a genuine redelivery.
+        let outcome = detail.follow(&activity_delta(&wire, activity(1_000, "the-frame", 1)));
+        assert!(
+            !outcome.changed,
+            "a buffered record has nothing to show yet"
+        );
+
+        let seed_records = [activity(1_000, "the-frame", 1)];
+        let mut seeded_baseline = baseline(session_with_active_frame("run-a", "the-frame"));
+        seeded_baseline.activity_overlay = ActivityOverlay::from_records(&seed_records);
+        assert!(detail.apply(request.generation, Ok(seeded_baseline)));
+
+        let tree = detail.tree().unwrap();
+        assert_eq!(
+            tree.roots[0].activity_lines.len(),
+            1,
+            "a seed/pending replay of the same occurrence must not duplicate its line"
+        );
+    }
+
     #[test]
     fn down_marks_stale_a_delta_while_stale_is_dropped_and_a_recovery_snapshot_resyncs_once() {
         let mut detail = RunDetail::default();

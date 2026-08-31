@@ -18,6 +18,7 @@ use crate::tokens::{FONT_MONO, FONT_SANS};
 
 const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf");
 const MONO_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
+const MONO_ITALIC: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Italic.ttf");
 
 /// A family name that cannot exist. Used by [`verify_family_resolves`] as a
 /// negative control: a family that fell through to gpui's fallback stack
@@ -44,6 +45,7 @@ pub fn register(cx: &App) -> Result<(), String> {
         .add_fonts(vec![
             Cow::Borrowed(SANS_REGULAR),
             Cow::Borrowed(MONO_REGULAR),
+            Cow::Borrowed(MONO_ITALIC),
         ])
         .map_err(|error| error.to_string())
 }
@@ -98,5 +100,25 @@ pub fn verify_family_resolves(
 pub fn verify_bundled(cx: &App) -> Result<(), String> {
     verify_family_resolves(cx, FONT_SANS, FONT_MONO)?;
     verify_family_resolves(cx, FONT_MONO, FONT_SANS)?;
+    verify_italic_bundled(cx)?;
+    Ok(())
+}
+
+/// `verify_family_resolves`/`verify_bundled` above prove the *family* is
+/// bundled, but family membership cannot see a style — CoreText will
+/// silently synthesize an oblique for a missing italic weight, which this
+/// task treats as a failure, not a fallback. The discriminator: an italic
+/// query for the bundled mono family must resolve to a different `FontId`
+/// than the upright query for that same family, proving a real italic face
+/// (not a synthesized slant of the regular face) was registered.
+pub fn verify_italic_bundled(cx: &App) -> Result<(), String> {
+    let text_system = cx.text_system();
+    let upright_id = text_system.resolve_font(&font(FONT_MONO));
+    let italic_id = text_system.resolve_font(&font(FONT_MONO).italic());
+    if upright_id == italic_id {
+        return Err(format!(
+            "{FONT_MONO} italic resolved to the same FontId as upright — the italic face did not register and CoreText is synthesizing an oblique instead"
+        ));
+    }
     Ok(())
 }

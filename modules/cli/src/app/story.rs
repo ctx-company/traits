@@ -28,18 +28,14 @@ use crate::app::tui::{self, Line, Tone, write_plain_line as w};
 
 /// Formats a persisted step title for human-facing output. Only loop control
 /// segments own round numbers; item and other control segments may repeat an
-/// iteration field for unrelated bookkeeping.
+/// iteration field for unrelated bookkeeping. The derivation itself lives in
+/// `ctx_traits_core::procedure::runtime` so the desktop's loop-narration line
+/// consumes the same loop-only, plus-one, nested-preserving semantics.
 pub(crate) fn format_step_title(title: &str, position_path: &[PathSegment]) -> String {
-    let rounds = position_path
-        .iter()
-        .filter(|segment| segment.kind == "loop")
-        .filter_map(|segment| segment.iteration)
-        .map(|iteration| iteration.saturating_add(1).to_string())
-        .collect::<Vec<_>>();
-    if rounds.is_empty() {
-        title.to_string()
-    } else {
-        format!("{title} ({})", rounds.join("/"))
+    use ctx_traits_core::procedure::runtime::{loop_rounds, loop_rounds_label};
+    match loop_rounds_label(&loop_rounds(position_path)) {
+        Some(label) => format!("{title} ({label})"),
+        None => title.to_string(),
     }
 }
 
@@ -220,12 +216,16 @@ pub(crate) fn load_activity(
     let mut step_summaries = Vec::new();
     let mut narrations = Vec::new();
     for record in records {
+        if let Some((at_epoch_ms, event)) = record.as_activity() {
+            events.push(ctx_traits_core::procedure::story::TimedActivityEvent {
+                at_epoch_ms,
+                event: event.clone(),
+            });
+            continue;
+        }
         match record {
-            ctx_traits_io::activity_sidecar::ActivityRecord::Activity { at_epoch_ms, event } => {
-                events.push(ctx_traits_core::procedure::story::TimedActivityEvent {
-                    at_epoch_ms,
-                    event,
-                });
+            ctx_traits_io::activity_sidecar::ActivityRecord::Activity { .. } => {
+                unreachable!("Activity records are routed above via ActivityRecord::as_activity")
             }
             ctx_traits_io::activity_sidecar::ActivityRecord::StepSummary {
                 at_epoch_ms,

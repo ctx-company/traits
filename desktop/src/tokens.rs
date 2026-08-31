@@ -198,6 +198,24 @@ pub const BOTTOM_BAR_GAP: Pixels = px(8.);
 // bottom fade
 pub const BOTTOM_FADE_HEIGHT: Pixels = px(100.);
 
+// loop-narration line and activity block — export-only geometry
+// (`reference/sessions.html:349-359, 460-511`) `tokens.md` does not record,
+// same owner-correction class `FRAME_ROW_*` above already carries.
+pub const LOOP_NARRATION_PAD_TOP: Pixels = px(8.);
+pub const LOOP_NARRATION_PAD_BOTTOM: Pixels = px(2.);
+
+/// reference/sessions.html:464-511 — positional, by visible index. The
+/// newest line carries no opacity property in the export (default 1.0).
+pub const ACTIVITY_FADE_OPACITY: [f32; 8] = [1.0, 0.93, 0.86, 0.79, 0.72, 0.65, 0.55, 0.45];
+pub const ACTIVITY_LINE_CAP: usize = ACTIVITY_FADE_OPACITY.len();
+pub const ACTIVITY_BLOCK_GAP: Pixels = px(3.);
+pub const ACTIVITY_BLOCK_PAD_TOP: Pixels = px(4.);
+pub const ACTIVITY_BLOCK_PAD_RIGHT: Pixels = px(12.);
+pub const ACTIVITY_BLOCK_PAD_BOTTOM: Pixels = px(6.);
+/// `LIST_ROW_PAD_X_MAX + LIST_ROW_DOT_SIZE + ROW_DOT_TEXT_GAP_MIN` — asserted
+/// equal to that sum in a unit test below (`Pixels` addition is not `const`).
+pub const ACTIVITY_BLOCK_PAD_LEFT: Pixels = px(27.);
+
 // rail divider
 pub const RAIL_DIVIDER_WIDTH: Pixels = px(32.);
 pub const RAIL_DIVIDER_HEIGHT: Pixels = px(1.);
@@ -205,3 +223,16 @@ pub const RAIL_DIVIDER_PAD_Y_MIN: Pixels = px(12.);
 pub const RAIL_DIVIDER_PAD_Y_MAX: Pixels = px(14.);
 pub const RAIL_DIVIDER_PAD_X_MIN: Pixels = px(16.);
 pub const RAIL_DIVIDER_PAD_X_MAX: Pixels = px(18.);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_block_pad_left_matches_the_current_row_s_dot_and_gap() {
+        assert_eq!(
+            ACTIVITY_BLOCK_PAD_LEFT,
+            LIST_ROW_PAD_X_MAX + LIST_ROW_DOT_SIZE + ROW_DOT_TEXT_GAP_MIN
+        );
+    }
+}

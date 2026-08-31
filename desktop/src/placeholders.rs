@@ -20,3 +20,11 @@ pub const WATCH_RAW: Placeholder = Placeholder { label: "watch raw" };
 pub const CURRENT_FRAME_INTENT: Placeholder = Placeholder {
     label: "working on this frame",
 };
+
+/// `screens/sessions.md:22-24` tags this leaf `data: loop marker exists;
+/// copy phrasing placeholder:`. The round(s) are data and pass through;
+/// only the sentence around them is the placeholder. Neutral phrasing,
+/// never the export's example sentence.
+pub fn loop_round_narration(rounds: &str) -> String {
+    format!("round {rounds} — the loop runs again")
+}

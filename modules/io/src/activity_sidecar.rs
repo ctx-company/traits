@@ -64,6 +64,17 @@ impl ActivityRecord {
             ActivityRecord::Narration { at_epoch_ms, .. } => *at_epoch_ms,
         }
     }
+
+    /// The one home for "which record is agent activity" — `Some` only for
+    /// `Activity`, so a consumer filtering `StepSummary`/`SessionTitle`/
+    /// `Narration` out of a rendered line has a single accessor to call
+    /// rather than matching the variant itself at each call site.
+    pub fn as_activity(&self) -> Option<(u64, &ActivityEvent)> {
+        match self {
+            ActivityRecord::Activity { at_epoch_ms, event } => Some((*at_epoch_ms, event)),
+            _ => None,
+        }
+    }
 }
 
 /// Sidecar path for a ledger: `<ledger>.json` -> `<ledger>.json.activity.jsonl`.
@@ -269,6 +280,37 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert!(matches!(records[0], ActivityRecord::Activity { .. }));
         assert!(matches!(records[1], ActivityRecord::StepSummary { .. }));
+    }
+
+    #[test]
+    fn as_activity_returns_the_stamp_and_event_only_for_the_activity_variant() {
+        let event = fixture_event(1);
+        let activity = ActivityRecord::Activity {
+            at_epoch_ms: 42,
+            event: event.clone(),
+        };
+        assert_eq!(activity.as_activity(), Some((42, &event)));
+
+        let step_summary = ActivityRecord::StepSummary {
+            at_epoch_ms: 1,
+            key: "frame-1".to_string(),
+            role: "agent:worker".to_string(),
+            text: "did the thing".to_string(),
+        };
+        assert_eq!(step_summary.as_activity(), None);
+
+        let session_title = ActivityRecord::SessionTitle {
+            at_epoch_ms: 1,
+            title: "a title".to_string(),
+        };
+        assert_eq!(session_title.as_activity(), None);
+
+        let narration = ActivityRecord::Narration {
+            at_epoch_ms: 1,
+            frame_id: "frame-1".to_string(),
+            text: "a narration".to_string(),
+        };
+        assert_eq!(narration.as_activity(), None);
     }
 
     #[test]

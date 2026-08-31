@@ -414,19 +414,12 @@ fn paint(tone: Tone, text: &str) -> String {
     }
 }
 
-const PASSTHROUGH_PREVIEW_CHARS: usize = 100;
-
 /// Wrap a raw model text delta as a one-line quoted preview for the passthrough
 /// panel: control characters collapsed to spaces, head-truncated with an ellipsis.
+/// Delegates to `ctx_traits_core::text`, the shared home the desktop consumes
+/// too — see that module for the actual sanitizing rules.
 pub(crate) fn quote_line(text: &str) -> String {
-    let cleaned = clean_live_text(text);
-    let trimmed = cleaned.trim();
-    let preview: String = trimmed.chars().take(PASSTHROUGH_PREVIEW_CHARS).collect();
-    if preview.chars().count() < trimmed.chars().count() {
-        format!("\"{preview}…\"")
-    } else {
-        format!("\"{preview}\"")
-    }
+    ctx_traits_core::text::quote_line(text)
 }
 
 fn summary_lines(state: &LiveOutputState) -> Vec<Line> {
@@ -566,92 +559,10 @@ fn trim_buffer(buffer: &mut String, max_bytes: usize) {
     buffer.drain(..start);
 }
 
+/// Delegates to `ctx_traits_core::text` — see that module for the actual
+/// ANSI/control/bidi sanitizing rules, shared with the desktop.
 pub(crate) fn clean_live_text(line: &str) -> String {
-    strip_ansi_sequences(line)
-        .chars()
-        .map(|ch| {
-            if ch.is_control() || is_bidi_format_control(ch) {
-                ' '
-            } else {
-                ch
-            }
-        })
-        .collect()
-}
-
-/// True for Unicode `Cf`-category bidirectional-formatting controls (the
-/// explicit embedding/override/isolate marks and the directional marks).
-/// These are not C0/C1 control codes and are not touched by
-/// `char::is_control`, but a terminal still honors them and can use them to
-/// visually reorder or mask surrounding text (e.g. `U+202E RIGHT-TO-LEFT
-/// OVERRIDE`), so any text reaching a terminal via [`clean_live_text`] must
-/// have them stripped alongside ANSI/control sequences.
-fn is_bidi_format_control(ch: char) -> bool {
-    matches!(
-        ch,
-        '\u{200E}' | '\u{200F}' // LRM, RLM
-            | '\u{061C}' // ALM (Arabic Letter Mark)
-            | '\u{202A}'..='\u{202E}' // LRE, RLE, PDF, LRO, RLO
-            | '\u{2066}'..='\u{2069}' // LRI, RLI, FSI, PDI
-    )
-}
-
-fn strip_ansi_sequences(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut output = String::with_capacity(input.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != 0x1b {
-            let Some(ch) = input[index..].chars().next() else {
-                break;
-            };
-            output.push(ch);
-            index += ch.len_utf8();
-            continue;
-        }
-        index += 1;
-        match bytes.get(index).copied() {
-            Some(b'[') => {
-                index += 1;
-                while index < bytes.len() {
-                    let byte = bytes[index];
-                    index += 1;
-                    if (0x40..=0x7e).contains(&byte) {
-                        break;
-                    }
-                }
-            }
-            Some(b']') => {
-                index += 1;
-                while index < bytes.len() {
-                    match bytes[index] {
-                        0x07 => {
-                            index += 1;
-                            break;
-                        }
-                        0x1b if bytes.get(index + 1) == Some(&b'\\') => {
-                            index += 2;
-                            break;
-                        }
-                        _ => index += 1,
-                    }
-                }
-            }
-            Some(b'P' | b'^' | b'_') => {
-                index += 1;
-                while index < bytes.len() {
-                    if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
-                        index += 2;
-                        break;
-                    }
-                    index += 1;
-                }
-            }
-            Some(_) => index += 1,
-            None => {}
-        }
-    }
-    output
+    ctx_traits_core::text::clean_live_text(line)
 }
 
 fn truncate_display_width(line: &str, max_width: usize) -> String {

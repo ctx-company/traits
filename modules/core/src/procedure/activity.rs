@@ -135,6 +135,46 @@ pub struct ActivityEvent {
     pub rate_limit: Option<RateLimitObservation>,
 }
 
+/// Human-facing label for an `ActivityKind`, shared between the CLI's
+/// fallback tail (`ctx_traits_cli::app::run_view::projection`) and the
+/// desktop's activity block so both name the same closed set of kinds the
+/// same way.
+pub fn activity_kind_label(kind: &ActivityKind) -> &'static str {
+    match kind {
+        ActivityKind::Dispatching => "dispatching",
+        ActivityKind::Thinking => "thinking",
+        ActivityKind::RunningTool => "running tool",
+        ActivityKind::StreamingOutput => "streaming output",
+        ActivityKind::ValidatingOutput => "validating output",
+        ActivityKind::Retrying => "retrying",
+        ActivityKind::Stalled => "stalled",
+        ActivityKind::Compacting => "compacting",
+        ActivityKind::NoActivityReported => "no activity reported",
+        ActivityKind::RateLimited => "rate limited",
+    }
+}
+
+/// One line of rendered agent activity for `event`: quoted agent text for
+/// `Thinking`/`StreamingOutput`, the tool label (never raw tool-input JSON)
+/// for `RunningTool`, and the kind label otherwise. The exact semantics the
+/// CLI's `activity_event_fallback_tail` (`run_view/projection.rs`) already
+/// holds, extracted here so the desktop's activity block renders the same
+/// text rather than forking a third formatter.
+pub fn activity_event_line(event: &ActivityEvent) -> String {
+    match event.kind {
+        ActivityKind::StreamingOutput | ActivityKind::Thinking => event
+            .text
+            .as_deref()
+            .map(crate::text::quote_line)
+            .unwrap_or_else(|| activity_kind_label(&event.kind).to_string()),
+        ActivityKind::RunningTool => event
+            .tool
+            .clone()
+            .unwrap_or_else(|| activity_kind_label(&event.kind).to_string()),
+        _ => activity_kind_label(&event.kind).to_string(),
+    }
+}
+
 /// The latest event available for a frame, suitable for live surfaces.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]

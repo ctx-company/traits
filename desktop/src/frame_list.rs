@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use ctx_traits_core::procedure::activity::SessionState;
+use ctx_traits_core::procedure::activity::{SessionState, activity_event_line};
 
 use crate::detail_tree::{DetailNode, DetailTree, FrameState};
 use crate::placeholders;
@@ -125,24 +125,45 @@ fn frame_state_presentation(state: FrameState) -> StatePresentation {
     }
 }
 
+/// The block painted beneath the current row — see the module-level "Two
+/// live leaves" doc in `0265.6`'s task file. `role` is the current row's
+/// durable role mapping (`DetailHeader.current_agent_role`), never a literal
+/// or `ActivityEvent.frame_id`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityBlock {
+    pub role: Option<String>,
+    pub lines: Vec<String>,
+}
+
 /// A flattened, form-decided view of a [`DetailTree`]'s frame list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameList {
     rows: Vec<FrameRow>,
     selected: Option<usize>,
+    /// Narration lines painted before `rows()[index]`. The index and phrase
+    /// come from the projected loop-group node's own evidence, never from
+    /// row adjacency or a label change.
+    narrations: Vec<(usize, String)>,
+    /// The block painted beneath the current row, if the current node
+    /// carries any retained activity lines.
+    activity: Option<ActivityBlock>,
 }
 
 impl FrameList {
     /// Build the list from a projected [`DetailTree`]. Pure: no gpui types,
     /// no IO.
     pub fn from_tree(tree: &DetailTree) -> Self {
-        let mut rows = Vec::new();
-        let mut selected = None;
+        let mut state = PushState::default();
         let live = tree.header.run_state == SessionState::Running;
         for root in &tree.roots {
-            push_node(root, 0, tree, live, &mut rows, &mut selected);
+            push_node(root, 0, tree, live, &mut state);
         }
-        FrameList { rows, selected }
+        FrameList {
+            rows: state.rows,
+            selected: state.selected,
+            narrations: state.narrations,
+            activity: state.activity,
+        }
     }
 
     pub fn rows(&self) -> &[FrameRow] {
@@ -158,6 +179,24 @@ impl FrameList {
     pub fn is_bright(&self, index: usize) -> bool {
         self.selected == Some(index)
     }
+
+    /// Every narration phrase painted before `rows()[index]`, in the order
+    /// the shared projection supplied them — outermost boundary first, then
+    /// each cumulative inner boundary that flattens to the same row index.
+    /// A row index can carry more than one marker (a directly nested loop
+    /// whose child precedes any row-producing sibling), so this returns all
+    /// of them rather than the first.
+    pub fn narration_before(&self, index: usize) -> Vec<&str> {
+        self.narrations
+            .iter()
+            .filter(|(at, _)| *at == index)
+            .map(|(_, text)| text.as_str())
+            .collect()
+    }
+
+    pub fn activity_block(&self) -> Option<&ActivityBlock> {
+        self.activity.as_ref()
+    }
 }
 
 fn group_title(node: &DetailNode) -> String {
@@ -170,14 +209,36 @@ fn group_title(node: &DetailNode) -> String {
     label
 }
 
-fn push_node(
-    node: &DetailNode,
-    depth: usize,
-    tree: &DetailTree,
-    live: bool,
-    rows: &mut Vec<FrameRow>,
-    selected: &mut Option<usize>,
-) {
+/// Bundles `push_node`'s accumulators (row/selection/narration/activity
+/// output) into one `&mut` parameter — otherwise the function's argument
+/// count would exceed clippy's `too_many_arguments` ceiling.
+#[derive(Default)]
+struct PushState {
+    rows: Vec<FrameRow>,
+    selected: Option<usize>,
+    narrations: Vec<(usize, String)>,
+    activity: Option<ActivityBlock>,
+}
+
+fn push_node(node: &DetailNode, depth: usize, tree: &DetailTree, live: bool, out: &mut PushState) {
+    if let Some(label) = &node.narration_marker {
+        // A loop-iteration group's `narration_marker` (set once, by the
+        // shared projection's `resolve_narration_markers`, at exactly the
+        // innermost boundary of its lineage) emits a narration placement in
+        // place of its `RowForm::Group` row (parent `0265:38`'s design has
+        // no iteration row here — see the work summary's owner correction),
+        // then recurses into its children as before, keeping their depth
+        // nested exactly as it was under the group row. No `kind` test and
+        // no child-adjacency inference lives here — the projection already
+        // decided which node is the boundary and joined its rounds.
+        out.narrations
+            .push((out.rows.len(), placeholders::loop_round_narration(label)));
+        for child in &node.children {
+            push_node(child, depth + 1, tree, live, out);
+        }
+        return;
+    }
+
     let row = if node.state == FrameState::Structural {
         FrameRow {
             depth,
@@ -189,7 +250,7 @@ fn push_node(
         }
     } else if node.current {
         if live {
-            *selected = Some(rows.len());
+            out.selected = Some(out.rows.len());
             let state = session_state_presentation(tree.header.run_state);
             FrameRow {
                 depth,
@@ -264,9 +325,19 @@ fn push_node(
             FrameState::Structural => unreachable!("handled above"),
         }
     };
-    rows.push(row);
+    if row.form == RowForm::Current && !node.activity_lines.is_empty() {
+        out.activity = Some(ActivityBlock {
+            role: tree.header.current_agent_role.clone(),
+            lines: node
+                .activity_lines
+                .iter()
+                .map(activity_event_line)
+                .collect(),
+        });
+    }
+    out.rows.push(row);
     for child in &node.children {
-        push_node(child, depth + 1, tree, live, rows, selected);
+        push_node(child, depth + 1, tree, live, out);
     }
 }
 
@@ -607,8 +678,12 @@ mod tests {
 
     #[test]
     fn a_structural_group_row_has_no_dot_and_no_right_side() {
-        let mut statuses = vec![status("the-loop", "The loop", "pending")];
-        let loop_child = serde_json::json!({
+        // A `for-each` item group still renders `RowForm::Group` — only a
+        // `loop` group is replaced by the narration line (goal 1/12); this
+        // test moved off a loop fixture for that reason (extraction-forced
+        // adaptation, see the work summary).
+        let mut statuses = vec![status("the-for-each", "The for-each", "pending")];
+        let for_each_child = serde_json::json!({
             "sequence-index": 1,
             "run-index": 1,
             "item-id": "child",
@@ -616,12 +691,12 @@ mod tests {
             "status": "accepted",
             "reason": "",
             "position-path": [
-                {"kind": "procedure", "id": "the-loop", "index": 0},
-                {"kind": "loop", "id": "the-loop-body", "index": 0, "iteration": 0},
-                {"kind": "item", "id": "child", "index": 0, "iteration": 0},
+                {"kind": "procedure", "id": "the-for-each", "index": 0},
+                {"kind": "for-each", "id": "the-for-each-body", "index": 0, "item-index": 0},
+                {"kind": "item", "id": "child", "index": 0, "item-index": 0},
             ],
         });
-        statuses.push(loop_child);
+        statuses.push(for_each_child);
         let session = session("completed", "completed", serde_json::Value::Array(statuses));
         let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
         let list = FrameList::from_tree(&tree);
@@ -629,8 +704,257 @@ mod tests {
             .rows()
             .iter()
             .find(|row| row.form == RowForm::Group)
-            .expect("an iteration group row exists");
+            .expect("a for-each item group row exists");
         assert_eq!(group_row.dot, None);
         assert_eq!(group_row.right, RightSide::None);
+    }
+
+    #[test]
+    fn no_narration_for_a_loop_free_reconstruction() {
+        let session = session(
+            "completed",
+            "completed",
+            serde_json::Value::Array(vec![status("item", "Item", "accepted")]),
+        );
+        let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
+        let list = FrameList::from_tree(&tree);
+        assert!((0..list.rows().len()).all(|index| list.narration_before(index).is_empty()));
+    }
+
+    fn loop_session_with_round(iteration: usize) -> Session {
+        let statuses = serde_json::Value::Array(vec![
+            status("the-loop", "The loop", "pending"),
+            serde_json::json!({
+                "sequence-index": 1,
+                "run-index": 1,
+                "item-id": "child",
+                "title": "Child",
+                "status": "accepted",
+                "reason": "",
+                "position-path": [
+                    {"kind": "procedure", "id": "the-loop", "index": 0},
+                    {"kind": "loop", "id": "the-loop-body", "index": 0, "iteration": iteration},
+                    {"kind": "item", "id": "child", "index": 0, "iteration": iteration},
+                ],
+            }),
+        ]);
+        session("completed", "completed", statuses)
+    }
+
+    #[test]
+    fn a_recorded_round_renders_a_narration_line_with_the_one_based_round() {
+        let session = loop_session_with_round(1);
+        let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
+        let list = FrameList::from_tree(&tree);
+        let (_, phrase) = (0..list.rows().len())
+            .find_map(|index| {
+                list.narration_before(index)
+                    .first()
+                    .map(|text| (index, *text))
+            })
+            .expect("a narration line is placed for the loop group");
+        assert_eq!(phrase, placeholders::loop_round_narration("2"));
+    }
+
+    #[test]
+    fn a_different_recorded_round_renders_a_different_round_in_the_same_phrase() {
+        let session = loop_session_with_round(4);
+        let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
+        let list = FrameList::from_tree(&tree);
+        let phrase = (0..list.rows().len())
+            .find_map(|index| list.narration_before(index).first().copied())
+            .expect("a narration line is placed for the loop group");
+        assert_eq!(phrase, placeholders::loop_round_narration("5"));
+    }
+
+    #[test]
+    fn nested_loop_rounds_render_joined_not_flattened() {
+        let statuses = serde_json::Value::Array(vec![serde_json::json!({
+            "sequence-index": 0,
+            "run-index": 0,
+            "item-id": "child",
+            "title": "Child",
+            "status": "accepted",
+            "reason": "",
+            "position-path": [
+                {"kind": "procedure", "id": "outer", "index": 0},
+                {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                {"kind": "item", "id": "child", "index": 0, "iteration": 2},
+            ],
+        })]);
+        let session = session("completed", "completed", statuses);
+        let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
+        let list = FrameList::from_tree(&tree);
+        let phrases: Vec<&str> = (0..list.rows().len())
+            .flat_map(|index| list.narration_before(index))
+            .collect();
+        assert_eq!(
+            phrases,
+            vec![placeholders::loop_round_narration("2/3")],
+            "exactly one line renders, at the innermost boundary, joining every \
+             enclosing round rather than flattening or duplicating"
+        );
+    }
+
+    /// Review-verdict-1 blocker `desktop-loop-marker-rederived`: two loops
+    /// separated by an intervening non-loop structural node (a `branch`
+    /// here, rather than the direct nesting `nested_loop_rounds_render_
+    /// joined_not_flattened` covers) must still resolve to exactly one
+    /// narration line, at the innermost boundary, joining both rounds — the
+    /// shared projection's marker recurses through every descendant
+    /// regardless of its own kind, so an intervening structural node cannot
+    /// hide a nested loop from it.
+    #[test]
+    fn loops_separated_by_another_structural_node_still_join_at_the_innermost_boundary() {
+        let statuses = serde_json::Value::Array(vec![serde_json::json!({
+            "sequence-index": 0,
+            "run-index": 0,
+            "item-id": "child",
+            "title": "Child",
+            "status": "accepted",
+            "reason": "",
+            "position-path": [
+                {"kind": "procedure", "id": "outer", "index": 0},
+                {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                {"kind": "branch", "id": "arm-a", "index": 0},
+                {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                {"kind": "item", "id": "child", "index": 0, "iteration": 2},
+            ],
+        })]);
+        let session = session("completed", "completed", statuses);
+        let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
+        let list = FrameList::from_tree(&tree);
+        let phrases: Vec<&str> = (0..list.rows().len())
+            .flat_map(|index| list.narration_before(index))
+            .collect();
+        assert_eq!(
+            phrases,
+            vec![placeholders::loop_round_narration("2/3")],
+            "exactly one line renders, at the innermost boundary, even with a \
+             branch node separating the two loops"
+        );
+    }
+
+    /// Review-verdict-1 blocker `desktop-loop-marker-rederived`'s open steps:
+    /// a directly nested loop (no intervening structural node) whose child
+    /// precedes an outer-only sibling under the same outer iteration. The
+    /// shared projection correctly carries an explicit marker on both the
+    /// outer loop group and the nested inner loop group
+    /// (`mixed_outer_only_and_nested_branches_both_get_their_own_marker`
+    /// proves that for the branch-separated case) — but `push_node` appends
+    /// both at the same flattened `rows.len()` here, because the nested
+    /// child is processed before any row is produced. `narration_before`
+    /// must surface both markers at that shared index, in deterministic
+    /// outer-to-inner order, rather than the `find`-based lookup that used
+    /// to drop the inner one.
+    #[test]
+    fn direct_mixed_outer_and_inner_markers_at_one_row_index_both_render() {
+        let statuses = serde_json::Value::Array(vec![
+            serde_json::json!({
+                "sequence-index": 0,
+                "run-index": 0,
+                "item-id": "nested-item",
+                "title": "Nested Item",
+                "status": "accepted",
+                "reason": "",
+                "position-path": [
+                    {"kind": "procedure", "id": "outer", "index": 0},
+                    {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                    {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                    {"kind": "item", "id": "nested-item", "index": 0, "iteration": 2},
+                ],
+            }),
+            serde_json::json!({
+                "sequence-index": 1,
+                "run-index": 1,
+                "item-id": "plain-item",
+                "title": "Plain Item",
+                "status": "accepted",
+                "reason": "",
+                "position-path": [
+                    {"kind": "procedure", "id": "outer", "index": 0},
+                    {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                    {"kind": "item", "id": "plain-item", "index": 1, "iteration": 1},
+                ],
+            }),
+        ]);
+        let session = session("completed", "completed", statuses);
+        let tree = crate::detail_tree::project(&session, &ActivityOverlay::default(), false);
+        let list = FrameList::from_tree(&tree);
+        let (shared_index, phrases) = (0..list.rows().len())
+            .map(|index| (index, list.narration_before(index)))
+            .find(|(_, phrases)| phrases.len() > 1)
+            .expect("the outer and inner markers flatten to one shared row index");
+        assert_eq!(
+            phrases,
+            vec![
+                placeholders::loop_round_narration("2"),
+                placeholders::loop_round_narration("2/3"),
+            ],
+            "both markers survive flattening, in deterministic outer-to-inner order"
+        );
+        assert_eq!(
+            list.narration_before(shared_index).len(),
+            2,
+            "narration_before returns every marker at the index, not just the first"
+        );
+    }
+
+    #[test]
+    fn activity_block_is_present_only_under_a_live_current_row() {
+        use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
+        use ctx_traits_io::activity_sidecar::ActivityRecord;
+
+        let mut json = session(
+            "awaiting-agent-output",
+            "running",
+            serde_json::Value::Array(vec![status("item", "Item", "ready")]),
+        );
+        json.active_path = vec![ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "procedure".to_string(),
+            id: Some("item".to_string()),
+            index: 0,
+            iteration: None,
+            item_index: None,
+        }];
+        json.current_agent = Some(ctx_traits_core::procedure::runtime::AgentRole {
+            role: "review".to_string(),
+            ref_text: String::new(),
+            description: String::new(),
+            summary: None,
+            system: None,
+            structural_seat: None,
+        });
+        let overlay = ActivityOverlay::from_records(&[ActivityRecord::Activity {
+            at_epoch_ms: 1,
+            event: ActivityEvent {
+                sequence: 1,
+                frame_id: "item".to_string(),
+                kind: ActivityKind::RunningTool,
+                text: Some(r#"{"raw":"json"}"#.to_string()),
+                tool: Some("edit".to_string()),
+                tokens: None,
+                rate_limit: None,
+            },
+        }]);
+        let live_tree = crate::detail_tree::project(&json, &overlay, true);
+        let live_list = FrameList::from_tree(&live_tree);
+        let block = live_list
+            .activity_block()
+            .expect("a live current row with activity lines carries a block");
+        assert_eq!(block.role.as_deref(), Some("review"));
+        assert_eq!(block.lines, vec!["edit".to_string()]);
+
+        // A settled/failed run's stopped-at-current row is never `Current`,
+        // so the block cannot appear.
+        let settled_tree = crate::detail_tree::project(&json, &overlay, false);
+        let settled_list = FrameList::from_tree(&settled_tree);
+        assert!(settled_list.activity_block().is_none());
+
+        // No activity lines -> no block, even for a live current row.
+        let empty_tree = crate::detail_tree::project(&json, &ActivityOverlay::default(), true);
+        let empty_list = FrameList::from_tree(&empty_tree);
+        assert!(empty_list.activity_block().is_none());
     }
 }

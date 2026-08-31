@@ -987,34 +987,10 @@ pub(super) fn latest_frame_event_rows(
 /// `RunningTool` row shows only the tool label, dropping its raw tool-input
 /// JSON `text`; every other kind keeps its kind label. House ruling: quoted
 /// agent text or a label, never raw stream JSON.
+/// Delegates to `ctx_traits_core::procedure::activity::activity_event_line` —
+/// the shared home the desktop's activity block consumes too.
 fn activity_event_fallback_tail(event: &ActivityEvent) -> String {
-    match event.kind {
-        ActivityKind::StreamingOutput | ActivityKind::Thinking => event
-            .text
-            .as_deref()
-            .map(tui::quote_line)
-            .unwrap_or_else(|| activity_kind_label(&event.kind).to_string()),
-        ActivityKind::RunningTool => event
-            .tool
-            .clone()
-            .unwrap_or_else(|| activity_kind_label(&event.kind).to_string()),
-        _ => activity_kind_label(&event.kind).to_string(),
-    }
-}
-
-fn activity_kind_label(kind: &ActivityKind) -> &'static str {
-    match kind {
-        ActivityKind::Dispatching => "dispatching",
-        ActivityKind::Thinking => "thinking",
-        ActivityKind::RunningTool => "running tool",
-        ActivityKind::StreamingOutput => "streaming output",
-        ActivityKind::ValidatingOutput => "validating output",
-        ActivityKind::Retrying => "retrying",
-        ActivityKind::Stalled => "stalled",
-        ActivityKind::Compacting => "compacting",
-        ActivityKind::NoActivityReported => "no activity reported",
-        ActivityKind::RateLimited => "rate limited",
-    }
+    ctx_traits_core::procedure::activity::activity_event_line(event)
 }
 
 fn activity_event_tone(kind: &ActivityKind) -> tui::Tone {

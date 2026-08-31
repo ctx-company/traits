@@ -9,7 +9,7 @@ use gpui::{AnyElement, SharedString, div, rgb};
 
 use ctx_traits_core::procedure::activity::compact_elapsed_text;
 
-use crate::frame_list::{DotTone, FrameList, FrameRow, RightSide, RowForm};
+use crate::frame_list::{ActivityBlock, DotTone, FrameList, FrameRow, RightSide, RowForm};
 use crate::run_row::role_color;
 use crate::tokens;
 
@@ -204,6 +204,72 @@ fn row_element(row: &FrameRow, index: usize, bright: bool) -> AnyElement {
     }
 }
 
+/// Rule 5's inline-narration voice: italic mono 10.5 `text-faint`, nowrap, in
+/// a full-width container at padding `[8,12,2,12]`
+/// (`grammar.md:49-56`, `reference/sessions.html:349-359`) — never the
+/// italic sans 12 `text-secondary` narrated screen summary rule 5
+/// distinguishes it from.
+fn narration_element(text: &str) -> AnyElement {
+    div()
+        .w_full()
+        .pt(tokens::LOOP_NARRATION_PAD_TOP)
+        .pr(tokens::LIST_ROW_PAD_X_MAX)
+        .pb(tokens::LOOP_NARRATION_PAD_BOTTOM)
+        .pl(tokens::LIST_ROW_PAD_X_MAX)
+        .child(
+            div()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .italic()
+                .font_weight(tokens::WEIGHT_NORMAL)
+                .text_color(rgb(tokens::TEXT_FAINT))
+                .whitespace_nowrap()
+                .child(text.to_string()),
+        )
+        .into_any_element()
+}
+
+/// The role prefix, mirroring `right_side_text`'s no-dangling-separator
+/// shape: `Some(role)` composes `"{role}: {text}"`, `None` leaves `text`
+/// unprefixed.
+fn activity_line_text(role: Option<&str>, text: &str) -> String {
+    match role {
+        Some(role) => format!("{role}: {text}"),
+        None => text.to_string(),
+    }
+}
+
+/// Full width, flex column, gap 3, padding `[4,12,6,27]`, mono 10.5
+/// `text-faint` (`reference/sessions.html:460-463`, `grammar.md:104-108`),
+/// per-line opacity **zipped** with `tokens::ACTIVITY_FADE_OPACITY` — zipping
+/// rather than indexing means the eight-line cap and the opacity ramp are
+/// structurally inseparable: a ninth line cannot render and no caller can
+/// pass an opacity of its own. `gpui`'s `.opacity()` sets the element's own
+/// style opacity (and inherits to children), so it is applied per line, not
+/// on the column.
+fn activity_block_element(block: &ActivityBlock) -> AnyElement {
+    let mut column = div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(tokens::ACTIVITY_BLOCK_GAP)
+        .pt(tokens::ACTIVITY_BLOCK_PAD_TOP)
+        .pr(tokens::ACTIVITY_BLOCK_PAD_RIGHT)
+        .pb(tokens::ACTIVITY_BLOCK_PAD_BOTTOM)
+        .pl(tokens::ACTIVITY_BLOCK_PAD_LEFT);
+    for (line, opacity) in block.lines.iter().zip(tokens::ACTIVITY_FADE_OPACITY) {
+        column = column.child(
+            div()
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(tokens::TEXT_FAINT))
+                .opacity(opacity)
+                .child(activity_line_text(block.role.as_deref(), line)),
+        );
+    }
+    column.into_any_element()
+}
+
 /// Build the native element tree for a [`FrameList`]. Pure: no `Context`, no
 /// `App` required to call it.
 pub fn frame_list_element(list: &FrameList) -> AnyElement {
@@ -213,7 +279,21 @@ pub fn frame_list_element(list: &FrameList) -> AnyElement {
         .flex_col()
         .gap(tokens::LIST_ROWS_GAP_MAX);
     for (index, row) in list.rows().iter().enumerate() {
+        for text in list.narration_before(index) {
+            column = column.child(narration_element(text));
+        }
         column = column.child(row_element(row, index, list.is_bright(index)));
+        if row.form == RowForm::Current
+            && let Some(block) = list.activity_block()
+        {
+            column = column.child(activity_block_element(block));
+        }
+    }
+    // A loop group that is the very last node in the whole tree places its
+    // narration at `rows().len()` — past every row index the loop above
+    // walks, so it is rendered here rather than dropped.
+    for text in list.narration_before(list.rows().len()) {
+        column = column.child(narration_element(text));
     }
     column.into_any_element()
 }
@@ -404,6 +484,36 @@ mod tests {
     }
 
     #[test]
+    fn activity_line_text_composes_the_role_prefix_with_no_dangling_separator() {
+        assert_eq!(
+            activity_line_text(Some("review"), "reading a file"),
+            "review: reading a file"
+        );
+        assert_eq!(activity_line_text(None, "reading a file"), "reading a file");
+    }
+
+    #[test]
+    fn activity_block_element_opacity_slots_match_visible_index_and_cap_at_eight() {
+        use crate::frame_list::ActivityBlock;
+
+        for count in [0usize, 1, 5, 8, 9] {
+            let lines: Vec<String> = (0..count).map(|i| format!("line-{i}")).collect();
+            let block = ActivityBlock { role: None, lines };
+            // Zipping (not indexing) with the fixed opacity table is what
+            // caps rendering at eight regardless of how many lines the
+            // model carries — assert the zip length directly, mirroring
+            // what `activity_block_element` actually iterates.
+            let rendered = block
+                .lines
+                .iter()
+                .zip(tokens::ACTIVITY_FADE_OPACITY)
+                .count();
+            assert_eq!(rendered, count.min(8), "count={count}");
+            let _element = activity_block_element(&block);
+        }
+    }
+
+    #[test]
     fn frame_list_element_builds_for_every_form_with_no_app() {
         let done = session_with("completed", "completed", "accepted");
         let pending = session_with("completed", "completed", "pending");
@@ -461,6 +571,81 @@ mod tests {
         // The handle is kept (not dropped before `run_until_parked`, unlike
         // the prior version of this test) so the window and its one render
         // pass are not torn down before the frame actually runs.
+        let _window = cx
+            .update(|cx| {
+                let bounds =
+                    gpui::Bounds::centered(None, gpui::size(gpui::px(400.), gpui::px(300.)), cx);
+                cx.open_window(
+                    gpui::WindowOptions {
+                        window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                        ..Default::default()
+                    },
+                    |_, cx| cx.new(|_| FrameListProbe { list: list.clone() }),
+                )
+            })
+            .expect("open a real window");
+        cx.run_until_parked();
+    }
+
+    /// A real gpui window painting a narration line and a full eight-line
+    /// activity block together with the four settled row forms, so `render`
+    /// actually executes over both new element kinds this task adds.
+    #[gpui::test]
+    fn frame_list_paints_a_narration_line_and_a_full_activity_block(cx: &mut gpui::TestAppContext) {
+        use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
+        use ctx_traits_io::activity_sidecar::ActivityRecord;
+
+        let mut session = session_with_all_four_forms();
+        session.ledger.sequence_statuses[1].position_path = vec![
+            ctx_traits_core::procedure::runtime::PathSegment {
+                kind: "procedure".to_string(),
+                id: Some("the-loop".to_string()),
+                index: 0,
+                iteration: None,
+                item_index: None,
+            },
+            ctx_traits_core::procedure::runtime::PathSegment {
+                kind: "loop".to_string(),
+                id: Some("the-loop-body".to_string()),
+                index: 0,
+                iteration: Some(1),
+                item_index: None,
+            },
+            ctx_traits_core::procedure::runtime::PathSegment {
+                kind: "item".to_string(),
+                id: Some("item-pending".to_string()),
+                index: 0,
+                iteration: Some(1),
+                item_index: None,
+            },
+        ];
+        let records: Vec<ActivityRecord> = (0..9u64)
+            .map(|sequence| ActivityRecord::Activity {
+                at_epoch_ms: sequence,
+                event: ActivityEvent {
+                    sequence,
+                    frame_id: "item-current".to_string(),
+                    kind: ActivityKind::Thinking,
+                    text: Some(format!("thinking {sequence}")),
+                    tool: None,
+                    tokens: None,
+                    rate_limit: None,
+                },
+            })
+            .collect();
+        let overlay = ActivityOverlay::from_records(&records);
+        let tree = detail_tree::project(&session, &overlay, true);
+        let list = crate::frame_list::FrameList::from_tree(&tree);
+
+        assert!(
+            (0..list.rows().len() + 1).any(|index| !list.narration_before(index).is_empty()),
+            "the loop-wrapped pending item produces a narration placement"
+        );
+        let block = list
+            .activity_block()
+            .expect("the current row's nine folded events produce a capped block");
+        assert_eq!(block.lines.len(), 8, "the ninth line is dropped, not shown");
+
         let _window = cx
             .update(|cx| {
                 let bounds =

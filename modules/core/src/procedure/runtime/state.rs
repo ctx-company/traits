@@ -314,6 +314,119 @@ pub struct PathSegment {
     pub item_index: Option<usize>,
 }
 
+/// The one place a `PathSegment`'s `kind` is recognized as a loop control
+/// segment (as opposed to `procedure`/`branch`/`for-each`/`item`) — shared by
+/// [`loop_rounds`] and by any consumer that needs to identify a loop-control
+/// position without repeating the `"loop"` literal itself.
+pub fn is_loop_control_kind(kind: &str) -> bool {
+    kind == "loop"
+}
+
+/// Only loop control segments own round numbers; item and other control
+/// segments may repeat an `iteration` field for unrelated bookkeeping.
+/// Storage is zero-based; the displayed round is +1. A nested position
+/// yields one round per enclosing loop, outermost first.
+pub fn loop_rounds(position_path: &[PathSegment]) -> Vec<usize> {
+    position_path
+        .iter()
+        .filter(|segment| is_loop_control_kind(&segment.kind))
+        .filter_map(|segment| segment.iteration)
+        .map(|iteration| iteration.saturating_add(1))
+        .collect()
+}
+
+/// `None` for an empty slice; `"2"`, `"2/3"` otherwise.
+pub fn loop_rounds_label(rounds: &[usize]) -> Option<String> {
+    if rounds.is_empty() {
+        None
+    } else {
+        Some(
+            rounds
+                .iter()
+                .map(|round| round.to_string())
+                .collect::<Vec<_>>()
+                .join("/"),
+        )
+    }
+}
+
+/// One node in a generic reconstructed frame tree, carrying only its own
+/// consumed position-path prefix and its children — enough shape for
+/// [`resolve_narration_markers`] to derive cumulative loop rounds and
+/// narration-marker boundaries without the caller testing a `kind` or
+/// inferring a boundary from descendant topology itself.
+#[derive(Debug, Clone)]
+pub struct NarrationCandidate {
+    pub position_path: Vec<PathSegment>,
+    pub children: Vec<NarrationCandidate>,
+}
+
+/// [`resolve_narration_markers`]'s per-node result, in the same shape as the
+/// `NarrationCandidate` tree it was derived from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NarrationResolution {
+    /// This node's own cumulative one-based round(s), outermost first —
+    /// [`loop_rounds`] applied to its position path. Empty unless the path
+    /// passes through at least one `loop` control segment.
+    pub rounds: Vec<usize>,
+    /// `Some(label)` exactly when this node is a loop-control node and the
+    /// innermost loop-control boundary of its lineage: no child, at any
+    /// depth however many non-loop structural nodes intervene, is itself
+    /// fully covered by a nested loop-control marker. A loop-control node
+    /// with at least one child whose own lineage has no nested loop-control
+    /// marker keeps its own marker for that child's sake, even when a
+    /// sibling child does carry one — an outer-only path must not lose its
+    /// narration just because another branch under the same loop is nested
+    /// (review-verdict-1 blocker `desktop-loop-marker-rederived`).
+    pub marker: Option<String>,
+    pub children: Vec<NarrationResolution>,
+}
+
+/// Resolves cumulative loop rounds and narration-marker boundaries for a
+/// whole `NarrationCandidate` forest in one pure pass — the one place a
+/// reconstructed frame tree's `kind` is tested against `"loop"` and the one
+/// place marker-boundary inference happens, so no caller needs to repeat
+/// either. See [`NarrationResolution::marker`] for the boundary rule.
+pub fn resolve_narration_markers(candidates: &[NarrationCandidate]) -> Vec<NarrationResolution> {
+    candidates
+        .iter()
+        .map(|candidate| resolve_narration_candidate(candidate).0)
+        .collect()
+}
+
+/// Returns this candidate's resolution plus whether its own lineage is
+/// "covered" — carries a loop-control marker at or below this node on every
+/// path a caller could descend, so an ancestor loop-control node may safely
+/// suppress its own marker only when *all* of its children report covered.
+fn resolve_narration_candidate(candidate: &NarrationCandidate) -> (NarrationResolution, bool) {
+    let mut children = Vec::with_capacity(candidate.children.len());
+    let mut children_covered = Vec::with_capacity(candidate.children.len());
+    for child in &candidate.children {
+        let (resolution, covered) = resolve_narration_candidate(child);
+        children.push(resolution);
+        children_covered.push(covered);
+    }
+    let rounds = loop_rounds(&candidate.position_path);
+    let is_loop_control_node = !rounds.is_empty()
+        && candidate
+            .position_path
+            .last()
+            .is_some_and(|segment| is_loop_control_kind(&segment.kind));
+    let fully_covered = !children_covered.is_empty() && children_covered.iter().all(|covered| *covered);
+    let marker = (is_loop_control_node && !fully_covered)
+        .then(|| loop_rounds_label(&rounds))
+        .flatten();
+    let covered = is_loop_control_node || fully_covered;
+    (
+        NarrationResolution {
+            rounds,
+            marker,
+            children,
+        },
+        covered,
+    )
+}
+
 /// Runtime-only isolation buffer for effects accepted while a `parallel`
 /// branch is active but not yet merged at the panel's barrier. Never part of
 /// the committed ledger (`State.accepted_slot_values` etc.) until merge —

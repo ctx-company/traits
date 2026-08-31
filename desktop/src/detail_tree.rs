@@ -57,14 +57,16 @@
 //! attached to the *current* frame only — attaching it to every historical
 //! iteration of a looped item would fabricate evidence.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind, FrameSpans, SessionState};
-use ctx_traits_core::procedure::runtime::{PathSegment, SequenceStatus, SequenceStatusKind};
+use ctx_traits_core::procedure::activity::{ActivityEvent, FrameSpans, SessionState};
+use ctx_traits_core::procedure::runtime::{self, PathSegment, SequenceStatus, SequenceStatusKind};
 use ctx_traits_core::procedure::session::Session;
 use ctx_traits_io::activity_sidecar::ActivityRecord;
 use ctx_traits_io::run_summary::RunSummary;
+
+use crate::tokens;
 
 /// A frame's durable or derived state. `Structural` is reserved for
 /// synthesized group nodes that carry no `SequenceStatus` of their own.
@@ -94,13 +96,6 @@ impl FrameState {
     }
 }
 
-/// One bounded activity line attached to the current frame.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ActivityLine {
-    pub kind: ActivityKind,
-    pub text: Option<String>,
-}
-
 /// One node in the projected frame tree: either a leaf frame landed from a
 /// `SequenceStatus`, a top-level container, or a synthesized structural
 /// group (loop iteration / branch arm / for-each item / orphan placeholder).
@@ -121,13 +116,41 @@ pub struct DetailNode {
     /// Set only on the current node, from `SessionState::derive` — never
     /// invented locally.
     pub session_state: Option<SessionState>,
-    pub activity: Option<ActivityLine>,
+    /// Retained `Activity` events for this node's `frame_id`, newest first,
+    /// capped at `tokens::ACTIVITY_LINE_CAP`. Whole events (not a trimmed
+    /// line) are retained: an `ActivityEvent` carries `tool`, so a
+    /// `RunningTool` line can render its tool label instead of its raw JSON
+    /// `text`. See [`ActivityOverlay::activity_lines_for`] for the
+    /// ambiguity rule that decides which entries a looped item's node sees.
+    pub activity_lines: Vec<ActivityEvent>,
+    /// One-based round(s) for this node's own position path, outermost
+    /// first. Empty unless this node's path passes through at least one
+    /// `loop` control segment. Populated wholesale, after the tree is fully
+    /// built, by [`apply_narration_resolutions`] from
+    /// `runtime::resolve_narration_markers`'s result — never computed
+    /// per-node here, so this file never calls the core round/label
+    /// functions directly.
+    pub loop_rounds: Vec<usize>,
+    /// `Some(label)` exactly when this node is the innermost loop-control
+    /// boundary of its lineage — see
+    /// `ctx_traits_core::procedure::runtime::NarrationResolution::marker`
+    /// for the exact rule. Populated the same way as `loop_rounds`, by
+    /// [`apply_narration_resolutions`], so a consumer
+    /// (`frame_list::push_node`) never has to test this node's or a child's
+    /// `kind`, or infer boundaries from structural adjacency, to find where
+    /// a narration line belongs.
+    pub narration_marker: Option<String>,
     pub narration: Option<String>,
     /// First→last durable `Activity` span for this node's `frame_id`, only
     /// when that id occurs exactly once in the whole reconstructed tree —
     /// see [`FrameSpans::span`]. `None` for a `Structural` group (no
     /// `frame_id`) and for any ambiguous or evidence-free frame.
     pub span: Option<Duration>,
+    /// This node's own consumed position-path prefix, threaded through by
+    /// [`insert`] and consulted only by [`project`] to build the
+    /// `NarrationCandidate` tree `runtime::resolve_narration_markers`
+    /// resolves — never read to test a `kind` or infer a boundary itself.
+    own_path: Vec<PathSegment>,
     pub children: Vec<DetailNode>,
 }
 
@@ -143,9 +166,12 @@ impl DetailNode {
             reason: String::new(),
             current: false,
             session_state: None,
-            activity: None,
+            activity_lines: Vec::new(),
+            loop_rounds: Vec::new(),
+            narration_marker: None,
             narration: None,
             span: None,
+            own_path: Vec::new(),
             children: Vec::new(),
         }
     }
@@ -272,10 +298,12 @@ fn insert(
     status: &SequenceStatus,
     current: bool,
     session_state: Option<SessionState>,
+    consumed: &mut Vec<PathSegment>,
 ) {
     let (segment, rest) = path
         .split_first()
         .expect("a normalized position path is never empty");
+    consumed.push(segment.clone());
     let retain_index = rest.is_empty();
     let key = GroupKey::from_segment(segment, retain_index);
     let index = match nodes.iter().position(|node| node.key == key) {
@@ -285,6 +313,7 @@ fn insert(
             nodes.len() - 1
         }
     };
+    nodes[index].own_path = consumed.clone();
     if rest.is_empty() {
         nodes[index].apply_status(status, segment);
         if current {
@@ -298,19 +327,26 @@ fn insert(
             status,
             current,
             session_state,
+            consumed,
         );
     }
+    consumed.pop();
 }
 
-fn attach_overlay(nodes: &mut [DetailNode], overlay: &ActivityOverlay) {
+fn attach_overlay(
+    nodes: &mut [DetailNode],
+    overlay: &ActivityOverlay,
+    counts: &HashMap<String, usize>,
+) {
     for node in nodes {
         if node.current
             && let Some(frame_id) = node.frame_id()
         {
-            node.activity = overlay.activity_for(&frame_id);
+            let executions = counts.get(&frame_id).copied().unwrap_or(0);
+            node.activity_lines = overlay.activity_lines_for(&frame_id, executions);
             node.narration = overlay.narration_for(&frame_id);
         }
-        attach_overlay(&mut node.children, overlay);
+        attach_overlay(&mut node.children, overlay, counts);
     }
 }
 
@@ -325,6 +361,42 @@ fn count_frame_ids(nodes: &[DetailNode], counts: &mut HashMap<String, usize>) {
             *counts.entry(frame_id).or_insert(0) += 1;
         }
         count_frame_ids(&node.children, counts);
+    }
+}
+
+/// Builds the `runtime::NarrationCandidate` shadow of a `DetailNode` tree —
+/// just its own consumed `position_path` and its children's shadows, the
+/// only shape `runtime::resolve_narration_markers` needs. No `kind` is read
+/// here; the core function is the one place a `kind` is tested against
+/// `"loop"`.
+fn narration_candidates(nodes: &[DetailNode]) -> Vec<runtime::NarrationCandidate> {
+    nodes
+        .iter()
+        .map(|node| runtime::NarrationCandidate {
+            position_path: node.own_path.clone(),
+            children: narration_candidates(&node.children),
+        })
+        .collect()
+}
+
+/// Populates [`DetailNode::loop_rounds`] and [`DetailNode::narration_marker`]
+/// wholesale from `runtime::resolve_narration_markers`'s result — the shared
+/// projection [`FrameRow`]'s narration placement is built from, so nothing in
+/// this file (or downstream, in `frame_list::push_node`) tests a node's or a
+/// child's `kind`, or infers a marker boundary from structural adjacency;
+/// both live in exactly one place, the core function itself. `nodes` and
+/// `resolutions` are the same shape by construction — both walked from
+/// [`narration_candidates`]'s output.
+///
+/// [`FrameRow`]: crate::frame_list::FrameRow
+fn apply_narration_resolutions(
+    nodes: &mut [DetailNode],
+    resolutions: Vec<runtime::NarrationResolution>,
+) {
+    for (node, resolution) in nodes.iter_mut().zip(resolutions) {
+        node.loop_rounds = resolution.rounds;
+        node.narration_marker = resolution.marker;
+        apply_narration_resolutions(&mut node.children, resolution.children);
     }
 }
 
@@ -435,12 +507,30 @@ pub struct DetailTree {
 
 /// Folded, bounded view of a session's `.activity.jsonl` sidecar. Built once
 /// and applied after the durable tree is complete — see the module doc
-/// comment. Only the last matching record per `frame_id` is retained, so a
-/// long run's thousands of records never survive past this fold.
+/// comment. Up to `tokens::ACTIVITY_LINE_CAP` `Activity` records per
+/// `frame_id` are retained (newest evicts oldest), so a long run's thousands
+/// of records never survive past this fold.
+#[derive(Debug, Clone, PartialEq)]
+struct RetainedActivity {
+    at_epoch_ms: u64,
+    event: ActivityEvent,
+    /// `false` for a record folded by the seed's historical read
+    /// (`apply_record`); `true` for one folded live (`apply_live_record`/
+    /// `apply_pending_record`). Consulted only by
+    /// [`ActivityOverlay::activity_lines_for`]'s ambiguity rule: a delta
+    /// arriving on the open subscription is by construction the currently
+    /// executing frame's, while a seed-folded record sharing the same
+    /// iteration-blind `frame_id` cannot be attributed to it.
+    live: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ActivityOverlay {
     session_title: Option<String>,
-    activity_by_frame: HashMap<String, ActivityLine>,
+    /// Retained `Activity` events per frame id, in arrival order (oldest at
+    /// the front), capped at `tokens::ACTIVITY_LINE_CAP` — never a sort on
+    /// `ActivityEvent.sequence` (coalesced records persist sequence 0).
+    lines_by_frame: HashMap<String, VecDeque<RetainedActivity>>,
     narration_by_frame: HashMap<String, String>,
     /// First/last `Activity` stamp per frame id — durable-only, folded from
     /// the same records `activity_by_frame` is, never from a process-local
@@ -486,14 +576,14 @@ impl ActivityOverlay {
     /// never rebuilt on each projection.
     pub(crate) fn apply_record(&mut self, record: &ActivityRecord) {
         self.watermark_ms = self.watermark_ms.max(record.at_epoch_ms());
-        if let ActivityRecord::Activity { at_epoch_ms, event } = record {
-            self.spans.observe(&event.frame_id, *at_epoch_ms);
+        if let Some((at_epoch_ms, event)) = record.as_activity() {
+            self.spans.observe(&event.frame_id, at_epoch_ms);
             self.activity_occurrences
                 .entry(event.frame_id.clone())
                 .or_default()
-                .push((*at_epoch_ms, event.clone()));
+                .push((at_epoch_ms, event.clone()));
         }
-        self.apply_presentation(record);
+        self.apply_presentation(record, false);
     }
 
     /// Consumes one occurrence of `(at_epoch_ms, event)` from this overlay's
@@ -566,39 +656,77 @@ impl ActivityOverlay {
     /// an interior record on its own (review-verdict-1 blocker
     /// `live-span-reopen-divergence`). A record with no matching occurrence
     /// is genuinely new and folds through the ordinary span path.
-    /// Presentation fields (`activity_by_frame`/`narration_by_frame`/
-    /// `session_title`) always fold through the same watermark-gated path
-    /// `apply_live_record` uses regardless of the reconciliation outcome —
-    /// re-applying an identical line is idempotent, so there is nothing to
-    /// reconcile there. Returns whether the overlay actually changed.
+    /// A replayed `Activity` occurrence never re-enters `apply_presentation`:
+    /// the retained deque is an ordered, bounded history rather than a
+    /// last-write-wins slot, so appending it again would duplicate a visible
+    /// line instead of idempotently overwriting one. Its `live` provenance is
+    /// promoted in place on the still-retained entry instead (see the branch
+    /// above). `Narration`/`SessionTitle` records have no such deque and
+    /// remain genuinely last-write-wins, folded through the same
+    /// watermark-gated `apply_presentation` path `apply_live_record` uses.
+    /// Returns whether the overlay actually changed.
     pub(crate) fn apply_pending_record(&mut self, record: &ActivityRecord) -> bool {
         let mut changed = false;
-        if let ActivityRecord::Activity { at_epoch_ms, event } = record
-            && !self.consume_seed_activity_occurrence(&event.frame_id, *at_epoch_ms, event)
-        {
-            changed |= self.spans.observe(&event.frame_id, *at_epoch_ms);
+        let mut is_replay = false;
+        if let Some((at_epoch_ms, event)) = record.as_activity() {
+            if self.consume_seed_activity_occurrence(&event.frame_id, at_epoch_ms, event) {
+                is_replay = true;
+                // The seed already retained this exact occurrence as a line;
+                // promote its provenance to `live` in place rather than
+                // appending a duplicate. A window eviction (the cap) may have
+                // already dropped the entry — nothing to promote then, and
+                // nothing to append either, since the visible window still
+                // reflects at most one line per occurrence.
+                if let Some(queue) = self.lines_by_frame.get_mut(&event.frame_id)
+                    && let Some(entry) = queue
+                        .iter_mut()
+                        .find(|r| !r.live && r.at_epoch_ms == at_epoch_ms && r.event == *event)
+                {
+                    entry.live = true;
+                    changed = true;
+                }
+            } else {
+                changed |= self.spans.observe(&event.frame_id, at_epoch_ms);
+            }
         }
         if record.at_epoch_ms() < self.watermark_ms {
             return changed;
         }
         self.watermark_ms = self.watermark_ms.max(record.at_epoch_ms());
-        self.apply_presentation(record);
+        if is_replay {
+            // A replayed seed occurrence already has its line (promoted
+            // above, if still retained); `apply_presentation`'s other
+            // branches (narration/session title) never fire for `Activity`
+            // records, so there is nothing left to fold for this case.
+            return changed;
+        }
+        self.apply_presentation(record, true);
         true
     }
 
     /// The presentation-only half of [`Self::apply_record`] — everything
     /// except span currency, which [`Self::apply_live_record`] folds through
-    /// a separate, per-frame-monotonic path (see its doc comment).
-    fn apply_presentation(&mut self, record: &ActivityRecord) {
+    /// a separate, per-frame-monotonic path (see its doc comment). `live`
+    /// tags the retained event with its provenance — see [`RetainedActivity`].
+    fn apply_presentation(&mut self, record: &ActivityRecord, live: bool) {
+        if let Some((at_epoch_ms, event)) = record.as_activity() {
+            let queue = self
+                .lines_by_frame
+                .entry(event.frame_id.clone())
+                .or_default();
+            queue.push_back(RetainedActivity {
+                at_epoch_ms,
+                event: event.clone(),
+                live,
+            });
+            while queue.len() > tokens::ACTIVITY_LINE_CAP {
+                queue.pop_front();
+            }
+            return;
+        }
         match record {
-            ActivityRecord::Activity { event, .. } => {
-                self.activity_by_frame.insert(
-                    event.frame_id.clone(),
-                    ActivityLine {
-                        kind: event.kind.clone(),
-                        text: event.text.clone(),
-                    },
-                );
+            ActivityRecord::Activity { .. } => {
+                unreachable!("Activity records are routed above via ActivityRecord::as_activity")
             }
             ActivityRecord::Narration { frame_id, text, .. } => {
                 self.narration_by_frame
@@ -619,9 +747,12 @@ impl ActivityOverlay {
     /// rejected wholesale when the record is strictly older than the
     /// overlay's global watermark: a `pending` record replayed from before
     /// the seed's sidecar read must never roll a newer, already-folded line
-    /// back to a superseded one. Equal timestamps are kept —
-    /// millisecond-resolution collisions are idempotent under
-    /// `apply_presentation`'s last-write-wins fold.
+    /// back to a superseded one. Equal timestamps are kept — for
+    /// `Narration`/`SessionTitle` that is an idempotent last-write-wins
+    /// overwrite; for `Activity` the retained deque instead appends a bounded
+    /// history entry per call, which is why *this* path (ordinary live
+    /// deltas, never a seed/pending replay) is safe to call unconditionally,
+    /// while [`Self::apply_pending_record`] must reconcile a replay first.
     ///
     /// Span currency (`FrameSpans`) is folded through `FrameSpans::observe`,
     /// unconditionally and never gated on the presentation watermark: the
@@ -651,19 +782,35 @@ impl ActivityOverlay {
     /// evidence. Returns whether the overlay actually changed.
     pub(crate) fn apply_live_record(&mut self, record: &ActivityRecord) -> bool {
         let mut changed = false;
-        if let ActivityRecord::Activity { at_epoch_ms, event } = record {
-            changed |= self.spans.observe(&event.frame_id, *at_epoch_ms);
+        if let Some((at_epoch_ms, event)) = record.as_activity() {
+            changed |= self.spans.observe(&event.frame_id, at_epoch_ms);
         }
         if record.at_epoch_ms() < self.watermark_ms {
             return changed;
         }
         self.watermark_ms = self.watermark_ms.max(record.at_epoch_ms());
-        self.apply_presentation(record);
+        self.apply_presentation(record, true);
         true
     }
 
-    fn activity_for(&self, frame_id: &str) -> Option<ActivityLine> {
-        self.activity_by_frame.get(frame_id).cloned()
+    /// Newest-first, at most `tokens::ACTIVITY_LINE_CAP` events for
+    /// `frame_id`. Mirrors [`Self::span_for`]'s ambiguity posture: when
+    /// `executions == 1` the whole retained window is shown; when the id
+    /// resolves to more than one node (a looped item), only the entries
+    /// folded live are — a seed-folded record with the same iteration-blind
+    /// `frame_id` cannot be attributed to whichever occurrence is currently
+    /// selected as `current`.
+    fn activity_lines_for(&self, frame_id: &str, executions: usize) -> Vec<ActivityEvent> {
+        let Some(queue) = self.lines_by_frame.get(frame_id) else {
+            return Vec::new();
+        };
+        let ambiguous = executions > 1;
+        queue
+            .iter()
+            .filter(|retained| !ambiguous || retained.live)
+            .rev()
+            .map(|retained| retained.event.clone())
+            .collect()
     }
 
     fn narration_for(&self, frame_id: &str) -> Option<String> {
@@ -707,13 +854,20 @@ pub fn project(session: &Session, overlay: &ActivityOverlay, live: bool) -> Deta
             status,
             is_current,
             is_current.then_some(current_session_state),
+            &mut Vec::new(),
         );
     }
-    attach_overlay(&mut roots, overlay);
 
     let mut frame_id_counts = HashMap::new();
     count_frame_ids(&roots, &mut frame_id_counts);
+    // Executions must be counted globally before the overlay is attached: the
+    // ambiguity rule `activity_lines_for` applies needs to know, per node,
+    // whether its `frame_id` is shared by more than one node in the whole
+    // reconstruction.
+    attach_overlay(&mut roots, overlay, &frame_id_counts);
     assign_spans(&mut roots, overlay, &frame_id_counts);
+    let resolutions = runtime::resolve_narration_markers(&narration_candidates(&roots));
+    apply_narration_resolutions(&mut roots, resolutions);
 
     DetailTree { header, roots }
 }
@@ -721,7 +875,7 @@ pub fn project(session: &Session, overlay: &ActivityOverlay, live: bool) -> Deta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ctx_traits_core::procedure::activity::ActivityEvent;
+    use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
 
     fn session_from(value: serde_json::Value) -> Session {
         serde_json::from_value(value).expect("fixture session")
@@ -829,6 +983,433 @@ mod tests {
                 assert_eq!(item.state, FrameState::Done);
             }
         }
+    }
+
+    #[test]
+    fn loop_rounds_only_come_from_loop_segments_and_stay_distinguishable_when_nested() {
+        // No loop at all: empty.
+        let no_loop = session_from(base_session_json(serde_json::Value::Array(vec![status(
+            0,
+            "solo",
+            "Solo",
+            "accepted",
+            serde_json::json!([]),
+        )])));
+        let tree = project(&no_loop, &ActivityOverlay::default(), false);
+        assert!(tree.roots[0].loop_rounds.is_empty());
+
+        // One loop, recorded iteration 1 (zero-based) -> displayed round 2.
+        let one_loop = session_from(base_session_json(serde_json::Value::Array(vec![status(
+            0,
+            "item",
+            "Item",
+            "accepted",
+            serde_json::json!([
+                {"kind": "procedure", "id": "the-loop", "index": 0},
+                {"kind": "loop", "id": "the-loop-body", "index": 0, "iteration": 1},
+                {"kind": "item", "id": "item", "index": 0, "iteration": 1},
+            ]),
+        )])));
+        let tree = project(&one_loop, &ActivityOverlay::default(), false);
+        let loop_group = &tree.roots[0].children[0];
+        assert_eq!(loop_group.kind, "loop");
+        assert_eq!(loop_group.loop_rounds, vec![2]);
+
+        // A non-loop control segment (`item`) carrying its own `iteration`
+        // must not contribute a round — only `kind == "loop"` segments do.
+        let item_leaf = &loop_group.children[0];
+        assert_eq!(item_leaf.kind, "item");
+        assert_eq!(
+            item_leaf.loop_rounds,
+            vec![2],
+            "the leaf still inherits its enclosing loop's round, but its own \
+             `item` iteration contributes nothing extra"
+        );
+
+        // Nested loops keep both rounds, outermost first, not flattened.
+        let nested = session_from(base_session_json(serde_json::Value::Array(vec![status(
+            0,
+            "item",
+            "Item",
+            "accepted",
+            serde_json::json!([
+                {"kind": "procedure", "id": "outer", "index": 0},
+                {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                {"kind": "item", "id": "item", "index": 0, "iteration": 2},
+            ]),
+        )])));
+        let tree = project(&nested, &ActivityOverlay::default(), false);
+        let outer_group = &tree.roots[0].children[0];
+        let inner_group = &outer_group.children[0];
+        assert_eq!(inner_group.kind, "loop");
+        assert_eq!(inner_group.loop_rounds, vec![2, 3], "outermost round first");
+    }
+
+    /// Review-verdict-1 blocker `desktop-loop-marker-rederived`:
+    /// `narration_marker` is `Some` only at the innermost loop-control
+    /// boundary — never on a solo loop's ancestor-free case's absence, never
+    /// duplicated on both levels of a direct nesting, and still correctly
+    /// suppressed on the outer loop when a non-loop structural node (a
+    /// `branch`) separates it from a nested loop.
+    #[test]
+    fn narration_marker_is_set_only_at_the_innermost_loop_boundary() {
+        // A single loop with no nested loop: it is its own innermost
+        // boundary.
+        let one_loop = session_from(base_session_json(serde_json::Value::Array(vec![status(
+            0,
+            "item",
+            "Item",
+            "accepted",
+            serde_json::json!([
+                {"kind": "procedure", "id": "the-loop", "index": 0},
+                {"kind": "loop", "id": "the-loop-body", "index": 0, "iteration": 1},
+                {"kind": "item", "id": "item", "index": 0, "iteration": 1},
+            ]),
+        )])));
+        let tree = project(&one_loop, &ActivityOverlay::default(), false);
+        let loop_group = &tree.roots[0].children[0];
+        assert_eq!(loop_group.narration_marker.as_deref(), Some("2"));
+
+        // Directly nested loops: only the inner one is a marker.
+        let nested = session_from(base_session_json(serde_json::Value::Array(vec![status(
+            0,
+            "item",
+            "Item",
+            "accepted",
+            serde_json::json!([
+                {"kind": "procedure", "id": "outer", "index": 0},
+                {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                {"kind": "item", "id": "item", "index": 0, "iteration": 2},
+            ]),
+        )])));
+        let tree = project(&nested, &ActivityOverlay::default(), false);
+        let outer_group = &tree.roots[0].children[0];
+        let inner_group = &outer_group.children[0];
+        assert_eq!(
+            outer_group.narration_marker, None,
+            "the outer loop suppresses its own marker when it has a loop descendant"
+        );
+        assert_eq!(inner_group.narration_marker.as_deref(), Some("2/3"));
+
+        // Loops separated by a non-loop structural node (a `branch`): the
+        // outer loop must still be suppressed even though the nested loop
+        // is not its immediate child.
+        let separated = session_from(base_session_json(serde_json::Value::Array(vec![status(
+            0,
+            "item",
+            "Item",
+            "accepted",
+            serde_json::json!([
+                {"kind": "procedure", "id": "outer", "index": 0},
+                {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                {"kind": "branch", "id": "arm-a", "index": 0},
+                {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                {"kind": "item", "id": "item", "index": 0, "iteration": 2},
+            ]),
+        )])));
+        let tree = project(&separated, &ActivityOverlay::default(), false);
+        let outer_group = &tree.roots[0].children[0];
+        let branch_group = &outer_group.children[0];
+        let inner_group = &branch_group.children[0];
+        assert_eq!(
+            outer_group.narration_marker, None,
+            "an intervening branch node must not hide the nested loop from the outer level"
+        );
+        assert_eq!(branch_group.narration_marker, None);
+        assert_eq!(inner_group.narration_marker.as_deref(), Some("2/3"));
+    }
+
+    /// Review-verdict-1 blocker `desktop-loop-marker-rederived`'s mixed
+    /// reconstruction: one path ends its loop nesting at the outer loop (a
+    /// plain sibling item with no nested loop), while another path under the
+    /// *same* outer-loop iteration enters a nested loop. The outer loop must
+    /// keep its own marker for the plain path's sake, even though the
+    /// nested-loop branch also carries its own (joined) innermost marker —
+    /// an any-descendant-has-loop suppression would wrongly hide the outer
+    /// marker just because a sibling branch happens to nest a loop.
+    #[test]
+    fn mixed_outer_only_and_nested_branches_both_get_their_own_marker() {
+        let mixed = session_from(base_session_json(serde_json::Value::Array(vec![
+            status(
+                0,
+                "nested-item",
+                "Nested Item",
+                "accepted",
+                serde_json::json!([
+                    {"kind": "procedure", "id": "outer", "index": 0},
+                    {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                    {"kind": "branch", "id": "arm-a", "index": 0},
+                    {"kind": "loop", "id": "inner-body", "index": 0, "iteration": 2},
+                    {"kind": "item", "id": "nested-item", "index": 0, "iteration": 2},
+                ]),
+            ),
+            status(
+                1,
+                "plain-item",
+                "Plain Item",
+                "accepted",
+                serde_json::json!([
+                    {"kind": "procedure", "id": "outer", "index": 0},
+                    {"kind": "loop", "id": "outer-body", "index": 0, "iteration": 1},
+                    {"kind": "item", "id": "plain-item", "index": 1, "iteration": 1},
+                ]),
+            ),
+        ])));
+        let tree = project(&mixed, &ActivityOverlay::default(), false);
+        let outer_group = &tree.roots[0].children[0];
+        assert_eq!(outer_group.kind, "loop");
+        assert_eq!(
+            outer_group.narration_marker.as_deref(),
+            Some("2"),
+            "the outer loop keeps its own marker: the plain-item path has no \
+             nested loop to carry it instead"
+        );
+
+        let branch_group = outer_group
+            .children
+            .iter()
+            .find(|child| child.kind == "branch")
+            .expect("the nested-item path's branch arm");
+        let inner_group = &branch_group.children[0];
+        assert_eq!(inner_group.kind, "loop");
+        assert_eq!(
+            inner_group.narration_marker.as_deref(),
+            Some("2/3"),
+            "the nested branch still carries its own, separately joined marker"
+        );
+
+        let plain_item = outer_group
+            .children
+            .iter()
+            .find(|child| child.kind == "item")
+            .expect("the plain-item leaf, a direct child of the outer loop");
+        assert_eq!(
+            plain_item.narration_marker, None,
+            "a leaf is never a marker"
+        );
+    }
+
+    #[test]
+    fn activity_lines_cap_at_eight_newest_first_and_ambiguous_ids_show_only_live_entries() {
+        use ctx_traits_core::procedure::activity::ActivityEvent;
+
+        fn event(sequence: u64, text: &str) -> ActivityEvent {
+            ActivityEvent {
+                sequence,
+                frame_id: "item".to_string(),
+                kind: ActivityKind::Thinking,
+                text: Some(text.to_string()),
+                tool: None,
+                tokens: None,
+                rate_limit: None,
+            }
+        }
+
+        let mut overlay = ActivityOverlay::default();
+        for at_epoch_ms in 0..10u64 {
+            overlay.apply_record(&ActivityRecord::Activity {
+                at_epoch_ms,
+                event: event(at_epoch_ms, &format!("line-{at_epoch_ms}")),
+            });
+        }
+        let lines = overlay.activity_lines_for("item", 1);
+        assert_eq!(lines.len(), 8, "at most eight lines are retained");
+        assert_eq!(
+            lines.first().and_then(|e| e.text.as_deref()),
+            Some("line-9"),
+            "the newest accepted line is first"
+        );
+        assert_eq!(
+            lines.last().and_then(|e| e.text.as_deref()),
+            Some("line-2"),
+            "the ninth and older lines are dropped, not the newest"
+        );
+
+        // An ambiguous frame_id (executions > 1, i.e. two executions of one
+        // looped item) must show only entries folded live, never a seed line.
+        let mut ambiguous = ActivityOverlay::default();
+        ambiguous.apply_record(&ActivityRecord::Activity {
+            at_epoch_ms: 1,
+            event: event(1, "seed-line"),
+        });
+        ambiguous.apply_live_record(&ActivityRecord::Activity {
+            at_epoch_ms: 2,
+            event: event(2, "live-line"),
+        });
+        let unambiguous = ambiguous.activity_lines_for("item", 1);
+        assert_eq!(unambiguous.len(), 2, "one execution sees the whole window");
+        let filtered = ambiguous.activity_lines_for("item", 2);
+        assert_eq!(
+            filtered.len(),
+            1,
+            "more than one execution sees only the live-folded entries"
+        );
+        assert_eq!(filtered[0].text.as_deref(), Some("live-line"));
+
+        // Zero lines render nothing.
+        assert!(
+            ActivityOverlay::default()
+                .activity_lines_for("no-such-frame", 1)
+                .is_empty()
+        );
+    }
+
+    /// Review-verdict-1 blocker `seed-pending-activity-replay-duplicates-line`:
+    /// a seed/pending replay of the exact same `Activity` occurrence must
+    /// promote the retained line's provenance to `live` in place, never
+    /// append a second visible line for it. A genuinely distinct event
+    /// sharing the replayed record's timestamp must still land as its own
+    /// line, and an ambiguous (looped) `frame_id` must show exactly the one
+    /// promoted line, not the seed line plus a duplicate.
+    #[test]
+    fn seed_pending_replay_promotes_the_retained_line_instead_of_duplicating_it() {
+        use ctx_traits_core::procedure::activity::ActivityEvent;
+
+        fn event(sequence: u64, text: &str) -> ActivityEvent {
+            ActivityEvent {
+                sequence,
+                frame_id: "item".to_string(),
+                kind: ActivityKind::Thinking,
+                text: Some(text.to_string()),
+                tool: None,
+                tokens: None,
+                rate_limit: None,
+            }
+        }
+
+        let seed_line = ActivityRecord::Activity {
+            at_epoch_ms: 1,
+            event: event(1, "seed-line"),
+        };
+
+        // Unambiguous frame_id: replaying the seed's own occurrence through
+        // `apply_pending_record` must leave exactly one visible line.
+        let mut overlay = ActivityOverlay::from_records(std::slice::from_ref(&seed_line));
+        overlay.apply_pending_record(&seed_line);
+        let lines = overlay.activity_lines_for("item", 1);
+        assert_eq!(
+            lines.len(),
+            1,
+            "a seed/pending replay of one occurrence must not duplicate its line"
+        );
+        assert_eq!(lines[0].text.as_deref(), Some("seed-line"));
+
+        // A genuinely distinct event sharing the replayed record's stamp
+        // must remain a second, separate line.
+        let distinct = ActivityRecord::Activity {
+            at_epoch_ms: 1,
+            event: event(2, "distinct-line"),
+        };
+        overlay.apply_pending_record(&distinct);
+        let lines = overlay.activity_lines_for("item", 1);
+        assert_eq!(
+            lines.len(),
+            2,
+            "a distinct event at the same timestamp is not mistaken for a replay"
+        );
+        assert_eq!(lines[0].text.as_deref(), Some("distinct-line"));
+        assert_eq!(lines[1].text.as_deref(), Some("seed-line"));
+
+        // Ambiguous frame_id (executions > 1): the replayed occurrence's
+        // promotion to `live` must be exactly what makes it visible.
+        let mut ambiguous = ActivityOverlay::from_records(std::slice::from_ref(&seed_line));
+        assert!(
+            ambiguous.activity_lines_for("item", 2).is_empty(),
+            "before any replay, an ambiguous id shows no seed-only line"
+        );
+        ambiguous.apply_pending_record(&seed_line);
+        let promoted = ambiguous.activity_lines_for("item", 2);
+        assert_eq!(
+            promoted.len(),
+            1,
+            "the replay promotes exactly one line, never a duplicate, even when ambiguous"
+        );
+        assert_eq!(promoted[0].text.as_deref(), Some("seed-line"));
+    }
+
+    /// Review-verdict-1 blocker `seed-pending-activity-replay-duplicates-line`,
+    /// the exact repeated-payload scenario the root-cause names: a seed deque
+    /// `E@1, F@2, E@3` where `E` occurs twice with an identical full
+    /// `ActivityEvent` payload, separated by a distinct `F@2`. Replaying `F@2`
+    /// then `E@3` (the newer duplicate) must promote each occurrence at its
+    /// own retained timestamp, never the wrong (older) `E@1` entry — an
+    /// event-only match would find `E@1` first and leave the visible,
+    /// ambiguous order reversed.
+    #[test]
+    fn seed_pending_replay_matches_the_exact_timestamped_occurrence_not_the_first_equal_event() {
+        use ctx_traits_core::procedure::activity::ActivityEvent;
+
+        fn event(sequence: u64, text: &str) -> ActivityEvent {
+            ActivityEvent {
+                sequence,
+                frame_id: "item".to_string(),
+                kind: ActivityKind::Thinking,
+                text: Some(text.to_string()),
+                tool: None,
+                tokens: None,
+                rate_limit: None,
+            }
+        }
+
+        let e = event(1, "e");
+        let f = event(2, "f");
+        let seed_records = [
+            ActivityRecord::Activity {
+                at_epoch_ms: 1,
+                event: e.clone(),
+            },
+            ActivityRecord::Activity {
+                at_epoch_ms: 2,
+                event: f.clone(),
+            },
+            ActivityRecord::Activity {
+                at_epoch_ms: 3,
+                event: e.clone(),
+            },
+        ];
+
+        let mut overlay = ActivityOverlay::from_records(&seed_records);
+        // Replay the distinct event first, then the newer duplicate — the
+        // order review-verdict-1 specified.
+        overlay.apply_pending_record(&seed_records[1]);
+        overlay.apply_pending_record(&seed_records[2]);
+
+        let unambiguous = overlay.activity_lines_for("item", 1);
+        assert_eq!(
+            unambiguous.len(),
+            3,
+            "no replay of an already-retained occurrence may duplicate a line"
+        );
+        assert_eq!(
+            unambiguous
+                .iter()
+                .map(|e| e.text.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("e"), Some("f"), Some("e")],
+            "newest-first order over all three retained occurrences is unaffected by promotion"
+        );
+
+        // Ambiguous: only the two promoted (live) occurrences are visible,
+        // newest first — the newer duplicate (E@3), then the distinct event
+        // (F@2) — never the un-replayed, older E@1.
+        let ambiguous = overlay.activity_lines_for("item", 2);
+        assert_eq!(
+            ambiguous.len(),
+            2,
+            "exactly the two replayed occurrences are visible, each exactly once"
+        );
+        assert_eq!(
+            ambiguous[0].text.as_deref(),
+            Some("e"),
+            "the newer duplicate (E@3) is promoted at its own timestamp, not E@1"
+        );
+        assert_eq!(
+            ambiguous[1].text.as_deref(),
+            Some("f"),
+            "the distinct event (F@2) is the second-newest promoted occurrence"
+        );
     }
 
     #[test]
@@ -1188,7 +1769,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_overlay_last_record_wins() {
+    fn activity_overlay_retains_both_records_newest_first() {
         let mut overlay = ActivityOverlay::default();
         overlay.apply_record(&ActivityRecord::SessionTitle {
             at_epoch_ms: 1,
@@ -1234,9 +1815,19 @@ mod tests {
         });
 
         assert_eq!(overlay.session_title.as_deref(), Some("second title"));
-        let activity = overlay.activity_for("the-frame").expect("activity");
-        assert_eq!(activity.kind, ActivityKind::RunningTool);
-        assert_eq!(activity.text.as_deref(), Some("second activity"));
+        let lines = overlay.activity_lines_for("the-frame", 1);
+        assert_eq!(
+            lines.len(),
+            2,
+            "both retained events survive, bounded window"
+        );
+        assert_eq!(
+            lines[0].kind,
+            ActivityKind::RunningTool,
+            "newest line is first"
+        );
+        assert_eq!(lines[0].text.as_deref(), Some("second activity"));
+        assert_eq!(lines[1].text.as_deref(), Some("first activity"));
         assert_eq!(
             overlay.narration_for("the-frame").as_deref(),
             Some("second narration")
@@ -1568,12 +2159,15 @@ mod tests {
             .find(|n| n.id.as_deref() == Some("current-item"))
             .unwrap();
         assert!(
-            past.activity.is_none(),
+            past.activity_lines.is_empty(),
             "a stale frame_id never attaches to a non-current node"
         );
         assert!(current.current);
         assert_eq!(
-            current.activity.as_ref().unwrap().text.as_deref(),
+            current
+                .activity_lines
+                .first()
+                .and_then(|e| e.text.as_deref()),
             Some("editing")
         );
         assert_eq!(current.narration.as_deref(), Some("on it"));

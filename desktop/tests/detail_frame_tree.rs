@@ -56,9 +56,9 @@ fn durable_hierarchy_and_states_survive_a_tolerant_partly_malformed_sidecar() {
     );
     assert_eq!(
         iteration.children[1]
-            .activity
-            .as_ref()
-            .and_then(|line| line.text.as_deref()),
+            .activity_lines
+            .first()
+            .and_then(|event| event.text.as_deref()),
         Some("editing the file"),
         "the sidecar's activity line attaches to the current frame"
     );
@@ -97,7 +97,7 @@ fn durable_hierarchy_and_states_survive_a_tolerant_partly_malformed_sidecar() {
 
 fn clear_overlay(nodes: &mut [ctx_traits_desktop::detail_tree::DetailNode]) {
     for node in nodes {
-        node.activity = None;
+        node.activity_lines.clear();
         node.narration = None;
         clear_overlay(&mut node.children);
     }
