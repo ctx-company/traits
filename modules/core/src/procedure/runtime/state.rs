@@ -151,6 +151,17 @@ pub struct CommandExecutionEvidence {
         skip_serializing_if = "Option::is_none"
     )]
     pub output_tail: Option<String>,
+    /// The highest signal `emission_order` visible when this command's argv
+    /// was built (0 when none were visible). Bounds replay's reconstructed
+    /// signal-payload visibility to exactly what this activation could see,
+    /// so a later re-emission of the same signal can never retroactively
+    /// change what an already-accepted command's argv is replayed against —
+    /// see `ordered_visible_signal_payloads_up_to`. `#[serde(default)]` so
+    /// ledgers written before this field existed — none of which could have
+    /// referenced a signal in argv — replay with no signals visible, which is
+    /// exactly what they actually saw.
+    #[serde(default, rename = "signal-emission-ceiling")]
+    pub signal_emission_ceiling: usize,
 }
 
 /// Pure schema-validation outcome for a runtime value.

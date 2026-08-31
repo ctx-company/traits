@@ -157,6 +157,7 @@ pub fn intro_sequence_frame(trait_ref: &Trait, state: &State) -> crate::Result<S
         for_each_context: None,
         guard_explanations: Vec::new(),
         signal_payloads: Vec::new(),
+        signal_emission_ceiling: 0,
         title: proc.description.clone(),
         frame_text: bounded(text),
         prompt: None,
@@ -214,13 +215,20 @@ fn build_sequence_frame(
     state: &State,
     ready: &ReadyItem<'_>,
 ) -> crate::Result<SequenceFrame> {
+    // Both payloads and ceiling come from the one filtered/ordered
+    // traversal in `visible_signal_projection` — never a second, differently
+    // filtered rescan — so a command activation's recorded evidence stamps
+    // exactly the visibility its argv was actually resolved against, and
+    // replay never disagrees (see `SequenceFrame::signal_emission_ceiling`).
+    let (signal_payloads, signal_emission_ceiling) =
+        visible_signal_projection(state, &ready.position_path);
     let command_plan = command_plan_for_item(
         ready.item,
         &format!("procedure.sequence[{}]", ready.sequence_index),
     )?;
     let command = command_plan
         .as_ref()
-        .map(|plan| command_frame(ready.item, plan, state))
+        .map(|plan| command_frame(ready.item, plan, state, &signal_payloads))
         .transpose()?;
     let prompt = if command.is_some() {
         None
@@ -361,19 +369,8 @@ fn build_sequence_frame(
         loop_context: ready.loop_context.clone(),
         for_each_context: ready.for_each_context.clone(),
         guard_explanations: ready.guard_explanations.clone(),
-        signal_payloads: visible_signal_emissions_in_scope(
-            state,
-            "",
-            &repeated_activation_scope(&ready.position_path),
-        )
-        .into_iter()
-        .filter_map(|signal| {
-            signal.payload.as_ref().map(|payload| FrameSignalPayload {
-                signal_ref: signal.signal_ref.clone(),
-                payload: payload.clone(),
-            })
-        })
-        .collect(),
+        signal_payloads,
+        signal_emission_ceiling,
         title: ready.item.title.clone(),
         frame_text: bounded(frame_text),
         prompt,

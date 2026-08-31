@@ -1061,6 +1061,7 @@ mod tests {
             exit_code,
             timed_out,
             output_tail: None,
+            signal_emission_ceiling: 0,
         }
     }
 

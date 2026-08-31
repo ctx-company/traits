@@ -454,6 +454,22 @@ pub(crate) fn classify_prompt(text: &str) -> Result<PromptClassification, String
 /// Kinds that are valid in prompt input contracts.
 const VALID_INPUT_KINDS: &[Kind] = &[Kind::Port, Kind::Slot, Kind::Resource, Kind::Setting];
 
+/// Kinds that are valid in prompt *text interpolations*.
+///
+/// A superset of [`VALID_INPUT_KINDS`] with [`Kind::Signal`] added: a signal
+/// payload-field interpolation like `{signal:needs-owner.question}` resolves
+/// at drive time but is not an input contract entry (the CDK keeps signal
+/// refs out of `input` lists, and `PROMPT_REQUIRED_INPUT_KINDS`
+/// (`trait::procedure::model`) stays Signal-free), so this widening is
+/// confined to the interpolation seam.
+const VALID_INTERPOLATION_KINDS: &[Kind] = &[
+    Kind::Port,
+    Kind::Slot,
+    Kind::Resource,
+    Kind::Setting,
+    Kind::Signal,
+];
+
 /// Kinds that are valid in prompt output contracts.
 const VALID_OUTPUT_KINDS: &[Kind] = &[Kind::Slot];
 
@@ -646,11 +662,11 @@ fn validate_prompt_text(
                 ),
             }
         })?;
-        if !VALID_INPUT_KINDS.contains(&parsed.kind()) {
+        if !VALID_INTERPOLATION_KINDS.contains(&parsed.kind()) {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: format!("{id_path}.text"),
                 message: format!(
-                    "interpolation {{{}}} kind {:?} not allowed; expected port, slot, setting, or resource",
+                    "interpolation {{{}}} kind {:?} not allowed; expected port, slot, setting, resource, or signal",
                     interp.ref_text,
                     parsed.kind()
                 ),

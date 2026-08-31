@@ -23,7 +23,7 @@ fn validate_signal_with_context(
     let declared = if parsed.is_qualified() {
         None
     } else {
-        trait_ref.signals.iter().find(|declared| declared.id == parsed.id())
+        trait_ref.signals.iter().find(|declared| declared.id == parsed.base_id())
     };
     let allowed =
         { parsed.kind() == Kind::Signal && allowed_signals.contains(signal.ref_text.as_str()) };
@@ -93,6 +93,7 @@ fn validate_signal_with_context(
     };
     Ok(SignalEmission {
         signal_ref: parsed,
+        emission_order: 0,
         sequence_index,
         evidence_digest,
         payload: signal.payload,

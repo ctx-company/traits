@@ -89,6 +89,12 @@ schema = "schema:text"
 description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
 
 [[slot]]
+id = "owner-decisions"
+schema = "[schema:text]"
+description = "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message."
+hint = "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences."
+
+[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict"
 description = "First reviewer's verdict for the current work state."
@@ -102,6 +108,11 @@ description = "Second, independent reviewer's verdict for the current work state
 id = "stage-output"
 schema = "schema:text"
 description = "Output evidence from the git add command step."
+
+[[slot]]
+id = "summon-the-owner"
+schema = "schema:text"
+description = "Runtime slot summon-the-owner."
 
 [[slot]]
 id = "work-summary"
@@ -184,6 +195,20 @@ description = """"open" or "done". Flips to done only when the reviewer has veri
 schema = "schema:text"
 required = true
 description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
+id = "needs-owner-payload"
+description = "Why only the owner can settle this, and the one question that unblocks the run."
+
+[schema.fields.question]
+schema = "schema:text"
+required = true
+description = "The single question to put to the owner, phrased so one short answer unblocks the run. Name the options you see and what you would do absent an answer."
+
+[schema.fields.reason]
+schema = "schema:text"
+required = true
+description = "Why only the owner can settle this: the contradiction, the missing authority, or the trade-off the run has no standing to decide. Grounded in what you verified, not a restatement of the question."
 
 [[schema]]
 id = "owner-item"
@@ -269,6 +294,11 @@ schema = "schema:text"
 required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
+[[signal]]
+id = "needs-owner"
+description = "The run cannot proceed without an owner decision; parks on a summons the owner answers inside the run."
+schema = "schema:needs-owner-payload"
+
 [[agent]]
 id = "scribe"
 description = "Commit & Summary Writing; git staging and committing run as command steps."
@@ -321,17 +351,30 @@ Return this round's work summary: slot:work-summary"""
 input = ["slot:draft"]
 output = ["slot:work-summary"]
 
+[prompt.record-the-owner-s-ruling]
+text = """
+The owner answered a summons raised during this run.
+The question put to the owner: {signal:needs-owner.question}
+Why it needed the owner: {signal:needs-owner.reason}
+The owner's answer: {slot:summon-the-owner}
+Write exactly ONE entry recording this ruling — the question and what the owner decided, in one or two sentences, no preamble."""
+input = ["slot:summon-the-owner"]
+output = ["slot:owner-decisions"]
+
 [prompt.review-the-implementation]
 text = """
-Review the implemented state against the draft {slot:draft} as source of truth.
-Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
-Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
-Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
-There is no reachable owner during this run — never set escalation to needs-owner. Any question you would have escalated is yours to decide: make the best-effort judgement call, ground it in evidence you verified yourself, and record the decision and its reason in the verdict. A decided question is never a blocker.
+  Review the implemented state against the draft {slot:draft} as source of truth.
+  Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
+  Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
+  Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
 
-Return the typed review verdict: (slot:review-verdict-1).
-Verdict should come with proposed solutions.
-Put solutions in most efficient order."""
+Owner rulings already made in this run (if any): {slot:owner-decisions} — they are settled; never reopen one. Decide what you can decide yourself and record the decision and its reason in the verdict; a decided question is never a blocker.
+
+    Return the typed review verdict: (slot:review-verdict-1).
+    Verdict should come with proposed solutions.
+    Put solutions in most efficient order.
+  
+Separately: for any contradiction or question only the owner can answer, emit {signal:needs-owner}."""
 input = [
     "slot:draft",
     "slot:work-summary",
@@ -339,10 +382,19 @@ input = [
 ]
 output = ["slot:review-verdict-1"]
 
+[prompt.summon-the-owner]
+text = """
+This run cannot settle a question on its own and is parked until you answer.
+Why only you can settle it: {signal:needs-owner.reason}
+The question: {signal:needs-owner.question}
+Answer in one or two sentences — the run resumes with your answer as evidence."""
+output = ["slot:summon-the-owner"]
+
 [prompt.write-the-commit-message]
 text = """
 The work for {port:task} is being committed.
 Write a concise commit message from the work summary into {slot:work-summary}.
+Owner rulings made during this run (if any): {slot:owner-decisions} — when one shaped the work, cite what the owner decided in the message body.
 
 Return exactly the finished commit message into (slot:commit-message)."""
 input = [
@@ -359,6 +411,7 @@ prompt = "prompt:write-the-commit-message"
 input = [
     "port:task",
     "slot:work-summary",
+    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:commit-message"]
 
@@ -387,6 +440,25 @@ argv = [
     "-m",
     "{slot:commit-message}",
 ]
+
+[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
+id = "summon-the-owner"
+title = "Summon the owner"
+kind = "ask"
+prompt = "prompt:summon-the-owner"
+output = ["slot:summon-the-owner"]
+when = "signal:needs-owner"
+
+[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
+id = "record-the-owner-s-ruling"
+title = "Record the owner's ruling"
+agent = "agent:scribe"
+prompt = "prompt:record-the-owner-s-ruling"
+input = ["slot:summon-the-owner"]
+
+[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence.output]]
+slot = "slot:owner-decisions"
+operation = "append"
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "implement-the-task"
@@ -425,8 +497,19 @@ input = [
     "slot:changed-files",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
+    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:review-verdict-1"]
+on-complete = ["signal:needs-owner"]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "owner-ruling"
+title = "Owner ruling"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then"
+
+[sequence.reviewed-refinement-body.sequence.when]
+signal = "signal:needs-owner"
 
 [procedure]
 description = "Reviewed implementation: implement, review, refine & commit."

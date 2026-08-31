@@ -16,8 +16,8 @@ use crate::r#trait::Resource;
 /// Each argv item is scanned with the shared [`scan_interpolations`] scanner.
 /// For every interpolation that parses as a typed ref:
 ///
-/// - the ref kind MUST be `slot`, `port`, `setting`, or `resource` — every
-///   other kind is rejected;
+/// - the ref kind MUST be `slot`, `port`, `setting`, `resource`, or
+///   `signal` — every other kind is rejected;
 /// - a `slot`/`port` ref MUST be local and unqualified — dependency
 ///   slot/port values are not resolvable at pure frame-build time — and MAY
 ///   appear anywhere within the argv element; the referenced value is
@@ -29,6 +29,11 @@ use crate::r#trait::Resource;
 ///   sequence item `input` list requirement below: settings are resolved at
 ///   activation, not accepted as step inputs, mirroring the loop-bound
 ///   branch's skip of the analogous port-only rule;
+/// - a `signal` ref MUST name a declared local signal via its base id
+///   (`{signal:id}` or a dotted `{signal:id.field}` payload-field path — the
+///   base id is what must be declared) and, like `setting`, is exempt from
+///   the `input` list requirement: it resolves at drive time from the
+///   visible emitted signals, not from accepted step inputs;
 /// - a `resource` ref MUST be the entire argv element (`{resource:id}` with
 ///   nothing else in that element), local and unqualified, and MUST NOT
 ///   carry an input guard: a resource launched as a command argument is
@@ -36,8 +41,9 @@ use crate::r#trait::Resource;
 ///   interpolated here — permitting it embedded in a larger string or
 ///   behind a conditional input would blur containment and let dynamic text
 ///   be reinterpreted as a resource reference downstream;
-/// - every non-`setting` ref MUST appear in the sequence item `input` list —
-///   the same implicit-input rule prompt interpolation enforces.
+/// - every non-`setting`/`signal` ref MUST appear in the sequence item
+///   `input` list — the same implicit-input rule prompt interpolation
+///   enforces.
 ///
 /// Interpolation braces that do **not** parse as a typed ref (for example a
 /// `jq` object filter such as `{name: .n}`) are left untouched: argv runs
@@ -59,12 +65,12 @@ pub(crate) fn validate_sequence_item_command_contract(
             let argv_path = format!("{base}.command.argv[{index}]");
             if !matches!(
                 parsed.kind(),
-                Kind::Slot | Kind::Port | Kind::Resource | Kind::Setting
+                Kind::Slot | Kind::Port | Kind::Resource | Kind::Setting | Kind::Signal
             ) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: argv_path,
                     message: format!(
-                        "argv interpolation {{{}}} kind {:?} not allowed; only slot, port, setting, or resource refs may be interpolated",
+                        "argv interpolation {{{}}} kind {:?} not allowed; only slot, port, setting, resource, or signal refs may be interpolated",
                         interp.ref_text,
                         parsed.kind()
                     ),
@@ -73,6 +79,22 @@ pub(crate) fn validate_sequence_item_command_contract(
             }
             if parsed.kind() == Kind::Setting {
                 resolve_setting_ref(_trait_ref, interp.ref_text.as_str(), &argv_path)?;
+            }
+            if parsed.kind() == Kind::Signal
+                && !_trait_ref
+                    .signals
+                    .iter()
+                    .any(|signal| signal.id == parsed.base_id())
+            {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: argv_path,
+                    message: format!(
+                        "argv interpolation {{{}}} requires a declared local signal {:?}",
+                        interp.ref_text,
+                        parsed.base_id()
+                    ),
+                }
+                .into());
             }
             if parsed.is_qualified() {
                 return Err(crate::manifest::Error::InvalidField {
@@ -108,7 +130,9 @@ pub(crate) fn validate_sequence_item_command_contract(
                     .into());
                 }
             }
-            if parsed.kind() != Kind::Setting && !item_input.contains(interp.ref_text.as_str()) {
+            if !matches!(parsed.kind(), Kind::Setting | Kind::Signal)
+                && !item_input.contains(interp.ref_text.as_str())
+            {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.input"),
                     message: format!(
@@ -118,7 +142,9 @@ pub(crate) fn validate_sequence_item_command_contract(
                 }
                 .into());
             }
-            if parsed.kind() != Kind::Setting && item.input.is_optional_for(interp.ref_text.as_str()) {
+            if !matches!(parsed.kind(), Kind::Setting | Kind::Signal)
+                && item.input.is_optional_for(interp.ref_text.as_str())
+            {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.input"),
                     message: format!(
@@ -139,6 +165,7 @@ fn argv_kind_label(kind: Kind) -> &'static str {
         Kind::Port => "port",
         Kind::Resource => "resource",
         Kind::Setting => "setting",
+        Kind::Signal => "signal",
         _ => "unsupported",
     }
 }
@@ -265,6 +292,47 @@ mod command_contract_tests {
             "id = \"run\"\ntitle = \"Run\"\nkind = \"command\"\ncmd = \"true\"\n",
         )
         .expect("test fixture must be a valid sequence item")
+    }
+
+    fn minimal_trait_with_signal(id: &str) -> Trait {
+        let mut trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            "id = \"command-contract-signal-test\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Command contract signal test\"\nsummary = \"Minimal fixture.\"\n",
+        )
+        .expect("minimal trait decodes");
+        trait_ref.signals.push(crate::r#trait::Signal {
+            id: id.to_string(),
+            description: "A test signal.".to_string(),
+            schema: None,
+        });
+        trait_ref
+    }
+
+    #[test]
+    fn argv_signal_field_ref_to_a_declared_signal_builds() {
+        let trait_ref = minimal_trait_with_signal("needs-owner");
+        let item = command_item();
+        let argv = vec!["--reason".to_string(), "{signal:needs-owner.reason}".to_string()];
+        validate_sequence_item_command_contract(&trait_ref, &item, &argv, "procedure.sequence[0]")
+            .expect("a signal payload-field ref naming a declared signal builds without requiring it in `input`");
+    }
+
+    #[test]
+    fn argv_signal_field_ref_to_an_undeclared_signal_fails_naming_the_id() {
+        let trait_ref = minimal_trait_with_signal("needs-owner");
+        let item = command_item();
+        let argv = vec!["{signal:not-declared.reason}".to_string()];
+        let error = validate_sequence_item_command_contract(
+            &trait_ref,
+            &item,
+            &argv,
+            "procedure.sequence[0]",
+        )
+        .expect_err("an undeclared signal base must fail the build");
+        assert!(
+            format!("{error}").contains("not-declared"),
+            "error must name the resolved base id: {error}"
+        );
     }
 
     #[test]

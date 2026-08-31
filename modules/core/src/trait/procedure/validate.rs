@@ -4494,7 +4494,7 @@ fn validate_signal_ref(
         }
         .into());
     }
-    if !parsed.is_qualified() && !signal_ids.contains(parsed.id()) {
+    if !parsed.is_qualified() && !signal_ids.contains(parsed.base_id()) {
         return Err(crate::manifest::Error::InvalidField {
             field_path: field_path.to_string(),
             message: format!("unresolved local signal ref {ref_text:?}"),
@@ -4517,7 +4517,7 @@ fn validate_runtime_authored_signal(
         && trait_ref
             .signals
             .iter()
-            .find(|signal| signal.id == parsed.id())
+            .find(|signal| signal.id == parsed.base_id())
             .is_some_and(|signal| signal.schema.is_some())
     {
         return Err(crate::manifest::Error::InvalidField {
@@ -5613,6 +5613,41 @@ sequence = [
         let error = validate_item_refs(&trait_ref, &runtime_item, "procedure.sequence[1]", &sets)
             .expect_err("for-each completion has no payload source");
         assert!(error.to_string().contains("procedure.sequence[1].on-complete[0]"));
+    }
+
+    #[test]
+    fn schema_signal_dotted_payload_field_ref_is_refused_for_runtime_for_each_completion() {
+        let mut trait_ref = checklist_for_each_fixture_trait("slot:verdicts");
+        trait_ref.signals.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "payload",
+                "description": "Carries a caller payload.",
+                "schema": "schema:text"
+            }))
+            .expect("signal fixture decodes"),
+        );
+        let empty = BTreeSet::new();
+        let signal_ids = BTreeSet::from(["payload"]);
+        let sets = SequenceValidationSets {
+            input_port_ids: &empty,
+            output_port_ids: &empty,
+            slot_ids: &empty,
+            signal_ids: &signal_ids,
+            agent_ids: &empty,
+            resource_ids: &empty,
+        };
+
+        // The dotted payload-field form must resolve its declared schema
+        // through `base_id()`, exactly like the bare form: this proves
+        // `validate_runtime_authored_signal` doesn't miss the schema because
+        // `signal_ids`/lookup compares the whole (dotted) `id()` instead.
+        let runtime_item = item_from_toml(
+            "id = \"per-item\"\ntitle = \"Per item\"\nkind = \"for-each\"\nsequence = \"sequence:body\"\non-complete = [\"signal:payload.detail\"]\n",
+        );
+        let error = validate_item_refs(&trait_ref, &runtime_item, "procedure.sequence[1]", &sets)
+            .expect_err("for-each completion of a dotted schema signal has no payload source");
+        assert!(error.to_string().contains("procedure.sequence[1].on-complete[0]"));
+        assert!(error.to_string().contains("signal:payload.detail"));
     }
 
     #[test]

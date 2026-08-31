@@ -16,13 +16,13 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 61,
-    "end": 61
+    "start": 68,
+    "end": 68
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 56,
-    "end": 56
+    "start": 63,
+    "end": 63
   },
   "prompt:draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
@@ -31,18 +31,28 @@
   },
   "prompt:implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 14,
-    "end": 14
+    "start": 15,
+    "end": 15
+  },
+  "prompt:record-the-owner-s-ruling": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/summon.ts",
+    "start": 21,
+    "end": 21
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 16,
-    "end": 16
+    "start": 17,
+    "end": 17
+  },
+  "prompt:summon-the-owner": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/summon.ts",
+    "start": 9,
+    "end": 9
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 26,
-    "end": 26
+    "start": 32,
+    "end": 32
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
@@ -59,6 +69,11 @@
     "start": 91,
     "end": 91
   },
+  "schema:needs-owner-payload": {
+    "file": "packages/toolkit/src/signal.ts",
+    "start": 11,
+    "end": 11
+  },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
     "start": 238,
@@ -71,58 +86,78 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 28,
-    "end": 28
+    "start": 34,
+    "end": 34
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 33,
+    "end": 33
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 26,
-    "end": 26
+    "start": 32,
+    "end": 32
+  },
+  "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then/record-the-owner-s-ruling": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 21,
+    "end": 21
+  },
+  "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then/summon-the-owner": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 20,
+    "end": 20
   },
   "sequence:procedure/capture-the-session-base": {
-    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 10,
-    "end": 10
-  },
-  "sequence:procedure/check-working-tree-status": {
-    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 24,
-    "end": 24
-  },
-  "sequence:procedure/draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
     "start": 11,
     "end": 11
   },
+  "sequence:procedure/check-working-tree-status": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 30,
+    "end": 30
+  },
+  "sequence:procedure/draft-the-implementation-plan": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 12,
+    "end": 12
+  },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 25,
-    "end": 25
+    "start": 31,
+    "end": 31
   },
   "sequence:procedure/reviewed-refinement": {
-    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 13,
-    "end": 13
-  },
-  "sequence:reviewed-refinement-body/capture-the-changed-files": {
-    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 15,
-    "end": 15
-  },
-  "sequence:reviewed-refinement-body/implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
     "start": 14,
     "end": 14
   },
-  "sequence:reviewed-refinement-body/review-the-implementation": {
+  "sequence:reviewed-refinement-body/capture-the-changed-files": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
     "start": 16,
     "end": 16
+  },
+  "sequence:reviewed-refinement-body/implement-the-task": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 15,
+    "end": 15
+  },
+  "sequence:reviewed-refinement-body/owner-ruling": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 19,
+    "end": 19
+  },
+  "sequence:reviewed-refinement-body/review-the-implementation": {
+    "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
+    "start": 17,
+    "end": 17
+  },
+  "signal:needs-owner": {
+    "file": "packages/toolkit/src/signal.ts",
+    "start": 37,
+    "end": 37
   },
   "slot:changed-files": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -146,6 +181,11 @@
   },
   "slot:git-status": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 53,
+    "end": 53
+  },
+  "slot:owner-decisions": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 46,
     "end": 46
   },
@@ -161,8 +201,13 @@
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 51,
-    "end": 51
+    "start": 58,
+    "end": 58
+  },
+  "slot:summon-the-owner": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/summon.ts",
+    "start": 21,
+    "end": 21
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",

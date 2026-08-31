@@ -767,7 +767,7 @@ fn validate_guard_ref(
     })?;
     match parsed.kind() {
         Kind::Signal => {
-            if !parsed.is_qualified() && !signal_ids.contains(parsed.id()) {
+            if !parsed.is_qualified() && !signal_ids.contains(parsed.base_id()) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: field_path.to_string(),
                     message: format!("unresolved local signal ref {ref_text:?}"),

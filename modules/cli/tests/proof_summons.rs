@@ -108,6 +108,26 @@ struct Fixture {
 /// that final frame under whatever conditions the scenario needs (a plain
 /// resume, or one with a fault injected).
 fn start_and_signal(label: &str) -> Fixture {
+    start_with_source_and_signal(
+        label,
+        "summons-fixture",
+        fixture_source(),
+        serde_json::json!({ "signal:needs-owner": {} }),
+    )
+}
+
+/// Generalized [`start_and_signal`]: build a caller-supplied CDK `source`
+/// under `trait_id`, activate it, start `--no-drive`, and submit
+/// `signals_payload` (a `{ "signal:<ref>": <payload> }` map, as
+/// `call_session_frame`'s `signals` field expects) as an unassigned-agent
+/// caller would. Leaves the session one `internal drive` short of the park,
+/// exactly like [`start_and_signal`].
+fn start_with_source_and_signal(
+    label: &str,
+    trait_id: &str,
+    source: &str,
+    signals_payload: serde_json::Value,
+) -> Fixture {
     let scratch = ScratchRoot::new(label);
     let home = scratch.home();
     let proj = home.join("repo");
@@ -115,7 +135,6 @@ fn start_and_signal(label: &str) -> Fixture {
     git_init(&proj);
     symlink_node_modules(&proj);
 
-    let trait_id = "summons-fixture";
     require_success(
         &format!("`ctx traits init {trait_id}`"),
         &["traits", "init", trait_id],
@@ -124,7 +143,7 @@ fn start_and_signal(label: &str) -> Fixture {
     );
 
     let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
-    fs::write(&source_path, fixture_source())
+    fs::write(&source_path, source)
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", source_path.display()));
 
     require_success(
@@ -179,7 +198,7 @@ fn start_and_signal(label: &str) -> Fixture {
         &home,
         &ledger_path,
         None,
-        serde_json::json!({ "signals": { "signal:needs-owner": {} } }),
+        serde_json::json!({ "signals": signals_payload }),
     );
 
     Fixture {
@@ -720,5 +739,89 @@ fn answer_no_resume_records_without_driving_the_following_command() {
     assert!(
         consumed.contains("do the thing"),
         "expected the explicit resume to consume the recorded answer, got: {consumed}"
+    );
+}
+
+/// 0272 goal 5 (end-to-end): a `step.ask` guarded on the toolkit's schema'd
+/// `needsOwnerSignal` interpolates its payload's `.question` field
+/// (`{signal:needs-owner.question}`) directly into the ask prompt. Submits a
+/// distinctive question through the emitted signal's payload and asserts it
+/// appears verbatim in the durable `last-drive-outcome.summons.question` —
+/// proof that a signal payload field reference resolves through drive the
+/// same way a slot reference does.
+#[test]
+fn ask_prompt_interpolates_a_schema_carrying_signal_payload_field() {
+    // A locally declared schema'd signal, deliberately not the toolkit's
+    // `needsOwnerSignal`: the CDK stamps each construct's own source anchor
+    // from its call site, which must resolve inside the building repo — a
+    // scratch test repo's `node_modules/@ctx-traits/toolkit` symlink points
+    // at this repository's real checkout, outside that scratch repo, so an
+    // imported package construct's anchor cannot be made repository-relative
+    // here. Declaring the same shape (`reason`/`question` fields) locally
+    // exercises the identical `signal:needs-owner.question` interpolation
+    // grammar `needsOwnerSignal` produces, without the anchor mismatch.
+    let source = "import { input, procedure, schema, sequence, signal, step, trait } from \"@ctx-traits/cdk\";\n\
+        \n\
+        const needsOwner = signal(\"needs-owner\", {\n\
+        \x20 description: \"The run cannot proceed without an owner decision.\",\n\
+        \x20 schema: schema.object(\"needs-owner-payload\", {\n\
+        \x20   reason: schema.field(schema.text(), { description: \"Why the owner must decide.\" }),\n\
+        \x20   question: schema.field(schema.text(), { description: \"The question for the owner.\" }),\n\
+        \x20 }),\n\
+        });\n\
+        \n\
+        const emit = sequence.prompt(\"emit\", {\n\
+        \x20 text: input.prompt`Emit the needs-owner signal.`,\n\
+        \x20 onComplete: [needsOwner],\n\
+        });\n\
+        \n\
+        let ask;\n\
+        procedure.from({ description: \"throwaway scope for step.ask\" }, () => {\n\
+        \x20 ask = step.ask(\"ask-owner\", {\n\
+        \x20   when: needsOwner,\n\
+        \x20   input: input.prompt`${needsOwner.question}`,\n\
+        \x20   output: schema.text(),\n\
+        \x20 });\n\
+        });\n\
+        \n\
+        export const draft = trait({\n\
+        \x20 id: \"signal-payload-summons-fixture\",\n\
+        \x20 name: \"signal-payload-summons-fixture\",\n\
+        \x20 description: \"An ask prompt interpolating a schema-carrying signal payload field.\",\n\
+        \x20 signal: [needsOwner],\n\
+        \x20 procedure: procedure({\n\
+        \x20   description: \"Emit the schema'd signal, then ask the owner a guarded question.\",\n\
+        \x20   sequence: [emit, ask],\n\
+        \x20 }),\n\
+        });\n";
+
+    let distinctive_question = "Which of the two migration paths should this run take?";
+    let fixture = start_with_source_and_signal(
+        "signal-payload-summons-fixture",
+        "signal-payload-summons-fixture",
+        source,
+        serde_json::json!({
+            "signal:needs-owner": {
+                "payload": {
+                    "reason": "Two equally valid migration paths, no authority to pick one.",
+                    "question": distinctive_question,
+                }
+            }
+        }),
+    );
+
+    let run_stdout = drive_to_park(&fixture);
+    let run_json = value_json(&run_stdout);
+    assert_eq!(
+        run_json["value"]["status"], "awaiting-owner",
+        "expected the run to park awaiting-owner on the guarded ask: {run_json}"
+    );
+
+    let ledger_json = read_ledger_json(&fixture);
+    let session = session_view(&ledger_json);
+    assert_eq!(
+        session["last-drive-outcome"]["summons"]["question"], distinctive_question,
+        "the ask prompt's {{signal:needs-owner.question}} interpolation must resolve to the \
+         submitted payload's question field verbatim: {session}"
     );
 }

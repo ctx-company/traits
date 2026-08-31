@@ -77,6 +77,12 @@ schema = "schema:text"
 description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
 
 [[slot]]
+id = "owner-decisions"
+schema = "[schema:text]"
+description = "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message."
+hint = "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences."
+
+[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict"
 description = "First reviewer's verdict for the current work state."
@@ -313,6 +319,7 @@ output = ["slot:work-summary"]
 text = """
 The work for {port:task} is being committed.
 Write a concise commit message from the work summary into {slot:work-summary}.
+Owner rulings made during this run (if any): {slot:owner-decisions} — when one shaped the work, cite what the owner decided in the message body.
 
 Return exactly the finished commit message into (slot:commit-message)."""
 input = [
@@ -329,6 +336,7 @@ prompt = "prompt:write-the-commit-message"
 input = [
     "port:task",
     "slot:work-summary",
+    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:commit-message"]
 

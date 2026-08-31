@@ -4805,6 +4805,12 @@ fn advance_command_frames(
         let run_index = frame.run_index;
         let sequence_index = frame.sequence_index;
         let position_path = frame.position_path.clone();
+        // Carried verbatim from the frame `next_sequence_frame` built this
+        // argv against, rather than rescanned here: the exact signal
+        // visibility this argv resolved against, so a later re-emission of
+        // the same signal can never retroactively change what this
+        // activation's replay sees.
+        let signal_emission_ceiling = frame.signal_emission_ceiling;
         let outcome = crate::command::run_with_env(
             crate::command::RunRequest {
                 argv: &process_argv,
@@ -4857,6 +4863,7 @@ fn advance_command_frames(
                     stderr: (!outcome.stderr.is_empty()).then(|| outcome.stderr.clone()),
                     stdout_truncated: outcome.stdout_truncated,
                     stderr_truncated: outcome.stderr_truncated,
+                    signal_emission_ceiling,
                 };
             let verdict_record = ctx_traits_core::procedure::session::check_output_value(
                 verdict,
@@ -5008,6 +5015,7 @@ fn advance_command_frames(
                             stderr: None,
                             stdout_truncated: outcome.stdout_truncated,
                             stderr_truncated: outcome.stderr_truncated,
+                            signal_emission_ceiling,
                         },
                     ),
                     caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
@@ -5118,6 +5126,7 @@ fn advance_command_frames(
                         stderr: None,
                         stdout_truncated: false,
                         stderr_truncated: false,
+                        signal_emission_ceiling,
                     },
                 ),
                 caller: Some(ctx_traits_core::procedure::session::CallerProvenance {

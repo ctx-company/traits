@@ -300,6 +300,14 @@ pub struct SequenceFrame {
     pub guard_explanations: Vec<ConditionEvaluation>,
     #[serde(default, rename = "signal-payloads", skip_serializing_if = "Vec::is_empty")]
     pub signal_payloads: Vec<FrameSignalPayload>,
+    /// The highest signal `emission_order` visible when this frame's
+    /// `signal_payloads`/argv were resolved — the same scan, not a second
+    /// one. A command activation's evidence stamps this value verbatim as
+    /// `CommandExecutionEvidence::signal_emission_ceiling`, so a later
+    /// re-emission of the same signal can never retroactively change what an
+    /// already-built frame's provenance replay sees.
+    #[serde(default, rename = "signal-emission-ceiling", skip_serializing_if = "is_zero")]
+    pub signal_emission_ceiling: usize,
     pub title: String,
     pub frame_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -341,15 +349,36 @@ pub struct FrameSignalPayload {
     pub payload: JsonValue,
 }
 
+/// Look up a visible signal payload or one of its dotted object fields in a
+/// list of ordered payloads. `payloads` must be in emission order (oldest
+/// first); this takes the LAST matching entry so a signal raised more than
+/// once resolves to its most recent payload, not append/sort-order luck.
+///
+/// The single collection-level lookup for signal payload resolution: both
+/// [`SequenceFrame::signal_payload_field`] (the prompt path) and the
+/// `Kind::Signal` argv-interpolation arm (`frame_builders.rs`) delegate here
+/// instead of each independently reimplementing reverse matching and dotted
+/// field traversal, so recency/matching semantics can never drift between
+/// the two surfaces.
+pub(crate) fn signal_payload_field<'a>(
+    payloads: &'a [FrameSignalPayload],
+    signal_ref: &str,
+    field: Option<&str>,
+) -> Option<&'a JsonValue> {
+    let payload = payloads
+        .iter()
+        .rev()
+        .find(|payload| payload.signal_ref.as_str() == signal_ref)
+        .map(|payload| &payload.payload)?;
+    field.map_or(Some(payload), |field| crate::shared::resolve_field_path(payload, field))
+}
+
 impl SequenceFrame {
     /// Look up a visible signal payload or one of its dotted object fields.
+    /// See [`signal_payload_field`] (the free function) for the shared
+    /// lookup this delegates to.
     pub fn signal_payload_field(&self, signal_ref: &str, field: Option<&str>) -> Option<&JsonValue> {
-        let payload = self
-            .signal_payloads
-            .iter()
-            .find(|payload| payload.signal_ref.as_str() == signal_ref)
-            .map(|payload| &payload.payload)?;
-        field.map_or(Some(payload), |field| crate::shared::resolve_field_path(payload, field))
+        signal_payload_field(&self.signal_payloads, signal_ref, field)
     }
 }
 
@@ -375,6 +404,7 @@ mod signal_payload_tests {
                 signal_ref: Reference::parse("signal:review").unwrap(),
                 payload: json!({"detail": {"code": "missing-test"}}),
             }],
+            signal_emission_ceiling: 0,
             title: "step".to_string(),
             frame_text: String::new(),
             prompt: None,
@@ -515,6 +545,19 @@ pub struct StepOutputEnvelope {
 #[schemars(rename_all = "kebab-case")]
 pub struct SignalEmission {
     pub signal_ref: Reference,
+    /// Monotonic emission ordinal, assigned in [`record_emitted_signals`]
+    /// (control_flow.rs) from a max-existing+1 scan across the committed
+    /// ledger and any open parallel-branch buffers. This is the recency
+    /// signal for [`SequenceFrame::signal_payload_field`]: `sort_state`
+    /// (frame_builders.rs) reorders committed emissions by sequence
+    /// index/ref/digest for display, which destroys append order, so
+    /// `.last()` on the stored `Vec` is not recency — this field is.
+    /// `#[serde(default)]` so pre-existing ledgers deserialize to `0`; ties
+    /// degrade to whatever order the vec already carries, which is
+    /// acceptable since no ledger predates this field with more than one
+    /// emission of the same signal in a way that recency-mattered.
+    #[serde(default, rename = "emission-order")]
+    pub emission_order: usize,
     pub sequence_index: usize,
     pub evidence_digest: Digest,
     #[serde(default, skip_serializing_if = "Option::is_none")]

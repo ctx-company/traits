@@ -90,6 +90,12 @@ schema = "schema:text"
 description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
 
 [[slot]]
+id = "owner-decisions"
+schema = "[schema:text]"
+description = "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message."
+hint = "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences."
+
+[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict"
 description = "First reviewer's verdict for the current work state."
@@ -340,10 +346,11 @@ output = ["slot:work-summary"]
 
 [prompt.review-the-implementation]
 text = """
-Review the implemented state against the draft {slot:draft} as source of truth.
-Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
-Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
-Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
+  Review the implemented state against the draft {slot:draft} as source of truth.
+  Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
+  Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
+  Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
+
 There is no reachable owner during this run — never set escalation to needs-owner. Any question you would have escalated is yours to decide: make the best-effort judgement call, ground it in evidence you verified yourself, and record the decision and its reason in the verdict. A decided question is never a blocker.
 
 Return the typed review verdict: (slot:review-verdict-1).
@@ -360,6 +367,7 @@ output = ["slot:review-verdict-1"]
 text = """
 The work for {port:task} is being committed.
 Write a concise commit message from the work summary into {slot:work-summary}.
+Owner rulings made during this run (if any): {slot:owner-decisions} — when one shaped the work, cite what the owner decided in the message body.
 
 Return exactly the finished commit message into (slot:commit-message)."""
 input = [
@@ -376,6 +384,7 @@ prompt = "prompt:write-the-commit-message"
 input = [
     "port:task",
     "slot:work-summary",
+    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:commit-message"]
 

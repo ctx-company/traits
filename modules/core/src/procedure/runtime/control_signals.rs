@@ -42,6 +42,7 @@ fn emit_runtime_control_signal_at(
         state,
         std::iter::once(SignalEmission {
             signal_ref: Reference::parse(signal_ref)?,
+            emission_order: 0,
             sequence_index,
             evidence_digest,
             payload: None,

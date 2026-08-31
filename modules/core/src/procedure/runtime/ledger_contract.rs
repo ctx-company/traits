@@ -1291,6 +1291,7 @@ fn validate_revision_command_evidence(
     validate_command_provenance(
         item,
         &historical,
+        &revision.position_path,
         "slot-revisions",
         index,
         revision.source.as_ref(),
@@ -1305,6 +1306,15 @@ fn validate_revision_command_evidence(
 /// `acceptance_order`/`position_path` recorded its evidence — every value
 /// accepted no later, with parallel-branch isolation buffers cleared so a
 /// still-unmerged branch's staged writes never leak into the replay.
+///
+/// Emitted signals are NOT truncated here: `acceptance_order` and
+/// `emission_order` are independent counters (slot revisions require a
+/// dense, gapless `acceptance_order` sequence, so the two cannot share a
+/// timeline), and there is no way to compare them from this function alone.
+/// Signal-visibility replay is instead bounded by the activation's own
+/// recorded `signal_emission_ceiling` — see
+/// [`validate_command_provenance`]'s call to
+/// [`ordered_visible_signal_payloads_up_to`].
 fn historical_ledger_before(
     ledger: &State,
     acceptance_order: usize,
@@ -1332,6 +1342,7 @@ fn historical_ledger_before(
 fn validate_command_provenance(
     item: &crate::r#trait::procedure::SequenceItem,
     historical: &State,
+    position_path: &[PathSegment],
     label: &str,
     index: usize,
     source: Option<&ValueSource>,
@@ -1368,7 +1379,12 @@ fn validate_command_provenance(
         ));
         return;
     };
-    match command_frame(item, &plan, historical) {
+    let signal_payloads = ordered_visible_signal_payloads_up_to(
+        historical,
+        position_path,
+        evidence.signal_emission_ceiling,
+    );
+    match command_frame(item, &plan, historical, &signal_payloads) {
         Ok(command) => {
             if evidence.argv != command.argv
                 || evidence.output_slot != command.output_slot
@@ -1456,6 +1472,7 @@ fn validate_output_port_command_evidence(
     validate_command_provenance(
         item,
         &historical,
+        &value.position_path,
         label,
         index,
         Some(&value.source),

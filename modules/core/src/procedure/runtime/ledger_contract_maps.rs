@@ -807,7 +807,7 @@ fn validate_emitted_signal_collection(
                 trait_ref
                     .signals
                     .iter()
-                    .find(|declared| declared.id == signal.signal_ref.id())
+                    .find(|declared| declared.id == signal.signal_ref.base_id())
                     .and_then(|declared| declared.schema.as_ref())
         };
         if let Some(schema) = declared_schema
@@ -908,7 +908,7 @@ fn validate_emitted_signal_collection(
             ));
         } else if !is_canonical_abort_if_matched
             && !parsed.is_qualified()
-            && !declared_local_signals.contains(parsed.id())
+            && !declared_local_signals.contains(parsed.base_id())
         {
             diagnostics.push(format!(
                 "emitted signal {} is not declared locally",
@@ -1021,4 +1021,159 @@ fn nested_signal_allowed(trait_ref: &Trait, signal: &SignalEmission) -> bool {
                 .iter()
                 .any(|item_signal| item_signal.signal_ref() == signal.signal_ref.as_str())
         })
+}
+
+#[cfg(test)]
+mod emitted_signal_collection_dotted_signal_tests {
+    use super::*;
+
+    fn fixture_trait() -> Trait {
+        crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            r#"
+id = "ledger-dotted-signal"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Ledger dotted signal"
+description = "Test fixture."
+
+[[signal]]
+id = "payload"
+description = "Carries a caller payload."
+schema = "schema:text"
+"#,
+        )
+        .expect("fixture trait decodes")
+    }
+
+    fn empty_ledger() -> State {
+        State {
+            run_id: crate::procedure::run::Id::new("run-ledger-dotted-signal-test").expect("id"),
+            trait_id: "ledger-dotted-signal".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    fn fixture_contract(on_complete: &str) -> SequenceContract {
+        let item = SequenceContractItem {
+            run_index: 0,
+            declaration_index: 0,
+            item_id: Some("step".to_string()),
+            executable: true,
+            output_refs: Vec::new(),
+            optional_output_refs: BTreeSet::new(),
+            on_complete: BTreeSet::from([on_complete.to_string()]),
+        };
+        SequenceContract {
+            by_run: BTreeMap::from([(0, item.clone())]),
+            by_declaration: BTreeMap::from([(0, item)]),
+            slot_producers: BTreeMap::new(),
+        }
+    }
+
+    fn emission(payload: Option<JsonValue>) -> SignalEmission {
+        SignalEmission {
+            signal_ref: Reference::parse("signal:payload.detail").expect("parses"),
+            emission_order: 0,
+            sequence_index: 0,
+            evidence_digest: Digest::source("evidence"),
+            payload_digest: payload.as_ref().map(|value| value_digest(value).expect("digest")),
+            payload,
+            schema_validation: Vec::new(),
+            position_path: Vec::new(),
+            source: None,
+            runtime_control: None,
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+            producer_agent: None,
+            producer_harness: None,
+            acceptance: AcceptanceStatus::Accepted,
+            reason: "signal is declared in current item on-complete".to_string(),
+        }
+    }
+
+    /// A ledger-persisted `signal:payload.detail` emission must resolve its
+    /// declared schema through `Reference::base_id()` — comparing the whole
+    /// (dotted) `id()` against `declared.id == "payload"` would never match,
+    /// silently bypassing the payload-schema requirement this diagnostic
+    /// exists to enforce.
+    #[test]
+    fn dotted_signal_ref_missing_payload_is_flagged_via_base_id_schema_lookup() {
+        let trait_ref = fixture_trait();
+        let contract = fixture_contract("signal:payload.detail");
+        let ledger = empty_ledger();
+        let declared_local_signals = BTreeSet::from(["payload"]);
+        let mut diagnostics = Vec::new();
+
+        validate_emitted_signal_collection(
+            &trait_ref,
+            &contract,
+            &ledger,
+            &declared_local_signals,
+            &[emission(None)],
+            "committed ledger",
+            true,
+            &mut diagnostics,
+        );
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|line| line.contains("declares payload schema") && line.contains("signal:payload.detail")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn dotted_signal_ref_with_payload_resolves_schema_without_diagnostic() {
+        let trait_ref = fixture_trait();
+        let contract = fixture_contract("signal:payload.detail");
+        let ledger = empty_ledger();
+        let declared_local_signals = BTreeSet::from(["payload"]);
+        let mut diagnostics = Vec::new();
+
+        validate_emitted_signal_collection(
+            &trait_ref,
+            &contract,
+            &ledger,
+            &declared_local_signals,
+            &[emission(Some(JsonValue::String("ready".to_string())))],
+            "committed ledger",
+            true,
+            &mut diagnostics,
+        );
+
+        assert!(
+            diagnostics.is_empty(),
+            "dotted signal with a payload must resolve its declared schema and pass: {diagnostics:?}"
+        );
+    }
 }

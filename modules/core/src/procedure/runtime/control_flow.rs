@@ -1973,7 +1973,19 @@ fn record_accepted_output_port_value(state: &mut State, value: Value) {
 
 /// Record accepted signal emissions at the active effect target — see
 /// [`record_accepted_slot_value`].
+///
+/// Assigns each emission's `emission_order` monotonically from a
+/// max-existing+1 scan (mirroring [`next_acceptance_order`]/
+/// [`latest_recorded_slot_revision_order`]) rather than trusting the caller,
+/// so append order survives even though `sort_state` (frame_builders.rs)
+/// later reorders the stored `Vec` for display.
 fn record_emitted_signals(state: &mut State, signals: impl IntoIterator<Item = SignalEmission>) {
+    let mut next_order = latest_recorded_emission_order(state).saturating_add(1);
+    let signals = signals.into_iter().map(|mut signal| {
+        signal.emission_order = next_order;
+        next_order += 1;
+        signal
+    });
     match active_parallel_frame_index(state) {
         Some(index) => state.control_stack[index]
             .parallel_buffer
@@ -1981,6 +1993,14 @@ fn record_emitted_signals(state: &mut State, signals: impl IntoIterator<Item = S
             .extend(signals),
         None => state.emitted_signals.extend(signals),
     }
+}
+
+fn latest_recorded_emission_order(state: &State) -> usize {
+    recorded_emitted_signals(state)
+        .into_iter()
+        .map(|signal| signal.emission_order)
+        .max()
+        .unwrap_or(0)
 }
 
 fn complete_or_repeat_current_control(trait_ref: &Trait, state: &mut State) -> crate::Result<bool> {

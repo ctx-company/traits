@@ -1412,6 +1412,7 @@ mod tests {
                 exit_code: Some(0),
                 timed_out: false,
                 output_tail: None,
+                signal_emission_ceiling: 0,
             },
         );
         let parallel_frame =
@@ -1517,6 +1518,7 @@ mod tests {
                 exit_code: Some(7),
                 timed_out: false,
                 output_tail: None,
+                signal_emission_ceiling: 0,
             },
         );
         let session = session_with_history_revisions(vec![command_revision], Vec::new());

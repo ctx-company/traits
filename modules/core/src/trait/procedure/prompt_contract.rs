@@ -1,6 +1,45 @@
 // Validates procedure prompt contracts.
 // Procedure prompt contract definitions.
 
+/// Validate that every `signal:*` interpolation in prompt text names a
+/// declared local signal.
+///
+/// Signal interpolations are exempt from the sequence-item `input` list
+/// requirement (they resolve from emitted signal payloads at drive time, not
+/// accepted step inputs — see [`PROMPT_REQUIRED_INPUT_KINDS`]), but an
+/// undeclared or dependency-qualified base must still fail the build; this is
+/// the only seam that can check that, since [`crate::trait::prompt::validate_prompts`]
+/// sees only prompts and settings, not the trait's declared signals.
+fn validate_prompt_signal_interpolations(
+    trait_ref: &Trait,
+    text: &str,
+    field_path: &str,
+) -> crate::Result<()> {
+    let (interps, _) = scan_interpolations(text);
+    for interp in &interps {
+        let Ok(parsed) = Reference::parse(&interp.ref_text) else {
+            continue;
+        };
+        if parsed.kind() != Kind::Signal {
+            continue;
+        }
+        if parsed.is_qualified()
+            || !trait_ref.signals.iter().any(|signal| signal.id == parsed.base_id())
+        {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: field_path.to_string(),
+                message: format!(
+                    "signal interpolation {{{}}} requires a declared local signal {:?}",
+                    interp.ref_text,
+                    parsed.base_id()
+                ),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
 fn collect_prompt_required_inputs(prompt: &crate::r#trait::Prompt) -> Vec<String> {
     let mut required: Vec<String> = prompt.input.iter().cloned().collect();
 
@@ -110,6 +149,7 @@ pub(crate) fn validate_sequence_item_prompt_contract(
                         require_input_or_setting(&interp.ref_text)?;
                     }
             }
+            validate_prompt_signal_interpolations(trait_ref, &item.prompt, &format!("{base}.prompt"))?;
             Ok(())
         }
 
@@ -126,6 +166,9 @@ pub(crate) fn validate_sequence_item_prompt_contract(
 
             for req in collect_prompt_required_inputs(prompt) {
                 require_input_or_setting(&req)?;
+            }
+            if let Some(text) = prompt.text.as_deref() {
+                validate_prompt_signal_interpolations(trait_ref, text, &format!("{base}.prompt"))?;
             }
 
             for output_ref in prompt.output.iter() {
@@ -190,5 +233,61 @@ default = 3
             err.to_string().contains("setting:not-declared"),
             "error must name the resolved id: {err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod prompt_contract_signal_tests {
+    use crate::encoding::{Encoding, decode_trait};
+
+    const HEADER: &str = r#"
+id = "prompt-contract-signal-test"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Prompt contract signal test"
+summary = "Minimal fixture."
+
+[[signal]]
+id = "needs-owner"
+description = "Owner input is needed."
+schema = "schema:owner-payload"
+
+[[schema]]
+id = "owner-payload"
+
+[schema.fields.question]
+schema = "schema:text"
+required = true
+"#;
+
+    #[test]
+    fn inline_prompt_interpolating_a_declared_signal_field_builds_without_requiring_input() {
+        let text = format!(
+            "{HEADER}\n[procedure]\ndescription = \"Go.\"\n\n[[procedure.sequence]]\nid = \"go\"\ntitle = \"Go\"\nkind = \"prompt\"\nprompt = \"{{signal:needs-owner.question}}\"\n"
+        );
+        decode_trait(Encoding::Toml, &text)
+            .expect("a signal payload-field interpolation builds without being listed in `input`");
+    }
+
+    #[test]
+    fn inline_prompt_interpolating_an_undeclared_signal_base_fails_naming_the_id() {
+        let text = format!(
+            "{HEADER}\n[procedure]\ndescription = \"Go.\"\n\n[[procedure.sequence]]\nid = \"go\"\ntitle = \"Go\"\nkind = \"prompt\"\nprompt = \"{{signal:not-declared.question}}\"\n"
+        );
+        let err = decode_trait(Encoding::Toml, &text)
+            .expect_err("an undeclared signal base must fail the build");
+        assert!(
+            err.to_string().contains("signal:not-declared.question"),
+            "error must name the resolved ref: {err}"
+        );
+    }
+
+    #[test]
+    fn referenced_prompt_interpolating_a_declared_signal_field_builds() {
+        let text = format!(
+            "{HEADER}\n[prompt.ask]\ntext = \"{{signal:needs-owner.question}}\"\n\n[procedure]\ndescription = \"Go.\"\n\n[[procedure.sequence]]\nid = \"go\"\ntitle = \"Go\"\nkind = \"prompt\"\nprompt = \"prompt:ask\"\n"
+        );
+        decode_trait(Encoding::Toml, &text)
+            .expect("a referenced prompt's signal payload-field interpolation builds");
     }
 }

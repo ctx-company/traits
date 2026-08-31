@@ -152,10 +152,13 @@ impl Kind {
 
     /// Whether this kind allows dots in reference paths.
     ///
-    /// Only [`Kind::Fixture`] permits dots, for documented file-extension
-    /// paths such as `fixture:fixtures/rust-reviewer.agent-skills.md`.
+    /// [`Kind::Fixture`] permits dots, for documented file-extension paths
+    /// such as `fixture:fixtures/rust-reviewer.agent-skills.md`.
+    /// [`Kind::Signal`] permits a single trailing dotted payload-field path
+    /// (`signal:needs-owner.question`), validated separately in
+    /// [`validate_path`] since fixture's "anything goes" rule does not apply.
     fn allows_dot_paths(self) -> bool {
-        matches!(self, Self::Fixture)
+        matches!(self, Self::Fixture | Self::Signal)
     }
 
     /// Whether this kind has a local definition section in the trait model.
@@ -413,6 +416,33 @@ impl Reference {
     pub fn id(&self) -> &str {
         self.ref_path().id()
     }
+
+    /// The definition id with any dotted payload-field suffix stripped.
+    ///
+    /// Identical to [`Self::id`] for refs with no dot in the id segment.
+    /// For a signal ref like `signal:needs-owner.question`, this returns
+    /// `needs-owner` — the declared signal name used for symbol-table
+    /// lookups. Fixture ids legitimately contain dots as file extensions, so
+    /// this truncation is only meaningful for kinds where dots delimit a
+    /// payload-field path (currently [`Kind::Signal`]); callers should not
+    /// use it for fixture refs.
+    pub fn base_id(&self) -> &str {
+        let id = self.id();
+        match id.find('.') {
+            Some(idx) => &id[..idx],
+            None => id,
+        }
+    }
+
+    /// The dotted payload-field path after the base id, if any.
+    ///
+    /// For `signal:needs-owner.question`, returns `Some("question")`. For
+    /// `signal:needs-owner.a.b`, returns `Some("a.b")` (the field-path walker
+    /// splits further on `.`). Returns `None` when the id has no dot.
+    pub fn payload_field(&self) -> Option<&str> {
+        let id = self.id();
+        id.find('.').map(|idx| &id[idx + 1..])
+    }
 }
 
 impl fmt::Display for Reference {
@@ -524,6 +554,16 @@ fn validate_path(kind: Kind, path: &str, original: &str) -> crate::Result<()> {
         .into());
     }
 
+    if kind == Kind::Signal && path.contains('.') {
+        let id_segment = path.rsplit('/').next().unwrap_or(path);
+        if id_segment.split('.').any(|part| part.is_empty()) {
+            return Err(Error::DotPathNotAllowed {
+                ref_text: original.to_string(),
+            }
+            .into());
+        }
+    }
+
     Ok(())
 }
 
@@ -563,5 +603,39 @@ mod tests {
         assert!(Reference::qualified(Kind::Slot, "aws", "scope").is_ok());
         assert!(Reference::qualified(Kind::Slot, "", "scope").is_err());
         assert!(Reference::qualified(Kind::Slot, "aws/team", "scope").is_err());
+    }
+
+    #[test]
+    fn signal_refs_admit_dotted_payload_field_paths() {
+        let dotted = Reference::parse("signal:needs-owner.question").expect("dotted signal ref");
+        assert_eq!(dotted.base_id(), "needs-owner");
+        assert_eq!(dotted.payload_field(), Some("question"));
+
+        let nested = Reference::parse("signal:x.a.b").expect("nested dotted signal ref");
+        assert_eq!(nested.base_id(), "x");
+        assert_eq!(nested.payload_field(), Some("a.b"));
+
+        let dotless = Reference::parse("signal:needs-owner").expect("dotless signal ref");
+        assert_eq!(dotless.base_id(), "needs-owner");
+        assert_eq!(dotless.payload_field(), None);
+    }
+
+    #[test]
+    fn signal_refs_reject_malformed_dot_paths() {
+        assert!(Reference::parse("signal:x.").is_err());
+        assert!(Reference::parse("signal:.x").is_err());
+        assert!(Reference::parse("signal:x..y").is_err());
+    }
+
+    #[test]
+    fn non_signal_non_fixture_kinds_still_reject_dots() {
+        assert!(Reference::parse("slot:x.y").is_err());
+    }
+
+    #[test]
+    fn fixture_dot_paths_are_unchanged() {
+        let fixture = Reference::parse("fixture:fixtures/rust-reviewer.agent-skills.md")
+            .expect("fixture dots remain permissive");
+        assert_eq!(fixture.id(), "rust-reviewer.agent-skills.md");
     }
 }

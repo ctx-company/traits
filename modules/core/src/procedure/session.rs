@@ -839,6 +839,7 @@ argv = ["git", "commit", "-m", "fixture"]
                 exit_code,
                 timed_out,
                 output_tail: None,
+                signal_emission_ceiling: 0,
             }),
             runtime_binding: false,
             projection: None,
@@ -1590,6 +1591,11 @@ pub struct CommandExecutionEvidence {
     pub stdout_truncated: bool,
     #[serde(default, rename = "stderr-truncated")]
     pub stderr_truncated: bool,
+    /// The highest signal `emission_order` visible when this command's argv
+    /// was built — see `runtime::CommandExecutionEvidence::signal_emission_ceiling`,
+    /// which this becomes at the submission boundary.
+    #[serde(default, rename = "signal-emission-ceiling")]
+    pub signal_emission_ceiling: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2325,6 +2331,7 @@ fn submit_run_submission(
             // ledger evidence, so the submitting runtime and a later replay
             // read a tail produced by the same function from the same bytes.
             output_tail: failure_tail(evidence),
+            signal_emission_ceiling: evidence.signal_emission_ceiling,
         }
     });
     let producer_agent = caller_agent_role(
@@ -3580,6 +3587,7 @@ mod command_capture_truncation_tests {
             stderr: None,
             stdout_truncated,
             stderr_truncated: false,
+            signal_emission_ceiling: 0,
         }
     }
 
@@ -3750,6 +3758,7 @@ mod check_output_tests {
             stderr: (!stderr.is_empty()).then(|| stderr.to_string()),
             stdout_truncated: false,
             stderr_truncated: false,
+            signal_emission_ceiling: 0,
         }
     }
 
@@ -4647,6 +4656,7 @@ argv = ["check", "{slot:verdict}"]
                 stderr: None,
                 stdout_truncated: false,
                 stderr_truncated: false,
+                signal_emission_ceiling: 0,
             }),
             caller: Some(CallerProvenance {
                 surface: "local-runtime-command".to_string(),
@@ -4738,6 +4748,7 @@ argv = ["check", "{slot:verdict}"]
             stderr: None,
             stdout_truncated: false,
             stderr_truncated: false,
+            signal_emission_ceiling: 0,
         };
         let verdict =
             check_output_value(true, &command, &CheckEvidence::from_submission(&evidence));
@@ -4820,6 +4831,7 @@ argv = ["check", "{slot:verdict}"]
             stderr: None,
             stdout_truncated: false,
             stderr_truncated: false,
+            signal_emission_ceiling: 0,
         };
         let verdict =
             check_output_value(true, &command, &CheckEvidence::from_submission(&evidence));

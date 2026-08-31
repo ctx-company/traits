@@ -1462,25 +1462,136 @@ fn signal_matched_in_scope(
     !visible_signal_emissions_in_scope(state, signal_ref, repeated_scope).is_empty()
 }
 
+/// Repeated-activation (loop/for-each) visibility predicate shared by every
+/// signal-visibility projection: an emission is visible at `current_scope`
+/// only if its own recorded scope agrees on control identity, iteration, and
+/// item index at each nested level. Both the guard-time scope check
+/// ([`visible_signal_emissions_in_scope`]) and the ordered replay/live
+/// projection ([`filtered_visible_signal_emissions`]) route through this one
+/// implementation so they cannot silently diverge.
+fn repeated_activation_visible(
+    signal_scope: &[RepeatedActivation],
+    current_scope: &[RepeatedActivation],
+) -> bool {
+    signal_scope
+        .iter()
+        .zip(current_scope)
+        .all(|(emitted, current)| {
+            same_repeated_control(emitted, current)
+                && emitted.iteration == current.iteration
+                && emitted.item_index == current.item_index
+        })
+}
+
 /// Accepted emissions visible at this control position and repeated activation.
 fn visible_signal_emissions_in_scope<'a>(
     state: &'a State,
     signal_ref: &str,
     repeated_scope: &[RepeatedActivation],
 ) -> Vec<&'a SignalEmission> {
-    visible_emitted_signals(state).into_iter().filter(|signal| {
-        let signal_scope = repeated_activation_scope(&signal.position_path);
+    visible_emitted_signals(state)
+        .into_iter()
+        .filter(|signal| {
+            signal.acceptance == AcceptanceStatus::Accepted
+                && (signal_ref.is_empty() || signal.signal_ref.as_str() == signal_ref)
+                && repeated_activation_visible(
+                    &repeated_activation_scope(&signal.position_path),
+                    repeated_scope,
+                )
+        })
+        .collect()
+}
+
+/// Accepted signal emissions visible at `position_path`, recorded at or
+/// before `ceiling` (an `emission_order`), ordered by `emission_order`
+/// ascending (oldest first). This is the single filtered-and-ordered
+/// traversal every signal-payload/ceiling projection is built from: the
+/// `signal_payloads` frame field, its paired `signal_emission_ceiling`
+/// ([`visible_signal_projection`]), and command-provenance replay
+/// ([`ordered_visible_signal_payloads_up_to`]) all consume this same list, so
+/// live resolution and replay can never disagree about what was visible.
+///
+/// Sourced from [`recorded_emitted_signals`] — every emission ever recorded,
+/// including a completed sibling `parallel` branch's own drained buffer, not
+/// just what's currently on the active buffer — because a branch's OWN
+/// emissions move out of `parallel_buffer` and into `parallel_committed_branches`
+/// the moment that branch finishes, which can happen in the very same
+/// control-flow advance that also validates that branch's own last command.
+/// Visibility is instead scoped by filtering: the repeated-activation scope
+/// (loop/for-each identity) and, via [`revision_visible_at_decision`], the
+/// same parallel-branch isolation slot revisions get — an emission recorded
+/// inside a DIFFERENT `parallel` branch than `position_path` stays hidden,
+/// whether that sibling is still running, already committed-but-unmerged, or
+/// (after the barrier) fully merged into one flat ledger, which is exactly
+/// the state `historical_ledger_before` hands to replay. Past the barrier,
+/// `position_path` no longer has a `parallel` segment to gate on, so the
+/// predicate is a no-op admitting every branch's emissions, which is
+/// correct — a step after the join legitimately sees all of them.
+fn filtered_visible_signal_emissions<'a>(
+    state: &'a State,
+    position_path: &[PathSegment],
+    ceiling: usize,
+) -> Vec<&'a SignalEmission> {
+    let repeated_scope = repeated_activation_scope(position_path);
+    let mut emissions: Vec<&SignalEmission> = recorded_emitted_signals(state);
+    emissions.retain(|signal| {
         signal.acceptance == AcceptanceStatus::Accepted
-            && (signal_ref.is_empty() || signal.signal_ref.as_str() == signal_ref)
-            && signal_scope
-                .iter()
-                .zip(repeated_scope)
-                .all(|(emitted, current)| {
-                    same_repeated_control(emitted, current)
-                        && emitted.iteration == current.iteration
-                        && emitted.item_index == current.item_index
-                })
-    }).collect()
+            && signal.emission_order <= ceiling
+            && revision_visible_at_decision(&signal.position_path, position_path)
+            && repeated_activation_visible(
+                &repeated_activation_scope(&signal.position_path),
+                &repeated_scope,
+            )
+    });
+    emissions.sort_by_key(|signal| signal.emission_order);
+    emissions
+}
+
+fn payloads_from_visible_emissions(emissions: Vec<&SignalEmission>) -> Vec<FrameSignalPayload> {
+    emissions
+        .into_iter()
+        .filter_map(|signal| {
+            signal.payload.as_ref().map(|payload| FrameSignalPayload {
+                signal_ref: signal.signal_ref.clone(),
+                payload: payload.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Live frame-building's signal visibility: the ordered payload projection
+/// paired with its own ceiling (the highest `emission_order` among that same
+/// filtered set), both produced from the ONE traversal in
+/// [`filtered_visible_signal_emissions`] — never a second, differently
+/// filtered rescan — so a command activation's recorded
+/// `signal_emission_ceiling` always matches the exact visibility its argv was
+/// resolved against.
+fn visible_signal_projection(
+    state: &State,
+    position_path: &[PathSegment],
+) -> (Vec<FrameSignalPayload>, usize) {
+    let emissions = filtered_visible_signal_emissions(state, position_path, usize::MAX);
+    let ceiling = emissions
+        .last()
+        .map(|signal| signal.emission_order)
+        .unwrap_or(0);
+    (payloads_from_visible_emissions(emissions), ceiling)
+}
+
+/// Command-provenance replay's signal visibility: the ordered payload
+/// projection bounded to the activation's own recorded
+/// `CommandExecutionEvidence::signal_emission_ceiling`, so a later
+/// re-emission of the same signal can never retroactively change what an
+/// already-accepted command's argv is replayed against. The ceiling itself
+/// is already known (it's the recorded evidence being validated), so only
+/// the payload list is needed here — see [`visible_signal_projection`] for
+/// the live-build counterpart that produces both from one traversal.
+fn ordered_visible_signal_payloads_up_to(
+    state: &State,
+    position_path: &[PathSegment],
+    ceiling: usize,
+) -> Vec<FrameSignalPayload> {
+    payloads_from_visible_emissions(filtered_visible_signal_emissions(state, position_path, ceiling))
 }
 
 /// Emitted-signal evidence visible from the current control position: the

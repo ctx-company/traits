@@ -2402,6 +2402,7 @@ mod resolve_input_value_tokens_setting_tests {
             for_each_context: None,
             guard_explanations: Vec::new(),
             signal_payloads: Vec::new(),
+            signal_emission_ceiling: 0,
             title: "test".to_string(),
             frame_text: String::new(),
             prompt: None,
@@ -2454,12 +2455,20 @@ mod resolve_input_value_tokens_setting_tests {
         let rendered = resolve_input_value_tokens(
             &session,
             &frame,
-            "Reason: {signal:needs-review.reason.code}; missing: {signal:needs-review.other}."
+            "Reason: {signal:needs-review.reason.code}; missing: {signal:needs-review.other}; \
+             not raised: {signal:not-raised.reason}."
                 .to_string(),
         );
 
         assert!(rendered.contains("missing-test"));
-        assert!(rendered.contains("{signal:needs-review.other}"));
+        assert!(
+            rendered.contains("{signal:needs-review.other}"),
+            "a missing field on a raised signal must stay literal: {rendered}"
+        );
+        assert!(
+            rendered.contains("{signal:not-raised.reason}"),
+            "a well-formed field interpolation for a signal with no visible emission must stay literal: {rendered}"
+        );
     }
 
     fn summons_outcome(step_id: &str, question: &str) -> DriveOutcome {

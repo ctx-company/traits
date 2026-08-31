@@ -639,6 +639,7 @@ fn command_frame(
     item: &crate::r#trait::procedure::SequenceItem,
     plan: &CommandPlan,
     state: &State,
+    signal_payloads: &[FrameSignalPayload],
 ) -> crate::Result<CommandFrame> {
     let (argv, substituted, resource_argv) = if let Some(argv_from) = plan.argv_from.as_deref() {
         let value = accepted_value(state, argv_from).ok_or_else(|| {
@@ -683,7 +684,7 @@ fn command_frame(
         }
         (argv, Vec::new(), Vec::new())
     } else {
-        let (argv, substituted) = resolve_command_argv(&plan.argv, state);
+        let (argv, substituted) = resolve_command_argv(&plan.argv, state, signal_payloads);
         (argv, substituted, collect_resource_argv(&plan.argv))
     };
     // Substituted items are runtime DATA (a draft, a briefing, a commit
@@ -779,11 +780,15 @@ pub(crate) fn command_execution_succeeded(
 /// substituted — those items are runtime data, and
 /// [`crate::r#trait::procedure::validate_resolved_command_argv`] exempts them
 /// from the authored-argv hygiene rules.
-fn resolve_command_argv(argv: &[String], state: &State) -> (Vec<String>, Vec<usize>) {
+fn resolve_command_argv(
+    argv: &[String],
+    state: &State,
+    signal_payloads: &[FrameSignalPayload],
+) -> (Vec<String>, Vec<usize>) {
     let mut resolved = Vec::with_capacity(argv.len());
     let mut substituted = Vec::new();
     for (index, arg) in argv.iter().enumerate() {
-        let (value, item_substituted) = resolve_command_argv_item(arg, state);
+        let (value, item_substituted) = resolve_command_argv_item(arg, state, signal_payloads);
         if item_substituted {
             substituted.push(index);
         }
@@ -818,7 +823,11 @@ fn collect_resource_argv(argv: &[String]) -> Vec<ResourceArgvRef> {
 /// diagnostics-only (`${...}`, `` `...` ``, `{{...}}`) stay untouched at
 /// runtime too, instead of a divergent hand-rolled parser substituting text
 /// validation never required as input.
-fn resolve_command_argv_item(arg: &str, state: &State) -> (String, bool) {
+fn resolve_command_argv_item(
+    arg: &str,
+    state: &State,
+    signal_payloads: &[FrameSignalPayload],
+) -> (String, bool) {
     let (interpolations, _diagnostics) = scan_interpolations(arg);
     if interpolations.is_empty() {
         return (arg.to_string(), false);
@@ -829,7 +838,7 @@ fn resolve_command_argv_item(arg: &str, state: &State) -> (String, bool) {
     let mut substituted = false;
     for interp in &interpolations {
         out.extend(chars[cursor..interp.start].iter());
-        match resolve_argv_ref_value(&interp.ref_text, state) {
+        match resolve_argv_ref_value(&interp.ref_text, state, signal_payloads) {
             Some(value) => {
                 out.push_str(&value);
                 substituted = true;
@@ -845,7 +854,11 @@ fn resolve_command_argv_item(arg: &str, state: &State) -> (String, bool) {
 /// Render the accepted or resolved value for a local `slot:`/`port:`/
 /// `setting:` interpolation body, or `None` when the body is not such a ref
 /// or has no value.
-fn resolve_argv_ref_value(body: &str, state: &State) -> Option<String> {
+fn resolve_argv_ref_value(
+    body: &str,
+    state: &State,
+    signal_payloads: &[FrameSignalPayload],
+) -> Option<String> {
     let parsed = Reference::parse(body).ok()?;
     if parsed.is_qualified() {
         return None;
@@ -857,6 +870,11 @@ fn resolve_argv_ref_value(body: &str, state: &State) -> Option<String> {
         }
         Kind::Setting => {
             let value = resolved_setting_value(state, parsed.id())?;
+            render_argv_value(value)
+        }
+        Kind::Signal => {
+            let base_ref = format!("signal:{}", parsed.base_id());
+            let value = signal_payload_field(signal_payloads, &base_ref, parsed.payload_field())?;
             render_argv_value(value)
         }
         _ => None,
@@ -1332,6 +1350,100 @@ mod argv_interpolation_tests {
         assert_eq!(
             render_argv_value(&listing).as_deref(),
             Some("M src/a.rs\nM src/b.rs"),
+        );
+    }
+
+    fn empty_state() -> State {
+        State {
+            run_id: crate::procedure::run::Id::new("run-argv-signal-test").expect("id"),
+            trait_id: "argv-signal-test".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    fn signal_payload(signal_ref: &str, payload: JsonValue) -> FrameSignalPayload {
+        FrameSignalPayload {
+            signal_ref: Reference::parse(signal_ref).expect("valid signal ref"),
+            payload,
+        }
+    }
+
+    /// A `{signal:x.field}` argv token substitutes the visible payload's
+    /// field, exactly like `frame_prompt.rs`'s prompt-side substitution.
+    #[test]
+    fn signal_argv_token_substitutes_the_payload_field() {
+        let state = empty_state();
+        let payloads = vec![signal_payload(
+            "signal:review",
+            serde_json::json!({"reason": "missing tests"}),
+        )];
+        assert_eq!(
+            resolve_argv_ref_value("signal:review.reason", &state, &payloads).as_deref(),
+            Some("missing tests"),
+        );
+    }
+
+    /// A signal never raised in scope leaves the token as a literal — the
+    /// same pass-through the prompt path already gets for free.
+    #[test]
+    fn signal_argv_token_never_raised_is_left_literal() {
+        let state = empty_state();
+        assert_eq!(resolve_argv_ref_value("signal:review.reason", &state, &[]), None);
+    }
+
+    /// A field absent from the raised payload also leaves the token literal.
+    #[test]
+    fn signal_argv_token_missing_field_is_left_literal() {
+        let state = empty_state();
+        let payloads = vec![signal_payload(
+            "signal:review",
+            serde_json::json!({"reason": "missing tests"}),
+        )];
+        assert_eq!(
+            resolve_argv_ref_value("signal:review.unknown", &state, &payloads),
+            None,
+        );
+    }
+
+    /// When a signal was raised more than once, argv resolution takes the
+    /// LAST matching payload in the (already emission-order-sorted) list —
+    /// the same recency rule `SequenceFrame::signal_payload_field` applies.
+    #[test]
+    fn signal_argv_token_resolves_to_the_most_recent_payload() {
+        let state = empty_state();
+        let payloads = vec![
+            signal_payload("signal:review", serde_json::json!({"reason": "first"})),
+            signal_payload("signal:review", serde_json::json!({"reason": "second"})),
+        ];
+        assert_eq!(
+            resolve_argv_ref_value("signal:review.reason", &state, &payloads).as_deref(),
+            Some("second"),
         );
     }
 }

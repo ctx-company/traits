@@ -524,6 +524,7 @@ mod tests {
                 for_each_context: None,
                 guard_explanations: Vec::new(),
                 signal_payloads: Vec::new(),
+                signal_emission_ceiling: 0,
                 title: "ask-owner".to_string(),
                 frame_text: String::new(),
                 prompt: None,

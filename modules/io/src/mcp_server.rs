@@ -387,6 +387,7 @@ fn dispatch_run_call(arguments: Value) -> ServerResult<Value> {
                 stderr: None,
                 stdout_truncated: false,
                 stderr_truncated: false,
+                signal_emission_ceiling: 0,
             },
         );
     }
