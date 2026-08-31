@@ -1,0 +1,267 @@
+id = "visualize"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Default"
+description = "Investigate an existing functionality, compose a non-code walkthrough of its flows and states (markdown + HTML diagram), and refine it through ctx-annotate until the owner accepts — annotations demand corrections or deeper dives."
+variant = "default"
+
+[metadata]
+tag = [
+    "visualize",
+    "walkthrough",
+    "flows",
+]
+
+[[intent.require]]
+id = "correctness"
+
+[[intent.require]]
+id = "leanness"
+
+[[intent.require]]
+id = "reuse-over-reimplement"
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.avoid]]
+id = "over-engineering"
+
+[[intent.avoid]]
+id = "duplication"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[intent.avoid]]
+id = "unbounded-loop"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "owner-gate"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner acceptance transport: 'annotate' (default) opens the diagram and pipes the walkthrough to ctx-annotate; 'off' auto-approves for unattended runs."
+
+[port.default]
+value = "annotate"
+
+[[port]]
+id = "receipts"
+direction = "output"
+schema = "schema:text"
+description = "output port receipts."
+
+[[port]]
+id = "topic"
+direction = "input"
+schema = "schema:text"
+description = 'The existing functionality, flow, or capability of this system to walk through — named at the product level (e.g. "how a task goes from draft to merged", "the owner acceptance gates"). Rough is fine.'
+
+[[slot]]
+id = "commit-log"
+schema = "schema:text"
+description = "Git's own output for the visualization artifacts commit."
+
+[[slot]]
+id = "overview"
+schema = "schema:text"
+description = "The composed walkthrough receipt: the two artifact paths written (markdown sibling and HTML diagram), the repository areas consulted to establish ground truth, and a one-paragraph summary of the functionality as explained."
+
+[[slot]]
+id = "owner-answer"
+schema = "schema:text"
+description = "The owner's verdict from the acceptance gate: the literal string 'approved' ends the loop; any other content is the ctx-annotate decision JSON whose annotations are binding corrections or deepening requests for the next revision."
+
+[[slot]]
+id = "revision-note"
+schema = "schema:text"
+description = "What the revision pass changed or expanded in both artifacts, per annotation."
+
+[[slot]]
+id = "slug"
+schema = "schema:text"
+description = "Filesystem slug derived from the topic; both artifacts are named by it under .internal/visualizations/."
+
+[[resource]]
+id = "visualizations"
+path = ".internal/visualizations"
+root = "repo"
+hint = "Repo-root directory visualize walkthroughs and their diagrams are written under."
+trigger = "on-demand"
+
+[[agent]]
+id = "smart"
+description = "Investigates the codebase for ground truth, composes the non-code walkthrough and its diagram, and applies the owner's annotations."
+summary = "Investigation + composition + revision role."
+
+[prompt.apply-owner-annotations]
+text = """
+The owner reviewed .internal/visualizations/{slot:slug}.md through ctx-annotate and returned this decision; its annotations reference that markdown file's line numbers and are binding: {slot:owner-answer}
+
+Each annotation is one of two kinds — read it and decide which:
+- A correction: the walkthrough misstates how the system behaves. Re-verify against the code and fix it.
+- A deepening request: the owner wants more depth on the annotated part. Investigate the code further to get the facts, then EXTEND both artifacts — new subsections or steps in the markdown, new or expanded regions in the diagram — still at the functionality level unless the annotation explicitly asks for code-level detail.
+
+Apply every annotation to the markdown, then update the sibling .internal/visualizations/{slot:slug}.html so the diagram still presents the same (now corrected or deepened) walkthrough. Change nothing an annotation does not ask for. Report each annotation and the exact edits made to both artifacts for it."""
+input = [
+    "slot:slug",
+    "slot:owner-answer",
+]
+output = ["slot:revision-note"]
+
+[prompt.investigate-and-compose]
+text = """
+Compose a non-code walkthrough of an existing functionality of this system.
+
+Topic: {port:topic}
+
+Investigate the repository first to establish ground truth: read whatever code, docs, and configuration you need until you are certain how this functionality actually behaves today — including its refusal and failure paths. The investigation is code-level; the deliverable is not.
+
+Present strictly at the functionality level: what the capability does, what triggers it, the flows it runs (steps, decisions, hand-offs, failure and refusal paths), the states it moves through, and where it borders other parts of the system. Name components by their plain-language role; a module name may appear only as orientation. No line numbers, no symbol inventories, no file-by-file tours.
+
+Write exactly two files, creating .internal/visualizations/ if needed, both named by the slug {slot:slug}:
+1. .internal/visualizations/<slug>.md — the walkthrough as plain markdown: a short orientation, each flow narrated step by step (including what can go wrong and how the system answers), the states and their transitions, the boundaries and hand-offs, and open questions where behavior surprised you. This file is the annotation surface and the authoritative text.
+2. .internal/visualizations/<slug>.html — one self-contained HTML file (inline CSS/JS, no external resources) presenting the same walkthrough visually. Follow the diagram standards at .ctx/traits/authored/visualize/resources/diagram-standards.md — read that file before composing. Choose the diagram form the content demands (process, sequence, and state models usually fit flows); legible labels and clear direction come before any interaction.
+
+Both artifacts must present the same walkthrough; where detail differs, the markdown is authoritative. Return the receipt: both artifact paths, the repository areas consulted, and a one-paragraph summary of the functionality as explained."""
+input = [
+    "port:topic",
+    "slot:slug",
+]
+output = ["slot:overview"]
+
+[[sequence.ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-annotations-then.sequence]]
+id = "apply-owner-annotations"
+title = "Apply the owner's annotations to both artifacts"
+agent = "agent:smart"
+prompt = "prompt:apply-owner-annotations"
+input = [
+    "slot:slug",
+    "slot:owner-answer",
+]
+output = ["slot:revision-note"]
+
+[[sequence.owner-acceptance-body.sequence]]
+id = "owner-acceptance-gate"
+title = "Present the walkthrough to the owner"
+input = [
+    "slot:slug",
+    "port:owner-gate",
+]
+output = ["slot:owner-answer"]
+
+[sequence.owner-acceptance-body.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """
+if [ "$2" = "off" ]; then
+  printf approved
+  exit 0
+fi
+md=".internal/visualizations/$1.md"
+html=".internal/visualizations/$1.html"
+[ -f "$html" ] && open "$html" >/dev/null 2>&1 || true
+if [ ! -f "$md" ]; then
+  printf 'annotation gate: %s does not exist; compose must write it' "$md"
+  exit 0
+fi
+out=$(ctx-annotate --stdin < "$md")
+if printf '%s' "$out" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("annotations")==[] else 1)' 2>/dev/null; then
+  printf approved
+else
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf 'annotation gate returned no decision; retrying next iteration'; fi
+fi""",
+    "_",
+    "{slot:slug}",
+    "{port:owner-gate}",
+]
+
+[[sequence.owner-acceptance-body.sequence]]
+id = "apply-owner-annotations"
+title = "Apply owner annotations"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-21-owner-acceptance-body-23-apply-owner-annotations-then"
+
+[sequence.owner-acceptance-body.sequence.when.not]
+slot = "slot:owner-answer"
+equals = "approved"
+
+[procedure]
+description = "Investigate an existing functionality, compose a non-code walkthrough of its flows and states (markdown + HTML diagram), and refine it through ctx-annotate until the owner accepts — annotations demand corrections or deeper dives."
+input = [
+    "port:owner-gate",
+    "port:topic",
+]
+
+[[procedure.sequence]]
+id = "derive-slug"
+title = "Derive the artifact slug"
+input = ["port:topic"]
+output = ["slot:slug"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'printf %s "$1" | tr "[:upper:]" "[:lower:]" | sed -e "s/[^a-z0-9]/-/g" -e "s/--*/-/g" -e "s/^-//" -e "s/-$//" | cut -c1-60',
+    "_",
+    "{port:topic}",
+]
+
+[[procedure.sequence]]
+id = "investigate-and-compose"
+title = "Investigate and compose the walkthrough"
+agent = "agent:smart"
+prompt = "prompt:investigate-and-compose"
+input = [
+    "port:topic",
+    "slot:slug",
+]
+output = ["slot:overview"]
+
+[[procedure.sequence]]
+id = "owner-acceptance"
+title = "Owner acceptance"
+kind = "loop"
+sequence = "sequence:owner-acceptance-body"
+max-iterations = 500
+on-exhausted = "abort"
+
+[[procedure.sequence.until.all]]
+slot = "slot:owner-answer"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "commit-visualization"
+title = "Commit the accepted walkthrough"
+input = ["slot:slug"]
+output = ["slot:commit-log"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'git add .internal/visualizations && { git commit -m "visualize: $1" -- .internal/visualizations 2>&1 || echo "nothing to commit"; }',
+    "_",
+    "{slot:slug}",
+]

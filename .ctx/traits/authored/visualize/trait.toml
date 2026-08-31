@@ -1,0 +1,14 @@
+[package]
+id = "visualize"
+version = "0.1.0"
+name = "Visualize"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant]
+
+[family.variant.default]
+path = "generated/default/index.toml"
+aliases = ["visualize-default"]
