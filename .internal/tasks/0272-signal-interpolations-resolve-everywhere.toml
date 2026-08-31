@@ -1,9 +1,9 @@
 schema-version = "0.2"
 key = "0272"
 title = "Signal interpolations resolve everywhere refs do"
-status = "draft"
+status = "ready"
 raised = "2026-08-31"
-content = """
+content = '''
 The implement trait is unbuildable from source, and has been since
 0253.6 landed: `ctx traits build implement` fails with
 
@@ -22,7 +22,8 @@ unrelated implement-trait change could not rebuild.
 This is exactly the prerequisite 0253.6's needs-owner escalation named
 and the ruling deferred ("core signal interpolation blocker remains,
 outside scope"). The bill is due: no implement change of any kind can
-land until it clears.
+land until it clears — 0273's completed implement-source design is
+explicitly blocked on this task.
 
 ## Owner contract
 
@@ -31,51 +32,267 @@ does: it validates at build, and it resolves at drive time to the
 raised signal's payload field. Rebuilding implement from today's source
 succeeds, and the regenerated canonical is committed so source and
 canonical agree again.
-"""
-scope = """
-## Goals (binding)
 
-1. `Reference::parse` accepts `signal:<id>.<field>`: `allows_dot_paths`
-   (modules/core/src/reference.rs:157) admits Signal alongside Fixture,
-   with the dot splitting a base signal id from a payload field path.
-   Symbol-table validation matches on the base id, not the dotted text.
-2. Prompt-text validation accepts signal interpolations:
-   `VALID_INPUT_KINDS` (modules/core/src/trait/prompt.rs:454) admits
-   Kind::Signal, and `validate_prompt_text` (prompt.rs:618) passes the
-   summon prompts as authored.
-3. Drive-time resolution: wherever interpolations substitute — the argv
-   resolver's kind match (`resolve_argv_ref_value`,
-   modules/core/src/procedure/runtime/frame_builders.rs:848, currently
-   `_ => None` for signals) and the prompt-text substitution path — a
-   `signal:<id>.<field>` resolves to the most recently raised matching
-   signal's payload field for the current loop scope, rendered with the
-   same scalar/JSON rules as slot values. An unraised signal or absent
-   field leaves the interpolation unsubstituted exactly as an
-   unaccepted slot does.
-4. `ctx traits build implement` exits zero on current source; the
-   regenerated basic/quick/complex canonicals are committed in the same
-   change, ending the silent source-vs-canonical divergence.
-5. A regression proves the summon record prompt renders the question:
-   raise a needs-owner signal with a payload in a fixture run and
-   assert the recorded prompt text contains the payload's question
-   verbatim.
+## Grounded corrections to the draft
 
-## Suggested starting points — guidance, not a boundary
+Four facts the draft did not carry, each verified in code during
+grounding; the goals below already reflect them.
 
-- reference.rs `validate_path`/`allows_dot_paths`; prompt.rs
-  `VALID_INPUT_KINDS`/`validate_prompt_text`; frame_builders.rs
-  `resolve_argv_ref_value` and the prompt-side twin the grounding
-  locates; the signal payload store written by 0253.1 (signals carry
-  payloads) is the value source.
-- 0253.6's landed summon.ts (`${sig.question}` at lines 12 and 23) is
-  the consuming idiom; do not change it — the core meets it.
+**The prompt-side runtime twin already exists and passes.** The draft
+implied prompt-text substitution needed building. It is implemented in
+`modules/cli/src/app/frame_prompt.rs:1260-1335`: it reads
+`frame.signal_payloads`, resolves nested fields through
+`SequenceFrame::signal_payload_field`, renders through the shared
+renderer, and leaves unknown tokens unchanged; its unit test
+`prompt_rendering_substitutes_visible_signal_payload_fields_only`
+passed during grounding. Human ask questions flow through the same
+path (`resolved_human_question_body` at `frame_prompt.rs:451-481`,
+persisted into `SummonsRecord` by `drive.rs:1591-1615`), so the
+runtime work remaining is validation, the parser, argv substitution,
+and recency — not a new prompt substitution engine.
+
+**Widening `allows_dot_paths` alone is wrong twice over.** For an
+unqualified ref, `id()` (`modules/core/src/reference.rs:409-415`)
+returns the entire path, so a bare widening makes `parsed.id()` equal
+`needs-owner.question` and silently breaks every symbol-table site
+that compares against declared ids (`trait/procedure/validate.rs:4478-4504`,
+`trait/condition.rs:761-773`, `runtime/signals.rs:22-29`). And
+`validate_path` (`reference.rs:502-527`) checks only empty `/`
+segments, so a bare widening admits leading, trailing, and repeated
+dots from hand-authored canonicals.
+
+**"Most recently raised" is not `.last()`.** `SignalEmission` carries
+no emission ordinal; `record_emitted_signals` appends
+(`runtime/control_flow.rs:1974-1983`) but `sort_state` reorders
+committed emissions by sequence index, signal ref, and evidence digest
+(`runtime/frame_builders.rs:1266-1287`) throughout status refresh, and
+`SequenceFrame::signal_payload_field` currently returns the *first*
+match via `.find(...)`. Recency needs a deliberate ordering mechanism
+plus a two-emission regression, not a one-token edit.
+
+**Two extra validation seams exist beyond the two the draft named.**
+Inline prompt-contract validation (`trait/procedure/prompt_contract.rs:105-112`)
+today silently skips dotted signal refs because parsing fails — once
+parsing succeeds, Signal must be exempted from ordinary input
+satisfaction while its base declaration is checked. And command
+validation (`trait/procedure/command_contract.rs:13-133`) permits only
+Slot/Port/Resource/Setting, so a widened parser turns today's inert
+literal braces into a hard unsupported-kind error unless it too admits
+Signal as a runtime-fact input.
+'''
+scope = '''
+## Goals and approach are separate
+
+Everything in this section, including the `## Done when` list, is a
+GOAL: binding, observable, and — where a command in this repository can
+decide it — decided by that command, with exclusions stated alongside.
+Everything under `## Approach` in the validation section is APPROACH:
+expected files, symbols, edit order, commands, and proof mechanics,
+stated precisely because the grounding supports them, and never a
+boundary. The run may deviate from any of the approach whenever a goal
+requires it, recording the deviation in the work summary; a deviation
+is not a violation and needs no escalation. Proof mechanics are pinned
+only where the grounding shows them already occurring; elsewhere the
+goal states what must be proven and the run chooses how to observe it.
+
+## Done when
+
+1. **`Reference::parse` accepts `signal:<id>.<field>` and keeps symbol
+   lookup on the base id.** A dotted signal ref parses; the base signal
+   id and the dotted payload field path are distinguishable through the
+   core representation, with the original text preserved for round-trip
+   rendering; every existing symbol-table comparison site
+   (`trait/procedure/validate.rs`, `trait/condition.rs`,
+   `runtime/signals.rs`) continues to match on the base declaration id
+   `needs-owner`, never the dotted text. Malformed dotted forms —
+   leading, trailing, or repeated dot segments — are rejected, and
+   non-signal, non-fixture kinds still reject dots. Decided by
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core reference::tests`
+   with parser tests added for the accepted and rejected forms.
+
+2. **Static validation accepts signal interpolations at every seam that
+   sees them, and only there.** Top-level prompt-text validation
+   (`trait/prompt.rs`) accepts a signal interpolation whose base signal
+   is declared; a trait-aware seam rejects an undeclared base signal;
+   command-contract validation (`command_contract.rs`) accepts signal
+   refs as runtime-fact inputs; inline prompt-contract validation
+   exempts Signal from ordinary input satisfaction while validating the
+   base declaration. Explicit exclusions: `PROMPT_REQUIRED_INPUT_KINDS`
+   and `SequenceItem.input`'s allowed kinds (`model.rs`) continue to
+   exclude Signal — CDK signal fields are runtime facts, not sequence
+   inputs, and the CDK filtering in `packages/cdk/src/prompt.ts` and
+   `sequence.ts` stays untouched. Allowed-kind diagnostic messages in
+   `trait/prompt.rs` and `command_contract.rs` enumerate the updated
+   kind set. Decided by
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core` and by goal 4's
+   build exiting zero.
+
+3. **Drive-time argv and prompt substitution resolve signal payload
+   fields from the latest visible matching emission.** The argv
+   resolver (`runtime/frame_builders.rs`) resolves
+   `{signal:<id>.<field>}` to the payload field of the most recently
+   raised matching signal visible in the current loop/for-each scope,
+   rendered through the same shared renderer as slot values, and the
+   existing prompt-side substitution keeps working. Two pass-through
+   requirements hold, each independently mandatory and each on both
+   the argv and prompt paths: a signal that has never been raised
+   leaves its interpolation unsubstituted exactly as an unaccepted
+   slot does, and a raised signal whose payload lacks the referenced
+   field likewise leaves the interpolation unsubstituted. When two
+   payload-bearing emissions of the same signal are visible, the most
+   recent one wins, and a regression proves that winner through the
+   implemented ordering mechanism. Repeated-activation clearing
+   (iteration N payloads unreadable in iteration N+1, per 0253.1) and
+   parallel branch-buffer visibility are unchanged. Decided by the
+   fixed command set
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core`,
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_signal_payloads`,
+   and
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib prompt_rendering_substitutes_visible_signal_payload_fields_only`:
+   these three commands all pass, and together they execute the argv
+   substitution regression, the two-emission recency case, and both
+   pass-through regressions on the argv and prompt paths.
+
+4. **Implement rebuilds from current source and the regenerated family
+   is committed.** `ctx traits build implement`, run with a
+   repository-built current CLI, exits zero on today's authored source
+   with zero edits to that source; the regenerated basic, quick, and
+   complex canonicals plus any build-produced maps and `trait.lock`
+   digest changes are committed in the same change; the regenerated
+   basic canonical carries the needs-owner signal/schema, the
+   owner-decisions slot, the ask and record steps, their guard, and the
+   `{signal:needs-owner.question}` and `{signal:needs-owner.reason}`
+   interpolations, verified by reviewing the canonical diff. Decided by
+   the build's exit code and by
+   `grep -q 'signal:needs-owner\.question' .ctx/traits/authored/implement/generated/basic/index.toml`
+   against the committed artifact.
+
+5. **An end-to-end regression proves the summons question carries the
+   payload.** The `proof_summons` suite contains a focused case that
+   builds CDK source declaring a schema needs-owner signal through
+   the existing scratch harness, submits a payload, drives to the ask
+   park, and asserts a distinctive question from that payload appears
+   verbatim in the durable `last-drive-outcome.summons.question`
+   record. Decided by
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons`.
+
+6. **Repository gates stay green.** Decided by `just test` and
+   `just test-full`.
+
+## Bounded refinement (binding)
+
+Run the checks in order: focused tests (goals 1-3, 5), family build
+and canonical-diff review (goal 4), then repository gates (goal 6).
+Then perform a substantive review of the diff against every Done-when
+above, including the stated exclusions. On any failure or review
+finding, repair, then rerun the failing check and all checks after it.
+At most two such repair rounds; if a check still fails after the
+second, stop, leave the work as is, and report the exact failing
+command and its output rather than iterating further.
 
 ## Out of scope
 
 - Any change to summon semantics, ask machinery, or the implement
-  trait's authored source.
-- New interpolation kinds beyond Signal.
-"""
+  trait's authored source (`.ctx/traits/authored/implement/source/`).
+- New interpolation kinds beyond Signal; adding Signal to
+  `SequenceItem.input` or `PROMPT_REQUIRED_INPUT_KINDS`.
+- A second JSON path walker (reuse `modules/core/src/shared.rs`
+  `resolve_field_path`), a second emission scan bypassing
+  `visible_signal_emissions_in_scope`, or any change to the CDK's
+  `${sig.<field>}` idiom, field-ref minting, or guard enforcement in
+  `packages/cdk`.
+- 0273's implement-source narration work.
+'''
+validation = '''
+## Approach — guidance, not a boundary
+
+Suggested edit order, each point grounded in code read during
+grounding; deviate wherever a goal requires it and say so in the work
+summary.
+
+1. **Parser** (`modules/core/src/reference.rs`). Extend
+   `allows_dot_paths`/`validate_path` (:153-159, :502-527) so
+   `Kind::Signal` admits a single well-formed dotted field path —
+   reject empty, leading, trailing, and repeated dot segments — and
+   give `Reference` a representation or accessor pair that splits base
+   id from field path at the first dot while `text` keeps the original
+   for rendering. Route the three symbol-table sites and
+   `runtime/signals.rs` through the base id. Add cases to
+   `reference::tests` (currently 3 tests, no dotted-signal coverage).
+
+2. **Static validation.** Add `Kind::Signal` to `VALID_INPUT_KINDS`
+   (`trait/prompt.rs:454-455`) and let `validate_prompt_text`
+   (:618-669) pass it; `validate_prompts` receives only prompts and
+   settings, so check base-signal existence at a trait-aware seam —
+   `trait/procedure/prompt_contract.rs` already has trait access, and
+   its :105-112 skip-on-parse-failure branch is where dotted refs
+   start arriving once the parser widens. Admit Signal in
+   `command_contract.rs` (:13-133) as a runtime-fact kind alongside
+   Setting. Update the allowed-kind messages at
+   `trait/prompt.rs:515-522,649-657` and `command_contract.rs:60-70`.
+
+3. **Runtime.** Add a Signal arm to `resolve_argv_ref_value`
+   (`runtime/frame_builders.rs:765-895`), reading the frame's
+   projected `signal_payloads` (populated by
+   `runtime/transitions.rs:343-376` from
+   `visible_signal_emissions_in_scope`) through
+   `SequenceFrame::signal_payload_field` and rendering via
+   `render_interpolation_value` exactly as slot values do; keep the
+   `None`-leaves-literal branch at :830-842. For recency, fix
+   `signal_payload_field`'s `.find(...)` with a deliberate ordering —
+   an explicit emission ordinal on `SignalEmission` or projection-time
+   ordering are both open; `sort_state` (:1266-1287) reorders
+   committed emissions, so prove the winner with a two-emission
+   regression rather than trusting append order.
+
+4. **Tests.** Extend `proof_signal_payloads` with the recency case;
+   place the argv substitution/pass-through proof at whatever seam is
+   cheapest (core runtime unit test or the existing proof harness).
+   For goal 5 reuse `proof_summons`'s `Fixture`, `start_and_signal`,
+   `drive_to_park`, ledger access, and scratch build/run harness — do
+   not build another process harness. The toolkit's
+   `needsOwnerSignal` (`packages/toolkit/src/signal.ts`) is the
+   payload shape; its lowering is already proven CDK-side in
+   `packages/toolkit/test/needs-owner.test.ts` (synth evidence only).
+
+5. **Regeneration.** `just ts-build` if TypeScript outputs are stale,
+   `cargo build -p ctx-traits-cli`, then run the repository-built
+   binary's `ctx traits build implement` so an installed stale `ctx`
+   cannot mask the core change. Review the full generated diff —
+   three canonicals, `index.map` files, `trait.lock` digests — and
+   commit it; build-produced map/lock updates are legitimate outputs,
+   not noise to discard.
+
+6. **Gates and review** per the binding refinement bound in scope.
+'''
 
 [relations]
 depends-on = ["0262"]
+
+[[checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+timeout-ms = 1800000
+
+[[checks]]
+name = "core reference grammar accepts dotted signal refs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core reference::tests"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1200000
+
+[[checks]]
+name = "signal payload persistence, rendering, and recency proofs pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_signal_payloads"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "end-to-end summons question carries the signal payload"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+expect = "test result: ok\\. [1-9]"
+timeout-ms = 1800000
+
+[[checks]]
+name = "committed basic canonical carries the needs-owner interpolations"
+command = '''grep -q 'signal:needs-owner\.question' .ctx/traits/authored/implement/generated/basic/index.toml && grep -q 'signal:needs-owner\.reason' .ctx/traits/authored/implement/generated/basic/index.toml && echo "needs-owner interpolations present in regenerated basic canonical"'''
+expect = "needs-owner interpolations present"
