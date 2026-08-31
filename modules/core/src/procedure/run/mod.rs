@@ -12,3 +12,4 @@
 
 include!("model.rs");
 include!("planner.rs");
+include!("progress.rs");

@@ -148,7 +148,7 @@ fn bar_state_and_bar_detail_track_only_the_center_across_a_full_pause() {
     // Baseline: no control status, bar word is "running", no detail.
     let row = find_row(&face, &ledger_a);
     assert_eq!(row.state, RowState::Live);
-    let baseline_bar = sessions_bar(&row, controls.status(&row.ledger_path));
+    let baseline_bar = sessions_bar(&row, controls.status(&row.ledger_path), None);
     assert_eq!(baseline_bar.state.word, "running");
     assert_eq!(baseline_bar.detail_text(), None);
 
@@ -183,7 +183,7 @@ fn bar_state_and_bar_detail_track_only_the_center_across_a_full_pause() {
 
     // After press, before response: bar word unchanged, detail requesting.
     let row = find_row(&face, &ledger_a);
-    let requesting_bar = sessions_bar(&row, controls.status(&row.ledger_path));
+    let requesting_bar = sessions_bar(&row, controls.status(&row.ledger_path), None);
     assert_eq!(requesting_bar.state.word, "running");
     assert_eq!(
         requesting_bar.detail_text().as_deref(),
@@ -199,7 +199,7 @@ fn bar_state_and_bar_detail_track_only_the_center_across_a_full_pause() {
     // reads the requested wording, never "paused".
     assert!(!reconcile_row_controls(&face, &mut controls));
     let row = find_row(&face, &ledger_a);
-    let acknowledged_bar = sessions_bar(&row, controls.status(&row.ledger_path));
+    let acknowledged_bar = sessions_bar(&row, controls.status(&row.ledger_path), None);
     assert_eq!(acknowledged_bar.state.word, "running");
     let detail = acknowledged_bar.detail_text().expect("a requested detail");
     assert_eq!(
@@ -214,6 +214,7 @@ fn bar_state_and_bar_detail_track_only_the_center_across_a_full_pause() {
     let row_b_bar = sessions_bar(
         &row_b_projected,
         controls.status(&row_b_projected.ledger_path),
+        None,
     );
     assert_eq!(row_b_bar.detail_text(), None);
 
@@ -235,7 +236,7 @@ fn bar_state_and_bar_detail_track_only_the_center_across_a_full_pause() {
     assert!(controls.status(ledger_a.as_str()).is_none());
 
     let row = find_row(&face, &ledger_a);
-    let paused_bar = sessions_bar(&row, controls.status(&row.ledger_path));
+    let paused_bar = sessions_bar(&row, controls.status(&row.ledger_path), None);
     assert_eq!(paused_bar.state.word, "paused");
     assert_eq!(paused_bar.detail_text(), None);
 

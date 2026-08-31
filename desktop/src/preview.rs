@@ -256,6 +256,21 @@ pub(crate) fn staleness_word(stale: Option<&str>, refreshing: bool) -> Option<&'
     }
 }
 
+/// `frame N of M` — the 0265.14 counter shared by the Sessions bottom bar's
+/// detail segment and the screen header's summary slot. Every absence
+/// (`NoCountedFrames`, `NoneReached`, or a resolution `Err`) renders no
+/// segment rather than a fabricated `frame 0 of 0`/`frame 0 of M`.
+pub(crate) fn frame_counter_text(
+    progress: &Result<ctx_traits_core::procedure::run::RunProgress, String>,
+) -> Option<String> {
+    match progress {
+        Ok(ctx_traits_core::procedure::run::RunProgress::Reached { ordinal, total }) => {
+            Some(format!("frame {ordinal} of {total}"))
+        }
+        _ => None,
+    }
+}
+
 fn accepted_heading(stale: Option<&str>, refreshing: bool) -> String {
     match staleness_word(stale, refreshing) {
         Some(word) => format!("run \u{b7} {word}"),
@@ -614,6 +629,7 @@ mod tests {
             skipped_activity_lines: 0,
             variant,
             claimed_task,
+            progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
             row: fixture_row(run_id, trait_id, elapsed_seconds),
         }
     }
@@ -801,6 +817,7 @@ mod tests {
             skipped_activity_lines: 0,
             variant: Ok(None),
             claimed_task: Ok(ClaimedTaskResult::Unclaimed),
+            progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
             row,
         };
         let state = accepted(&baseline);
@@ -972,6 +989,7 @@ mod now_and_verdict_tests {
             skipped_activity_lines: 0,
             variant: Ok(None),
             claimed_task: Ok(ClaimedTaskResult::Unclaimed),
+            progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
             row,
         }
     }

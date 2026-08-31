@@ -64,9 +64,16 @@ impl BottomBar {
 /// `row_control::status_text` and appended as the last detail segment (kept
 /// last so `0265.14`'s `frame N of M` can prepend without colliding). It
 /// never moves `state`: that changes only through an accepted center delta.
-pub fn sessions_bar(row: &RunRow, control_status: Option<&RowStatus>) -> BottomBar {
+pub fn sessions_bar(
+    row: &RunRow,
+    control_status: Option<&RowStatus>,
+    counter: Option<&str>,
+) -> BottomBar {
     let state = presentation(&row.state);
     let mut detail = Vec::new();
+    if let Some(counter) = counter {
+        detail.push(counter.to_string());
+    }
     if let Some(rounds) = row.verdict_rounds {
         detail.push(format!("review round {rounds}"));
     }
@@ -162,7 +169,7 @@ mod tests {
 
     #[test]
     fn sessions_bar_actions_are_watch_raw_then_pause() {
-        let bar = sessions_bar(&base_row(), None);
+        let bar = sessions_bar(&base_row(), None, None);
         assert_eq!(
             bar.actions,
             vec![
@@ -182,7 +189,7 @@ mod tests {
 
     #[test]
     fn sessions_bar_carries_no_detail_when_verdict_rounds_is_none() {
-        let bar = sessions_bar(&base_row(), None);
+        let bar = sessions_bar(&base_row(), None, None);
         assert_eq!(bar.detail, Vec::<String>::new());
     }
 
@@ -190,7 +197,7 @@ mod tests {
     fn sessions_bar_renders_review_round_when_verdict_rounds_is_some() {
         let mut row = base_row();
         row.verdict_rounds = Some(2);
-        let bar = sessions_bar(&row, None);
+        let bar = sessions_bar(&row, None, None);
         assert_eq!(bar.detail, vec!["review round 2".to_string()]);
     }
 
@@ -199,17 +206,34 @@ mod tests {
         let mut row = base_row();
         row.state = RowState::Unreadable;
         row.detail_text = "bad json".to_string();
-        let bar = sessions_bar(&row, None);
+        let bar = sessions_bar(&row, None, None);
         assert_eq!(bar.state.word, "unreadable");
         assert_eq!(bar.state.role, StateRole::Danger);
         assert_eq!(bar.detail, vec!["bad json".to_string()]);
     }
 
     #[test]
+    fn the_frame_counter_prepends_ahead_of_review_round_and_control_status() {
+        let mut row = base_row();
+        row.verdict_rounds = Some(2);
+        let bar = sessions_bar(&row, Some(&RowStatus::Requesting), Some("frame 5 of 9"));
+        assert_eq!(
+            bar.detail_text().as_deref(),
+            Some("· frame 5 of 9 · review round 2 · requesting…")
+        );
+    }
+
+    #[test]
+    fn an_absent_frame_counter_renders_no_extra_segment() {
+        let bar = sessions_bar(&base_row(), None, None);
+        assert_eq!(bar.detail, Vec::<String>::new());
+    }
+
+    #[test]
     fn a_control_status_renders_as_the_last_detail_segment() {
         let mut row = base_row();
         row.verdict_rounds = Some(2);
-        let bar = sessions_bar(&row, Some(&RowStatus::Requesting));
+        let bar = sessions_bar(&row, Some(&RowStatus::Requesting), None);
         assert_eq!(
             bar.detail_text().as_deref(),
             Some("· review round 2 · requesting…")
@@ -223,9 +247,9 @@ mod tests {
             verb: row_control::RowVerb::Pause,
             session_id: row.session_id.clone(),
         };
-        let none_bar = sessions_bar(&row, None);
-        let requesting_bar = sessions_bar(&row, Some(&RowStatus::Requesting));
-        let requested_bar = sessions_bar(&row, Some(&requested));
+        let none_bar = sessions_bar(&row, None, None);
+        let requesting_bar = sessions_bar(&row, Some(&RowStatus::Requesting), None);
+        let requested_bar = sessions_bar(&row, Some(&requested), None);
         assert_eq!(none_bar.state.word, "running");
         assert_eq!(requesting_bar.state, none_bar.state);
         assert_eq!(requested_bar.state, none_bar.state);
@@ -254,7 +278,7 @@ mod tests {
             let request = controls.request(&row, row_control::RowVerb::Pause).unwrap();
             controls.settle(&row.ledger_path, request.generation, outcome);
             let status = controls.status(&row.ledger_path).unwrap();
-            let bar = sessions_bar(&row, Some(status));
+            let bar = sessions_bar(&row, Some(status), None);
             let detail = bar.detail_text().unwrap();
             assert!(detail.contains("refused:"));
             assert!(!detail.contains("paused"));
@@ -272,7 +296,7 @@ mod tests {
         let mut row = base_row();
         row.state = RowState::Paused;
         row.live = false;
-        let bar = sessions_bar(&row, None);
+        let bar = sessions_bar(&row, None, None);
         assert_eq!(bar.state.word, "paused");
         assert_eq!(bar.state.role, StateRole::Warn);
     }

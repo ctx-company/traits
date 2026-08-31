@@ -386,6 +386,7 @@ fn late_result_for_a_superseded_selection_never_reaches_the_rendered_preview() {
         skipped_activity_lines: 0,
         variant: Ok(None),
         claimed_task: Ok(ctx_traits_io::center::ClaimedTaskResult::Unclaimed),
+        progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
         row: request_a.row.clone(),
     });
     assert!(
@@ -626,6 +627,7 @@ fn a_pending_resync_is_rendered_as_refreshing_not_silently_current() {
                 skipped_activity_lines: 0,
                 variant: Ok(None),
                 claimed_task: Ok(ctx_traits_io::center::ClaimedTaskResult::Unclaimed),
+                progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
                 row: request.row.clone(),
             })
         ));

@@ -586,9 +586,14 @@ and every command after it. If a second round would be needed, stop and report
 the exact failing command with its evidence, or the exact unresolved contract,
 rather than iterating. That bound is the stop condition, not a judgement call.
 """
+
 [relations]
+depends-on = [
+    "0265.3",
+    "0265.13",
+    "0257",
+]
 parent = "0265"
-depends-on = ["0265.3", "0265.13", "0257"]
 
 [[checks]]
 name = "per-round workspace gate remains green"
@@ -599,7 +604,7 @@ timeout-ms = 1800000
 name = "the run-view projection survives the extraction"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib run_view"
 timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"

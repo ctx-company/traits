@@ -79,6 +79,12 @@ pub struct DetailBaseline {
     /// The served claimed-task answer. `Err` is the transport/center
     /// failure; `Ok` still carries 0265.2's four typed outcomes.
     pub claimed_task: Result<ctx_traits_io::center::ClaimedTaskResult, String>,
+    /// N/M for the selected run, derived once in `load` from the pinned
+    /// trait's resolved plan joined to this session (0265.14). `Err` is the
+    /// same resolution refusal as `variant` (source moved, digest mismatch,
+    /// foreign repository) — a typed absence, never a number assembled from
+    /// the row.
+    pub progress: Result<ctx_traits_core::procedure::run::RunProgress, String>,
     /// The exact `RunRow` this baseline's `LoadRequest` was issued for —
     /// copied verbatim from `LoadRequest::row`, never re-derived. This is
     /// what the preview composer reads identity/elapsed/start-time/
@@ -98,7 +104,7 @@ pub fn load(request: &LoadRequest) -> Result<DetailBaseline, String> {
         .map_err(|error| error.to_string())?;
     let (activity, skipped_activity_lines) =
         ctx_traits_io::activity_sidecar::read_activity(&request.ledger_path);
-    let variant = load_variant(&session);
+    let (variant, progress) = load_variant_and_progress(&session);
     let claimed_task =
         ctx_traits_io::center::claimed_task_existing(&request.session_id, Some(&request.repo_key))
             .map_err(|error| error.to_string());
@@ -108,26 +114,48 @@ pub fn load(request: &LoadRequest) -> Result<DetailBaseline, String> {
         skipped_activity_lines,
         variant,
         claimed_task,
+        progress,
         row: request.row.clone(),
     })
 }
 
-/// The authoritative variant: native `Trait.variant` over legacy
-/// `Metadata.variant` (documented display-only), taken from
-/// `run::load_trait_for_session`'s digest-verifying reconstruction — never a
-/// suffix split of the trait id, never a re-resolution of the family alias
-/// table.
-fn load_variant(session: &Session) -> Result<Option<String>, String> {
-    let loaded = ctx_traits_io::run::load_trait_for_session(None, None, session, "preview")
-        .map_err(|error| error.to_string())?;
-    Ok(loaded.trait_ref.variant.clone().or_else(|| {
+/// The authoritative variant — native `Trait.variant` over legacy
+/// `Metadata.variant` (documented display-only) — and the 0265.14 frame
+/// counter, both from one `load_trait_for_session` resolution rather than
+/// two: the desktop already resolved the trait once for `variant` alone;
+/// folding `plan_procedure_run` into that same resolution avoids doubling a
+/// digest-verified reconstruction per resync (`0257.3`'s advance mechanism
+/// calls `load` roughly once per landed frame). Mirrors the CLI's
+/// `reconstruct_projection` (`dashboard.rs`), so both faces resolve
+/// identically.
+fn load_variant_and_progress(
+    session: &Session,
+) -> (
+    Result<Option<String>, String>,
+    Result<ctx_traits_core::procedure::run::RunProgress, String>,
+) {
+    let loaded = match ctx_traits_io::run::load_trait_for_session(None, None, session, "preview") {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            let message = error.to_string();
+            return (Err(message.clone()), Err(message));
+        }
+    };
+    let variant = Ok(loaded.trait_ref.variant.clone().or_else(|| {
         loaded
             .trait_ref
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.variant.clone())
             .map(|variant| variant.as_str().to_string())
-    }))
+    }));
+    let progress = ctx_traits_core::procedure::run::plan_procedure_run(
+        &loaded.trait_ref,
+        session.run_id.clone(),
+    )
+    .map(|plan| ctx_traits_core::procedure::run::run_progress_for(&plan, session))
+    .map_err(|error| error.to_string());
+    (variant, progress)
 }
 
 /// A selected run's load state. `DetailBaseline` is boxed because it is
@@ -735,6 +763,7 @@ mod tests {
             skipped_activity_lines: 0,
             variant: Ok(None),
             claimed_task: Ok(ctx_traits_io::center::ClaimedTaskResult::Unclaimed),
+            progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
             row: fixture_row,
         }
     }

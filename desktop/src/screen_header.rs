@@ -54,8 +54,11 @@ fn title_from_claimed_task(
 
 /// The Sessions screen's composer: `pub fn sessions_header(state: ...)`
 /// matches the `sessions_run_block`/`sessions_footer` signature convention
-/// (`preview.rs:227,257`).
-pub fn sessions_header(state: Option<&PreviewState<'_>>) -> ScreenHeader {
+/// (`preview.rs:227,257`). `counter` is the 0265.14 `frame N of M` value,
+/// derived once by the caller (`shell.rs`) and passed straight into the
+/// already-reserved `placeholders::sessions_summary(_, counter)` slot; the
+/// `Loading`/`Failed` arms keep passing `None`.
+pub fn sessions_header(state: Option<&PreviewState<'_>>, counter: Option<&str>) -> ScreenHeader {
     match state {
         None | Some(PreviewState::Loading) => pending_header(),
         Some(PreviewState::Failed(reason)) => failed_header(reason),
@@ -70,7 +73,7 @@ pub fn sessions_header(state: Option<&PreviewState<'_>>) -> ScreenHeader {
             if let Some(word) = staleness_word(*stale, *refreshing) {
                 title = format!("{title} \u{b7} {word}");
             }
-            let summary = placeholders::sessions_summary(*session_title, None);
+            let summary = placeholders::sessions_summary(*session_title, counter);
             ScreenHeader { title, summary }
         }
     }
@@ -142,6 +145,7 @@ mod tests {
             skipped_activity_lines: 0,
             variant: Ok(None),
             claimed_task,
+            progress: Ok(ctx_traits_core::procedure::run::RunProgress::NoCountedFrames),
             row: fixture_row(session_title),
         }
     }
@@ -170,7 +174,7 @@ mod tests {
         };
         let baseline = baseline(Ok(ClaimedTaskResult::Task(Box::new(task))), None);
         let state = accepted(&baseline, None);
-        let header = sessions_header(Some(&state));
+        let header = sessions_header(Some(&state), None);
         assert_eq!(header.title, "0265.13 \u{2014} render the sessions header");
     }
 
@@ -186,13 +190,13 @@ mod tests {
         ] {
             let baseline = baseline(Ok(outcome), None);
             let state = accepted(&baseline, None);
-            let header = sessions_header(Some(&state));
+            let header = sessions_header(Some(&state), None);
             assert_eq!(header.title, expected);
         }
 
         let failed = baseline(Err("center down".to_string()), None);
         let state = accepted(&failed, None);
-        let header = sessions_header(Some(&state));
+        let header = sessions_header(Some(&state), None);
         assert_eq!(header.title, "task unavailable: center error");
     }
 
@@ -200,7 +204,7 @@ mod tests {
     fn present_description_carries_through_the_summary() {
         let baseline = baseline(Ok(ClaimedTaskResult::Unclaimed), Some("review the plan"));
         let state = accepted(&baseline, Some("review the plan"));
-        let header = sessions_header(Some(&state));
+        let header = sessions_header(Some(&state), None);
         assert_eq!(header.summary, "review the plan");
     }
 
@@ -208,22 +212,47 @@ mod tests {
     fn absent_description_renders_one_non_empty_module_phrased_summary() {
         let baseline = baseline(Ok(ClaimedTaskResult::Unclaimed), None);
         let state = accepted(&baseline, None);
-        let header = sessions_header(Some(&state));
+        let header = sessions_header(Some(&state), None);
         assert!(!header.summary.is_empty());
         assert_eq!(header.summary, "no run description yet");
     }
 
     #[test]
     fn none_loading_and_failed_states_render_visible_non_fabricated_text() {
-        assert_eq!(sessions_header(None).title, "loading");
+        assert_eq!(sessions_header(None, None).title, "loading");
         assert_eq!(
-            sessions_header(Some(&PreviewState::Loading)).title,
+            sessions_header(Some(&PreviewState::Loading), None).title,
             "loading"
         );
-        let failed = sessions_header(Some(&PreviewState::Failed("bad json")));
+        let failed = sessions_header(Some(&PreviewState::Failed("bad json")), None);
         assert!(failed.title.contains("bad json"));
         assert!(!failed.title.is_empty());
         assert!(!failed.summary.is_empty());
+    }
+
+    #[test]
+    fn the_frame_counter_reaches_the_summary_through_the_reserved_slot() {
+        let baseline = baseline(Ok(ClaimedTaskResult::Unclaimed), Some("review the plan"));
+        let state = accepted(&baseline, Some("review the plan"));
+        let header = sessions_header(Some(&state), Some("frame 2 of 5"));
+        assert_eq!(header.summary, "review the plan \u{b7} frame 2 of 5");
+        assert_eq!(header.summary.matches('\u{b7}').count(), 1);
+    }
+
+    #[test]
+    fn loading_and_failed_headers_never_render_a_counter_even_when_supplied() {
+        assert_eq!(
+            sessions_header(Some(&PreviewState::Loading), Some("frame 2 of 5")).summary,
+            "no run description yet"
+        );
+        assert_eq!(
+            sessions_header(
+                Some(&PreviewState::Failed("bad json")),
+                Some("frame 2 of 5")
+            )
+            .summary,
+            "no run description yet"
+        );
     }
 
     #[test]
@@ -245,9 +274,9 @@ mod tests {
             session_title: None,
         };
 
-        let current_header = sessions_header(Some(&current));
-        let refreshing_header = sessions_header(Some(&refreshing));
-        let stale_header = sessions_header(Some(&stale));
+        let current_header = sessions_header(Some(&current), None);
+        let refreshing_header = sessions_header(Some(&refreshing), None);
+        let stale_header = sessions_header(Some(&stale), None);
 
         assert_ne!(refreshing_header.title, current_header.title);
         assert!(refreshing_header.title.contains("refreshing"));

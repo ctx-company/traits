@@ -775,6 +775,17 @@ impl Render for Shell {
             } else {
                 "spawn run"
             });
+        // Taken once per render, per 0265.14 §3.4: one derived `frame N of
+        // M` value handed to both the header and the bottom bar, so the
+        // "one derivation, two renders" property is directly observable in
+        // a diff read rather than two independent format calls drifting.
+        let preview_state = self.detail.preview_state();
+        let frame_counter = preview_state.as_ref().and_then(|state| match state {
+            crate::detail::PreviewState::Accepted { baseline, .. } => {
+                crate::preview::frame_counter_text(&baseline.progress)
+            }
+            crate::detail::PreviewState::Loading | crate::detail::PreviewState::Failed(_) => None,
+        });
         let mut column = div()
             .flex()
             .flex_col()
@@ -786,8 +797,10 @@ impl Render for Shell {
             .font_weight(tokens::WEIGHT_NORMAL)
             .child(header)
             .child({
-                let screen_header =
-                    crate::screen_header::sessions_header(self.detail.preview_state().as_ref());
+                let screen_header = crate::screen_header::sessions_header(
+                    preview_state.as_ref(),
+                    frame_counter.as_deref(),
+                );
                 crate::screen_header_view::screen_header_element(
                     &screen_header.title,
                     &screen_header.summary,
@@ -853,7 +866,11 @@ impl Render for Shell {
                 .iter()
                 .find(|row| row.ledger_path == selected)
         {
-            let bar = bottom_bar::sessions_bar(row, self.row_controls.status(&row.ledger_path));
+            let bar = bottom_bar::sessions_bar(
+                row,
+                self.row_controls.status(&row.ledger_path),
+                frame_counter.as_deref(),
+            );
             // Only a live row is eligible for pause
             // (`RowControls::request`'s client-side check) — the same rule
             // the run-list's own pause action uses above: attach no handler

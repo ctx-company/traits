@@ -116,7 +116,7 @@ fn served_answer_drives_the_title_never_the_row_s_task_key() {
     let outcome = load_serving_claimed_task(&peer, &request, "task", Some(served));
     assert!(detail.apply(request.generation, outcome));
 
-    let header = sessions_header(detail.preview_state().as_ref());
+    let header = sessions_header(detail.preview_state().as_ref(), None);
     assert!(header.title.contains("0265.13"));
     assert!(header.title.contains("render the sessions header"));
     assert!(!header.title.contains("row-task-key-must-not-appear"));
@@ -157,7 +157,7 @@ fn live_session_title_updates_the_summary_with_no_resync() {
     let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
     assert!(detail.apply(request.generation, outcome));
 
-    let before = sessions_header(detail.preview_state().as_ref());
+    let before = sessions_header(detail.preview_state().as_ref(), None);
     assert_eq!(before.summary, "no run description yet");
 
     let mut retitled = support::row_from_ledger("repo", &ledger_path, &session, true);
@@ -173,7 +173,7 @@ fn live_session_title_updates_the_summary_with_no_resync() {
     );
     assert!(outcome.changed);
 
-    let after = sessions_header(detail.preview_state().as_ref());
+    let after = sessions_header(detail.preview_state().as_ref(), None);
     assert_eq!(after.summary, "a live title");
 
     drop(updates);
@@ -212,7 +212,7 @@ fn absent_summary_title_renders_one_non_empty_non_error_summary() {
     let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
     assert!(detail.apply(request.generation, outcome));
 
-    let header = sessions_header(detail.preview_state().as_ref());
+    let header = sessions_header(detail.preview_state().as_ref(), None);
     assert!(!header.summary.is_empty());
     assert_eq!(header.summary, "no run description yet");
 
@@ -252,7 +252,7 @@ fn claimed_task_transport_failure_renders_a_loud_non_success_title() {
     let outcome = load_with_claimed_task_failure(&peer, &request);
     assert!(detail.apply(request.generation, outcome));
 
-    let header = screen_header::sessions_header(detail.preview_state().as_ref());
+    let header = screen_header::sessions_header(detail.preview_state().as_ref(), None);
     assert_eq!(header.title, "task unavailable: center error");
 
     drop(updates);

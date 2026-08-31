@@ -12,9 +12,9 @@ use super::model::{
     RunView, StepState,
 };
 use super::planned::{
-    PlannedItemLocation, accepted_refs, active_loop_container_keys, child_location, flatten_step,
-    harness_by_role, loop_container_key, parallel_child_location, ref_slug, step_key,
-    structural_path_key, structural_path_matches,
+    PlannedItemLocation, accepted_refs, active_loop_container_keys, child_location,
+    harness_by_role, loop_container_key, parallel_child_location, ref_slug, step_from_frame,
+    step_key, structural_path_key, structural_path_matches,
 };
 use super::session_text::{
     harness_summary, input_text, output_port_status, phase_text, stop_reason_summary,
@@ -35,17 +35,15 @@ pub(super) fn run_view(
 ) -> RunView {
     let harness_by_role = harness_by_role(session);
     let accepted = accepted_refs(session);
-    let mut steps = plan
-        .sequence_items
+    let frames = ctx_traits_core::procedure::run::walk_planned_frames(plan, session);
+    let mut steps = frames
         .iter()
-        .flat_map(|item| {
-            flatten_step(
-                item,
-                &PlannedItemLocation::root(item),
+        .map(|frame| {
+            step_from_frame(
+                frame,
                 session,
                 &harness_by_role,
                 &accepted,
-                false,
                 presentation.live_drive,
             )
         })

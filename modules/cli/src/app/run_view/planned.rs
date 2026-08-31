@@ -1,8 +1,16 @@
-//! Planned-tree flattening: turn the dry-run planned sequence plus live
-//! session status into the flat `RunStep` list the journey/render code
-//! walks. Pure functions over `ctx_traits_core::procedure::run` types.
+//! Planned-tree presentation: turn a shared core `PlannedFrame` (the
+//! structural enumeration from
+//! `ctx_traits_core::procedure::run::walk_planned_frames`) plus
+//! live session status into the flat `RunStep` list the journey/render code
+//! walks. The structural walk itself — kind classification, branch-arm
+//! selection, `parallel_branches` children, loop/for-each `force_done`
+//! latching, current-position activity — lives in core (`0265.14`); this
+//! file keeps only presentation: labels, tags, harness seats, port slugs,
+//! status prose.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+use ctx_traits_core::procedure::run::{PlannedFrame, PlannedFrameState};
 
 use super::{Activity, PortSlug, RunStep, StepState, session_status};
 use crate::app::tui;
@@ -24,72 +32,31 @@ impl PlannedItemLocation {
             }],
         }
     }
+
+    fn from_location_path(
+        position_path: Vec<ctx_traits_core::procedure::runtime::PathSegment>,
+    ) -> Self {
+        Self { position_path }
+    }
 }
 
-/// A loop's own `Accepted`/`Rejected` outcome is a one-time event; once
-/// accepted, every descendant should paint `Done` even if a given descendant
-/// wasn't part of the final iteration. `force_done` carries that verdict down
-/// through the recursion — it starts `false` and latches `true` the moment a
-/// `Loop`/`ForEach` ancestor's own step resolves to `StepState::Done`.
-pub(super) fn flatten_step(
-    item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
-    location: &PlannedItemLocation,
-    session: &ctx_traits_core::procedure::session::Session,
-    harness_by_role: &BTreeMap<String, Vec<(Option<u32>, String)>>,
-    accepted: &BTreeSet<String>,
-    force_done: bool,
-    live_drive: bool,
-) -> Vec<RunStep> {
-    let step = step_from_item(
-        item,
-        location,
-        session,
-        harness_by_role,
-        accepted,
-        force_done,
-        live_drive,
-    );
-    let child_force_done =
-        force_done || (is_loop_kind(&item.kind) && step.state == StepState::Done);
-    let mut steps = vec![step];
-    let selected_arm =
-        branch_decision_for(session, item, location).map(|decision| decision.selected_arm.as_str());
-    let include_then = item.kind != ctx_traits_core::procedure::run::PlannedSequenceKind::Branch
-        || selected_arm == Some("then");
-    let include_otherwise = selected_arm == Some("otherwise");
-    for child in item.children.iter().filter(|_| include_then) {
-        let child_location = child_location(location, item, false, child);
-        steps.extend(flatten_step(
-            child,
-            &child_location,
-            session,
-            harness_by_role,
-            accepted,
-            child_force_done,
-            live_drive,
-        ));
+fn step_state_from_frame(state: PlannedFrameState) -> StepState {
+    match state {
+        PlannedFrameState::Done => StepState::Done,
+        PlannedFrameState::Running => StepState::Running,
+        PlannedFrameState::Pending => StepState::Pending,
+        PlannedFrameState::Failed => StepState::Failed,
     }
-    for child in item.otherwise_children.iter().filter(|_| include_otherwise) {
-        let child_location = child_location(location, item, true, child);
-        steps.extend(flatten_step(
-            child,
-            &child_location,
-            session,
-            harness_by_role,
-            accepted,
-            child_force_done,
-            live_drive,
-        ));
-    }
-    steps
 }
 
-fn is_loop_kind(kind: &ctx_traits_core::procedure::run::PlannedSequenceKind) -> bool {
-    matches!(
-        kind,
-        ctx_traits_core::procedure::run::PlannedSequenceKind::Loop
-            | ctx_traits_core::procedure::run::PlannedSequenceKind::ForEach
-    )
+fn activity_from_frame(frame: &PlannedFrame<'_>) -> Activity {
+    if frame.active {
+        Activity::Current
+    } else if frame.on_active_path {
+        Activity::Ancestor
+    } else {
+        Activity::Idle
+    }
 }
 
 pub(super) fn child_location(
@@ -208,37 +175,6 @@ pub(super) fn structural_path_matches(
                 && actual.id == expected.id
                 && actual.index == expected.index
         })
-}
-
-fn structural_control_ancestor_matches(
-    expected: &[ctx_traits_core::procedure::runtime::PathSegment],
-    actual: &[ctx_traits_core::procedure::runtime::PathSegment],
-) -> bool {
-    let prefix = if expected
-        .last()
-        .is_some_and(|segment| segment.kind == "item")
-    {
-        &expected[..expected.len().saturating_sub(1)]
-    } else {
-        expected
-    };
-    actual.len() > prefix.len()
-        && actual.iter().zip(prefix).all(|(actual, expected)| {
-            actual.kind == expected.kind
-                && actual.id == expected.id
-                && actual.index == expected.index
-        })
-}
-
-fn is_control_item(item: &ctx_traits_core::procedure::run::PlannedSequenceItem) -> bool {
-    matches!(
-        item.kind,
-        ctx_traits_core::procedure::run::PlannedSequenceKind::Sequence
-            | ctx_traits_core::procedure::run::PlannedSequenceKind::Branch
-            | ctx_traits_core::procedure::run::PlannedSequenceKind::Loop
-            | ctx_traits_core::procedure::run::PlannedSequenceKind::ForEach
-            | ctx_traits_core::procedure::run::PlannedSequenceKind::Parallel
-    )
 }
 
 /// Joins a position path's segments into one string, one `kind:id:index:
@@ -506,42 +442,52 @@ pub(super) fn active_loop_container_keys(
     keys
 }
 
-fn step_from_item(
-    item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
-    location: &PlannedItemLocation,
+/// Builds this file's presentation `RunStep` from a shared core
+/// `PlannedFrame` — the structural half (state, activity, `counts_progress`,
+/// branch-arm inclusion, `force_done` latching) already resolved by
+/// `ctx_traits_core::procedure::run::progress::walk_planned_frames`. Only
+/// presentation fields (labels, tags, harness seats, port slugs, status
+/// prose) are computed here.
+pub(super) fn step_from_frame(
+    frame: &PlannedFrame<'_>,
     session: &ctx_traits_core::procedure::session::Session,
     harness_by_role: &BTreeMap<String, Vec<(Option<u32>, String)>>,
     accepted: &BTreeSet<String>,
-    force_done: bool,
     live_drive: bool,
 ) -> RunStep {
-    let stamped_path = stamp_live_iterations(session, &location.position_path);
-    let runtime_status = session
-        .ledger
-        .sequence_statuses
-        .iter()
-        .rev()
-        .find(|status| {
-            status.run_index == item.run_index
-                && if location.position_path.len() > 1 {
-                    !status.position_path.is_empty()
-                        && iteration_aware_path_matches(&status.position_path, &stamped_path)
-                } else {
-                    status.position_path.is_empty()
-                }
-        });
-    let activity = item_activity(session, item, location);
-    let active = activity == Activity::Current;
-    let mut state = step_state(session, runtime_status, activity);
-    let mut status_text = step_status_text(
-        session,
-        runtime_status,
-        activity,
-        item,
-        location,
-        live_drive,
-    );
-    if force_done {
+    let item = frame.item;
+    let location = PlannedItemLocation::from_location_path(frame.location_path.clone());
+    let stamped_path = frame.stamped_path.clone();
+    let activity = activity_from_frame(frame);
+    let active = frame.active;
+    let mut state = step_state_from_frame(frame.state);
+    let mut status_text = if frame.force_done {
+        "done".to_string()
+    } else {
+        let runtime_status = session
+            .ledger
+            .sequence_statuses
+            .iter()
+            .rev()
+            .find(|status| {
+                status.run_index == item.run_index
+                    && if location.position_path.len() > 1 {
+                        !status.position_path.is_empty()
+                            && iteration_aware_path_matches(&status.position_path, &stamped_path)
+                    } else {
+                        status.position_path.is_empty()
+                    }
+            });
+        step_status_text(
+            session,
+            runtime_status,
+            activity,
+            item,
+            &location,
+            live_drive,
+        )
+    };
+    if frame.force_done {
         state = StepState::Done;
         status_text = "done".to_string();
     }
@@ -553,10 +499,10 @@ fn step_from_item(
     let harness = harness_for_seat(rows, item.structural_seat);
     let mut inputs = port_slugs(item.input_refs.iter().map(ToString::to_string), accepted);
     let mut outputs = port_slugs(item.output_refs.iter().map(ToString::to_string), accepted);
-    if active && let Some(frame) = session.next_frame.as_deref() {
+    if active && let Some(next_frame) = session.next_frame.as_deref() {
         extend_port_slugs(
             &mut inputs,
-            frame
+            next_frame
                 .available_inputs
                 .iter()
                 .map(|input| input.ref_text.clone()),
@@ -564,7 +510,7 @@ fn step_from_item(
         );
         extend_port_slugs(
             &mut outputs,
-            frame
+            next_frame
                 .requested_outputs
                 .iter()
                 .map(|output| output.slot_ref.to_string()),
@@ -578,11 +524,11 @@ fn step_from_item(
         label: item.title.clone(),
         role,
         harness,
-        tags: step_tags(item, session, location),
+        tags: step_tags(item, session, &location),
         status: status_text,
         state,
         active,
-        counts_progress: counts_progress(item),
+        counts_progress: frame.counts_progress,
         inputs,
         outputs,
         elapsed: None,
@@ -597,36 +543,12 @@ fn step_from_item(
     }
 }
 
-pub(super) fn counts_progress(item: &ctx_traits_core::procedure::run::PlannedSequenceItem) -> bool {
+fn is_loop_kind(kind: &ctx_traits_core::procedure::run::PlannedSequenceKind) -> bool {
     matches!(
-        item.kind,
-        ctx_traits_core::procedure::run::PlannedSequenceKind::Prompt
-            | ctx_traits_core::procedure::run::PlannedSequenceKind::Command
+        kind,
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Loop
+            | ctx_traits_core::procedure::run::PlannedSequenceKind::ForEach
     )
-}
-
-fn item_activity(
-    session: &ctx_traits_core::procedure::session::Session,
-    item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
-    location: &PlannedItemLocation,
-) -> Activity {
-    let active_path = active_position_path(session);
-    let current = if location.position_path.len() == 1 && active_path.is_empty() {
-        session.current_run_index == item.run_index
-            && session.current_sequence_item_id == item.item_id
-    } else {
-        structural_path_matches(active_path, &location.position_path)
-    };
-    if current {
-        return Activity::Current;
-    }
-    let on_active_path = is_control_item(item)
-        && structural_control_ancestor_matches(&location.position_path, active_path);
-    if on_active_path {
-        Activity::Ancestor
-    } else {
-        Activity::Idle
-    }
 }
 
 /// Progress text for a container mid-execution, from the control stack entry
@@ -703,41 +625,6 @@ fn step_tags(
         tags.push(format!("selected:{}", decision.selected_arm));
     }
     tags
-}
-
-fn step_state(
-    session: &ctx_traits_core::procedure::session::Session,
-    runtime_status: Option<&ctx_traits_core::procedure::runtime::SequenceStatus>,
-    activity: Activity,
-) -> StepState {
-    if let Some(status) = runtime_status {
-        match status.status {
-            ctx_traits_core::procedure::runtime::SequenceStatusKind::Accepted => {
-                return StepState::Done;
-            }
-            ctx_traits_core::procedure::runtime::SequenceStatusKind::Rejected => {
-                return StepState::Failed;
-            }
-            ctx_traits_core::procedure::runtime::SequenceStatusKind::Blocked
-                if activity == Activity::Idle =>
-            {
-                return StepState::Pending;
-            }
-            _ => {}
-        }
-    }
-    if activity == Activity::Current
-        && session.completion.is_none()
-        && session.stop_reason.is_some()
-    {
-        // The item the run stopped at wears the failure mark, not a spinner.
-        return StepState::Failed;
-    }
-    if activity != Activity::Idle && session.completion.is_none() {
-        StepState::Running
-    } else {
-        StepState::Pending
-    }
 }
 
 fn step_status_text(

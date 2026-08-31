@@ -133,7 +133,7 @@ mod tests {
             elapsed_seconds: 0,
             started_at_epoch: None,
         };
-        let bar = sessions_bar(&row, None);
+        let bar = sessions_bar(&row, None, None);
         // Constructing the element must not panic and must reach an
         // `AnyElement` — proof this render path needs no `App`/`Context`.
         let _element: AnyElement = bar_element(&bar, None);
@@ -175,7 +175,7 @@ mod tests {
             elapsed_seconds: 0,
             started_at_epoch: None,
         };
-        let bar = sessions_bar(&row, None);
+        let bar = sessions_bar(&row, None, None);
         let handler: BarActionHandler = Box::new(|_, _, _| {});
         let _element: AnyElement = bar_element(&bar, Some(handler));
     }
