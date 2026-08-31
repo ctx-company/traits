@@ -29,7 +29,10 @@ arithmetic is handled.
 - File node id: `f-` + the path slugified — lowercase, every character
   outside `a-z0-9` becomes `-`, runs collapsed, ends trimmed.
   `modules/io/src/mcp.rs` → `f-modules-io-src-mcp-rs`.
-- Symbol node id: `s-` + symbol name + `-` + definition line, kebab-case.
+- Symbol node id: `s-` + slugified path + `-` + definition line + `-` +
+  symbol name, kebab-case. The path segment is mandatory: two files can
+  define the same name on the same line, and an id collision silently
+  replaces one description with the other (last-wins).
 - Re-emitting an existing id REPLACES that node (last-wins). That is the
   only revision mechanism — never rewrite the whole tree.
 

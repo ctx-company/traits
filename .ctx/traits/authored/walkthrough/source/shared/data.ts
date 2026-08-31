@@ -42,7 +42,7 @@ export const nodeSchema: SchemaHandle = schema.object(
   {
     id: schema.field(schema.text(), {
       description:
-        'Stable kebab-case slug, unique across the whole walkthrough. Conventions: the root is "root"; a file node is "f-" plus the slugified path; a symbol node is "s-" plus the symbol name plus "-" plus its definition line. Re-emitting an existing id REPLACES that node (last-wins revision).',
+        'Stable kebab-case slug, unique across the whole walkthrough. Conventions: the root is "root"; a file node is "f-" plus the slugified path; a symbol node is "s-" plus the slugified path plus "-" plus the definition line plus "-" plus the symbol name — the path segment keeps two same-named symbols on the same line of different files from colliding. Re-emitting an existing id REPLACES that node (last-wins revision).',
     }),
     parent: schema.optional(
       schema.field(schema.text(), {

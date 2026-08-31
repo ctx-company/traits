@@ -189,21 +189,30 @@ def merged_nodes(skeleton_arg: str, batches_arg: str):
         elif isinstance(batch, dict):
             flat.append(batch)
     by_id, order = {}, []
+    id_symbols = {}
     for n in flat:
         nid = str(n.get("id", "")).strip()
         if not nid:
             continue
+        sym = str(n.get("symbol") or "").strip()
+        if sym:
+            id_symbols.setdefault(nid, set()).add(sym)
         if nid not in by_id:
             order.append(nid)
         by_id[nid] = n
-    return [by_id[nid] for nid in order]
+    collisions = [
+        {"id": nid, "symbols": sorted(syms)}
+        for nid, syms in sorted(id_symbols.items())
+        if len(syms) > 1
+    ]
+    return [by_id[nid] for nid in order], collisions
 
 
 def analyze(chunks_arg: str, skeleton_arg: str, batches_arg: str):
     chunks = load_json(chunks_arg, "symbol-chunks")
     if not isinstance(chunks, list):
         fail("symbol-chunks must be a JSON list")
-    nodes = merged_nodes(skeleton_arg, batches_arg)
+    nodes, collisions = merged_nodes(skeleton_arg, batches_arg)
     index_entries = []
     for c in chunks:
         index_entries.extend(c.get("symbols", []))
@@ -224,6 +233,7 @@ def analyze(chunks_arg: str, skeleton_arg: str, batches_arg: str):
     return {
         "uncovered": uncovered[:400],
         "uncovered-count": len(uncovered),
+        "id-collisions": collisions[:50],
         "unknown-symbol-keys": unknown[:100],
         "orphan-parents": orphans,
         "roots": roots,
@@ -253,6 +263,7 @@ def main() -> None:
                 report["uncovered-count"]
                 + len(report["unknown-symbol-keys"])
                 + len(report["orphan-parents"])
+                + len(report["id-collisions"])
                 + (0 if len(report["roots"]) == 1 else 1)
             )
             # No trailing newline: text-slot command output is captured

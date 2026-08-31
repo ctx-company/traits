@@ -92,8 +92,8 @@ export default function () {
     investigator.prompt("Cover the gaps", {
       input: input.prompt`
                 The deterministic coverage report for the walkthrough of ${shared.data.topic} is ${shared.data.coverageReport}.
-                If it shows zero uncovered entries, zero unknown symbol keys, and zero orphan parents with exactly one root: contribute an empty batch and nothing else.
-                Otherwise make progress on what it names, at most 40 nodes this round — the loop runs again for the rest. Priority: first corrected re-emissions for nodes with unknown symbol keys or orphaned parents (keep the content, fix the broken field, never drop a valid symbol key); then a node per uncovered entry, described from the opened file at leaf register per ${shared.resource.walkthroughStandards}.
+                If it shows zero uncovered entries, zero unknown symbol keys, zero id collisions, and zero orphan parents with exactly one root: contribute an empty batch and nothing else.
+                Otherwise make progress on what it names, at most 40 nodes this round — the loop runs again for the rest. Priority: first id collisions — re-emit EVERY symbol the collision lists under its own file-qualified id per ${shared.resource.walkthroughStandards}, so no two files' symbols share an id; then every listed root except "root" — re-emit it with its correct parent; then corrected re-emissions for nodes with unknown symbol keys or orphaned parents (keep the content, fix the broken field, never drop a valid symbol key); then a node per uncovered entry, described from the opened file at leaf register.
                 READ-ONLY discipline: never create, edit, or delete any file in this repository — investigation means reading.
                 `,
       output: shared.data.nodeBatches.with(operation.Append),
