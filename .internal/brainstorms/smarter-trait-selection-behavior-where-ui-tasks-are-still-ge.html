@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evolved implement-basic: complexity triage routes review depth</title>
+<style>
+  :root {
+    --ink: #1c1e21;
+    --dim: #6b7280;
+    --line: #9aa1ab;
+    --box-edge: #444a54;
+    --light-edge: #8a6d1f;
+    --light-fill: #fdf8ec;
+    --std-fill: #f1f3f6;
+    --loop-edge: #7c8494;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: #fafafa;
+  }
+  header {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 28px 24px 8px;
+  }
+  header h1 { font-size: 20px; margin: 0 0 6px; }
+  header p { margin: 0; color: var(--dim); font-size: 14px; max-width: 78ch; }
+  header p code { font-size: 13px; }
+  .scroll { overflow-x: auto; padding: 8px 24px 12px; }
+  .canvas { min-width: 880px; max-width: 940px; margin: 0 auto; }
+  svg { display: block; width: 100%; height: auto; }
+  svg text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .node   { fill: #fff; stroke: var(--box-edge); stroke-width: 1.4; }
+  .gate   { fill: #fff; stroke: var(--box-edge); stroke-width: 1.6; }
+  .loopbg-light { fill: var(--light-fill); stroke: var(--light-edge); stroke-width: 1.4; stroke-dasharray: 7 4; }
+  .loopbg-std   { fill: var(--std-fill);   stroke: var(--loop-edge);  stroke-width: 1.4; stroke-dasharray: 7 4; }
+  .edge   { stroke: var(--box-edge); stroke-width: 1.5; fill: none; }
+  .edge-escalate { stroke: var(--light-edge); stroke-width: 1.7; fill: none; stroke-dasharray: 5 4; }
+  .t-title { font-size: 14px; font-weight: 600; fill: var(--ink); }
+  .t-sub   { font-size: 12px; fill: var(--dim); }
+  .t-edge  { font-size: 12px; font-weight: 600; fill: var(--ink); }
+  .t-edge-dim { font-size: 11.5px; fill: var(--dim); }
+  .t-loop  { font-size: 12.5px; font-weight: 600; fill: #4a5160; letter-spacing: 0.02em; }
+  .t-loop-light { fill: var(--light-edge); }
+  .t-code  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; fill: var(--dim); }
+  .seatbox { fill: #fff; stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+  .legend {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 4px 24px 36px;
+    font-size: 13px;
+    color: var(--dim);
+    display: flex;
+    gap: 26px;
+    flex-wrap: wrap;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .decisions {
+    max-width: 892px;
+    margin: 0 auto 8px;
+    padding: 14px 18px;
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    background: #fff;
+    font-size: 13px;
+    color: var(--dim);
+  }
+  .decisions strong { color: var(--ink); }
+  .decisions p { margin: 0 0 7px; }
+  .decisions p:last-child { margin-bottom: 0; }
+  .key { display: inline-block; width: 26px; height: 14px; border-radius: 3px; }
+  .key.step  { background: #fff; border: 1.4px solid var(--box-edge); }
+  .key.loop  { background: var(--std-fill); border: 1.4px dashed var(--loop-edge); }
+  .key.light { background: var(--light-fill); border: 1.4px dashed var(--light-edge); }
+  .key.esc   { background: transparent; border-top: 2px dashed var(--light-edge); height: 0; margin-top: 6px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Evolved <code>implement-basic</code>: one triage frame routes review depth and reviewer seat</h1>
+  <p>Proposed flow for <code>implement-basic</code> (Stage&nbsp;1 of the brainstorm — the sibling markdown is authoritative).
+     A post-draft, single-frame size triage classifies the drafted change into a typed <code>tier</code> verdict; the
+     <em>light</em> tier gets a round-capped loop on a separate reviewer seat, the <em>standard</em> tier gets today's
+     uncapped loop unchanged, and unresolved blocking work after the final light review escalates instead of being treated as approval.</p>
+</header>
+
+<div class="scroll"><div class="canvas">
+<svg viewBox="0 0 860 950" role="img"
+     aria-label="Process diagram: implement-basic dispatch leads to draft, then a size triage gate using draft evidence without a task facet. Tier light routes to a capped review loop with a separately configurable reviewer-light seat whose model is undecided; tier standard routes to the existing uncapped review loop with the smart seat. Light-loop approval goes to the commit tail; an unresolved revise verdict after the final light review escalates into the standard loop, whose approval also reaches the commit tail. A side panel shows role-to-seat mapping in runtime.toml.">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#444a54"/>
+    </marker>
+    <marker id="arrow-gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a6d1f"/>
+    </marker>
+  </defs>
+
+  <!-- ===== dispatch ===== -->
+  <rect class="node" x="310" y="18" width="240" height="52" rx="6"/>
+  <text class="t-title" x="430" y="40" text-anchor="middle">dispatch task</text>
+  <text class="t-code"  x="430" y="58" text-anchor="middle">implement-basic (evolved)</text>
+
+  <path class="edge" d="M430 70 V 100" marker-end="url(#arrow)"/>
+
+  <!-- ===== draft ===== -->
+  <rect class="node" x="310" y="102" width="240" height="52" rx="6"/>
+  <text class="t-title" x="430" y="124" text-anchor="middle">draft the implementation plan</text>
+  <text class="t-sub"   x="430" y="142" text-anchor="middle">agent: smart &nbsp;·&nbsp; slot: draft</text>
+
+  <path class="edge" d="M430 154 V 184" marker-end="url(#arrow)"/>
+
+  <!-- ===== triage gate (diamond) ===== -->
+  <polygon class="gate" points="430,186 570,246 430,306 290,246"/>
+  <text class="t-title" x="430" y="238" text-anchor="middle">size triage — 1 frame</text>
+  <text class="t-sub"   x="430" y="256" text-anchor="middle">draft evidence only · no task facet</text>
+  <text class="t-code"  x="430" y="274" text-anchor="middle">slot: size-tier</text>
+
+  <!-- branch edges -->
+  <path class="edge" d="M290 246 H 205 V 330" marker-end="url(#arrow)"/>
+  <text class="t-edge"     x="196" y="240" text-anchor="end">tier: light</text>
+  <text class="t-edge-dim" x="196" y="256" text-anchor="end">cosmetic, small blast radius</text>
+
+  <path class="edge" d="M570 246 H 655 V 330" marker-end="url(#arrow)"/>
+  <text class="t-edge"     x="666" y="240" text-anchor="start">tier: standard</text>
+  <text class="t-edge-dim" x="666" y="256" text-anchor="start">novel logic, crosses modules</text>
+
+  <!-- ===== LIGHT loop ===== -->
+  <rect class="loopbg-light" x="60" y="332" width="290" height="330" rx="10"/>
+  <text class="t-loop t-loop-light" x="76" y="356">LIGHT LOOP — capped: iterations ≤ 3</text>
+
+  <rect class="node" x="100" y="372" width="220" height="46" rx="6"/>
+  <text class="t-title" x="210" y="392" text-anchor="middle">implement the task</text>
+  <text class="t-sub"   x="210" y="408" text-anchor="middle">agent: worker</text>
+
+  <path class="edge" d="M210 418 V 440" marker-end="url(#arrow)"/>
+
+  <rect class="node" x="100" y="442" width="220" height="42" rx="6"/>
+  <text class="t-title" x="210" y="460" text-anchor="middle">capture changed files</text>
+  <text class="t-sub"   x="210" y="476" text-anchor="middle">diff vs. session base</text>
+
+  <path class="edge" d="M210 484 V 506" marker-end="url(#arrow)"/>
+
+  <rect class="node" x="100" y="508" width="220" height="70" rx="6"/>
+  <text class="t-title" x="210" y="528" text-anchor="middle">light review — one round</text>
+  <text class="t-sub"   x="210" y="544" text-anchor="middle">reviewer-light (separate seat; model TBD)</text>
+  <text class="t-sub"   x="210" y="559" text-anchor="middle">only contract-breaking findings block;</text>
+  <text class="t-sub"   x="210" y="573" text-anchor="middle" font-style="italic">nits recorded, never looped on</text>
+
+  <!-- revise back-edge (light) -->
+  <path class="edge" d="M100 543 H 82 V 395 H 98" marker-end="url(#arrow)"/>
+  <text class="t-edge-dim" x="74" y="470" text-anchor="middle" transform="rotate(-90 74 470)">revise</text>
+
+  <!-- light approved exit -->
+  <path class="edge" d="M210 578 V 720 H 468" marker-end="url(#arrow)"/>
+  <text class="t-edge" x="220" y="648" text-anchor="start">approved</text>
+
+  <!-- escalation edge: final light review still has unresolved blockers -->
+  <path class="edge-escalate" d="M350 500 H 528" marker-end="url(#arrow-gold)"/>
+  <text class="t-edge"     x="439" y="480" text-anchor="middle" fill="#8a6d1f">final review: revise</text>
+  <text class="t-edge-dim" x="439" y="495" text-anchor="middle">unresolved blockers escalate</text>
+
+  <!-- ===== STANDARD loop ===== -->
+  <rect class="loopbg-std" x="530" y="332" width="290" height="272" rx="10"/>
+  <text class="t-loop" x="546" y="356">STANDARD LOOP — uncapped (ruling kept)</text>
+
+  <rect class="node" x="560" y="372" width="220" height="46" rx="6"/>
+  <text class="t-title" x="670" y="392" text-anchor="middle">implement the task</text>
+  <text class="t-sub"   x="670" y="408" text-anchor="middle">agent: worker</text>
+
+  <path class="edge" d="M670 418 V 440" marker-end="url(#arrow)"/>
+
+  <rect class="node" x="560" y="442" width="220" height="42" rx="6"/>
+  <text class="t-title" x="670" y="460" text-anchor="middle">capture changed files</text>
+  <text class="t-sub"   x="670" y="476" text-anchor="middle">diff vs. session base</text>
+
+  <path class="edge" d="M670 484 V 506" marker-end="url(#arrow)"/>
+
+  <rect class="node" x="560" y="508" width="220" height="58" rx="6"/>
+  <text class="t-title" x="670" y="528" text-anchor="middle">full review</text>
+  <text class="t-sub"   x="670" y="544" text-anchor="middle">agent: smart (top seat)</text>
+  <text class="t-sub"   x="670" y="558" text-anchor="middle">today's basic behavior, verbatim</text>
+
+  <!-- revise back-edge (standard) -->
+  <path class="edge" d="M780 537 H 798 V 395 H 782" marker-end="url(#arrow)"/>
+  <text class="t-edge-dim" x="806" y="470" text-anchor="middle" transform="rotate(90 806 470)">revise</text>
+
+  <!-- standard approved exit -->
+  <path class="edge" d="M670 604 V 720 H 632" marker-end="url(#arrow)"/>
+  <text class="t-edge" x="680" y="648" text-anchor="start">approved</text>
+
+  <!-- ===== commit tail ===== -->
+  <rect class="node" x="470" y="696" width="160" height="48" rx="6"/>
+  <text class="t-title" x="550" y="716" text-anchor="middle">commit tail</text>
+  <text class="t-sub"   x="550" y="732" text-anchor="middle">status → message → commit</text>
+
+  <!-- ===== seat mapping panel ===== -->
+  <rect class="seatbox" x="60" y="780" width="760" height="152" rx="8"/>
+  <text class="t-loop" x="78" y="806">SEAT MAPPING — where "dynamic model assign" lives (no runtime changes)</text>
+  <text class="t-code" x="78" y="832">trait declares roles ──────────▶ runtime.toml maps seats ──────────▶ models</text>
+  <text class="t-code" x="78" y="856">worker                         [agent.role.default]                mid-tier</text>
+  <text class="t-code" x="78" y="876">smart (reviewer, top tier)     [agent.role.smart]                  top model</text>
+  <text class="t-code" x="78" y="896">reviewer-light (separate)      [agent.role.reviewer-light]         model TBD</text>
+  <text class="t-sub"  x="78" y="920">Seats resolve once per run per role; the quick experiment chooses reviewer-light's model explicitly.</text>
+</svg>
+</div></div>
+
+<div class="decisions" aria-label="Owner decisions incorporated into the proposal">
+  <p><strong>Target:</strong> evolve <code>implement-basic</code>; do not add a calibrated variant.</p>
+  <p><strong>Escalation:</strong> approval exits. Only unresolved blocking work returned by the final permitted light review enters the standard loop.</p>
+  <p><strong>Severity:</strong> a typed field would mechanically control blocking, iteration, escalation, and auditability. The existing approve/revise verdict plus reviewer doctrine already does that here, so no schema field is added.</p>
+  <p><strong>Triage input:</strong> use the drafted change and repository evidence; do not add a task facet now.</p>
+  <p><strong>Experiment:</strong> first extend <code>implement-quick</code> with the capped light-review loop. Treat reaching the cap with unresolved blockers as non-approval; keep the reviewer model undecided and vary it explicitly.</p>
+</div>
+
+<div class="legend">
+  <span><span class="key step"></span> step (one frame)</span>
+  <span><span class="key light"></span> light loop — capped, separate reviewer seat (model TBD)</span>
+  <span><span class="key loop"></span> standard loop — uncapped, smart seat</span>
+  <span><span class="key esc"></span> escalation edge (final light revise → standard loop)</span>
+</div>
+</body>
+</html>
