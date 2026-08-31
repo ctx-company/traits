@@ -47,7 +47,7 @@ fn title_from_claimed_task(
     claimed_task: &Result<ctx_traits_io::center::ClaimedTaskResult, String>,
 ) -> String {
     match claimed_task_wording(claimed_task) {
-        ClaimedTaskWording::Task(task) => format!("{} \u{2014} {}", task.key, task.title),
+        ClaimedTaskWording::Task(task, _policy) => format!("{} \u{2014} {}", task.key, task.title),
         ClaimedTaskWording::Wording { text, .. } => text.to_string(),
     }
 }
@@ -84,7 +84,7 @@ mod tests {
     use super::*;
     use ctx_traits_core::task::TaskStatus;
     use ctx_traits_core::task::provider::ClaimedTask;
-    use ctx_traits_io::center::ClaimedTaskResult;
+    use ctx_traits_io::center::{ClaimedTaskResult, ClosePolicyResolution};
 
     use crate::detail::DetailBaseline;
     use crate::run_row::{RowState, RunRow};
@@ -172,7 +172,13 @@ mod tests {
             stored_status: Some(TaskStatus::Ready),
             auto_close: None,
         };
-        let baseline = baseline(Ok(ClaimedTaskResult::Task(Box::new(task))), None);
+        let baseline = baseline(
+            Ok(ClaimedTaskResult::Task(
+                Box::new(task),
+                ClosePolicyResolution::NoneConfigured,
+            )),
+            None,
+        );
         let state = accepted(&baseline, None);
         let header = sessions_header(Some(&state), None);
         assert_eq!(header.title, "0265.13 \u{2014} render the sessions header");

@@ -588,8 +588,8 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
             message: e.to_string(),
         }
     })?;
-    let task = match claimed {
-        ctx_traits_io::center::ClaimedTaskResult::Task(task) => *task,
+    let (task, close_policy) = match claimed {
+        ctx_traits_io::center::ClaimedTaskResult::Task(task, policy) => (*task, policy),
         ctx_traits_io::center::ClaimedTaskResult::Missing => {
             return Err(crate::Error::Command {
                 message: format!("no run matching session {session:?}"),
@@ -609,7 +609,13 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
 
     match OutputMode::select(json, false) {
         OutputMode::Json => {
-            print_json_report(&Envelope::ok(&task), "tasks show report")?;
+            print_json_report(
+                &Envelope::ok(&serde_json::json!({
+                    "task": task,
+                    "close-policy": close_policy,
+                })),
+                "tasks show report",
+            )?;
         }
         OutputMode::Human(mode) => {
             let mut panel = Panel::new(
@@ -630,6 +636,21 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
                     RowTone::Default,
                 ));
             }
+            panel = panel.row(PanelRow::toned(
+                "close-policy",
+                match &close_policy {
+                    ctx_traits_io::center::ClosePolicyResolution::Effective(policy) => {
+                        format!("{policy:?}").to_lowercase()
+                    }
+                    ctx_traits_io::center::ClosePolicyResolution::NoneConfigured => {
+                        "none configured".to_string()
+                    }
+                    ctx_traits_io::center::ClosePolicyResolution::Unresolved(reason) => {
+                        format!("unresolved: {reason}")
+                    }
+                },
+                RowTone::Default,
+            ));
             if !task.description.is_empty() {
                 panel = panel.row(PanelRow::toned(
                     "description",
@@ -1139,13 +1160,19 @@ mod tests {
                     "type": "claimed-task",
                     "data": {
                         "type": "task",
-                        "data": {
-                            "key": "0001",
-                            "title": "Fixture task",
-                            "description": "the description",
-                            "stored-status": "ready",
-                            "auto-close": "checked"
-                        }
+                        "data": [
+                            {
+                                "key": "0001",
+                                "title": "Fixture task",
+                                "description": "the description",
+                                "stored-status": "ready",
+                                "auto-close": "checked"
+                            },
+                            {
+                                "type": "effective",
+                                "data": "checked"
+                            }
+                        ]
                     }
                 }),
             );
@@ -1249,13 +1276,19 @@ mod tests {
                     "type": "claimed-task",
                     "data": {
                         "type": "task",
-                        "data": {
-                            "key": "0001",
-                            "title": "Fixture task",
-                            "description": "the description",
-                            "stored-status": "ready",
-                            "auto-close": "checked"
-                        }
+                        "data": [
+                            {
+                                "key": "0001",
+                                "title": "Fixture task",
+                                "description": "the description",
+                                "stored-status": "ready",
+                                "auto-close": "checked"
+                            },
+                            {
+                                "type": "effective",
+                                "data": "checked"
+                            }
+                        ]
                     }
                 }),
             );

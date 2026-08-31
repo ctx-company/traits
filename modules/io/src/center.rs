@@ -272,13 +272,35 @@ enum ControlWireResult {
     Refused,
 }
 
+/// The claimed task's effective `auto-close` policy, resolved by the center
+/// at the row's own validated `repo_root` (never the process cwd — see
+/// [`ctx_traits_io::harness_config::effective_auto_close_policy`]) and
+/// carried beside [`ctx_traits_core::task::provider::ClaimedTask`] rather
+/// than folded into it, so that shared core type stays untouched for its
+/// other constructors. Three outcomes stay distinguishable end to end: a
+/// resolved policy, a resolved absence of one, and a resolution failure —
+/// collapsing the latter two would let a config-read error masquerade as
+/// "no policy configured".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+pub enum ClosePolicyResolution {
+    Effective(ctx_traits_core::task::AutoClosePolicy),
+    NoneConfigured,
+    /// Config resolution failed; carries the error text for diagnostics.
+    /// Never defaulted to a plausible policy.
+    Unresolved(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "kebab-case")]
 enum ClaimedTaskWireResult {
     Missing,
     Ambiguous(Vec<String>),
     Unclaimed,
-    Task(Box<ctx_traits_core::task::provider::ClaimedTask>),
+    Task(
+        Box<ctx_traits_core::task::provider::ClaimedTask>,
+        ClosePolicyResolution,
+    ),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1066,7 +1088,10 @@ pub enum ClaimedTaskResult {
     Missing,
     Ambiguous(Vec<String>),
     Unclaimed,
-    Task(Box<ctx_traits_core::task::provider::ClaimedTask>),
+    Task(
+        Box<ctx_traits_core::task::provider::ClaimedTask>,
+        ClosePolicyResolution,
+    ),
 }
 
 fn decode_claimed_task(result: ResponseResult) -> crate::Result<ClaimedTaskResult> {
@@ -1080,8 +1105,8 @@ fn decode_claimed_task(result: ResponseResult) -> crate::Result<ClaimedTaskResul
         ResponseResult::ClaimedTask(ClaimedTaskWireResult::Unclaimed) => {
             Ok(ClaimedTaskResult::Unclaimed)
         }
-        ResponseResult::ClaimedTask(ClaimedTaskWireResult::Task(task)) => {
-            Ok(ClaimedTaskResult::Task(task))
+        ResponseResult::ClaimedTask(ClaimedTaskWireResult::Task(task, policy)) => {
+            Ok(ClaimedTaskResult::Task(task, policy))
         }
         _ => Err(protocol_error("unexpected claimed-task response")),
     }
@@ -3809,9 +3834,23 @@ fn run_claimed_task_request(
                 .ok_or_else(|| {
                     protocol_error(format!("claimed task {key:?} not found in board {dir}"))
                 })?;
-            Ok(ClaimedTaskWireResult::Task(Box::new(
-                ctx_traits_core::task::provider::ClaimedTask::from_document(&resolved.document),
-            )))
+            // A config-resolution failure degrades only the close-policy
+            // outcome to `Unresolved` — it must never fail the whole
+            // claimed-task answer, which would break the task row itself.
+            let policy = match crate::harness_config::effective_auto_close_policy(
+                &repo_root,
+                resolved.document.auto_close,
+            ) {
+                Ok(Some(policy)) => ClosePolicyResolution::Effective(policy),
+                Ok(None) => ClosePolicyResolution::NoneConfigured,
+                Err(error) => ClosePolicyResolution::Unresolved(error.to_string()),
+            };
+            Ok(ClaimedTaskWireResult::Task(
+                Box::new(ctx_traits_core::task::provider::ClaimedTask::from_document(
+                    &resolved.document,
+                )),
+                policy,
+            ))
         }
     }
 }
@@ -4465,7 +4504,18 @@ mod tests {
             ClaimedTaskWireResult::Missing,
             ClaimedTaskWireResult::Ambiguous(vec!["a".to_string(), "b".to_string()]),
             ClaimedTaskWireResult::Unclaimed,
-            ClaimedTaskWireResult::Task(Box::new(claimed)),
+            ClaimedTaskWireResult::Task(
+                Box::new(claimed.clone()),
+                ClosePolicyResolution::Effective(ctx_traits_core::task::AutoClosePolicy::Checked),
+            ),
+            ClaimedTaskWireResult::Task(
+                Box::new(claimed.clone()),
+                ClosePolicyResolution::NoneConfigured,
+            ),
+            ClaimedTaskWireResult::Task(
+                Box::new(claimed),
+                ClosePolicyResolution::Unresolved("malformed runtime.toml".to_string()),
+            ),
         ] {
             let response = ResponseResult::ClaimedTask(result.clone());
             let encoded = serde_json::to_string(&response).expect("encode response");

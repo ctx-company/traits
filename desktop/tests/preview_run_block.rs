@@ -687,13 +687,16 @@ fn a_pending_resync_is_rendered_as_refreshing_not_silently_current() {
         &peer,
         &resync,
         "task",
-        Some(serde_json::json!({
-            "key": "0265.10",
-            "title": "the preview run block and footer",
-            "description": "",
-            "stored_status": "done",
-            "auto_close": null,
-        })),
+        Some(serde_json::json!([
+            {
+                "key": "0265.10",
+                "title": "the preview run block and footer",
+                "description": "",
+                "stored-status": "done",
+                "auto-close": null,
+            },
+            {"type": "none-configured"},
+        ])),
     );
     assert!(detail.apply(resync.generation, resync_outcome));
 

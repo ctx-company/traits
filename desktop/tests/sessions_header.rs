@@ -106,13 +106,16 @@ fn served_answer_drives_the_title_never_the_row_s_task_key() {
 
     let mut detail = RunDetail::default();
     let request = detail.select(row).expect("selection issues a request");
-    let served = serde_json::json!({
-        "key": "0265.13",
-        "title": "render the sessions header",
-        "description": "",
-        "stored-status": null,
-        "auto-close": null,
-    });
+    let served = serde_json::json!([
+        {
+            "key": "0265.13",
+            "title": "render the sessions header",
+            "description": "",
+            "stored-status": null,
+            "auto-close": null,
+        },
+        {"type": "none-configured"},
+    ]);
     let outcome = load_serving_claimed_task(&peer, &request, "task", Some(served));
     assert!(detail.apply(request.generation, outcome));
 

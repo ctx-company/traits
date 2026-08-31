@@ -78,6 +78,19 @@ pub enum AutoClosePolicy {
     Merge,
 }
 
+/// Resolve the effective `auto-close` policy for one task: its own
+/// `auto_close` override wins over the `[tasks] auto-close` config leaf in
+/// either direction; `None` when neither is set. Hosted in core (rather than
+/// only the CLI, its original home) so `ctx-traits-io` — the center's own
+/// crate — can build the shared, config-reading resolution on top of it
+/// without depending on the CLI crate.
+pub fn resolve_auto_close_policy(
+    document_override: Option<AutoClosePolicy>,
+    config_default: Option<AutoClosePolicy>,
+) -> Option<AutoClosePolicy> {
+    document_override.or(config_default)
+}
+
 /// One check's recorded outcome, stored on [`Closure`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]

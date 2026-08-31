@@ -19,7 +19,7 @@ use ctx_traits_core::procedure::runtime::{loop_rounds, loop_rounds_label};
 use ctx_traits_core::procedure::story::{
     SlotValueForm, VerdictTone, finding_count_segment, verdict_presentation,
 };
-use ctx_traits_io::center::ClaimedTaskResult;
+use ctx_traits_io::center::{ClaimedTaskResult, ClosePolicyResolution};
 use ctx_traits_io::run_summary::RunSummary;
 
 use crate::detail::{DetailBaseline, PreviewState};
@@ -110,15 +110,21 @@ fn run_row_row(row: &RunRow) -> KeyValueRow {
 /// own presentation from it); the other four outcomes carry the one
 /// non-success wording each renders, everywhere.
 pub(crate) enum ClaimedTaskWording<'a> {
-    Task(&'a ctx_traits_core::task::provider::ClaimedTask),
-    Wording { text: &'static str, danger: bool },
+    Task(
+        &'a ctx_traits_core::task::provider::ClaimedTask,
+        &'a ClosePolicyResolution,
+    ),
+    Wording {
+        text: &'static str,
+        danger: bool,
+    },
 }
 
 pub(crate) fn claimed_task_wording(
     claimed_task: &Result<ClaimedTaskResult, String>,
 ) -> ClaimedTaskWording<'_> {
     match claimed_task {
-        Ok(ClaimedTaskResult::Task(task)) => ClaimedTaskWording::Task(task),
+        Ok(ClaimedTaskResult::Task(task, policy)) => ClaimedTaskWording::Task(task, policy),
         Ok(ClaimedTaskResult::Unclaimed) => ClaimedTaskWording::Wording {
             text: "no task claimed",
             danger: false,
@@ -140,7 +146,7 @@ pub(crate) fn claimed_task_wording(
 
 fn task_row(baseline: &DetailBaseline) -> KeyValueRow {
     let value = match claimed_task_wording(&baseline.claimed_task) {
-        ClaimedTaskWording::Task(task) => {
+        ClaimedTaskWording::Task(task, _policy) => {
             let mut value = vec![ValueSegment::neutral(task.key.clone())];
             if let Some(status) = task.stored_status {
                 let presented = task_status_presentation(status);
@@ -555,6 +561,105 @@ pub fn sessions_slots_block(state: Option<&PreviewState<'_>>) -> Option<NamedBlo
     })
 }
 
+/// One `landing` block line: fixed/served text plus the tone it renders in.
+/// `role: None` is the block's own default (`text-secondary`, rule 5) —
+/// deliberately not [`ValueSegment`]'s "identity, no state" `None`
+/// (`tokens::TEXT`), since every landing line is a stated fact, never an
+/// identity value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandingLine {
+    pub text: String,
+    pub role: Option<StateRole>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandingBlock {
+    pub heading: String,
+    pub lines: Vec<LandingLine>,
+}
+
+fn landing_tone_role(tone: ctx_traits_core::procedure::landing::LineTone) -> Option<StateRole> {
+    use ctx_traits_core::procedure::landing::LineTone;
+    match tone {
+        LineTone::Neutral => None,
+        LineTone::Ok => Some(StateRole::Ok),
+        LineTone::Warn => Some(StateRole::Warn),
+        LineTone::Danger => Some(StateRole::Danger),
+    }
+}
+
+fn landing_line(line: ctx_traits_core::procedure::landing::LandingLine) -> LandingLine {
+    LandingLine {
+        role: landing_tone_role(line.tone),
+        text: line.text,
+    }
+}
+
+/// Goal 5/7: the served claimed-task answer, reduced to what the core
+/// projection needs — never the desktop's own guess at what "unresolved"
+/// means, and never carrying the config-failure reason text (the line never
+/// renders it).
+fn claimed_task_close_outcome(
+    claimed_task: &Result<ClaimedTaskResult, String>,
+) -> ctx_traits_core::procedure::landing::ClaimedTaskCloseOutcome<'_> {
+    use ctx_traits_core::procedure::landing::{ClaimedTaskCloseOutcome, ResolvedClosePolicy};
+    match claimed_task {
+        Ok(ClaimedTaskResult::Unclaimed) => ClaimedTaskCloseOutcome::Unclaimed,
+        Ok(ClaimedTaskResult::Task(task, policy)) => ClaimedTaskCloseOutcome::Claimed {
+            task_key: &task.key,
+            policy: match policy {
+                ClosePolicyResolution::Effective(policy) => ResolvedClosePolicy::Effective(*policy),
+                ClosePolicyResolution::NoneConfigured => ResolvedClosePolicy::NoneConfigured,
+                ClosePolicyResolution::Unresolved(_) => ResolvedClosePolicy::Unresolved,
+            },
+        },
+        Ok(ClaimedTaskResult::Missing) | Ok(ClaimedTaskResult::Ambiguous(_)) | Err(_) => {
+            ClaimedTaskCloseOutcome::Unavailable
+        }
+    }
+}
+
+/// `None` unless the selection is `Accepted`, settled (not `stale`, not
+/// `refreshing`), and readable — the same gate [`sessions_slots_block`]
+/// applies. Unlike slots, a block always renders once that gate passes: the
+/// three lines' truthful absence forms guarantee three lines regardless of
+/// how little evidence the run carries (goal 1).
+pub fn sessions_landing_block(state: Option<&PreviewState<'_>>) -> Option<LandingBlock> {
+    let Some(PreviewState::Accepted {
+        baseline,
+        stale,
+        refreshing,
+        ..
+    }) = state
+    else {
+        return None;
+    };
+    if stale.is_some() || *refreshing {
+        return None;
+    }
+    if baseline.row.state == RowState::Unreadable {
+        return None;
+    }
+
+    let provenance = &baseline.session.provenance;
+    let close_outcome = claimed_task_close_outcome(&baseline.claimed_task);
+    let lines = ctx_traits_core::procedure::landing::landing_lines(
+        provenance.worktree.as_ref(),
+        provenance.merge_intent,
+        &provenance.merge_frames,
+        &close_outcome,
+    );
+
+    Some(LandingBlock {
+        heading: "landing".to_string(),
+        lines: vec![
+            landing_line(lines.worktree),
+            landing_line(lines.merge),
+            landing_line(lines.close),
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,7 +760,10 @@ mod tests {
         };
         let baseline = baseline_with(
             Ok(Some("basic".to_string())),
-            Ok(ClaimedTaskResult::Task(Box::new(task))),
+            Ok(ClaimedTaskResult::Task(
+                Box::new(task),
+                ClosePolicyResolution::NoneConfigured,
+            )),
         );
         let state = accepted(&baseline);
         let block = sessions_run_block(Some(&state));
@@ -683,7 +791,10 @@ mod tests {
             "implement-phase",
             2_520,
             Ok(Some("basic".to_string())),
-            Ok(ClaimedTaskResult::Task(Box::new(task))),
+            Ok(ClaimedTaskResult::Task(
+                Box::new(task),
+                ClosePolicyResolution::NoneConfigured,
+            )),
         );
         let state = accepted(&baseline);
         let block = sessions_run_block(Some(&state));
@@ -768,13 +879,16 @@ mod tests {
 
         let no_status = baseline_with(
             Ok(None),
-            Ok(ClaimedTaskResult::Task(Box::new(ClaimedTask {
-                key: "0265.10".to_string(),
-                title: "t".to_string(),
-                description: String::new(),
-                stored_status: None,
-                auto_close: None,
-            }))),
+            Ok(ClaimedTaskResult::Task(
+                Box::new(ClaimedTask {
+                    key: "0265.10".to_string(),
+                    title: "t".to_string(),
+                    description: String::new(),
+                    stored_status: None,
+                    auto_close: None,
+                }),
+                ClosePolicyResolution::NoneConfigured,
+            )),
         );
         assert_eq!(
             task_row(&no_status).value,
@@ -917,7 +1031,8 @@ mod now_and_verdict_tests {
     use ctx_traits_core::digest::canonical_digest;
     use ctx_traits_core::procedure::runtime::{AcceptanceStatus, SlotRevision, Value, ValueSource};
     use ctx_traits_core::reference::{Kind, Reference};
-    use ctx_traits_io::center::ClaimedTaskResult;
+    use ctx_traits_core::task::provider::ClaimedTask;
+    use ctx_traits_io::center::{ClaimedTaskResult, ClosePolicyResolution};
 
     fn base_session(run_id: &str, trait_id: &str, elapsed_seconds: u64) -> serde_json::Value {
         serde_json::json!({
@@ -1503,5 +1618,156 @@ mod now_and_verdict_tests {
         let block = sessions_slots_block(Some(&state)).expect("slots block");
         let keys: Vec<&str> = block.rows.iter().map(|row| row.key.as_str()).collect();
         assert_eq!(keys, vec!["zulu", "alpha", "mike"]);
+    }
+
+    // --- 0265.15: sessions_landing_block -----------------------------------
+
+    #[test]
+    fn landing_block_is_none_unless_accepted_settled_and_readable() {
+        assert!(sessions_landing_block(None).is_none());
+        assert!(sessions_landing_block(Some(&PreviewState::Loading)).is_none());
+        assert!(sessions_landing_block(Some(&PreviewState::Failed("bad"))).is_none());
+
+        let baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let stale = PreviewState::Accepted {
+            baseline: &baseline_value,
+            stale: Some("resync"),
+            refreshing: false,
+            live: true,
+            session_title: None,
+        };
+        assert!(sessions_landing_block(Some(&stale)).is_none());
+        let refreshing = PreviewState::Accepted {
+            baseline: &baseline_value,
+            stale: None,
+            refreshing: true,
+            live: true,
+            session_title: None,
+        };
+        assert!(sessions_landing_block(Some(&refreshing)).is_none());
+
+        let mut unreadable_row = live_row();
+        unreadable_row.state = RowState::Unreadable;
+        let unreadable_baseline =
+            baseline(unreadable_row, base_session("run-1", "implement-phase", 10));
+        let unreadable = accepted_state(&unreadable_baseline);
+        assert!(sessions_landing_block(Some(&unreadable)).is_none());
+    }
+
+    /// Goal 1: three lines always present, with the absence forms for a run
+    /// with none of the underlying evidence — never fewer than three, never
+    /// omitted.
+    #[test]
+    fn landing_block_renders_the_absence_trio_for_a_run_with_no_evidence() {
+        let baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        let state = accepted_state(&baseline_value);
+        let block = sessions_landing_block(Some(&state)).expect("landing block always renders");
+        assert_eq!(block.heading, "landing");
+        assert_eq!(block.lines.len(), 3);
+        assert_eq!(
+            block.lines[0].text,
+            "\u{2192} No worktree recorded for this run"
+        );
+        assert_eq!(
+            block.lines[1].text,
+            "\u{2192} No automatic merge intent recorded"
+        );
+        assert_eq!(block.lines[2].text, "\u{2192} No task claimed by this run");
+        assert!(block.lines.iter().all(|line| line.role.is_none()));
+    }
+
+    #[test]
+    fn landing_block_renders_worktree_and_terminal_merge_evidence() {
+        use ctx_traits_core::procedure::session::{
+            MergeFrame, MergeStage, MergeStatus, WorktreeProvenance,
+        };
+
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.session.provenance.worktree = Some(WorktreeProvenance {
+            id: "wt-ab12ef".to_string(),
+            branch: "ctx/run/wt-ab12ef".to_string(),
+            seed_snapshots: Vec::new(),
+            path: None,
+        });
+        baseline_value.session.provenance.merge_frames = vec![MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Merged,
+            reason: None,
+            evidence: vec!["landed=deadbeef".to_string()],
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        }];
+        let state = accepted_state(&baseline_value);
+        let block = sessions_landing_block(Some(&state)).expect("landing block");
+        assert_eq!(block.lines[0].text, "\u{2192} Runs in worktree wt-ab12ef");
+        assert_eq!(block.lines[1].text, "\u{2192} Merged at deadbeef");
+        assert_eq!(block.lines[1].role, Some(StateRole::Ok));
+    }
+
+    /// Goal 4/7: the close line comes entirely from the served claimed-task
+    /// answer — an effective policy, a resolved absence, and the unresolved
+    /// failure form all render distinctly.
+    #[test]
+    fn landing_block_close_line_covers_effective_none_configured_and_unresolved() {
+        let claimed = ClaimedTask {
+            key: "0243.4".to_string(),
+            title: "t".to_string(),
+            description: String::new(),
+            stored_status: None,
+            auto_close: None,
+        };
+
+        let mut baseline_value = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        baseline_value.claimed_task = Ok(ClaimedTaskResult::Task(
+            Box::new(claimed.clone()),
+            ClosePolicyResolution::Effective(ctx_traits_core::task::AutoClosePolicy::Checked),
+        ));
+        let state = accepted_state(&baseline_value);
+        let block = sessions_landing_block(Some(&state)).expect("landing block");
+        assert_eq!(
+            block.lines[2].text,
+            "\u{2192} Task 0243.4 closes when its declared checks pass"
+        );
+        assert_eq!(block.lines[2].role, None);
+
+        let mut none_configured =
+            baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        none_configured.claimed_task = Ok(ClaimedTaskResult::Task(
+            Box::new(claimed.clone()),
+            ClosePolicyResolution::NoneConfigured,
+        ));
+        let state = accepted_state(&none_configured);
+        let block = sessions_landing_block(Some(&state)).expect("landing block");
+        assert_eq!(
+            block.lines[2].text,
+            "\u{2192} Task 0243.4 has no auto-close policy"
+        );
+
+        let mut unresolved = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        unresolved.claimed_task = Ok(ClaimedTaskResult::Task(
+            Box::new(claimed),
+            ClosePolicyResolution::Unresolved("malformed config".to_string()),
+        ));
+        let state = accepted_state(&unresolved);
+        let block = sessions_landing_block(Some(&state)).expect("landing block");
+        assert_eq!(
+            block.lines[2].text,
+            "\u{2192} Task 0243.4 close policy unresolved"
+        );
+        assert_eq!(block.lines[2].role, Some(StateRole::Danger));
+        assert!(
+            !block.lines[2].text.contains("malformed config"),
+            "the unresolved reason text is never rendered"
+        );
+
+        let mut missing = baseline(live_row(), base_session("run-1", "implement-phase", 10));
+        missing.claimed_task = Ok(ClaimedTaskResult::Missing);
+        let state = accepted_state(&missing);
+        let block = sessions_landing_block(Some(&state)).expect("landing block");
+        assert_eq!(
+            block.lines[2].text,
+            "\u{2192} Claimed task close policy unresolved"
+        );
+        assert_eq!(block.lines[2].role, Some(StateRole::Danger));
     }
 }

@@ -719,6 +719,20 @@ pub enum LandingState {
     MergeFailed,
 }
 
+/// The `landed=<sha>` evidence entry a `Merged` frame carries, stripped to
+/// the bare revision — shared by [`landing_state`] and
+/// [`crate::procedure::landing`]'s merge line, so the two never drift on
+/// where that revision comes from. `None` when the frame's first evidence
+/// entry is absent or does not carry the `landed=` prefix (a `Merged` frame
+/// with no evidence yet).
+pub fn merge_frame_revision(frame: &MergeFrame) -> Option<String> {
+    frame
+        .evidence
+        .first()
+        .and_then(|entry| entry.strip_prefix("landed="))
+        .map(str::to_string)
+}
+
 /// Classify `session`'s landing state from its own persisted evidence. See
 /// [`LandingState`] for the precedence and exclusions.
 pub fn landing_state(session: &Session) -> Option<LandingState> {
@@ -731,11 +745,7 @@ pub fn landing_state(session: &Session) -> Option<LandingState> {
     if let Some(frame) = last_terminal_frame {
         return Some(match frame.status {
             MergeStatus::Merged => LandingState::Landed {
-                revision: frame
-                    .evidence
-                    .first()
-                    .and_then(|entry| entry.strip_prefix("landed="))
-                    .map(str::to_string),
+                revision: merge_frame_revision(frame),
             },
             MergeStatus::Parked => LandingState::Parked,
             MergeStatus::PostMergeCleanupFailure | MergeStatus::RecoveryFailure => {

@@ -7,7 +7,7 @@
 use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
-use crate::preview::{KeyValueRow, NamedBlock, NowItem, ValueSegment, VerdictBlock};
+use crate::preview::{KeyValueRow, LandingBlock, NamedBlock, NowItem, ValueSegment, VerdictBlock};
 use crate::run_row::role_color;
 use crate::tokens;
 
@@ -178,6 +178,37 @@ pub fn verdict_block_element(verdict: &VerdictBlock) -> AnyElement {
     named_block_shell("verdict", &verdict.heading, children)
 }
 
+/// One `landing` line: sans `SIZE_12`, `TEXT_SECONDARY` when `role` is
+/// `None` (the block's own default, distinct from [`segment_color`]'s
+/// identity-value `None`), `role_color` otherwise.
+fn landing_line_element(index: usize, line: &crate::preview::LandingLine) -> AnyElement {
+    let color = match line.role {
+        Some(role) => role_color(role),
+        None => tokens::TEXT_SECONDARY,
+    };
+    div()
+        .debug_selector(move || format!("preview-landing-line-{index}"))
+        .w_full()
+        .font_family(tokens::FONT_SANS)
+        .text_size(tokens::SIZE_12)
+        .text_color(rgb(color))
+        .child(line.text.clone())
+        .into_any_element()
+}
+
+/// The `landing` block: the reusable named-block heading, then exactly three
+/// full-width lines — composed through [`named_block_shell`] unchanged, so
+/// heading form, gap and bottom padding are inherited, not re-declared.
+pub fn landing_block_element(block: &LandingBlock) -> AnyElement {
+    let lines = block
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| landing_line_element(index, line))
+        .collect();
+    named_block_shell("landing", &block.heading, lines)
+}
+
 pub fn preview_footer_element(text: &str) -> AnyElement {
     div()
         .debug_selector(|| "preview-footer".to_string())
@@ -275,6 +306,26 @@ mod tests {
         }
     }
 
+    fn fixture_landing_block() -> LandingBlock {
+        LandingBlock {
+            heading: "landing".to_string(),
+            lines: vec![
+                crate::preview::LandingLine {
+                    text: "\u{2192} Runs in worktree wt-ab12ef".to_string(),
+                    role: None,
+                },
+                crate::preview::LandingLine {
+                    text: "\u{2192} Merged at deadbeef".to_string(),
+                    role: Some(crate::run_row::StateRole::Ok),
+                },
+                crate::preview::LandingLine {
+                    text: "\u{2192} Task 0243.4 close policy unresolved".to_string(),
+                    role: Some(crate::run_row::StateRole::Danger),
+                },
+            ],
+        }
+    }
+
     fn fixture_verdict_block() -> VerdictBlock {
         VerdictBlock {
             heading: "verdict \u{b7} round 1".to_string(),
@@ -307,6 +358,7 @@ mod tests {
     struct PreviewHarness {
         extra: bool,
         now_and_verdict: bool,
+        landing: bool,
     }
 
     impl Render for PreviewHarness {
@@ -325,6 +377,9 @@ mod tests {
                         .into_any_element(),
                 );
             }
+            if self.landing {
+                body.push(landing_block_element(&fixture_landing_block()));
+            }
             let footer = preview_footer_element("run-1 \u{b7} started 13:44");
             preview_column_element(body, Some(footer))
         }
@@ -335,6 +390,29 @@ mod tests {
         extra: bool,
     ) -> gpui::WindowHandle<PreviewHarness> {
         open_harness_full(cx, extra, false)
+    }
+
+    fn open_landing_harness(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<PreviewHarness> {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), size(px(900.), px(700.)));
+                cx.open_window(
+                    gpui::WindowOptions {
+                        window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                        ..Default::default()
+                    },
+                    |_, cx| {
+                        cx.new(|_| PreviewHarness {
+                            extra: true,
+                            now_and_verdict: false,
+                            landing: true,
+                        })
+                    },
+                )
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
     }
 
     fn open_harness_full(
@@ -354,6 +432,7 @@ mod tests {
                         cx.new(|_| PreviewHarness {
                             extra,
                             now_and_verdict,
+                            landing: false,
                         })
                     },
                 )
@@ -418,6 +497,47 @@ mod tests {
             (footer.origin.y + footer.size.height - inner_bottom).abs() <= px(1.),
             "the footer's bottom edge sits at the column's inner bottom edge"
         );
+    }
+
+    /// The `landing` block paints its heading and exactly three `→` lines,
+    /// after the (probe, standing in for slots) block and before the spacer
+    /// and footer — the same "one heading form" invariant every other block
+    /// composes through `named_block_shell`.
+    #[gpui::test]
+    fn landing_block_paints_three_lines_after_the_probe_and_before_the_spacer(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = open_landing_harness(cx);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+
+        let probe = vcx.debug_bounds("preview-probe").expect("probe painted");
+        let heading = vcx
+            .debug_bounds("preview-heading-landing")
+            .expect("landing heading painted");
+        let line0 = vcx
+            .debug_bounds("preview-landing-line-0")
+            .expect("landing line 0 painted");
+        let line1 = vcx
+            .debug_bounds("preview-landing-line-1")
+            .expect("landing line 1 painted");
+        let line2 = vcx
+            .debug_bounds("preview-landing-line-2")
+            .expect("landing line 2 painted");
+        let spacer = vcx.debug_bounds("preview-spacer").expect("spacer painted");
+        let footer = vcx.debug_bounds("preview-footer").expect("footer painted");
+
+        assert!(
+            heading.origin.y >= probe.origin.y + probe.size.height,
+            "the landing block sits after the prior block"
+        );
+        assert!(line0.origin.y >= heading.origin.y + heading.size.height);
+        assert!(line1.origin.y >= line0.origin.y + line0.size.height);
+        assert!(line2.origin.y >= line1.origin.y + line1.size.height);
+        assert!(
+            spacer.origin.y >= line2.origin.y + line2.size.height,
+            "the landing block sits before the spacer"
+        );
+        assert!(footer.origin.y >= spacer.origin.y + spacer.size.height);
     }
 
     #[gpui::test]

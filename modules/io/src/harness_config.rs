@@ -3901,7 +3901,51 @@ pub fn resolve_runtime_config(start_dir: &Utf8Path) -> crate::Result<RuntimeConf
 /// rules. The report is also the source of doctor provenance; callers should
 /// not infer winners by comparing the final values.
 pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport> {
-    let layers = runtime_config_layers(start_dir)?;
+    resolve_config_report_impl(None, start_dir)
+}
+
+/// Same as [`resolve_config_report`], except the repo-root ancestor bound for
+/// every layer comes from `repo_root` rather than `discover_repo_root()` at
+/// the process cwd — for a caller (e.g. the center) resolving config for a
+/// repository other than the one the process happens to be running in.
+pub fn resolve_config_report_at(
+    repo_root: &Utf8Path,
+    start_dir: &Utf8Path,
+) -> crate::Result<ConfigReport> {
+    resolve_config_report_impl(Some(repo_root), start_dir)
+}
+
+/// 0144/0265.15: the shared effective `auto-close` policy resolution — the
+/// single home for "read `repo_root`'s config layers, then let
+/// `document_override` win over `[tasks] auto-close` in either direction"
+/// ([`ctx_traits_core::task::resolve_auto_close_policy`]), so every caller
+/// (CLI task commands, the center answering about a repository other than
+/// its own process cwd) resolves the same way. Reads config layers anchored
+/// at `repo_root` itself (never the process cwd) via
+/// [`resolve_config_report_at`], so a caller resolving policy for a
+/// repository it does not happen to be running in still walks that
+/// repository's own ancestor chain. `Ok(None)` means "resolved: no policy
+/// configured", distinct from `Err` ("config resolution itself failed") —
+/// callers that must collapse both to "no policy" (the pre-0265.15 CLI
+/// behaviour) do so explicitly at their own call site, not here.
+pub fn effective_auto_close_policy(
+    repo_root: &Utf8Path,
+    document_override: Option<ctx_traits_core::task::AutoClosePolicy>,
+) -> crate::Result<Option<ctx_traits_core::task::AutoClosePolicy>> {
+    let config_default = resolve_config_report_at(repo_root, repo_root)?
+        .runtime
+        .effective_auto_close();
+    Ok(ctx_traits_core::task::resolve_auto_close_policy(
+        document_override,
+        config_default,
+    ))
+}
+
+fn resolve_config_report_impl(
+    repo_root: Option<&Utf8Path>,
+    start_dir: &Utf8Path,
+) -> crate::Result<ConfigReport> {
+    let layers = runtime_config_layers_at(repo_root, start_dir)?;
     let mut documents = Vec::new();
     let mut winners = BTreeMap::new();
     let mut tier_warnings = Vec::new();
@@ -5077,6 +5121,21 @@ pub fn runtime_config_layer_paths(start_dir: &Utf8Path) -> crate::Result<Vec<Utf
 }
 
 fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer, Utf8PathBuf)>> {
+    runtime_config_layers_at(None, start_dir)
+}
+
+/// Same as [`runtime_config_layers`], except the repo-root ancestor bound
+/// comes from `repo_root` when given, instead of `discover_repo_root()`
+/// (which asks Git for the *process* cwd's repository). A caller answering
+/// about a repository other than the one it happens to be running in — the
+/// center resolving a claimed task's own `repo_path` — must pass that
+/// repository's root explicitly, or its ancestor walk silently bounds at the
+/// wrong repo and either overruns into an unrelated checkout or stops short
+/// of that repo's own config layers.
+fn runtime_config_layers_at(
+    repo_root: Option<&Utf8Path>,
+    start_dir: &Utf8Path,
+) -> crate::Result<Vec<(ConfigLayer, Utf8PathBuf)>> {
     let mut layers = Vec::new();
     let globals = global_runtime_config_paths()?;
     for path in globals {
@@ -5100,7 +5159,10 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
         }
     }
     let cwd = absolute_utf8_path(start_dir, "runtime.config.cwd")?;
-    let repo_root = crate::repository::discover_repo_root().ok();
+    let repo_root = match repo_root {
+        Some(root) => Some(root.to_path_buf()),
+        None => crate::repository::discover_repo_root().ok(),
+    };
     let mut ancestors = Vec::new();
     for ancestor in cwd.ancestors() {
         ancestors.push(ancestor);
@@ -8610,6 +8672,136 @@ mod config_tests {
             effective.effective_auto_close(),
             Some(ctx_traits_core::task::AutoClosePolicy::Checked)
         );
+    }
+
+    /// A scratch dir under the test process's real temp root — deliberately
+    /// unrelated to whatever repository `cargo test`'s own process cwd sits
+    /// in, so a test using it can prove `repo_root`-threading works without
+    /// depending on (or being confused by) the ambient checkout.
+    fn scratch_config_root(name: &str) -> Utf8PathBuf {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir().join(format!(
+            "ctx-harness-config-test-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        )))
+        .expect("utf8 scratch root");
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+        std::fs::create_dir_all(root.join(".ctx/traits").as_std_path())
+            .expect("create scratch config dir");
+        root
+    }
+
+    /// 0265.15 goal 6: an explicit `repo_root` is read on its own terms —
+    /// two unrelated repositories, neither of which is the test process's
+    /// own cwd, each resolve their own `[tasks] auto-close` leaf. Before
+    /// `resolve_config_report_at`/`runtime_config_layers_at` existed, the
+    /// only entry point bounded its ancestor walk at `discover_repo_root()`
+    /// (the process cwd's repository), so a caller asking about a different
+    /// repository — the center resolving a claimed task's own `repo_path`
+    /// — had no way to read that repository's config layers at all.
+    #[test]
+    fn resolve_config_report_at_reads_the_given_roots_own_config_not_a_different_repo() {
+        let repo_a = scratch_config_root("repo-a");
+        let repo_b = scratch_config_root("repo-b");
+        std::fs::write(
+            repo_a.join(RUNTIME_CONFIG).as_std_path(),
+            "[tasks]\nauto-close = \"confirm\"\n",
+        )
+        .expect("write repo-a runtime.toml");
+        std::fs::write(
+            repo_b.join(RUNTIME_CONFIG).as_std_path(),
+            "[tasks]\nauto-close = \"merge\"\n",
+        )
+        .expect("write repo-b runtime.toml");
+
+        let report_a = resolve_config_report_at(&repo_a, &repo_a).expect("repo-a config resolves");
+        let report_b = resolve_config_report_at(&repo_b, &repo_b).expect("repo-b config resolves");
+        assert_eq!(
+            report_a.runtime.effective_auto_close(),
+            Some(ctx_traits_core::task::AutoClosePolicy::Confirm)
+        );
+        assert_eq!(
+            report_b.runtime.effective_auto_close(),
+            Some(ctx_traits_core::task::AutoClosePolicy::Merge)
+        );
+
+        let _ = std::fs::remove_dir_all(repo_a.as_std_path());
+        let _ = std::fs::remove_dir_all(repo_b.as_std_path());
+    }
+
+    /// A malformed document at the explicit root must fail loudly — never
+    /// silently resolve to `None`, which would make an unconfigured repo
+    /// indistinguishable from one whose config the loader could not parse.
+    #[test]
+    fn resolve_config_report_at_errors_loudly_on_a_malformed_document() {
+        let root = scratch_config_root("malformed");
+        std::fs::write(
+            root.join(RUNTIME_CONFIG).as_std_path(),
+            "[tasks]\nauto-close = \"not-a-real-policy\"\n",
+        )
+        .expect("write malformed runtime.toml");
+
+        let error = resolve_config_report_at(&root, &root)
+            .expect_err("a malformed document must be a loud error, never a silent None");
+        assert!(!error.to_string().is_empty());
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    /// 0265.15 goal 5: the shared `effective_auto_close_policy` resolution
+    /// keeps the document override winning over config in both directions,
+    /// resolves to `None` when neither is set, and surfaces a malformed
+    /// document as `Err` rather than collapsing it into either `Some` or
+    /// `None`.
+    #[test]
+    fn effective_auto_close_policy_resolves_override_config_and_failure_distinctly() {
+        use ctx_traits_core::task::AutoClosePolicy;
+
+        let root = scratch_config_root("effective-policy");
+        std::fs::write(
+            root.join(RUNTIME_CONFIG).as_std_path(),
+            "[tasks]\nauto-close = \"merge\"\n",
+        )
+        .expect("write runtime.toml");
+
+        // Override (Confirm) beats config (Merge).
+        assert_eq!(
+            effective_auto_close_policy(&root, Some(AutoClosePolicy::Confirm))
+                .expect("override-over-config resolves"),
+            Some(AutoClosePolicy::Confirm)
+        );
+        // No override: config wins.
+        assert_eq!(
+            effective_auto_close_policy(&root, None).expect("config-only resolves"),
+            Some(AutoClosePolicy::Merge)
+        );
+
+        let unconfigured = scratch_config_root("effective-policy-unconfigured");
+        // Neither override nor config: resolved absence, not a failure.
+        assert_eq!(
+            effective_auto_close_policy(&unconfigured, None)
+                .expect("unconfigured repo still resolves"),
+            None
+        );
+        // Override still wins even with no config layer present at all.
+        assert_eq!(
+            effective_auto_close_policy(&unconfigured, Some(AutoClosePolicy::Checked))
+                .expect("override with no config layer resolves"),
+            Some(AutoClosePolicy::Checked)
+        );
+
+        let malformed = scratch_config_root("effective-policy-malformed");
+        std::fs::write(
+            malformed.join(RUNTIME_CONFIG).as_std_path(),
+            "[tasks]\nauto-close = \"not-a-real-policy\"\n",
+        )
+        .expect("write malformed runtime.toml");
+        effective_auto_close_policy(&malformed, None)
+            .expect_err("a malformed document must fail resolution, never default to None");
+
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+        let _ = std::fs::remove_dir_all(unconfigured.as_std_path());
+        let _ = std::fs::remove_dir_all(malformed.as_std_path());
     }
 
     #[test]

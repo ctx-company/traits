@@ -473,26 +473,31 @@ pub fn close_disposition(
 /// Resolve the effective policy for one task: its own `auto_close`
 /// override wins over the `[tasks] auto-close` config leaf in either
 /// direction; `None` when neither is set (today's confirm-only flow).
+/// Re-exports the core-hosted combinator so this crate's public surface
+/// (and its callers/tests) stay unchanged now that io also needs it.
 pub fn resolve_auto_close_policy(
     document_override: Option<AutoClosePolicy>,
     config_default: Option<AutoClosePolicy>,
 ) -> Option<AutoClosePolicy> {
-    document_override.or(config_default)
+    ctx_traits_core::task::resolve_auto_close_policy(document_override, config_default)
 }
 
 /// 0144: the effective `auto-close` policy for one task document, reading
 /// the `[tasks] auto-close` config leaf from `config_root` — its own
 /// `auto_close` override wins over the config leaf in either direction
 /// ([`resolve_auto_close_policy`]). `None` when neither is set — the
-/// pre-0144 confirm-only flow, unchanged.
+/// pre-0144 confirm-only flow, unchanged. A config-resolution failure
+/// collapses to `None` here (this call site's own choice — the shared
+/// [`ctx_traits_io::harness_config::effective_auto_close_policy`] keeps the
+/// three outcomes distinguishable for callers, like the center, that must
+/// tell "unconfigured" apart from "config read failed").
 pub(crate) fn resolve_task_close_policy(
     document: &ctx_traits_core::task::TaskDocument,
     config_root: &camino::Utf8Path,
 ) -> Option<AutoClosePolicy> {
-    let config_default = ctx_traits_io::harness_config::resolve_runtime_config(config_root)
+    ctx_traits_io::harness_config::effective_auto_close_policy(config_root, document.auto_close)
         .ok()
-        .and_then(|config| config.effective_auto_close());
-    resolve_auto_close_policy(document.auto_close, config_default)
+        .flatten()
 }
 
 /// Run `checks` against `sha` in a clean worktree, mapping a whole-set

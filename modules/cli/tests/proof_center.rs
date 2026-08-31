@@ -4722,8 +4722,8 @@ fn claimed_task_answers_over_the_real_socket_and_fails_loudly_when_unresolvable(
     // Done-when 1: every field answers, `description` is `content` verbatim.
     let happy = ctx_traits_io::center::claimed_task("claimed-task-happy", None)
         .expect("claimed-task happy path succeeds");
-    let task = match happy {
-        ctx_traits_io::center::ClaimedTaskResult::Task(task) => *task,
+    let (task, close_policy) = match happy {
+        ctx_traits_io::center::ClaimedTaskResult::Task(task, policy) => (*task, policy),
         other => panic!("expected a claimed task, got {other:?}"),
     };
     assert_eq!(task.key, "center-task");
@@ -4736,6 +4736,15 @@ fn claimed_task_answers_over_the_real_socket_and_fails_loudly_when_unresolvable(
     assert_eq!(
         task.auto_close,
         Some(ctx_traits_core::task::AutoClosePolicy::Checked)
+    );
+    // The fixture board has no `[tasks] auto-close` config layer at all —
+    // the document's own override must still win, resolved (not defaulted)
+    // to `Effective`.
+    assert_eq!(
+        close_policy,
+        ctx_traits_io::center::ClosePolicyResolution::Effective(
+            ctx_traits_core::task::AutoClosePolicy::Checked
+        )
     );
 
     // Done-when 7: the center and a direct `FilesTaskBoard` read agree —
@@ -4763,10 +4772,14 @@ fn claimed_task_answers_over_the_real_socket_and_fails_loudly_when_unresolvable(
     let archived = ctx_traits_io::center::claimed_task("claimed-task-happy", None)
         .expect("claimed-task still answers once the document is archived");
     match archived {
-        ctx_traits_io::center::ClaimedTaskResult::Task(archived_task) => {
+        ctx_traits_io::center::ClaimedTaskResult::Task(archived_task, archived_policy) => {
             assert_eq!(
                 *archived_task, task,
                 "archived resolution must be unchanged"
+            );
+            assert_eq!(
+                archived_policy, close_policy,
+                "archived close-policy resolution must be unchanged"
             );
         }
         other => panic!("expected the archived task to still answer, got {other:?}"),

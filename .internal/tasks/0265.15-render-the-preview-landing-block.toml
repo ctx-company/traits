@@ -3,7 +3,7 @@ key = "0265.15"
 title = "Render the preview landing block"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — discovery order, file and symbol
@@ -217,8 +217,8 @@ layer stack (`harness_config.rs:5079-5156`), and the center's short-resolve-then
 blocking-work-in-the-connection-worker shape (`center.rs:3278-3315,3380-3429`)
 which `Get`'s model-owner-blocking shape (`:3649-3669`) must not be inherited
 from.
-'''
-scope = '''
+"""
+scope = """
 ## GOALS — binding
 
 1. **The block is exactly three `→` consequence lines under a `landing`
@@ -650,8 +650,8 @@ command and preserve every invariant named under Excluded.
   executes the discovered command and reports its output in the work summary.
 - Anything discovered beyond these goals: that is board material, not a cell
   here.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **`grammar.md` and `screens/sessions.md` are the specification; the export is
@@ -810,10 +810,11 @@ one named defect, then rerun the failed command and every command after it in
 that order. If a second round would be needed, stop and report the exact failing
 command with its evidence, or the unresolved data or render contract, rather
 than iterating. That is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
-parent = "0265"
 depends-on = ["0265.12"]
+parent = "0265"
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
@@ -823,14 +824,14 @@ timeout-ms = 600000
 [[checks]]
 name = "layered config read and the shared auto-close resolution stay green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib harness_config"
-expect = "test result: ok\\. [1-9]"
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "the retained non-GUI close-policy consumer stays green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
-expect = "test result: ok\\. [1-9]"
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "center wire and the served claimed-task answer stay green"
