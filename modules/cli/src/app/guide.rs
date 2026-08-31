@@ -87,7 +87,8 @@ pub(crate) fn evidence(
             detail.push(format!("verdict/status={status}"));
         }
         if !beat.gloss.blockers.is_empty() {
-            detail.push(format!("blockers={}", beat.gloss.blockers.join(", ")));
+            let ids: Vec<&str> = beat.gloss.blockers.iter().map(|b| b.id.as_str()).collect();
+            detail.push(format!("blockers={}", ids.join(", ")));
         }
         if !beat.bullets.is_empty() {
             detail.push(format!("activity={}", beat.bullets.join("; ")));

@@ -93,6 +93,81 @@ pub fn write_session_ledger(
     session
 }
 
+/// Write a session ledger carrying one accepted `review-verdict-1` slot
+/// value (`status` = `approved`/`revise`) with a matching `slot-revisions`
+/// entry, so a selecting test observes a real `sessions_verdict_block`
+/// through the served `verdict_presentation` path rather than a hand-built
+/// `VerdictBlock`. `title`, when `Some`, becomes the served
+/// `current-sequence-title`; `blocker_id`, when `Some`, becomes a `revise`
+/// value's single `blockers` entry. The single JSON builder every verdict
+/// fixture caller routes through.
+pub fn write_session_ledger_with_verdict(
+    path: &Utf8Path,
+    session_id: &str,
+    run_id: &str,
+    live: bool,
+    status: &str,
+    title: Option<&str>,
+    blocker_id: Option<&str>,
+) -> Session {
+    let ledger_status = if live {
+        "awaiting-agent-output"
+    } else {
+        "completed"
+    };
+    let blockers: Vec<serde_json::Value> = blocker_id
+        .into_iter()
+        .map(|id| serde_json::json!({"id": id}))
+        .collect();
+    let value = serde_json::json!({"status": status, "blockers": blockers});
+    let mut session_json = serde_json::json!({
+        "schema-version": "0.1.0",
+        "session-id": session_id,
+        "run-id": run_id,
+        "trait-id": "desktop-detail-fixture-trait",
+        "current-run-index": 0,
+        "status": ledger_status,
+        "provenance": {
+            "started-by": {"surface": "test", "caller": "desktop-detail-fixture"},
+            "state-source": "test",
+        },
+        "ledger": {
+            "run-id": run_id,
+            "trait-id": "desktop-detail-fixture-trait",
+            "current-run-index": 0,
+            "final-state": if live { "running" } else { "completed" },
+        },
+        "slot-revisions": [
+            {
+                "slot-ref": "slot:review-verdict-1",
+                "value-digest": "sha256:desktop-detail-verdict-1",
+                "acceptance-order": 0,
+                "operation": "replace",
+                "source": "model-output",
+            },
+        ],
+        "accepted-slot-values": [
+            {
+                "ref-text": "slot:review-verdict-1",
+                "value": value,
+                "value-digest": "sha256:desktop-detail-verdict-1",
+                "source": "model-output",
+                "acceptance": "accepted",
+            },
+        ],
+        "state-digest": format!("sha256:desktop-detail-{run_id}"),
+    });
+    if let Some(title) = title
+        && !title.is_empty()
+    {
+        session_json["current-sequence-title"] = serde_json::json!(title);
+    }
+    let session: Session =
+        serde_json::from_value(session_json).expect("fixture session with verdict evidence");
+    ctx_traits_io::run_session::write_run_session(path, &session).expect("write ledger");
+    session
+}
+
 /// Write a session ledger with a nested loop-body sequence status (one
 /// top-level loop container plus two body items in one iteration), using
 /// the same production writer `write_session_ledger` uses. The loop's

@@ -565,17 +565,23 @@ fn blocker_rows_for_beats(beats: &[StoryBeat]) -> Vec<String> {
             continue;
         }
         let entries = by_ref.entry(&beat.ref_text).or_default();
+        let beat_blocker_ids: Vec<&str> = beat
+            .gloss
+            .blockers
+            .iter()
+            .map(|blocker| blocker.id.as_str())
+            .collect();
         for blocker in entries.iter_mut() {
-            if !beat.gloss.blockers.contains(&blocker.id) {
+            if !beat_blocker_ids.contains(&blocker.id.as_str()) {
                 blocker.active = false;
             }
         }
-        for id in &beat.gloss.blockers {
+        for id in &beat_blocker_ids {
             if let Some(blocker) = entries.iter_mut().find(|blocker| blocker.id == *id) {
                 blocker.active = true;
             } else {
                 entries.push(Blocker {
-                    id: id.clone(),
+                    id: (*id).to_string(),
                     first_round: (!loop_key(beat).is_empty()).then(|| round_label(&loop_key(beat))),
                     active: true,
                 });
@@ -1100,7 +1106,13 @@ mod tests {
             operation: None,
             source: None,
             gloss: ctx_traits_core::procedure::story::ValueGloss {
-                blockers: blockers.iter().map(|id| (*id).to_string()).collect(),
+                blockers: blockers
+                    .iter()
+                    .map(|id| ctx_traits_core::procedure::story::BlockerGloss {
+                        id: (*id).to_string(),
+                        what: None,
+                    })
+                    .collect(),
                 ..Default::default()
             },
             command: None,

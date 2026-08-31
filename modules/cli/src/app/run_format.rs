@@ -598,25 +598,47 @@ fn print_stop_reason(
     }
 }
 
-/// Prints stable blocker ids from accepted slot values escalated
-/// `needs-owner`, sorted and deduplicated for byte-stable output.
-fn print_escalation_blockers(
-    indent: &str,
+/// Composes the sorted, deduplicated `escalation-blockers` line body from
+/// accepted slot values escalated `needs-owner`. `None` when there are no
+/// blockers to print. Pure so the printed line's shape is directly testable.
+fn escalation_blockers_line(
     accepted_slot_values: &[ctx_traits_core::procedure::runtime::Value],
-) {
+) -> Option<String> {
     let mut blockers: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for value in accepted_slot_values {
         let gloss = ctx_traits_core::procedure::story::value_gloss(&value.value);
         if gloss.escalation.as_deref() != Some("needs-owner") {
             continue;
         }
-        blockers.extend(gloss.blockers);
+        blockers.extend(gloss.blockers.into_iter().map(|blocker| blocker.id));
     }
-    if !blockers.is_empty() {
-        println!(
-            "{indent}escalation-blockers: {}",
-            blockers.into_iter().collect::<Vec<_>>().join(", ")
-        );
+    if blockers.is_empty() {
+        None
+    } else {
+        Some(blockers.into_iter().collect::<Vec<_>>().join(", "))
+    }
+}
+
+/// Composes the exact printed `escalation-blockers` line, indentation and
+/// label included. `None` when there is nothing to print. Pure so the
+/// printer's byte-stable output is directly testable without capturing
+/// stdout.
+fn escalation_blockers_full_line(
+    indent: &str,
+    accepted_slot_values: &[ctx_traits_core::procedure::runtime::Value],
+) -> Option<String> {
+    escalation_blockers_line(accepted_slot_values)
+        .map(|line| format!("{indent}escalation-blockers: {line}"))
+}
+
+/// Prints stable blocker ids from accepted slot values escalated
+/// `needs-owner`, sorted and deduplicated for byte-stable output.
+fn print_escalation_blockers(
+    indent: &str,
+    accepted_slot_values: &[ctx_traits_core::procedure::runtime::Value],
+) {
+    if let Some(line) = escalation_blockers_full_line(indent, accepted_slot_values) {
+        println!("{line}");
     }
 }
 
@@ -874,5 +896,104 @@ fn format_output_port_status(
         ctx_traits_core::procedure::runtime::OutputPortStatus::OptionalMissing => {
             "optional-missing"
         }
+    }
+}
+
+#[cfg(test)]
+mod escalation_blockers_tests {
+    use super::{escalation_blockers_full_line, escalation_blockers_line};
+    use ctx_traits_core::procedure::runtime::{AcceptanceStatus, Value, ValueSource};
+    use serde_json::json;
+
+    fn value(json_value: serde_json::Value) -> Value {
+        Value {
+            ref_text: "scratch-ref".to_string(),
+            value_digest: ctx_traits_core::digest::canonical_digest(&json_value).expect("digest"),
+            value: json_value,
+            schema_ref: None,
+            source: ValueSource::HostInput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            position_path: Vec::new(),
+            acceptance_order: None,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn escalation_blockers_line_prints_only_sorted_deduplicated_ids() {
+        let values = vec![
+            value(json!({
+                "status": "revise",
+                "escalation": "needs-owner",
+                "blockers": [
+                    {"id": "zeta-blocker", "what": "the concrete failure it causes"},
+                    {"id": "alpha-blocker"},
+                ],
+            })),
+            value(json!({
+                "status": "revise",
+                "escalation": "needs-owner",
+                "blockers": [
+                    {"id": "alpha-blocker"},
+                    {"id": "zeta-blocker"},
+                ],
+            })),
+            value(json!({
+                "status": "approved",
+                "escalation": "none",
+                "blockers": [],
+            })),
+        ];
+
+        let line = escalation_blockers_line(&values).expect("blockers present");
+        assert_eq!(line, "alpha-blocker, zeta-blocker");
+        assert!(!line.contains("the concrete failure"));
+    }
+
+    #[test]
+    fn escalation_blockers_line_is_none_when_nothing_escalated() {
+        let values = vec![value(json!({"status": "approved", "escalation": "none"}))];
+        assert_eq!(escalation_blockers_line(&values), None);
+    }
+
+    #[test]
+    fn escalation_blockers_full_line_prints_the_exact_indented_label_and_body() {
+        let values = vec![
+            value(json!({
+                "status": "revise",
+                "escalation": "needs-owner",
+                "blockers": [
+                    {"id": "zeta-blocker", "what": "the concrete failure it causes"},
+                    {"id": "alpha-blocker"},
+                ],
+            })),
+            value(json!({
+                "status": "revise",
+                "escalation": "needs-owner",
+                "blockers": [
+                    {"id": "alpha-blocker"},
+                    {"id": "zeta-blocker"},
+                ],
+            })),
+            value(json!({
+                "status": "approved",
+                "escalation": "none",
+                "blockers": [],
+            })),
+        ];
+
+        let line = escalation_blockers_full_line("  ", &values).expect("blockers present");
+        assert_eq!(line, "  escalation-blockers: alpha-blocker, zeta-blocker");
+    }
+
+    #[test]
+    fn escalation_blockers_full_line_is_none_when_nothing_escalated() {
+        let values = vec![value(json!({"status": "approved", "escalation": "none"}))];
+        assert_eq!(escalation_blockers_full_line("  ", &values), None);
     }
 }

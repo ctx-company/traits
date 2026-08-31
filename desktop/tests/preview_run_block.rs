@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 use camino::Utf8PathBuf;
 use ctx_traits_desktop::center_link::LinkUpdate;
 use ctx_traits_desktop::detail::{self, DetailLoad, PreviewState, RunDetail};
-use ctx_traits_desktop::preview::{sessions_footer, sessions_run_block};
+use ctx_traits_desktop::preview::{
+    sessions_footer, sessions_now_item, sessions_run_block, sessions_verdict_block,
+};
 use ctx_traits_desktop::run_row;
 
 fn recv_snapshot(
@@ -76,6 +78,7 @@ fn accepted<'a>(state: &'a Option<PreviewState<'a>>) -> (&'a str, Option<&'a str
             baseline,
             stale,
             refreshing,
+            ..
         }) => (
             Box::leak(baseline.row.run_id.clone().into_boxed_str()),
             *stale,
@@ -101,6 +104,10 @@ fn preview_run_block_atomicity_and_staleness() {
     an_unreadable_projected_row_renders_unreadable_even_though_the_ledger_read_succeeded();
     reopening_a_finished_run_reproduces_the_same_accepted_facts();
     unselected_row_changes_issue_no_resync_request();
+    a_fingerprint_identical_live_flip_removes_the_now_item_with_no_resync();
+    a_fingerprint_identical_live_resume_produces_the_now_item_with_no_resync();
+    stale_and_refreshing_previews_present_neither_state_block();
+    an_ended_delta_removes_the_now_item_through_the_served_detail_path();
 }
 
 /// Deliberately diverge the committed center row's `elapsed_seconds` from
@@ -746,6 +753,300 @@ fn a_pending_resync_is_rendered_as_refreshing_not_silently_current() {
     assert_ne!(
         committed_footer, footer_before,
         "the committed footer must differ from the retained pre-resync footer"
+    );
+
+    drop(updates);
+}
+
+/// A `RowChanged` delta whose fingerprint (`modified_epoch_secs` +
+/// title-cleared summary) is unchanged from the just-loaded baseline, only
+/// `live` flips true-to-false, must remove the now item through the real
+/// `follow -> preview_state -> sessions_now_item` chain, and must not issue a
+/// resync `LoadRequest` — the connected regression review-verdict-1's
+/// blocker `state-blocks-ignore-preview-freshness` asked for, proving
+/// `Selection.live` (not the frozen `baseline.row.live`) drives the
+/// composer.
+fn a_fingerprint_identical_live_flip_removes_the_now_item_with_no_resync() {
+    let guard = support::scratch("preview-run-block-live-flip");
+    let root = guard.0.clone();
+    // SAFETY: see above.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_path =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("session.json")).expect("UTF-8 path");
+    let session = support::write_session_ledger(&ledger_path, "session-a", "run-a", true);
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let wire_row = support::row_from_ledger("repo", &ledger_path, &session, true);
+    connection.serve_snapshot(&subscribe_id, std::slice::from_ref(&wire_row));
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+    let row = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_path.as_str())
+        .expect("seeded row present");
+
+    let mut detail = RunDetail::default();
+    let request = detail.select(row).expect("selection issues a request");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+
+    let before = detail.preview_state();
+    assert!(
+        sessions_now_item(before.as_ref()).is_some(),
+        "a live, readable, settled selection must render a now item"
+    );
+
+    let mut flipped = wire_row;
+    flipped.live = false;
+    let outcome = detail.follow(&ctx_traits_desktop::center_link::LinkUpdate::Delta(
+        ctx_traits_io::center::CenterDelta::RowChanged {
+            row: Box::new(flipped),
+        },
+    ));
+    assert!(
+        outcome.request.is_none(),
+        "a live flip alone must cost no re-read"
+    );
+
+    let after = detail.preview_state();
+    assert!(
+        sessions_now_item(after.as_ref()).is_none(),
+        "the now item must disappear on a live-to-finished transition, even a \
+         fingerprint-identical one that never triggers a resync"
+    );
+
+    drop(updates);
+}
+
+/// The mirror of the live-to-finished proof above: a `RowChanged` delta whose
+/// fingerprint is unchanged from the just-loaded baseline, only `live` flips
+/// false-to-true, must produce a now item with the shared `RowState::Live`
+/// presentation (`running` / `StateRole::Accent`) through the real
+/// `follow -> preview_state -> sessions_now_item` chain, and must not issue a
+/// resync `LoadRequest` — review-verdict-1 blocker
+/// `live-resume-marker-uses-frozen-row-state`'s required regression.
+fn a_fingerprint_identical_live_resume_produces_the_now_item_with_no_resync() {
+    let guard = support::scratch("preview-run-block-live-resume");
+    let root = guard.0.clone();
+    // SAFETY: see above.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_path =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("session.json")).expect("UTF-8 path");
+    let session = support::write_session_ledger(&ledger_path, "session-a", "run-a", false);
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let wire_row = support::row_from_ledger("repo", &ledger_path, &session, false);
+    connection.serve_snapshot(&subscribe_id, std::slice::from_ref(&wire_row));
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+    let row = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_path.as_str())
+        .expect("seeded row present");
+
+    let mut detail = RunDetail::default();
+    let request = detail.select(row).expect("selection issues a request");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+
+    let before = detail.preview_state();
+    assert!(
+        sessions_now_item(before.as_ref()).is_none(),
+        "a non-live, readable, settled selection must render no now item"
+    );
+
+    let mut flipped = wire_row;
+    flipped.live = true;
+    let outcome = detail.follow(&ctx_traits_desktop::center_link::LinkUpdate::Delta(
+        ctx_traits_io::center::CenterDelta::RowChanged {
+            row: Box::new(flipped),
+        },
+    ));
+    assert!(
+        outcome.request.is_none(),
+        "a live resume alone must cost no re-read"
+    );
+
+    let after = detail.preview_state();
+    let now_item = sessions_now_item(after.as_ref())
+        .expect("the now item must appear on a finished-to-live transition");
+    assert_eq!(
+        now_item.state_word, "running",
+        "the resumed now item must carry the shared live-row presentation word"
+    );
+    assert_eq!(
+        now_item.state_role,
+        run_row::StateRole::Accent,
+        "the resumed now item must carry the shared live-row presentation role"
+    );
+
+    drop(updates);
+}
+
+/// Neither state block is presented as current while the accepted preview is
+/// stale (center lost) or refreshing (a resync in flight) — proved through
+/// the same served `preview_state` a stale/refreshing selection actually
+/// reaches, not a hand-built `PreviewState` (review-verdict-1 blocker
+/// `state-blocks-ignore-preview-freshness`). The seeded run carries real
+/// verdict evidence so `sessions_verdict_block`, not just `sessions_now_item`,
+/// is proved under the same stale/refreshing/`Ended` transitions.
+fn stale_and_refreshing_previews_present_neither_state_block() {
+    let guard = support::scratch("preview-run-block-live-freshness");
+    let root = guard.0.clone();
+    // SAFETY: see above.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_path =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("session.json")).expect("UTF-8 path");
+    let session = support::write_session_ledger_with_verdict(
+        &ledger_path,
+        "session-a",
+        "run-a",
+        true,
+        "approved",
+        None,
+        None,
+    );
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let wire_row = support::row_from_ledger("repo", &ledger_path, &session, true);
+    connection.serve_snapshot(&subscribe_id, std::slice::from_ref(&wire_row));
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+    let row = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_path.as_str())
+        .expect("seeded row present");
+
+    let mut detail = RunDetail::default();
+    let request = detail.select(row).expect("selection issues a request");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    assert!(sessions_now_item(detail.preview_state().as_ref()).is_some());
+    assert!(sessions_verdict_block(detail.preview_state().as_ref()).is_some());
+
+    // Move the fingerprint so `follow` starts a resync, leaving this
+    // selection `refreshing` while the old baseline is still `Loaded`.
+    let mut moved = wire_row.clone();
+    moved.modified_epoch_secs += 1;
+    let resync = detail
+        .follow(&ctx_traits_desktop::center_link::LinkUpdate::Delta(
+            ctx_traits_io::center::CenterDelta::RowChanged {
+                row: Box::new(moved),
+            },
+        ))
+        .request
+        .expect("a moved fingerprint issues a resync");
+
+    let refreshing_state = detail.preview_state();
+    assert!(
+        sessions_now_item(refreshing_state.as_ref()).is_none(),
+        "a refreshing preview must not present a now item as current"
+    );
+    assert!(
+        sessions_verdict_block(refreshing_state.as_ref()).is_none(),
+        "a refreshing preview must not present a verdict block as current"
+    );
+
+    let resync_outcome = load_serving_claimed_task(&peer, &resync, "unclaimed", None);
+    assert!(detail.apply(resync.generation, resync_outcome));
+    assert!(sessions_now_item(detail.preview_state().as_ref()).is_some());
+    assert!(sessions_verdict_block(detail.preview_state().as_ref()).is_some());
+
+    // Lose the center: the accepted baseline stays but must be marked stale.
+    connection.shutdown();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let reason = loop {
+        match updates.try_recv() {
+            Ok(LinkUpdate::Down(reason)) => break reason,
+            Ok(_) => {}
+            Err(async_channel::TryRecvError::Empty) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("no Down arrived before the deadline: {error}"),
+        }
+    };
+    detail.follow(&LinkUpdate::Down(reason));
+    let stale_state = detail.preview_state();
+    assert!(
+        sessions_now_item(stale_state.as_ref()).is_none(),
+        "a stale preview must not present a now item as current"
+    );
+    assert!(
+        sessions_verdict_block(stale_state.as_ref()).is_none(),
+        "a stale preview must not present a verdict block as current"
+    );
+
+    drop(updates);
+}
+
+/// An `Ended` center delta on the selected run must reach the served
+/// `preview_state` the same way `RowChanged` does — the now item disappears
+/// once the ended row's liveness commits — proving the third `CenterDelta`
+/// variant is not a blind spot next to `RowChanged`/`Down` (review-verdict-1
+/// blocker `state-blocks-ignore-preview-freshness`).
+fn an_ended_delta_removes_the_now_item_through_the_served_detail_path() {
+    let guard = support::scratch("preview-run-block-ended");
+    let root = guard.0.clone();
+    // SAFETY: see above.
+    let socket = unsafe { support::install_center_env(&root) };
+
+    let ledger_path =
+        Utf8PathBuf::from_path_buf(root.join("repo").join("session.json")).expect("UTF-8 path");
+    let session = support::write_session_ledger(&ledger_path, "session-a", "run-a", true);
+
+    let peer = support::FakePeer::bind(&socket);
+    let updates = ctx_traits_desktop::center_link::start(None);
+
+    let mut connection = peer.accept();
+    let subscribe_id = connection.read_subscribe_id();
+    let wire_row = support::row_from_ledger("repo", &ledger_path, &session, true);
+    connection.serve_snapshot(&subscribe_id, std::slice::from_ref(&wire_row));
+
+    let snapshot_rows = recv_snapshot(&updates);
+    let rows = run_row::project(&snapshot_rows, &run_row::RepoScope::All);
+    let row = rows
+        .iter()
+        .find(|row| row.ledger_path == ledger_path.as_str())
+        .expect("seeded row present");
+
+    let mut detail = RunDetail::default();
+    let request = detail.select(row).expect("selection issues a request");
+    let outcome = load_serving_claimed_task(&peer, &request, "unclaimed", None);
+    assert!(detail.apply(request.generation, outcome));
+    assert!(sessions_now_item(detail.preview_state().as_ref()).is_some());
+
+    let mut ended = wire_row;
+    ended.live = false;
+    let follow_outcome = detail.follow(&ctx_traits_desktop::center_link::LinkUpdate::Delta(
+        ctx_traits_io::center::CenterDelta::Ended {
+            row: Box::new(ended),
+        },
+    ));
+    assert!(
+        follow_outcome.request.is_none(),
+        "a fingerprint-identical Ended delta must cost no re-read, same as RowChanged"
+    );
+    assert!(
+        sessions_now_item(detail.preview_state().as_ref()).is_none(),
+        "the now item must disappear once the Ended delta commits"
     );
 
     drop(updates);

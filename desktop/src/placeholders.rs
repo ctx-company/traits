@@ -29,6 +29,14 @@ pub fn loop_round_narration(rounds: &str) -> String {
     format!("round {rounds} — the loop runs again")
 }
 
+/// `screens/sessions.md:38-39` tags the preview `in progress` block's
+/// narrated line `placeholder:` — the title and marker are data, the
+/// sentence is not. Neutral phrasing, never the export's example sentence,
+/// never run-specific content.
+pub const NOW_NARRATION: Placeholder = Placeholder {
+    label: "working on this frame now",
+};
+
 /// `grammar.md:98` sets this value; the center serves no owner identity
 /// today, so it resolves here rather than as a literal at the rail's call
 /// site. A plain `&str`, not a [`Placeholder`]: that struct is documented

@@ -156,6 +156,14 @@ pub enum PreviewState<'a> {
         /// identically to a settled, current baseline (review-verdict-1
         /// blocker `selected-preview-not-atomic`).
         refreshing: bool,
+        /// The selection's current liveness, refreshed from every
+        /// `RowChanged`/`Appeared`/`Ended` delta while following — distinct
+        /// from `baseline.row.live`, which is frozen at the load this
+        /// baseline was accepted from. A fingerprint-identical liveness flip
+        /// (e.g. a run ending with no other summary change) moves this flag
+        /// without a resync, so the `in progress` block's presence follows
+        /// the current center posture rather than the last-loaded snapshot.
+        live: bool,
     },
 }
 
@@ -609,6 +617,7 @@ impl RunDetail {
                     baseline,
                     stale,
                     refreshing,
+                    live: selection.live,
                 })
             }
         }

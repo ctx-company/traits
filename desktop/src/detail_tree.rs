@@ -276,7 +276,7 @@ fn normalize_path(status: &SequenceStatus) -> Vec<PathSegment> {
 /// queued frame's path first, the ledger's own active path otherwise. An
 /// empty `next_frame.position_path` (a top-level current frame) is
 /// synthesized the same way a top-level status entry is.
-fn current_position_path(session: &Session) -> Vec<PathSegment> {
+pub(crate) fn current_position_path(session: &Session) -> Vec<PathSegment> {
     if let Some(frame) = &session.next_frame {
         if frame.position_path.is_empty() {
             return vec![PathSegment {
