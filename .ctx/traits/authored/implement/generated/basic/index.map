@@ -51,8 +51,8 @@
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 34,
+    "end": 34
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
@@ -86,18 +86,18 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 34,
-    "end": 34
+    "start": 36,
+    "end": 36
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 33,
-    "end": 33
+    "start": 35,
+    "end": 35
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 34,
+    "end": 34
   },
   "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then/record-the-owner-s-ruling": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -116,8 +116,8 @@
   },
   "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 32,
+    "end": 32
   },
   "sequence:procedure/draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -126,8 +126,8 @@
   },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 31,
-    "end": 31
+    "start": 33,
+    "end": 33
   },
   "sequence:procedure/reviewed-refinement": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",

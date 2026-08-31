@@ -498,6 +498,8 @@ id = "doubly-reviewed-refinement"
 title = "Doubly-reviewed refinement"
 kind = "loop"
 sequence = "sequence:doubly-reviewed-refinement-body"
+max-iterations = 3
+on-exhausted = "continue"
 
 [[procedure.sequence.until.all]]
 slot = "slot:review-verdict-1"

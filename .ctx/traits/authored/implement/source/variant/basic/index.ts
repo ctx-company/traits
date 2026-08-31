@@ -21,9 +21,11 @@ export default function () {
       shared.step.summon.record("Record the owner's ruling", agents.needsOwnerSignal, ruling.result);
     });
 
-    // No round ceiling: the loop ends when the reviewer approves, and the
-    // run's own frame/time budgets are the outer stop. A ceiling here only
-    // decided when to abandon work the reviewer had not yet accepted.
+    // Owner ruling 2026-09-01: three review rounds, then stop refining.
+    // Exhaustion continues past the loop — the work proceeds to commit with
+    // the last verdict unresolved, and the task's own checks plus the merge
+    // gate remain the landing authority. Abort here would strand the work.
+    loop.maxIterations(3, { onExhausted: cdk.signal.Continue });
     loop.until(cdk.condition.equals(shared.data.verdict1.status, "approved"));
   });
 
