@@ -35,6 +35,26 @@ fn recv_snapshot(
     }
 }
 
+/// `detail::load` now also asks the center for the run's claimed task
+/// (0265.10), a second connection distinct from the subscribe stream this
+/// test drives by hand. Accept and answer that one connection on a
+/// background thread while the foreground thread blocks inside `load`.
+fn load_serving_claimed_task(
+    peer: &support::FakePeer,
+    request: &detail::LoadRequest,
+) -> Result<ctx_traits_desktop::detail::DetailBaseline, String> {
+    std::thread::scope(|scope| {
+        let server = scope.spawn(|| {
+            let mut connection = peer.accept();
+            let (id, _session_id, _repo_key) = connection.read_claimed_task_request();
+            connection.send_claimed_task_result(&id, "unclaimed", None);
+        });
+        let outcome = detail::load(request);
+        server.join().expect("claimed-task server thread");
+        outcome
+    })
+}
+
 fn recv_down(updates: &async_channel::Receiver<LinkUpdate>) -> String {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -81,7 +101,7 @@ fn a_selected_runs_detail_goes_stale_on_disconnect_and_resyncs_exactly_once_on_r
     let seed_request = detail
         .select(row)
         .expect("first selection issues a request");
-    let seed_outcome = detail::load(&seed_request);
+    let seed_outcome = load_serving_claimed_task(&peer, &seed_request);
     assert!(detail.apply(seed_request.generation, seed_outcome));
     assert!(matches!(
         detail.follow_state(),
@@ -134,7 +154,7 @@ fn a_selected_runs_detail_goes_stale_on_disconnect_and_resyncs_exactly_once_on_r
         Some(FollowState::Following)
     ));
 
-    let resync_outcome = detail::load(&resync);
+    let resync_outcome = load_serving_claimed_task(&peer, &resync);
     assert!(detail.apply(resync.generation, resync_outcome));
     assert!(matches!(
         detail.follow_state(),

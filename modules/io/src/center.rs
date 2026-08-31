@@ -1087,11 +1087,27 @@ fn decode_claimed_task(result: ResponseResult) -> crate::Result<ClaimedTaskResul
     }
 }
 
-/// The task a run claims, resolved by session id. Spawn-on-need only — a
-/// caller that cannot spawn a center (`ctx-desktop`) needs an `_existing`
-/// sibling, added when that caller exists rather than ahead of it.
+/// The task a run claims, resolved by session id. Spawn-on-need only — see
+/// [`claimed_task_existing`] for the `_existing` sibling `ctx-desktop` uses.
 pub fn claimed_task(session_id: &str, repo_key: Option<&str>) -> crate::Result<ClaimedTaskResult> {
     decode_claimed_task(request_with_timeout(
+        Request::ClaimedTask {
+            id: next_id("claimed-task"),
+            session_id: session_id.to_owned(),
+            repo_key: repo_key.map(str::to_owned),
+        },
+        ACTION_TIMEOUT,
+    )?)
+}
+
+/// Same shared claimed-task capability as [`claimed_task`], but only against
+/// a center that is already serving — it never spawns one. `ctx-desktop`'s
+/// use case, symmetric with [`control_existing`]/[`subscribe_existing`].
+pub fn claimed_task_existing(
+    session_id: &str,
+    repo_key: Option<&str>,
+) -> crate::Result<ClaimedTaskResult> {
+    decode_claimed_task(request_existing(
         Request::ClaimedTask {
             id: next_id("claimed-task"),
             session_id: session_id.to_owned(),

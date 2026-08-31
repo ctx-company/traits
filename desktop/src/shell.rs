@@ -14,6 +14,7 @@ use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
+use crate::preview_view;
 use crate::rail_view;
 use crate::row_control::{self, RowControls, RowRequest, RowVerb};
 use crate::run_row::{RepoScope, RunRow};
@@ -862,7 +863,21 @@ impl Render for Shell {
             column = column.child(bottom_bar_view::bar_element(&bar, on_pause));
         }
         let rail = rail_view::rail_element(&self.face.rail(self.detail.repo_key()));
-        let body = div()
+        // The preview reads exclusively from `RunDetail::preview_state` —
+        // never from a `RunRow` fetched separately out of `CenterFace` — so
+        // the trait/run/task rows and the footer can never disagree about
+        // which run, or which generation of that run, they describe
+        // (review-verdict-1 blocker `selected-preview-not-atomic`).
+        let preview = self.detail.preview_state().map(|state| {
+            let block = preview_view::named_block_element(&crate::preview::sessions_run_block(
+                Some(&state),
+            ));
+            let footer = preview_view::preview_footer_element(&crate::preview::sessions_footer(
+                Some(&state),
+            ));
+            preview_view::preview_column_element(vec![block], Some(footer))
+        });
+        let mut body = div()
             .debug_selector(|| "window-body".to_string())
             .flex()
             .flex_row()
@@ -871,6 +886,9 @@ impl Render for Shell {
             .w_full()
             .child(rail)
             .child(column.flex_1().min_w_0());
+        if let Some(preview) = preview {
+            body = body.child(preview);
+        }
         div()
             .debug_selector(|| "window-frame".to_string())
             .flex()
@@ -1076,6 +1094,8 @@ mod tests {
             live: true,
             modified_epoch_secs: 0,
             verdict_rounds: None,
+            elapsed_seconds: 0,
+            started_at_epoch: None,
         }
     }
 

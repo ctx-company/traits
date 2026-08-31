@@ -61,7 +61,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
             .session
             .provenance
             .started_at_epoch
-            .and_then(local_utc_offset_seconds),
+            .and_then(ctx_traits_io::clock::local_utc_offset_seconds),
     );
     let RunPanelState {
         repaint,
@@ -171,46 +171,14 @@ pub(crate) fn title_row_line(
     if let Some(epoch) = started_at_epoch {
         line.push(" \u{b7} ", tui::Tone::Muted);
         line.push(
-            format!("Started at {}", epoch_clock(epoch, utc_offset_seconds)),
+            format!(
+                "Started at {}",
+                ctx_traits_io::clock::epoch_clock(epoch, utc_offset_seconds)
+            ),
             tui::Tone::Muted,
         );
     }
     line
-}
-
-/// The reader's UTC offset, in seconds, at the moment `epoch` occurred (not
-/// "now" — DST-correct for the stamp being rendered). `None` if the C
-/// library cannot resolve it, in which case the caller falls back to a
-/// labelled UTC display. No `chrono`/`time` dependency exists in this
-/// workspace; `libc` is already a direct dependency for termios/ioctl/signal
-/// (`tui.rs`, `interrupt.rs`), so this owns nothing beyond one `localtime_r`
-/// call (which applies the environment's `TZ` itself, POSIX-equivalent to a
-/// `tzset` call) rather than TZif parsing.
-pub(super) fn local_utc_offset_seconds(epoch: u64) -> Option<i32> {
-    let epoch_time = epoch as libc::time_t;
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let result = unsafe { libc::localtime_r(&epoch_time, &mut tm) };
-    if result.is_null() {
-        None
-    } else {
-        Some(tm.tm_gmtoff as i32)
-    }
-}
-
-/// Pure `HH:MM:SS` decomposition of a UNIX epoch, shifted by
-/// `utc_offset_seconds`. `None` renders the UTC fallback labelled `UTC`;
-/// `Some(0)` renders unlabelled (a genuinely-UTC locale is local time, not a
-/// degradation).
-pub(super) fn epoch_clock(epoch: u64, utc_offset_seconds: Option<i32>) -> String {
-    let (offset, suffix) = match utc_offset_seconds {
-        Some(offset) => (offset as i64, ""),
-        None => (0, " UTC"),
-    };
-    let seconds_of_day = (epoch as i64 + offset).rem_euclid(86_400);
-    let hours = seconds_of_day / 3_600;
-    let minutes = (seconds_of_day % 3_600) / 60;
-    let seconds = seconds_of_day % 60;
-    format!("{hours:02}:{minutes:02}:{seconds:02}{suffix}")
 }
 
 /// P552: builds a [`PaneTree`] with a leaf for exactly the panes `data`
@@ -3150,12 +3118,14 @@ mod tests {
 
     #[test]
     fn epoch_clock_wraps_seconds_of_day() {
+        use ctx_traits_io::clock::epoch_clock;
         assert_eq!(epoch_clock(3_723, Some(0)), "01:02:03");
         assert_eq!(epoch_clock(86_400, Some(0)), "00:00:00");
     }
 
     #[test]
     fn epoch_clock_applies_offset() {
+        use ctx_traits_io::clock::epoch_clock;
         // Negative offset crossing midnight backwards: 01:02:03 UTC - 2h.
         assert_eq!(epoch_clock(3_723, Some(-2 * 3_600)), "23:02:03");
         // Non-whole-hour positive offset: 01:02:03 UTC + 5:45.

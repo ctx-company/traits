@@ -23,6 +23,7 @@ pub mod builtin_store;
 pub mod cache;
 pub mod cdk_build;
 pub mod center;
+pub mod clock;
 pub mod command;
 pub mod config_document;
 pub mod config_source;

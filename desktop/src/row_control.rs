@@ -321,6 +321,8 @@ mod tests {
             live: true,
             modified_epoch_secs: 0,
             verdict_rounds: None,
+            elapsed_seconds: 0,
+            started_at_epoch: None,
         }
     }
 

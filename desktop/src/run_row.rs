@@ -14,6 +14,7 @@
 
 use ctx_traits_core::procedure::activity::SessionState;
 use ctx_traits_core::procedure::session::DriveOutcomeKind;
+use ctx_traits_core::task::TaskStatus;
 use ctx_traits_io::center::CenterPublicRow;
 
 /// Which repositories a projected list should include. Driven only by
@@ -132,6 +133,28 @@ pub fn presentation(state: &RowState) -> StatePresentation {
     }
 }
 
+/// The shared state presentation, extended for the claimed-task's stored
+/// status. Mirrors `ctx_traits_cli::app::tasks::status_tone`'s pass/fail/
+/// default semantics without importing that `pub(crate)` table: `Done` is
+/// `Ok`, `Cancelled` is `Danger`, `Ready` is `Neutral`. Exhaustive, no
+/// catch-all arm.
+pub fn task_status_presentation(status: TaskStatus) -> StatePresentation {
+    match status {
+        TaskStatus::Done => StatePresentation {
+            word: "done",
+            role: StateRole::Ok,
+        },
+        TaskStatus::Cancelled => StatePresentation {
+            word: "cancelled",
+            role: StateRole::Danger,
+        },
+        TaskStatus::Ready => StatePresentation {
+            word: "ready",
+            role: StateRole::Neutral,
+        },
+    }
+}
+
 /// A presentation-ready run row. Identity fields are retained even when the
 /// scope filters a row out of the currently painted list, so later selection
 /// and delta application (0256.4) have something to key on.
@@ -155,6 +178,9 @@ pub struct RunRow {
     pub live: bool,
     pub modified_epoch_secs: u64,
     pub verdict_rounds: Option<u64>,
+    // preview (0265.10) — the durable numbers, not the story-clock strings
+    pub elapsed_seconds: u64,
+    pub started_at_epoch: Option<u64>,
 }
 
 impl RunRow {
@@ -267,7 +293,11 @@ fn row_state(row: &CenterPublicRow) -> RowState {
     }
 }
 
-fn project_one(row: &CenterPublicRow) -> RunRow {
+/// `pub(crate)` so `detail.rs` can project the exact same `RunRow` a live
+/// `RowChanged`/`Appeared` delta or snapshot row carries, as the candidate a
+/// resync's `LoadRequest` commits alongside its `DetailBaseline` — never a
+/// second, independently-derived projection.
+pub(crate) fn project_one(row: &CenterPublicRow) -> RunRow {
     let summary = &row.summary;
     let state = row_state(row);
     let state_text = state_text_for(&state);
@@ -297,6 +327,8 @@ fn project_one(row: &CenterPublicRow) -> RunRow {
         live: row.live,
         modified_epoch_secs: row.modified_epoch_secs,
         verdict_rounds: summary.verdict_rounds,
+        elapsed_seconds: summary.elapsed_seconds,
+        started_at_epoch: summary.started_at_epoch,
     }
 }
 

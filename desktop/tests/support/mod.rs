@@ -541,6 +541,51 @@ impl FakePeerConnection {
         self.send_control_result(id, "acknowledged", None);
     }
 
+    /// Read the client's `ClaimedTask` request — a hand-written duplicate of
+    /// the io crate's private `Request::ClaimedTask` wire shape, the same
+    /// duplication convention documented on [`FakePeer`] for the snapshot/
+    /// delta/control tags. Returns `(id, session_id, repo_key)`.
+    pub fn read_claimed_task_request(&mut self) -> (String, String, Option<String>) {
+        let request = self.read_line();
+        assert_eq!(
+            request["kind"], "claimed-task",
+            "expected a claimed-task request"
+        );
+        let id = request["id"]
+            .as_str()
+            .expect("claimed-task request id")
+            .to_string();
+        let session_id = request["session_id"]
+            .as_str()
+            .expect("claimed-task request session_id")
+            .to_string();
+        let repo_key = request["repo_key"].as_str().map(str::to_string);
+        (id, session_id, repo_key)
+    }
+
+    /// Respond to a `ClaimedTask` request with the `ClaimedTaskWireResult`
+    /// variant named by `tag` (its kebab-case wire name, e.g. `"unclaimed"`),
+    /// and `data` for the variants that carry a payload (`ambiguous`/`task`).
+    pub fn send_claimed_task_result(
+        &mut self,
+        id: &str,
+        tag: &str,
+        data: Option<serde_json::Value>,
+    ) {
+        let claimed_task_data = match data {
+            Some(data) => serde_json::json!({"type": tag, "data": data}),
+            None => serde_json::json!({"type": tag}),
+        };
+        self.write_line(&serde_json::json!({
+            "kind": "response",
+            "id": id,
+            "result": {
+                "type": "claimed-task",
+                "data": claimed_task_data,
+            },
+        }));
+    }
+
     /// Serve a complete snapshot in one call: start, each row, end.
     pub fn serve_snapshot(&mut self, id: &str, rows: &[CenterPublicRow]) {
         self.send_snapshot_start(id);

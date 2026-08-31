@@ -10,6 +10,8 @@ pub mod frame_list;
 pub mod frame_list_view;
 pub mod overflow_fade;
 pub mod placeholders;
+pub mod preview;
+pub mod preview_view;
 pub mod rail;
 pub mod rail_view;
 pub mod row_control;

@@ -129,6 +129,8 @@ mod tests {
             live: true,
             modified_epoch_secs: 0,
             verdict_rounds: Some(2),
+            elapsed_seconds: 0,
+            started_at_epoch: None,
         };
         let bar = sessions_bar(&row, None);
         // Constructing the element must not panic and must reach an
@@ -168,6 +170,8 @@ mod tests {
             live: true,
             modified_epoch_secs: 0,
             verdict_rounds: None,
+            elapsed_seconds: 0,
+            started_at_epoch: None,
         };
         let bar = sessions_bar(&row, None);
         let handler: BarActionHandler = Box::new(|_, _, _| {});

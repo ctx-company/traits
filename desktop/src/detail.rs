@@ -49,6 +49,13 @@ pub struct LoadRequest {
     pub generation: u64,
     pub repo_key: String,
     pub ledger_path: Utf8PathBuf,
+    pub session_id: String,
+    /// The exact projected `RunRow` this request's read is being issued
+    /// for — carried through to `DetailBaseline::row` unchanged, so the
+    /// facts a resync commits (run identity, elapsed, start time,
+    /// readability) can never straddle two different center rows
+    /// (review-verdict-1 blocker `selected-preview-not-atomic`).
+    pub row: RunRow,
 }
 
 /// The authoritative session plus its tolerant activity embellishment,
@@ -63,6 +70,21 @@ pub struct DetailBaseline {
     pub session: Session,
     pub activity_overlay: ActivityOverlay,
     pub skipped_activity_lines: usize,
+    /// The authoritative variant, reconstructed from the pinned trait
+    /// source: `Ok(Some)` served, `Ok(None)` reconstructed with no native
+    /// `variant`, `Err` reconstruction refused (digest/identity mismatch).
+    /// Never fails the detail — a variant that cannot be resolved renders
+    /// its own loud segment rather than turning a readable run unreadable.
+    pub variant: Result<Option<String>, String>,
+    /// The served claimed-task answer. `Err` is the transport/center
+    /// failure; `Ok` still carries 0265.2's four typed outcomes.
+    pub claimed_task: Result<ctx_traits_io::center::ClaimedTaskResult, String>,
+    /// The exact `RunRow` this baseline's `LoadRequest` was issued for —
+    /// copied verbatim from `LoadRequest::row`, never re-derived. This is
+    /// what the preview composer reads identity/elapsed/start-time/
+    /// readability from, so those facts commit atomically with `variant`
+    /// and `claimed_task` under the same generation-checked `apply`.
+    pub row: RunRow,
 }
 
 /// The one filesystem read this module performs, plus the tolerant sidecar
@@ -76,11 +98,36 @@ pub fn load(request: &LoadRequest) -> Result<DetailBaseline, String> {
         .map_err(|error| error.to_string())?;
     let (activity, skipped_activity_lines) =
         ctx_traits_io::activity_sidecar::read_activity(&request.ledger_path);
+    let variant = load_variant(&session);
+    let claimed_task =
+        ctx_traits_io::center::claimed_task_existing(&request.session_id, Some(&request.repo_key))
+            .map_err(|error| error.to_string());
     Ok(DetailBaseline {
         session,
         activity_overlay: ActivityOverlay::from_records(&activity),
         skipped_activity_lines,
+        variant,
+        claimed_task,
+        row: request.row.clone(),
     })
+}
+
+/// The authoritative variant: native `Trait.variant` over legacy
+/// `Metadata.variant` (documented display-only), taken from
+/// `run::load_trait_for_session`'s digest-verifying reconstruction — never a
+/// suffix split of the trait id, never a re-resolution of the family alias
+/// table.
+fn load_variant(session: &Session) -> Result<Option<String>, String> {
+    let loaded = ctx_traits_io::run::load_trait_for_session(None, None, session, "preview")
+        .map_err(|error| error.to_string())?;
+    Ok(loaded.trait_ref.variant.clone().or_else(|| {
+        loaded
+            .trait_ref
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.variant.clone())
+            .map(|variant| variant.as_str().to_string())
+    }))
 }
 
 /// A selected run's load state. `DetailBaseline` is boxed because it is
@@ -90,6 +137,26 @@ pub enum DetailLoad {
     Loading,
     Loaded(Box<DetailBaseline>),
     Failed(String),
+}
+
+/// The preview column's one honest view of the current selection: pending,
+/// failed, or an atomically-accepted baseline, staleness marked explicitly
+/// rather than inferred from a second source.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreviewState<'a> {
+    Loading,
+    Failed(&'a str),
+    Accepted {
+        baseline: &'a DetailBaseline,
+        stale: Option<&'a str>,
+        /// A resync (fingerprint move, or recovery from `Stale`) has been
+        /// issued and has not yet landed via `apply`. `baseline` is still
+        /// the last-accepted facts, not the pending replacement's — this
+        /// flag is what stops a same-selection resync from being painted
+        /// identically to a settled, current baseline (review-verdict-1
+        /// blocker `selected-preview-not-atomic`).
+        refreshing: bool,
+    },
 }
 
 /// Whether a selection is still tracking the live center stream. `Ended`
@@ -139,6 +206,7 @@ pub struct FollowOutcome {
 struct Selection {
     key: String,
     repo_key: String,
+    session_id: String,
     generation: u64,
     /// The row's kernel-backed liveness flag. Refreshed from every
     /// `RowChanged`/`Appeared`/`Ended` delta while `Following` — no longer a
@@ -162,6 +230,12 @@ struct Selection {
     /// Activity records that arrived while a read (seed or resync) was in
     /// flight, replayed onto the fresh overlay once it lands.
     pending: VecDeque<ActivityRecord>,
+    /// The most recently projected `RunRow` for this selection — the
+    /// candidate a resync's `LoadRequest` carries, and what lands in the
+    /// next accepted `DetailBaseline::row`. Updated by `select_inner` and
+    /// by every `RowChanged`/`Appeared`/recovery `Snapshot` that reprojects
+    /// this selection's row, never by the read outcome itself.
+    row: RunRow,
 }
 
 impl Selection {
@@ -170,6 +244,8 @@ impl Selection {
             generation,
             repo_key: self.repo_key.clone(),
             ledger_path: Utf8PathBuf::from(self.key.clone()),
+            session_id: self.session_id.clone(),
+            row: self.row.clone(),
         }
     }
 }
@@ -222,6 +298,7 @@ impl RunDetail {
             self.selected = Some(Selection {
                 key: String::new(),
                 repo_key: row.repo_key.clone(),
+                session_id: row.session_id.clone(),
                 generation: self.generation,
                 live: row.live,
                 load: DetailLoad::Failed("run row carries no ledger path".to_string()),
@@ -230,6 +307,7 @@ impl RunDetail {
                 fingerprint: None,
                 in_flight: None,
                 pending: VecDeque::new(),
+                row: row.clone(),
             });
             return None;
         }
@@ -245,6 +323,7 @@ impl RunDetail {
         self.selected = Some(Selection {
             key: row.ledger_path.clone(),
             repo_key: row.repo_key.clone(),
+            session_id: row.session_id.clone(),
             generation,
             live: row.live,
             load: DetailLoad::Loading,
@@ -258,11 +337,14 @@ impl RunDetail {
             fingerprint: None,
             in_flight: Some(generation),
             pending: VecDeque::new(),
+            row: row.clone(),
         });
         Some(LoadRequest {
             generation,
             repo_key: row.repo_key.clone(),
             ledger_path: Utf8PathBuf::from(row.ledger_path.clone()),
+            session_id: row.session_id.clone(),
+            row: row.clone(),
         })
     }
 
@@ -416,6 +498,7 @@ impl RunDetail {
                 let fingerprint = Fingerprint::from_row(row);
                 if selection.fingerprint.as_ref() != Some(&fingerprint) {
                     selection.fingerprint = Some(fingerprint);
+                    selection.row = crate::run_row::project_one(row);
                     self.generation += 1;
                     selection.generation = self.generation;
                     selection.in_flight = Some(self.generation);
@@ -465,6 +548,7 @@ impl RunDetail {
         if let Some(row) = rows.iter().find(|row| row.ledger_path == selection.key) {
             selection.live = row.live;
             selection.fingerprint = Some(Fingerprint::from_row(row));
+            selection.row = crate::run_row::project_one(row);
         }
         selection.follow = FollowState::Following;
         self.generation += 1;
@@ -498,6 +582,36 @@ impl RunDetail {
     /// The current selection's live-follow state, if any.
     pub fn follow_state(&self) -> Option<&FollowState> {
         self.selected.as_ref().map(|selection| &selection.follow)
+    }
+
+    /// The one preview-safe projection of the current selection: loading,
+    /// failed, or an accepted `DetailBaseline` (optionally marked stale).
+    /// Every field the Sessions preview column renders — trait/variant,
+    /// run id/elapsed, task answer, footer — comes out of the same
+    /// `DetailBaseline` here, which is only ever installed by a
+    /// generation-checked `apply`. There is deliberately no path that lets a
+    /// caller pair this baseline with a `RunRow` read fresh from
+    /// `CenterFace` — that pairing is exactly what let a resync's new
+    /// run/elapsed sit beside a stale variant/task (review-verdict-1 blocker
+    /// `selected-preview-not-atomic`).
+    pub fn preview_state(&self) -> Option<PreviewState<'_>> {
+        let selection = self.selected.as_ref()?;
+        match &selection.load {
+            DetailLoad::Loading => Some(PreviewState::Loading),
+            DetailLoad::Failed(reason) => Some(PreviewState::Failed(reason)),
+            DetailLoad::Loaded(baseline) => {
+                let stale = match &selection.follow {
+                    FollowState::Stale { reason } => Some(reason.as_str()),
+                    FollowState::Following => None,
+                };
+                let refreshing = selection.in_flight.is_some();
+                Some(PreviewState::Accepted {
+                    baseline,
+                    stale,
+                    refreshing,
+                })
+            }
+        }
     }
 
     /// Project the current selection's loaded baseline into a
@@ -542,6 +656,8 @@ mod tests {
             live: true,
             modified_epoch_secs: 0,
             verdict_rounds: None,
+            elapsed_seconds: 0,
+            started_at_epoch: None,
         }
     }
 
@@ -573,10 +689,15 @@ mod tests {
     }
 
     fn baseline(session: Session) -> DetailBaseline {
+        let run_id = session.run_id.as_str().to_string();
+        let fixture_row = row("repo", &format!("/repo/{run_id}.json"), &run_id);
         DetailBaseline {
             session,
             activity_overlay: ActivityOverlay::default(),
             skipped_activity_lines: 0,
+            variant: Ok(None),
+            claimed_task: Ok(ctx_traits_io::center::ClaimedTaskResult::Unclaimed),
+            row: fixture_row,
         }
     }
 
