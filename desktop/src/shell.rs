@@ -14,6 +14,7 @@ use crate::center_link::{self, LinkUpdate};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
+use crate::rail_view;
 use crate::row_control::{self, RowControls, RowRequest, RowVerb};
 use crate::run_row::{RepoScope, RunRow};
 use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, SubmitRequest};
@@ -216,6 +217,20 @@ impl CenterFace {
             CenterState::Connecting | CenterState::Unavailable { .. } => Vec::new(),
             CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
                 dashboard.repositories()
+            }
+        }
+    }
+
+    /// Empty unless `Connected`/`Stale` — see [`CenterFace::rows`]'s same
+    /// reasoning. Delegates to `Dashboard::rail`, never a second source of
+    /// repository identity or a rail-held selection.
+    pub fn rail(&self, active_repo_key: Option<&str>) -> crate::rail::Rail {
+        match &self.state {
+            CenterState::Connecting | CenterState::Unavailable { .. } => {
+                crate::rail::project(std::iter::empty(), None, false)
+            }
+            CenterState::Connected { dashboard } | CenterState::Stale { dashboard, .. } => {
+                dashboard.rail(active_repo_key, self.is_stale())
             }
         }
     }
@@ -841,7 +856,14 @@ impl Render for Shell {
                 });
             column = column.child(bottom_bar_view::bar_element(&bar, on_pause));
         }
-        column
+        let rail = rail_view::rail_element(&self.face.rail(self.detail.repo_key()));
+        div()
+            .flex()
+            .flex_row()
+            .size_full()
+            .bg(rgb(tokens::CANVAS))
+            .child(rail)
+            .child(column.flex_1().min_w_0())
     }
 }
 
@@ -849,7 +871,7 @@ impl Render for Shell {
 mod tests {
     use super::*;
     use crate::row_control::RowOutcome;
-    use ctx_traits_io::center::CenterPublicRow;
+    use ctx_traits_io::center::{CenterDelta, CenterPublicRow};
     use ctx_traits_io::run_summary::RunSummary;
 
     fn wire_row(repo_key: &str, run_id: &str) -> CenterPublicRow {
@@ -1284,5 +1306,188 @@ mod tests {
             Some(gpui::WindowBounds::Windowed(actual)) => assert_eq!(actual, bounds),
             other => panic!("expected windowed bounds, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rail_is_empty_while_connecting_or_unavailable() {
+        let face = CenterFace::new(RepoScope::All);
+        assert!(face.rail(None).repos().is_empty());
+        assert_eq!(face.rail(None).space(), None);
+
+        let mut face = CenterFace::new(RepoScope::All);
+        face.apply(
+            LinkUpdate::Down("no center yet".to_string()),
+            SystemTime::now(),
+        );
+        assert!(face.rail(None).repos().is_empty());
+    }
+
+    #[test]
+    fn rail_repository_appears_survives_a_partial_ending_and_disappears_on_the_last_ended() {
+        let mut face = CenterFace::new(RepoScope::All);
+        let now = SystemTime::now();
+        face.apply(LinkUpdate::Snapshot(vec![wire_row("repo-a", "run-1")]), now);
+        assert_eq!(face.rail(None).repos().len(), 1);
+        assert_eq!(
+            face.rail(None).dot(0),
+            crate::frame_list::DotTone::Accent,
+            "repo-a's only row is live"
+        );
+
+        // `second` is not live from the start, so repo-a's liveness fold
+        // still depends solely on row-1 — the RowChanged below is the sole
+        // cause of any dot transition, not masked by another live row.
+        let mut second = wire_row("repo-a", "run-2");
+        second.ledger_path = "/repo-a/session-2.json".to_string();
+        second.live = false;
+        face.apply(
+            LinkUpdate::Delta(CenterDelta::Appeared {
+                row: Box::new(second.clone()),
+            }),
+            now,
+        );
+        assert_eq!(
+            face.rail(None).repos().len(),
+            1,
+            "still one repository, two rows"
+        );
+        assert_eq!(
+            face.rail(None).dot(0),
+            crate::frame_list::DotTone::Accent,
+            "row-1 is still live"
+        );
+
+        let mut changed = wire_row("repo-a", "run-1");
+        changed.live = false;
+        face.apply(
+            LinkUpdate::Delta(CenterDelta::RowChanged {
+                row: Box::new(changed.clone()),
+            }),
+            now,
+        );
+        assert_eq!(face.rail(None).repos().len(), 1);
+        assert_eq!(
+            face.rail(None).dot(0),
+            crate::frame_list::DotTone::Idle,
+            "the RowChanged delta turned row-1 non-live, and both of repo-a's rows are now non-live"
+        );
+
+        face.apply(
+            LinkUpdate::Delta(CenterDelta::Ended {
+                row: Box::new(changed),
+            }),
+            now,
+        );
+        assert_eq!(
+            face.rail(None).repos().len(),
+            1,
+            "the repository survives its first row ending — a second row remains"
+        );
+
+        face.apply(
+            LinkUpdate::Delta(CenterDelta::Ended {
+                row: Box::new(second),
+            }),
+            now,
+        );
+        assert!(
+            face.rail(None).repos().is_empty(),
+            "the repository disappears once its last row ends"
+        );
+    }
+
+    #[test]
+    fn rail_keeps_the_last_complete_model_and_reports_stale_across_a_down_and_recovery() {
+        let mut face = CenterFace::new(RepoScope::All);
+        let now = SystemTime::now();
+        face.apply(LinkUpdate::Snapshot(vec![wire_row("repo-a", "run-1")]), now);
+        face.apply(LinkUpdate::Down("lost connection".to_string()), now);
+        let rail = face.rail(Some("repo-a"));
+        assert_eq!(rail.repos().len(), 1);
+        assert!(rail.is_stale());
+
+        // A delta while Stale changes nothing.
+        let mut other = wire_row("repo-b", "run-2");
+        other.ledger_path = "/repo-b/session.json".to_string();
+        face.apply(
+            LinkUpdate::Delta(CenterDelta::Appeared {
+                row: Box::new(other),
+            }),
+            now,
+        );
+        assert_eq!(face.rail(Some("repo-a")).repos().len(), 1);
+
+        face.apply(LinkUpdate::Snapshot(vec![wire_row("repo-c", "run-3")]), now);
+        let rail = face.rail(None);
+        assert!(!rail.is_stale());
+        assert_eq!(rail.repos().len(), 1);
+        assert_eq!(rail.repos()[0].repo_key, "repo-c");
+    }
+
+    #[test]
+    fn rail_ignores_a_repo_scope_that_hides_the_repository_from_the_run_list() {
+        let mut face = CenterFace::new(RepoScope::Repo("repo-a".to_string()));
+        let now = SystemTime::now();
+        face.apply(
+            LinkUpdate::Snapshot(vec![
+                wire_row("repo-a", "run-1"),
+                wire_row("repo-b", "run-2"),
+            ]),
+            now,
+        );
+        // The run list is scoped to repo-a, but the rail still shows both.
+        assert_eq!(face.rail(None).repos().len(), 2);
+    }
+
+    #[test]
+    fn rail_active_row_and_footer_move_together_across_selections() {
+        let mut face = CenterFace::new(RepoScope::All);
+        let now = SystemTime::now();
+        face.apply(
+            LinkUpdate::Snapshot(vec![
+                wire_row("repo-a", "run-1"),
+                wire_row("repo-b", "run-2"),
+            ]),
+            now,
+        );
+
+        // Drive the active identity through the real `RunDetail::select` /
+        // `repo_key()` path, not a repo key handed to `CenterFace::rail`
+        // directly — that is the binding goal 6 requires be exercised.
+        let mut detail = RunDetail::default();
+        detail.select(&live_run_row("repo-a", "/repo-a/session.json", "run-1"));
+        assert_eq!(detail.repo_key(), Some("repo-a"));
+        let rail = face.rail(detail.repo_key());
+        assert_eq!(
+            rail.space(),
+            Some(rail.repos()[rail_active_index(&rail)].name.as_str())
+        );
+        assert_eq!(rail.repos()[rail_active_index(&rail)].repo_key, "repo-a");
+
+        detail.select(&live_run_row("repo-b", "/repo-b/session.json", "run-2"));
+        assert_eq!(detail.repo_key(), Some("repo-b"));
+        let rail = face.rail(detail.repo_key());
+        assert_eq!(
+            rail.space(),
+            Some(rail.repos()[rail_active_index(&rail)].name.as_str())
+        );
+        assert_eq!(rail.repos()[rail_active_index(&rail)].repo_key, "repo-b");
+
+        // Wholesale replacement with an empty snapshot: the previously
+        // active repository no longer exists in the accepted model, so the
+        // active row and the footer's space line must disappear together —
+        // the selection is retained but no longer matches any repo.
+        face.apply(LinkUpdate::Snapshot(vec![]), now);
+        assert_eq!(detail.repo_key(), Some("repo-b"));
+        let rail = face.rail(detail.repo_key());
+        assert!(rail.repos().is_empty());
+        assert!((0..rail.repos().len()).all(|i| !rail.is_active(i)));
+        assert_eq!(rail.space(), None);
+    }
+
+    fn rail_active_index(rail: &crate::rail::Rail) -> usize {
+        (0..rail.repos().len())
+            .find(|i| rail.is_active(*i))
+            .expect("expected exactly one active row")
     }
 }

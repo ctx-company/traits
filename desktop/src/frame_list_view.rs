@@ -13,7 +13,7 @@ use crate::frame_list::{ActivityBlock, DotTone, FrameList, FrameRow, RightSide, 
 use crate::run_row::role_color;
 use crate::tokens;
 
-fn dot_color(tone: DotTone) -> u32 {
+pub(crate) fn dot_color(tone: DotTone) -> u32 {
     match tone {
         DotTone::Ok => tokens::OK,
         DotTone::Accent => tokens::ACCENT,
@@ -21,12 +21,15 @@ fn dot_color(tone: DotTone) -> u32 {
         DotTone::Dim => tokens::DOT_DIM,
         DotTone::Warn => tokens::WARN,
         DotTone::Danger => tokens::DANGER,
+        DotTone::Bright => tokens::TEXT_BRIGHT,
     }
 }
 
 /// Rule 4's 5px ellipse (`tokens::LIST_ROW_DOT_SIZE`), never a canvas
 /// radius: `rounded_full` here is the dot marker, not a container corner.
-fn dot_element(tone: DotTone) -> AnyElement {
+/// `pub(crate)` so `rail_view.rs` paints exactly this element — one dot
+/// primitive in the crate, never two.
+pub(crate) fn dot_element(tone: DotTone) -> AnyElement {
     div()
         .size(tokens::LIST_ROW_DOT_SIZE)
         .rounded_full()

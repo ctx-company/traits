@@ -801,3 +801,40 @@ skipped, and the resolution check must itself fail — the forced-negative
 control proving the positive check is not vacuous). Driving it as a
 subprocess test keeps the proof inside plain `cargo test` / `just
 desktop-test` without any `Justfile` change.
+
+## The rail (0265.8)
+
+Rule 10's rail — one 260-wide full-height column on the Sessions screen —
+splits the same way every other surface here does: `src/rail.rs` is a
+gpui-free model (grouping, ordering, the dot rule, the brightness
+invariant), `src/rail_view.rs` is the free-function element that paints
+exactly that model. Rows are the distinct repositories of the accepted
+center row model (`Dashboard`'s unfiltered keyed map — the same doctrine
+`repositories`/`contains_session`/`row_liveness` already document, so a
+`RepoScope` that hides a repository's rows from the run list never hides it
+from the rail), one per `repo_key`, ordered by `(name, repo_key)` — total
+and insertion-independent. The active repository is the selected run's
+repository (`RunDetail::repo_key()`); it drives both the active row and the
+footer's space line through one projection, `rail::repo_display_name`
+(final two path segments, falling back to `repo_key`) — deliberately not
+`run_row::repo_label_for`, the compact row's different, one-segment label.
+The active identity is only active if it still matches a repository in the
+current list, so when that repository's last row ends, the active row and
+the footer's space line disappear together — no fallback promotion.
+
+The rail's dot reuses `frame_list`'s one dot primitive rather than growing a
+second: `DotTone::Bright` is a new variant for `text-bright`, rule 10's
+instruction for the rail's active row specifically and not part of rule 4's
+palette (the same extension class `0265.5` used for `Danger`), and
+`dot_color`/`dot_element` are promoted `pub(crate)` so `rail_view.rs` calls
+the identical 5px `rounded_full` element the frame list paints. The owner
+handle resolves through one new `placeholders::OWNER_HANDLE` entry, not an
+inline literal.
+
+The rail participates in the same accepted snapshot/delta transaction the
+run rows do — `Dashboard::rail`/`CenterFace::rail` are pure per-frame
+projections off the existing model, with no second subscription, reducer,
+cache, timer, or poll; a `Down` retains the last complete accepted rail
+behind the stale marker (dimmed via `.opacity(0.6)` on the rows container
+only, matching the run list's own stale treatment) and only a fresh
+snapshot replaces it wholesale.

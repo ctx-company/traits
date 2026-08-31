@@ -34,6 +34,10 @@ pub enum DotTone {
     Dim,
     Warn,
     Danger,
+    /// Not in rule 4's dot palette — rule 10 assigns `text-bright` to the
+    /// rail's active row specifically. Added the same way `0265.5` added
+    /// `Danger`: one shared enum, no rail-private dot type.
+    Bright,
 }
 
 fn dot_tone_for_role(role: StateRole) -> DotTone {

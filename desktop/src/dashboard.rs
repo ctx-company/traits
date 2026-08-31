@@ -136,6 +136,17 @@ impl Dashboard {
         repositories.sort_by(|left, right| left.repo_key.cmp(&right.repo_key));
         repositories
     }
+
+    /// The rail's projection off the *unfiltered* keyed row map — the same
+    /// doctrine `repositories`/`contains_session`/`row_liveness` document.
+    /// Unlike `repositories`, this does not filter to an absolute
+    /// `repo_path`: that filter exists because `run_start` rejects a
+    /// non-absolute spawn target, and the rail is a display, not a spawn
+    /// target, so an empty `repo_path` is a real row that renders its
+    /// `repo_key`.
+    pub fn rail(&self, active_repo_key: Option<&str>, stale: bool) -> crate::rail::Rail {
+        crate::rail::project(self.rows.values(), active_repo_key, stale)
+    }
 }
 
 #[cfg(test)]

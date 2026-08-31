@@ -565,9 +565,13 @@ it in that order. If a second round would be needed, stop and report the exact
 failing command with its evidence, or the unresolved visual/data contract,
 rather than iterating. That is the stop condition, not a judgement call.
 """
+
 [relations]
+depends-on = [
+    "0265.1",
+    "0265.3",
+]
 parent = "0265"
-depends-on = ["0265.1", "0265.3"]
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"

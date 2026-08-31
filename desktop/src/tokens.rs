@@ -132,6 +132,11 @@ pub const RAIL_FOOTER_PAD_RIGHT: Pixels = px(18.);
 pub const RAIL_FOOTER_PAD_BOTTOM: Pixels = px(0.);
 pub const RAIL_FOOTER_PAD_LEFT: Pixels = px(18.);
 pub const RAIL_FOOTER_GAP: Pixels = px(6.);
+/// `tokens.md:71-85` records the footer's pad and gap but not the gap
+/// between the space line's three segments; sourced from
+/// `reference/sessions.html:236` instead. Same owner-correction class
+/// `BOTTOM_BAR_GAP` and `FRAME_ROW_*` already carry.
+pub const RAIL_FOOTER_SEGMENT_GAP: Pixels = px(5.);
 
 // main pane
 pub const MAIN_PANE_PAD_TOP: Pixels = px(18.);

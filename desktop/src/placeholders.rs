@@ -28,3 +28,10 @@ pub const CURRENT_FRAME_INTENT: Placeholder = Placeholder {
 pub fn loop_round_narration(rounds: &str) -> String {
     format!("round {rounds} — the loop runs again")
 }
+
+/// `grammar.md:98` sets this value; the center serves no owner identity
+/// today, so it resolves here rather than as a literal at the rail's call
+/// site. A plain `&str`, not a [`Placeholder`]: that struct is documented
+/// as a labelled *action* with no bound behaviour, and this is unserved
+/// data, not an action.
+pub const OWNER_HANDLE: &str = "Oskar Cieslik";
