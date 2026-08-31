@@ -1,0 +1,81 @@
+schema-version = "0.2"
+key = "0272"
+title = "Signal interpolations resolve everywhere refs do"
+status = "draft"
+raised = "2026-08-31"
+content = """
+The implement trait is unbuildable from source, and has been since
+0253.6 landed: `ctx traits build implement` fails with
+
+    invalid manifest at prompt.record-the-owner-s-ruling.text:
+    interpolation {signal:needs-owner.question} is not a valid typed ref
+
+because the CDK emits signal payload field interpolations
+(`${sig.question}` in summon.ts) that core's reference grammar rejects.
+Worse, the divergence is silent: the committed generated canonicals
+contain ZERO occurrences of the interpolation (they predate the current
+source), so every dispatch runs a stale canonical while the source
+claims otherwise — main's implement source and its running canonical
+have quietly disagreed since 0253.6. Discovered 2026-08-31 when an
+unrelated implement-trait change could not rebuild.
+
+This is exactly the prerequisite 0253.6's needs-owner escalation named
+and the ruling deferred ("core signal interpolation blocker remains,
+outside scope"). The bill is due: no implement change of any kind can
+land until it clears.
+
+## Owner contract
+
+A signal payload field reference works everywhere a slot reference
+does: it validates at build, and it resolves at drive time to the
+raised signal's payload field. Rebuilding implement from today's source
+succeeds, and the regenerated canonical is committed so source and
+canonical agree again.
+"""
+scope = """
+## Goals (binding)
+
+1. `Reference::parse` accepts `signal:<id>.<field>`: `allows_dot_paths`
+   (modules/core/src/reference.rs:157) admits Signal alongside Fixture,
+   with the dot splitting a base signal id from a payload field path.
+   Symbol-table validation matches on the base id, not the dotted text.
+2. Prompt-text validation accepts signal interpolations:
+   `VALID_INPUT_KINDS` (modules/core/src/trait/prompt.rs:454) admits
+   Kind::Signal, and `validate_prompt_text` (prompt.rs:618) passes the
+   summon prompts as authored.
+3. Drive-time resolution: wherever interpolations substitute — the argv
+   resolver's kind match (`resolve_argv_ref_value`,
+   modules/core/src/procedure/runtime/frame_builders.rs:848, currently
+   `_ => None` for signals) and the prompt-text substitution path — a
+   `signal:<id>.<field>` resolves to the most recently raised matching
+   signal's payload field for the current loop scope, rendered with the
+   same scalar/JSON rules as slot values. An unraised signal or absent
+   field leaves the interpolation unsubstituted exactly as an
+   unaccepted slot does.
+4. `ctx traits build implement` exits zero on current source; the
+   regenerated basic/quick/complex canonicals are committed in the same
+   change, ending the silent source-vs-canonical divergence.
+5. A regression proves the summon record prompt renders the question:
+   raise a needs-owner signal with a payload in a fixture run and
+   assert the recorded prompt text contains the payload's question
+   verbatim.
+
+## Suggested starting points — guidance, not a boundary
+
+- reference.rs `validate_path`/`allows_dot_paths`; prompt.rs
+  `VALID_INPUT_KINDS`/`validate_prompt_text`; frame_builders.rs
+  `resolve_argv_ref_value` and the prompt-side twin the grounding
+  locates; the signal payload store written by 0253.1 (signals carry
+  payloads) is the value source.
+- 0253.6's landed summon.ts (`${sig.question}` at lines 12 and 23) is
+  the consuming idiom; do not change it — the core meets it.
+
+## Out of scope
+
+- Any change to summon semantics, ask machinery, or the implement
+  trait's authored source.
+- New interpolation kinds beyond Signal.
+"""
+
+[relations]
+depends-on = ["0262"]

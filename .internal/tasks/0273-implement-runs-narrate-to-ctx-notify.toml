@@ -1,0 +1,86 @@
+schema-version = "0.2"
+key = "0273"
+title = "Implement runs narrate to ctx-notify"
+status = "draft"
+raised = "2026-08-31"
+content = """
+Owner delegation 2026-08-31: the default (basic) implement flow mirrors
+its progress to the owner through ctx-notify — one activity per run
+(`ctx-notify begin --json` at start, activity id stored in a slot), a
+status update after each step, per-open-point line updates after every
+review verdict, and a finish on completion. The owner's phone becomes
+the run's live narrator, via the notification pipeline this org built.
+
+The wiring was fully authored and script-tested on 2026-08-31 but could
+not land because implement is unbuildable from source (0272's blocker);
+this task carries that finished design through once 0272 clears.
+
+Verified CLI facts to build against: `ctx-notify begin --json <TITLE>`
+prints `{"activity_id":"<uuid>",...}` (`--quiet` suppresses it — do not
+combine); `update <ID> --status <TEXT>` works; `--line` is
+single-occurrence today (two flags = usage_error), so per-point updates
+issue one call per line until ctx-notify 0017 makes it repeatable;
+`finish <--ok|--fail|--cancel> <ID>` closes the activity.
+
+## Owner contract
+
+Every basic-variant run opens one notify activity titled from its task,
+updates it after each step with the step's title, follows every review
+verdict with the verdict status plus one line per still-open reviewer
+point, and finishes it on completion. Notification trouble never
+affects the run: every notify step is failure-tolerant and records
+'unavailable'/'skipped' instead of failing.
+"""
+scope = """
+## Goals (binding)
+
+1. Shared helper `shared/step/notify.ts` with begin/update/
+   reviewUpdate/finish command steps; slots `notify-id`, `notify-log`,
+   `review-status`, `review-points` in shared data. begin extracts
+   activity_id from `begin --json` and stores 'unavailable' on any
+   failure; every later step no-ops on 'unavailable'.
+2. The basic variant weaves: begin before the baseline; an update after
+   baseline, draft, implement, and commit; reviewUpdate after the
+   review step inside the loop (fires each round); finish after the
+   commit block. Titles match the step titles.
+3. reviewUpdate projects the verdict (`status` and `blockers` via
+   cdk.step.project into text slots — object slots do not interpolate
+   into argv), sends `update --status "review: <status>"`, then one
+   `update --line <open step text, 200-char cap>` per still-open
+   blocker step, all failure-tolerant with bounded timeouts.
+4. No notify step can fail a run: nonzero ctx-notify exits, timeouts,
+   and absent binaries all degrade to recorded no-ops.
+5. Quick and complex variants are untouched (basic is the default and
+   the owner's ask); a later task may extend them.
+
+## Suggested starting points — guidance, not a boundary
+
+The complete tested implementation from 2026-08-31 (gate scripts
+verified standalone; build blocked only by 0272):
+
+- BEGIN: sh -c script: `out=$(ctx-notify begin --json "implement: $1")
+  || printf unavailable`; extract activity_id via python json; argv
+  carries the task port; output notify-id.
+- UPDATE: `[ "$1" = unavailable ] && exit 0; ctx-notify update "$1"
+  --quiet --status "$2" || true`; step ids derived from slugified
+  titles; output notify-log.
+- REVIEW: cdk.step.project verdict1.status -> review-status,
+  verdict1.blockers -> review-points; script sends the status update
+  then pipes review-points JSON to python which loops blockers'
+  open steps calling `ctx-notify update <id> --quiet --line <text>`
+  per point (subprocess, check=False, timeout 15).
+- FINISH: `ctx-notify finish --ok "$1" --quiet || true`.
+- Weave points in variant/basic/index.ts: begin before
+  diff.baseline; updates after baseline/draft/implement; reviewUpdate
+  after review.primarySummoning; update after git.commitSubmit inside
+  the Maybe Commit when-block; finish after that block.
+
+## Out of scope
+
+- Repeatable `--line` in ctx-notify itself (notify board 0017).
+- Wiring quick/complex variants.
+- Any change to review or summon semantics.
+"""
+
+[relations]
+depends-on = ["0272"]
