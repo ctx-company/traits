@@ -1,0 +1,81 @@
+schema-version = "0.2"
+key = "0274.1"
+title = "Declare the reviewerLight role and the light-review step"
+status = "draft"
+raised = "2026-09-01"
+content = """
+Give the implement trait a second, separately seated reviewer whose verdict contract lets
+small changes through without taste churn. Two pieces, both inside
+.ctx/traits/authored/implement/:
+
+1. In source/shared/agent.ts, declare a reviewerLight role from the existing reviewer
+   template (the smart reviewer already carries cdk.intent.TasteOnlyBlocking /
+   TailCasePursuit / RubberStampReview / UnboundedLoop in avoid) with its own separately
+   configurable seat. Its model stays unset in trait sources: seats resolve once per run
+   per role via the P451 variant/role qualifiers ([agent.variant.<v>.role.<r>],
+   [trait.<id>.variant.<vid>.agent…] — modules/io/src/harness_config.rs:1699,
+   resolve_run_variant), so two declared reviewer roles with separate seats is the entire
+   dynamic-model-assignment mechanism. No mid-run re-seating.
+
+2. In source/shared/step/review.ts, add a light-review step whose verdict contract hardens
+   the existing TasteOnlyBlocking avoid into doctrine: only contract-breaking findings
+   justify a revise status; taste and polish findings are recorded in the verdict but never
+   block. Reuse the existing reviewVerdictSchema/blockerSchema spine
+   (packages/toolkit/src/schema.ts, re-exported via @ctx-traits/agents), which already
+   encodes approved iff blockers empty and advisory-never-affects-status — no new schema
+   fields and no toolkit-wide severity change.
+
+The [agent.role.reviewer-light] seat entry for this repo's .ctx/traits/runtime.toml is
+gitignored machine-local config: the run worktree cannot land it and workers cannot write
+outside the worktree. Document it as an owner/host step, with a committed
+runtime.example.toml entry as the landable illustration — model: haiku, the decided
+reviewer-light seat.
+"""
+scope = """
+## Decisions
+- The nits-don't-block contract lives in role/step/slot descriptions and schema field
+  descriptions, never in prompt text (owner ruling 2026-08-30: prompts carry task doctrine
+  only).
+- No new schema fields, no toolkit severity change: the existing approve/revise verdict plus
+  light-review doctrine supply the control. Any shared gate extraction into
+  packages/toolkit stays out until a second consumer exists (single-trait-packages rule).
+- The role's model is never hard-coded in the trait; the committed artifact set is trait
+  sources plus a runtime.example.toml illustration. The live runtime.toml seat entry is an
+  owner step outside this task's file changes.
+- Wiring the step into any variant flow is 0274.2's work, not this task's.
+- Exact symbols, signatures, and edit sequencing are the architect's call — this task fixes
+  the contract, not the diff.
+"""
+validation = """
+## Watch
+- generated/*/index.toml and trait.lock are outputs of ctx traits build implement — never
+  hand-edit them.
+- No tests asserting on committed trait canonical content (file-exists or pattern-match
+  against generated TOML); for a trait-package edit the existing gates are the proof.
+- Doctrine text stays generic pseudocode — no owner-specific examples in resources.
+- Do not attempt to write .ctx/traits/runtime.toml from the run worktree; the write is
+  auto-denied. State the seat entry as an owner step in the landed docs/example instead.
+- In a run worktree, isolate the build cache (CARGO_TARGET_DIR=target cargo …) before
+  trusting a gate failure.
+
+## Done when
+Trait sources declare a reviewerLight role (reviewer template, own seat, no hard-coded
+model — the decided haiku lives in the seat entry) and a
+light-review step reusing reviewVerdictSchema whose descriptions carry the
+only-contract-breaking-findings-block contract; runtime.example.toml illustrates the
+[agent.role.reviewer-light] seat with model haiku; the trait-package recipe
+(just ts-build → ctx traits build implement) and just test run green.
+"""
+[relations]
+parent = "0274"
+
+[[checks]]
+name = "TS workspace builds"
+command = "just ts-build"
+timeout-ms = 900000
+
+[[checks]]
+name = "implement canonicals regenerate from source with no tracked drift"
+command = "CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
+timeout-ms = 1800000
+

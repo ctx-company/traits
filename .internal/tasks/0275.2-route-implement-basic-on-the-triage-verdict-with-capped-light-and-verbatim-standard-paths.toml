@@ -1,0 +1,86 @@
+schema-version = "0.2"
+key = "0275.2"
+title = "Route implement-basic on the triage verdict with capped light and verbatim standard paths"
+status = "draft"
+raised = "2026-09-01"
+content = """
+Wire Stage 1 into the basic variant. In .ctx/traits/authored/implement/source/variant/
+basic/index.ts, insert the 0275.1 size-triage step immediately after
+shared.step.draft.compose and route on its verdict with cdk.flow.when +
+condition.fieldEquals — the file already branches this way on agents.needsOwnerSignal.
+
+- tier == standard enters today's unbounded reviewed-refinement loop verbatim. The
+  no-ceiling loop and its comment are a standing ruling and must be byte-identical.
+- tier == light enters a capped loop (iterations: 3) of implement → capture diff → one
+  reviewerLight round per iteration, where light-review approval exits immediately.
+  Escalation is the loop's onExhausted path: when the cap runs out without approval,
+  exhaustion sets the sizeTier verdict to standard and the flow enters the standard loop
+  (packages/cdk/src/sequence.ts; functional API loop.maxIterations in
+  packages/cdk/src/functional/registrars.ts). Exhaustion never turns an unapproved result
+  into approval — no synthetic verdict.
+
+The expected light-run shape is draft + triage + (implement → light review) × ≤3 + commit
+tail — roughly 6–8 frames before any necessary escalation.
+
+Bump the trait version in trait.toml [package] and source/index.ts
+(cdk.defineTrait("Implement", { version })) in sync — or verify the 0274.2 bump covers
+this landing — and regenerate the committed generated/*/index.toml canonicals and
+trait.lock via ctx traits build implement.
+"""
+scope = """
+## Decisions
+- Evolve basic in place — no calibrated variant (owner ruling). complex stays untouched.
+- The standard branch is today's loop untouched; escalation from the light path enters
+  exactly that loop.
+- Escalation policy is settled: approval exits the light loop; cap exhaustion
+  (onExhausted) sets the sizeTier verdict to standard and escalates into the standard
+  loop; exhaustion never approves.
+- Trait authoring plus seat mapping only: no Rust runtime changes; any change needing
+  flatten_agent_defaults or session-record work is out of scope. The reviewer-light seat
+  entry lives in gitignored machine-local .ctx/traits/runtime.toml — an owner/host step,
+  not a landable file change.
+- Consumes 0275.1's sizeTier slot and triage step and 0274.1's reviewerLight role and
+  light-review step — redeclare none of them.
+- Exact step symbols, slot wiring, and edit sequencing are the architect's call.
+"""
+validation = """
+## Watch
+- Registrar ordering constraint inside loop bodies: only container kinds that cannot
+  carry the derived not(until) guard — flow.match and flow.parallel — are rejected when
+  registered after loop.until in a loop scope (forbidPositionalUntil,
+  packages/cdk/src/functional/registrars.ts); other containers get the guard composed
+  automatically. Order the light-loop body so no match/parallel routing follows
+  loop.until.
+- The no-ceiling comment and loop in the standard branch must survive byte-identical; a
+  well-meaning refactor of that block is a regression.
+- Never hand-edit generated/ or trait.lock; both come from ctx traits build implement.
+- Version stated in trait.toml [package] and source/index.ts must move together; if
+  0274.2 already bumped for this landing, verify rather than double-bump.
+- No tests asserting on committed trait canonical content; the existing gates are the
+  proof for a trait-package edit.
+- In a run worktree, isolate the build cache (CARGO_TARGET_DIR=target cargo …) before
+  trusting a gate failure.
+
+## Done when
+implement-basic's flow is draft → size triage → cdk.flow.when routing where the standard
+branch is today's unbounded loop byte-identical and the light branch is a ≤3-iteration
+implement → capture diff → reviewerLight loop with approval-only exit and onExhausted
+routing (sizeTier set to standard) into the standard loop; the trait version is
+consistent between trait.toml and source/index.ts; canonicals and trait.lock are
+regenerated; and the landing recipe (just ts-build → ctx traits build implement) plus
+just test run green.
+"""
+[relations]
+parent = "0275"
+depends-on = ["0275.1", "0274.1"]
+
+[[checks]]
+name = "TS workspace builds"
+command = "just ts-build"
+timeout-ms = 900000
+
+[[checks]]
+name = "implement canonicals regenerate from source with no tracked drift"
+command = "CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
+timeout-ms = 1800000
+

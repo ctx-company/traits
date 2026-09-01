@@ -1,0 +1,78 @@
+schema-version = "0.2"
+key = "0275"
+title = "Stage 1 — post-draft size triage and verdict-routed light/standard loops in implement-basic"
+status = "draft"
+raised = "2026-09-01"
+content = """
+Give implement-basic a post-draft size triage so simple UI-scale changes stop paying for
+the full smart-reviewer loop, per .internal/brainstorms/smarter-trait-selection-behavior-
+where-ui-tasks-are-still-ge.md. Today basic (.ctx/traits/authored/implement/source/variant/
+basic/index.ts, trait version 0.25.0) runs draft → unbounded reviewed-refinement loop
+(exit only on verdict1.status == "approved"; the "No round ceiling" comment is a deliberate,
+standing ruling) → commit tail — every change, however cosmetic, gets the same depth.
+
+Stage 1 adds, entirely as trait authoring:
+
+- a sizeTier typed verdict slot (tier: light | standard, plus reasons and evidence) in
+  source/shared/data.ts, alongside verdict1/verdict2;
+- a 1-frame post-draft size-triage step shaped like the single-prompt warn arm of the
+  feasibilityGate prior art (packages/toolkit/src/sequence/feasibility.ts), where the
+  smart drafter classifies the drafted change against repository evidence only — no task
+  facet. Light and standard are both valid, successful classification outcomes: the triage
+  step always completes and hands its verdict to routing, and never blocks or aborts the
+  run;
+- verdict routing in basic via cdk.flow.when: tier == standard enters today's unbounded
+  loop byte-identical; tier == light enters a capped loop (iterations: 3) of implement →
+  capture diff → one reviewerLight round, where approval exits immediately. Escalation is
+  the loop's onExhausted path: when the cap runs out without approval, exhaustion sets the
+  sizeTier verdict to standard and the run enters the standard loop — never fabricating
+  approval.
+
+The expected light-run shape is draft + triage + (implement → light review) × ≤3 + commit
+tail — roughly 6–8 frames before any necessary escalation. Anything triaged standard, or
+escalated from the light path, gets exactly today's behavior.
+
+Work items covered: size-tier-slot, post-draft-size-triage-gate,
+verdict-routed-review-branches, trait-authoring-only-and-version-bump.
+"""
+scope = """
+## Decisions
+- Trait authoring plus seat mapping only: edits live in .ctx/traits/authored/implement/
+  source/ and trait.toml. No Rust runtime changes; anything needing flatten_agent_defaults
+  or session-record work is out of scope.
+- Evolve basic in place — no new calibrated variant (owner ruling).
+- The triage gate stays inside the implement trait: no toolkit sizeGate extraction until a
+  second consumer exists (single-trait-packages rule), and no toolkit-wide severity schema
+  change — the existing approve/revise verdict plus light-review doctrine supply that
+  control.
+- Triage judges the drafted change plus repository evidence only — files it will touch,
+  novel logic vs cosmetic adjustment, blast radius beyond the rendering layer. No task
+  facet.
+- The standard branch is today's loop verbatim; the no-ceiling loop and its comment are a
+  standing ruling and must survive byte-identical.
+- Escalation is modeled as loop exhaustion: approval exits the light loop; onExhausted
+  sets the sizeTier verdict to standard and routes into the standard loop, never
+  converting an unapproved result into approval.
+- The reviewerLight role and light-review step come from the Stage 0 charter (0274) — this
+  charter consumes them, it does not redeclare them. The reviewer-light seat's model is
+  decided: haiku, configured in gitignored machine-local runtime.toml — an owner step.
+"""
+validation = """
+## Watch
+- Committed generated/*/index.toml canonicals and trait.lock are build outputs of
+  ctx traits build — never hand-edited.
+- No tests asserting on committed trait canonical content (no frozen-inventory proofs);
+  for pure trait-package edits the existing gates are the proof.
+- Prompts carry task doctrine only: classification and verdict conventions live in schema
+  field descriptions, slot descriptions, and resources — never in prompt text.
+
+## Done when
+Every child task (0275.1, 0275.2) is closed and the stop condition holds: the implement
+trait, landed through the trait-package recipe (just ts-build → ctx traits build implement)
+with just test green, runs basic as
+draft → size triage (a one-frame classification that completes successfully for both
+light and standard verdicts, never blocking the run) → verdict-routed flow where
+light-tier work takes a ≤3-round reviewerLight loop (approval-only success, honest
+escalation into the standard path) and standard-tier work takes today's unbounded loop
+untouched — with the trait version bumped in sync in trait.toml and source/index.ts.
+"""
