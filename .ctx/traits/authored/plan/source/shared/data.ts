@@ -14,15 +14,6 @@ export const taskInput = port.input.text({
     "The work you describe, in your own words — rough is fine. May reference a source document (a research report, an MVP plan) by repo-relative path.",
 });
 
-export const durationTarget = port.input.text({
-  id: "duration",
-  title: "Task Duration Target",
-  optional: true,
-  default: { value: "10-15 minutes" },
-  description:
-    'Target duration of one child task, e.g. "10-15 minutes" or "~45m". Slicing and review both judge tasks against this.',
-});
-
 export const workItemSchema: SchemaHandle = schema.object(
   "work-item",
   {
@@ -52,7 +43,7 @@ export const planTaskSchema: SchemaHandle = schema.object(
       description: "Keys of earlier tasks this one needs completed first; empty when independent.",
     }),
     summary: schema.field(schema.text(), {
-      description: "One-paragraph account of the task's work, sized to the run's duration target (default: roughly 10-15 minutes) of focused agent effort.",
+      description: "One-paragraph account of the task's work.",
     }),
   },
   {

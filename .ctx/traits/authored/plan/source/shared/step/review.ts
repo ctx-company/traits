@@ -1,7 +1,7 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
 import { condition, flow, input, signal } from "@ctx-traits/cdk";
 
-import { doneCriteria, durationTarget, receipts, revisionLog, slicePlan, taskInput, verdict, workItems } from "../data.ts";
+import { doneCriteria, receipts, revisionLog, slicePlan, taskInput, verdict, workItems } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 /**
@@ -16,7 +16,7 @@ function round(reviewer: AgentHandle, composer: AgentHandle) {
     input: input.prompt(
       `Independently review the task files written for {task} against the plan {slice-plan} and the receipts {receipts} — read every written file yourself with your tools; do not trust the receipts alone.
             The format contract every file must satisfy: ${TASK_FORMAT_DOCTRINE}
-            A BLOCKER is: a file that fails the format contract (not parseable TaskDocument TOML, wrong key/name shape, missing status/raised); a planned task with no file, or a file outside the plan; a work item in {work-items} no written task covers; an unmet or unrepresented entry of {done-criteria}; a slice keyed to a stack layer instead of a work item (more slices than work items is the tell); a define-first, architecture-only, or audit-only task or slice; a task materially larger than the run's duration target {duration} of focused work, or with a vague, unverifiable Done when; a task materially SMALLER than that target that a sibling could absorb; two tasks with no reason to be separate; a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code); a charter with no genuine umbrella — children sharing no stop condition beyond all being done; an implied total (task count times {duration}) disproportionate to the described work; a dependency error (depends-on naming a later or missing key, a child without its parent relation — symbolic order: KEY1 before KEY2, .9 before .10); grounding a task needs that its own body omits or contradicts; a mechanically verifiable Done when with no corresponding [[checks]] entry; or a declared check whose command does not exist in the repository or does not actually verify its Done when. Everything else is advisory.
+            A BLOCKER is: a file that fails the format contract (not parseable TaskDocument TOML, wrong key/name shape, missing status/raised); a planned task with no file, or a file outside the plan; a work item in {work-items} no written task covers; an unmet or unrepresented entry of {done-criteria}; a slice keyed to a stack layer instead of a work item (more slices than work items is the tell); a define-first, architecture-only, or audit-only task or slice; a task with a vague, unverifiable Done when; two tasks with no reason to be separate; a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code); a charter with no genuine umbrella — children sharing no stop condition beyond all being done; a dependency error (depends-on naming a later or missing key, a child without its parent relation — symbolic order: KEY1 before KEY2, .9 before .10); grounding a task needs that its own body omits or contradicts; a mechanically verifiable Done when with no corresponding [[checks]] entry; or a declared check whose command does not exist in the repository or does not actually verify its Done when. Everything else is advisory.
             Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
             Set status to revise while any blocker remains, approved when none do.`,
       {
@@ -25,7 +25,6 @@ function round(reviewer: AgentHandle, composer: AgentHandle) {
         receipts,
         "work-items": workItems,
         "done-criteria": doneCriteria,
-        duration: durationTarget,
       },
     ),
     output: verdict,

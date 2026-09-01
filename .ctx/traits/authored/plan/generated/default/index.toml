@@ -38,17 +38,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "duration"
-direction = "input"
-schema = "schema:text"
-optional = true
-description = 'Target duration of one child task, e.g. "10-15 minutes" or "~45m". Slicing and review both judge tasks against this.'
-title = "Task Duration Target"
-
-[port.default]
-value = "10-15 minutes"
-
-[[port]]
 id = "final-keys"
 direction = "output"
 schema = "schema:text"
@@ -314,7 +303,7 @@ description = """Symbolic key: the parent slice's KEY<n> plus a child ordinal, e
 [schema.fields.summary]
 schema = "schema:text"
 required = true
-description = "One-paragraph account of the task's work, sized to the run's duration target (default: roughly 10-15 minutes) of focused agent effort."
+description = "One-paragraph account of the task's work."
 
 [schema.fields.title]
 schema = "schema:text"
@@ -491,8 +480,7 @@ Rules:
 - Child tasks are keyed "KEY<n>.1", "KEY<n>.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — ".10", ".11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9, KEY1 is earlier than KEY2).
 - Decompose along the WORK, never the stack: a charter (or slice) is keyed to a work item, and one work item that spans many layers is ONE charter whose children may cross layers — schema, authoring surface, runtime, and their tests can live in one child when that is the coherent cut. More charters than work items is the tell that layers, not work, did the slicing.
 - Ceremony is a defect in every form: never a define-first or architecture-only task (the contract belongs in the charter's own body), never an audit-only or parity-only task (verification belongs in the validation and [[checks]] of the task that changed the behavior), and never a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code).
-- Size SYMMETRICALLY to the run's requested duration target (default: roughly 10-15 minutes of focused agent work): split anything materially larger into more tasks, and merge anything materially smaller into a sibling.
-- Judge the implied total — task count times the duration target — against the described work before writing: a plan whose total is disproportionate to what was asked is wrong even when every task is well-formed. Cover the work with the FEWEST tasks that stay within the duration target.
+- Cover the work with the FEWEST coherent tasks; a plan disproportionate to what was asked is wrong even when every task is well-formed. Sizing to swift agent runs is architect's decomposition judgment, not plan's.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -500,7 +488,7 @@ Rules:
 - At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
 - Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
 - Never modify an existing task file; symbolic keys exist so new files cannot collide with the board, and the renumber step never touches a file without a KEY-prefixed name.
-            A BLOCKER is: a file that fails the format contract (not parseable TaskDocument TOML, wrong key/name shape, missing status/raised); a planned task with no file, or a file outside the plan; a work item in {slot:work-items} no written task covers; an unmet or unrepresented entry of {slot:done-criteria}; a slice keyed to a stack layer instead of a work item (more slices than work items is the tell); a define-first, architecture-only, or audit-only task or slice; a task materially larger than the run's duration target {port:duration} of focused work, or with a vague, unverifiable Done when; a task materially SMALLER than that target that a sibling could absorb; two tasks with no reason to be separate; a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code); a charter with no genuine umbrella — children sharing no stop condition beyond all being done; an implied total (task count times {port:duration}) disproportionate to the described work; a dependency error (depends-on naming a later or missing key, a child without its parent relation — symbolic order: KEY1 before KEY2, .9 before .10); grounding a task needs that its own body omits or contradicts; a mechanically verifiable Done when with no corresponding [[checks]] entry; or a declared check whose command does not exist in the repository or does not actually verify its Done when. Everything else is advisory.
+            A BLOCKER is: a file that fails the format contract (not parseable TaskDocument TOML, wrong key/name shape, missing status/raised); a planned task with no file, or a file outside the plan; a work item in {slot:work-items} no written task covers; an unmet or unrepresented entry of {slot:done-criteria}; a slice keyed to a stack layer instead of a work item (more slices than work items is the tell); a define-first, architecture-only, or audit-only task or slice; a task with a vague, unverifiable Done when; two tasks with no reason to be separate; a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code); a charter with no genuine umbrella — children sharing no stop condition beyond all being done; a dependency error (depends-on naming a later or missing key, a child without its parent relation — symbolic order: KEY1 before KEY2, .9 before .10); grounding a task needs that its own body omits or contradicts; a mechanically verifiable Done when with no corresponding [[checks]] entry; or a declared check whose command does not exist in the repository or does not actually verify its Done when. Everything else is advisory.
             Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
             Set status to revise while any blocker remains, approved when none do.'''
 input = [
@@ -509,7 +497,6 @@ input = [
     "slot:receipts",
     "slot:work-items",
     "slot:done-criteria",
-    "port:duration",
 ]
 output = ["slot:review-verdict"]
 
@@ -552,8 +539,7 @@ Rules:
 - Child tasks are keyed "KEY<n>.1", "KEY<n>.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — ".10", ".11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9, KEY1 is earlier than KEY2).
 - Decompose along the WORK, never the stack: a charter (or slice) is keyed to a work item, and one work item that spans many layers is ONE charter whose children may cross layers — schema, authoring surface, runtime, and their tests can live in one child when that is the coherent cut. More charters than work items is the tell that layers, not work, did the slicing.
 - Ceremony is a defect in every form: never a define-first or architecture-only task (the contract belongs in the charter's own body), never an audit-only or parity-only task (verification belongs in the validation and [[checks]] of the task that changed the behavior), and never a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code).
-- Size SYMMETRICALLY to the run's requested duration target (default: roughly 10-15 minutes of focused agent work): split anything materially larger into more tasks, and merge anything materially smaller into a sibling.
-- Judge the implied total — task count times the duration target — against the described work before writing: a plan whose total is disproportionate to what was asked is wrong even when every task is well-formed. Cover the work with the FEWEST tasks that stay within the duration target.
+- Cover the work with the FEWEST coherent tasks; a plan disproportionate to what was asked is wrong even when every task is well-formed. Sizing to swift agent runs is architect's decomposition judgment, not plan's.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -575,14 +561,13 @@ Grounding notes: {slot:grounding}
 Describe every slice and child as a dependency-ordered outcome at module/area and validation-gate scope. Include applicable constraints from the grounding notes, but defer exact symbols, signatures, edits, and edit sequencing to architect.
 The one slice is the whole described work: its covers list every work item, its intent carries the shared stop condition, and its tasks list stays EMPTY — never pre-decompose, never emit children, never a second slice. The parent states outcome and acceptance shape at module/area and validation-gate scope; architect later judges whether it becomes a charter with children or stays the implementable unit.
 The slice's key is symbolic: "KEY1". Never invent numeric board keys — a final mechanical step assigns the real number from the live board.
-Record real dependencies on EXISTING board keys in depends-on. Duration target {port:duration} is context for stating acceptance, not a reason to trim scope: the parent may be larger than one run — architect owns making it swift.
+Record real dependencies on EXISTING board keys in depends-on. Never trim scope to a time budget: the parent may be larger than one run — architect owns decomposition and making it swift.
 Do not implement anything, and write nothing to disk in this step — not task files, not notes; return only the plan. A later step writes the board from it; any file created here is out-of-plan and will not be adopted."""
 input = [
     "port:task",
     "slot:work-items",
     "slot:done-criteria",
     "slot:grounding",
-    "port:duration",
 ]
 output = ["slot:slice-plan"]
 
@@ -625,8 +610,7 @@ Rules:
 - Child tasks are keyed "KEY<n>.1", "KEY<n>.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — ".10", ".11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9, KEY1 is earlier than KEY2).
 - Decompose along the WORK, never the stack: a charter (or slice) is keyed to a work item, and one work item that spans many layers is ONE charter whose children may cross layers — schema, authoring surface, runtime, and their tests can live in one child when that is the coherent cut. More charters than work items is the tell that layers, not work, did the slicing.
 - Ceremony is a defect in every form: never a define-first or architecture-only task (the contract belongs in the charter's own body), never an audit-only or parity-only task (verification belongs in the validation and [[checks]] of the task that changed the behavior), and never a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code).
-- Size SYMMETRICALLY to the run's requested duration target (default: roughly 10-15 minutes of focused agent work): split anything materially larger into more tasks, and merge anything materially smaller into a sibling.
-- Judge the implied total — task count times the duration target — against the described work before writing: a plan whose total is disproportionate to what was asked is wrong even when every task is well-formed. Cover the work with the FEWEST tasks that stay within the duration target.
+- Cover the work with the FEWEST coherent tasks; a plan disproportionate to what was asked is wrong even when every task is well-formed. Sizing to swift agent runs is architect's decomposition judgment, not plan's.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -718,7 +702,6 @@ input = [
     "slot:work-items",
     "slot:done-criteria",
     "slot:grounding",
-    "port:duration",
     { slot = "slot:slice-plan", optional = true },
 ]
 output = ["slot:slice-plan"]
@@ -734,7 +717,6 @@ input = [
     "slot:receipts",
     "slot:work-items",
     "slot:done-criteria",
-    "port:duration",
     { slot = "slot:review-verdict", optional = true },
 ]
 output = ["slot:review-verdict"]
@@ -770,7 +752,6 @@ operation = "append"
 [procedure]
 description = "Extract the source's work items and done criteria, ground the work in the codebase, shape it as one symbolic-keyed parent slice, write that parent's TaskDocument in one frame, run one bounded independent review pass, then assign final board keys mechanically from the live board and commit the written files."
 input = [
-    "port:duration",
     "port:owner-gate",
     "port:task",
 ]

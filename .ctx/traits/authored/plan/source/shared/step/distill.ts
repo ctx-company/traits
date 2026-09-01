@@ -1,7 +1,7 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
 import { input } from "@ctx-traits/cdk";
 
-import { durationTarget, raisedDate, receipts, taskInput } from "../data.ts";
+import { raisedDate, receipts, taskInput } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 /**
@@ -16,9 +16,9 @@ export function tasks(agent: AgentHandle) {
       `Turn the described work directly into TaskDocument TOML task files on the board — skip deriving separate grounding notes, but read the relevant parts of the repository with your tools so every task is grounded in this codebase's affected modules or areas, applicable constraints, and existing validation gates. Do not solicit or prescribe exact symbols, signatures, edits, or edit sequencing; architect makes those execution-level decisions later.
             The work, as described: {task}
             ${TASK_FORMAT_DOCTRINE}
-            Shape follows the work, per the doctrine: one bare task ("KEY1"), several independent bare tasks ("KEY1", "KEY2", ...), or a charter with children ("KEY1" plus "KEY1.1", "KEY1.2", ... — ordinals continue ".10", ".11", ..., never zero-padded) only when a genuine umbrella exists. Size every task symmetrically to roughly {duration} of focused agent work, cover the work with the FEWEST tasks that stay within it, and never write a gate-only task. Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
+            Shape follows the work, per the doctrine: one bare task ("KEY1"), several independent bare tasks ("KEY1", "KEY2", ...), or a charter with children ("KEY1" plus "KEY1.1", "KEY1.2", ... — ordinals continue ".10", ".11", ..., never zero-padded) only when a genuine umbrella exists. Cover the work with the FEWEST coherent tasks, and never write a gate-only task. Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
             Do not implement anything. Return the receipts: one entry per charter (or standalone task) naming every file written.`,
-      { task: taskInput, "raised-date": raisedDate, duration: durationTarget },
+      { task: taskInput, "raised-date": raisedDate },
     ),
     output: receipts,
   });

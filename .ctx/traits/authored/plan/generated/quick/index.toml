@@ -38,17 +38,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "duration"
-direction = "input"
-schema = "schema:text"
-optional = true
-description = 'Target duration of one child task, e.g. "10-15 minutes" or "~45m". Slicing and review both judge tasks against this.'
-title = "Task Duration Target"
-
-[port.default]
-value = "10-15 minutes"
-
-[[port]]
 id = "final-keys"
 direction = "output"
 schema = "schema:text"
@@ -149,8 +138,7 @@ Rules:
 - Child tasks are keyed "KEY<n>.1", "KEY<n>.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys. Ordinals are plain integers with no upper bound — ".10", ".11", ... — never zero-padded; "earlier keys" means numeric ordinal order (.10 is later than .9, KEY1 is earlier than KEY2).
 - Decompose along the WORK, never the stack: a charter (or slice) is keyed to a work item, and one work item that spans many layers is ONE charter whose children may cross layers — schema, authoring surface, runtime, and their tests can live in one child when that is the coherent cut. More charters than work items is the tell that layers, not work, did the slicing.
 - Ceremony is a defect in every form: never a define-first or architecture-only task (the contract belongs in the charter's own body), never an audit-only or parity-only task (verification belongs in the validation and [[checks]] of the task that changed the behavior), and never a task whose body is only running gates, tests, or checks (gates belong in the [[checks]] of the task that changed the code).
-- Size SYMMETRICALLY to the run's requested duration target (default: roughly 10-15 minutes of focused agent work): split anything materially larger into more tasks, and merge anything materially smaller into a sibling.
-- Judge the implied total — task count times the duration target — against the described work before writing: a plan whose total is disproportionate to what was asked is wrong even when every task is well-formed. Cover the work with the FEWEST tasks that stay within the duration target.
+- Cover the work with the FEWEST coherent tasks; a plan disproportionate to what was asked is wrong even when every task is well-formed. Sizing to swift agent runs is architect's decomposition judgment, not plan's.
 - Fold the scope-level grounding each task needs — affected modules or areas, applicable invariants and constraints, and existing validation gates with exact commands — into that task's own content/scope/validation, so every file stands alone. Defer execution-level decisions to architect: never prescribe exact symbols, signatures, edits, or edit sequencing.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
 - When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
@@ -158,21 +146,17 @@ Rules:
 - At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
 - Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
 - Never modify an existing task file; symbolic keys exist so new files cannot collide with the board, and the renumber step never touches a file without a KEY-prefixed name.
-            Shape follows the work, per the doctrine: one bare task ("KEY1"), several independent bare tasks ("KEY1", "KEY2", ...), or a charter with children ("KEY1" plus "KEY1.1", "KEY1.2", ... — ordinals continue ".10", ".11", ..., never zero-padded) only when a genuine umbrella exists. Size every task symmetrically to roughly {port:duration} of focused agent work, cover the work with the FEWEST tasks that stay within it, and never write a gate-only task. Stamp raised = {slot:raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
+            Shape follows the work, per the doctrine: one bare task ("KEY1"), several independent bare tasks ("KEY1", "KEY2", ...), or a charter with children ("KEY1" plus "KEY1.1", "KEY1.2", ... — ordinals continue ".10", ".11", ..., never zero-padded) only when a genuine umbrella exists. Cover the work with the FEWEST coherent tasks, and never write a gate-only task. Stamp raised = {slot:raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
             Do not implement anything. Return the receipts: one entry per charter (or standalone task) naming every file written.'''
 input = [
     "port:task",
     "slot:raised-date",
-    "port:duration",
 ]
 output = ["slot:receipts"]
 
 [procedure]
 description = "Distill the described work — grounded by the frame's own repository reading — straight into symbolic-keyed TaskDocument TOML files on the board, then assign final board keys mechanically from the live board."
-input = [
-    "port:duration",
-    "port:task",
-]
+input = ["port:task"]
 output = [
     "port:final-keys",
     "port:written-files",
@@ -198,7 +182,6 @@ prompt = "prompt:distill"
 input = [
     "port:task",
     "slot:raised-date",
-    "port:duration",
 ]
 output = ["slot:receipts"]
 

@@ -1,7 +1,7 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
 import { condition, flow, input, signal } from "@ctx-traits/cdk";
 
-import { doneCriteria, durationTarget, grounding, slicePlan, taskInput, workItems } from "../data.ts";
+import { doneCriteria, grounding, slicePlan, taskInput, workItems } from "../data.ts";
 
 /**
  * How many slices the plan may hold — the deterministic gate below AND the
@@ -42,7 +42,7 @@ export function slices(agent: AgentHandle) {
             Describe every slice and child as a dependency-ordered outcome at module/area and validation-gate scope. Include applicable constraints from the grounding notes, but defer exact symbols, signatures, edits, and edit sequencing to architect.
             The one slice is the whole described work: its covers list every work item, its intent carries the shared stop condition, and its tasks list stays EMPTY — never pre-decompose, never emit children, never a second slice. The parent states outcome and acceptance shape at module/area and validation-gate scope; architect later judges whether it becomes a charter with children or stays the implementable unit.
             The slice's key is symbolic: "KEY1". Never invent numeric board keys — a final mechanical step assigns the real number from the live board.
-            Record real dependencies on EXISTING board keys in depends-on. Duration target ${durationTarget} is context for stating acceptance, not a reason to trim scope: the parent may be larger than one run — architect owns making it swift.
+            Record real dependencies on EXISTING board keys in depends-on. Never trim scope to a time budget: the parent may be larger than one run — architect owns decomposition and making it swift.
             Do not implement anything, and write nothing to disk in this step — not task files, not notes; return only the plan. A later step writes the board from it; any file created here is out-of-plan and will not be adopted.`,
       output: slicePlan,
       include: [slicePlan.optional()],
