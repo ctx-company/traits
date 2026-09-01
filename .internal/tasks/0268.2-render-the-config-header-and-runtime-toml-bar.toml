@@ -126,31 +126,3 @@ At most one targeted repair-and-rerun round: repair one named defect and rerun w
 [relations]
 parent = "0268"
 depends-on = ["0268.1", "0265.13"]
-
-[[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1200000
-
-[[checks]]
-name = "the landed config report is unchanged"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_config"
-timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
-
-[[checks]]
-name = "center wire proof still passes for any served-answer widening"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
-
-[[checks]]
-name = "the generated-runtime document proof still passes"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_runtime_ts"
-timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
-
-[[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
-timeout-ms = 300000

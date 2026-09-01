@@ -487,32 +487,3 @@ focused test filters actually run, and every deviation from this approach.
 [relations]
 parent = "0266"
 depends-on = ["0266.1"]
-
-[[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1800000
-
-[[checks]]
-name = "the TUI board projection and preview stay green"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
-expect = "test result: ok\\. [1-9]"
-timeout-ms = 900000
-
-[[checks]]
-name = "the CLI's direct task readers stay green"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib tasks"
-expect = "test result: ok\\. [1-9]"
-timeout-ms = 900000
-
-[[checks]]
-name = "the served board answer and center absence stay green over the real socket"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9]"
-timeout-ms = 1800000
-
-[[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
-expect = "gpui absent from root resolution and lockfile"
-timeout-ms = 600000

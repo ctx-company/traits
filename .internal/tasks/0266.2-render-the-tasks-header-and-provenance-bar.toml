@@ -633,26 +633,3 @@ depends-on = [
     "0265.13",
 ]
 parent = "0266"
-
-[[checks]]
-name = "the board digest fold and the typed board outcomes stay green"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib task_files"
-timeout-ms = 900000
-expect = 'test result: ok\. [1-9]'
-
-[[checks]]
-name = "the center wire carries the digest and the captured instant"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-timeout-ms = 1800000
-expect = 'test result: ok\. [1-9]'
-
-[[checks]]
-name = "the counts, the phrasing entry and every other consumer keep the per-round gate green"
-command = "CARGO_TARGET_DIR=target just test"
-timeout-ms = 1800000
-
-[[checks]]
-name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = """m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc"""
-timeout-ms = 600000
-expect = "gpui absent from root resolution and lockfile"

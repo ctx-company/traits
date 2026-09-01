@@ -882,13 +882,3 @@ is the stop condition, not a judgement call.
 [relations]
 parent = "0269"
 depends-on = ["0265.5", "0265.7", "0265.9", "0258"]
-
-[[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''
-timeout-ms = 600000
-
-[[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1800000

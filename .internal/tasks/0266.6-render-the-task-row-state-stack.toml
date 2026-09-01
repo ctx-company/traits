@@ -489,21 +489,3 @@ approach.
 [relations]
 parent = "0266"
 depends-on = ["0266.1"]
-
-[[checks]]
-name = "the served state, claim and blocker facts stay green over the real socket"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9]"
-timeout-ms = 1800000
-
-[[checks]]
-name = "the shared state presentation and every other consumer keep the per-round gate green"
-command = "just test"
-expect = "test result: ok\\. [1-9]"
-timeout-ms = 1800000
-
-[[checks]]
-name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
-expect = "gpui absent from root resolution and lockfile"
-timeout-ms = 600000

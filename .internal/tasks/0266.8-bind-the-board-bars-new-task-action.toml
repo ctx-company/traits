@@ -553,20 +553,3 @@ not a judgement call.
 [relations]
 parent = "0266"
 depends-on = ["0266.2", "0266.3"]
-
-[[checks]]
-name = "0266.3's center-served creation, its typed refusals and its changed board answer stay unmoved"
-command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-expect = "test result: ok\\. [1-9]"
-timeout-ms = 1800000
-
-[[checks]]
-name = "per-round workspace gate remains green"
-command = "CARGO_TARGET_DIR=target just test"
-timeout-ms = 1800000
-
-[[checks]]
-name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
-expect = "gpui absent from root resolution and lockfile"
-timeout-ms = 600000

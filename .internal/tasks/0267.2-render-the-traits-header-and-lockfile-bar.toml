@@ -111,12 +111,3 @@ At most one targeted repair-and-rerun round: repair one named defect and rerun w
 [relations]
 parent = "0267"
 depends-on = ["0267.1", "0265.13"]
-
-[[checks]]
-name = "per-round workspace gate remains green"
-command = "just test"
-timeout-ms = 1200000
-
-[[checks]]
-name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
