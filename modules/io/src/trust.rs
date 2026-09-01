@@ -156,7 +156,7 @@ impl Document {
 
 /// Where a [`TrustRecord`] stands relative to the trait it names, once
 /// joined against that trait's current resolved canonical digest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TrustFreshness {
     /// The recorded digest equals the trait's current resolved digest
@@ -175,7 +175,7 @@ pub enum TrustFreshness {
 /// A [`TrustRecord`] joined against current trait resolution: the shared
 /// classification `trust <trait>`, `trust --list`, and `doctor` all read from,
 /// so none of them re-derive current/stale/orphan independently.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TrustReportRow {
     pub trait_id: Option<String>,

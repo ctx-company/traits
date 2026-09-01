@@ -13,11 +13,16 @@ use ctx_traits_io::center::{ControlAction, StartResult};
 
 pub(super) type RefreshResult = Result<Arc<DashboardSnapshot>, String>;
 pub(super) type PreviewResult = AttachedView;
+pub(super) struct TraitDetailResult {
+    pub(super) selector: ctx_traits_io::library::LibraryDetailSelector,
+    pub(super) result: Result<ctx_traits_io::library::LibraryDetailResolution, String>,
+}
 
 pub(super) struct Handle {
     commands: mpsc::Sender<Command>,
     snapshots: mpsc::Receiver<RefreshResult>,
     previews: mpsc::Receiver<PreviewResult>,
+    trait_details: mpsc::Receiver<TraitDetailResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
     actions: mpsc::Receiver<ActionResult>,
     action_sender: mpsc::Sender<ActionResult>,
@@ -50,9 +55,10 @@ enum Command {
         all_repos: bool,
         screen: Screen,
     },
-    /// The periodic dashboard tick: refresh only TRAITS/TRUST and previews.
-    Refresh,
     Preview(SessionPreviewRequest),
+    TraitDetail(ctx_traits_io::library::LibraryDetailSelector),
+    /// Kept for test-only command projections; it never reads library files.
+    Refresh,
     Explain(ExplanationRequest),
 }
 
@@ -61,13 +67,15 @@ impl Handle {
         let (commands, command_rx) = mpsc::channel();
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (preview_tx, previews) = mpsc::channel();
+        let (trait_detail_tx, trait_details) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
-        std::thread::spawn(move || run(command_rx, snapshot_tx, preview_tx, explanation_tx));
+        std::thread::spawn(move || run(command_rx, snapshot_tx, preview_tx, trait_detail_tx, explanation_tx));
         Self {
             commands,
             snapshots,
             previews,
+            trait_details,
             explanations,
             actions,
             action_sender,
@@ -79,12 +87,14 @@ impl Handle {
         let (commands, _command_rx) = mpsc::channel();
         let (_snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
+        let (_trait_detail_tx, trait_details) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
         Self {
             commands,
             snapshots,
             previews,
+            trait_details,
             explanations,
             actions,
             action_sender,
@@ -169,12 +179,26 @@ impl Handle {
         let _ = self.commands.send(Command::Render { all_repos, screen });
     }
 
-    pub(super) fn refresh_non_session(&self) {
-        let _ = self.commands.send(Command::Refresh);
-    }
-
     pub(super) fn preview(&self, request: SessionPreviewRequest) {
         let _ = self.commands.send(Command::Preview(request));
+    }
+
+    pub(super) fn trait_detail(&self, selector: ctx_traits_io::library::LibraryDetailSelector) {
+        let _ = self.commands.send(Command::TraitDetail(selector));
+    }
+
+    pub(super) fn notify_library_changed(&self) {
+        std::thread::spawn(|| {
+            if let Ok(repo_key) = ctx_traits_io::state::current_repo_key() {
+                let _ = ctx_traits_io::center::notify_library_changed(&repo_key);
+            }
+        });
+    }
+
+    pub(super) fn trait_detail_results(&self) -> Vec<TraitDetailResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.trait_details.try_recv() { results.push(result); }
+        results
     }
 
     pub(super) fn preview_results(&self) -> Vec<PreviewResult> {
@@ -259,6 +283,7 @@ fn run(
     commands: mpsc::Receiver<Command>,
     snapshots: mpsc::Sender<RefreshResult>,
     previews: mpsc::Sender<PreviewResult>,
+    trait_details: mpsc::Sender<TraitDetailResult>,
     explanations: mpsc::Sender<ExplanationResult>,
 ) {
     let mut state = State::new_without_worker();
@@ -281,6 +306,7 @@ fn run(
                     &commands,
                     &snapshots,
                     &previews,
+                    &trait_details,
                     &explanations,
                     &mut state,
                     &rows,
@@ -303,6 +329,7 @@ fn run(
                             command,
                             &snapshots,
                             &previews,
+                            &trait_details,
                             &explanations,
                             &mut state,
                             &rows,
@@ -355,8 +382,27 @@ fn run(
                         accepted,
                         std::time::SystemTime::now(),
                     );
+                    // Do not delay the authoritative session snapshot. The
+                    // served library is requested immediately afterwards.
+                    if !cfg!(test) && let Err(error) = refresh_library(&mut state) {
+                        let _ = snapshots.send(Err(format!("library unavailable: {error}")));
+                    }
                 }
                 Ok(ctx_traits_io::center::CenterEvent::Delta(delta)) => {
+                    if let ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys } = &delta {
+                        let scoped = ctx_traits_io::state::current_repo_key()
+                            .map(|key| repo_keys.contains(&key))
+                            .unwrap_or(false);
+                        if scoped {
+                            match refresh_library(&mut state) {
+                                Ok(()) => {
+                                    if emit_cached_rows_snapshot(&snapshots, &mut state, &rows, false).is_err() { return; }
+                                }
+                                Err(error) => { let _ = snapshots.send(Err(format!("library unavailable: {error}"))); }
+                            }
+                        }
+                        continue;
+                    }
                     if snapshotting {
                         let _ = apply_delta(&mut staged_rows, delta);
                         continue;
@@ -410,7 +456,8 @@ fn run(
         if wait_for_retry(
             &commands,
             &snapshots,
-            &previews,
+                            &previews,
+                            &trait_details,
             &explanations,
             &mut state,
             &rows,
@@ -468,6 +515,7 @@ fn wait_for_retry(
     commands: &mpsc::Receiver<Command>,
     snapshots: &mpsc::Sender<RefreshResult>,
     previews: &mpsc::Sender<PreviewResult>,
+    trait_details: &mpsc::Sender<TraitDetailResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
@@ -484,6 +532,7 @@ fn wait_for_retry(
                 command,
                 snapshots,
                 previews,
+                trait_details,
                 explanations,
                 state,
                 rows,
@@ -499,6 +548,7 @@ fn handle_one_command(
     command: Command,
     snapshots: &mpsc::Sender<RefreshResult>,
     previews: &mpsc::Sender<PreviewResult>,
+    trait_details: &mpsc::Sender<TraitDetailResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
@@ -507,6 +557,20 @@ fn handle_one_command(
     match command {
         Command::Explain(request) => explanations.send(explain(request)).map_err(|_| ()),
         Command::Preview(request) => previews.send(preview(state, request)).map_err(|_| ()),
+        Command::TraitDetail(selector) => {
+            let sender = trait_details.clone();
+            std::thread::spawn(move || {
+                let result = ctx_traits_io::state::current_repo_key()
+                    .and_then(|repo_key| ctx_traits_io::center::library_detail_existing(&repo_key, selector.clone()))
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(TraitDetailResult { selector, result });
+            });
+            Ok(())
+        }
+        Command::Refresh => {
+            emit_cached_rows_snapshot(snapshots, state, rows, clear_refresh_error)?;
+            Ok(())
+        }
         Command::Render { all_repos, screen } => {
             let previous_scope = state.all_repos;
             let previous_screen = state.screen;
@@ -521,7 +585,6 @@ fn handle_one_command(
             }
             Ok(())
         }
-        Command::Refresh => emit_command_snapshot(snapshots, state, clear_refresh_error),
     }
 }
 
@@ -534,20 +597,11 @@ fn emit_subscription_snapshot(
     emit_snapshot(snapshots, state, rows, true, true, changed_ledger_path)
 }
 
-fn emit_command_snapshot(
-    snapshots: &mpsc::Sender<RefreshResult>,
-    state: &mut State,
-    clear_refresh_error: bool,
-) -> Result<(), ()> {
-    let result = state
-        .reload_non_session_state()
-        .map(|_| {
-            let mut snapshot = DashboardSnapshot::from_state(state);
-            snapshot.clear_refresh_error = clear_refresh_error;
-            Arc::new(snapshot)
-        })
-        .map_err(|error| error.to_string());
-    snapshots.send(result).map_err(|_| ())
+fn refresh_library(state: &mut State) -> crate::Result<()> {
+    let repo_key = ctx_traits_io::state::current_repo_key()?;
+    let answer = ctx_traits_io::center::library_existing(&repo_key)?;
+    state.apply_library(&answer);
+    Ok(())
 }
 
 fn emit_cached_rows_snapshot(
@@ -711,10 +765,11 @@ mod tests {
             let (commands, command_rx) = mpsc::channel();
             let (snapshot_tx, snapshots) = mpsc::channel();
             let (preview_tx, _preview_rx) = mpsc::channel();
+            let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
             let (explanation_tx, _explanation_rx) = mpsc::channel();
             let worker = std::thread::Builder::new()
                 .name(name.to_string())
-                .spawn(move || run(command_rx, snapshot_tx, preview_tx, explanation_tx))
+                .spawn(move || run(command_rx, snapshot_tx, preview_tx, trait_detail_tx, explanation_tx))
                 .expect("spawn worker");
             Self {
                 commands: Some(commands),
@@ -791,6 +846,7 @@ mod tests {
     fn refresh_emits_an_empty_snapshot() {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
+        let (trait_details, _trait_detail_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         let rows = HashMap::new();
@@ -799,6 +855,7 @@ mod tests {
             Command::Refresh,
             &snapshots,
             &previews,
+            &trait_details,
             &explanations,
             &mut state,
             &rows,
@@ -822,6 +879,7 @@ mod tests {
         let _lock = crate::app::test_support::center_environment_lock();
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
+        let (trait_details, _trait_detail_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         state.all_repos = true;
@@ -839,6 +897,7 @@ mod tests {
             Command::Refresh,
             &snapshots,
             &previews,
+            &trait_details,
             &explanations,
             &mut state,
             &rows,
@@ -859,6 +918,7 @@ mod tests {
         let (commands, command_rx) = mpsc::channel();
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
+        let (trait_details, _trait_detail_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         let rows = HashMap::new();
@@ -873,6 +933,7 @@ mod tests {
             &command_rx,
             &snapshots,
             &previews,
+            &trait_details,
             &explanations,
             &mut state,
             &rows,
@@ -893,12 +954,14 @@ mod tests {
         let (commands, _command_rx) = mpsc::channel();
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
+        let (_trait_detail_tx, trait_details) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
         let handle = Handle {
             commands,
             snapshots,
             previews,
+            trait_details,
             explanations,
             actions,
             action_sender,
@@ -1093,6 +1156,7 @@ mod tests {
         });
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
+        let (trait_details, _trait_detail_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         state.all_repos = true;
@@ -1110,6 +1174,7 @@ mod tests {
             },
             &snapshots,
             &previews,
+            &trait_details,
             &explanations,
             &mut state,
             &rows,
@@ -1662,7 +1727,8 @@ mod tests {
         let (explanation_tx, _explanation_rx) = mpsc::channel();
         let (exited_tx, exited_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            run(command_rx, snapshot_tx, preview_tx, explanation_tx);
+            let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
+            run(command_rx, snapshot_tx, preview_tx, trait_detail_tx, explanation_tx);
             let _ = exited_tx.send(());
         });
 

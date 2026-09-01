@@ -38,9 +38,7 @@ use ratatui::widgets::Paragraph;
 
 use super::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
 use super::frame_prompt::summons_question;
-use super::lifecycle_reporting::{
-    DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source,
-};
+use super::lifecycle_reporting::{DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source};
 use super::merge::{MergeInputs, merge};
 use super::merge_story;
 use super::report_check::sequence_kind_label;
@@ -1411,13 +1409,6 @@ impl State {
         }
     }
 
-    fn reload_non_session(&mut self) {
-        if let Some(worker) = &self.worker {
-            worker.refresh_non_session();
-            self.loading = true;
-        }
-    }
-
     /// P081: always the currently-selected row's own request — attach is now
     /// a synchronous handoff (see [`AttachRequest`]) rather than a persisted
     /// dashboard mode, so there is no longer a second "attached" identity to
@@ -1452,6 +1443,7 @@ impl State {
         };
         let explanation_results = worker.explanation_results();
         let preview_results = worker.preview_results();
+        let trait_detail_results = worker.trait_detail_results();
         let refresh_results = worker.refresh_results();
         for result in explanation_results {
             if self.traits.get(self.selected()).is_some_and(|row| {
@@ -1479,7 +1471,28 @@ impl State {
             }
         }
         self.apply_preview_results(preview_results);
+        self.apply_trait_detail_results(trait_detail_results);
         self.apply_refresh_results(refresh_results);
+    }
+
+    fn apply_trait_detail_results(&mut self, results: impl IntoIterator<Item = worker::TraitDetailResult>) {
+        for result in results {
+            let selected = self.traits.get(self.selected());
+            if !selected.is_some_and(|row| row.id == result.selector.trait_id && row.canonical_digest == result.selector.canonical_digest.clone().unwrap_or_default() && row.variant == result.selector.member) { continue; }
+            let facts = match result.result {
+                Ok(ctx_traits_io::library::LibraryDetailResolution::Resolved { display_identity, version, status, canonical_digest, trust_record, trust_reason, trust_stale, has_trust_record, drift, source_drift_checked, procedure, source_path, source_excerpt, .. }) => TraitPreviewFacts {
+                    id: display_identity, version, status, canonical_digest,
+                    trust_state: trust_record.as_ref().map(|record| record.state.as_str().to_string()).unwrap_or_else(|| "pending".to_string()),
+                    trust_reason, trust_stale, has_trust_record, drift, source_drift_checked,
+                    procedure: match procedure { ctx_traits_io::library::LibraryProcedureShape::Sequence(items) => ProcedureShape::Sequence(items), ctx_traits_io::library::LibraryProcedureShape::GuidanceOnly => ProcedureShape::GuidanceOnly, ctx_traits_io::library::LibraryProcedureShape::Unknown => ProcedureShape::Unknown },
+                    source_path, source_excerpt, error: None,
+                },
+                Ok(ctx_traits_io::library::LibraryDetailResolution::Unreadable { id, error, .. }) => TraitPreviewFacts { id, version: String::new(), status: String::new(), canonical_digest: String::new(), trust_state: "pending".to_string(), trust_reason: String::new(), trust_stale: false, has_trust_record: false, drift: "unverified".to_string(), source_drift_checked: false, procedure: ProcedureShape::Unknown, source_path: String::new(), source_excerpt: Vec::new(), error: Some(error) },
+                Ok(other) => TraitPreviewFacts { id: result.selector.trait_id.clone(), version: String::new(), status: String::new(), canonical_digest: result.selector.canonical_digest.clone().unwrap_or_default(), trust_state: "pending".to_string(), trust_reason: String::new(), trust_stale: false, has_trust_record: false, drift: "unverified".to_string(), source_drift_checked: false, procedure: ProcedureShape::Unknown, source_path: String::new(), source_excerpt: Vec::new(), error: Some(format!("trait detail unavailable: {}", detail_error(&other))) },
+                Err(error) => TraitPreviewFacts { id: result.selector.trait_id.clone(), version: String::new(), status: String::new(), canonical_digest: result.selector.canonical_digest.clone().unwrap_or_default(), trust_state: "pending".to_string(), trust_reason: String::new(), trust_stale: false, has_trust_record: false, drift: "unverified".to_string(), source_drift_checked: false, procedure: ProcedureShape::Unknown, source_path: String::new(), source_excerpt: Vec::new(), error: Some(error) },
+            };
+            self.trait_preview = Some(TraitPreview { trait_id: result.selector.trait_id, canonical_digest: facts.canonical_digest.clone(), lines: trait_preview_lines(&facts).iter().map(tui_ratatui::render_line).collect() });
+        }
     }
 
     fn apply_preview_results(&mut self, results: impl IntoIterator<Item = worker::PreviewResult>) {
@@ -1626,7 +1639,6 @@ impl State {
         // Complete every fallible operation before replacing a visible session
         // model. A failed center projection must leave the accepted snapshot
         // intact for command refreshes and outage rendering.
-        self.reload_non_session_state()?;
         self.sessions = sessions;
         self.merges = merges;
         self.run_sightings = run_sightings;
@@ -1646,15 +1658,12 @@ impl State {
         Ok(())
     }
 
-    /// Refresh projections that do not depend on session rows. This is used by
-    /// the periodic dashboard command while the subscription remains the sole
-    /// owner of the session model.
-    fn reload_non_session_state(&mut self) -> crate::Result<()> {
-        if matches!(self.screen, Screen::Traits | Screen::Trust) {
-            let (traits, trust) = load_traits_and_trust()?;
-            self.traits = traits;
-            self.trust = trust;
-        }
+    /// Commit a complete center-served library answer. Traits and trust always
+    /// move together because their trust evidence comes from the same answer.
+    fn apply_library(&mut self, answer: &ctx_traits_io::center::LibraryWireResult) {
+        let (traits, trust) = project_library(answer);
+        self.traits = traits;
+        self.trust = trust;
         rebuild_visible_trust(self);
         let trust_ids: Vec<String> = self
             .trust
@@ -1664,16 +1673,12 @@ impl State {
         self.trust_marks.retain_existing(&trust_ids);
         self.list_traits.set_len(self.traits.len());
         self.list_merges.set_len(self.merges.len());
-        if self.screen == Screen::Merges {
-            refresh_merge_preview_for_selection(self);
-        }
         if self.screen == Screen::Traits {
             refresh_trait_preview_for_selection(self);
         }
         if self.screen == Screen::Trust {
             refresh_trust_preview_for_selection(self);
         }
-        Ok(())
     }
 
     fn center_row_projections(
@@ -2415,35 +2420,30 @@ fn dashboard_token_value(tokens: Option<u64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-/// Builds both TRAITS' and TRUST's rows from the single
-/// [`dashboard_trait_inventory`] scan (P473 §4.1): TRAITS filters
-/// `origin != Some("built-in")` (byte-identical to pre-P473 rows); TRUST
-/// projects the full tier set via [`build_trust_rows`]. No second inventory
-/// scan, no second trust-store read.
-fn load_traits_and_trust() -> crate::Result<(Vec<TraitRow>, Vec<TrustRow>)> {
-    let context = ctx_traits_io::inventory::InventoryContext::discover()?;
-    let document = ctx_traits_io::trust::read_store()?;
-    let all = super::lifecycle_reporting::dashboard_trait_inventory_from(&context, &document)?;
-    let traits = all
-        .iter()
-        .filter(|row| row.origin.as_deref() != Some("built-in"))
-        .map(|row| TraitRow {
-            id: row.id.clone(),
-            version: row.version.clone(),
-            status: row.error.clone().unwrap_or_else(|| row.status.clone()),
-            trust: if row.error.is_some() {
-                "unreadable".to_string()
-            } else {
-                row.trust.clone()
-            },
-            canonical_digest: row.canonical_digest.clone(),
-            source_path: row.source_path.clone(),
-            error: row.error.clone(),
-            variant: row.variant.clone(),
-        })
-        .collect();
-    let trust = build_trust_rows_from(&document, &all);
-    Ok((traits, trust))
+/// Pure projection of one repository-scoped served library answer.
+fn project_library(answer: &ctx_traits_io::center::LibraryWireResult) -> (Vec<TraitRow>, Vec<TrustRow>) {
+    let mut traits = Vec::new();
+    let mut trust = Vec::new();
+    for row in &answer.resolution.rows {
+        match row {
+            ctx_traits_io::library::LibraryRow::Resolved(member) => {
+                if member.origin != "built-in" {
+                    traits.push(TraitRow { id: member.id.clone(), version: member.version.clone(), status: member.status.clone(), trust: member.trust.display_name().to_string(), canonical_digest: member.canonical_digest.clone(), source_path: member.source_path.clone(), error: None, variant: member.variant.clone() });
+                }
+                trust.push(TrustRow { trait_id: Some(member.id.clone()), origin: member.origin.clone(), family: member.family.clone(), variant: member.variant.clone(), current_digest: member.canonical_digest.clone(), recorded_digest: member.record.as_ref().map(|record| record.digest.clone()), class: trust_story::classify_trust(member.record.as_ref()), updated_at: member.record.as_ref().and_then(|record| record.updated_at.clone()), reason: member.record.as_ref().and_then(|record| record.reason.clone()) });
+            }
+            ctx_traits_io::library::LibraryRow::Unreadable { id, path, error, origin, .. } if origin != "built-in" => {
+                traits.push(TraitRow { id: id.clone(), version: String::new(), status: error.clone(), trust: "unreadable".to_string(), canonical_digest: String::new(), source_path: path.clone(), error: Some(error.clone()), variant: None });
+            }
+            _ => {}
+        }
+    }
+    for orphan in &answer.resolution.orphans {
+        trust.push(TrustRow { trait_id: None, origin: "orphaned".to_string(), family: None, variant: None, current_digest: String::new(), recorded_digest: Some(orphan.digest.clone()), class: trust_story::TrustClass::Orphaned, updated_at: orphan.updated_at.clone(), reason: orphan.reason.clone() });
+    }
+    traits.sort_by(|a, b| a.id.cmp(&b.id));
+    sort_trust_rows(&mut trust);
+    (traits, trust)
 }
 
 /// Projects a run inventory scan to the cheap owned facts [`run_sighting`]
@@ -2835,7 +2835,6 @@ fn run_with_initial_session(
             // active screen. It never opens a session ledger or asks the
             // center for a session.
             if last_reload.elapsed() >= RELOAD_INTERVAL {
-                state.reload_non_session();
                 refresh_tasks_board_if_stale(&mut state);
                 last_reload = std::time::Instant::now();
             }
@@ -3743,8 +3742,21 @@ fn refresh_trait_preview_impl(state: &mut State, force: bool) {
     if !force && !trait_preview_needs_rebuild(cached, &row.id, &row.canonical_digest) {
         return;
     }
-    let trust_document = ctx_traits_io::trust::read_store().unwrap_or_default();
-    state.trait_preview = Some(build_trait_preview(row, &trust_document));
+    if let Some(worker) = &state.worker {
+        worker.trait_detail(ctx_traits_io::library::LibraryDetailSelector {
+            trait_id: row.id.clone(), canonical_digest: Some(row.canonical_digest.clone()), member: row.variant.clone(),
+        });
+    }
+}
+
+fn detail_error(detail: &ctx_traits_io::library::LibraryDetailResolution) -> String {
+    match detail {
+        ctx_traits_io::library::LibraryDetailResolution::SourceOnly { .. } => "source-only".to_string(),
+        ctx_traits_io::library::LibraryDetailResolution::Missing => "missing".to_string(),
+        ctx_traits_io::library::LibraryDetailResolution::Stale { .. } => "stale".to_string(),
+        ctx_traits_io::library::LibraryDetailResolution::Refused { reason } => reason.clone(),
+        _ => "unavailable".to_string(),
+    }
 }
 
 /// IO edge (§4.2): resolves the trait document, the trust record, and a
@@ -5732,16 +5744,11 @@ fn apply_trait_action(
     // block-approve never leaves stale marks that would silently re-apply on
     // the next `A` press.
     state.trust_marks.clear();
-    state.reload();
+    if let Some(worker) = &state.worker { worker.notify_library_changed(); }
     // Only the writing screen's own preview needs a forced rebuild here —
     // `state.reload()` already rebuilds whichever preview belongs to
     // `state.screen` via `State::reload`'s own per-screen dispatch; the
     // other screen's preview is rebuilt for free when it is next selected.
-    match state.screen {
-        Screen::Traits => force_rebuild_trait_preview_for_selection(state),
-        Screen::Trust => force_rebuild_trust_preview_for_selection(state),
-        _ => {}
-    }
     Ok(())
 }
 
@@ -5765,7 +5772,9 @@ fn edit_selected_trait_source(pane: &mut RatatuiPane, state: &mut State) -> crat
     } else {
         format!("editor exited nonzero for {}", path)
     });
-    state.reload();
+    if ok {
+        if let Some(worker) = &state.worker { worker.notify_library_changed(); }
+    }
     match reposition_trait_selection(&state.traits, &trait_id) {
         Some(idx) => state.list_traits.set_selected(idx),
         None => state.message = Some(format!("{trait_id} is no longer listed")),

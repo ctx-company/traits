@@ -182,6 +182,10 @@ enum Request {
         repo_key: String,
         selector: crate::library::LibraryDetailSelector,
     },
+    LibraryChangedNotice {
+        id: String,
+        repo_key: String,
+    },
 }
 
 impl Request {
@@ -205,7 +209,8 @@ impl Request {
             | Self::CreateTask { id, .. }
             | Self::TaskDetail { id, .. }
             | Self::Library { id, .. }
-            | Self::LibraryDetail { id, .. } => id,
+            | Self::LibraryDetail { id, .. }
+            | Self::LibraryChangedNotice { id, .. } => id,
         }
     }
 
@@ -1419,6 +1424,21 @@ pub fn library_detail_existing(
     )? {
         ResponseResult::LibraryDetail(detail) => Ok(*detail),
         _ => Err(protocol_error("unexpected library detail response")),
+    }
+}
+
+/// Notify all subscribers that the repository-scoped library answer changed.
+/// This only talks to an already-running center, matching the action clients.
+pub fn notify_library_changed(repo_key: &str) -> crate::Result<()> {
+    match request_existing(
+        Request::LibraryChangedNotice {
+            id: next_id("library-changed"),
+            repo_key: repo_key.to_owned(),
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Ok => Ok(()),
+        _ => Err(protocol_error("unexpected library-changed response")),
     }
 }
 
@@ -3754,7 +3774,13 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                     roots.sort();
                     roots.dedup();
                     let resolution = match roots.len() {
-                        0 => RepositoryResolution::Missing,
+                        0 => match crate::state::read_repo_index() {
+                            Ok(index) => match index.into_iter().filter(|entry| entry.key == repo_key).collect::<Vec<_>>().as_slice() {
+                                [entry] => RepositoryResolution::One { root: Utf8PathBuf::from(entry.path.clone()), runs: Vec::new() },
+                                _ => RepositoryResolution::Missing,
+                            },
+                            Err(error) => { let _ = reply.send(Err(error)); continue; }
+                        },
                         1 => RepositoryResolution::One {
                             root: roots.remove(0),
                             runs: model
@@ -3782,6 +3808,10 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                         _ => RepositoryResolution::Ambiguous,
                     };
                     let _ = reply.send(Ok(resolution));
+                }
+                ModelCommand::LibraryChanged { repo_key, reply } => {
+                    model.broadcast(CenterDelta::LibraryChanged { repo_keys: vec![repo_key] });
+                    let _ = reply.send(Ok(()));
                 }
                 ModelCommand::ResolveRunId {
                     run_id,
@@ -3973,6 +4003,10 @@ enum ModelCommand {
     PublishBoard {
         repo_key: String,
         board: Box<BoardWireResult>,
+    },
+    LibraryChanged {
+        repo_key: String,
+        reply: mpsc::SyncSender<crate::Result<()>>,
     },
 }
 
@@ -4296,6 +4330,19 @@ fn serve_connection_worker_with_board_instants(
                 .unwrap_or_else(|error| ResponseResult::Error {
                     message: error.to_string(),
                 });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
+        if let Request::LibraryChangedNotice { repo_key, .. } = request {
+            let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+            if jobs.try_send(ModelCommand::LibraryChanged { repo_key, reply: reply_sender }).is_err() {
+                return;
+            }
+            let result = match reply_receiver.recv_timeout(STREAM_TIMEOUT) {
+                Ok(Ok(())) => ResponseResult::Ok,
+                Ok(Err(error)) => ResponseResult::Error { message: error.to_string() },
+                Err(_) => return,
+            };
             let _ = response(&mut stream, id, result);
             return;
         }
@@ -5282,7 +5329,8 @@ fn handle_request(
         | Request::CreateTask { .. }
         | Request::TaskDetail { .. }
         | Request::Library { .. }
-        | Request::LibraryDetail { .. } => Err(protocol_error(
+        | Request::LibraryDetail { .. }
+        | Request::LibraryChangedNotice { .. } => Err(protocol_error(
             "request is handled by the connection worker",
         )),
     }
