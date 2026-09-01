@@ -88,18 +88,53 @@ fn engine_count(view: &ConfigView) -> usize {
 
 /// One shared presentation of Config provenance, using only the served answer.
 pub fn config_provenance_text(view: &ConfigView) -> String {
+    let provenance = config_provenance(view);
+    let mut parts = vec![provenance.citation];
+    if let Some(qualifier) = provenance.document_count_qualifier {
+        parts.push(qualifier);
+    }
+    parts.push(format!("resolved {} UTC", provenance.instant));
+    parts.join(" · ")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigProvenance {
+    pub citation: String,
+    pub document_count_qualifier: Option<String>,
+    pub instant: String,
+}
+
+pub fn config_provenance(view: &ConfigView) -> ConfigProvenance {
     let instant = utc_hh_mm(view.instant_epoch_millis);
     match view.documents.last() {
         Some(document) => {
             let name = document.path.rsplit('/').next().unwrap_or(&document.path);
-            let qualifier = (view.documents.len() > 1)
-                .then(|| format!("of {} documents", view.documents.len()));
-            match qualifier {
-                Some(qualifier) => format!("{name} · {qualifier} · resolved {instant} UTC"),
-                None => format!("{name} · resolved {instant} UTC"),
+            ConfigProvenance {
+                citation: name.to_string(),
+                document_count_qualifier: (view.documents.len() > 1)
+                    .then(|| format!("of {} documents", view.documents.len())),
+                instant,
             }
         }
-        None => format!("built-in defaults · resolved {instant} UTC"),
+        None => ConfigProvenance {
+            citation: "built-in defaults".to_string(),
+            document_count_qualifier: None,
+            instant,
+        },
+    }
+}
+
+pub fn config_verdict(view: &ConfigView) -> StatePresentation {
+    if view.tier_warnings.is_empty() {
+        StatePresentation {
+            word: "valid",
+            role: StateRole::Ok,
+        }
+    } else {
+        StatePresentation {
+            word: "warning",
+            role: StateRole::Warn,
+        }
     }
 }
 
@@ -120,12 +155,10 @@ pub fn config_bar(state: &ConfigState) -> BottomBar {
         } => match &answer.resolution {
             ConfigResolution::Resolved(view) => {
                 let mut detail = vec![config_provenance_text(view)];
-                let (word, role) = if view.tier_warnings.is_empty() {
-                    ("valid", StateRole::Ok)
-                } else {
+                let verdict = config_verdict(view);
+                if !view.tier_warnings.is_empty() {
                     detail.extend(view.tier_warnings.clone());
-                    ("warning", StateRole::Warn)
-                };
+                }
                 let actions = match &view.edit_target {
                     Some(_) => vec![BarAction {
                         id: BarActionId::EditRuntimeToml,
@@ -139,7 +172,7 @@ pub fn config_bar(state: &ConfigState) -> BottomBar {
                     }],
                 };
                 BottomBar {
-                    state: StatePresentation { word, role },
+                    state: verdict,
                     detail,
                     actions,
                 }
@@ -282,6 +315,24 @@ mod tests {
         assert!(bar.detail.join(" ").contains("retired model-tier"));
         assert_eq!(bar.actions[0].label, "no editable source");
         assert_eq!(bar.actions[0].tone, ActionTone::Muted);
+    }
+
+    #[test]
+    fn shared_provenance_and_verdict_keep_bar_and_preview_parts_aligned() {
+        let mut view = view();
+        view.documents.push(ConfigDocument {
+            layer: "repo".to_string(),
+            path: "/work/runtime.toml".to_string(),
+        });
+        let state = ConfigState::Accepted {
+            answer: answer(view.clone()),
+            stale: None,
+        };
+        let provenance = config_provenance(&view);
+        let bar = config_bar(&state);
+        assert_eq!(bar.state, config_verdict(&view));
+        assert!(bar.detail[0].contains(&provenance.citation));
+        assert!(bar.detail[0].contains(&provenance.instant));
     }
 
     #[test]

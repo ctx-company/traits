@@ -38,7 +38,9 @@ use ratatui::widgets::Paragraph;
 
 use super::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
 use super::frame_prompt::summons_question;
-use super::lifecycle_reporting::{DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source};
+use super::lifecycle_reporting::{
+    DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source,
+};
 use super::merge::{MergeInputs, merge};
 use super::merge_story;
 use super::report_check::sequence_kind_label;
@@ -1475,23 +1477,129 @@ impl State {
         self.apply_refresh_results(refresh_results);
     }
 
-    fn apply_trait_detail_results(&mut self, results: impl IntoIterator<Item = worker::TraitDetailResult>) {
+    fn apply_trait_detail_results(
+        &mut self,
+        results: impl IntoIterator<Item = worker::TraitDetailResult>,
+    ) {
         for result in results {
             let selected = self.traits.get(self.selected());
-            if !selected.is_some_and(|row| row.id == result.selector.trait_id && row.canonical_digest == result.selector.canonical_digest.clone().unwrap_or_default() && row.variant == result.selector.member) { continue; }
+            if !selected.is_some_and(|row| {
+                row.id == result.selector.trait_id
+                    && row.canonical_digest
+                        == result.selector.canonical_digest.clone().unwrap_or_default()
+                    && row.variant == result.selector.member
+            }) {
+                continue;
+            }
             let facts = match result.result {
-                Ok(ctx_traits_io::library::LibraryDetailResolution::Resolved { display_identity, version, status, canonical_digest, trust_record, trust_reason, trust_stale, has_trust_record, drift, source_drift_checked, procedure, source_path, source_excerpt, .. }) => TraitPreviewFacts {
-                    id: display_identity, version, status, canonical_digest,
-                    trust_state: trust_record.as_ref().map(|record| record.state.as_str().to_string()).unwrap_or_else(|| "pending".to_string()),
-                    trust_reason, trust_stale, has_trust_record, drift, source_drift_checked,
-                    procedure: match procedure { ctx_traits_io::library::LibraryProcedureShape::Sequence(items) => ProcedureShape::Sequence(items), ctx_traits_io::library::LibraryProcedureShape::GuidanceOnly => ProcedureShape::GuidanceOnly, ctx_traits_io::library::LibraryProcedureShape::Unknown => ProcedureShape::Unknown },
-                    source_path, source_excerpt, error: None,
+                Ok(ctx_traits_io::library::LibraryDetailResolution::Resolved {
+                    display_identity,
+                    version,
+                    status,
+                    canonical_digest,
+                    trust_record,
+                    trust_reason,
+                    trust_stale,
+                    has_trust_record,
+                    drift,
+                    source_drift_checked,
+                    procedure,
+                    source_path,
+                    source_excerpt,
+                    ..
+                }) => TraitPreviewFacts {
+                    id: display_identity,
+                    version,
+                    status,
+                    canonical_digest,
+                    trust_state: trust_record
+                        .as_ref()
+                        .map(|record| record.state.as_str().to_string())
+                        .unwrap_or_else(|| "pending".to_string()),
+                    trust_reason,
+                    trust_stale,
+                    has_trust_record,
+                    drift,
+                    source_drift_checked,
+                    procedure: match procedure {
+                        ctx_traits_io::library::LibraryProcedureShape::Sequence(items) => {
+                            ProcedureShape::Sequence(items)
+                        }
+                        ctx_traits_io::library::LibraryProcedureShape::GuidanceOnly => {
+                            ProcedureShape::GuidanceOnly
+                        }
+                        ctx_traits_io::library::LibraryProcedureShape::Unknown => {
+                            ProcedureShape::Unknown
+                        }
+                    },
+                    source_path,
+                    source_excerpt,
+                    error: None,
                 },
-                Ok(ctx_traits_io::library::LibraryDetailResolution::Unreadable { id, error, .. }) => TraitPreviewFacts { id, version: String::new(), status: String::new(), canonical_digest: String::new(), trust_state: "pending".to_string(), trust_reason: String::new(), trust_stale: false, has_trust_record: false, drift: "unverified".to_string(), source_drift_checked: false, procedure: ProcedureShape::Unknown, source_path: String::new(), source_excerpt: Vec::new(), error: Some(error) },
-                Ok(other) => TraitPreviewFacts { id: result.selector.trait_id.clone(), version: String::new(), status: String::new(), canonical_digest: result.selector.canonical_digest.clone().unwrap_or_default(), trust_state: "pending".to_string(), trust_reason: String::new(), trust_stale: false, has_trust_record: false, drift: "unverified".to_string(), source_drift_checked: false, procedure: ProcedureShape::Unknown, source_path: String::new(), source_excerpt: Vec::new(), error: Some(format!("trait detail unavailable: {}", detail_error(&other))) },
-                Err(error) => TraitPreviewFacts { id: result.selector.trait_id.clone(), version: String::new(), status: String::new(), canonical_digest: result.selector.canonical_digest.clone().unwrap_or_default(), trust_state: "pending".to_string(), trust_reason: String::new(), trust_stale: false, has_trust_record: false, drift: "unverified".to_string(), source_drift_checked: false, procedure: ProcedureShape::Unknown, source_path: String::new(), source_excerpt: Vec::new(), error: Some(error) },
+                Ok(ctx_traits_io::library::LibraryDetailResolution::Unreadable {
+                    id,
+                    error,
+                    ..
+                }) => TraitPreviewFacts {
+                    id,
+                    version: String::new(),
+                    status: String::new(),
+                    canonical_digest: String::new(),
+                    trust_state: "pending".to_string(),
+                    trust_reason: String::new(),
+                    trust_stale: false,
+                    has_trust_record: false,
+                    drift: "unverified".to_string(),
+                    source_drift_checked: false,
+                    procedure: ProcedureShape::Unknown,
+                    source_path: String::new(),
+                    source_excerpt: Vec::new(),
+                    error: Some(error),
+                },
+                Ok(other) => TraitPreviewFacts {
+                    id: result.selector.trait_id.clone(),
+                    version: String::new(),
+                    status: String::new(),
+                    canonical_digest: result.selector.canonical_digest.clone().unwrap_or_default(),
+                    trust_state: "pending".to_string(),
+                    trust_reason: String::new(),
+                    trust_stale: false,
+                    has_trust_record: false,
+                    drift: "unverified".to_string(),
+                    source_drift_checked: false,
+                    procedure: ProcedureShape::Unknown,
+                    source_path: String::new(),
+                    source_excerpt: Vec::new(),
+                    error: Some(format!(
+                        "trait detail unavailable: {}",
+                        detail_error(&other)
+                    )),
+                },
+                Err(error) => TraitPreviewFacts {
+                    id: result.selector.trait_id.clone(),
+                    version: String::new(),
+                    status: String::new(),
+                    canonical_digest: result.selector.canonical_digest.clone().unwrap_or_default(),
+                    trust_state: "pending".to_string(),
+                    trust_reason: String::new(),
+                    trust_stale: false,
+                    has_trust_record: false,
+                    drift: "unverified".to_string(),
+                    source_drift_checked: false,
+                    procedure: ProcedureShape::Unknown,
+                    source_path: String::new(),
+                    source_excerpt: Vec::new(),
+                    error: Some(error),
+                },
             };
-            self.trait_preview = Some(TraitPreview { trait_id: result.selector.trait_id, canonical_digest: facts.canonical_digest.clone(), lines: trait_preview_lines(&facts).iter().map(tui_ratatui::render_line).collect() });
+            self.trait_preview = Some(TraitPreview {
+                trait_id: result.selector.trait_id,
+                canonical_digest: facts.canonical_digest.clone(),
+                lines: trait_preview_lines(&facts)
+                    .iter()
+                    .map(tui_ratatui::render_line)
+                    .collect(),
+            });
         }
     }
 
@@ -2421,25 +2529,77 @@ fn dashboard_token_value(tokens: Option<u64>) -> String {
 }
 
 /// Pure projection of one repository-scoped served library answer.
-fn project_library(answer: &ctx_traits_io::center::LibraryWireResult) -> (Vec<TraitRow>, Vec<TrustRow>) {
+fn project_library(
+    answer: &ctx_traits_io::center::LibraryWireResult,
+) -> (Vec<TraitRow>, Vec<TrustRow>) {
     let mut traits = Vec::new();
     let mut trust = Vec::new();
     for row in &answer.resolution.rows {
         match row {
             ctx_traits_io::library::LibraryRow::Resolved(member) => {
                 if member.origin != "built-in" {
-                    traits.push(TraitRow { id: member.id.clone(), version: member.version.clone(), status: member.status.clone(), trust: member.trust.display_name().to_string(), canonical_digest: member.canonical_digest.clone(), source_path: member.source_path.clone(), error: None, variant: member.variant.clone() });
+                    traits.push(TraitRow {
+                        id: member.id.clone(),
+                        version: member.version.clone(),
+                        status: member.status.clone(),
+                        trust: member.trust.display_name().to_string(),
+                        canonical_digest: member.canonical_digest.clone(),
+                        source_path: member.source_path.clone(),
+                        error: None,
+                        variant: member.variant.clone(),
+                    });
                 }
-                trust.push(TrustRow { trait_id: Some(member.id.clone()), origin: member.origin.clone(), family: member.family.clone(), variant: member.variant.clone(), current_digest: member.canonical_digest.clone(), recorded_digest: member.record.as_ref().map(|record| record.digest.clone()), class: trust_story::classify_trust(member.record.as_ref()), updated_at: member.record.as_ref().and_then(|record| record.updated_at.clone()), reason: member.record.as_ref().and_then(|record| record.reason.clone()) });
+                trust.push(TrustRow {
+                    trait_id: Some(member.id.clone()),
+                    origin: member.origin.clone(),
+                    family: member.family.clone(),
+                    variant: member.variant.clone(),
+                    current_digest: member.canonical_digest.clone(),
+                    recorded_digest: member.record.as_ref().map(|record| record.digest.clone()),
+                    class: trust_story::classify_trust(member.record.as_ref()),
+                    updated_at: member
+                        .record
+                        .as_ref()
+                        .and_then(|record| record.updated_at.clone()),
+                    reason: member
+                        .record
+                        .as_ref()
+                        .and_then(|record| record.reason.clone()),
+                });
             }
-            ctx_traits_io::library::LibraryRow::Unreadable { id, path, error, origin, .. } if origin != "built-in" => {
-                traits.push(TraitRow { id: id.clone(), version: String::new(), status: error.clone(), trust: "unreadable".to_string(), canonical_digest: String::new(), source_path: path.clone(), error: Some(error.clone()), variant: None });
+            ctx_traits_io::library::LibraryRow::Unreadable {
+                id,
+                path,
+                error,
+                origin,
+                ..
+            } if origin != "built-in" => {
+                traits.push(TraitRow {
+                    id: id.clone(),
+                    version: String::new(),
+                    status: error.clone(),
+                    trust: "unreadable".to_string(),
+                    canonical_digest: String::new(),
+                    source_path: path.clone(),
+                    error: Some(error.clone()),
+                    variant: None,
+                });
             }
             _ => {}
         }
     }
     for orphan in &answer.resolution.orphans {
-        trust.push(TrustRow { trait_id: None, origin: "orphaned".to_string(), family: None, variant: None, current_digest: String::new(), recorded_digest: Some(orphan.digest.clone()), class: trust_story::TrustClass::Orphaned, updated_at: orphan.updated_at.clone(), reason: orphan.reason.clone() });
+        trust.push(TrustRow {
+            trait_id: None,
+            origin: "orphaned".to_string(),
+            family: None,
+            variant: None,
+            current_digest: String::new(),
+            recorded_digest: Some(orphan.digest.clone()),
+            class: trust_story::TrustClass::Orphaned,
+            updated_at: orphan.updated_at.clone(),
+            reason: orphan.reason.clone(),
+        });
     }
     traits.sort_by(|a, b| a.id.cmp(&b.id));
     sort_trust_rows(&mut trust);
@@ -3744,14 +3904,18 @@ fn refresh_trait_preview_impl(state: &mut State, force: bool) {
     }
     if let Some(worker) = &state.worker {
         worker.trait_detail(ctx_traits_io::library::LibraryDetailSelector {
-            trait_id: row.id.clone(), canonical_digest: Some(row.canonical_digest.clone()), member: row.variant.clone(),
+            trait_id: row.id.clone(),
+            canonical_digest: Some(row.canonical_digest.clone()),
+            member: row.variant.clone(),
         });
     }
 }
 
 fn detail_error(detail: &ctx_traits_io::library::LibraryDetailResolution) -> String {
     match detail {
-        ctx_traits_io::library::LibraryDetailResolution::SourceOnly { .. } => "source-only".to_string(),
+        ctx_traits_io::library::LibraryDetailResolution::SourceOnly { .. } => {
+            "source-only".to_string()
+        }
         ctx_traits_io::library::LibraryDetailResolution::Missing => "missing".to_string(),
         ctx_traits_io::library::LibraryDetailResolution::Stale { .. } => "stale".to_string(),
         ctx_traits_io::library::LibraryDetailResolution::Refused { reason } => reason.clone(),
@@ -5744,7 +5908,9 @@ fn apply_trait_action(
     // block-approve never leaves stale marks that would silently re-apply on
     // the next `A` press.
     state.trust_marks.clear();
-    if let Some(worker) = &state.worker { worker.notify_library_changed(); }
+    if let Some(worker) = &state.worker {
+        worker.notify_library_changed();
+    }
     // Only the writing screen's own preview needs a forced rebuild here —
     // `state.reload()` already rebuilds whichever preview belongs to
     // `state.screen` via `State::reload`'s own per-screen dispatch; the
@@ -5773,7 +5939,9 @@ fn edit_selected_trait_source(pane: &mut RatatuiPane, state: &mut State) -> crat
         format!("editor exited nonzero for {}", path)
     });
     if ok {
-        if let Some(worker) = &state.worker { worker.notify_library_changed(); }
+        if let Some(worker) = &state.worker {
+            worker.notify_library_changed();
+        }
     }
     match reposition_trait_selection(&state.traits, &trait_id) {
         Some(idx) => state.list_traits.set_selected(idx),

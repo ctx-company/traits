@@ -99,6 +99,10 @@ pub const EDIT_RUNTIME_TOML: Placeholder = Placeholder {
     label: "edit runtime.toml",
 };
 
+/// `screens/config.md:31` leaves the selected seat's explanatory prose as
+/// unserved data. This is data-shaped text, not an inert action placeholder.
+pub const SEAT_PROSE: &str = "configuration resolved for this physical seat";
+
 /// `grammar.md:98` sets this value; the center serves no owner identity
 /// today, so it resolves here rather than as a literal at the rail's call
 /// site. A plain `&str`, not a [`Placeholder`]: that struct is documented

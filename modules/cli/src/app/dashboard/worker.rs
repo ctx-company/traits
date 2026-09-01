@@ -70,7 +70,15 @@ impl Handle {
         let (trait_detail_tx, trait_details) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
-        std::thread::spawn(move || run(command_rx, snapshot_tx, preview_tx, trait_detail_tx, explanation_tx));
+        std::thread::spawn(move || {
+            run(
+                command_rx,
+                snapshot_tx,
+                preview_tx,
+                trait_detail_tx,
+                explanation_tx,
+            )
+        });
         Self {
             commands,
             snapshots,
@@ -197,7 +205,9 @@ impl Handle {
 
     pub(super) fn trait_detail_results(&self) -> Vec<TraitDetailResult> {
         let mut results = Vec::new();
-        while let Ok(result) = self.trait_details.try_recv() { results.push(result); }
+        while let Ok(result) = self.trait_details.try_recv() {
+            results.push(result);
+        }
         results
     }
 
@@ -384,21 +394,33 @@ fn run(
                     );
                     // Do not delay the authoritative session snapshot. The
                     // served library is requested immediately afterwards.
-                    if !cfg!(test) && let Err(error) = refresh_library(&mut state) {
+                    if !cfg!(test)
+                        && let Err(error) = refresh_library(&mut state)
+                    {
                         let _ = snapshots.send(Err(format!("library unavailable: {error}")));
                     }
                 }
                 Ok(ctx_traits_io::center::CenterEvent::Delta(delta)) => {
-                    if let ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys } = &delta {
+                    if let ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys } = &delta
+                    {
                         let scoped = ctx_traits_io::state::current_repo_key()
                             .map(|key| repo_keys.contains(&key))
                             .unwrap_or(false);
                         if scoped {
                             match refresh_library(&mut state) {
                                 Ok(()) => {
-                                    if emit_cached_rows_snapshot(&snapshots, &mut state, &rows, false).is_err() { return; }
+                                    if emit_cached_rows_snapshot(
+                                        &snapshots, &mut state, &rows, false,
+                                    )
+                                    .is_err()
+                                    {
+                                        return;
+                                    }
                                 }
-                                Err(error) => { let _ = snapshots.send(Err(format!("library unavailable: {error}"))); }
+                                Err(error) => {
+                                    let _ = snapshots
+                                        .send(Err(format!("library unavailable: {error}")));
+                                }
                             }
                         }
                         continue;
@@ -456,8 +478,8 @@ fn run(
         if wait_for_retry(
             &commands,
             &snapshots,
-                            &previews,
-                            &trait_details,
+            &previews,
+            &trait_details,
             &explanations,
             &mut state,
             &rows,
@@ -561,7 +583,9 @@ fn handle_one_command(
             let sender = trait_details.clone();
             std::thread::spawn(move || {
                 let result = ctx_traits_io::state::current_repo_key()
-                    .and_then(|repo_key| ctx_traits_io::center::library_detail_existing(&repo_key, selector.clone()))
+                    .and_then(|repo_key| {
+                        ctx_traits_io::center::library_detail_existing(&repo_key, selector.clone())
+                    })
                     .map_err(|error| error.to_string());
                 let _ = sender.send(TraitDetailResult { selector, result });
             });
@@ -769,7 +793,15 @@ mod tests {
             let (explanation_tx, _explanation_rx) = mpsc::channel();
             let worker = std::thread::Builder::new()
                 .name(name.to_string())
-                .spawn(move || run(command_rx, snapshot_tx, preview_tx, trait_detail_tx, explanation_tx))
+                .spawn(move || {
+                    run(
+                        command_rx,
+                        snapshot_tx,
+                        preview_tx,
+                        trait_detail_tx,
+                        explanation_tx,
+                    )
+                })
                 .expect("spawn worker");
             Self {
                 commands: Some(commands),
@@ -1728,7 +1760,13 @@ mod tests {
         let (exited_tx, exited_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
-            run(command_rx, snapshot_tx, preview_tx, trait_detail_tx, explanation_tx);
+            run(
+                command_rx,
+                snapshot_tx,
+                preview_tx,
+                trait_detail_tx,
+                explanation_tx,
+            );
             let _ = exited_tx.send(());
         });
 

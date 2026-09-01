@@ -3412,6 +3412,56 @@ fn flatten_agent_defaults(
     )
 }
 
+/// Pure, report-local assignment evidence for Config's inventory projection.
+/// This deliberately receives the report's runtime and caller-supplied repo
+/// key, so it never consults the process cwd or resolves configuration again.
+pub(crate) struct ConfigScopedAssignment {
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub qualifier: Option<String>,
+}
+
+pub(crate) fn config_scope_assignment(
+    runtime: &RuntimeConfig,
+    trait_id: &str,
+    variant: Option<&str>,
+    repo_key: &str,
+    role: &str,
+    seat_index: Option<u32>,
+) -> ConfigScopedAssignment {
+    let scope = RunScope {
+        variant: variant.map(std::borrow::Cow::Borrowed),
+        repo_key: Some(std::borrow::Cow::Borrowed(repo_key)),
+        trait_id: Some(std::borrow::Cow::Borrowed(trait_id)),
+    };
+    let trait_defaults = runtime.trait_defaults.get(trait_id);
+    let (mut defaults, qualifiers) = flatten_agent_defaults(
+        &runtime.pre_environment_agent,
+        &runtime.repo,
+        trait_defaults,
+        &scope,
+    );
+    let (environment, _) = flatten_agent_defaults(
+        &runtime.environment_agent,
+        &std::collections::BTreeMap::new(),
+        None,
+        &scope,
+    );
+    merge_agent_defaults(&mut defaults, environment);
+    expand_role_seats(&mut defaults);
+    let assignment = match (defaults.role.get(role), seat_index) {
+        (Some(RoleAssignmentValue::List(entries)), Some(index)) => {
+            entries.get(index.saturating_sub(1) as usize).cloned()
+        }
+        _ => resolved_assignment_for_role(&defaults, role, None),
+    };
+    ConfigScopedAssignment {
+        model: assignment.as_ref().and_then(|value| value.model.clone()),
+        reasoning_effort: assignment.and_then(|value| value.reasoning_effort),
+        qualifier: qualifiers.get(role).cloned(),
+    }
+}
+
 fn reject_tier_override(role: &str, assignment: &ProfileAssignment) -> crate::Result<()> {
     if assignment.model.is_none() && assignment.model_tier.is_some() {
         return invalid_config(

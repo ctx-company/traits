@@ -3,7 +3,7 @@ key = "0268.3"
 title = "Render the Config preview column"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Render the Config screen's 380-wide preview column over the one repository-scoped answer `0268.1` taught the center to serve. `screens/config.md:29-34` is precise about what this column is — **"Preview column (selected seat)"** — a `seat` block, a `facts` block of `model` / `effort` / `used by` / `source`, and a provenance footer. That is the whole of its normative content, and the selected seat is the whole of its subject. This cut projects; it resolves nothing.
 
 Exactly one leaf here is `placeholder:` — the seat's prose description, the third and last of the screen's three placeholder leaves (`0268` Correction 4). Every other leaf is `data:`, and the export's `smart · strong seat`, `claude-opus-5`, `high`, `implement · plan · architect`, `runtime.toml · trait-scoped` and `13:02` are illustrations rather than values (`reference/config.html:633-738`).
@@ -23,8 +23,8 @@ Seven grounded corrections the draft this file replaces did not carry.
 **The preview primitives this column composes are not reachable from this leaf's declared prerequisites.** `0265.10` owns the 380-wide preview column frame, its order, the key/value row and the preview-footer primitive (`0265.10:16-26`), and `0265.12` owns the fact-block shape the four later screens compose (`0265.12:7-24,40-42`), depending on `0265.10`. This leaf declared only `0268.2`, whose closure runs `0268.1` → `0265.5`/`0265.9`/`0258` and `0265.13`, and reaches neither; a charter's `depends-on` is not inherited by its children, because `derived_status` evaluates dependency edges only for open leaves (`modules/core/src/task/graph.rs:115-177`). `0265.12` is added, exactly as the analogous Traits preview leaf carries it (`0267.3` relations).
 
 **The declared `proof_doctor` check was the wrong evidence.** Its only `--config` test asserts that `--verbose` conflicts with `--config` (`modules/cli/tests/proof_doctor.rs:255-273`) — it observes no resolution, no seat, no winner, no provenance and no transport. Parent Correction 10 requires correcting it: `proof_config.rs` is the standing config-semantics suite, already covering built-in defaults over a document-free scratch repository (`:18-40`), exact per-leaf provenance (`:95-414`), independently-won model and effort (`:417-553`) and uniform seat listing over harness-only seats (`:818-859`); `proof_center.rs` is the process-boundary suite for any served-answer widening.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or observation shows it is the run's call.
@@ -78,8 +78,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 9. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and the desktop project stays outside the workspace. Decided by `just test` and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no config resolution, layer walk, document-set assembly, verdict derivation, instant capture, inventory scan, trust read, winner mapping or provenance formatter is written or copied here; no `resolve_runtime_assignments`, `resolve_trait_runtime_assignments`, `resolved_seats_for_role`, `InventoryContext::discover` or `read_store_with_sequences` call is added on this path; no CLI-private type is imported by the desktop; no desktop-side filesystem, `git`, cwd or clock read is added; no client timer or filesystem watcher is added; no Config-private copy of the preview frame, key/value row, fact block, footer primitive, token entry point or `placeholders` module is created; no second placeholder leaf, inline placeholder literal or export literal — `smart · strong seat`, `claude-opus-5`, `high`, `implement · plan · architect`, `runtime.toml · trait-scoped`, `13:02`, the hex colours or the paddings as raw numbers — enters this call site; no preview content is invented for a `Runtime` or `Trust` row; no status dot, pill, badge, icon, checkmark or corner radius appears in this column and no glyph outside `·` is used here; no light-theme value is touched; no pencil artifact is edited; no configuration write, trust mutation, lock acquisition, editor affordance, `--apply` or `--migrate-config` change is made; and no work belonging to `0268.1`, `0268.2`, `0268.4`, `0266`, `0267`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. The desktop project does not exist at this HEAD — no manifest or lockfile in this repository names `gpui`, there is no standalone desktop source tree or `placeholders` module, the `Justfile` has no desktop recipe, there is no desktop CI job, and `0256.1` is still `ready` — so no desktop path, module, component, gpui API or command is named below. Discover every one of them from what `0256`, `0265`, `0268.1` and `0268.2` actually landed, and say in the work summary where the landed shape differed from what is described here.
@@ -126,7 +126,11 @@ Suggested route, not a boundary. The desktop project does not exist at this HEAD
 One review pass over the completed diff before calling this done: walk `screens/config.md:29-34` leaf by leaf against the rendered column, naming for each of the seat name, the prose, `model`, `effort`, `used by`, `source` and the footer the served source it renders from, and confirming the seat prose is this cut's only placeholder leaf and the screen's third; check the form against `grammar.md:24-72` and `:110-124` and the dark column of `tokens.md:6-85`; compare the literal geometry against `reference/config.html:618-739`, resolving each content conflict toward the spec rather than the export; exercise the scratch boundaries listed above, including the absent-model and absent-effort seats, the divergent trait/variant qualifiers and every provenance state; then read the diff for the properties no fixture shows directly — no second resolver, inventory scan, winner derivation or provenance formatter; no desktop filesystem, `git`, cwd or clock read; no catalog or version probe on any answer, owner, UI or selection path; no client timer or watcher; no direct-reader fallback; no partial or ungated commit; no CLI-private import; no duplicated preview, key/value, fact-block or footer primitive; no light-theme value; and no write path. Then run the declared checks, and `0256.1`'s desktop command if it exists by then.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0268.2",
+    "0265.12",
+]
 parent = "0268"
-depends-on = ["0268.2", "0265.12"]

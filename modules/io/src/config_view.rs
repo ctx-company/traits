@@ -62,6 +62,17 @@ pub struct ConfigSeatRow {
     pub reasoning_effort: Option<String>,
     pub model_winner: Option<ConfigWinnerWire>,
     pub effort_winner: Option<ConfigWinnerWire>,
+    #[serde(default)]
+    pub used_by: Vec<ConfigSeatUser>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConfigSeatUser {
+    pub member: String,
+    pub scope: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +153,15 @@ pub fn resolve_config_view(
         .into_iter()
         .map(|(id, variant, _)| variant.map_or(id.clone(), |variant| format!("{id}.{variant}")))
         .collect();
+    let members: Vec<_> = library
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            crate::library::LibraryRow::Resolved(member) => Some(member.as_ref()),
+            _ => None,
+        })
+        .collect();
+    let repo_key = crate::state::repo_key(root);
     let mut seats = Vec::new();
     let mut harnesses = Vec::new();
     for (role, configured) in &report.runtime.agent.role {
@@ -158,6 +178,39 @@ pub fn resolve_config_view(
             {
                 harnesses.push(harness);
             }
+            let mut used_by = Vec::new();
+            for member in &members {
+                for agent in &member.agents {
+                    let maps_to_seat = agent == role
+                        || (role == "default" && !report.runtime.agent.role.contains_key(agent));
+                    if !maps_to_seat {
+                        continue;
+                    }
+                    let scoped = crate::harness_config::config_scope_assignment(
+                        &report.runtime,
+                        &member.id,
+                        member.variant.as_deref(),
+                        &repo_key,
+                        agent,
+                        index,
+                    );
+                    let differs = scoped.model != assignment.model
+                        || scoped.reasoning_effort != assignment.reasoning_effort;
+                    used_by.push(ConfigSeatUser {
+                        member: member
+                            .family_key
+                            .clone()
+                            .unwrap_or_else(|| member.id.clone()),
+                        scope: differs.then(|| {
+                            scoped
+                                .qualifier
+                                .unwrap_or_else(|| "scoped configuration".to_string())
+                        }),
+                        model: differs.then_some(scoped.model).flatten(),
+                        reasoning_effort: differs.then_some(scoped.reasoning_effort).flatten(),
+                    });
+                }
+            }
             seats.push(ConfigSeatRow {
                 role: role.clone(),
                 seat_index: index,
@@ -168,6 +221,7 @@ pub fn resolve_config_view(
                     .or_else(|| winner(&report, &format!("agent.role.{role}.model"))),
                 effort_winner: winner(&report, &format!("{key}.reasoning-effort"))
                     .or_else(|| winner(&report, &format!("agent.role.{role}.reasoning-effort"))),
+                used_by,
             });
         }
     }

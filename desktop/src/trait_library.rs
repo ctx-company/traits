@@ -213,6 +213,7 @@ mod tests {
             shadow: None,
             name: id.to_string(),
             summary: String::new(),
+            agents: vec![],
             record: None,
         }
     }

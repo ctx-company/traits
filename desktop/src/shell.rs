@@ -12,6 +12,7 @@ use crate::board::{self, BoardState};
 use crate::bottom_bar;
 use crate::bottom_bar_view;
 use crate::center_link::{self, LinkUpdate};
+use crate::config_preview::{self, SeatIdentity};
 use crate::config_screen::{self, ConfigState};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
@@ -370,6 +371,7 @@ pub struct Shell {
     config: ConfigState,
     config_task: Option<gpui::Task<()>>,
     config_generation: u64,
+    config_seat_selection: Option<SeatIdentity>,
     trait_selection: Option<LibraryDetailSelector>,
     trait_detail: Option<Result<LibraryDetailResolution, String>>,
     trait_detail_task: Option<gpui::Task<()>>,
@@ -486,6 +488,7 @@ impl Shell {
             config: ConfigState::Failed("select a repository to view its config".to_string()),
             config_task: None,
             config_generation: 0,
+            config_seat_selection: None,
             trait_selection: None,
             trait_detail: None,
             trait_detail_task: None,
@@ -645,10 +648,28 @@ impl Shell {
             let _ = this.update(cx, |shell, cx| {
                 if shell.config_generation == generation {
                     shell.config = config_screen::fold_config_result(&shell.config, result);
+                    shell.reconcile_config_selection();
                     cx.notify();
                 }
             });
         }));
+    }
+
+    fn reconcile_config_selection(&mut self) {
+        let Some(selection) = &self.config_seat_selection else {
+            return;
+        };
+        let present = matches!(&self.config, ConfigState::Accepted { answer, .. } if matches!(&answer.resolution, ctx_traits_io::config_view::ConfigResolution::Resolved(view) if view.seats.iter().any(|seat| seat.role == selection.role && seat.seat_index == selection.seat_index)));
+        if !present {
+            self.config_seat_selection = None;
+        }
+    }
+
+    fn select_config_seat(&mut self, selection: SeatIdentity, cx: &mut Context<Self>) {
+        if self.config_seat_selection.as_ref() != Some(&selection) {
+            self.config_seat_selection = Some(selection);
+            cx.notify();
+        }
     }
 
     fn select_trait(&mut self, selector: LibraryDetailSelector, cx: &mut Context<Self>) {
@@ -1565,6 +1586,10 @@ impl Render for Shell {
                                                     .clone()
                                                     .unwrap_or_else(|| "unconfigured".to_string()),
                                                 seat.reasoning_effort.clone().unwrap_or_default(),
+                                                Some(SeatIdentity {
+                                                    role: seat.role.clone(),
+                                                    seat_index: seat.seat_index,
+                                                }),
                                             )
                                         })
                                         .collect::<Vec<_>>(),
@@ -1578,6 +1603,7 @@ impl Render for Shell {
                                                 row.name.clone(),
                                                 row.value.clone(),
                                                 row.qualifier.clone(),
+                                                None,
                                             )
                                         })
                                         .collect::<Vec<_>>(),
@@ -1588,6 +1614,7 @@ impl Render for Shell {
                                         "approved traits".to_string(),
                                         view.trust.approved_digests.to_string(),
                                         view.trust.approved_members.join(", "),
+                                        None,
                                     )],
                                 ),
                             ] {
@@ -1598,42 +1625,60 @@ impl Render for Shell {
                                         .text_color(rgb(tokens::TEXT_MUTED))
                                         .child(heading),
                                 );
-                                for (name, value, qualifier) in rows {
-                                    config = config.child(
-                                        div()
-                                            .flex()
-                                            .flex_row()
-                                            .justify_between()
-                                            .px(tokens::RAIL_ROW_PAD_X)
-                                            .py(tokens::RAIL_ROW_PAD_Y)
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap_1()
-                                                    .child(
-                                                        div()
-                                                            .font_family(tokens::FONT_SANS)
-                                                            .text_size(tokens::SIZE_12)
-                                                            .text_color(rgb(tokens::TEXT))
-                                                            .child(name),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .font_family(tokens::FONT_SANS)
-                                                            .text_size(tokens::SIZE_11)
-                                                            .text_color(rgb(tokens::TEXT_SECONDARY))
-                                                            .child(qualifier),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_size(tokens::SIZE_10_5)
-                                                    .text_color(rgb(tokens::TEXT_SECONDARY))
-                                                    .child(value),
-                                            ),
-                                    );
+                                for (name, value, qualifier, seat) in rows {
+                                    let selected =
+                                        self.config_seat_selection.as_ref() == seat.as_ref();
+                                    let mut row = div()
+                                        .id(SharedString::from(format!("config-row-{name}")))
+                                        .flex()
+                                        .flex_row()
+                                        .justify_between()
+                                        .px(tokens::RAIL_ROW_PAD_X)
+                                        .py(tokens::RAIL_ROW_PAD_Y)
+                                        .bg(rgb(if selected {
+                                            tokens::SURFACE_RAISED
+                                        } else {
+                                            tokens::ROW_OPEN
+                                        }))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .font_family(tokens::FONT_SANS)
+                                                        .text_size(tokens::SIZE_12)
+                                                        .text_color(rgb(if selected {
+                                                            tokens::TEXT_BRIGHT
+                                                        } else {
+                                                            tokens::TEXT
+                                                        }))
+                                                        .child(name),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .font_family(tokens::FONT_SANS)
+                                                        .text_size(tokens::SIZE_11)
+                                                        .text_color(rgb(tokens::TEXT_SECONDARY))
+                                                        .child(qualifier),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .font_family(tokens::FONT_MONO)
+                                                .text_size(tokens::SIZE_10_5)
+                                                .text_color(rgb(tokens::TEXT_SECONDARY))
+                                                .child(value),
+                                        );
+                                    if let Some(seat) = seat {
+                                        row = row.on_click(cx.listener(
+                                            move |shell, _event, _window, cx| {
+                                                shell.select_config_seat(seat.clone(), cx)
+                                            },
+                                        ));
+                                    }
+                                    config = config.child(row);
                                 }
                             }
                             let _ = stale;
@@ -1664,7 +1709,26 @@ impl Render for Shell {
                     .child(rail_view::rail_element(
                         &self.face.rail(self.detail.repo_key()),
                     ))
-                    .child(config);
+                    .child(config)
+                    .when_some(
+                        config_preview::project(&self.config, self.config_seat_selection.as_ref()),
+                        |body, preview| {
+                            body.child(preview_view::preview_column_element(
+                                vec![
+                                    preview_view::lede_block_element(
+                                        "seat",
+                                        &preview.seat_block,
+                                        preview.prose,
+                                    ),
+                                    preview_view::named_block_element(
+                                        "facts",
+                                        &preview.facts_block,
+                                    ),
+                                ],
+                                Some(preview_view::preview_footer_element(&preview.footer)),
+                            ))
+                        },
+                    );
             }
             if self.screen == Screen::Traits {
                 let traits = traits

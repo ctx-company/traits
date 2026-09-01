@@ -183,6 +183,10 @@ pub struct LibraryMember {
     pub shadow: Option<String>,
     pub name: String,
     pub summary: String,
+    /// Declared trait agent ids, retained from the decode already performed for
+    /// this inventory row.
+    #[serde(default)]
+    pub agents: Vec<String>,
     pub record: Option<crate::trust::TrustReportRow>,
 }
 
@@ -489,6 +493,11 @@ pub fn resolve_library_detail(
                 shadow: None,
                 name: trait_ref.id.as_str().to_string(),
                 summary: trait_ref.effective_summary().to_string(),
+                agents: trait_ref
+                    .agents
+                    .iter()
+                    .map(|agent| agent.id.clone())
+                    .collect(),
                 record: document
                     .record_for_current(trait_ref.id.as_str(), digest.as_str())
                     .map(|record| crate::trust::TrustReportRow {
@@ -672,6 +681,11 @@ fn push_member(
                 shadow,
                 name: trait_ref.id.as_str().to_string(),
                 summary: trait_ref.effective_summary().to_string(),
+                agents: trait_ref
+                    .agents
+                    .iter()
+                    .map(|agent| agent.id.clone())
+                    .collect(),
                 record: current.map(|record| crate::trust::TrustReportRow {
                     trait_id: Some(trait_ref.id.as_str().to_string()),
                     digest: record.digest.clone(),
@@ -833,6 +847,7 @@ mod tests {
             shadow: None,
             name: "fixture".to_string(),
             summary: String::new(),
+            agents: vec![],
             record: None,
         }
     }
