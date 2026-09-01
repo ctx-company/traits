@@ -87,9 +87,13 @@ fn narration_sits_at_the_contract_sites_in_order() {
         "begin opens the run: {top_ids:?}"
     );
     let baseline = index_of(&top_ids, "capture-the-session-base");
-    assert_eq!(top_ids[baseline + 1], "notify-session-base");
+    assert_eq!(
+        top_ids[baseline - 1],
+        "notify-session-base",
+        "status announces the step it precedes"
+    );
     let draft = index_of(&top_ids, "draft-the-implementation-plan");
-    assert_eq!(top_ids[draft + 1], "notify-plan-drafted");
+    assert_eq!(top_ids[draft - 1], "notify-plan-drafted");
     let finish = index_of(&top_ids, "notify-finish");
     assert!(finish > index_of(&top_ids, "maybe-commit"));
     assert_eq!(
@@ -106,7 +110,11 @@ fn narration_sits_at_the_contract_sites_in_order() {
         .expect("reviewed-refinement-body.sequence");
     let body_ids = ids(body);
     let implement = index_of(&body_ids, "implement-the-task");
-    assert_eq!(body_ids[implement + 1], "notify-implement-pass");
+    assert_eq!(
+        body_ids[implement - 1],
+        "notify-implement-pass",
+        "status announces the pass it precedes"
+    );
     let review = index_of(&body_ids, "review-the-implementation");
     assert_eq!(body_ids[review + 1], "notify-digest-verdict");
     assert_eq!(body_ids[review + 2], "notify-carry-digest");
@@ -133,8 +141,8 @@ fn narration_sits_at_the_contract_sites_in_order() {
         .expect("an arm containing commit-the-work");
     let arm_ids = ids(commit_arm);
     assert_eq!(
-        arm_ids[index_of(&arm_ids, "commit-the-work") + 1],
-        "notify-committed"
+        arm_ids[0], "notify-committed",
+        "commit phase announced on entry: {arm_ids:?}"
     );
 }
 

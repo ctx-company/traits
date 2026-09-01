@@ -36,8 +36,8 @@
   },
   "prompt:implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 21,
+    "end": 21
   },
   "prompt:notify-digest-verdict": {
     "file": ".ctx/traits/authored/implement/source/shared/step/notify.ts",
@@ -51,8 +51,8 @@
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 21,
-    "end": 21
+    "start": 24,
+    "end": 24
   },
   "prompt:summon-the-owner": {
     "file": ".ctx/traits/authored/implement/source/shared/step/summon.ts",
@@ -61,8 +61,8 @@
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 49,
-    "end": 49
+    "start": 50,
+    "end": 50
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
@@ -101,8 +101,8 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 52,
+    "end": 52
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/notify-committed": {
     "file": ".ctx/traits/authored/implement/source/shared/step/notify.ts",
@@ -111,23 +111,23 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 50,
-    "end": 50
+    "start": 51,
+    "end": 51
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 49,
-    "end": 49
+    "start": 50,
+    "end": 50
   },
   "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then/record-the-owner-s-ruling": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 31,
-    "end": 31
+    "start": 34,
+    "end": 34
   },
   "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then/summon-the-owner": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 33,
+    "end": 33
   },
   "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then/gate-append-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
@@ -136,8 +136,8 @@
   },
   "sequence:procedure/capture-the-session-base": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 12,
-    "end": 12
+    "start": 14,
+    "end": 14
   },
   "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -146,8 +146,8 @@
   },
   "sequence:procedure/draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 14,
-    "end": 14
+    "start": 17,
+    "end": 17
   },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -176,13 +176,13 @@
   },
   "sequence:procedure/reviewed-refinement": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 19,
+    "end": 19
   },
   "sequence:reviewed-refinement-body/capture-the-changed-files": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 20,
-    "end": 20
+    "start": 23,
+    "end": 23
   },
   "sequence:reviewed-refinement-body/gate-carry-surface": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
@@ -191,8 +191,8 @@
   },
   "sequence:reviewed-refinement-body/implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 21,
+    "end": 21
   },
   "sequence:reviewed-refinement-body/notify-awaiting-annotations": {
     "file": ".ctx/traits/authored/implement/source/shared/step/notify.ts",
@@ -231,8 +231,8 @@
   },
   "sequence:reviewed-refinement-body/owner-ruling": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 29,
-    "end": 29
+    "start": 32,
+    "end": 32
   },
   "sequence:reviewed-refinement-body/owner-verdict-gate": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
@@ -246,8 +246,8 @@
   },
   "sequence:reviewed-refinement-body/review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
-    "start": 21,
-    "end": 21
+    "start": 24,
+    "end": 24
   },
   "signal:needs-owner": {
     "file": "packages/toolkit/src/signal.ts",
