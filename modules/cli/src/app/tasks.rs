@@ -676,8 +676,77 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
                         RowTone::Fail,
                     ));
                 }
-                ctx_traits_io::center::TaskDetailWireResult::Resolved { state, claim, .. } => {
+                ctx_traits_io::center::TaskDetailWireResult::Resolved {
+                    state,
+                    claim,
+                    raised,
+                    parent,
+                    depends_on,
+                    checks,
+                    closure,
+                    close_policy: detail_close_policy,
+                    ..
+                } => {
                     panel = panel.row(PanelRow::toned("state", state, RowTone::Default));
+                    panel = panel.row(PanelRow::toned(
+                        "raised",
+                        raised.as_deref().unwrap_or("not recorded"),
+                        RowTone::Default,
+                    ));
+                    panel = panel.row(PanelRow::toned(
+                        "parent",
+                        parent.as_deref().unwrap_or("none"),
+                        RowTone::Default,
+                    ));
+                    panel = panel.row(PanelRow::toned(
+                        "depends on",
+                        if depends_on.is_empty() {
+                            "none".to_string()
+                        } else {
+                            depends_on.join(" · ")
+                        },
+                        RowTone::Default,
+                    ));
+                    panel = panel.row(PanelRow::toned(
+                        "checks",
+                        if checks.is_empty() {
+                            "none".to_string()
+                        } else {
+                            checks
+                                .iter()
+                                .map(|check| check.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" · ")
+                        },
+                        RowTone::Default,
+                    ));
+                    panel = panel.row(PanelRow::toned(
+                        "detail close-policy",
+                        match detail_close_policy {
+                            ctx_traits_io::center::ClosePolicyResolution::Effective(policy) => {
+                                format!("{policy:?}").to_lowercase()
+                            }
+                            ctx_traits_io::center::ClosePolicyResolution::NoneConfigured => {
+                                "none configured".to_string()
+                            }
+                            ctx_traits_io::center::ClosePolicyResolution::Unresolved(reason) => {
+                                format!("unresolved: {reason}")
+                            }
+                        },
+                        RowTone::Default,
+                    ));
+                    if let Some(closure) = closure {
+                        panel = panel.row(PanelRow::toned(
+                            "closure",
+                            match &closure.commit {
+                                Some(commit) => {
+                                    format!("{:?} at {commit}", closure.mode).to_lowercase()
+                                }
+                                None => format!("{:?}", closure.mode).to_lowercase(),
+                            },
+                            RowTone::Default,
+                        ));
+                    }
                     match claim {
                         ctx_traits_io::center::TaskClaimWire::NoClaim => {
                             panel =
@@ -694,6 +763,7 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
                             run_id,
                             trait_id,
                             progress,
+                            ..
                         } => {
                             panel = panel.row(PanelRow::toned(
                                 "claimed",

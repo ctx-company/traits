@@ -267,6 +267,18 @@ pub enum TaskDetailWireResult {
         content: String,
         state: String,
         current_activity: bool,
+        #[serde(default)]
+        raised: Option<String>,
+        #[serde(default)]
+        parent: Option<String>,
+        #[serde(default)]
+        depends_on: Vec<String>,
+        #[serde(default)]
+        checks: Vec<ctx_traits_core::task::Check>,
+        #[serde(default)]
+        closure: Option<ctx_traits_core::task::Closure>,
+        #[serde(default = "default_close_policy_resolution")]
+        close_policy: ClosePolicyResolution,
         claim: TaskClaimWire,
     },
 }
@@ -280,7 +292,22 @@ pub enum TaskClaimWire {
         run_id: String,
         trait_id: String,
         progress: Result<ctx_traits_core::procedure::run::RunProgress, String>,
+        #[serde(default)]
+        state: TaskClaimState,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TaskClaimState {
+    #[default]
+    Active,
+    Pending,
+    Terminal,
+}
+
+fn default_close_policy_resolution() -> ClosePolicyResolution {
+    ClosePolicyResolution::NoneConfigured
 }
 
 /// Repository-scoped trait library answer. Its rows and provenance are
@@ -4385,14 +4412,35 @@ fn run_task_detail_request(
                 run_id: row.run_id,
                 trait_id: row.trait_id,
                 progress,
+                state: if run.live {
+                    TaskClaimState::Active
+                } else if run.awaiting_owner {
+                    TaskClaimState::Pending
+                } else {
+                    TaskClaimState::Terminal
+                },
             }
         }
     };
+    // Like the claimed-task request, a bad config is evidence about policy,
+    // not a reason to discard the otherwise readable task detail.
+    let close_policy =
+        match crate::harness_config::effective_auto_close_policy(&root, task.document.auto_close) {
+            Ok(Some(policy)) => ClosePolicyResolution::Effective(policy),
+            Ok(None) => ClosePolicyResolution::NoneConfigured,
+            Err(error) => ClosePolicyResolution::Unresolved(error.to_string()),
+        };
     Ok(TaskDetailWireResult::Resolved {
         summary: board_row.summary.clone(),
         content: ctx_traits_core::task::provider::content_lede(&task.document).to_owned(),
         state: ctx_traits_core::task::provider::state_word(state).to_owned(),
         current_activity: ctx_traits_core::task::provider::state_is_current_activity(state),
+        raised: task.document.raised.clone(),
+        parent: task.document.relations.parent.clone(),
+        depends_on: task.document.relations.depends_on.clone(),
+        checks: task.document.checks.clone(),
+        closure: task.document.closure.clone(),
+        close_policy,
         claim,
     })
 }

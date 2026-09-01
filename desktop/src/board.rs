@@ -2,7 +2,7 @@
 
 use ctx_traits_core::task::provider::board_summary_counts;
 use ctx_traits_io::center::BoardWireResult;
-use ctx_traits_io::task_files::BoardPresence;
+use ctx_traits_io::task_files::{BOARD_DIR_NAME, BoardPresence};
 
 use crate::bottom_bar::{ActionTone, BarAction, BarActionId, BottomBar};
 use crate::placeholders;
@@ -46,33 +46,22 @@ pub fn short_board_digest(digest: &str) -> String {
         .collect()
 }
 
-pub fn tasks_bar(state: &BoardState) -> BottomBar {
-    let clean = match state {
+fn board_status(state: &BoardState) -> Result<(&'static str, Vec<String>), String> {
+    match state {
         BoardState::Accepted {
             answer,
             stale: None,
-        } => {
-            matches!(
+        } if matches!(
                 answer.resolution.presence,
                 BoardPresence::Empty | BoardPresence::Loaded
-            ) && answer.resolution.digest.is_some()
-        }
-        _ => false,
-    };
-    let (word, role, detail) = if clean {
-        let BoardState::Accepted { answer, .. } = state else {
-            unreachable!()
-        };
-        (
-            "synced",
-            StateRole::Ok,
-            vec![format!(
-                ".internal/tasks @ {}",
+            ) && answer.resolution.digest.is_some() => Ok((
+                "synced",
+                vec![format!(
+                "{BOARD_DIR_NAME} @ {}",
                 short_board_digest(answer.resolution.digest.as_deref().unwrap_or_default())
             )],
-        )
-    } else {
-        let reason = match state {
+            )),
+        _ => Err(match state {
             BoardState::Loading => "loading board".to_string(),
             BoardState::Failed(reason) => reason.clone(),
             BoardState::Accepted {
@@ -84,8 +73,14 @@ pub fn tasks_bar(state: &BoardState) -> BottomBar {
                 BoardPresence::Unreadable { reason } => format!("tasks unreadable: {reason}"),
                 BoardPresence::Empty | BoardPresence::Loaded => "board incomplete".to_string(),
             },
-        };
-        ("unavailable", StateRole::Danger, vec![reason])
+        }),
+    }
+}
+
+pub fn tasks_bar(state: &BoardState) -> BottomBar {
+    let (word, role, detail) = match board_status(state) {
+        Ok((word, detail)) => (word, StateRole::Ok, detail),
+        Err(reason) => ("unavailable", StateRole::Danger, vec![reason]),
     };
     BottomBar {
         state: StatePresentation { word, role },
@@ -95,6 +90,21 @@ pub fn tasks_bar(state: &BoardState) -> BottomBar {
             label: "new task".to_string(),
             tone: ActionTone::Primary,
         }],
+    }
+}
+
+pub fn tasks_footer(state: &BoardState) -> String {
+    match board_status(state) {
+        Ok((_, _)) => {
+            let BoardState::Accepted { answer, .. } = state else { unreachable!() };
+            let epoch = answer.resolution.resolved_at;
+            let clock = ctx_traits_io::clock::epoch_clock_minutes(
+                epoch,
+                ctx_traits_io::clock::local_utc_offset_seconds(epoch),
+            );
+            format!("{BOARD_DIR_NAME} \u{b7} synced \u{b7} {clock}")
+        }
+        Err(reason) => reason,
     }
 }
 

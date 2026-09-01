@@ -1,9 +1,9 @@
 //! Pure Tasks preview projection. The shell owns selection and loading; this
 //! module only renders the one atomically accepted center answer.
 
-use ctx_traits_io::center::{TaskClaimWire, TaskDetailWireResult};
+use ctx_traits_io::center::{ClosePolicyResolution, TaskClaimState, TaskClaimWire, TaskDetailWireResult};
 
-use crate::preview::{KeyValueRow, NamedBlock, ValueSegment, frame_counter_text, staleness_word};
+use crate::preview::{KeyValueRow, LandingBlock, LandingLine, NamedBlock, ValueSegment, frame_counter_text, staleness_word};
 use crate::run_row::StateRole;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +20,12 @@ pub enum TaskDetailState {
 pub struct Lede {
     pub title: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecksBlock {
+    pub heading: String,
+    pub lines: Vec<String>,
 }
 
 pub fn tasks_lede(state: &TaskDetailState) -> Lede {
@@ -50,6 +56,95 @@ pub fn tasks_lede(state: &TaskDetailState) -> Lede {
             content: content.clone(),
         },
     }
+}
+
+/// Facts are served with the selected detail, never rediscovered from a board
+/// or task document by the desktop.
+pub fn tasks_facts_block(state: &TaskDetailState) -> NamedBlock {
+    let (status, raised, parent, depends_on) = match state {
+        TaskDetailState::Accepted {
+            answer: TaskDetailWireResult::Resolved { summary, raised, parent, depends_on, .. },
+            ..
+        } => (
+            summary.stored_status.map(|status| format!("{status:?}").to_lowercase()),
+            raised.as_deref(),
+            parent.as_deref(),
+            Some(depends_on.as_slice()),
+        ),
+        _ => (None, None, None, None),
+    };
+    let depends_value = match depends_on {
+        Some(values) if !values.is_empty() => values
+            .iter()
+            .enumerate()
+            .flat_map(|(index, value)| {
+                let mut segments = Vec::new();
+                if index > 0 { segments.push(ValueSegment::dot()); }
+                segments.push(ValueSegment::neutral(value));
+                segments
+            })
+            .collect(),
+        _ => vec![ValueSegment::neutral("none")],
+    };
+    NamedBlock {
+        heading: "facts".to_string(),
+        rows: vec![
+            KeyValueRow { key: "status".to_string(), value: vec![ValueSegment::neutral(status.unwrap_or_else(|| "not stored".to_string()))] },
+            KeyValueRow { key: "raised".to_string(), value: vec![ValueSegment::neutral(raised.unwrap_or("not recorded"))] },
+            KeyValueRow { key: "parent".to_string(), value: vec![ValueSegment::neutral(parent.unwrap_or("none"))] },
+            KeyValueRow { key: "depends on".to_string(), value: depends_value },
+        ],
+    }
+}
+
+pub fn tasks_checks_block(state: &TaskDetailState) -> ChecksBlock {
+    let lines = match state {
+        TaskDetailState::Accepted {
+            answer: TaskDetailWireResult::Resolved { checks, .. },
+            ..
+        } => checks.iter().map(|check| check.name.clone()).collect(),
+        _ => Vec::new(),
+    };
+    ChecksBlock { heading: "checks".to_string(), lines }
+}
+
+pub fn tasks_landing_block(state: &TaskDetailState) -> LandingBlock {
+    use ctx_traits_core::procedure::landing::{ResolvedClosePolicy, SelectedTaskClaimState};
+    let line = match state {
+        TaskDetailState::Accepted {
+            answer: TaskDetailWireResult::Resolved { summary, closure, claim, close_policy, checks, .. },
+            ..
+        } => {
+            let claim_state = match claim {
+                TaskClaimWire::NoClaim => SelectedTaskClaimState::None,
+                TaskClaimWire::Ambiguous(_) => SelectedTaskClaimState::Ambiguous,
+                TaskClaimWire::Claim { state, .. } => match state {
+                    TaskClaimState::Active => SelectedTaskClaimState::Active,
+                    TaskClaimState::Pending => SelectedTaskClaimState::Pending,
+                    TaskClaimState::Terminal => SelectedTaskClaimState::Terminal,
+                },
+            };
+            let policy = match close_policy {
+                ClosePolicyResolution::Effective(policy) => ResolvedClosePolicy::Effective(*policy),
+                ClosePolicyResolution::NoneConfigured => ResolvedClosePolicy::NoneConfigured,
+                ClosePolicyResolution::Unresolved(_) => ResolvedClosePolicy::Unresolved,
+            };
+            ctx_traits_core::procedure::landing::selected_task_close_line(
+                &summary.key, summary.stored_status, closure.as_ref(), claim_state, policy, checks.len(),
+            )
+        }
+        _ => ctx_traits_core::procedure::landing::LandingLine {
+            text: "\u{2192} Task details unavailable".to_string(),
+            tone: ctx_traits_core::procedure::landing::LineTone::Danger,
+        },
+    };
+    let role = match line.tone {
+        ctx_traits_core::procedure::landing::LineTone::Neutral => None,
+        ctx_traits_core::procedure::landing::LineTone::Ok => Some(StateRole::Ok),
+        ctx_traits_core::procedure::landing::LineTone::Warn => Some(StateRole::Warn),
+        ctx_traits_core::procedure::landing::LineTone::Danger => Some(StateRole::Danger),
+    };
+    LandingBlock { heading: "landing".to_string(), lines: vec![LandingLine { text: line.text, role }] }
 }
 
 fn unavailable_rows(text: &str) -> Vec<KeyValueRow> {
@@ -168,6 +263,12 @@ mod tests {
                 content: "full served prose\n\nsecond paragraph".to_string(),
                 state: "ready".to_string(),
                 current_activity: false,
+                raised: None,
+                parent: None,
+                depends_on: Vec::new(),
+                checks: Vec::new(),
+                closure: None,
+                close_policy: ClosePolicyResolution::NoneConfigured,
                 claim,
             },
             stale: None,
@@ -198,6 +299,7 @@ mod tests {
                 run_id: "run".to_string(),
                 trait_id: "trait".to_string(),
                 progress,
+                state: TaskClaimState::Active,
             }));
             let text: String = details.rows[2]
                 .value
@@ -207,5 +309,18 @@ mod tests {
             assert!(!text.contains("frame"));
             assert!(!text.contains("0 of"));
         }
+    }
+
+    #[test]
+    fn facts_use_declared_relation_order_and_absence_words() {
+        let facts = tasks_facts_block(&resolved(TaskClaimWire::NoClaim));
+        assert_eq!(facts.heading, "facts");
+        assert_eq!(facts.rows[0].value[0].text, "not stored");
+        assert_eq!(facts.rows[1].value[0].text, "not recorded");
+        assert_eq!(facts.rows[2].value[0].text, "none");
+        assert_eq!(facts.rows[3].value[0].text, "none");
+        let checks = tasks_checks_block(&resolved(TaskClaimWire::NoClaim));
+        assert_eq!(checks.heading, "checks");
+        assert!(checks.lines.is_empty());
     }
 }

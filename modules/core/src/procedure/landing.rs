@@ -10,7 +10,7 @@
 use super::session::{
     MergeFrame, MergeRung, MergeStatus, WorktreeProvenance, merge_frame_revision,
 };
-use crate::task::AutoClosePolicy;
+use crate::task::{AutoClosePolicy, Closure, TaskStatus};
 
 /// The tone one landing line renders in — deliberately not gpui's own state
 /// role vocabulary, so this crate never depends on a UI toolkit; a desktop
@@ -131,6 +131,91 @@ pub enum ResolvedClosePolicy {
     Unresolved,
 }
 
+/// The selected task's served claim posture. This is deliberately independent
+/// of the center wire so every consumer uses the same consequence wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedTaskClaimState {
+    None,
+    Active,
+    Pending,
+    Terminal,
+    Ambiguous,
+}
+
+fn future_close_text(task_key: &str, policy: ResolvedClosePolicy) -> String {
+    match policy {
+        ResolvedClosePolicy::Effective(AutoClosePolicy::Confirm) => {
+            format!("Task {task_key} closes only on owner confirmation")
+        }
+        ResolvedClosePolicy::Effective(AutoClosePolicy::Checked) => {
+            format!("Task {task_key} closes when its declared checks pass")
+        }
+        ResolvedClosePolicy::Effective(AutoClosePolicy::Merge) => {
+            format!("Task {task_key} closes when a run lands, checks or not")
+        }
+        ResolvedClosePolicy::NoneConfigured => {
+            format!("Task {task_key} has no auto-close policy")
+        }
+        ResolvedClosePolicy::Unresolved => format!("Task {task_key} close policy unresolved"),
+    }
+}
+
+/// Project the one close consequence for a selected board task. Stored closure
+/// facts take precedence over its current claim and configured future policy.
+pub fn selected_task_close_line(
+    task_key: &str,
+    stored_status: Option<TaskStatus>,
+    closure: Option<&Closure>,
+    claim_state: SelectedTaskClaimState,
+    policy: ResolvedClosePolicy,
+    declared_check_count: usize,
+) -> LandingLine {
+    let cancelled = matches!(stored_status, Some(TaskStatus::Cancelled));
+    let closed = matches!(stored_status, Some(TaskStatus::Done)) || closure.is_some();
+    if cancelled {
+        return LandingLine::toned(format!("Task {task_key} was cancelled"), LineTone::Warn);
+    }
+    if closed {
+        return match closure.and_then(|closure| closure.commit.as_deref()) {
+            Some(commit) => {
+                LandingLine::toned(format!("Task {task_key} closed at {commit}"), LineTone::Ok)
+            }
+            None => LandingLine::toned(format!("Task {task_key} closed"), LineTone::Ok),
+        };
+    }
+    if policy == ResolvedClosePolicy::Unresolved {
+        return LandingLine::toned(
+            format!("Task {task_key} close policy unresolved"),
+            LineTone::Danger,
+        );
+    }
+    if claim_state == SelectedTaskClaimState::Terminal {
+        return LandingLine::neutral(match policy {
+            ResolvedClosePolicy::Effective(AutoClosePolicy::Confirm) => {
+                format!("Task {task_key} did not close without owner confirmation")
+            }
+            ResolvedClosePolicy::Effective(AutoClosePolicy::Checked) => {
+                format!("Task {task_key} did not close because its checks did not pass")
+            }
+            ResolvedClosePolicy::Effective(AutoClosePolicy::Merge) => {
+                format!("Task {task_key} did not close because its run did not land")
+            }
+            ResolvedClosePolicy::NoneConfigured => {
+                format!("Task {task_key} had no auto-close policy")
+            }
+            ResolvedClosePolicy::Unresolved => unreachable!("handled above"),
+        });
+    }
+    if policy == ResolvedClosePolicy::Effective(AutoClosePolicy::Checked)
+        && declared_check_count == 0
+    {
+        return LandingLine::neutral(format!(
+            "Task {task_key} declares no checks, so nothing closes it automatically"
+        ));
+    }
+    LandingLine::neutral(future_close_text(task_key, policy))
+}
+
 /// Goal 4: the configured policy for the claimed task, never a prediction
 /// that it will close. Five fixed forms over a claimed task's effective
 /// policy, plus one failure form (`danger` tone) with two renderings
@@ -139,17 +224,8 @@ pub fn close_line(outcome: &ClaimedTaskCloseOutcome<'_>) -> LandingLine {
     match outcome {
         ClaimedTaskCloseOutcome::Unclaimed => LandingLine::neutral("No task claimed by this run"),
         ClaimedTaskCloseOutcome::Claimed { task_key, policy } => match policy {
-            ResolvedClosePolicy::Effective(AutoClosePolicy::Confirm) => {
-                LandingLine::neutral(format!("Task {task_key} closes only on owner confirmation"))
-            }
-            ResolvedClosePolicy::Effective(AutoClosePolicy::Checked) => LandingLine::neutral(
-                format!("Task {task_key} closes when its declared checks pass"),
-            ),
-            ResolvedClosePolicy::Effective(AutoClosePolicy::Merge) => LandingLine::neutral(
-                format!("Task {task_key} closes when a run lands, checks or not"),
-            ),
-            ResolvedClosePolicy::NoneConfigured => {
-                LandingLine::neutral(format!("Task {task_key} has no auto-close policy"))
+            ResolvedClosePolicy::Effective(_) | ResolvedClosePolicy::NoneConfigured => {
+                LandingLine::neutral(future_close_text(task_key, *policy))
             }
             ResolvedClosePolicy::Unresolved => LandingLine::toned(
                 format!("Task {task_key} close policy unresolved"),
@@ -328,5 +404,43 @@ mod tests {
             "\u{2192} Claimed task close policy unresolved"
         );
         assert_eq!(unavailable.tone, LineTone::Danger);
+    }
+
+    #[test]
+    fn selected_task_close_line_prefers_recorded_outcomes_and_handles_no_checks() {
+        assert_eq!(
+            selected_task_close_line(
+                "0266.5",
+                None,
+                None,
+                SelectedTaskClaimState::Active,
+                ResolvedClosePolicy::Effective(AutoClosePolicy::Checked),
+                0,
+            )
+            .text,
+            "\u{2192} Task 0266.5 declares no checks, so nothing closes it automatically"
+        );
+        let terminal = selected_task_close_line(
+            "0266.5",
+            None,
+            None,
+            SelectedTaskClaimState::Terminal,
+            ResolvedClosePolicy::Effective(AutoClosePolicy::Merge),
+            1,
+        );
+        assert_eq!(
+            terminal.text,
+            "\u{2192} Task 0266.5 did not close because its run did not land"
+        );
+        let cancelled = selected_task_close_line(
+            "0266.5",
+            Some(TaskStatus::Cancelled),
+            None,
+            SelectedTaskClaimState::Terminal,
+            ResolvedClosePolicy::Unresolved,
+            0,
+        );
+        assert_eq!(cancelled.text, "\u{2192} Task 0266.5 was cancelled");
+        assert_eq!(cancelled.tone, LineTone::Warn);
     }
 }

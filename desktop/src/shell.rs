@@ -1286,12 +1286,18 @@ impl Render for Shell {
             if self.selected_task.is_some() {
                 let lede = crate::task_preview::tasks_lede(&self.task_detail);
                 let details = crate::task_preview::tasks_details_block(&self.task_detail);
+                let facts = crate::task_preview::tasks_facts_block(&self.task_detail);
+                let checks = crate::task_preview::tasks_checks_block(&self.task_detail);
+                let landing = crate::task_preview::tasks_landing_block(&self.task_detail);
                 body = body.child(preview_view::preview_column_element(
                     vec![
                         preview_view::lede_element(&lede),
                         preview_view::named_block_element("details", &details),
+                        preview_view::named_block_element("facts", &facts),
+                        preview_view::checks_block_element(&checks),
+                        preview_view::landing_block_element(&landing),
                     ],
-                    None,
+                    Some(preview_view::preview_footer_element(&board::tasks_footer(&self.board))),
                 ));
             }
         }

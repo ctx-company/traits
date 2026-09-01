@@ -8,6 +8,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
 use crate::preview::{KeyValueRow, LandingBlock, NamedBlock, NowItem, ValueSegment, VerdictBlock};
+use crate::task_preview::ChecksBlock;
 use crate::run_row::role_color;
 use crate::tokens;
 
@@ -120,6 +121,26 @@ fn named_block_shell(slug: &str, heading: &str, children: Vec<AnyElement>) -> An
 pub fn named_block_element(slug: &str, block: &NamedBlock) -> AnyElement {
     let rows = block.rows.iter().map(kv_row_element).collect();
     named_block_shell(slug, &block.heading, rows)
+}
+
+/// Checks are a heading followed by plain lines, not empty-key fact rows.
+pub fn checks_block_element(block: &ChecksBlock) -> AnyElement {
+    let lines = block
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            div()
+                .debug_selector(move || format!("preview-check-{index}"))
+                .w_full()
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_11_5)
+                .text_color(rgb(tokens::TEXT_SECONDARY))
+                .child(line.clone())
+                .into_any_element()
+        })
+        .collect();
+    named_block_shell("checks", &block.heading, lines)
 }
 
 /// A named block with a full-width Sans lede below its key/value rows.
