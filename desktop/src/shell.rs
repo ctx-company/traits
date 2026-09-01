@@ -23,6 +23,7 @@ use crate::spawn_form::{SpawnForm, SpawnRepo, SpawnStatus, SubmitOutcome, Submit
 use crate::spawn_view;
 use crate::title_bar_view;
 use crate::tokens;
+use crate::trait_library::{self, LibraryState};
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -354,6 +355,9 @@ pub struct Shell {
     board_repo: Option<(String, String)>,
     board_task: Option<gpui::Task<()>>,
     board_generation: u64,
+    library: LibraryState,
+    library_task: Option<gpui::Task<()>>,
+    library_generation: u64,
     spawn_form: SpawnForm,
     spawn_task: Option<gpui::Task<()>>,
     row_controls: RowControls,
@@ -435,6 +439,9 @@ impl Shell {
             board_repo: None,
             board_task: None,
             board_generation: 0,
+            library: LibraryState::Failed("select a repository to view its traits".to_string()),
+            library_task: None,
+            library_generation: 0,
             spawn_form: SpawnForm::default(),
             spawn_task: None,
             row_controls: RowControls::default(),
@@ -447,6 +454,9 @@ impl Shell {
         self.screen = screen;
         if screen == Screen::Tasks {
             self.load_board(cx);
+        }
+        if screen == Screen::Traits {
+            self.load_library(cx);
         }
         cx.notify();
     }
@@ -495,6 +505,42 @@ impl Shell {
                         },
                         Err(reason) => BoardState::Failed(reason),
                     };
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// Ask the existing center for the selected repository's served library.
+    /// The UI supplies neither a path nor a filesystem fallback.
+    fn load_library(&mut self, cx: &mut Context<Self>) {
+        let repo_key = self
+            .detail
+            .repo_key()
+            .map(str::to_owned)
+            .or_else(|| self.face.rows().first().map(|row| row.repo_key.clone()));
+        let Some(repo_key) = repo_key else {
+            self.library = trait_library::fold_library_result(
+                &self.library,
+                Err("select a repository to view its traits".to_string()),
+            );
+            return;
+        };
+        self.library_generation += 1;
+        let generation = self.library_generation;
+        if !matches!(self.library, LibraryState::Accepted { .. }) {
+            self.library = LibraryState::Loading;
+        }
+        self.library_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    ctx_traits_io::center::library_existing(&repo_key)
+                        .map_err(|error| error.to_string())
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.library_generation == generation {
+                    shell.library = trait_library::fold_library_result(&shell.library, result);
                     cx.notify();
                 }
             });
@@ -1123,15 +1169,48 @@ impl Render for Shell {
                 .child(tasks);
         }
         if self.screen == Screen::Traits {
-            body = div()
+            let header = trait_library::traits_header(&self.library);
+            let authored_count = match &self.library {
+                LibraryState::Accepted { answer, .. } => {
+                    trait_library::authored_row_count(&answer.resolution)
+                }
+                LibraryState::Loading | LibraryState::Failed(_) => 0,
+            };
+            let traits = div()
                 .debug_selector(|| "traits-screen".to_string())
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_h_0()
                 .p(tokens::MAIN_PANE_PAD_TOP)
-                .gap(tokens::LIST_SECTION_GAP)
-                .child(div().font_family(tokens::FONT_MONO).text_size(tokens::SIZE_11).text_color(rgb(tokens::TEXT_MUTED)).child("Authored — 0"));
+                .gap(tokens::MAIN_PANE_GAP)
+                .child(crate::screen_header_view::screen_header_element(
+                    &header.title,
+                    &header.summary,
+                ))
+                // Trait rows are supplied by the prerequisite library section;
+                // retain its section label's count derivation here.
+                .child(
+                    div()
+                        .font_family(tokens::FONT_MONO)
+                        .text_size(tokens::SIZE_11)
+                        .text_color(rgb(tokens::TEXT_MUTED))
+                        .child(format!("Authored — {authored_count}")),
+                )
+                .child(div().flex_1())
+                .child(bottom_bar_view::bar_element(
+                    &trait_library::traits_bar(&self.library),
+                    None,
+                ));
+            body = div()
+                .debug_selector(|| "traits-screen".to_string())
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(rail_view::rail_element(
+                    &self.face.rail(self.detail.repo_key()),
+                ))
+                .child(traits);
         }
         div()
             .debug_selector(|| "window-frame".to_string())

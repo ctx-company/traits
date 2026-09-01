@@ -3,7 +3,7 @@ key = "0267.2"
 title = "Render the Traits header and lockfile bar"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Give the Traits screen its chrome — grammar rule 6's header and rule 8/12's provenance bar — over the one repository-scoped answer `0267.1` taught the center to serve. This cut renders; it resolves nothing.
 
 The **header** is a title in the shape `traits — authored in <repository display identity>` over exactly one italic narrated summary, with `∷` top-right and no breadcrumbs (`grammar.md:58-66`, `screens/traits.md:11-13`). The **bottom bar** is rule 12's provenance instance for this screen: a semantic state word, then the provenance detail, then `author trait` as the right-hand ghost action (`grammar.md:74-84,110-115`, `screens/traits.md:21-22`).
@@ -17,8 +17,8 @@ Four grounded corrections the draft this file replaces did not carry.
 **No repository display identity exists at this HEAD, so the title's data source has to be found rather than assumed.** `CenterPublicRow` carries only `repo_key` and `repo_path` (`modules/io/src/center.rs:3778-3788`); `RepoIndexEntry` carries key, path and last-seen time (`modules/io/src/state.rs:477-488`); and `repo_key` is `<basename>-<first 8 hex of the path's sha256>` (`state.rs:149-160`). Nothing in that set is an owner/repository pair, so the export's `ctx-company/traits` shape is not something HEAD can produce truthfully. The execution inspects what `0267.1` actually landed. If its served answer already carries a truthful display identity, the title renders it. If it does not, this cut widens that same typed capability minimally — the widened field reachable by a non-GUI face like every other served leaf — or renders a clearly defined pure projection of the served key/path, and says which in the work summary. What it may not do: read the desktop process's cwd, invoke `git` from the desktop, synthesise an owner segment the system does not hold, or fall back to the reference repository.
 
 **The header's count and the bar's count are two different numbers.** The summary's authored count is the number of rendered `Authored — N` rows — one per family, per standalone package, per source-only package (`0267` Correction 2; `0267.1` Done-when 4-5). `N digests` is the cardinality of the joined current-member evidence set, which counts every member of a multi-variant family and counts a source-only package not at all. Rendering one where the other belongs makes the header and the bar contradict each other on the one screen whose subject is what this repository authored. Relatedly, the all-pinned phrasing of the example sentence cannot be emitted when provenance failed: the phrasing is `placeholder:`, but the pin claim inside it is `data:`.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or observation shows it is the run's call.
@@ -66,8 +66,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 8. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and the desktop project stays outside the workspace. Decided by `just test` and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no lockfile, digest or provenance resolution logic is written or copied here; no `0267.2` → `0267.4` dependency is added; no Traits-private copy of the header, bar, token entry point, state presentation or `placeholders` module is created; no export literal — `ctx-company/traits`, `implement`, the summary sentence, the counts, `trusted`, the hex colours or any sha — is hardcoded at this call site; no light-theme value is touched; no pencil artifact is edited; no row, section, menu, preview or TUI work is done; no trait authoring or trust mutation is opened; and no work belonging to `0267.1`, `0267.3`, `0267.4`, `0267.5`, `0266`, `0268`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. The desktop project does not exist at this HEAD — no Cargo manifest in this repository names `gpui`, and `0256.1` is still `ready` — so no desktop path, module, symbol or command is named below. Discover every one of them from what `0256`, `0265` and `0267.1` actually landed, and say in the work summary where the landed shape differed from what is described here.
@@ -107,7 +107,11 @@ Suggested route, not a boundary. The desktop project does not exist at this HEAD
 One review pass over the completed diff before calling this done: walk `screens/traits.md:11-13` and `21-22` leaf by leaf against the rendered header and bar, naming for each leaf the served source it renders from and confirming that only the summary's phrasing and `author trait` come from the `placeholders` module; check the form against `grammar.md:58-66`, `74-84` and `110-115`; compare the literal geometry against `reference/traits.html:250-285` and `580-611` and `tokens.md:71-84` — the footer geometry at `881-885` is `0267.4`'s to check, not this pass's; exercise the boundaries listed above; then read the diff for the properties no fixture shows directly — one accepted answer projecting header, rows and bar together, no second reader, resolution, request or timer, no duplicated provenance assembly, no Traits-private copy of the header or bar, no inline placeholder literal, no export literal, and no desktop filesystem or `git` work. Then run the declared checks, and `0256.1`'s desktop command if it exists by then.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0267.1",
+    "0265.13",
+]
 parent = "0267"
-depends-on = ["0267.1", "0265.13"]

@@ -62,6 +62,28 @@ pub fn board_summary(open: usize, states: usize, live: usize, waiting: usize) ->
     )
 }
 
+/// Neutral narration around served authored-row and provenance facts.
+pub fn traits_summary(authored: usize, pinned: bool) -> String {
+    format!(
+        "{authored} {} — {}",
+        if authored == 1 {
+            "authored trait"
+        } else {
+            "authored traits"
+        },
+        if pinned {
+            "library pinned"
+        } else {
+            "provenance unavailable"
+        },
+    )
+}
+
+/// The Traits screen's deliberately inert authoring action.
+pub const AUTHOR_TRAIT: Placeholder = Placeholder {
+    label: "author trait",
+};
+
 /// `grammar.md:98` sets this value; the center serves no owner identity
 /// today, so it resolves here rather than as a literal at the rail's call
 /// site. A plain `&str`, not a [`Placeholder`]: that struct is documented

@@ -22,6 +22,7 @@ pub enum BarActionId {
     WatchRaw,
     Pause,
     NewTask,
+    AuthorTrait,
 }
 
 /// A right-hand action word. Carrying no bound behaviour is the model's way
