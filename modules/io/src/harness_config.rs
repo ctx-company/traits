@@ -1437,11 +1437,18 @@ pub struct ConfigReport {
     pub tier_warnings: Vec<String>,
     /// Runtime documents that existed and decoded, in effective layer order.
     /// This is provenance only; callers must use `runtime` for resolved values.
-    pub documents: Vec<(ConfigLayer, Utf8PathBuf)>,
+    pub documents: Vec<ConfigReportDocument>,
     /// Non-fatal attempts to override repository-owned requirements. Kept in
     /// the report so presentation layers, rather than this library, decide
     /// how and where to display them.
     pub requirement_conflicts: Vec<ConfigRequirementConflict>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigReportDocument {
+    pub layer: ConfigLayer,
+    pub path: Utf8PathBuf,
+    pub edit_path: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -3959,7 +3966,12 @@ fn resolve_config_report_impl(
     let mut winners = BTreeMap::new();
     let mut tier_warnings = Vec::new();
 
-    for (layer, path) in layers {
+    for ConfigLayerPath {
+        layer,
+        path,
+        edit_path,
+    } in layers
+    {
         if !path.exists() {
             continue;
         }
@@ -3983,11 +3995,11 @@ fn resolve_config_report_impl(
                 ),
             );
         }
-        documents.push((layer, path, next));
+        documents.push((layer, path, edit_path, next));
     }
 
     let mut project = RuntimeConfig::default();
-    for (layer, path, next) in &documents {
+    for (layer, path, _, next) in &documents {
         if *layer == ConfigLayer::Environment {
             continue;
         }
@@ -4001,7 +4013,7 @@ fn resolve_config_report_impl(
     }
     let mut machine = RuntimeConfig::default();
     for wanted in [ConfigLayer::UserGlobal, ConfigLayer::Repo] {
-        for (layer, path, next) in &documents {
+        for (layer, path, _, next) in &documents {
             if *layer == wanted {
                 merge_machine_config(
                     &mut machine,
@@ -4035,7 +4047,7 @@ fn resolve_config_report_impl(
     // `[preferences]` is global-only exactly like `[repo.*]` above.
     runtime.preferences = machine.preferences;
     runtime.pre_environment_agent = runtime.agent.clone();
-    for (layer, _, document) in &documents {
+    for (layer, _, _, document) in &documents {
         if *layer == ConfigLayer::Environment {
             merge_agent_defaults(&mut runtime.environment_agent, document.agent.clone());
         }
@@ -4050,7 +4062,7 @@ fn resolve_config_report_impl(
     // merge every matching qualifier in legacy-to-current order.
     let personal: Vec<_> = documents
         .iter()
-        .filter_map(|(layer, path, document)| {
+        .filter_map(|(layer, path, _, document)| {
             (*layer == ConfigLayer::UserGlobal)
                 .then(|| {
                     active_repo_key
@@ -4075,7 +4087,7 @@ fn resolve_config_report_impl(
             &mut winners,
         );
     }
-    for (layer, path, document) in &documents {
+    for (layer, path, _, document) in &documents {
         if *layer == ConfigLayer::Environment {
             apply_environment_requirement_leaves(
                 &mut runtime,
@@ -4163,7 +4175,11 @@ fn resolve_config_report_impl(
         tier_warnings,
         documents: documents
             .iter()
-            .map(|(layer, path, _)| (*layer, path.clone()))
+            .map(|(layer, path, edit_path, _)| ConfigReportDocument {
+                layer: *layer,
+                path: path.clone(),
+                edit_path: edit_path.clone(),
+            })
             .collect(),
         requirement_conflicts,
     })
@@ -4180,10 +4196,10 @@ type EffectiveRepoRequirements<'a> =
     BTreeMap<ConfigLeaf, (&'a Utf8PathBuf, &'a AuthoredConfigLeaf)>;
 
 fn effective_repo_requirements(
-    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+    documents: &[(ConfigLayer, Utf8PathBuf, Option<Utf8PathBuf>, RuntimeConfig)],
 ) -> EffectiveRepoRequirements<'_> {
     let mut effective = BTreeMap::new();
-    for (layer, path, document) in documents {
+    for (layer, path, _, document) in documents {
         if *layer == ConfigLayer::Repo {
             for (leaf, value) in &document.authored_requirements {
                 if value.semantic == ConfigSemantic::Requirement {
@@ -4693,7 +4709,7 @@ fn apply_environment_defaults(
 
 fn apply_additive_values(
     runtime: &mut RuntimeConfig,
-    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+    documents: &[(ConfigLayer, Utf8PathBuf, Option<Utf8PathBuf>, RuntimeConfig)],
     personal: &[(&Utf8PathBuf, &RepoOverride)],
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
@@ -4724,7 +4740,7 @@ fn apply_additive_values(
             source: None,
         }],
     );
-    for (layer, path, document) in documents {
+    for (layer, path, _, document) in documents {
         push_unique(&mut runtime.worktree.seed, document.worktree.seed.clone());
         push_unique(&mut runtime.worktree.warm, document.worktree.warm.clone());
         push_unique(
@@ -4922,17 +4938,21 @@ fn record_additive_contributor(
 fn requirement_conflicts(
     documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
 ) -> Vec<ConfigRequirementConflict> {
-    requirement_conflicts_for_effective(documents, &effective_repo_requirements(documents))
+    let documents: Vec<_> = documents
+        .iter()
+        .map(|(layer, path, document)| (*layer, path.clone(), None, document.clone()))
+        .collect();
+    requirement_conflicts_for_effective(&documents, &effective_repo_requirements(&documents))
 }
 
 fn requirement_conflicts_for_effective(
-    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+    documents: &[(ConfigLayer, Utf8PathBuf, Option<Utf8PathBuf>, RuntimeConfig)],
     effective: &EffectiveRepoRequirements<'_>,
 ) -> Vec<ConfigRequirementConflict> {
     let mut output = Vec::new();
-    for (layer, path, candidate) in documents
+    for (layer, path, _, candidate) in documents
         .iter()
-        .filter(|(layer, _, _)| *layer == ConfigLayer::Environment)
+        .filter(|(layer, _, _, _)| *layer == ConfigLayer::Environment)
     {
         for (leaf, rejected) in &candidate.authored_requirements {
             if let Some((repo_path, required)) = effective.get(leaf)
@@ -4953,7 +4973,7 @@ fn requirement_conflicts_for_effective(
     // rejected personal values are visible instead of silently ignored.
     let mut repo_env = BTreeMap::new();
     let mut repo_caches = BTreeMap::new();
-    for (layer, path, document) in documents {
+    for (layer, path, _, document) in documents {
         if *layer != ConfigLayer::Repo {
             continue;
         }
@@ -4990,13 +5010,13 @@ fn requirement_conflicts_for_effective(
             }
         }
     };
-    for (layer, path, document) in documents {
+    for (layer, path, _, document) in documents {
         if *layer == ConfigLayer::Environment {
             check_maps(path, &document.worktree.env, &document.worktree.build_cache);
         }
     }
     if let Some(key) = active_repo_qualifier_key() {
-        for (layer, path, document) in documents {
+        for (layer, path, _, document) in documents {
             if *layer == ConfigLayer::UserGlobal
                 && let Some(personal) = document.repo.get(&key)
             {
@@ -5132,12 +5152,19 @@ fn toml_value_at<'a>(value: &'a toml::Value, path: &str) -> Option<&'a toml::Val
 pub fn runtime_config_layer_paths(start_dir: &Utf8Path) -> crate::Result<Vec<Utf8PathBuf>> {
     Ok(runtime_config_layers(start_dir)?
         .into_iter()
-        .map(|(_, path)| path)
+        .map(|entry| entry.path)
         .collect())
 }
 
-fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer, Utf8PathBuf)>> {
+fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<ConfigLayerPath>> {
     runtime_config_layers_at(None, start_dir)
+}
+
+#[derive(Debug, Clone)]
+struct ConfigLayerPath {
+    layer: ConfigLayer,
+    path: Utf8PathBuf,
+    edit_path: Option<Utf8PathBuf>,
 }
 
 /// Same as [`runtime_config_layers`], except the repo-root ancestor bound
@@ -5151,11 +5178,15 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
 fn runtime_config_layers_at(
     repo_root: Option<&Utf8Path>,
     start_dir: &Utf8Path,
-) -> crate::Result<Vec<(ConfigLayer, Utf8PathBuf)>> {
+) -> crate::Result<Vec<ConfigLayerPath>> {
     let mut layers = Vec::new();
     let globals = global_runtime_config_paths()?;
     for path in globals {
-        layers.push((ConfigLayer::UserGlobal, path));
+        layers.push(ConfigLayerPath {
+            layer: ConfigLayer::UserGlobal,
+            edit_path: Some(path.clone()),
+            path,
+        });
     }
     // 0178: the global tier's `GLOBAL_RUNTIME_CONFIG_SOURCE` (`traits/runtime.ts`),
     // when present, wins over the hand `GLOBAL_RUNTIME_CONFIG` sibling —
@@ -5171,7 +5202,16 @@ fn runtime_config_layers_at(
             &hand_path,
             &generated_path,
         )? {
-            layers.push((ConfigLayer::UserGlobal, resolved));
+            let edit_path = if resolved == generated_path {
+                source_path
+            } else {
+                resolved.clone()
+            };
+            layers.push(ConfigLayerPath {
+                layer: ConfigLayer::UserGlobal,
+                path: resolved,
+                edit_path: Some(edit_path),
+            });
         }
     }
     let cwd = absolute_utf8_path(start_dir, "runtime.config.cwd")?;
@@ -5189,14 +5229,24 @@ fn runtime_config_layers_at(
     }
     ancestors.reverse();
     for ancestor in ancestors {
-        layers.push((ConfigLayer::Repo, ancestor.join(HARNESS_REGISTRY)));
+        let harness_path = ancestor.join(HARNESS_REGISTRY);
+        layers.push(ConfigLayerPath {
+            layer: ConfigLayer::Repo,
+            path: harness_path.clone(),
+            edit_path: Some(harness_path),
+        });
         // 0177: `.ctx/traits/config.toml` (`PROJECT_CONFIG`) no longer
         // decodes as `RuntimeConfig` — it is the declarative `ConfigDocument`
         // now (`[vendor]`, and eventually team setting overrides / dispatch
         // defaults, not yet wired into this layer stack — see task 0177's
         // work summary). Only the machine-local runtime tier remains here.
         //
-        layers.push((ConfigLayer::Repo, ancestor.join(RUNTIME_CONFIG)));
+        let hand_path = ancestor.join(RUNTIME_CONFIG);
+        layers.push(ConfigLayerPath {
+            layer: ConfigLayer::Repo,
+            path: hand_path.clone(),
+            edit_path: Some(hand_path.clone()),
+        });
         // 0178: `RUNTIME_CONFIG_SOURCE` (`runtime.ts`), when present, wins
         // over the hand `RUNTIME_CONFIG` sibling pushed just above (which the
         // never-built/both-present guards below ensure cannot itself exist
@@ -5214,7 +5264,16 @@ fn runtime_config_layers_at(
             &hand_path,
             &generated_path,
         )? {
-            layers.push((ConfigLayer::Repo, resolved));
+            let edit_path = if resolved == generated_path {
+                source_path
+            } else {
+                resolved.clone()
+            };
+            layers.push(ConfigLayerPath {
+                layer: ConfigLayer::Repo,
+                path: resolved,
+                edit_path: Some(edit_path),
+            });
         }
         if ancestor.join(RETIRED_RUNTIME_CONFIG_SOURCE).exists() {
             return Err(crate::Error::Core(
@@ -5230,19 +5289,23 @@ fn runtime_config_layers_at(
         }
     }
     if let Ok(path) = std::env::var("CTX_CONFIG") {
-        layers.push((ConfigLayer::Environment, Utf8PathBuf::from(path)));
+        let path = Utf8PathBuf::from(path);
+        layers.push(ConfigLayerPath {
+            layer: ConfigLayer::Environment,
+            path: path.clone(),
+            edit_path: Some(path),
+        });
     }
     // The hand-path candidate above and the `[GLOBAL_]RUNTIME_CONFIG_SOURCE`
     // resolution below it can both resolve to the same on-disk path (no `.ts`
     // source present); dedup so that path is never read as two separate
     // documents, which would otherwise double-count its requirement
     // conflicts and winner contributions.
-    let mut deduped: Vec<(ConfigLayer, Utf8PathBuf)> = Vec::with_capacity(layers.len());
+    let mut deduped = Vec::with_capacity(layers.len());
     for entry in layers {
-        if !deduped
-            .iter()
-            .any(|(layer, path)| *layer == entry.0 && *path == entry.1)
-        {
+        if !deduped.iter().any(|existing: &ConfigLayerPath| {
+            existing.layer == entry.layer && existing.path == entry.path
+        }) {
             deduped.push(entry);
         }
     }
@@ -5483,7 +5546,7 @@ pub fn plan_agent_config_migration(
     start_dir: &Utf8Path,
 ) -> crate::Result<Vec<AgentConfigLayerPlan>> {
     let mut plans = Vec::new();
-    for (layer, path) in runtime_config_layers(start_dir)? {
+    for ConfigLayerPath { layer, path, .. } in runtime_config_layers(start_dir)? {
         if !path.exists() {
             continue;
         }
@@ -9156,15 +9219,16 @@ mod config_tests {
             ..RuntimeConfig::default()
         };
         let documents = vec![
-            (ConfigLayer::UserGlobal, global_path.clone(), global),
-            (ConfigLayer::Repo, repo_path.clone(), repo),
+            (ConfigLayer::UserGlobal, global_path.clone(), None, global),
+            (ConfigLayer::Repo, repo_path.clone(), None, repo),
             (
                 ConfigLayer::Environment,
                 environment_path.clone(),
+                None,
                 environment,
             ),
         ];
-        let personal = documents[0].2.repo.values().next().unwrap();
+        let personal = documents[0].3.repo.values().next().unwrap();
         let mut runtime = RuntimeConfig::default();
         let mut winners = BTreeMap::new();
         apply_additive_values(
@@ -9203,7 +9267,8 @@ mod config_tests {
             Some("repo.toml")
         );
 
-        let conflicts = requirement_conflicts(&documents);
+        let effective = effective_repo_requirements(&documents);
+        let conflicts = requirement_conflicts_for_effective(&documents, &effective);
         let actual: BTreeSet<_> = conflicts
             .iter()
             .map(|conflict| {
@@ -9499,10 +9564,11 @@ mod config_tests {
         let repo = parse("schema-version = \"repository\"");
         let environment = parse("schema-version = \"environment\"");
         let documents = vec![
-            (ConfigLayer::Repo, repo_path.clone(), repo.clone()),
+            (ConfigLayer::Repo, repo_path.clone(), None, repo.clone()),
             (
                 ConfigLayer::Environment,
                 environment_path,
+                None,
                 environment.clone(),
             ),
         ];
@@ -10542,7 +10608,7 @@ mod config_tests {
     #[test]
     fn project_config_no_longer_a_runtime_config_layer() {
         let layers = runtime_config_layers(Utf8Path::new(".")).expect("layers enumerate");
-        let paths: Vec<String> = layers.iter().map(|(_, path)| path.to_string()).collect();
+        let paths: Vec<String> = layers.iter().map(|entry| entry.path.to_string()).collect();
         assert!(
             paths.iter().any(|path| path.ends_with(RUNTIME_CONFIG)),
             "runtime.toml tier still enumerated: {paths:?}"
@@ -10876,6 +10942,7 @@ mod config_tests {
             (
                 ConfigLayer::UserGlobal,
                 Utf8PathBuf::from("global.toml"),
+                None,
                 toml::from_str::<RuntimeConfig>(
                     "[pricing.\"model-a\"]\nusd-per-mtok = 1.0\n\n[pricing.\"model-b\"]\nusd-per-mtok = 2.0\n",
                 )
@@ -10884,6 +10951,7 @@ mod config_tests {
             (
                 ConfigLayer::Repo,
                 Utf8PathBuf::from("repo.toml"),
+                None,
                 toml::from_str::<RuntimeConfig>("[pricing.\"model-a\"]\nusd-per-mtok = 9.0\n").unwrap(),
             ),
         ];

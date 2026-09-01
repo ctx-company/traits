@@ -3,7 +3,7 @@ key = "0268.2"
 title = "Render the Config header and runtime.toml bar"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Give the Config screen its chrome — grammar rule 6's header and rule 8/12's provenance bar — over the one repository-scoped answer `0268.1` taught the center to serve. This cut renders; it resolves nothing.
 
 The **header** is a title in the shape `runtime — <repository display identity>` over exactly one italic narrated summary carrying three data counts in placeholder phrasing, with `∷` top-right and no breadcrumbs (`grammar.md:58-66`, `screens/config.md:9-11`). The **bottom bar** is rule 12's provenance instance for this screen: the served verdict, then the cited provenance and the one served instant, then `edit runtime.toml` as the right-hand ghost action (`grammar.md:74-84,110-115`, `screens/config.md:24-27`).
@@ -25,8 +25,8 @@ Eight grounded corrections the draft this file replaces did not carry.
 **No repository display identity exists at this HEAD, so the title's data source has to be found rather than assumed.** Shared code has `state::canonical_repo_root` and the deterministic `repo_key` = `<slug>-<first 8 hex>` (`modules/io/src/state.rs:128-160`), and center rows expose key and path, but nothing in that set is an owner/repository pair, so the export's `ctx-company/traits` shape is not something HEAD can produce truthfully. Execution inspects what `0268.1` actually landed: if the served answer already carries a truthful display identity, the title renders it; if not, this cut widens that same typed capability minimally — reachable by a non-GUI face — or renders a clearly defined pure projection of the served scope. What it may not do: read the desktop process's cwd, invoke `git` from the desktop, synthesise an owner segment the system does not hold, or fall back to the reference repository.
 
 **The check this file declared is the wrong evidence, and one prerequisite edge is missing.** `proof_doctor`'s only `--config` test asserts that `--verbose` conflicts with `--config` (`modules/cli/tests/proof_doctor.rs:255-273`); it covers no config semantics, and parent Correction 10 requires correcting it. `proof_config.rs` is the standing config suite, `proof_center.rs` the process-boundary suite for any served-answer widening, and `proof_runtime_ts.rs` the generated-document suite that the editable-source mapping runs through. Separately, dependencies are not inherited through a parent — open leaves evaluate only their own `depends-on` edges (`modules/core/src/task/graph.rs:115-176`) — and `0268.1`'s closure through `0265.5` reaches `0265.3`'s bar and `placeholders` module but never `0265.13`, which owns the reusable rule 6 header this cut composes. The edge is added, exactly as the analogous Traits chrome leaf carries it (`0267.2` relations).
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or observation shows it is the run's call.
@@ -76,8 +76,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 8. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and the desktop project stays outside the workspace. Decided by `just test` and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no config resolution, document-set assembly, verdict derivation or instant capture is written or copied here; no `0268.2` → `0268.3` dependency is added and no preview footer is implemented; no Config-private copy of the header, bar, token entry point, state presentation, `placeholders` module or provenance formatter is created; no export literal — `ctx-company/traits`, `Three seats, two engines, one trust list — runtime.toml as loaded.`, `runtime.toml` as a fixed source name, `13:02`, the hex colours or the paddings as raw numbers — is hardcoded at this call site; no light-theme value is touched; no pencil artifact is edited; no row, section, menu, preview or CLI work is done; no configuration write, trust mutation, `--apply` or `--migrate-config` change is made; and no work belonging to `0268.1`, `0268.3`, `0268.4`, `0266`, `0267`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. The desktop project does not exist at this HEAD — no manifest or lockfile in this repository names `gpui`, there is no standalone desktop source tree or `placeholders` module, the `Justfile` has no desktop command, and `0256.1` is still `ready` — so no desktop path, module, symbol, gpui API or command is named below. Discover every one of them from what `0256`, `0265` and `0268.1` actually landed, and say in the work summary where the landed shape differed from what is described here.
@@ -122,7 +122,11 @@ Suggested route, not a boundary. The desktop project does not exist at this HEAD
 One review pass over the completed diff before calling this done: walk `screens/config.md:9-27` leaf by leaf against the rendered header and bar, naming for each leaf the served source it renders from and confirming that only the summary's phrasing and `edit runtime.toml` come from the `placeholders` module; check the form against `grammar.md` rules 1-3, 5-6, 8 and 12 and the dark column of `tokens.md:6-85`; compare the literal geometry against `reference/config.html:251-286` and `589-616`, resolving content conflicts toward the spec; exercise the states and boundaries listed above; then read the diff for the properties no fixture shows directly — one accepted answer projecting header, rows and bar together, no second request, model, resolution, reader, timer or clock, no duplicated provenance assembly, no Config-private copy of the header, bar, tokens or placeholders, no inline placeholder or export literal, no write path, no light-theme value, no CLI-private import, no desktop filesystem or `git` work, and no gpui in root resolution. Then run the declared checks, and `0256.1`'s desktop command if it exists by then.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0268.1",
+    "0265.13",
+]
 parent = "0268"
-depends-on = ["0268.1", "0265.13"]

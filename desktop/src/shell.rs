@@ -1396,7 +1396,7 @@ impl Render for Shell {
                 ));
             }
         }
-        if self.screen == Screen::Traits {
+        if matches!(self.screen, Screen::Traits | Screen::Config) {
             let header = trait_library::traits_header(&self.library);
             let authored_count = match &self.library {
                 LibraryState::Accepted { answer, .. } => {
@@ -1517,6 +1517,7 @@ impl Render for Shell {
                 }
             }
             if self.screen == Screen::Config {
+                let header = config_screen::config_header(&self.config);
                 let mut config = div()
                     .debug_selector(|| "config-screen".to_string())
                     .flex()
@@ -1526,7 +1527,11 @@ impl Render for Shell {
                     .pl(tokens::MAIN_PANE_PAD_LEFT)
                     .pr(tokens::MAIN_PANE_PAD_RIGHT)
                     .py(tokens::MAIN_PANE_PAD_TOP)
-                    .gap(tokens::MAIN_PANE_GAP);
+                    .gap(tokens::MAIN_PANE_GAP)
+                    .child(crate::screen_header_view::screen_header_element(
+                        &header.title,
+                        &header.summary,
+                    ));
                 match &self.config {
                     ConfigState::Loading => {
                         config = config.child(
@@ -1631,15 +1636,7 @@ impl Render for Shell {
                                     );
                                 }
                             }
-                            if let Some(reason) = stale {
-                                config = config.child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_size(tokens::SIZE_10_5)
-                                        .text_color(rgb(tokens::TEXT_MUTED))
-                                        .child(format!("stale: {reason}")),
-                                );
-                            }
+                            let _ = stale;
                         }
                         ctx_traits_io::config_view::ConfigResolution::Refused { reason }
                         | ctx_traits_io::config_view::ConfigResolution::Failed { reason } => {
@@ -1653,6 +1650,12 @@ impl Render for Shell {
                         }
                     },
                 }
+                config = config
+                    .child(div().flex_1())
+                    .child(bottom_bar_view::bar_element(
+                        &config_screen::config_bar(&self.config),
+                        None,
+                    ));
                 body = div()
                     .debug_selector(|| "config-screen".to_string())
                     .flex()
@@ -1663,39 +1666,44 @@ impl Render for Shell {
                     ))
                     .child(config);
             }
-            let traits = traits
-                .child(div().flex_1())
-                .child(bottom_bar_view::bar_element(
-                    &trait_library::traits_bar(&self.library),
-                    None,
-                ));
-            body = div()
-                .debug_selector(|| "traits-screen".to_string())
-                .flex()
-                .flex_1()
-                .min_h_0()
-                .child(rail_view::rail_element(
-                    &self.face.rail(self.detail.repo_key()),
-                ))
-                .child(traits)
-                .child({
-                    let preview = trait_preview::project(self.trait_detail.as_ref());
-                    preview_view::preview_column_element(
-                        vec![
-                            preview_view::lede_block_element(
-                                "trait",
-                                &preview.trait_block,
-                                preview.lede.as_deref(),
-                            ),
-                            preview_view::named_block_element("facts", &preview.facts_block),
-                            preview_view::named_block_element("variants", &preview.variants_block),
-                            preview_view::named_block_element("ports", &preview.ports_block),
-                        ],
-                        Some(preview_view::preview_footer_element(
-                            &trait_library::traits_footer_text(&self.library),
-                        )),
-                    )
-                });
+            if self.screen == Screen::Traits {
+                let traits = traits
+                    .child(div().flex_1())
+                    .child(bottom_bar_view::bar_element(
+                        &trait_library::traits_bar(&self.library),
+                        None,
+                    ));
+                body = div()
+                    .debug_selector(|| "traits-screen".to_string())
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(rail_view::rail_element(
+                        &self.face.rail(self.detail.repo_key()),
+                    ))
+                    .child(traits)
+                    .child({
+                        let preview = trait_preview::project(self.trait_detail.as_ref());
+                        preview_view::preview_column_element(
+                            vec![
+                                preview_view::lede_block_element(
+                                    "trait",
+                                    &preview.trait_block,
+                                    preview.lede.as_deref(),
+                                ),
+                                preview_view::named_block_element("facts", &preview.facts_block),
+                                preview_view::named_block_element(
+                                    "variants",
+                                    &preview.variants_block,
+                                ),
+                                preview_view::named_block_element("ports", &preview.ports_block),
+                            ],
+                            Some(preview_view::preview_footer_element(
+                                &trait_library::traits_footer_text(&self.library),
+                            )),
+                        )
+                    });
+            }
         }
         div()
             .debug_selector(|| "window-frame".to_string())

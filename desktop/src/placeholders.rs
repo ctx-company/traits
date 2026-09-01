@@ -84,6 +84,21 @@ pub const AUTHOR_TRAIT: Placeholder = Placeholder {
     label: "author trait",
 };
 
+/// Neutral narration around the Config screen's served counts.
+pub fn config_summary(seats: usize, engines: usize, trust: usize) -> String {
+    format!(
+        "{seats} {} · {engines} {} · {trust} trusted {}",
+        if seats == 1 { "seat" } else { "seats" },
+        if engines == 1 { "engine" } else { "engines" },
+        if trust == 1 { "member" } else { "members" },
+    )
+}
+
+/// The Config screen's deliberately inert source-editing action.
+pub const EDIT_RUNTIME_TOML: Placeholder = Placeholder {
+    label: "edit runtime.toml",
+};
+
 /// `grammar.md:98` sets this value; the center serves no owner identity
 /// today, so it resolves here rather than as a literal at the rail's call
 /// site. A plain `&str`, not a [`Placeholder`]: that struct is documented

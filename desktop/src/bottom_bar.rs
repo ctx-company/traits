@@ -7,12 +7,13 @@ use crate::placeholders;
 use crate::row_control::{self, RowStatus};
 use crate::run_row::{RunRow, StatePresentation, presentation};
 
-/// The two tones rule 8 distinguishes today. The third (destructive/tertiary
-/// `text-muted`) tone is deliberately not defined until a screen renders one.
+/// Rule 8's action tones, including the tertiary muted presentation used for
+/// an honest in-place refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionTone {
     Primary,
     Secondary,
+    Muted,
 }
 
 /// Which action a `BarAction` is, independent of its display label — the
@@ -23,6 +24,7 @@ pub enum BarActionId {
     Pause,
     NewTask,
     AuthorTrait,
+    EditRuntimeToml,
 }
 
 /// A right-hand action word. Carrying no bound behaviour is the model's way

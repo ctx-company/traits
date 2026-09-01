@@ -44,6 +44,10 @@ pub struct ConfigView {
     pub runtime: Vec<ConfigRuntimeRow>,
     pub trust: ConfigTrustRow,
     pub documents: Vec<ConfigDocument>,
+    /// The authored source for the highest-precedence contributing document.
+    /// Defaults for an older center that has not yet served this field.
+    #[serde(default)]
+    pub edit_target: Option<String>,
     pub tier_warnings: Vec<String>,
     pub instant_epoch_millis: u128,
 }
@@ -93,6 +97,14 @@ fn winner(report: &ConfigReport, key: &str) -> Option<ConfigWinnerWire> {
         source: winner.source.clone(),
         reason: winner.reason.label().to_string(),
     })
+}
+
+fn edit_target(report: &ConfigReport) -> Option<String> {
+    report
+        .documents
+        .last()
+        .and_then(|document| document.edit_path.as_ref())
+        .map(ToString::to_string)
 }
 
 /// Builds one answer from one config report and one already-read trust store.
@@ -179,6 +191,7 @@ pub fn resolve_config_view(
             qualifier: "machine-global trait store".to_string(),
         },
     ]);
+    let edit_target = edit_target(&report);
     Ok(ConfigView {
         seats,
         runtime,
@@ -189,12 +202,56 @@ pub fn resolve_config_view(
         documents: report
             .documents
             .into_iter()
-            .map(|(layer, path)| ConfigDocument {
-                layer: layer_name(layer),
-                path: path.to_string(),
+            .map(|document| ConfigDocument {
+                layer: layer_name(document.layer),
+                path: document.path.to_string(),
             })
             .collect(),
+        edit_target,
         tier_warnings: report.tier_warnings,
         instant_epoch_millis,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8PathBuf;
+
+    use super::*;
+    use crate::harness_config::ConfigReportDocument;
+
+    #[test]
+    fn edit_target_uses_the_last_contributor_and_its_authored_source() {
+        let report = ConfigReport {
+            runtime: crate::harness_config::RuntimeConfig::default(),
+            winners: Default::default(),
+            tier_warnings: vec![],
+            documents: vec![
+                ConfigReportDocument {
+                    layer: ConfigLayer::Repo,
+                    path: Utf8PathBuf::from("generated/runtime.toml"),
+                    edit_path: Some(Utf8PathBuf::from("runtime.ts")),
+                },
+                ConfigReportDocument {
+                    layer: ConfigLayer::Environment,
+                    path: Utf8PathBuf::from("override.toml"),
+                    edit_path: Some(Utf8PathBuf::from("override.toml")),
+                },
+            ],
+            requirement_conflicts: vec![],
+        };
+        assert_eq!(edit_target(&report).as_deref(), Some("override.toml"));
+    }
+
+    #[test]
+    fn empty_document_set_has_no_edit_target() {
+        let report = ConfigReport {
+            runtime: crate::harness_config::RuntimeConfig::default(),
+            winners: Default::default(),
+            tier_warnings: vec![],
+            documents: vec![],
+            requirement_conflicts: vec![],
+        };
+        assert_eq!(edit_target(&report), None);
+    }
 }

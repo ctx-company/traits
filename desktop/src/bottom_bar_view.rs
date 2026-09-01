@@ -28,6 +28,7 @@ fn action_element(action: &BarAction, handler: Option<BarActionHandler>) -> AnyE
     let color = match action.tone {
         ActionTone::Primary => tokens::TEXT_BRIGHT,
         ActionTone::Secondary => tokens::TEXT_SECONDARY,
+        ActionTone::Muted => tokens::TEXT_MUTED,
     };
     let element = mono_11(color).child(action.label.clone());
     match handler {
