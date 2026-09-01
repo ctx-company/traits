@@ -80,6 +80,23 @@ impl InventoryContext {
         })
     }
 
+    /// Construct a repository-scoped inventory without consulting the process
+    /// cwd. The scope must name a usable directory; canonicalization makes
+    /// aliases resolve through the same project-tier paths.
+    pub fn at_repo_root(root: &Utf8Path) -> crate::Result<Self> {
+        if !root.is_dir() {
+            return Err(crate::Error::Usage {
+                message: format!("library scope is not a usable directory: {root}"),
+            });
+        }
+        let root = crate::state::canonical_repo_root(root)?;
+        Ok(Self {
+            invocation: InvocationRoot::Repo(root.clone()),
+            repo_root_for_paths: root,
+            project_tiers_visible: true,
+        })
+    }
+
     pub fn invocation(&self) -> &InvocationRoot {
         &self.invocation
     }

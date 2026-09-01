@@ -87,11 +87,25 @@ pub fn resolve_trust_verdict_for_trait(
     canonical_digest: &str,
 ) -> crate::Result<TrustVerdict> {
     let store = crate::trust::read_store()?;
-    Ok(match store.start_trust(trait_id, canonical_digest) {
+    Ok(resolve_trust_verdict_for_trait_in(
+        &store,
+        trait_id,
+        canonical_digest,
+    ))
+}
+
+/// Resolve a trait verdict from an already-loaded trust document. Library
+/// callers use this to join an entire inventory against one coherent store.
+pub fn resolve_trust_verdict_for_trait_in(
+    document: &crate::trust::Document,
+    trait_id: &str,
+    canonical_digest: &str,
+) -> TrustVerdict {
+    match document.start_trust(trait_id, canonical_digest) {
         crate::trust::StartTrust::Verified(_) => TrustVerdict::Verified,
         crate::trust::StartTrust::Blocked(_) => TrustVerdict::Blocked,
         crate::trust::StartTrust::Unreviewed => TrustVerdict::Unreviewed,
-    })
+    }
 }
 
 /// Resolve both package status and machine trust verdict for a loaded trait.

@@ -40,7 +40,6 @@ use super::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
 use super::frame_prompt::summons_question;
 use super::lifecycle_reporting::{
     DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source,
-    dashboard_trait_inventory,
 };
 use super::merge::{MergeInputs, merge};
 use super::merge_story;
@@ -2422,7 +2421,9 @@ fn dashboard_token_value(tokens: Option<u64>) -> String {
 /// projects the full tier set via [`build_trust_rows`]. No second inventory
 /// scan, no second trust-store read.
 fn load_traits_and_trust() -> crate::Result<(Vec<TraitRow>, Vec<TrustRow>)> {
-    let all = dashboard_trait_inventory()?;
+    let context = ctx_traits_io::inventory::InventoryContext::discover()?;
+    let document = ctx_traits_io::trust::read_store()?;
+    let all = super::lifecycle_reporting::dashboard_trait_inventory_from(&context, &document)?;
     let traits = all
         .iter()
         .filter(|row| row.origin.as_deref() != Some("built-in"))
@@ -2441,7 +2442,7 @@ fn load_traits_and_trust() -> crate::Result<(Vec<TraitRow>, Vec<TrustRow>)> {
             variant: row.variant.clone(),
         })
         .collect();
-    let trust = build_trust_rows(&all)?;
+    let trust = build_trust_rows_from(&document, &all);
     Ok((traits, trust))
 }
 
@@ -2619,11 +2620,6 @@ fn merges_from_center_rows(rows: &[ctx_traits_io::center::CenterPublicRow]) -> V
 /// `trust.toml` becomes invisible. An unreadable trait row (no canonical
 /// digest was ever computed) is skipped, matching the old digest-centric
 /// `load_trust`'s own rule.
-fn build_trust_rows(all: &[DashboardTraitRow]) -> crate::Result<Vec<TrustRow>> {
-    let document = ctx_traits_io::trust::read_store()?;
-    Ok(build_trust_rows_from(&document, all))
-}
-
 /// Projects a supplied trust document for the TRUST screen. Keeping the join
 /// pure makes exact-digest authority testable without machine-local store IO.
 fn build_trust_rows_from(

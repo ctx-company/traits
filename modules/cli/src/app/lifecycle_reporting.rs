@@ -1548,6 +1548,10 @@ pub(crate) enum TraitInventoryRow {
         path: String,
         error: String,
     },
+    SourceOnly {
+        id: String,
+        source_path: String,
+    },
 }
 
 /// The single discovery/load/lifecycle-resolution loop over every tier
@@ -1561,120 +1565,43 @@ pub(crate) enum TraitInventoryRow {
 pub(crate) fn resolve_trait_inventory(
     context: &ctx_traits_io::inventory::InventoryContext,
 ) -> crate::Result<Vec<TraitInventoryRow>> {
-    let ids = context.candidate_ids()?;
-    let mut rows = Vec::new();
-    for id in ids {
-        let Some(resolution) = context.resolve_tiers(&id)? else {
-            continue;
-        };
-        let path = resolution.winner.path.as_str().to_string();
-        let origin = match resolution.winner.tier {
-            ctx_traits_io::inventory::Tier::RepoAuthored => None,
-            _ => Some(resolution.winner.origin.clone()),
-        };
-        let shadow = resolution
-            .shadowed
-            .first()
-            .map(|candidate| candidate.origin.clone());
-
-        // A native family shares one candidate id across every variant, each
-        // with its own canonical digest and trust verdict. Reporting only the
-        // bare id's winner (the default variant) let one variant's verdict
-        // stand in for the whole family — the 0150 collapse. Reading the
-        // family table from the winner's package root, when present, expands
-        // the id into one row per declared variant instead of one row total;
-        // every reporting surface (`list`, TRAITS, TRUST) derives from this
-        // one scan, so the fix lands everywhere at once.
-        let family_table =
-            ctx_traits_io::layout::package_root_for_manifest(camino::Utf8Path::new(&path))
-                .and_then(|root| {
-                    ctx_traits_io::family_manifest::read_family_table(
-                        &ctx_traits_io::layout::package_manifest_path(root),
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|table| (root.to_path_buf(), table))
-                });
-
-        if let Some((root, table)) = family_table {
-            for variant in table.variants.values() {
-                let variant_path = root.join(&variant.relative_path);
-                push_resolved_trait_row(
-                    &mut rows,
-                    &id,
-                    variant_path.as_str(),
-                    origin.clone(),
-                    shadow.clone(),
-                    // The `[family]` package table is the ground truth this
-                    // expansion is reading from — a native build stamps no
-                    // `metadata.family` slug on the canonical document
-                    // itself, so grouping must key off the family id this
-                    // scan already resolved from, not off a field the
-                    // variant's own bytes never carry.
-                    Some(id.clone()),
-                )?;
-            }
-            continue;
-        }
-
-        push_resolved_trait_row(&mut rows, &id, &path, origin, shadow, None)?;
-    }
-    Ok(rows)
+    let document = ctx_traits_io::trust::read_store()?;
+    resolve_trait_inventory_from(context, &document)
 }
 
-/// Load one trait file and push its resolved (or unreadable) inventory row.
-/// The one place [`resolve_trait_inventory`] turns a candidate manifest path
-/// into a [`TraitInventoryRow`], shared by both the single-id path and the
-/// per-variant family expansion so the two can never diverge on how a row is
-/// built. `family_override` is `Some(family_id)` for a variant reached via
-/// the `[family]` package-table expansion; `None` falls back to the
-/// document's own `metadata.family` slug, for a family-less trait or one
-/// declared that way outside the native-family mechanism.
-fn push_resolved_trait_row(
-    rows: &mut Vec<TraitInventoryRow>,
-    id: &str,
-    path: &str,
-    origin: Option<String>,
-    shadow: Option<String>,
-    family_override: Option<String>,
-) -> crate::Result<()> {
-    match ctx_traits_io::run::load_trait(path) {
-        Ok((trait_ref, trait_root, _, canonical_digest)) => {
-            let (status, trust) = ctx_traits_io::lifecycle::resolve_named(
-                &trait_root,
-                trait_ref.id.as_str(),
-                canonical_digest.as_str(),
-            )?;
-            let family = family_override.or_else(|| {
-                trait_ref
-                    .metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.family.as_ref())
-                    .map(|slug| slug.as_str().to_string())
-            });
-            let variant = trait_ref.variant.clone();
-            rows.push(TraitInventoryRow::Resolved(Box::new(ResolvedTraitEntry {
-                id: trait_ref.id.as_str().to_string(),
-                version: trait_ref.version.as_str().to_string(),
-                schema_version: trait_ref.schema_version.as_str().to_string(),
-                status: status.display_name().to_string(),
-                trust: trust.display_name().to_string(),
-                canonical_digest: canonical_digest.as_str().to_string(),
-                source_path: path.to_string(),
-                trait_root: trait_root.to_string(),
-                origin,
-                family,
-                variant,
-                shadow,
-            })));
-        }
-        Err(error) => rows.push(TraitInventoryRow::Unreadable {
-            id: id.to_string(),
-            path: path.to_string(),
-            error: error.to_string(),
-        }),
-    }
-    Ok(())
+pub(crate) fn resolve_trait_inventory_from(
+    context: &ctx_traits_io::inventory::InventoryContext,
+    document: &ctx_traits_io::trust::Document,
+) -> crate::Result<Vec<TraitInventoryRow>> {
+    Ok(ctx_traits_io::library::resolve_library(context, document)?
+        .rows
+        .into_iter()
+        .map(|row| match row {
+            ctx_traits_io::library::LibraryRow::Resolved(entry) => {
+                TraitInventoryRow::Resolved(Box::new(ResolvedTraitEntry {
+                    id: entry.id,
+                    version: entry.version,
+                    schema_version: entry.schema_version,
+                    status: entry.status,
+                    trust: entry.trust.display_name().to_string(),
+                    canonical_digest: entry.canonical_digest,
+                    source_path: entry.source_path,
+                    trait_root: entry.trait_root,
+                    origin: (entry.tier != ctx_traits_io::library::TierWire::RepoAuthored)
+                        .then_some(entry.origin),
+                    family: entry.family,
+                    variant: entry.variant,
+                    shadow: entry.shadow,
+                }))
+            }
+            ctx_traits_io::library::LibraryRow::Unreadable {
+                id, path, error, ..
+            } => TraitInventoryRow::Unreadable { id, path, error },
+            ctx_traits_io::library::LibraryRow::SourceOnly { id, source_path } => {
+                TraitInventoryRow::SourceOnly { id, source_path }
+            }
+        })
+        .collect())
 }
 
 /// One TRAITS-screen row: [`ResolvedTraitEntry`], or the read error for an
@@ -1704,12 +1631,14 @@ pub(crate) struct DashboardTraitRow {
 /// list`/`doctor` (P473 §1 note 2). TRAITS filters this down to
 /// `origin != Some("built-in")` itself (byte-identical to pre-P473 rows);
 /// TRUST uses the full set. The list does not compute drift.
-pub(crate) fn dashboard_trait_inventory() -> crate::Result<Vec<DashboardTraitRow>> {
-    let context = ctx_traits_io::inventory::InventoryContext::discover()?;
-    let mut rows: Vec<DashboardTraitRow> = resolve_trait_inventory(&context)?
+pub(crate) fn dashboard_trait_inventory_from(
+    context: &ctx_traits_io::inventory::InventoryContext,
+    document: &ctx_traits_io::trust::Document,
+) -> crate::Result<Vec<DashboardTraitRow>> {
+    let mut rows: Vec<DashboardTraitRow> = resolve_trait_inventory_from(context, document)?
         .into_iter()
-        .map(|row| match row {
-            TraitInventoryRow::Resolved(entry) => DashboardTraitRow {
+        .filter_map(|row| match row {
+            TraitInventoryRow::Resolved(entry) => Some(DashboardTraitRow {
                 id: entry.id,
                 version: entry.version,
                 status: entry.status,
@@ -1720,8 +1649,8 @@ pub(crate) fn dashboard_trait_inventory() -> crate::Result<Vec<DashboardTraitRow
                 origin: entry.origin,
                 family: entry.family,
                 variant: entry.variant,
-            },
-            TraitInventoryRow::Unreadable { id, path, error } => DashboardTraitRow {
+            }),
+            TraitInventoryRow::Unreadable { id, path, error } => Some(DashboardTraitRow {
                 id,
                 version: String::new(),
                 status: String::new(),
@@ -1732,7 +1661,9 @@ pub(crate) fn dashboard_trait_inventory() -> crate::Result<Vec<DashboardTraitRow
                 origin: None,
                 family: None,
                 variant: None,
-            },
+            }),
+            // Existing dashboard output did not include source-only packages.
+            TraitInventoryRow::SourceOnly { .. } => None,
         })
         .collect();
     rows.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1816,7 +1747,6 @@ pub(crate) fn handle_list(json: bool, verbose: bool) -> crate::Result<CommandOut
             !matches!(row, TraitInventoryRow::Resolved(entry) if entry.origin.as_deref() == Some("built-in"))
         })
         .collect();
-    let authoring_packages = ctx_traits_io::discovery::trait_authoring_packages(&cwd)?;
 
     // Runnable only: a shared package like `spec` ships in the binary so a
     // dependent's `../spec` resolves, but listing it would offer a trait that
@@ -1843,13 +1773,6 @@ pub(crate) fn handle_list(json: bool, verbose: bool) -> crate::Result<CommandOut
     let repo_root_hint = ctx_traits_io::layout::trait_authoring_root_path(&cwd).to_string();
 
     let mut rows = Vec::new();
-    let protocol_ids: std::collections::BTreeSet<String> = inventory
-        .iter()
-        .map(|row| match row {
-            TraitInventoryRow::Resolved(entry) => entry.id.clone(),
-            TraitInventoryRow::Unreadable { id, .. } => id.clone(),
-        })
-        .collect();
     for row in inventory {
         match row {
             TraitInventoryRow::Resolved(entry) => rows.push(ListRow::Trait {
@@ -1867,14 +1790,10 @@ pub(crate) fn handle_list(json: bool, verbose: bool) -> crate::Result<CommandOut
             TraitInventoryRow::Unreadable { id, path, error } => {
                 rows.push(ListRow::Unreadable { id, path, error })
             }
-        }
-    }
-    for package in authoring_packages {
-        if !protocol_ids.contains(&package.trait_id) {
-            rows.push(ListRow::SourceOnly {
-                id: package.trait_id,
-                source: package.source_path.to_string(),
-            });
+            TraitInventoryRow::SourceOnly { id, source_path } => rows.push(ListRow::SourceOnly {
+                id,
+                source: source_path,
+            }),
         }
     }
 

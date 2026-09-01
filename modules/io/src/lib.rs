@@ -53,6 +53,7 @@ pub mod import;
 pub mod init;
 pub mod inventory;
 pub mod layout;
+pub mod library;
 pub mod lifecycle;
 pub mod lockfile;
 pub mod mcp;

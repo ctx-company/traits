@@ -3,7 +3,7 @@ key = "0267.1"
 title = "Serve traits and trust and render the library rows"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Teach the center to answer one repository's authored trait library — inventory, trust states, variants and lock provenance — and render the Traits screen's section and rows from that answer. One cut, because the rendering is what proves the capability and the capability is what makes the rendering honest.
 
 Today the library is reachable in-process only. `load_traits_and_trust` (`modules/cli/src/app/dashboard.rs:2418-2445`) calls `dashboard_trait_inventory` and then `build_trust_rows`, and the assembly beneath it — `ResolvedTraitEntry`, `TraitInventoryRow`, `resolve_trait_inventory`, `DashboardTraitRow` (`modules/cli/src/app/lifecycle_reporting.rs:1509-1740`) — is CLI-private. A separate desktop binary reaches none of it, and an inventory walk, trust parse or lock reader written for the desktop would be the capability-in-one-face defect the plan document forbids, even over identical bytes. So this cut extracts the pure assembly into shared core/IO, gives it an explicit repository scope, extends the center protocol with a typed library capability, and renders the `Authored — N` section from the served answer. Moving the TUI's two projections onto the same answer is `0267.5`, inside this same charter.
@@ -19,8 +19,8 @@ Five grounded corrections the draft this file replaces did not carry.
 **Unreadable rows discard the tier they came from, which would corrupt the `Authored` projection.** `TraitInventoryRow::Unreadable` carries only id/path/error and `dashboard_trait_inventory` fills `origin: None` for it (`lifecycle_reporting.rs:1541-1551,1724-1735`), and repo-authored winners are exactly the `origin = None` rows (`lifecycle_reporting.rs:1570-1578`). Deriving the desktop's `Authored` section from `origin = None` over today's shape would file every unreadable vendored, user-global and built-in package under this repository's authored library. The extracted unreadable arm carries its tier/origin. In the same region, family detection swallows read errors with `.ok().flatten()` (`lifecycle_reporting.rs:1588-1597`), so a malformed `[family]` table silently degrades into a standalone row; in a fail-loud resolution that must be a typed failure of that package, not a quiet reshape of it.
 
 **The family aggregate has no defined precedence once `moved` and `unreadable` are reachable.** `aggregate_trust_label` (`modules/cli/src/app/trust_story.rs:185-212`) covers verified/blocked/partial/unreviewed over three verdict strings; `TrustClass` adds moved-approval, moved-block and orphaned (`trust_story.rs:15-87`); neither defines what a family reads as when one member is moved or unreadable. Leaving that to each renderer is how a family reads flatly trusted while a member is not. This cut fixes the precedence once, in the typed mapping, and tests it.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected files, symbols, signatures, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or matcher observes it is the run's call.
@@ -62,8 +62,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 8. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and the desktop project stays outside the workspace. Decided by `just test` and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no second copy of the inventory assembly, the family aggregate or the trust word mapping is created; no CLI-private type is imported by the desktop; no inventory, trust or lockfile semantics are redefined; no light-theme value is touched; no pencil artifact is edited; no trait authoring or new trust mutation is opened; the TUI's direct readers and its two-second poll are `0267.5`'s to remove and are not half-removed here; and no work belonging to `0267.2`-`0267.5`, `0266`, `0268`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. Every symbol is named because the grounding supports it; take a different one wherever a goal requires it and say so in the work summary.
@@ -100,10 +100,15 @@ Suggested route, not a boundary. Every symbol is named because the grounding sup
 One review pass over the completed diff before calling this done: walk `screens/traits.md`'s menu entry, section, and row leaves against the rendered pane, naming the served source for each; compare the literal geometry against `reference/traits.html:287-579` and `tokens.md:71-85`; exercise the scratch boundaries listed above; then read the diff for the properties no fixture shows directly — one assembly, one trust-document load, one provenance resolution, retained per-member records with tier/origin, explicit repository scope, no client timer, no desktop filesystem or `git` read, no CLI-private import, no second copy of an extracted rule. Then run the declared checks.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0265.5",
+    "0265.9",
+    "0258",
+]
 parent = "0267"
-depends-on = ["0265.5", "0265.9", "0258"]
 
 [[checks]]
 name = "per-round workspace gate remains green"
@@ -114,14 +119,14 @@ timeout-ms = 1200000
 name = "center wire proof still passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
 timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "trust family report proof still passes"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_trust_family_report"
 timeout-ms = 1200000
-expect = "test result: ok\\. [1-9]"
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "root Cargo resolution and lockfile remain gpui-free"
-command = "metadata=\"$(cargo metadata --format-version 1)\" && ! printf '%s\\n' \"$metadata\" | rg -q '\"name\":\"gpui\"' && ! rg -q '^name = \"gpui\"$' Cargo.lock"
+command = '''metadata="$(cargo metadata --format-version 1)" && ! printf '%s\n' "$metadata" | rg -q '"name":"gpui"' && ! rg -q '^name = "gpui"$' Cargo.lock'''

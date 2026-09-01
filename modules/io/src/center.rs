@@ -162,6 +162,10 @@ enum Request {
         id: String,
         repo_key: String,
     },
+    Library {
+        id: String,
+        repo_key: String,
+    },
 }
 
 impl Request {
@@ -181,7 +185,8 @@ impl Request {
             | Self::Stats { id, .. }
             | Self::StandingWall { id, .. }
             | Self::ClaimedTask { id, .. }
-            | Self::Board { id, .. } => id,
+            | Self::Board { id, .. }
+            | Self::Library { id, .. } => id,
         }
     }
 
@@ -221,6 +226,7 @@ enum ResponseResult {
     Control(ControlWireResult),
     ClaimedTask(ClaimedTaskWireResult),
     Board(Box<BoardWireResult>),
+    Library(Box<LibraryWireResult>),
     Error { message: String },
 }
 
@@ -233,6 +239,17 @@ pub struct BoardWireResult {
     pub resolution: crate::task_files::BoardResolution,
     pub joined_runs: BTreeMap<String, Vec<ctx_traits_core::task::provider::BoardRun>>,
     pub sections: BTreeMap<String, Option<ctx_traits_core::task::provider::BoardSection>>,
+}
+
+/// Repository-scoped trait library answer. Its rows and provenance are
+/// produced once in the connection worker and are safe for all clients to
+/// project without rediscovery.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LibraryWireResult {
+    pub repo_key: String,
+    pub repo_path: String,
+    pub resolution: crate::library::LibraryResolution,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -336,6 +353,9 @@ pub enum CenterDelta {
         row: Box<CenterPublicRow>,
         activity: crate::activity_sidecar::ActivityRecord,
     },
+    LibraryChanged {
+        repo_keys: Vec<String>,
+    },
 }
 
 impl CenterDelta {
@@ -347,6 +367,7 @@ impl CenterDelta {
             | Self::RowChanged { row }
             | Self::Ended { row }
             | Self::ActivityLine { row, .. } => row,
+            Self::LibraryChanged { .. } => panic!("library change has no run row"),
         }
     }
 
@@ -375,6 +396,7 @@ impl CenterDelta {
                 row.ledger_path.clone()
             }
             Self::ActivityLine { row, .. } => row.ledger_path.clone(),
+            Self::LibraryChanged { .. } => panic!("library change cannot update run rows"),
         }
     }
 }
@@ -1171,6 +1193,21 @@ pub fn board_existing(repo_key: &str) -> crate::Result<BoardWireResult> {
     )? {
         ResponseResult::Board(board) => Ok(*board),
         _ => Err(protocol_error("unexpected board response")),
+    }
+}
+
+/// Resolve a repository's trait library through an already-serving center.
+/// Like the board endpoint, this never causes a desktop process to spawn one.
+pub fn library_existing(repo_key: &str) -> crate::Result<LibraryWireResult> {
+    match request_existing(
+        Request::Library {
+            id: next_id("library"),
+            repo_key: repo_key.to_owned(),
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Library(library) => Ok(*library),
+        _ => Err(protocol_error("unexpected library response")),
     }
 }
 
@@ -2846,11 +2883,14 @@ impl CenterModel {
     }
 
     fn broadcast(&mut self, message: CenterDelta) {
-        let repo_key = match &message {
+        let repo_keys = match &message {
             CenterDelta::Appeared { row }
             | CenterDelta::RowChanged { row }
             | CenterDelta::Ended { row }
-            | CenterDelta::ActivityLine { row, .. } => row.repo_key.as_str(),
+            | CenterDelta::ActivityLine { row, .. } => vec![row.repo_key.as_str()],
+            CenterDelta::LibraryChanged { repo_keys } => {
+                repo_keys.iter().map(String::as_str).collect()
+            }
         };
         self.subscribers.retain(|_, subscriber| {
             // A repository-scoped subscriber stays registered when an update
@@ -2860,7 +2900,7 @@ impl CenterModel {
             if !subscriber
                 .repo_key
                 .as_deref()
-                .is_none_or(|scope| scope == repo_key)
+                .is_none_or(|scope| repo_keys.contains(&scope))
             {
                 return true;
             }
@@ -3790,6 +3830,15 @@ fn serve_connection_worker(
             let _ = response(&mut stream, id, result);
             return;
         }
+        if let Request::Library { repo_key, .. } = request {
+            let result = run_library_request(&jobs, repo_key)
+                .map(|library| ResponseResult::Library(Box::new(library)))
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
         let (reply_sender, reply_receiver) = mpsc::sync_channel::<crate::Result<ResponseResult>>(1);
         let registered_path = match &request {
             Request::Register { registration, .. } => Some(registration.ledger_path.clone()),
@@ -4028,6 +4077,38 @@ fn run_board_request(
         resolution,
         joined_runs,
         sections,
+    })
+}
+
+fn run_library_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    repo_key: String,
+) -> crate::Result<LibraryWireResult> {
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRepository {
+        repo_key: repo_key.clone(),
+        reply,
+    })
+    .map_err(|_| protocol_error("model queue unavailable"))?;
+    let root = match receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("repository resolution timed out"))??
+    {
+        RepositoryResolution::One { root, .. } => root,
+        RepositoryResolution::Missing => {
+            return Err(protocol_error("repository is not known to center"));
+        }
+        RepositoryResolution::Ambiguous => {
+            return Err(protocol_error("repository has ambiguous roots"));
+        }
+    };
+    let context = crate::inventory::InventoryContext::at_repo_root(&root)?;
+    let document = crate::trust::read_store()?;
+    let resolution = crate::library::resolve_library(&context, &document)?;
+    Ok(LibraryWireResult {
+        repo_key,
+        repo_path: root.to_string(),
+        resolution,
     })
 }
 
@@ -4370,7 +4451,8 @@ fn handle_request(
         | Request::Start { .. }
         | Request::Control { .. }
         | Request::ClaimedTask { .. }
-        | Request::Board { .. } => Err(protocol_error(
+        | Request::Board { .. }
+        | Request::Library { .. } => Err(protocol_error(
             "request is handled by the connection worker",
         )),
     }

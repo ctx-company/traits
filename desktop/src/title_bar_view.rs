@@ -22,6 +22,7 @@ use crate::tokens;
 /// so this is a plain interface word, not a registry lookup.
 pub const SESSIONS: &str = "Sessions";
 pub const TASKS: &str = "Tasks";
+pub const TRAITS: &str = "Traits";
 
 pub type MenuHandler = Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
 
@@ -60,6 +61,7 @@ pub fn title_bar_element(
     current_screen: &str,
     on_sessions: Option<MenuHandler>,
     on_tasks: Option<MenuHandler>,
+    on_traits: Option<MenuHandler>,
 ) -> AnyElement {
     let menu = div()
         .debug_selector(|| "title-bar-menu".to_string())
@@ -69,7 +71,8 @@ pub fn title_bar_element(
         .flex_shrink_0()
         .gap(tokens::TITLE_BAR_MENU_GAP)
         .child(menu_entry(SESSIONS, current_screen, on_sessions))
-        .child(menu_entry(TASKS, current_screen, on_tasks));
+        .child(menu_entry(TASKS, current_screen, on_tasks))
+        .child(menu_entry(TRAITS, current_screen, on_traits));
 
     div()
         .debug_selector(|| "title-bar".to_string())

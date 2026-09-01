@@ -373,6 +373,7 @@ pub struct Shell {
 enum Screen {
     Sessions,
     Tasks,
+    Traits,
 }
 
 impl Screen {
@@ -380,6 +381,7 @@ impl Screen {
         match self {
             Self::Sessions => title_bar_view::SESSIONS,
             Self::Tasks => title_bar_view::TASKS,
+            Self::Traits => title_bar_view::TRAITS,
         }
     }
 }
@@ -969,6 +971,17 @@ impl Render for Shell {
                 .child(section("Ready"))
                 .child(section("Draft"));
         }
+        if self.screen == Screen::Traits {
+            body = div()
+                .debug_selector(|| "traits-screen".to_string())
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .p(tokens::MAIN_PANE_PAD_TOP)
+                .gap(tokens::LIST_SECTION_GAP)
+                .child(div().font_family(tokens::FONT_MONO).text_size(tokens::SIZE_11).text_color(rgb(tokens::TEXT_MUTED)).child("Authored — 0"));
+        }
         div()
             .debug_selector(|| "window-frame".to_string())
             .flex()
@@ -990,6 +1003,13 @@ impl Render for Shell {
                     Box::new(
                         cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
                             shell.switch_screen(Screen::Tasks, cx);
+                        }),
+                    ) as title_bar_view::MenuHandler
+                }),
+                (self.screen != Screen::Traits).then(|| {
+                    Box::new(
+                        cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
+                            shell.switch_screen(Screen::Traits, cx);
                         }),
                     ) as title_bar_view::MenuHandler
                 }),
