@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sessions &amp; runs: collapse the identity split</title>
+<style>
+  :root {
+    --ink: #1a1d21;
+    --dim: #6b7280;
+    --line: #9aa1ab;
+    --keep: #0a7a44;
+    --drop: #b4232a;
+    --panel: #ffffff;
+    --bg: #f4f4f2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding: 32px 16px 64px;
+  }
+  main { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lede { color: var(--dim); margin: 0 0 24px; max-width: 72ch; }
+  section {
+    background: var(--panel);
+    border: 1px solid #e2e2df;
+    border-radius: 8px;
+    margin-bottom: 28px;
+    padding: 16px 16px 8px;
+  }
+  h2 { font-size: 16px; margin: 0 0 2px; }
+  h2 .tag {
+    font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 8px; border-radius: 10px; vertical-align: 2px; margin-left: 8px;
+  }
+  .tag.today { background: #fbe9ea; color: var(--drop); }
+  .tag.proposed { background: #e6f4ec; color: var(--keep); }
+  p.note { color: var(--dim); font-size: 13.5px; margin: 2px 0 10px; max-width: 80ch; }
+  .scroll { overflow-x: auto; }
+  svg { display: block; min-width: 960px; }
+  .legend { display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; color: var(--dim); margin: 8px 0 16px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 26px; height: 0; border-top: 2.5px solid var(--line); display: inline-block; }
+  .swatch.dropped { border-top-style: dashed; border-top-color: var(--drop); }
+  .swatch.kept { border-top-color: var(--keep); }
+  footer { color: var(--dim); font-size: 13px; max-width: 80ch; }
+  code { font: 12.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: #eeeeeb; padding: 1px 4px; border-radius: 3px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sessions &amp; runs — do we need both identities?</h1>
+  <p class="lede">
+    Topology of one execution's identity in ctx.traits. Native starts mint
+    <code>session_id</code> and <code>run_id</code> from one seed; WASM derives both through
+    a separate deterministic path. Neither path creates multiple executions under one
+    session. The corrected proposal keeps the execution-ledger layering, uses session
+    vocabulary throughout, and deletes <code>run_id</code> in one migrated cut.
+  </p>
+
+  <div class="legend" aria-hidden="true">
+    <span><span class="swatch"></span> identity flow (kept)</span>
+    <span><span class="swatch kept"></span> canonical after collapse</span>
+    <span><span class="swatch dropped"></span> redundant today — removed (also marked “drop”)</span>
+  </div>
+
+  <section aria-labelledby="t1">
+    <h2 id="t1">One start, two names<span class="tag today">TODAY</span></h2>
+    <p class="note">
+      Native <code>io/run.rs:956</code> mints both ids from one
+      <code>fresh_identity_seed</code>. WASM instead derives both ids, and its run seed omits
+      inputs. Every surface downstream must still thread, validate, or resolve both namespaces.
+    </p>
+    <div class="scroll" role="img"
+         aria-label="Flow diagram, current native state: ctx traits run feeds one fresh identity seed, which mints both a session id and a run id. The session id reaches the ledger file, the worktree, the center projection, resume and story, and call submissions. The run id redundantly reaches the center projection, call submissions, and merge, which scans the center's in-memory rows by default or deserializes the whole explicitly selected session store.">
+    <svg viewBox="0 0 980 540" width="980" height="540" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#9aa1ab"/>
+        </marker>
+        <marker id="a1d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#b4232a"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5">
+        <!-- start + seed -->
+        <rect x="16" y="60" width="196" height="58" rx="6" fill="#fff" stroke="#1a1d21" stroke-width="1.4"/>
+        <text x="114" y="84" text-anchor="middle" font-weight="700" font-family="inherit" font-size="13.5">ctx traits run</text>
+        <text x="114" y="103" text-anchor="middle" fill="#6b7280">native start · io/run.rs</text>
+
+        <rect x="16" y="196" width="196" height="72" rx="6" fill="#fff" stroke="#9aa1ab"/>
+        <text x="114" y="222" text-anchor="middle" font-weight="700">fresh_identity_seed</text>
+        <text x="114" y="240" text-anchor="middle" fill="#6b7280">nanos|pid|counter|trait</text>
+        <text x="114" y="256" text-anchor="middle" fill="#6b7280">io/run.rs:83</text>
+
+        <line x1="114" y1="118" x2="114" y2="192" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+
+        <!-- twin ids -->
+        <rect x="300" y="120" width="196" height="58" rx="6" fill="#fff" stroke="#0a7a44" stroke-width="1.8"/>
+        <text x="398" y="144" text-anchor="middle" font-weight="700">session-&lt;hash&gt;</text>
+        <text x="398" y="162" text-anchor="middle" fill="#6b7280">digest("session|seed")</text>
+
+        <rect x="300" y="290" width="196" height="58" rx="6" fill="#fff" stroke="#b4232a" stroke-width="1.8" stroke-dasharray="6 4"/>
+        <text x="398" y="314" text-anchor="middle" font-weight="700" fill="#b4232a">run-&lt;hash&gt;</text>
+        <text x="398" y="332" text-anchor="middle" fill="#6b7280">digest("run|seed")</text>
+
+        <path d="M212 224 C 256 224, 260 160, 296 152" fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+        <path d="M212 240 C 256 240, 260 310, 296 318" fill="none" stroke="#b4232a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a1d)"/>
+
+        <!-- twins bracket -->
+        <line x1="398" y1="178" x2="398" y2="290" stroke="#b4232a" stroke-width="1.2" stroke-dasharray="2 4"/>
+        <text x="410" y="238" fill="#b4232a" font-weight="700">native 1:1 twins,</text>
+        <text x="410" y="254" fill="#b4232a">never diverge</text>
+
+        <!-- surfaces -->
+        <g>
+          <rect x="620" y="16" width="344" height="56" rx="6" fill="#fff" stroke="#9aa1ab"/>
+           <text x="632" y="38" font-weight="700">ledger  ~/.config/ctx/traits/runs/&lt;repo&gt;/</text>
+          <text x="632" y="56">&lt;session-id&gt;.json   (P426)</text>
+
+          <rect x="620" y="92" width="344" height="56" rx="6" fill="#fff" stroke="#9aa1ab"/>
+          <text x="632" y="114" font-weight="700">worktree wt-&lt;hex12(session)&gt;</text>
+          <text x="632" y="132">branch ctx/run/&lt;id&gt; · worktree.rs:190</text>
+
+          <rect x="620" y="168" width="344" height="56" rx="6" fill="#fff" stroke="#9aa1ab"/>
+          <text x="632" y="190" font-weight="700">center projection JSON</text>
+          <text x="632" y="208">{session_id, run_id, trait_id, status}</text>
+
+          <rect x="620" y="244" width="344" height="56" rx="6" fill="#fff" stroke="#9aa1ab"/>
+          <text x="632" y="266" font-weight="700">resume · sessions story</text>
+          <text x="632" y="284">accepts run-id | session-id | prefix | path</text>
+
+          <rect x="620" y="320" width="344" height="72" rx="6" fill="#fff" stroke="#b4232a" stroke-width="1.6"/>
+          <text x="632" y="342" font-weight="700" fill="#b4232a">merge &lt;run-id&gt;</text>
+          <text x="632" y="360">default: in-memory center row scan;</text>
+          <text x="632" y="378">explicit store: deserialize every ledger</text>
+
+          <rect x="620" y="412" width="344" height="72" rx="6" fill="#fff" stroke="#9aa1ab"/>
+          <text x="632" y="434" font-weight="700">CallSubmission (every frame)</text>
+          <text x="632" y="452">must carry session-id AND run-id</text>
+          <text x="632" y="470">AND state-digest · session.rs:2849</text>
+        </g>
+
+        <!-- session edges -->
+        <path d="M496 134 C 560 120, 560 60, 616 46"  fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+        <path d="M496 142 C 560 138, 560 118, 616 120" fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+        <path d="M496 152 C 556 162, 560 186, 616 192" fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+        <path d="M496 162 C 560 184, 560 262, 616 270" fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+        <path d="M496 170 C 572 210, 572 420, 616 438" fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a1)"/>
+
+        <!-- run edges (redundant) -->
+        <path d="M496 306 C 556 288, 560 216, 616 204" fill="none" stroke="#b4232a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a1d)"/>
+        <path d="M496 319 C 556 330, 560 344, 616 350" fill="none" stroke="#b4232a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a1d)"/>
+        <path d="M496 332 C 556 360, 560 440, 616 452" fill="none" stroke="#b4232a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a1d)"/>
+        <text x="516" y="384" fill="#b4232a" font-weight="700">drop: second namespace,</text>
+        <text x="516" y="400" fill="#b4232a">zero extra information</text>
+      </g>
+    </svg>
+    </div>
+  </section>
+
+  <section aria-labelledby="t2">
+    <h2 id="t2">One start, one name<span class="tag proposed">PROPOSED</span></h2>
+    <p class="note">
+      One coordinated cut: native starts mint one fresh session id, WASM requires one from
+      its host, persisted state is migrated with no serde alias, and all identity/storage
+      vocabulary becomes session vocabulary. Re-attempts, if ever needed, remain an
+      <code>attempt</code> ordinal inside the session ledger, not a resurrected namespace.
+    </p>
+    <div class="scroll" role="img"
+         aria-label="Flow diagram, corrected proposed state: the native adapter mints one fresh session id and the WASM host supplies one. The run id node and fields are removed. Persisted ledgers and git refs migrate to session names, the center projection is rebuilt without run id, merge resolves a session ref directly, and call submissions carry session id plus state digest only.">
+    <svg viewBox="0 0 980 540" width="980" height="540" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#9aa1ab"/>
+        </marker>
+        <marker id="a2k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#0a7a44"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5">
+        <rect x="16" y="60" width="196" height="58" rx="6" fill="#fff" stroke="#1a1d21" stroke-width="1.4"/>
+        <text x="114" y="84" text-anchor="middle" font-weight="700" font-family="inherit" font-size="13.5">start adapter</text>
+        <text x="114" y="103" text-anchor="middle" fill="#6b7280">native CLI · WASM host</text>
+
+        <rect x="16" y="196" width="196" height="72" rx="6" fill="#fff" stroke="#9aa1ab"/>
+        <text x="114" y="222" text-anchor="middle" font-weight="700">identity source</text>
+        <text x="114" y="240" text-anchor="middle" fill="#6b7280">native: fresh mint</text>
+        <text x="114" y="256" text-anchor="middle" fill="#6b7280">WASM: host supplied</text>
+
+        <line x1="114" y1="118" x2="114" y2="192" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a2)"/>
+
+        <rect x="300" y="120" width="196" height="58" rx="6" fill="#f2faf5" stroke="#0a7a44" stroke-width="2"/>
+        <text x="398" y="144" text-anchor="middle" font-weight="700" fill="#0a7a44">session-&lt;hash&gt;</text>
+        <text x="398" y="162" text-anchor="middle" fill="#6b7280">the only public identity</text>
+
+        <!-- removed node ghost, same position -->
+        <rect x="300" y="290" width="196" height="58" rx="6" fill="none" stroke="#c9ccd2" stroke-dasharray="3 5"/>
+        <text x="398" y="314" text-anchor="middle" fill="#9aa1ab">run-id removed</text>
+        <text x="398" y="332" text-anchor="middle" fill="#9aa1ab">no alias · no mirrored field</text>
+
+        <path d="M212 224 C 256 224, 260 160, 296 152" fill="none" stroke="#0a7a44" stroke-width="1.8" marker-end="url(#a2k)"/>
+
+        <g>
+          <rect x="620" y="16" width="344" height="56" rx="6" fill="#fff" stroke="#9aa1ab"/>
+          <text x="632" y="38" font-weight="700">ledger  traits/sessions/&lt;repo&gt;/</text>
+          <text x="632" y="56">&lt;session-id&gt;.json · typed rewrite + new digest</text>
+
+          <rect x="620" y="92" width="344" height="56" rx="6" fill="#fff" stroke="#9aa1ab"/>
+          <text x="632" y="114" font-weight="700">worktree wt-&lt;hex12(session)&gt;</text>
+          <text x="632" y="132">ctx/session/* ref + stored provenance migrated</text>
+
+          <rect x="620" y="168" width="344" height="56" rx="6" fill="#fff" stroke="#0a7a44" stroke-width="1.6"/>
+          <text x="632" y="190" font-weight="700" fill="#0a7a44">center projection</text>
+          <text x="632" y="208">version bump + rebuild; run_id gone</text>
+
+          <rect x="620" y="244" width="344" height="56" rx="6" fill="#fff" stroke="#0a7a44" stroke-width="1.6"/>
+          <text x="632" y="266" font-weight="700" fill="#0a7a44">resume · story · merge</text>
+          <text x="632" y="284">one grammar: session-id | prefix | path</text>
+
+          <rect x="620" y="320" width="344" height="72" rx="6" fill="#fff" stroke="#0a7a44" stroke-width="1.6"/>
+          <text x="632" y="342" font-weight="700" fill="#0a7a44">merge &lt;session-ref&gt;</text>
+          <text x="632" y="360">direct resolve_session_path lookup;</text>
+          <text x="632" y="378">O(store) scan + validate guard deleted</text>
+
+          <rect x="620" y="412" width="344" height="72" rx="6" fill="#fff" stroke="#0a7a44" stroke-width="1.6"/>
+          <text x="632" y="434" font-weight="700" fill="#0a7a44">CallSubmission</text>
+          <text x="632" y="452">session-id + state-digest only;</text>
+          <text x="632" y="470">redundant run-id check deleted</text>
+        </g>
+
+        <path d="M496 134 C 560 120, 560 60, 616 46"  fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a2)"/>
+        <path d="M496 142 C 560 138, 560 118, 616 120" fill="none" stroke="#9aa1ab" stroke-width="1.6" marker-end="url(#a2)"/>
+        <path d="M496 152 C 556 162, 560 186, 616 192" fill="none" stroke="#0a7a44" stroke-width="1.6" marker-end="url(#a2k)"/>
+        <path d="M496 162 C 560 184, 560 262, 616 270" fill="none" stroke="#0a7a44" stroke-width="1.6" marker-end="url(#a2k)"/>
+        <path d="M496 168 C 566 200, 566 336, 616 352" fill="none" stroke="#0a7a44" stroke-width="1.6" marker-end="url(#a2k)"/>
+        <path d="M496 172 C 576 216, 576 424, 616 440" fill="none" stroke="#0a7a44" stroke-width="1.6" marker-end="url(#a2k)"/>
+
+        <text x="300" y="404" fill="#6b7280">migration also rewrites liveness, holders, sidecars,</text>
+        <text x="300" y="422" fill="#6b7280">locks, board/wall evidence, CLI, and desktop consumers</text>
+        <text x="300" y="440" fill="#6b7280">future attempt ordinal stays inside the session ledger</text>
+      </g>
+    </svg>
+    </div>
+  </section>
+
+  <footer>
+    Owner decisions reflected here: WASM receives a fresh session id from its host;
+    persisted <code>run-id</code> is migrated and removed immediately; identity/storage nouns,
+    the <code>runs/</code> root, and <code>ctx/run/*</code> refs become session vocabulary; all
+    in-repo center consumers move to <code>session_id</code> before its disposable projection is
+    rebuilt. The sibling markdown is authoritative.
+  </footer>
+</main>
+</body>
+</html>
