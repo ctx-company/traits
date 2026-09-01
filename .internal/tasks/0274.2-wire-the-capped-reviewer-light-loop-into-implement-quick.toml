@@ -1,80 +1,283 @@
 schema-version = "0.2"
 key = "0274.2"
 title = "Wire the capped reviewer-light loop into implement-quick"
-status = "draft"
+status = "ready"
 raised = "2026-09-01"
-content = """
-Turn implement-quick into the Stage 0 experiment vehicle. Today the quick variant
-(.ctx/traits/authored/implement/source/variant/quick/index.ts) is draft → implement →
-commit, with no review loop and no diff baseline/capture steps at all. Extend it with:
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order,
+commands, proof mechanics. Deviate from any of it whenever a goal requires it,
+and report the deviation in the work summary; a deviation is not a violation and
+needs no escalation.
 
-1. The diff baseline and capture steps it currently lacks — the reviewer contract reads
-   changedFiles against diffBase, so the light reviewer cannot run without them.
-2. A capped loop — iterations: 3 — of implement → capture diff → one reviewerLight round
-   per iteration, using the 0274.1 light-review step. Only light-review approval is success
-   and exits the loop immediately. If the final permitted review still returns revise with
-   blocking work, the run reports unresolved cap exhaustion: the cap never converts an
-   unapproved result into approval, and no synthetic approved verdict is ever produced.
-   Express this through the loop's iterations/onExhausted semantics
-   (packages/cdk/src/sequence.ts; functional API loop.maxIterations in
-   packages/cdk/src/functional/registrars.ts) — exhaustion is an honest unresolved exit,
-   not a fabricated verdict.
+Turn `implement-quick` into the Stage 0 experiment vehicle. Today
+`source/variant/quick/index.ts` is exactly draft, one implementation frame,
+status check, conditional commit message/stage/commit — no diff baseline, no
+changed-files capture, no review, no loop. This task rewires it to
+`draft -> diff baseline -> capped (implement -> capture diff -> light review)
+x at most 3 -> commit tail`, consuming `0274.1`'s `reviewerLight` role and
+light-review step, and lands the synchronized version bump with regenerated
+outputs.
 
-Bump the trait version in trait.toml [package] and in source/index.ts
-(cdk.defineTrait("Implement", { version })) together — the two must stay in sync — and
-regenerate the committed generated/*/index.toml canonicals and trait.lock via
-ctx traits build implement.
+## Grounded against HEAD 172f39597
 
-This is trait authoring only: no Rust runtime changes, no dispatch_preflight changes.
-Dispatching the experiment itself — just implement-with implement:quick "<tasks>" — is an
-owner step after landing.
-"""
-scope = """
+- The reusable primitives already exist: `shared.step.diff.baseline` runs
+  `git rev-parse HEAD` into `slot.diffBase`; `shared.step.diff.capture` runs
+  `git diff --name-status ${slot.diffBase}` into `slot.changedFiles`, which is
+  cumulative across the loop because `diffBase` is fixed before work.
+  `changedFiles` is only an index for the reviewer (its hint already notes
+  untracked files are omitted); reuse the primitive, do not expand diff
+  semantics. The existing commit tail — `git status --porcelain`, conditional
+  message, `git add -A`, `git commit -m ...`, optional `commitReport` —
+  is likewise reused as-is.
+- The loop API is `cdk.flow.loop(title, loop => ...)` with
+  `loop.maxIterations(bound, { onExhausted })` and `loop.until(...)`
+  (`packages/cdk/src/functional/registrars.ts:512-533`). Only `Abort` and
+  `Continue` are legal exhaustion verbs (`registrars.ts:507-510`, `551-568`).
+  The host checks `until` after each full round and exits successfully the
+  moment it holds (`packages/cdk/src/sequence.ts:922-947`); the model never
+  enforces the guard or the cap.
+- Exhaustion semantics are the crux. `Continue` (or omission) proceeds to the
+  next step with the final unresolved output — which would wrongly let quick's
+  commit tail run after a revise verdict. `Abort` stops the run blocked and
+  skips everything after the loop; runtime proofs establish
+  `final-state = blocked`, no commit, stop reason `max-iterations-exhausted`
+  for an always-revise loop (`modules/cli/tests/proof_park_honesty.rs:592-658`)
+  and stats classify it `exhausted-unapproved`
+  (`modules/cli/tests/proof_stats_receipts.rs:200-208`). So
+  `loop.maxIterations(3, { onExhausted: cdk.signal.Abort })` is the required
+  spelling, and placing the existing commit tail after the loop makes it
+  reachable only on approval — no extra branch, no synthetic verdict.
+- The positional-until restriction rejects only `flow.match` and
+  `flow.parallel` registered after `loop.until` (`registrars.ts:124-165`,
+  `789-797`); the simple body needed here uses neither.
+- Basic and complex must land byte-identical in source, and the old task prose
+  about them was stale: current basic is unbounded but exits on
+  `verdict1.status == approved` AND `gateAnswer == accepted` behind the owner
+  annotation gate (`source/variant/basic/index.ts:19-45`; commit `824afb5f8`
+  removed its former cap), while current complex is capped at three rounds with
+  `onExhausted: Continue` and proceeds to commit with unresolved verdicts
+  (`source/variant/complex/index.ts:13-28`). Preserve each file exactly as it
+  exists; complex's `Continue` is not normalized to this task's `Abort` ruling,
+  and basic's gate flow is not touched.
+- Versioning: current is `0.25.0` in `trait.toml:3`, `source/index.ts:7` and
+  the generated outputs. The build refuses an id/version mismatch between
+  authored source and `trait.toml` (`modules/cli/src/app/cdk_build.rs:521-565`),
+  and `package.json` plus every `generated/<variant>/index.toml`, `index.map`
+  and `trait.lock` are owned end-to-end by `ctx traits build implement`
+  (`cdk_build.rs:113-142`; `modules/io/src/cdk_build.rs:476-509`) — hand edits
+  are overwritten byte-stably.
+- The existing quick description `Reviewed implementation: implement, review,
+  refine & commit.` becomes accurate with this change; no rewording is
+  required.
+
+## GOALS — binding
+
+1. **Quick's flow is the capped light lane.** `implement-quick` becomes
+   draft, then `shared.step.diff.baseline`, then a loop of at most three
+   rounds of implement, `shared.step.diff.capture`, and `0274.1`'s
+   light-review step writing `verdict1`, then the existing commit tail. Draft
+   precedes baseline per the parent's acceptance; the invariant that binds is
+   that the baseline precedes all implementation.
+   Decided by the declared flow check on the regenerated
+   `generated/quick/index.toml`: it gains the baseline/capture wiring
+   (`rev-parse`, `diff-base`), the loop spellings `max-iterations = 3` and
+   `on-exhausted = "abort"`, the until condition `equals = "approved"`, the
+   `reviewer-light` round, and the commit-tail argv — none of which exist in
+   the current quick canonical — plus the reproducibility check tying that
+   canonical to the source.
+   Excluded: new diff or commit primitives — the shared steps are the named
+   reuse points; any change to the reviewer contract itself, which is
+   `0274.1`'s; any smart-review round in quick.
+
+2. **Approval is the sole success and exhaustion is honest.** The loop's exit
+   condition is `verdict1.status == approved`, checked by the host after each
+   round, exiting immediately on approval. The cap is 3 with
+   `onExhausted: cdk.signal.Abort`: a third still-revise verdict leaves the
+   verdict unresolved, blocks the run on cap exhaustion, and the commit tail
+   never runs. The cap never fabricates or implies approval, and `Continue` is
+   never used.
+   Decided by the same declared flow check — `on-exhausted = "abort"` and
+   `equals = "approved"` are the exact machine spellings of honest exhaustion
+   and approval-only exit in the generated canonical — together with the
+   existing runtime proofs staying green under `just test`: the
+   blocked/no-commit/skip-everything-after semantics of an `Abort`-exhausted
+   loop are already proven generically in
+   `modules/cli/tests/proof_park_honesty.rs:592-658`, and no new proof against
+   this repository's committed canonicals may be added.
+   Excluded: a synthetic approved verdict on exhaustion; any `flow.match` or
+   `flow.parallel` after `loop.until`; new runtime proofs freezing committed
+   canonical content.
+
+3. **The substrate is consumed, never redeclared.** Quick uses `0274.1`'s
+   `reviewerLight` role and light-review step; no second role declaration, no
+   copied review body, no second safeguard-intent list appears, and the light
+   lane inherits no standard-only review wording.
+   Decided by the declared no-redeclaration check: no `cdk.agent.reviewer`
+   call under `source/variant/`, each safeguard-intent token still defined
+   exactly once under `source/`, and the standard take-as-many-rounds sentence
+   absent from `generated/quick/index.toml` — the first generated consumer of
+   the light lane, which is also where `0274.1`'s non-inheritance goal becomes
+   observable.
+   Excluded: any edit to the light step or role beyond what wiring strictly
+   requires; if the step needs a genuine adjustment to be wireable, make the
+   minimal change and report it as a deviation.
+
+4. **The version moves once, in sync, and every output is build-generated.**
+   `trait.toml [package]` and `source/index.ts` both carry the same new version
+   newer than `0.25.0` (`0.26.0` is the suggested choice), and
+   `generated/*/index.toml`, `index.map` files, `package.json` and `trait.lock`
+   are regenerated by `ctx traits build implement`, never hand-edited.
+   Decided by the declared version check — the version extracted from
+   `trait.toml` equals the one in `source/index.ts`, differs from `0.25.0`,
+   and sorts strictly after it under version ordering — plus the
+   reproducibility check: the build refuses a version mismatch, and
+   `git diff --exit-code -- .ctx/traits/authored/implement` after a rebuild
+   proves the committed outputs are exactly what the build writes.
+   Excluded: manual edits to any generated file; retuning quick's
+   `frame-seconds = 1800`, `total-seconds = 21600`, `idle-seconds = 600` or the
+   `[variant.quick.budget]` overrides in `trait.toml`.
+
+5. **Basic and complex are behaviorally untouched.** Their `source/variant/`
+   files are byte-identical to HEAD; only the version stamp moves in their
+   regenerated canonicals. Complex keeps its three-round `Continue` cap and
+   basic keeps its owner-gated unbounded loop, exactly as they exist — not as
+   older prose described them.
+   Decided by the declared preservation check against the fixed pre-work
+   commit `172f39597e1f6794016b44ac18132498d5abc48e` (a landed ancestor,
+   runnable in any later clean worktree): `git diff --exit-code` byte-identity
+   for `source/variant/basic` and `source/variant/complex`, and every changed
+   line of `generated/basic/index.toml` and `generated/complex/index.toml` is
+   a `version = ` stamp. Their `index.map` line references legitimately shift
+   when `0274.1`'s shared-source edits move lines and are covered by the
+   reproducibility check rather than frozen.
+   Excluded: normalizing complex to `Abort`; touching basic's annotation/gate
+   flow; any Stage 1 triage or routing — `0275` is separately chartered.
+
+6. **The landing recipe is green.** `just ts-build`, then the implement
+   package build with no tracked drift, then `just test`.
+   Decided by the two declared command checks.
+   Excluded: any Rust runtime or dispatch-preflight change; dispatching the
+   experiment itself — `just implement-with implement:quick "<tasks>"` is an
+   owner step after landing, once the owner adds the `[agent.role.
+   reviewer-light]` seat to the gitignored live `runtime.toml`.
+
+## APPROACH — suggested route, not a boundary
+
+Edit order:
+
+1. In `source/variant/quick/index.ts`, keep the draft step first, insert
+   `shared.step.diff.baseline`, then wrap the implementation frame in
+   `cdk.flow.loop(...)`: `loop.maxIterations(3, { onExhausted:
+   cdk.signal.Abort })` first, then implement, then
+   `shared.step.diff.capture`, then the light-review step, then
+   `loop.until(<verdict1.status equals "approved">)` in whatever condition
+   spelling the functional API provides — the grounding cites
+   `loop.until(equals(verdict1.status, "approved"))`. Register nothing inside
+   the body after `loop.until`. Leave the existing status-check/commit tail
+   after the loop.
+2. Bump the version in `trait.toml [package]` and
+   `cdk.defineTrait("Implement", { version })` in `source/index.ts` together.
+3. `just ts-build`, then
+   `CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build
+   implement`; commit all regenerated outputs as build outputs.
+4. `just test`, then a closing diff read as a supplementary sanity pass — the
+   declared checks are the deciders for every goal.
+
+The implementation frame already reads prior `verdict1` optionally, so
+revise-round context flows without new wiring. In a run worktree, isolate the
+build cache (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
+'''
+scope = '''
 ## Decisions
-- Only the quick variant's flow changes; basic and complex stay verbatim — the no-ceiling
-  loop and its comment in basic are a standing ruling.
-- The cap is 3 iterations, per the diminishing-returns grounding; the cap itself is never
-  an approval and never a success signal.
-- Quick's budget overrides in trait.toml ([variant.quick.budget]) are the outer stop and
-  are not this task's to retune.
-- Stage 1 (size triage and light/standard routing in basic) is a separate slice and out of
-  scope here; this task only produces the evidence vehicle.
-- Exact step symbols, slot names, and edit sequencing are the architect's call.
-"""
-validation = """
+
+- Only the quick variant's flow changes; basic and complex source files stay
+  byte-identical — as they actually exist at HEAD (basic: owner-gated
+  unbounded; complex: three-round Continue), not as older prose described them.
+- The cap is 3 iterations with `onExhausted: cdk.signal.Abort`; the cap is
+  never an approval and never a success signal. `Continue` is wrong here
+  because it would let the commit tail run on an unresolved verdict.
+- Light review writes `verdict1`; the loop guard reads `verdict1.status`. No
+  new slots or schemas.
+- Quick's budget overrides and frame/total/idle seconds in `trait.toml` are the
+  outer stop and are not this task's to retune.
+- Stage 1 (size triage and light/standard routing in basic) is `0275`'s
+  separate slice; this task only produces the evidence vehicle.
+- Expected symbols, slot names and edit sequencing above are guidance; the
+  goals bind.
+'''
+validation = '''
 ## Watch
-- Registrar ordering constraint inside loop bodies: only container kinds that cannot carry
-  the derived not(until) guard — flow.match and flow.parallel — are rejected when
-  registered after loop.until in a loop scope (forbidPositionalUntil,
-  packages/cdk/src/functional/registrars.ts); other containers get the guard composed
-  automatically. Order the loop body so no match/parallel routing follows loop.until.
-- Never hand-edit generated/ or trait.lock; both come from ctx traits build implement.
-- Version stated in trait.toml [package] and source/index.ts must move together.
-- No tests asserting on committed trait canonical content; the existing gates are the proof
-  for a trait-package edit.
-- Depends on 0274.1's reviewerLight role and light-review step — do not redeclare either.
-- In a run worktree, isolate the build cache (CARGO_TARGET_DIR=target cargo …) before
-  trusting a gate failure.
+
+- Registrar ordering: `flow.match` and `flow.parallel` are rejected after
+  `loop.until` in a loop scope (`packages/cdk/src/functional/registrars.ts:124-165`,
+  `789-797`); the simple body here needs neither — keep it that way.
+- Never hand-edit `generated/`, `index.map`, `package.json` or `trait.lock`;
+  all come from `ctx traits build implement`.
+- The version in `trait.toml [package]` and `source/index.ts` must move
+  together; the build refuses a mismatch.
+- No new tests asserting on committed trait canonical content; the existing
+  gates and runtime proofs are the proof for a trait-package edit.
+- Depends on `0274.1`'s `reviewerLight` role and light-review step — consume,
+  never redeclare.
+- Do not let exhaustion imply success anywhere — in flow wiring, in step
+  descriptions, or in the commit tail's reachability.
+- In a run worktree, isolate the build cache (`CARGO_TARGET_DIR=target`)
+  before trusting a gate failure.
 
 ## Done when
-implement-quick's flow is draft → diff baseline → capped (implement → capture diff →
-light review) × ≤3 → commit tail, where light-review approval exits immediately and cap
-exhaustion with unresolved blocking work is reported unresolved rather than approved; the
-trait version is bumped in sync in trait.toml and source/index.ts; canonicals and
-trait.lock are regenerated by ctx traits build implement; and the landing recipe
-(just ts-build → ctx traits build implement) plus just test run green.
-"""
+
+Every bullet below is decided by the named declared check; no bullet relies on
+a manual diff read.
+
+- `implement-quick`'s flow is draft, diff baseline, then at most three rounds
+  of implement, capture diff, light review, exiting the loop immediately on an
+  approved `verdict1`, with the existing commit tail after the loop and
+  `onExhausted: Abort` making cap exhaustion a blocked, uncommitted,
+  unresolved outcome — the flow check on the regenerated quick canonical
+  (`reviewer-light`, `max-iterations = 3`, `on-exhausted = "abort"`,
+  `equals = "approved"`, `rev-parse`, `diff-base`, commit argv), with the
+  blocked/no-commit exhaustion semantics carried by the existing runtime
+  proofs under the `just test` gate.
+- Quick consumes `0274.1`'s role and step with no redeclaration and no
+  standard-review wording in the light lane — the no-redeclaration check.
+- The trait version is identical in `trait.toml` and `source/index.ts` and
+  strictly newer than `0.25.0` — the version check — with all generated
+  outputs regenerated by the build — the reproducibility check.
+- Basic and complex source files are byte-identical to the pre-work commit
+  `172f39597` and their generated `index.toml` changes are version-stamp-only
+  — the preservation check.
+- The package rebuilds with no tracked drift and `just test` passes — the two
+  gate checks.
+'''
 [relations]
 parent = "0274"
 depends-on = ["0274.1"]
 
 [[checks]]
-name = "TS workspace builds"
-command = "just ts-build"
-timeout-ms = 900000
+name = "generated quick canonical carries the capped reviewer-light lane"
+command = 'grep -n "reviewer-light" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "max-iterations = 3" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "on-exhausted = \"abort\"" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "equals = \"approved\"" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "rev-parse" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "diff-base" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "\"commit\"," .ctx/traits/authored/implement/generated/quick/index.toml'
+expect = "reviewer-light"
 
 [[checks]]
-name = "implement canonicals regenerate from source with no tracked drift"
-command = "CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
+name = "substrate consumed not redeclared, light lane free of standard wording"
+command = '! grep -rn "cdk.agent.reviewer" .ctx/traits/authored/implement/source/variant && for t in TasteOnlyBlocking TailCasePursuit RubberStampReview UnboundedLoop; do test "$(grep -ro "$t" .ctx/traits/authored/implement/source | wc -l)" -eq 1 || exit 1; done && ! grep -n "as many rounds as it needs" .ctx/traits/authored/implement/generated/quick/index.toml'
+
+[[checks]]
+name = "trait version moved once, in sync, strictly past 0.25.0"
+command = 'vt=$(sed -n "s/^version = \"\(.*\)\"/\1/p" .ctx/traits/authored/implement/trait.toml | head -n1); vs=$(sed -n "s/.*version: \"\(.*\)\".*/\1/p" .ctx/traits/authored/implement/source/index.ts | head -n1); test -n "$vt" && test "$vt" = "$vs" && test "$vt" != "0.25.0" && test "$(printf "0.25.0\n%s\n" "$vt" | sort -V | tail -n1)" = "$vt"'
+
+[[checks]]
+name = "basic and complex preserved: source byte-identical, generated version-stamp-only"
+command = 'git diff --exit-code 172f39597e1f6794016b44ac18132498d5abc48e -- .ctx/traits/authored/implement/source/variant/basic .ctx/traits/authored/implement/source/variant/complex && test -z "$(git diff 172f39597e1f6794016b44ac18132498d5abc48e -- .ctx/traits/authored/implement/generated/basic/index.toml .ctx/traits/authored/implement/generated/complex/index.toml | grep -E "^[-+][^-+]" | grep -v "^[-+]version = ")"'
+
+[[checks]]
+name = "implement package rebuilds from source with no tracked drift"
+command = "just ts-build && CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
 timeout-ms = 1800000
 
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

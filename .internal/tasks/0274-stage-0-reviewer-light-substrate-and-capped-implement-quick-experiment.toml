@@ -1,65 +1,202 @@
 schema-version = "0.2"
 key = "0274"
 title = "Stage 0 — reviewer-light substrate and the capped implement-quick experiment"
-status = "draft"
+status = "ready"
 raised = "2026-09-01"
-content = """
-Establish the bounded Stage 0 experiment for right-sizing review depth on simple UI
-tasks, per .internal/brainstorms/smarter-trait-selection-behavior-where-ui-tasks-are-still-ge.md.
-Today the implement trait family (.ctx/traits/authored/implement/, version 0.25.0) reviews
-every change with a smart-seated reviewer in an unbounded loop (basic/complex), while the
-quick variant has no review at all — just draft → implement → commit. Stage 0 builds the
-substrate for a cheaper middle path and wires it into implement-quick as a live experiment:
+content = '''
+Establish the bounded Stage 0 experiment for right-sizing review depth on simple
+UI tasks, per
+`.internal/brainstorms/smarter-trait-selection-behavior-where-ui-tasks-are-still-ge.md`.
+Today the implement trait family (`.ctx/traits/authored/implement/`, version
+`0.25.0`) has no cheap review lane: the quick variant is draft, implement,
+commit — no review at all — while basic and complex review every change with
+the smart-seated reviewer. Stage 0 builds the substrate for a cheaper middle
+path and wires it into `implement-quick` as a live experiment:
 
-- a reviewerLight role (reviewer template, separately configurable seat, model decided:
-  haiku) plus a light-review step whose verdict contract hardens
-  TasteOnlyBlocking: only contract-breaking findings block, taste/polish findings are recorded
-  but never force another round;
-- implement-quick extended with the diff baseline/capture steps it currently lacks and a
-  capped loop (iterations: 3) of implement → capture diff → one reviewer-light round.
+- a `reviewerLight` role (reviewer template, canonical id `reviewer-light`,
+  separately configurable seat; model decided: haiku, living only in the seat)
+  plus a light-review step whose verdict contract hardens `TasteOnlyBlocking`
+  into doctrine — only contract-breaking findings block, taste and polish
+  findings are recorded as advisory and never force another round;
+- `implement-quick` extended with the diff baseline/capture steps it currently
+  lacks and a capped loop (at most 3 rounds) of implement, capture diff, one
+  reviewer-light round, with the commit tail reachable only after approval.
 
-Stage 0 is the evidence source for Stage 1 (post-draft size triage in basic, a separate
-slice): running selected UI cuts through implement:quick with the light reviewer validates
-the decided haiku seat before basic routes anything to it.
+Stage 0 is the evidence source for Stage 1 (`0275`: post-draft size triage in
+basic, a separate slice): running selected UI cuts through `implement:quick`
+with the light reviewer validates the decided haiku seat before basic routes
+anything to it. `0275.2` depends on `0274.1` and consumes the same substrate.
 
-Work items covered: reviewer-light-role-and-seat, light-review-step-nits-dont-block,
-stage-0-implement-quick-experiment, trait-authoring-only-and-version-bump.
-"""
-scope = """
-## Decisions
-- Trait authoring plus seat configuration only: edits live in .ctx/traits/authored/implement/
-  source/ and trait.toml. No Rust runtime changes, no dispatch_preflight changes, no toolkit
-  severity-schema change (existing approve/revise verdict plus doctrine supplies that control).
-- Dynamic model assignment IS role indirection: two declared reviewer roles with separate
-  seats. Seats resolve once per run per role; mid-run re-seating machinery is explicitly
-  parked and out of scope.
-- The reviewer-light model is decided: haiku. Trait sources still carry no model — the seat
-  resolves via machine-local seat config — and the quick experiment validates the choice.
-- Only light-review approval counts as success. If the final permitted review still returns
-  revise with blocking work, the run reports unresolved cap exhaustion; the cap never converts
-  an unapproved result into approval and no synthetic approved verdict is ever produced.
-- basic and complex variants are untouched in this charter; the no-ceiling standard loop is
-  a standing ruling. Stage 1 triage/routing is a separate slice, not covered here.
-- Dispatching the experiment itself (just implement-with implement:quick "<tasks>") is an
-  owner step after landing, as is the gitignored .ctx/traits/runtime.toml seat entry.
-"""
-validation = """
+This charter lands no code of its own. Its work is the two children and the
+closing review after the last of them; goals and approach are separated inside
+each child, and only the children carry execution plans. A third implementation
+cut written against this file instead of a child is the failure mode to avoid.
+
+## The children
+
+1. `0274.1` — the shared substrate: the `reviewerLight` role (safeguard intents
+   shared with `smart`, not copied), the light-review step writing `verdict1`
+   on the existing `reviewVerdictSchema`, and the committed fully commented
+   `[agent.role.reviewer-light]` illustration in
+   `.ctx/traits/runtime.example.toml`. No variant flow changes.
+2. `0274.2` (after `0274.1`) — the quick flow rewired to
+   draft, diff baseline, capped (implement, capture diff, light review) x at
+   most 3 with `onExhausted: Abort`, then the existing commit tail; the
+   synchronized version bump; all generated outputs regenerated by
+   `ctx traits build implement`.
+
+## Corrections to the draft this charter replaces — grounded at HEAD 172f39597
+
+- **The basic/complex prose was stale.** The draft said both use unbounded
+  smart-review loops, and that the no-ceiling loop is a standing ruling. False
+  at this HEAD and already false when `0274` was raised: basic is unbounded but
+  exits on `verdict1.status == approved` AND `gateAnswer == accepted` behind
+  the owner annotation gate (`source/variant/basic/index.ts:19-45`; commit
+  `824afb5f8` removed its former cap), and complex is capped at three rounds
+  with `onExhausted: Continue`, proceeding to commit with unresolved verdicts
+  (`source/variant/complex/index.ts:13-28`). "Basic and complex untouched"
+  binds as: preserve each file exactly as it exists, and do not normalize
+  complex's `Continue` to this charter's `Abort` ruling for quick.
+- **The landable file set includes `runtime.example.toml`.** The draft scoped
+  edits to `source/` and `trait.toml`, which contradicted `0274.1`'s done
+  condition. The live `.ctx/traits/runtime.toml` is gitignored
+  (`.ctx/traits/.gitignore:5`) and unlandable, so the committed illustration in
+  `.ctx/traits/runtime.example.toml` is precisely what makes the experiment
+  owner-dispatchable with only the host seat entry remaining. It is in scope.
+- **The build-output set is wider than the draft named.** Beyond
+  `generated/*/index.toml` and `trait.lock`, tracked `index.map` files and the
+  generated `package.json` also legitimately change and are retained as
+  outputs of `ctx traits build implement` — never hand-edited.
+- **Exhaustion semantics are now pinned by evidence.** `Abort` exhaustion
+  stops the run blocked, skips everything after the loop, and is classified
+  `exhausted-unapproved` (`modules/cli/tests/proof_park_honesty.rs:592-658`;
+  `proof_stats_receipts.rs:200-208`). `Continue` would wrongly let quick's
+  commit tail run on an unresolved verdict, so the children bind to `Abort`.
+
+Work items covered: reviewer-light-role-and-seat,
+light-review-step-nits-dont-block, stage-0-implement-quick-experiment,
+trait-authoring-only-and-version-bump.
+'''
+scope = '''
+## Binding constraints and exclusions
+
+These bound the outcome regardless of the route either child takes.
+
+- Trait authoring plus committed seat illustration only: edits live in
+  `.ctx/traits/authored/implement/` (source and `trait.toml`) and
+  `.ctx/traits/runtime.example.toml`. No Rust runtime changes, no
+  dispatch-preflight changes, no toolkit severity-schema change — the existing
+  approved/revise verdict plus doctrine supplies the control.
+- Dynamic model assignment IS role indirection: two declared reviewer roles
+  with separate seats, resolved once per run per role. The CDK agent API
+  carries no model (`packages/cdk/src/agent.ts:26-56`), which structurally
+  enforces it. Mid-run re-seating machinery is explicitly parked.
+- The reviewer-light model is decided: haiku. It appears only in the seat —
+  commented in the committed `runtime.example.toml`, live in the gitignored
+  `runtime.toml` as an owner/host step after landing.
+- Light review may return revise only for contract-breaking findings; taste,
+  polish, subjective naming/style and optional improvements are advisory and
+  never affect status or force another round.
+- Only light-review approval is success, and it exits the loop immediately. A
+  third still-revise verdict leaves the verdict unresolved, blocks the run on
+  cap exhaustion, and prevents the commit tail. The cap never converts an
+  unapproved result into approval and no synthetic approved verdict is ever
+  produced.
+- Basic and complex are behaviorally untouched, exactly as they exist at HEAD
+  (see the stale-prose correction). Stage 1 triage/routing is `0275`'s
+  separate slice.
+- Quick's budget overrides and frame/total/idle seconds in `trait.toml` are
+  not retuned.
+- Dispatching the experiment (`just implement-with implement:quick "<tasks>"`,
+  backed by `Justfile:247-248`) is an owner step after landing, as is the live
+  `runtime.toml` seat entry. Workers never write the live runtime file.
+- All generated files (`generated/*/index.toml`, `index.map`, `package.json`,
+  `trait.lock`) come from `ctx traits build implement`, never manual edits.
+
+## Order, and the closing pass
+
+`0274.1` then `0274.2`; the encoded child edge is the ordering that binds.
+After the last child lands, the closing pass is the declared checks — every
+umbrella claim below is command-observable: both child task files closed
+`done`, the safeguard-intent tokens each defined exactly once (shared, not
+copied), no model string under `source/`, `trait.toml` or `generated/`, the
+commented haiku seat in `runtime.example.toml`, the capped abort-on-exhaustion
+light lane in the regenerated quick canonical, basic and complex byte-identical
+to pre-work commit `172f39597e1f6794016b44ac18132498d5abc48e` with
+version-stamp-only generated `index.toml` changes, the package rebuilding with
+no tracked drift, and `just test` green. A supplementary diff read remains
+good practice but decides nothing the checks do not. The route is guidance — a
+pass reaching the same evidence another way reports the deviation, which is
+neither a violation nor an escalation.
+'''
+validation = '''
 ## Watch
-- Committed generated/*/index.toml canonicals and trait.lock are build outputs of
-  ctx traits build — never hand-edited.
-- No tests asserting on committed trait canonical content (no frozen-inventory proofs);
-  for pure trait-package edits the existing gates are the proof.
-- Prompts carry task doctrine only: format/schema/verdict conventions live in schema field
-  descriptions, slot descriptions, and resources — never in prompt text.
+
+- Committed `generated/*/index.toml`, `index.map`, `package.json` and
+  `trait.lock` are build outputs of `ctx traits build implement` — never
+  hand-edited.
+- No tests asserting on committed trait canonical content (no frozen-inventory
+  proofs); for pure trait-package edits the existing gates and runtime proofs
+  are the proof.
+- Prompts carry task doctrine only: format/verdict/taste conventions live in
+  schema field descriptions, role/step/slot descriptions and resources — never
+  in prompt text.
+- In a run worktree, isolate the build cache (`CARGO_TARGET_DIR=target`)
+  before trusting a gate failure.
 
 ## Done when
-Every child task (0274.1, 0274.2) is closed and the stop condition holds: the implement
-trait, landed through the trait-package recipe (just ts-build → ctx traits build implement)
-with just test green, carries a reviewerLight role with its own seat (model decided:
-haiku) and an implement-quick flow of
-draft → diff baseline → capped (implement → capture diff → light review) × ≤3 →
-commit tail, where light-review approval is the only success and exits the loop
-immediately, the commit tail runs only after approval, and cap exhaustion with unresolved
-blocking work is reported unresolved rather than approved — leaving the experiment
-dispatchable by the owner with only a runtime.toml seat entry.
-"""
+
+Both children (`0274.1`, `0274.2`) are closed as done on their own terms — the
+child-closure check greps `status = "done"` in both child task files — and the
+stop condition no single child owns holds, each clause decided by a declared
+check: the implement trait, landed through the trait-package recipe
+(`just ts-build`, then `ctx traits build implement` with no tracked drift —
+the reproducibility check) with `just test` green (the gate check), carries a
+`reviewerLight` role with its own separately addressable seat, model decided
+haiku and never in trait source (the substrate check: role export present,
+commented haiku seat line in `runtime.example.toml`, no `haiku` under
+`source/`, `trait.toml` or `generated/`), one shared safeguard-intent list
+(the single-definition check), and an `implement-quick` flow of draft, diff
+baseline, capped (implement, capture diff, light review) x at most 3, commit
+tail — where light-review approval is the only success and exits the loop
+immediately, the commit tail runs only after approval, and cap exhaustion with
+unresolved blocking work blocks the run rather than approving it (the flow
+check on the regenerated quick canonical: `max-iterations = 3`,
+`on-exhausted = "abort"`, `equals = "approved"`, `reviewer-light`; exhaustion
+semantics carried by existing runtime proofs under `just test`) — with basic
+and complex behaviorally untouched (the preservation check against pre-work
+commit `172f39597`), leaving the experiment dispatchable by the owner with
+only the gitignored `runtime.toml` seat entry remaining.
+'''
+[[checks]]
+name = "both children are closed done"
+command = 'grep -n "^status = \"done\"" .internal/tasks/0274.1-declare-the-reviewerlight-role-and-the-light-review-step.toml && grep -n "^status = \"done\"" .internal/tasks/0274.2-wire-the-capped-reviewer-light-loop-into-implement-quick.toml'
+expect = "done"
+
+[[checks]]
+name = "reviewer-light role exists with commented seat and no model in trait source"
+command = 'grep -n "export const reviewerLight" .ctx/traits/authored/implement/source/shared/agent.ts && grep -En "^# ?model *=.*haiku" .ctx/traits/runtime.example.toml && ! grep -rn "haiku" .ctx/traits/authored/implement/source .ctx/traits/authored/implement/trait.toml .ctx/traits/authored/implement/generated'
+expect = "reviewerLight"
+
+[[checks]]
+name = "safeguard intents are each defined exactly once, shared not copied"
+command = 'for t in TasteOnlyBlocking TailCasePursuit RubberStampReview UnboundedLoop; do test "$(grep -ro "$t" .ctx/traits/authored/implement/source | wc -l)" -eq 1 || exit 1; done'
+
+[[checks]]
+name = "quick canonical carries the capped abort-on-exhaustion light lane"
+command = 'grep -n "reviewer-light" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "max-iterations = 3" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "on-exhausted = \"abort\"" .ctx/traits/authored/implement/generated/quick/index.toml && grep -n "equals = \"approved\"" .ctx/traits/authored/implement/generated/quick/index.toml'
+expect = "reviewer-light"
+
+[[checks]]
+name = "basic and complex preserved: source byte-identical, generated version-stamp-only"
+command = 'git diff --exit-code 172f39597e1f6794016b44ac18132498d5abc48e -- .ctx/traits/authored/implement/source/variant/basic .ctx/traits/authored/implement/source/variant/complex && test -z "$(git diff 172f39597e1f6794016b44ac18132498d5abc48e -- .ctx/traits/authored/implement/generated/basic/index.toml .ctx/traits/authored/implement/generated/complex/index.toml | grep -E "^[-+][^-+]" | grep -v "^[-+]version = ")"'
+
+[[checks]]
+name = "implement package rebuilds from source with no tracked drift"
+command = "just ts-build && CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
+timeout-ms = 1800000
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

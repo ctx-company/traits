@@ -1,81 +1,286 @@
 schema-version = "0.2"
 key = "0274.1"
 title = "Declare the reviewerLight role and the light-review step"
-status = "draft"
+status = "ready"
 raised = "2026-09-01"
-content = """
-Give the implement trait a second, separately seated reviewer whose verdict contract lets
-small changes through without taste churn. Two pieces, both inside
-.ctx/traits/authored/implement/:
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order, commands,
+proof mechanics. Deviate from any of it whenever a goal requires it, and report
+the deviation in the work summary; a deviation is not a violation and needs no
+escalation.
 
-1. In source/shared/agent.ts, declare a reviewerLight role from the existing reviewer
-   template (the smart reviewer already carries cdk.intent.TasteOnlyBlocking /
-   TailCasePursuit / RubberStampReview / UnboundedLoop in avoid) with its own separately
-   configurable seat. Its model stays unset in trait sources: seats resolve once per run
-   per role via the P451 variant/role qualifiers ([agent.variant.<v>.role.<r>],
-   [trait.<id>.variant.<vid>.agent…] — modules/io/src/harness_config.rs:1699,
-   resolve_run_variant), so two declared reviewer roles with separate seats is the entire
-   dynamic-model-assignment mechanism. No mid-run re-seating.
+Give the implement trait package (`.ctx/traits/authored/implement/`, currently
+version `0.25.0`) a second, separately seated reviewer whose verdict contract
+lets small changes through without taste churn. This task is the shared
+substrate only: the role, the light-review step, and the committed configuration
+illustration. Wiring any variant flow is `0274.2`'s work.
 
-2. In source/shared/step/review.ts, add a light-review step whose verdict contract hardens
-   the existing TasteOnlyBlocking avoid into doctrine: only contract-breaking findings
-   justify a revise status; taste and polish findings are recorded in the verdict but never
-   block. Reuse the existing reviewVerdictSchema/blockerSchema spine
-   (packages/toolkit/src/schema.ts, re-exported via @ctx-traits/agents), which already
-   encodes approved iff blockers empty and advisory-never-affects-status — no new schema
-   fields and no toolkit-wide severity change.
+## Grounded against HEAD 172f39597
 
-The [agent.role.reviewer-light] seat entry for this repo's .ctx/traits/runtime.toml is
-gitignored machine-local config: the run worktree cannot land it and workers cannot write
-outside the worktree. Document it as an owner/host step, with a committed
-runtime.example.toml entry as the landable illustration — model: haiku, the decided
-reviewer-light seat.
-"""
-scope = """
+- `source/shared/agent.ts` declares exactly three roles today: `worker`, `smart`
+  and `scribe`. `smart` is `cdk.agent.reviewer("smart", ...)` and carries four
+  avoid intents — `TasteOnlyBlocking`, `TailCasePursuit`, `RubberStampReview`,
+  `UnboundedLoop`. Those four are implement-specific fields on `smart`, not part
+  of the built-in reviewer template (`packages/cdk/src/generated.ts:367-373`),
+  so a second reviewer does not inherit them for free.
+- The CDK agent API accepts role identity, description, summary, system
+  guidance, intent, behavior and session — and structurally no model
+  (`packages/cdk/src/agent.ts:26-56`). `cdk.agent.reviewer("reviewer-light",
+  ...)` yields the exact canonical role id `reviewer-light`; `reviewerLight` is
+  only the TypeScript export name.
+- Runtime role lookup is by exact canonical role id; a declared role without its
+  own runtime table falls back to `[agent.role.default]`, and adding
+  `[agent.role.reviewer-light]` makes it separately configurable. Dispatch fills
+  an omitted harness via built-in harness detection
+  (`modules/io/src/harness_config.rs:2717-2742`), so a model-only seat
+  illustration is complete. Variant/repo/trait qualifier resolution already
+  exists (`harness_config.rs:3185-3229`, `3270-3388`) and flattens to one
+  effective assignment before execution — no mid-run re-seating mechanism is
+  needed or wanted.
+- `source/shared/data.ts` already defines `verdict1`/`verdict2` on the existing
+  `agents.reviewVerdictSchema`. The schema's own field descriptions carry the
+  spine this task needs: `status` is `approved | revise`, approved iff blockers
+  is empty (`packages/toolkit/src/schema.ts:322-328`); `blockers` names
+  correctness defects, failing gates, clear over-build and unabstracted
+  duplication as blocking (`schema.ts:329-332`); the optional `advisory` field
+  covers subjective style, naming, taste, optional improvements and follow-up
+  work and never affects status (`schema.ts:333-337`). No new schema, no
+  severity field, no toolkit change.
+- `source/shared/step/review.ts` has a reusable `reviewBody` whose neutral task
+  context (draft, work summary, changed files, previous verdicts) is worth
+  reusing — but which also contains the standard-review sentence `Don't rush
+  the approval, take as many rounds as it needs`. That sentence contradicts the
+  capped light lane and must not be inherited by the light step.
+- `.ctx/traits/runtime.toml` is gitignored (`.ctx/traits/.gitignore:5`): the
+  live seat entry is an owner/host action after landing, and a worker write
+  outside the worktree is auto-denied. The committed illustration belongs in
+  `.ctx/traits/runtime.example.toml`, where every example key is commented and
+  users uncomment what they need; it currently has no reviewer-light entry.
+
+## GOALS — binding
+
+1. **Trait source declares a `reviewer-light` reviewer role with no model.**
+   `source/shared/agent.ts` exports a `reviewerLight` role built from the
+   reviewer template with canonical id `reviewer-light`, described as the light
+   lane's reviewer. No model name appears anywhere in trait source — the
+   decided haiku lives only in the seat entry, which the API already makes
+   structurally impossible to violate.
+   Decided by the declared role-declaration check: `export const reviewerLight`
+   and the literal id `reviewer-light` both present in
+   `source/shared/agent.ts`, and no `haiku` string anywhere under `source/`,
+   `trait.toml` or `generated/` — plus the reproducibility check building the
+   package green.
+   Excluded: any model string in authored source; a second verdict schema;
+   mid-run re-seating machinery; any Rust, dispatch-preflight or toolkit change.
+
+2. **The four review safeguards are shared, not copied.** `source/shared/agent.ts`
+   defines the four avoid intents `TasteOnlyBlocking`, `TailCasePursuit`,
+   `RubberStampReview` and `UnboundedLoop` exactly once, in one extracted list
+   that both `smart` and `reviewerLight` reference, so the two roles'
+   safeguards evolve together. This is the named reuse point; two
+   hand-maintained copies is the defect this goal exists to prevent.
+   Decided by the declared single-definition check: each of the four intent
+   tokens occurs exactly once under `source/`. A copied list makes every token
+   occur twice and fails the check; a list referenced by both roles keeps each
+   at one.
+   Excluded: extracting the list into `packages/toolkit` or any shared package —
+   a second consumer outside this trait does not exist, so the extraction stays
+   inside the implement package.
+
+3. **A light-review step exists whose contract is: only contract-breaking
+   findings block.** A shared step under `source/shared/step/` reviews the
+   cumulative change against the task contract using `reviewerLight` and
+   writes `slot.verdict1` using the existing `reviewVerdictSchema`
+   (imported via `@ctx-traits/agents`). Revise is justified only by
+   contract-breaking findings — correctness defects, failing gates, clear
+   over-build, unabstracted duplication. Taste, polish, subjective
+   naming/style and optional improvements are recorded as advisory and never
+   affect status or force another round. That doctrine lives in the role, step
+   and slot descriptions — schema descriptions already carry the
+   blockers/advisory split — while the step's prompt text carries only the
+   concrete review task (owner ruling 2026-08-30: prompts carry task doctrine
+   only). The step must not inherit the standard sentence `Don't rush the
+   approval, take as many rounds as it needs`; the neutral task context is
+   reused without copying the whole standard body and without leaking
+   standard-only doctrine into the light lane or vice versa.
+   Decided by the declared wiring check — the file under `source/shared/step/`
+   that references `reviewerLight` also references `verdict1`, and the
+   take-as-many-rounds sentence gains no occurrence beyond its two existing
+   standard-lane ones (a copy into the light step raises the count and fails)
+   — plus the reproducibility check building the step into a valid package.
+   Inheriting the sentence by reference is invisible to any source grep while
+   no variant consumes the step; that leak is decided at the first generated
+   consumer — `0274.2`'s and the parent's declared negation check on
+   `generated/quick/index.toml`.
+   Excluded: a new verdict or severity schema; a separate light verdict slot —
+   `verdict1` is the lean wiring, since `work.implement` already reads prior
+   `verdict1` optionally and a loop guard can read `verdict1.status`; rewording
+   the existing standard prompts' historical verdict text, which is explicitly
+   not requested.
+
+4. **`runtime.example.toml` illustrates the seat.** The committed
+   `.ctx/traits/runtime.example.toml` gains a fully commented
+   `[agent.role.reviewer-light]` example whose model is `haiku`, following the
+   file's every-key-commented convention. The live `.ctx/traits/runtime.toml`
+   is never touched from the run worktree; the seat entry there is stated as an
+   owner/host step.
+   Decided by the declared seat-illustration check: a commented
+   `[agent.role.reviewer-light]` table line, a commented `model` line naming
+   haiku, and no active (uncommented) `[agent.role.reviewer-light]` table in
+   `runtime.example.toml`.
+   Excluded: an active (uncommented) machine assignment in the example; any
+   write attempt against the gitignored live runtime file.
+
+5. **No variant flow changes.** `source/variant/quick/index.ts`,
+   `source/variant/basic/index.ts` and `source/variant/complex/index.ts` are
+   byte-identical to HEAD; the substrate is declared but consumed by nothing
+   yet.
+   Decided by the declared variant-freeze check:
+   `git diff --exit-code 172f39597e1f6794016b44ac18132498d5abc48e --
+   .ctx/traits/authored/implement/source/variant` — the fixed pre-work commit
+   is a landed ancestor, so the comparison is runnable in any later clean
+   worktree.
+   Excluded: wiring the light step anywhere (that is `0274.2`); a version bump,
+   which travels with `0274.2`'s flow change.
+
+6. **The landing recipe is green.** `just ts-build`, then the implement package
+   build, leaves no tracked drift under `.ctx/traits/authored/implement`, and
+   `just test` passes.
+   Decided by the two declared command checks.
+   Excluded: any hand edit to `generated/`, `trait.lock`, `index.map` files or
+   `package.json` — all are outputs of `ctx traits build implement`; any new
+   test asserting on this repository's committed canonical content
+   (frozen-inventory proofs are banned; existing runtime proof suites use owned
+   fixtures, `modules/cli/tests/proof_park_honesty.rs:1-26`).
+
+## APPROACH — suggested route, not a boundary
+
+Edit order:
+
+1. In `source/shared/agent.ts`, extract the four avoid intents into one shared
+   list (something shaped like `const reviewSafeguards = [...]`), point `smart`
+   at it, and declare
+   `export const reviewerLight = cdk.agent.reviewer("reviewer-light", ...)`
+   carrying the same list. Description/summary text follows the light-lane
+   contract of goal 3; keep doctrine wording generic.
+2. In `source/shared/step/review.ts`, add the light step beside the existing
+   primary/primarySummoning/secondary definitions, factoring the neutral task
+   context out of `reviewBody` so standard-only wording (the take-as-many-rounds
+   sentence) stays with the standard steps and light-only doctrine stays with
+   the light step. The step uses `reviewerLight` and writes `verdict1`.
+3. Add the commented `[agent.role.reviewer-light]` + `model` illustration to
+   `.ctx/traits/runtime.example.toml`, mirroring the file's existing comment
+   style.
+4. Build: `just ts-build`, then
+   `CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement`.
+   Because no variant consumes the substrate yet, generated canonicals are
+   expected to be unchanged; if the build nonetheless regenerates tracked
+   outputs (canonicals, `index.map`, `package.json`, `trait.lock`), commit them
+   as build outputs at the current version and report the deviation in the work
+   summary rather than hand-reverting them.
+5. `just test`, then a closing diff read as a supplementary sanity pass — the
+   declared checks are the deciders for every goal.
+
+In a run worktree, isolate the build cache (`CARGO_TARGET_DIR=target`) before
+trusting any gate failure; a shared cross-worktree target dir flakes gates.
+'''
+scope = '''
 ## Decisions
-- The nits-don't-block contract lives in role/step/slot descriptions and schema field
-  descriptions, never in prompt text (owner ruling 2026-08-30: prompts carry task doctrine
-  only).
-- No new schema fields, no toolkit severity change: the existing approve/revise verdict plus
-  light-review doctrine supply the control. Any shared gate extraction into
-  packages/toolkit stays out until a second consumer exists (single-trait-packages rule).
-- The role's model is never hard-coded in the trait; the committed artifact set is trait
-  sources plus a runtime.example.toml illustration. The live runtime.toml seat entry is an
-  owner step outside this task's file changes.
-- Wiring the step into any variant flow is 0274.2's work, not this task's.
-- Exact symbols, signatures, and edit sequencing are the architect's call — this task fixes
-  the contract, not the diff.
-"""
-validation = """
+
+- The nits-don't-block contract lives in role/step/slot descriptions and the
+  existing schema field descriptions, never in prompt text (owner ruling
+  2026-08-30: prompts carry task doctrine only).
+- No new schema fields and no toolkit severity change: the existing
+  approved/revise verdict plus light-review doctrine supply the control.
+  Shared-safeguard extraction stays inside the implement package until a second
+  consumer exists.
+- The role's model is never hard-coded in the trait; the committed artifact set
+  is trait sources plus the commented `runtime.example.toml` illustration. The
+  live `runtime.toml` seat entry is an owner step outside this task's file
+  changes.
+- Light review writes `slot.verdict1` — no separate light verdict slot or
+  schema.
+- Wiring the step into any variant flow is `0274.2`'s work, not this task's.
+- Expected files, symbols and edit order above are guidance; the goals bind.
+'''
+validation = '''
 ## Watch
-- generated/*/index.toml and trait.lock are outputs of ctx traits build implement — never
-  hand-edit them.
-- No tests asserting on committed trait canonical content (file-exists or pattern-match
-  against generated TOML); for a trait-package edit the existing gates are the proof.
-- Doctrine text stays generic pseudocode — no owner-specific examples in resources.
-- Do not attempt to write .ctx/traits/runtime.toml from the run worktree; the write is
-  auto-denied. State the seat entry as an owner step in the landed docs/example instead.
-- In a run worktree, isolate the build cache (CARGO_TARGET_DIR=target cargo …) before
+
+- `generated/`, `index.map`, `package.json` and `trait.lock` are outputs of
+  `ctx traits build implement` — never hand-edit them.
+- No tests asserting on committed trait canonical content (file-exists or
+  pattern-match against generated TOML); for a trait-package edit the existing
+  gates are the proof.
+- Doctrine text stays generic — no owner-specific examples in role/step
+  descriptions or resources.
+- Do not attempt to write `.ctx/traits/runtime.toml` from the run worktree; the
+  write is auto-denied and must not be retry-looped. State the seat entry as an
+  owner step instead.
+- Do not let the light step inherit `Don't rush the approval, take as many
+  rounds as it needs` — that sentence is standard-lane doctrine.
+- In a run worktree, isolate the build cache (`CARGO_TARGET_DIR=target`) before
   trusting a gate failure.
 
 ## Done when
-Trait sources declare a reviewerLight role (reviewer template, own seat, no hard-coded
-model — the decided haiku lives in the seat entry) and a
-light-review step reusing reviewVerdictSchema whose descriptions carry the
-only-contract-breaking-findings-block contract; runtime.example.toml illustrates the
-[agent.role.reviewer-light] seat with model haiku; the trait-package recipe
-(just ts-build → ctx traits build implement) and just test run green.
-"""
+
+Every bullet below is decided by the named declared check; no bullet relies on
+a manual diff read.
+
+- `source/shared/agent.ts` declares `reviewerLight` with canonical id
+  `reviewer-light`, and no model string appears under `source/`, `trait.toml`
+  or `generated/` — the role-declaration check.
+- The four safeguard intents are each defined exactly once under `source/`,
+  in one list referenced by both `smart` and `reviewerLight` — the
+  single-definition check.
+- A shared step under `source/shared/step/` references `reviewerLight` and
+  `verdict1` on the existing `reviewVerdictSchema`, with the
+  only-contract-breaking-findings-block contract in descriptions rather than
+  prompt text, and the standard take-as-many-rounds sentence gains no
+  occurrence beyond its two existing standard-lane ones — the wiring check.
+  (Non-inheritance by reference is decided at `0274.2` and the parent, where
+  the light lane first reaches a generated canonical.)
+- `runtime.example.toml` carries the fully commented
+  `[agent.role.reviewer-light]` table with a commented haiku model line and no
+  active table — the seat-illustration check.
+- All three `source/variant/` files are byte-identical to pre-work commit
+  `172f39597` — the variant-freeze check.
+- The package rebuilds with no tracked drift and `just test` passes — the two
+  gate checks.
+'''
 [relations]
 parent = "0274"
 
 [[checks]]
-name = "TS workspace builds"
-command = "just ts-build"
-timeout-ms = 900000
+name = "reviewer-light role declared in trait source with no model string"
+command = 'grep -n "export const reviewerLight" .ctx/traits/authored/implement/source/shared/agent.ts && grep -n "reviewer-light" .ctx/traits/authored/implement/source/shared/agent.ts && ! grep -rn "haiku" .ctx/traits/authored/implement/source .ctx/traits/authored/implement/trait.toml .ctx/traits/authored/implement/generated'
+expect = "reviewerLight"
 
 [[checks]]
-name = "implement canonicals regenerate from source with no tracked drift"
-command = "CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
+name = "safeguard intents are each defined exactly once, shared not copied"
+command = 'for t in TasteOnlyBlocking TailCasePursuit RubberStampReview UnboundedLoop; do test "$(grep -ro "$t" .ctx/traits/authored/implement/source | wc -l)" -eq 1 || exit 1; done'
+
+[[checks]]
+name = "light step wires reviewerLight to verdict1 without copying standard wording"
+command = 'f=$(grep -rln "reviewerLight" .ctx/traits/authored/implement/source/shared/step) && test -n "$f" && grep -l "verdict1" $f && test "$(grep -ro "as many rounds as it needs" .ctx/traits/authored/implement/source | wc -l)" -le 2'
+expect = "shared/step"
+
+[[checks]]
+name = "runtime example carries the fully commented reviewer-light seat with haiku"
+command = 'grep -En "^# ?\[agent\.role\.reviewer-light\]" .ctx/traits/runtime.example.toml && grep -En "^# ?model *=.*haiku" .ctx/traits/runtime.example.toml && ! grep -En "^\[agent\.role\.reviewer-light\]" .ctx/traits/runtime.example.toml'
+expect = "reviewer-light"
+
+[[checks]]
+name = "variant flows are byte-identical to the pre-work commit"
+command = "git diff --exit-code 172f39597e1f6794016b44ac18132498d5abc48e -- .ctx/traits/authored/implement/source/variant"
+
+[[checks]]
+name = "implement package rebuilds from source with no tracked drift"
+command = "just ts-build && CARGO_TARGET_DIR=target cargo run -p ctx-traits-cli -- traits build implement && git diff --exit-code -- .ctx/traits/authored/implement"
 timeout-ms = 1800000
 
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000
