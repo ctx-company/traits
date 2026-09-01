@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0266.6"
 title = "Render the task row state stack"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-f4840af1a30b7d945f50634c9764fa563f93383a0b369831cb89a9f51e792c7e merged as 59f09a280fe2c2a529f53b5eddac4c12c96b108a"
 content = """
 `0266.1` renders the task row's left half — dot, title, short description — from
 the center-served board answer. This cut renders its right half: the end-aligned
@@ -490,3 +492,7 @@ approach.
 [relations]
 depends-on = ["0266.1"]
 parent = "0266"
+
+[closure]
+mode = "merge"
+commit = "59f09a280fe2c2a529f53b5eddac4c12c96b108a"

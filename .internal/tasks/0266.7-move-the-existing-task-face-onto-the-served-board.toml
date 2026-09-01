@@ -3,6 +3,8 @@ key = "0266.7"
 title = "Move the existing task face onto the served board"
 status = "ready"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-a4b8a1af7db7c1577c0fe0557d0284602f476531f855679f408f8f07330e61f3 merged as d7d98b6ddfcdf3d9034d05dbc42c3bc261f3635f"
 content = """
 `0266.1` teaches the center to answer the board. This cut is the other half of the
 plan document's parity mechanism: an existing non-GUI face reads the board through
@@ -488,3 +490,7 @@ focused test filters actually run, and every deviation from this approach.
 [relations]
 depends-on = ["0266.1"]
 parent = "0266"
+
+[closure]
+mode = "merge"
+commit = "d7d98b6ddfcdf3d9034d05dbc42c3bc261f3635f"

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0266.3"
 title = "Create a draft task through the center"
-status = "done"
+status = "ready"
 raised = "2026-08-29"
 closed = "2026-09-01"
 origin = "run run-185354a8960026da36fbd932d9c8cab236e749c906dd0ea0e2299b984d7de55b merged as 0dee92bb6d7f8865908e132b5515d9dc8195f2b2"

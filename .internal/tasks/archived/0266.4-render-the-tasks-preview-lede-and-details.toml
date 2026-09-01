@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0266.4"
 title = "Render the Tasks preview lede and details"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-1ff4b8890cffb1efa8fa72f63f898c33318d099463cd4e25cf0776cab0a50334 merged as 701266bc60d2a02ccce2f8a327f57f49f2f00517"
 content = """
 Open the Tasks screen's 380-wide preview column with grammar rule 13's identity region — the headerless task lede and the `details` key/value block — over the repository-scoped board answer `0266.1` taught the center to serve, plus the selection-triggered detail answer that carries what a compact board row cannot. `screens/tasks.md:27-36` orders the column lede → `details` → `facts` → `checks` → `landing` → footer; this cut owns the column's use of the shared frame and the first two regions, and `0266.5` owns everything below them.
 
@@ -138,3 +140,7 @@ depends-on = [
     "0265.14",
 ]
 parent = "0266"
+
+[closure]
+mode = "merge"
+commit = "701266bc60d2a02ccce2f8a327f57f49f2f00517"

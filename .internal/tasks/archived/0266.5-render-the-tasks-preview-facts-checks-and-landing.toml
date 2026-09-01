@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0266.5"
 title = "Render the Tasks preview facts, checks and landing"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-58cef20adcb169d2af82ab31182261c91d6bfae9c2912e0e43c9913f9a6d9c7e merged as 138ba58fc30856aa4840ea646a1ca6acbef6c351"
 content = """
 Close the Tasks screen's 380-wide preview column: the `facts` and `checks` fact blocks, the `landing` consequence block, and the provenance footer, appended into the ordered body `0266.4` opened and composed from the primitives `0265.12` and `0265.15` landed. `screens/tasks.md:27-36` orders the column lede → `details` → `facts` → `checks` → `landing` → footer and rule 13 orders it identity → state → facts → consequence → spacer → provenance (`grammar.md:117-124`); `0266.4` owns the frame, the lede and `details`, and this cut owns everything after them.
 
@@ -187,3 +189,7 @@ depends-on = [
     "0265.15",
 ]
 parent = "0266"
+
+[closure]
+mode = "merge"
+commit = "138ba58fc30856aa4840ea646a1ca6acbef6c351"

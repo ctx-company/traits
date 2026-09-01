@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0267.2"
 title = "Render the Traits header and lockfile bar"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
 content = """
 Give the Traits screen its chrome — grammar rule 6's header and rule 8/12's provenance bar — over the one repository-scoped answer `0267.1` taught the center to serve. This cut renders; it resolves nothing.
