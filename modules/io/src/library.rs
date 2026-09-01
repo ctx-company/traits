@@ -39,6 +39,94 @@ impl LibraryTrustState {
     }
 }
 
+/// Semantic colour role for a library trust answer. Faces translate this small
+/// vocabulary to their own token types without reinterpreting trust evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LibraryTrustRole {
+    SettledGood,
+    Danger,
+    Warn,
+    Neutral,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryPresentationFace {
+    Tui,
+    Desktop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LibraryTrustPresentation {
+    pub word: &'static str,
+    pub role: LibraryTrustRole,
+}
+
+impl LibraryTrustState {
+    pub fn presentation(self, face: LibraryPresentationFace) -> LibraryTrustPresentation {
+        let word = match (self, face) {
+            (Self::AllVerified, LibraryPresentationFace::Desktop) => "trusted",
+            (Self::AllVerified, LibraryPresentationFace::Tui) => "verified",
+            (Self::Blocked, _) => "blocked",
+            (Self::Partial, _) => "partial",
+            (Self::Unreviewed, _) => "unreviewed",
+            (Self::Moved, _) => "moved",
+            (Self::Unreadable, _) => "unreadable",
+            (Self::SourceOnly, _) => "source-only",
+            (Self::Orphaned, _) => "orphaned",
+        };
+        let role = match self {
+            Self::AllVerified => LibraryTrustRole::SettledGood,
+            Self::Blocked | Self::Unreadable => LibraryTrustRole::Danger,
+            Self::Partial | Self::Moved | Self::Orphaned => LibraryTrustRole::Warn,
+            Self::Unreviewed | Self::SourceOnly => LibraryTrustRole::Neutral,
+        };
+        LibraryTrustPresentation { word, role }
+    }
+}
+
+/// Stable address of one served library row. It is deliberately not a list
+/// index: a refresh may reorder rows while this still identifies the member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LibraryDetailSelector {
+    pub trait_id: String,
+    pub canonical_digest: Option<String>,
+    pub member: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+pub enum LibraryDetailResolution {
+    Resolved {
+        display_identity: String,
+        name: String,
+        lede: String,
+        version: String,
+        canonical_digest: String,
+        trust_state: LibraryTrustState,
+        verified: usize,
+        total: usize,
+        agents: Vec<String>,
+    },
+    SourceOnly {
+        id: String,
+        source_path: String,
+    },
+    Unreadable {
+        id: String,
+        path: String,
+        error: String,
+    },
+    Missing,
+    Stale {
+        current_digest: Option<String>,
+    },
+    Refused {
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct LibraryMember {
@@ -221,6 +309,166 @@ pub fn resolve_library(
     Ok(LibraryResolution { rows, provenance })
 }
 
+/// Resolve one selected library member without performing the whole-inventory
+/// `candidate_ids` scan used by the compact list endpoint.
+pub fn resolve_library_detail(
+    context: &InventoryContext,
+    document: &crate::trust::Document,
+    selector: &LibraryDetailSelector,
+) -> crate::Result<LibraryDetailResolution> {
+    let Some(resolution) = context.resolve_tiers(&selector.trait_id)? else {
+        return source_only_detail(context, selector);
+    };
+    let candidate = resolution.winner;
+    let root = crate::layout::package_root_for_manifest(&candidate.path);
+    let family = root
+        .as_ref()
+        .map(|root| {
+            crate::family_manifest::read_family_table(&crate::layout::package_manifest_path(root))
+        })
+        .transpose()?
+        .flatten();
+    let (display_identity, member_key, paths) = match (root, family) {
+        (Some(root), Some(table)) => {
+            let Some((default_key, default)) = table.variant("default") else {
+                return Err(crate::Error::Usage {
+                    message: "family default is absent".to_string(),
+                });
+            };
+            let mut paths = vec![root.join(&default.relative_path)];
+            paths.extend(
+                table
+                    .variants
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != default_key)
+                    .map(|(_, variant)| root.join(&variant.relative_path)),
+            );
+            (
+                selector.trait_id.clone(),
+                Some(default_key.to_string()),
+                paths,
+            )
+        }
+        _ => (
+            selector.trait_id.clone(),
+            None,
+            vec![candidate.path.clone()],
+        ),
+    };
+    if selector.member != member_key {
+        return Ok(LibraryDetailResolution::Stale {
+            current_digest: None,
+        });
+    }
+    let mut members = Vec::new();
+    for path in &paths {
+        match crate::run::load_trait(path.as_str()) {
+            Ok((trait_ref, trait_root, _, digest)) => {
+                let trust = crate::lifecycle::resolve_trust_verdict_for_trait_in(
+                    document,
+                    trait_ref.id.as_str(),
+                    digest.as_str(),
+                );
+                let current = document.record_for_current(trait_ref.id.as_str(), digest.as_str());
+                let trust_state = match trust {
+                    TrustVerdict::Verified => LibraryTrustState::AllVerified,
+                    TrustVerdict::Blocked => LibraryTrustState::Blocked,
+                    TrustVerdict::Unreviewed
+                        if current.is_some_and(|record| {
+                            record.state == crate::trust::TrustState::Blocked
+                        }) =>
+                    {
+                        LibraryTrustState::Blocked
+                    }
+                    TrustVerdict::Unreviewed if current.is_some() => LibraryTrustState::Moved,
+                    TrustVerdict::Unreviewed => LibraryTrustState::Unreviewed,
+                };
+                members.push((
+                    path.clone(),
+                    trait_ref,
+                    trait_root,
+                    digest,
+                    trust,
+                    trust_state,
+                ));
+            }
+            Err(error) => {
+                return Ok(LibraryDetailResolution::Unreadable {
+                    id: selector.trait_id.clone(),
+                    path: path.to_string(),
+                    error: error.to_string(),
+                });
+            }
+        }
+    }
+    let Some((_, trait_ref, _, digest, _, _)) = members.first() else {
+        return Ok(LibraryDetailResolution::Missing);
+    };
+    if selector.canonical_digest.as_deref() != Some(digest.as_str()) {
+        return Ok(LibraryDetailResolution::Stale {
+            current_digest: Some(digest.as_str().to_string()),
+        });
+    }
+    let aggregate_members: Vec<LibraryMember> = members
+        .iter()
+        .map(
+            |(_, trait_ref, trait_root, digest, trust, trust_state)| LibraryMember {
+                id: trait_ref.id.as_str().to_string(),
+                version: trait_ref.version.as_str().to_string(),
+                schema_version: trait_ref.schema_version.as_str().to_string(),
+                // `family_aggregate` uses only trust fields; avoid another
+                // package-status read while constructing this local evidence.
+                status: String::new(),
+                trust: *trust,
+                trust_state: *trust_state,
+                canonical_digest: digest.as_str().to_string(),
+                source_path: String::new(),
+                trait_root: trait_root.to_string(),
+                tier: candidate.tier.into(),
+                origin: candidate.origin.clone(),
+                family: None,
+                family_key: None,
+                variant: trait_ref.variant.clone(),
+                shadow: None,
+                name: trait_ref.id.as_str().to_string(),
+                summary: trait_ref.effective_summary().to_string(),
+            },
+        )
+        .collect();
+    let (trust_state, verified, total) = family_aggregate(&aggregate_members);
+    Ok(LibraryDetailResolution::Resolved {
+        display_identity,
+        name: trait_ref.name.as_str().to_string(),
+        lede: trait_ref.effective_summary().to_string(),
+        version: trait_ref.version.as_str().to_string(),
+        canonical_digest: digest.as_str().to_string(),
+        trust_state,
+        verified,
+        total,
+        agents: trait_ref
+            .agents
+            .iter()
+            .map(|agent| agent.id.clone())
+            .collect(),
+    })
+}
+
+fn source_only_detail(
+    context: &InventoryContext,
+    selector: &LibraryDetailSelector,
+) -> crate::Result<LibraryDetailResolution> {
+    let package = crate::discovery::trait_authoring_packages(context.repo_root_for_paths())?
+        .into_iter()
+        .find(|package| package.trait_id == selector.trait_id);
+    Ok(match package {
+        Some(package) => LibraryDetailResolution::SourceOnly {
+            id: package.trait_id,
+            source_path: package.source_path.to_string(),
+        },
+        None => LibraryDetailResolution::Missing,
+    })
+}
+
 fn push_member(
     rows: &mut Vec<LibraryRow>,
     id: &str,
@@ -395,5 +643,27 @@ mod tests {
     fn moved_approval_is_distinct_when_no_current_member_is_verified() {
         let members = [member(TrustVerdict::Unreviewed, LibraryTrustState::Moved)];
         assert_eq!(family_aggregate(&members), (LibraryTrustState::Moved, 0, 1));
+    }
+
+    #[test]
+    fn trust_presentation_is_shared_and_face_specific_only_for_verified() {
+        assert_eq!(
+            LibraryTrustState::AllVerified
+                .presentation(LibraryPresentationFace::Desktop)
+                .word,
+            "trusted"
+        );
+        assert_eq!(
+            LibraryTrustState::AllVerified
+                .presentation(LibraryPresentationFace::Tui)
+                .word,
+            "verified"
+        );
+        assert_eq!(
+            LibraryTrustState::Unreadable
+                .presentation(LibraryPresentationFace::Desktop)
+                .role,
+            LibraryTrustRole::Danger
+        );
     }
 }

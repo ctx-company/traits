@@ -92,6 +92,22 @@ pub fn named_block_element(slug: &str, block: &NamedBlock) -> AnyElement {
     named_block_shell(slug, &block.heading, rows)
 }
 
+/// A named block with a full-width Sans lede below its key/value rows.
+pub fn lede_block_element(slug: &str, block: &NamedBlock, lede: Option<&str>) -> AnyElement {
+    let mut children: Vec<_> = block.rows.iter().map(kv_row_element).collect();
+    if let Some(lede) = lede {
+        children.push(div()
+            .debug_selector(move || format!("preview-lede-{slug}"))
+            .w_full()
+            .font_family(tokens::FONT_SANS)
+            .text_size(tokens::SIZE_11_5)
+            .text_color(rgb(tokens::TEXT_SECONDARY))
+            .child(lede.to_string())
+            .into_any_element());
+    }
+    named_block_shell(slug, &block.heading, children)
+}
+
 /// The `in progress` block: the reusable named-block heading, then one
 /// bordered "now" item — a `space-between` title/state-word row, then a
 /// full-width non-italic narration line.

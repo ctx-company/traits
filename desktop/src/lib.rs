@@ -25,3 +25,4 @@ pub mod spawn_view;
 pub mod title_bar_view;
 pub mod tokens;
 pub mod trait_library;
+pub mod trait_preview;

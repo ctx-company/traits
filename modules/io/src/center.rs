@@ -166,6 +166,11 @@ enum Request {
         id: String,
         repo_key: String,
     },
+    LibraryDetail {
+        id: String,
+        repo_key: String,
+        selector: crate::library::LibraryDetailSelector,
+    },
 }
 
 impl Request {
@@ -186,7 +191,8 @@ impl Request {
             | Self::StandingWall { id, .. }
             | Self::ClaimedTask { id, .. }
             | Self::Board { id, .. }
-            | Self::Library { id, .. } => id,
+            | Self::Library { id, .. }
+            | Self::LibraryDetail { id, .. } => id,
         }
     }
 
@@ -227,6 +233,7 @@ enum ResponseResult {
     ClaimedTask(ClaimedTaskWireResult),
     Board(Box<BoardWireResult>),
     Library(Box<LibraryWireResult>),
+    LibraryDetail(Box<crate::library::LibraryDetailResolution>),
     Error { message: String },
 }
 
@@ -1208,6 +1215,24 @@ pub fn library_existing(repo_key: &str) -> crate::Result<LibraryWireResult> {
     )? {
         ResponseResult::Library(library) => Ok(*library),
         _ => Err(protocol_error("unexpected library response")),
+    }
+}
+
+/// Resolve one selected trait's full preview data through the existing center.
+pub fn library_detail_existing(
+    repo_key: &str,
+    selector: crate::library::LibraryDetailSelector,
+) -> crate::Result<crate::library::LibraryDetailResolution> {
+    match request_existing(
+        Request::LibraryDetail {
+            id: next_id("library-detail"),
+            repo_key: repo_key.to_owned(),
+            selector,
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::LibraryDetail(detail) => Ok(*detail),
+        _ => Err(protocol_error("unexpected library detail response")),
     }
 }
 
@@ -3877,6 +3902,18 @@ fn serve_connection_worker_with_board_instants(
             let _ = response(&mut stream, id, result);
             return;
         }
+        if let Request::LibraryDetail {
+            repo_key, selector, ..
+        } = request
+        {
+            let result = run_library_detail_request(&jobs, repo_key, selector)
+                .map(|detail| ResponseResult::LibraryDetail(Box::new(detail)))
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
         let (reply_sender, reply_receiver) = mpsc::sync_channel::<crate::Result<ResponseResult>>(1);
         let registered_path = match &request {
             Request::Register { registration, .. } => Some(registration.ledger_path.clone()),
@@ -4186,6 +4223,47 @@ fn run_library_request(
         repo_path: root.to_string(),
         resolution,
     })
+}
+
+fn run_library_detail_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    repo_key: String,
+    selector: crate::library::LibraryDetailSelector,
+) -> crate::Result<crate::library::LibraryDetailResolution> {
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRepository { repo_key, reply })
+        .map_err(|_| protocol_error("model queue unavailable"))?;
+    let root = match receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("repository resolution timed out"))??
+    {
+        RepositoryResolution::One { root, .. } => root,
+        RepositoryResolution::Missing => {
+            return Err(protocol_error("repository is not known to center"));
+        }
+        RepositoryResolution::Ambiguous => {
+            return Err(protocol_error("repository has ambiguous roots"));
+        }
+    };
+    let context = crate::inventory::InventoryContext::at_repo_root(&root)?;
+    let document = crate::trust::read_store()?;
+    let detail = crate::library::resolve_library_detail(&context, &document, &selector)?;
+    // Refuse before the line writer sees an oversized payload; truncating a
+    // served lede would make the desktop fabricate a successful answer.
+    if serde_json::to_vec(&detail)
+        .map_err(|source| crate::parse::Error::JsonSerialize {
+            context: "serialize library detail".to_string(),
+            source,
+        })?
+        .len()
+        + 512
+        > MAX_LINE_BYTES
+    {
+        return Ok(crate::library::LibraryDetailResolution::Refused {
+            reason: "library detail exceeds protocol size limit".to_string(),
+        });
+    }
+    Ok(detail)
 }
 
 fn resume_argv(session_id: &str) -> Vec<String> {
@@ -4528,7 +4606,8 @@ fn handle_request(
         | Request::Control { .. }
         | Request::ClaimedTask { .. }
         | Request::Board { .. }
-        | Request::Library { .. } => Err(protocol_error(
+        | Request::Library { .. }
+        | Request::LibraryDetail { .. } => Err(protocol_error(
             "request is handled by the connection worker",
         )),
     }

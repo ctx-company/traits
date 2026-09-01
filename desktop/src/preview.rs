@@ -38,14 +38,14 @@ pub struct ValueSegment {
 }
 
 impl ValueSegment {
-    fn neutral(text: impl Into<String>) -> Self {
+    pub fn neutral(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             role: None,
         }
     }
 
-    fn toned(text: impl Into<String>, role: StateRole) -> Self {
+    pub fn toned(text: impl Into<String>, role: StateRole) -> Self {
         Self {
             text: text.into(),
             role: Some(role),
@@ -55,7 +55,7 @@ impl ValueSegment {
     /// The one separator glyph the design grammar allows, with ASCII spaces
     /// on both sides so concatenating a row's segment texts reads
     /// `identity · value`, never `identity·value`.
-    fn dot() -> Self {
+    pub fn dot() -> Self {
         Self::neutral(" \u{b7} ")
     }
 }

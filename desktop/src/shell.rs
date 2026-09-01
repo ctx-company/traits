@@ -24,6 +24,8 @@ use crate::spawn_view;
 use crate::title_bar_view;
 use crate::tokens;
 use crate::trait_library::{self, LibraryState};
+use crate::trait_preview;
+use ctx_traits_io::library::{LibraryDetailResolution, LibraryDetailSelector, LibraryPresentationFace, LibraryRow};
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -358,6 +360,10 @@ pub struct Shell {
     library: LibraryState,
     library_task: Option<gpui::Task<()>>,
     library_generation: u64,
+    trait_selection: Option<LibraryDetailSelector>,
+    trait_detail: Option<Result<LibraryDetailResolution, String>>,
+    trait_detail_task: Option<gpui::Task<()>>,
+    trait_detail_generation: u64,
     spawn_form: SpawnForm,
     spawn_task: Option<gpui::Task<()>>,
     row_controls: RowControls,
@@ -405,6 +411,11 @@ impl Shell {
                     // the face, and feeding it first keeps stream order
                     // exact for both consumers.
                     let outcome = shell.detail.follow(&update);
+                    let library_changed = matches!(
+                        &update,
+                        LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys })
+                            if matches!(&shell.library, LibraryState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
+                    );
                     shell.face.apply(update, SystemTime::now());
                     shell.spawn_form.set_repositories(shell.face.repositories());
                     // Reconcile a `Requested` spawn status against the
@@ -416,6 +427,12 @@ impl Shell {
                     // reconciliation on its own arrival too.
                     reconcile_spawn_status(&shell.face, &mut shell.spawn_form);
                     reconcile_row_controls(&shell.face, &mut shell.row_controls);
+                    if library_changed {
+                        shell.load_library(cx);
+                        if let Some(selector) = shell.trait_selection.clone() {
+                            shell.request_trait_detail(selector, cx);
+                        }
+                    }
                     cx.notify();
                     outcome
                 });
@@ -442,6 +459,10 @@ impl Shell {
             library: LibraryState::Failed("select a repository to view its traits".to_string()),
             library_task: None,
             library_generation: 0,
+            trait_selection: None,
+            trait_detail: None,
+            trait_detail_task: None,
+            trait_detail_generation: 0,
             spawn_form: SpawnForm::default(),
             spawn_task: None,
             row_controls: RowControls::default(),
@@ -541,6 +562,36 @@ impl Shell {
             let _ = this.update(cx, |shell, cx| {
                 if shell.library_generation == generation {
                     shell.library = trait_library::fold_library_result(&shell.library, result);
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    fn select_trait(&mut self, selector: LibraryDetailSelector, cx: &mut Context<Self>) {
+        if self.trait_selection.as_ref() == Some(&selector) {
+            return;
+        }
+        self.trait_selection = Some(selector.clone());
+        self.request_trait_detail(selector, cx);
+    }
+
+    fn request_trait_detail(&mut self, selector: LibraryDetailSelector, cx: &mut Context<Self>) {
+        self.trait_detail = None;
+        self.trait_detail_generation += 1;
+        let generation = self.trait_detail_generation;
+        let repo_key = match &self.library {
+            LibraryState::Accepted { answer, .. } => answer.repo_key.clone(),
+            LibraryState::Loading | LibraryState::Failed(_) => return,
+        };
+        self.trait_detail_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move {
+                ctx_traits_io::center::library_detail_existing(&repo_key, selector)
+                    .map_err(|error| error.to_string())
+            }).await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.trait_detail_generation == generation {
+                    shell.trait_detail = Some(result);
                     cx.notify();
                 }
             });
@@ -1176,7 +1227,7 @@ impl Render for Shell {
                 }
                 LibraryState::Loading | LibraryState::Failed(_) => 0,
             };
-            let traits = div()
+            let mut traits = div()
                 .debug_selector(|| "traits-screen".to_string())
                 .flex()
                 .flex_col()
@@ -1188,15 +1239,46 @@ impl Render for Shell {
                     &header.title,
                     &header.summary,
                 ))
-                // Trait rows are supplied by the prerequisite library section;
-                // retain its section label's count derivation here.
                 .child(
                     div()
                         .font_family(tokens::FONT_MONO)
                         .text_size(tokens::SIZE_11)
                         .text_color(rgb(tokens::TEXT_MUTED))
                         .child(format!("Authored — {authored_count}")),
-                )
+                );
+            if let LibraryState::Accepted { answer, .. } = &self.library {
+                for row in &answer.resolution.rows {
+                    let (label, selector, presentation) = match row {
+                        LibraryRow::Resolved(member) => (
+                            member.family_key.clone().unwrap_or_else(|| member.id.clone()),
+                            LibraryDetailSelector { trait_id: member.id.clone(), canonical_digest: Some(member.canonical_digest.clone()), member: member.family_key.clone() },
+                            member.trust_state.presentation(LibraryPresentationFace::Desktop),
+                        ),
+                        LibraryRow::SourceOnly { id, .. } => (
+                            id.clone(),
+                            LibraryDetailSelector { trait_id: id.clone(), canonical_digest: None, member: None },
+                            ctx_traits_io::library::LibraryTrustState::SourceOnly.presentation(LibraryPresentationFace::Desktop),
+                        ),
+                        LibraryRow::Unreadable { id, .. } => (
+                            id.clone(),
+                            LibraryDetailSelector { trait_id: id.clone(), canonical_digest: None, member: None },
+                            ctx_traits_io::library::LibraryTrustState::Unreadable.presentation(LibraryPresentationFace::Desktop),
+                        ),
+                    };
+                    let selected = self.trait_selection.as_ref() == Some(&selector);
+                    traits = traits.child(
+                        div()
+                            .id(SharedString::from(format!("trait-row-{label}")))
+                            .w_full().flex().flex_row().justify_between().items_center()
+                            .px(tokens::RAIL_ROW_PAD_X).py(tokens::RAIL_ROW_PAD_Y)
+                            .bg(rgb(if selected { tokens::SURFACE_RAISED } else { tokens::ROW_OPEN }))
+                            .child(div().font_family(tokens::FONT_SANS).text_size(tokens::SIZE_12).text_color(rgb(if selected { tokens::TEXT_BRIGHT } else { tokens::TEXT })).child(label))
+                            .child(div().font_family(tokens::FONT_MONO).text_size(tokens::SIZE_10_5).text_color(rgb(crate::run_row::role_color(match presentation.role { ctx_traits_io::library::LibraryTrustRole::SettledGood => crate::run_row::StateRole::Ok, ctx_traits_io::library::LibraryTrustRole::Danger => crate::run_row::StateRole::Danger, ctx_traits_io::library::LibraryTrustRole::Warn => crate::run_row::StateRole::Warn, ctx_traits_io::library::LibraryTrustRole::Neutral => crate::run_row::StateRole::Neutral }))).child(presentation.word))
+                            .on_click(cx.listener(move |shell, _event, _window, cx| shell.select_trait(selector.clone(), cx))),
+                    );
+                }
+            }
+            let traits = traits
                 .child(div().flex_1())
                 .child(bottom_bar_view::bar_element(
                     &trait_library::traits_bar(&self.library),
@@ -1210,7 +1292,14 @@ impl Render for Shell {
                 .child(rail_view::rail_element(
                     &self.face.rail(self.detail.repo_key()),
                 ))
-                .child(traits);
+                .child(traits)
+                .child({
+                    let preview = trait_preview::project(self.trait_detail.as_ref());
+                    preview_view::preview_column_element(vec![
+                        preview_view::lede_block_element("trait", &preview.trait_block, preview.lede.as_deref()),
+                        preview_view::named_block_element("facts", &preview.facts_block),
+                    ], None)
+                });
         }
         div()
             .debug_selector(|| "window-frame".to_string())

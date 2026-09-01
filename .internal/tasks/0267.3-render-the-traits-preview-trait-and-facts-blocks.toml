@@ -3,7 +3,7 @@ key = "0267.3"
 title = "Render the Traits preview trait and facts blocks"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Open the Traits screen's 380-wide preview column and render the two blocks that start it — `trait` and `facts` — over the repository-scoped library answer `0267.1` taught the center to serve, plus the selection-triggered detail answer that carries what a compact list row cannot. `screens/traits.md:24-31` orders the column `trait` → `facts` → `variants` → `ports` → footer, and grammar rule 13 puts identity before facts; this cut owns the column frame and the first two blocks, and `0267.4` owns the rest.
 
 Every leaf in this column is `data:`. The shared `placeholders` module has no call site here, and a static export value is not data — the only placeholder leaves on the finished screen are the header's summary phrasing and `author trait`, both `0267.2`'s (`0267` content, Correction 9; `0267` validation).
@@ -21,8 +21,8 @@ Six grounded corrections the draft this file replaces did not carry.
 **`(id, digest)` cannot be the freshness signal, and the export's `agents` string is two defects at once.** The existing TUI cache gates on trait id plus canonical digest (`modules/cli/src/app/dashboard.rs:3704-3750`), but a trust approval or block changes what this column must show without moving any canonical digest, and a family's members all share an id, so the stable key needs member/default identity too. Freshness therefore arrives as `0267.1`'s accepted library event, selection-scoped, with no timer on any client. Separately, the export's `worker · smart ×2 · scribe` (`reference/traits.html:735-740`) counts procedure assignments rather than declarations and uses `×`, which is outside grammar rule 3's closed glyph set. Parent Correction 8 fixes `facts.agents` as the declared `Agent.id` values in declaration order joined by `·`; `Trait.agents` is a `Vec<Agent>` and `Agent.id` is its identifier (`modules/core/src/trait/mod.rs:417-419`; `modules/core/src/trait/agent.rs:88-95`), so the order is available directly and no sort or dedup is applied.
 
 **The preview primitives this column composes are not reachable from this leaf's declared prerequisites.** `0265.10` owns "the 380-wide preview column's frame and order, the `run` key/value block, the provenance footer, and the key/value row and preview-footer primitives the later blocks and screens compose" (`0265.10` scope), and `0265.12` states its block "is the fact-block shape the four later screens compose (`facts`, `checks`, `variants`, `ports` all take it)" (`0265.12` content). `0267.3` declared only `0267.1`, whose closure runs `0265.5` → `0265.3` → `0265.1` and `0265.9` → `0265.8` and never reaches either; a charter's `depends-on` is not inherited by its children, since `derived_status` evaluates dependencies only for open leaves (`modules/core/src/task/graph.rs:115-177`). `0265.12` is added, which reaches `0265.10` transitively.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or observation shows it is the run's call.
@@ -72,8 +72,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 10. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free, the desktop project stays outside the workspace, and the TUI's existing dashboard projections stay green. Decided by `just test`, the declared dashboard projection check, and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no second manifest parse, inventory scan, family aggregate, trust mapping, provenance resolution or digest shortener is created; no CLI-private type is imported by the desktop; no desktop-side filesystem, `git`, cwd or clock read is added; no client timer or filesystem watcher is added; no `placeholders` call site enters this column; no export literal is hardcoded; the `variants` block, the `ports` block and the provenance footer are neither rendered nor half-rendered here; the TUI's direct preview reader at `dashboard.rs:3704-4019` and its two-second poll are `0267.5`'s to remove and are neither migrated nor preserved as a fallback here; no light-theme value is touched; no pencil artifact is edited; no trait authoring or trust mutation is opened; and no work belonging to `0267.1`, `0267.2`, `0267.4`, `0267.5`, `0266`, `0268`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. No standalone desktop project, gpui source, desktop lockfile or desktop validation command exists at this HEAD — root `Cargo.toml` names no gpui member and `0256.1` is still `ready` — so no desktop path, module, component or command is named below. Discover each of them from what `0256`, `0265` and `0267.1` actually landed, and say in the work summary where the landed shape differed from what is described here.
@@ -116,7 +116,11 @@ Suggested route, not a boundary. No standalone desktop project, gpui source, des
 One review pass over the completed diff before calling this done: walk `screens/traits.md:24-27` leaf by leaf against the rendered column, naming for each of `trait.name`, the trust word, the lede, `version`, `trust`, `digest` and `agents` the served source it renders from and confirming no `placeholders` call site exists here; confirm both block headings render and that every empty and failure state — no agents, source-only, unreadable, missing, stale, refused, outage — renders honestly; compare the literal geometry against `reference/traits.html:613-744` and `tokens.md:80`, resolving each content conflict toward `grammar.md:49-72,96-105` and the spec rather than the export; exercise the scratch boundaries listed above; then read the diff for the properties no fixture shows directly — no second manifest parse, inventory scan, family aggregate, trust mapping or digest shortener; no renderer-side representative choice; no client timer or watcher; no ungated commit of a stale response; no desktop filesystem, `git` or cwd read; no CLI-private import; and no duplicated preview or fact-block primitive. Then run the declared checks, and `0256.1`'s desktop command if it exists by then.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0267.1",
+    "0265.12",
+]
 parent = "0267"
-depends-on = ["0267.1", "0265.12"]
