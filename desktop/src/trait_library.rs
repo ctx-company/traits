@@ -117,56 +117,58 @@ pub fn traits_header(state: &LibraryState) -> ScreenHeader {
 }
 
 pub fn traits_bar(state: &LibraryState) -> BottomBar {
-    let (word, role, detail) = match state {
+    let (word, role) = match state {
         LibraryState::Accepted {
             answer,
             stale: None,
-        } if answer.resolution.provenance.pinned => (
-            "pinned",
-            StateRole::Ok,
-            provenance_text(&answer.resolution.provenance)
-                .into_iter()
-                .collect(),
-        ),
+        } if answer.resolution.provenance.pinned => ("pinned", StateRole::Ok),
         LibraryState::Accepted {
-            answer,
+            answer: _,
             stale: None,
-        } => (
-            "unpinned",
-            StateRole::Danger,
-            vec![
-                answer
-                    .resolution
-                    .provenance
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "provenance unavailable".to_string()),
-            ],
-        ),
-        LibraryState::Loading => (
-            "unavailable",
-            StateRole::Danger,
-            vec!["loading trait library".to_string()],
-        ),
-        LibraryState::Failed(reason) => ("unavailable", StateRole::Danger, vec![reason.clone()]),
-        LibraryState::Accepted {
-            stale: Some(reason),
-            ..
-        } => (
-            "unavailable",
-            StateRole::Danger,
-            vec![format!("stale: {reason}")],
-        ),
+        } => ("unpinned", StateRole::Danger),
+        LibraryState::Loading => ("unavailable", StateRole::Danger),
+        LibraryState::Failed(_) => ("unavailable", StateRole::Danger),
+        LibraryState::Accepted { stale: Some(_), .. } => ("unavailable", StateRole::Danger),
     };
     BottomBar {
         state: StatePresentation { word, role },
-        detail,
+        detail: vec![provenance_detail(state)],
         actions: vec![BarAction {
             id: BarActionId::AuthorTrait,
             label: placeholders::AUTHOR_TRAIT.label.to_string(),
             tone: ActionTone::Primary,
         }],
     }
+}
+
+fn provenance_detail(state: &LibraryState) -> String {
+    match state {
+        LibraryState::Accepted {
+            answer,
+            stale: None,
+        } if answer.resolution.provenance.pinned => {
+            provenance_text(&answer.resolution.provenance).unwrap_or_default()
+        }
+        LibraryState::Accepted {
+            answer,
+            stale: None,
+        } => answer
+            .resolution
+            .provenance
+            .error
+            .clone()
+            .unwrap_or_else(|| "provenance unavailable".to_string()),
+        LibraryState::Loading => "loading trait library".to_string(),
+        LibraryState::Failed(reason) => reason.clone(),
+        LibraryState::Accepted {
+            stale: Some(reason),
+            ..
+        } => format!("stale: {reason}"),
+    }
+}
+
+pub fn traits_footer_text(state: &LibraryState) -> String {
+    provenance_detail(state)
 }
 
 #[cfg(test)]
@@ -230,6 +232,7 @@ mod tests {
         assert_eq!(bar.detail, vec!["skill-lock @ 12345678 · 5 digests"]);
         assert_eq!(bar.actions[0].id, BarActionId::AuthorTrait);
         assert_eq!(bar.actions[0].label, placeholders::AUTHOR_TRAIT.label);
+        assert_eq!(traits_footer_text(&state), bar.detail[0]);
     }
 
     #[test]
@@ -242,6 +245,7 @@ mod tests {
         assert_eq!(bar.state.role, StateRole::Danger);
         assert_eq!(bar.detail, vec!["lock unavailable"]);
         assert!(!bar.detail.join(" ").contains("12345678"));
+        assert_eq!(traits_footer_text(&state), bar.detail[0]);
     }
 
     #[test]
@@ -271,6 +275,7 @@ mod tests {
         assert!(header.title.contains("acme/repo"));
         assert!(header.summary.contains("stale: center down"));
         assert_eq!(traits_bar(&folded).detail, vec!["stale: center down"]);
+        assert_eq!(traits_footer_text(&folded), "stale: center down");
     }
 
     #[test]

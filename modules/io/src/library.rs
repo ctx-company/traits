@@ -108,6 +108,8 @@ pub enum LibraryDetailResolution {
         verified: usize,
         total: usize,
         agents: Vec<String>,
+        variants: Vec<LibraryVariantSummary>,
+        ports: Vec<LibraryPortSummary>,
     },
     SourceOnly {
         id: String,
@@ -125,6 +127,20 @@ pub enum LibraryDetailResolution {
     Refused {
         reason: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LibraryVariantSummary {
+    pub key: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LibraryPortSummary {
+    pub id: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,13 +351,18 @@ pub fn resolve_library_detail(
                     message: "family default is absent".to_string(),
                 });
             };
-            let mut paths = vec![root.join(&default.relative_path)];
+            let mut paths = vec![(
+                Some(default_key.to_string()),
+                root.join(&default.relative_path),
+            )];
             paths.extend(
                 table
                     .variants
                     .iter()
                     .filter(|(key, _)| key.as_str() != default_key)
-                    .map(|(_, variant)| root.join(&variant.relative_path)),
+                    .map(|(key, variant)| {
+                        (Some(key.to_string()), root.join(&variant.relative_path))
+                    }),
             );
             (
                 selector.trait_id.clone(),
@@ -352,7 +373,7 @@ pub fn resolve_library_detail(
         _ => (
             selector.trait_id.clone(),
             None,
-            vec![candidate.path.clone()],
+            vec![(None, candidate.path.clone())],
         ),
     };
     if selector.member != member_key {
@@ -361,7 +382,7 @@ pub fn resolve_library_detail(
         });
     }
     let mut members = Vec::new();
-    for path in &paths {
+    for (key, path) in &paths {
         match crate::run::load_trait(path.as_str()) {
             Ok((trait_ref, trait_root, _, digest)) => {
                 let trust = crate::lifecycle::resolve_trust_verdict_for_trait_in(
@@ -384,6 +405,7 @@ pub fn resolve_library_detail(
                     TrustVerdict::Unreviewed => LibraryTrustState::Unreviewed,
                 };
                 members.push((
+                    key.clone(),
                     path.clone(),
                     trait_ref,
                     trait_root,
@@ -401,7 +423,7 @@ pub fn resolve_library_detail(
             }
         }
     }
-    let Some((_, trait_ref, _, digest, _, _)) = members.first() else {
+    let Some((_, _, trait_ref, _, digest, _, _)) = members.first() else {
         return Ok(LibraryDetailResolution::Missing);
     };
     if selector.canonical_digest.as_deref() != Some(digest.as_str()) {
@@ -412,7 +434,7 @@ pub fn resolve_library_detail(
     let aggregate_members: Vec<LibraryMember> = members
         .iter()
         .map(
-            |(_, trait_ref, trait_root, digest, trust, trust_state)| LibraryMember {
+            |(_, _, trait_ref, trait_root, digest, trust, trust_state)| LibraryMember {
                 id: trait_ref.id.as_str().to_string(),
                 version: trait_ref.version.as_str().to_string(),
                 schema_version: trait_ref.schema_version.as_str().to_string(),
@@ -436,6 +458,23 @@ pub fn resolve_library_detail(
         )
         .collect();
     let (trust_state, verified, total) = family_aggregate(&aggregate_members);
+    let variants = members
+        .iter()
+        .filter_map(|(key, _, trait_ref, _, _, _, _)| {
+            key.as_ref().map(|key| LibraryVariantSummary {
+                key: key.clone(),
+                summary: trait_ref.effective_summary().to_string(),
+            })
+        })
+        .collect();
+    let ports = trait_ref
+        .ports
+        .iter()
+        .map(|port| LibraryPortSummary {
+            id: port.id.clone(),
+            description: port.description.clone(),
+        })
+        .collect();
     Ok(LibraryDetailResolution::Resolved {
         display_identity,
         name: trait_ref.name.as_str().to_string(),
@@ -450,6 +489,8 @@ pub fn resolve_library_detail(
             .iter()
             .map(|agent| agent.id.clone())
             .collect(),
+        variants,
+        ports,
     })
 }
 
@@ -665,5 +706,31 @@ mod tests {
                 .role,
             LibraryTrustRole::Danger
         );
+    }
+
+    #[test]
+    fn detail_summaries_use_the_kebab_case_wire_shape() {
+        let detail = LibraryDetailResolution::Resolved {
+            display_identity: "fixture".to_string(),
+            name: "Fixture".to_string(),
+            lede: "summary".to_string(),
+            version: "1".to_string(),
+            canonical_digest: "sha256:fixture".to_string(),
+            trust_state: LibraryTrustState::Unreviewed,
+            verified: 0,
+            total: 1,
+            agents: vec![],
+            variants: vec![LibraryVariantSummary {
+                key: "member-name".to_string(),
+                summary: "member summary".to_string(),
+            }],
+            ports: vec![LibraryPortSummary {
+                id: "port-name".to_string(),
+                description: "port description".to_string(),
+            }],
+        };
+        let value = serde_json::to_value(detail).unwrap();
+        assert_eq!(value["data"]["variants"][0]["key"], "member-name");
+        assert_eq!(value["data"]["ports"][0]["id"], "port-name");
     }
 }

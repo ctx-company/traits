@@ -3,7 +3,7 @@ key = "0267.4"
 title = "Render the Traits preview variants and ports blocks"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Close the Traits preview column with the two blocks `0267.3` left after `trait` and `facts` — `variants` and `ports` — and with the provenance footer that ends it. `screens/traits.md:24-31` orders the column `trait` → `facts` → `variants` → `ports` → footer, and grammar rule 13 puts fact blocks before a flex spacer and a provenance footer (`grammar.md:117-124`); this cut owns everything after `facts`.
 
 Every leaf here is `data:`. The `placeholders` module has no call site in this column — the screen's only two placeholder leaves are the header summary's phrasing and `author trait`, both `0267.2`'s (`0267` content, Correction 9). A static export value is not data.
@@ -23,8 +23,8 @@ Six grounded corrections the draft this file replaces did not carry.
 **"A leaf the served answer cannot supply is unfinished work" is right for a built trait and wrong for the two row kinds that have no manifest.** A source-only authored package is `{trait_id, source_path}` (`modules/io/src/discovery.rs:63-118`) and an unreadable row is id, path and error (`lifecycle_reporting.rs:1541-1551`). Neither proves an empty variant set or an empty port set, so neither may render `none`, which is a data-derived claim about a decoded trait. Both stay selectable ordinary rows (`0267` Corrections 2 and 12), so both blocks render the typed unavailable/failure form `0267.3` established for those outcomes — visibly implemented, claiming nothing. The standalone case is the mirror: a standalone package has no family variant key at all, and Correction 5 forbids fabricating a `default` one, so its `variants` block renders the same one-leaf `none` empty state Correction 7 defines for ports.
 
 **Relations note.** `depends-on` gains `0267.2`. This leaf's declared closure is `0267.3` → `0267.1`/`0265.12` → `0265.10`, which never reaches `0267.2`, and a charter's `depends-on` is not inherited by its children — `derived_status` evaluates `depends-on` only for the open leaf itself (`modules/core/src/task/graph.rs:115-177`). The footer's only non-duplicating source for the rendered provenance text is `0267.2`'s presentation, so without the edge this leaf is build-dependent on an unlanded sibling and the only alternatives are a second formatter (the two-readers-can-disagree defect Correction 4 exists to prevent) or a blocked run. The parent's own staging already orders `0267.2` before `0267.4`; this makes the encoded graph say what the staging says.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or observation shows it is the run's call.
@@ -76,8 +76,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 9. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free, the desktop project stays outside the workspace, and the existing per-member family reporting stays green. Decided by `just test`, the declared family-report check, and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no second detail request, subscription, cache, model or timer; no inventory scan, manifest parse, family-table read, family aggregate, trust mapping, digest computation, digest shortener or provenance resolution; no second provenance string assembly; no widening of the compact list row with per-variant or port data; no union or merge of ports across variants; no sort or dedup of port ids; no desktop-side filesystem, `git`, cwd or clock read; no CLI-private import into the desktop; no `placeholders` call site in this column; no export literal hardcoded; the `trait` and `facts` blocks and the column frame are `0267.3`'s and are not rewritten here; the header and bar are `0267.2`'s and are not touched; the TUI's direct preview reader at `dashboard.rs:3704-4019` and its two-second `reload_non_session` poll (`dashboard.rs:2830-2844`; `dashboard/worker.rs:45-56,529-555`) are `0267.5`'s to remove and are neither migrated nor preserved as a fallback here; no light-theme value is touched; no pencil artifact is edited; no trait authoring or trust mutation is opened; and no work belonging to `0267.1`, `0267.2`, `0267.3`, `0267.5`, `0266`, `0268`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. No standalone desktop project, gpui source, desktop lockfile or desktop validation command exists at this HEAD — no `Cargo.toml` in this repository names `gpui`, the root `Cargo.lock` has no `gpui` package, and `0256.1` is still `ready` — so no desktop path, module, component or command is named below. Discover each of them from what `0256`, `0265`, `0267.1`, `0267.2` and `0267.3` actually landed, and say in the work summary where the landed shape differed from what is described here.
@@ -119,7 +119,11 @@ Suggested route, not a boundary. No standalone desktop project, gpui source, des
 One review pass over the completed diff before calling this done: walk `screens/traits.md:24-31` leaf by leaf from `variants` to the footer, naming for every variant key and value, every port key and value, every `none` leaf, every typed unavailable/failure leaf and the footer the served source it renders from, and confirming no `placeholders` call site exists in this column; compare the literal geometry against `reference/traits.html:745-886` and `tokens.md:53-68,80-83`, resolving each content conflict toward `grammar.md:49-72,110-124` rather than the export; exercise the scratch boundaries listed above; then read the diff for the properties no fixture shows directly — no second detail request, subscription, cache, model or timer; no inventory scan, manifest parse, family-table read or aggregate; no second provenance formatter, resolution or digest computation; no widened compact row; no sort, dedup or cross-variant union of ports; no desktop filesystem, `git` or cwd read; no CLI-private import; and no duplicated preview column, fact-block or footer primitive. Then run the focused evidence before the broad gates — the center wire proof, the family report proof, any affected dashboard or shared tests — followed by `just test` and the gpui-free root check, and `0256.1`'s desktop command if it exists by then.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0267.3",
+    "0267.2",
+]
 parent = "0267"
-depends-on = ["0267.3", "0267.2"]

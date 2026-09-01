@@ -8,8 +8,8 @@ use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
 use crate::preview::{KeyValueRow, LandingBlock, NamedBlock, NowItem, ValueSegment, VerdictBlock};
-use crate::task_preview::ChecksBlock;
 use crate::run_row::role_color;
+use crate::task_preview::ChecksBlock;
 use crate::tokens;
 
 pub fn lede_element(lede: &crate::task_preview::Lede) -> AnyElement {
@@ -147,14 +147,16 @@ pub fn checks_block_element(block: &ChecksBlock) -> AnyElement {
 pub fn lede_block_element(slug: &str, block: &NamedBlock, lede: Option<&str>) -> AnyElement {
     let mut children: Vec<_> = block.rows.iter().map(kv_row_element).collect();
     if let Some(lede) = lede {
-        children.push(div()
-            .debug_selector(move || format!("preview-lede-{slug}"))
-            .w_full()
-            .font_family(tokens::FONT_SANS)
-            .text_size(tokens::SIZE_11_5)
-            .text_color(rgb(tokens::TEXT_SECONDARY))
-            .child(lede.to_string())
-            .into_any_element());
+        children.push(
+            div()
+                .debug_selector(move || format!("preview-lede-{slug}"))
+                .w_full()
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_11_5)
+                .text_color(rgb(tokens::TEXT_SECONDARY))
+                .child(lede.to_string())
+                .into_any_element(),
+        );
     }
     named_block_shell(slug, &block.heading, children)
 }

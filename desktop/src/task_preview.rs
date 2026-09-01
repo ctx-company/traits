@@ -1,9 +1,14 @@
 //! Pure Tasks preview projection. The shell owns selection and loading; this
 //! module only renders the one atomically accepted center answer.
 
-use ctx_traits_io::center::{ClosePolicyResolution, TaskClaimState, TaskClaimWire, TaskDetailWireResult};
+use ctx_traits_io::center::{
+    ClosePolicyResolution, TaskClaimState, TaskClaimWire, TaskDetailWireResult,
+};
 
-use crate::preview::{KeyValueRow, LandingBlock, LandingLine, NamedBlock, ValueSegment, frame_counter_text, staleness_word};
+use crate::preview::{
+    KeyValueRow, LandingBlock, LandingLine, NamedBlock, ValueSegment, frame_counter_text,
+    staleness_word,
+};
 use crate::run_row::StateRole;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,10 +68,19 @@ pub fn tasks_lede(state: &TaskDetailState) -> Lede {
 pub fn tasks_facts_block(state: &TaskDetailState) -> NamedBlock {
     let (status, raised, parent, depends_on) = match state {
         TaskDetailState::Accepted {
-            answer: TaskDetailWireResult::Resolved { summary, raised, parent, depends_on, .. },
+            answer:
+                TaskDetailWireResult::Resolved {
+                    summary,
+                    raised,
+                    parent,
+                    depends_on,
+                    ..
+                },
             ..
         } => (
-            summary.stored_status.map(|status| format!("{status:?}").to_lowercase()),
+            summary
+                .stored_status
+                .map(|status| format!("{status:?}").to_lowercase()),
             raised.as_deref(),
             parent.as_deref(),
             Some(depends_on.as_slice()),
@@ -79,7 +93,9 @@ pub fn tasks_facts_block(state: &TaskDetailState) -> NamedBlock {
             .enumerate()
             .flat_map(|(index, value)| {
                 let mut segments = Vec::new();
-                if index > 0 { segments.push(ValueSegment::dot()); }
+                if index > 0 {
+                    segments.push(ValueSegment::dot());
+                }
                 segments.push(ValueSegment::neutral(value));
                 segments
             })
@@ -89,10 +105,24 @@ pub fn tasks_facts_block(state: &TaskDetailState) -> NamedBlock {
     NamedBlock {
         heading: "facts".to_string(),
         rows: vec![
-            KeyValueRow { key: "status".to_string(), value: vec![ValueSegment::neutral(status.unwrap_or_else(|| "not stored".to_string()))] },
-            KeyValueRow { key: "raised".to_string(), value: vec![ValueSegment::neutral(raised.unwrap_or("not recorded"))] },
-            KeyValueRow { key: "parent".to_string(), value: vec![ValueSegment::neutral(parent.unwrap_or("none"))] },
-            KeyValueRow { key: "depends on".to_string(), value: depends_value },
+            KeyValueRow {
+                key: "status".to_string(),
+                value: vec![ValueSegment::neutral(
+                    status.unwrap_or_else(|| "not stored".to_string()),
+                )],
+            },
+            KeyValueRow {
+                key: "raised".to_string(),
+                value: vec![ValueSegment::neutral(raised.unwrap_or("not recorded"))],
+            },
+            KeyValueRow {
+                key: "parent".to_string(),
+                value: vec![ValueSegment::neutral(parent.unwrap_or("none"))],
+            },
+            KeyValueRow {
+                key: "depends on".to_string(),
+                value: depends_value,
+            },
         ],
     }
 }
@@ -105,14 +135,25 @@ pub fn tasks_checks_block(state: &TaskDetailState) -> ChecksBlock {
         } => checks.iter().map(|check| check.name.clone()).collect(),
         _ => Vec::new(),
     };
-    ChecksBlock { heading: "checks".to_string(), lines }
+    ChecksBlock {
+        heading: "checks".to_string(),
+        lines,
+    }
 }
 
 pub fn tasks_landing_block(state: &TaskDetailState) -> LandingBlock {
     use ctx_traits_core::procedure::landing::{ResolvedClosePolicy, SelectedTaskClaimState};
     let line = match state {
         TaskDetailState::Accepted {
-            answer: TaskDetailWireResult::Resolved { summary, closure, claim, close_policy, checks, .. },
+            answer:
+                TaskDetailWireResult::Resolved {
+                    summary,
+                    closure,
+                    claim,
+                    close_policy,
+                    checks,
+                    ..
+                },
             ..
         } => {
             let claim_state = match claim {
@@ -130,7 +171,12 @@ pub fn tasks_landing_block(state: &TaskDetailState) -> LandingBlock {
                 ClosePolicyResolution::Unresolved(_) => ResolvedClosePolicy::Unresolved,
             };
             ctx_traits_core::procedure::landing::selected_task_close_line(
-                &summary.key, summary.stored_status, closure.as_ref(), claim_state, policy, checks.len(),
+                &summary.key,
+                summary.stored_status,
+                closure.as_ref(),
+                claim_state,
+                policy,
+                checks.len(),
             )
         }
         _ => ctx_traits_core::procedure::landing::LandingLine {
@@ -144,7 +190,13 @@ pub fn tasks_landing_block(state: &TaskDetailState) -> LandingBlock {
         ctx_traits_core::procedure::landing::LineTone::Warn => Some(StateRole::Warn),
         ctx_traits_core::procedure::landing::LineTone::Danger => Some(StateRole::Danger),
     };
-    LandingBlock { heading: "landing".to_string(), lines: vec![LandingLine { text: line.text, role }] }
+    LandingBlock {
+        heading: "landing".to_string(),
+        lines: vec![LandingLine {
+            text: line.text,
+            role,
+        }],
+    }
 }
 
 fn unavailable_rows(text: &str) -> Vec<KeyValueRow> {

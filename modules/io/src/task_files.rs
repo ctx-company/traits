@@ -1089,7 +1089,9 @@ mod tests {
             "schema-version = \"0.2\"\nkey = \"0003\"\ntitle = \"Dependent\"\nstatus = \"ready\"\n[relations]\ndepends-on = [\"0001\", \"9999\", \"0002\"]\n",
         );
 
-        let resolution = FilesTaskBoard::open_read(board_dir).resolve_board().unwrap();
+        let resolution = FilesTaskBoard::open_read(board_dir)
+            .resolve_board()
+            .unwrap();
         let dependent = resolution
             .rows
             .iter()

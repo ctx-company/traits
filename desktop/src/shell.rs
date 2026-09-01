@@ -1406,10 +1406,21 @@ impl Render for Shell {
                 .child(traits)
                 .child({
                     let preview = trait_preview::project(self.trait_detail.as_ref());
-                    preview_view::preview_column_element(vec![
-                        preview_view::lede_block_element("trait", &preview.trait_block, preview.lede.as_deref()),
-                        preview_view::named_block_element("facts", &preview.facts_block),
-                    ], None)
+                    preview_view::preview_column_element(
+                        vec![
+                            preview_view::lede_block_element(
+                                "trait",
+                                &preview.trait_block,
+                                preview.lede.as_deref(),
+                            ),
+                            preview_view::named_block_element("facts", &preview.facts_block),
+                            preview_view::named_block_element("variants", &preview.variants_block),
+                            preview_view::named_block_element("ports", &preview.ports_block),
+                        ],
+                        Some(preview_view::preview_footer_element(
+                            &trait_library::traits_footer_text(&self.library),
+                        )),
+                    )
                 });
         }
         div()
