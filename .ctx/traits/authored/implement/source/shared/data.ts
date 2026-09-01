@@ -114,6 +114,11 @@ export const gateAnswer = cdk.slot.text({
     "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON whose annotations are binding owner rulings.",
 });
 
+export const ownerRulingMode = cdk.slot.text({
+  id: "owner-ruling-mode",
+  description: "The owner-ruling port carried as a slot so the summons branch condition can read it.",
+});
+
 export const notifyLog = cdk.slot.text({
   id: "notify-log",
   description: "The notifier's own JSON receipt for the most recent notification command.",
@@ -127,6 +132,14 @@ export const stageOutput = cdk.slot.text({
 export const task = cdk.port.input.text({
   id: "task",
   description: 'Task to implement, named by its file in .internal/tasks/ — the key ("0044" or "0044.2"), the full name, or the filename.',
+});
+
+export const ownerRuling = cdk.port.input.text({
+  id: "owner-ruling",
+  description:
+    "Owner summons transport: 'on' (default) parks the run on reviewer-raised owner questions; 'off' skips the summons branch entirely for unattended runs — escalations stay recorded in the verdict for morning review, the run proceeds.",
+  optional: true,
+  default: { value: "on" },
 });
 
 export const ownerGate = cdk.port.input.text({
@@ -144,7 +157,7 @@ export const commitReport = cdk.port.output.text({
   optional: true,
 });
 
-export const port = { task, ownerGate, commitReport };
+export const port = { task, ownerGate, ownerRuling, commitReport };
 
 export const slot = {
   draft,
@@ -157,6 +170,7 @@ export const slot = {
   ownerDecisions,
   gitStatus,
   stageOutput,
+  ownerRulingMode,
   notifyId,
   notifyDigest,
   notifyBadge,

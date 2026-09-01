@@ -9,6 +9,11 @@ export default function () {
   });
 
   shared.step.notify.begin("Open the owner notification");
+  cdk.step.command("Carry the owner-ruling mode", {
+    id: "carry-owner-ruling",
+    argv: ["printf", "%s", shared.data.ownerRuling],
+    output: shared.data.ownerRulingMode,
+  });
 
   shared.step.notify.update("Notify: session base", "Capture the session base");
   shared.step.diff.baseline("Capture the session base");
@@ -30,8 +35,16 @@ export default function () {
     shared.step.notify.gateResult("Notify: owner ruling");
 
     cdk.flow.when("Owner ruling", cdk.condition.signal(agents.needsOwnerSignal), () => {
-      const ruling = shared.step.summon.ask("Summon the owner", agents.needsOwnerSignal);
-      shared.step.summon.record("Record the owner's ruling", agents.needsOwnerSignal, ruling.result);
+      // owner-ruling=off (unattended nights): the summons branch is skipped —
+      // the escalation stays in the verdict for morning review, nothing parks.
+      cdk.flow.when(
+        "Owner reachable",
+        cdk.condition.not(cdk.condition.equals(shared.data.ownerRulingMode, "off")),
+        () => {
+          const ruling = shared.step.summon.ask("Summon the owner", agents.needsOwnerSignal);
+          shared.step.summon.record("Record the owner's ruling", agents.needsOwnerSignal, ruling.result);
+        },
+      );
     });
 
     // Owner ruling 2026-09-01 (superseding the three-round cap): the

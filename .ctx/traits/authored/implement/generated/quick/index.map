@@ -16,13 +16,13 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 140,
-    "end": 140
+    "start": 153,
+    "end": 153
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 127,
-    "end": 127
+    "start": 132,
+    "end": 132
   },
   "prompt:draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
@@ -131,8 +131,8 @@
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 122,
-    "end": 122
+    "start": 127,
+    "end": 127
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",

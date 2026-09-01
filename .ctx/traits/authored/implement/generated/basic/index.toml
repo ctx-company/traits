@@ -65,6 +65,16 @@ description = "Owner annotation transport for review verdicts: 'annotate' (defau
 value = "annotate"
 
 [[port]]
+id = "owner-ruling"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner summons transport: 'on' (default) parks the run on reviewer-raised owner questions; 'off' skips the summons branch entirely for unattended runs — escalations stay recorded in the verdict for morning review, the run proceeds."
+
+[port.default]
+value = "on"
+
+[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -143,6 +153,11 @@ id = "owner-decisions"
 schema = "[schema:text]"
 description = "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message."
 hint = "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences."
+
+[[slot]]
+id = "owner-ruling-mode"
+schema = "schema:text"
+description = "The owner-ruling port carried as a slot so the summons branch condition can read it."
 
 [[slot]]
 id = "review-verdict-1"
@@ -540,23 +555,14 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
-id = "summon-the-owner"
-title = "Summon the owner"
-kind = "ask"
-prompt = "prompt:summon-the-owner"
-output = ["slot:summon-the-owner"]
-when = "signal:needs-owner"
+id = "owner-reachable"
+title = "Owner reachable"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-65-ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then-15-owner-reachable-then"
 
-[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
-id = "record-the-owner-s-ruling"
-title = "Record the owner's ruling"
-agent = "agent:scribe"
-prompt = "prompt:record-the-owner-s-ruling"
-input = ["slot:summon-the-owner"]
-
-[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence.output]]
-slot = "slot:owner-decisions"
-operation = "append"
+[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence.when.not]
+slot = "slot:owner-ruling-mode"
+equals = "off"
 
 [[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then.sequence]]
 id = "gate-append-ruling"
@@ -570,6 +576,25 @@ destination = "slot:owner-decisions"
 operation = "append"
 
 [[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then.sequence.output]]
+slot = "slot:owner-decisions"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-65-ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then-15-owner-reachable-then.sequence]]
+id = "summon-the-owner"
+title = "Summon the owner"
+kind = "ask"
+prompt = "prompt:summon-the-owner"
+output = ["slot:summon-the-owner"]
+when = "signal:needs-owner"
+
+[[sequence.ctx-branch-arm-s-65-ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then-15-owner-reachable-then.sequence]]
+id = "record-the-owner-s-ruling"
+title = "Record the owner's ruling"
+agent = "agent:scribe"
+prompt = "prompt:record-the-owner-s-ruling"
+input = ["slot:summon-the-owner"]
+
+[[sequence.ctx-branch-arm-s-65-ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then-15-owner-reachable-then.sequence.output]]
 slot = "slot:owner-decisions"
 operation = "append"
 
@@ -799,6 +824,7 @@ signal = "signal:needs-owner"
 description = "Reviewed implementation: implement, review, refine & commit."
 input = [
     "port:owner-gate",
+    "port:owner-ruling",
     "port:task",
 ]
 output = ["port:commit-report"]
@@ -814,6 +840,19 @@ argv = [
     "ctx-notify",
     "begin",
     "{port:task}",
+]
+
+[[procedure.sequence]]
+id = "carry-owner-ruling"
+title = "Carry the owner-ruling mode"
+input = ["port:owner-ruling"]
+output = ["slot:owner-ruling-mode"]
+
+[procedure.sequence.command]
+argv = [
+    "printf",
+    "%s",
+    "{port:owner-ruling}",
 ]
 
 [[procedure.sequence]]
