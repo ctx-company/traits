@@ -272,7 +272,7 @@ description = 'Short status badge for the activity, 64 characters at most, alway
 [schema.fields.journal]
 schema = "schema:text"
 required = true
-description = """One compact journal line: every still-open blocker step's text trimmed to 200 characters, joined with " | ". The literal "approved" when none are open."""
+description = 'Exactly "<X> open • <Y> closed" and NOTHING else — X counts steps with status "open" and Y counts steps with any completed status, across every blocker in the verdict. No step texts, no prose, no punctuation beyond the bullet.'
 
 [schema.fields.summary]
 schema = "schema:text"

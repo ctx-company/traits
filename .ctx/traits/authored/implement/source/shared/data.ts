@@ -76,7 +76,7 @@ export const notifyDigest = cdk.slot({
       }),
       journal: cdk.schema.field(cdk.schema.text(), {
         description:
-          'One compact journal line: every still-open blocker step\'s text trimmed to 200 characters, joined with " | ". The literal "approved" when none are open.',
+          'Exactly "<X> open \u2022 <Y> closed" and NOTHING else \u2014 X counts steps with status "open" and Y counts steps with any completed status, across every blocker in the verdict. No step texts, no prose, no punctuation beyond the bullet.',
       }),
       surface: cdk.schema.field(cdk.schema.text(), {
         description:
