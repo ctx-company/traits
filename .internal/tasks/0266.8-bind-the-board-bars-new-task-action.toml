@@ -4,6 +4,17 @@ title = "Bind the board bar's new task action"
 status = "ready"
 raised = "2026-08-29"
 content = '''
+## Owner ruling 2026-09-01 (binding; granted live in session 835b2505, baked so no run re-asks)
+
+Scope exception granted for two pre-existing main breakages that block
+this task's gates: (1) repair the desktop/src/task_preview.rs fixture
+for the widened TaskDetailWireResult::Resolved (scope/validation/
+open_steps fields from 0266.7's landing), and (2) run cargo fmt over
+modules/cli/src/app/dashboard.rs and modules/cli/src/app/dashboard/worker.rs.
+Minimal fixes, reported in the work summary. Do not summon the owner
+about either again.
+
+
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome and what decides it, plus what it excludes. The
 APPROACH section is the architect's suggested route — discovery order, file and
