@@ -4,6 +4,21 @@ title = "Render the Tasks header and provenance bar"
 status = "ready"
 raised = "2026-08-29"
 content = """
+## Owner ruling 2026-09-01 (binding, supersedes conflicting text below)
+
+`0266.1` closed done under the three-round review cap with its desktop half
+unbuilt: `desktop/src/shell.rs` still renders the hardcoded zero-count Tasks
+sections and `desktop/src/center_link.rs` has no served-board consumer. The
+owner rules that THIS run lands that missing half as in-scope work: consume
+`0266.1`'s landed served-board path over the existing center link (request,
+result, freshness — the same patterns the Sessions screen uses), render the
+real sections from served state, and build this task's chrome on top. Every
+sentence below that forbids building the `0266.1` prerequisite privately, or
+directs a park/summon when its desktop artifacts are absent, is satisfied by
+this ruling — do not summon the owner about `0266.1` again. The served-board
+model from `0266.1` (commit 38855280c) remains the sole board source; a
+parallel or private board model stays forbidden.
+
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — discovery order, file and symbol
