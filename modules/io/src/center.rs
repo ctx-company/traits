@@ -10,7 +10,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::{Read, Write};
 use std::net::Shutdown;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
@@ -158,6 +158,10 @@ enum Request {
         session_id: String,
         repo_key: Option<String>,
     },
+    Board {
+        id: String,
+        repo_key: String,
+    },
 }
 
 impl Request {
@@ -176,7 +180,8 @@ impl Request {
             | Self::FindByRunId { id, .. }
             | Self::Stats { id, .. }
             | Self::StandingWall { id, .. }
-            | Self::ClaimedTask { id, .. } => id,
+            | Self::ClaimedTask { id, .. }
+            | Self::Board { id, .. } => id,
         }
     }
 
@@ -215,7 +220,19 @@ enum ResponseResult {
     Start(StartWireResult),
     Control(ControlWireResult),
     ClaimedTask(ClaimedTaskWireResult),
+    Board(Box<BoardWireResult>),
     Error { message: String },
+}
+
+/// Compact board data for the Tasks pane and sibling task consumers. The
+/// resolution retains every board row; joins and sections are model-owned
+/// facts layered onto it without another filesystem read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BoardWireResult {
+    pub resolution: crate::task_files::BoardResolution,
+    pub joined_runs: BTreeMap<String, Vec<ctx_traits_core::task::provider::BoardRun>>,
+    pub sections: BTreeMap<String, Option<ctx_traits_core::task::provider::BoardSection>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1142,6 +1159,21 @@ pub fn claimed_task_existing(
     )?)
 }
 
+/// Resolve a repository's compact board through an already-serving center.
+/// The model owner resolves only identity; the connection worker reads files.
+pub fn board_existing(repo_key: &str) -> crate::Result<BoardWireResult> {
+    match request_existing(
+        Request::Board {
+            id: next_id("board"),
+            repo_key: repo_key.to_owned(),
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Board(board) => Ok(*board),
+        _ => Err(protocol_error("unexpected board response")),
+    }
+}
+
 /// Model-backed query helpers. They deliberately only encode/decode protocol
 /// values: ledger reconstruction belongs exclusively to the center owner.
 pub fn list(repo_key: Option<&str>) -> crate::Result<Vec<CenterPublicRow>> {
@@ -1788,6 +1820,15 @@ enum RowResolution {
     Missing,
     One(ResolvedRow),
     Ambiguous(Vec<String>),
+}
+
+enum RepositoryResolution {
+    Missing,
+    One {
+        root: Utf8PathBuf,
+        runs: Vec<ctx_traits_core::task::provider::BoardRun>,
+    },
+    Ambiguous,
 }
 
 struct Subscriber {
@@ -3371,6 +3412,45 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                     };
                     let _ = reply.send(Ok(resolution));
                 }
+                ModelCommand::ResolveRepository { repo_key, reply } => {
+                    let mut roots: Vec<_> = model
+                        .rows
+                        .values()
+                        .filter(|row| row.repo_key == repo_key && !row.repo_path.is_empty())
+                        .map(|row| Utf8PathBuf::from(row.repo_path.clone()))
+                        .collect();
+                    roots.sort();
+                    roots.dedup();
+                    let resolution = match roots.len() {
+                        0 => RepositoryResolution::Missing,
+                        1 => RepositoryResolution::One {
+                            root: roots.remove(0),
+                            runs: model
+                                .rows
+                                .values()
+                                .filter(|row| row.repo_key == repo_key)
+                                .filter_map(|row| {
+                                    let task_key = row.summary.task_key.clone()?;
+                                    Some(ctx_traits_core::task::provider::BoardRun {
+                                        run_id: row.summary.run_id.clone(),
+                                        repo_key: Some(row.repo_key.clone()),
+                                        task_key,
+                                        live: row.live,
+                                        awaiting_owner: matches!(
+                                            row.summary.status,
+                                            ctx_traits_core::procedure::session::Status::AwaitingInput
+                                                | ctx_traits_core::procedure::session::Status::WaitingOnHuman
+                                        ),
+                                        not_merged: row.summary.landing.as_deref()
+                                            == Some("not-merged"),
+                                    })
+                                })
+                                .collect(),
+                        },
+                        _ => RepositoryResolution::Ambiguous,
+                    };
+                    let _ = reply.send(Ok(resolution));
+                }
             }
             last_work = Instant::now();
         }
@@ -3438,6 +3518,10 @@ enum ModelCommand {
         session_id: String,
         repo_key: Option<String>,
         reply: mpsc::SyncSender<crate::Result<RowResolution>>,
+    },
+    ResolveRepository {
+        repo_key: String,
+        reply: mpsc::SyncSender<crate::Result<RepositoryResolution>>,
     },
 }
 
@@ -3678,6 +3762,15 @@ fn serve_connection_worker(
             let _ = response(&mut stream, id, result);
             return;
         }
+        if let Request::Board { repo_key, .. } = request {
+            let result = run_board_request(&jobs, repo_key)
+                .map(|board| ResponseResult::Board(Box::new(board)))
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
         let (reply_sender, reply_receiver) = mpsc::sync_channel::<crate::Result<ResponseResult>>(1);
         let registered_path = match &request {
             Request::Register { registration, .. } => Some(registration.ledger_path.clone()),
@@ -3853,6 +3946,72 @@ fn run_claimed_task_request(
             ))
         }
     }
+}
+
+fn run_board_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    repo_key: String,
+) -> crate::Result<BoardWireResult> {
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRepository {
+        repo_key: repo_key.clone(),
+        reply,
+    })
+        .map_err(|_| protocol_error("model queue unavailable"))?;
+    let root = match receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("repository resolution timed out"))??
+    {
+        RepositoryResolution::One { root, runs } => (root, runs),
+        RepositoryResolution::Missing => {
+            return Err(protocol_error("repository is not known to center"));
+        }
+        RepositoryResolution::Ambiguous => {
+            return Err(protocol_error("repository has ambiguous roots"));
+        }
+    };
+    let (root, runs) = root;
+    let resolution = crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root))
+        .resolve_board()
+        .map_err(|error| protocol_error(format!("board for {root}: {error}")))?;
+    let joined_runs = resolution
+        .rows
+        .iter()
+        .map(|row| {
+            let joined = ctx_traits_core::task::provider::joined_runs(
+                &repo_key,
+                &row.summary.key,
+                runs.iter(),
+            )
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+            (row.summary.key.clone(), joined)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let sections = resolution
+        .rows
+        .iter()
+        .map(|row| {
+            let joined = joined_runs
+                .get(&row.summary.key)
+                .into_iter()
+                .flatten();
+            (
+                row.summary.key.clone(),
+                ctx_traits_core::task::provider::section_of(
+                    row.summary.derived_status,
+                    row.summary.archived,
+                    joined,
+                ),
+            )
+        })
+        .collect();
+    Ok(BoardWireResult {
+        resolution,
+        joined_runs,
+        sections,
+    })
 }
 
 fn resume_argv(session_id: &str) -> Vec<String> {
@@ -4193,7 +4352,8 @@ fn handle_request(
         Request::Subscribe { .. }
         | Request::Start { .. }
         | Request::Control { .. }
-        | Request::ClaimedTask { .. } => Err(protocol_error(
+        | Request::ClaimedTask { .. }
+        | Request::Board { .. } => Err(protocol_error(
             "request is handled by the connection worker",
         )),
     }

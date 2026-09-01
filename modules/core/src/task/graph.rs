@@ -18,6 +18,7 @@ use super::{TaskDocument, TaskStatus};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DerivedStatus {
+    Draft,
     Ready,
     Blocked,
     Done,
@@ -157,6 +158,9 @@ fn derived_status_inner(
         match doc.status {
             Some(TaskStatus::Done) => DerivedStatus::Done,
             Some(TaskStatus::Cancelled) => DerivedStatus::Cancelled,
+            // A draft is intentionally not dispatchable-shaped, even when a
+            // dependency is open; sectioning can therefore keep it distinct.
+            Some(TaskStatus::Draft) => DerivedStatus::Draft,
             Some(TaskStatus::Ready) | None => {
                 let blocked = doc.relations.depends_on.iter().any(|dep| {
                     !matches!(
@@ -396,6 +400,28 @@ mod tests {
         let documents = snapshot(vec![dependency, dependent]);
 
         assert_eq!(derived_status(&documents, "0002"), DerivedStatus::Blocked);
+    }
+
+    #[test]
+    fn draft_leaf_stays_draft_when_its_dependency_is_open() {
+        let dependency = doc("0001", Some(TaskStatus::Ready));
+        let mut draft = doc("0002", Some(TaskStatus::Draft));
+        draft.relations.depends_on = vec!["0001".to_string()];
+        assert_eq!(
+            derived_status(&snapshot(vec![dependency, draft]), "0002"),
+            DerivedStatus::Draft
+        );
+    }
+
+    #[test]
+    fn parent_aggregation_depends_only_on_child_closure_when_children_are_draft() {
+        let parent = doc("0010", Some(TaskStatus::Draft));
+        let mut child = doc("0010.1", Some(TaskStatus::Draft));
+        child.relations.parent = Some("0010".to_string());
+        assert_eq!(
+            derived_status(&snapshot(vec![parent, child]), "0010"),
+            DerivedStatus::Ready
+        );
     }
 
     #[test]

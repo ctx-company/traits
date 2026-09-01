@@ -25,6 +25,7 @@ pub const SCHEMA_VERSION: &str = "0.2";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TaskStatus {
+    Draft,
     Ready,
     Done,
     Cancelled,
@@ -296,6 +297,15 @@ mod tests {
         let text = serialize(&document).expect("serialise");
         let parsed = parse(&text).expect("parse");
         assert_eq!(parsed, document);
+    }
+
+    #[test]
+    fn draft_status_round_trips_through_toml() {
+        let mut document = sample();
+        document.status = Some(TaskStatus::Draft);
+        let text = serialize(&document).expect("serialise");
+        assert!(text.contains("status = \"draft\""));
+        assert_eq!(parse(&text).expect("parse").status, Some(TaskStatus::Draft));
     }
 
     #[test]

@@ -22,6 +22,107 @@ use serde::{Deserialize, Serialize};
 use super::graph::{CyclePaths, DerivedStatus, ResolvedRelations};
 use super::{AutoClosePolicy, Step, TaskDocument, TaskStatus};
 
+/// The compact Tasks-pane sections. Closed and archived rows are deliberately
+/// excluded: callers still retain those served facts for sibling views.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BoardSection {
+    InProgress,
+    Ready,
+    Draft,
+}
+
+/// Run facts reduced to the board join. Repository identity is required so a
+/// same-key run from another checkout cannot claim this board's task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BoardRun {
+    /// The center-supplied run identity. It lets a served board retain the
+    /// concrete claiming run rather than reducing it to an anonymous boolean.
+    pub run_id: String,
+    /// `None` is the TUI's historical current-repository row. A named
+    /// repository must match the board before it can join.
+    pub repo_key: Option<String>,
+    pub task_key: String,
+    pub live: bool,
+    pub awaiting_owner: bool,
+    pub not_merged: bool,
+}
+
+/// The precedence result used by task consumers that retain the richer legacy
+/// task groups. It keeps run facts and board state in one shared decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardTaskState {
+    InProgress,
+    Pending,
+    AwaitingMerge,
+    Board(DerivedStatus),
+}
+
+/// Current-repository runs historically omit repository identity; explicitly
+/// identified runs must match the board's repository.
+pub fn same_repository(board_repo: Option<&str>, run_repo: Option<&str>) -> bool {
+    run_repo.is_none() || run_repo == board_repo
+}
+
+/// The task-group precedence shared by the TUI and served board: live, then
+/// awaiting owner, then unmerged work, then the derived board status.
+pub fn task_state(
+    derived: DerivedStatus,
+    runs: impl IntoIterator<Item = impl std::borrow::Borrow<BoardRun>>,
+) -> BoardTaskState {
+    let runs: Vec<_> = runs.into_iter().collect();
+    if runs.iter().any(|run| run.borrow().live) {
+        return BoardTaskState::InProgress;
+    }
+    if runs.iter().any(|run| run.borrow().awaiting_owner) {
+        return BoardTaskState::Pending;
+    }
+    if runs.iter().any(|run| run.borrow().not_merged) {
+        return BoardTaskState::AwaitingMerge;
+    }
+    BoardTaskState::Board(derived)
+}
+
+/// Returns only runs that belong to `repo_key` and `task_key`.
+pub fn joined_runs<'a>(
+    repo_key: &str,
+    task_key: &str,
+    runs: impl IntoIterator<Item = &'a BoardRun>,
+) -> Vec<&'a BoardRun> {
+    runs.into_iter()
+        .filter(|run| same_repository(Some(repo_key), run.repo_key.as_deref()))
+        .filter(|run| run.task_key == task_key)
+        .collect()
+}
+
+/// The one central partition rule for the first Tasks pane. A joined live or
+/// awaiting-owner run wins over the stored board state; all other open rows
+/// are draft only when their derived state is draft.
+pub fn section_of(
+    derived: DerivedStatus,
+    archived: bool,
+    joined: impl IntoIterator<Item = impl std::borrow::Borrow<BoardRun>>,
+) -> Option<BoardSection> {
+    if archived || derived.is_closed() {
+        return None;
+    }
+    let joined: Vec<_> = joined.into_iter().collect();
+    if matches!(
+        task_state(derived, joined.iter().map(|run| run.borrow())),
+        BoardTaskState::InProgress | BoardTaskState::Pending
+    ) {
+        return Some(BoardSection::InProgress);
+    }
+    // A claimed draft that is neither live nor awaiting its owner is still a
+    // claim, so it belongs with the other non-progress open work in Ready.
+    if derived == DerivedStatus::Draft && joined.is_empty() {
+        Some(BoardSection::Draft)
+    } else {
+        Some(BoardSection::Ready)
+    }
+}
+
 /// A task reduced to what a list view needs: identity, title, and both the
 /// stored and derived status (they can differ — a `Ready`-stored task with
 /// an unmet dependency derives to `Blocked`).
@@ -50,6 +151,22 @@ pub struct ClaimedTask {
     pub description: String,
     pub stored_status: Option<TaskStatus>,
     pub auto_close: Option<AutoClosePolicy>,
+}
+
+/// The full board lede and its compact list form. Both are projections of the
+/// one canonical `content` field; layout, truncation, and ellipsis belong to
+/// consumers rather than this shared data boundary.
+pub fn content_lede(document: &TaskDocument) -> &str {
+    &document.content
+}
+
+pub fn content_short(document: &TaskDocument) -> &str {
+    document
+        .content
+        .split("\n\n")
+        .next()
+        .unwrap_or("")
+        .trim_end()
 }
 
 impl ClaimedTask {
@@ -401,5 +518,77 @@ mod tests {
             }
             other => panic!("expected CycleRefused, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn content_projection_uses_the_first_paragraph_without_truncation() {
+        let mut document = doc("0001", Some(TaskStatus::Ready));
+        document.content =
+            "A deliberately long first paragraph.\nStill first.\n\nSecond paragraph.".to_string();
+        assert_eq!(content_lede(&document), document.content);
+        assert_eq!(
+            content_short(&document),
+            "A deliberately long first paragraph.\nStill first."
+        );
+    }
+
+    #[test]
+    fn content_projection_preserves_empty_and_single_paragraph_content() {
+        let mut document = doc("0001", Some(TaskStatus::Ready));
+        assert_eq!(content_lede(&document), "");
+        assert_eq!(content_short(&document), "");
+        document.content = "Only paragraph\n".to_string();
+        assert_eq!(content_short(&document), "Only paragraph");
+    }
+
+    #[test]
+    fn sections_are_a_repository_scoped_partition_of_open_tasks() {
+        let foreign = BoardRun {
+            run_id: "foreign-run".to_string(),
+            repo_key: Some("other".to_string()),
+            task_key: "0001".to_string(),
+            live: true,
+            awaiting_owner: false,
+            not_merged: false,
+        };
+        let local = BoardRun {
+            run_id: "local-run".to_string(),
+            repo_key: Some("repo".to_string()),
+            ..foreign.clone()
+        };
+        let joined = joined_runs("repo", "0001", [&foreign, &local]);
+        assert_eq!(joined.len(), 1);
+        assert_eq!(
+            section_of(DerivedStatus::Ready, false, joined),
+            Some(BoardSection::InProgress)
+        );
+        assert_eq!(
+            section_of(DerivedStatus::Draft, false, std::iter::empty::<&BoardRun>()),
+            Some(BoardSection::Draft)
+        );
+        let claimed_draft = BoardRun {
+            run_id: "settled-run".to_string(),
+            repo_key: Some("repo".to_string()),
+            task_key: "0002".to_string(),
+            live: false,
+            awaiting_owner: false,
+            not_merged: true,
+        };
+        assert_eq!(
+            section_of(DerivedStatus::Draft, false, [&claimed_draft]),
+            Some(BoardSection::Ready)
+        );
+        assert_eq!(
+            section_of(
+                DerivedStatus::Blocked,
+                false,
+                std::iter::empty::<&BoardRun>()
+            ),
+            Some(BoardSection::Ready)
+        );
+        assert_eq!(
+            section_of(DerivedStatus::Done, false, std::iter::empty::<&BoardRun>()),
+            None
+        );
     }
 }

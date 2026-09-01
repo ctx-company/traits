@@ -58,8 +58,9 @@ use super::tui_ratatui::{self, RatatuiPane, render_line};
 use ctx_traits_core::task::TaskStatus as TaskDocStatus;
 use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{
-    EffectKind, EffectOutcome, EffectRecord, NewTask, ResolvedTask, SyncReport, TaskProvider,
-    TaskProviderMut, TaskSummary, TaskUpdate,
+    BoardRun, BoardTaskState, EffectKind, EffectOutcome, EffectRecord, NewTask, ResolvedTask,
+    SyncReport, TaskProvider, TaskProviderMut, TaskSummary, TaskUpdate, same_repository,
+    task_state,
 };
 use ctx_traits_core::task::{Check, CheckOutcome, Closure};
 use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
@@ -5911,24 +5912,23 @@ fn task_dispatch_key(user_args: &[String]) -> Option<String> {
 /// of its own is simply not in-flight, which is the accepted shape (0063's
 /// own Watch), not a bug here.
 fn task_group(derived: DerivedStatus, joined: &[&SessionRow]) -> TaskGroup {
-    let group_of =
-        |row: &&SessionRow| session_group(row.class, row.status.as_ref(), row.outcome.as_ref());
-    if joined.iter().any(|row| group_of(row) == SessionGroup::Live) {
-        return TaskGroup::InFlight;
-    }
-    if joined
-        .iter()
-        .any(|row| group_of(row) == SessionGroup::Pending)
-    {
-        return TaskGroup::Parked;
-    }
-    if joined.iter().any(|row| row.not_merged.is_some()) {
-        return TaskGroup::AwaitingMerge;
-    }
-    match derived {
-        DerivedStatus::Blocked => TaskGroup::Blocked,
-        DerivedStatus::Ready => TaskGroup::Ready,
-        DerivedStatus::Done | DerivedStatus::Cancelled => TaskGroup::Done,
+    let runs = joined.iter().map(|row| BoardRun {
+        run_id: row.run_id.clone(),
+        repo_key: row.repo_key.clone(),
+        task_key: row.task_key.clone().unwrap_or_default(),
+        live: session_group(row.class, row.status.as_ref(), row.outcome.as_ref())
+            == SessionGroup::Live,
+        awaiting_owner: session_group(row.class, row.status.as_ref(), row.outcome.as_ref())
+            == SessionGroup::Pending,
+        not_merged: row.not_merged.is_some(),
+    });
+    match task_state(derived, runs) {
+        BoardTaskState::InProgress => TaskGroup::InFlight,
+        BoardTaskState::Pending => TaskGroup::Parked,
+        BoardTaskState::AwaitingMerge => TaskGroup::AwaitingMerge,
+        BoardTaskState::Board(DerivedStatus::Blocked) => TaskGroup::Blocked,
+        BoardTaskState::Board(DerivedStatus::Done | DerivedStatus::Cancelled) => TaskGroup::Done,
+        BoardTaskState::Board(DerivedStatus::Draft | DerivedStatus::Ready) => TaskGroup::Ready,
     }
 }
 
@@ -5944,8 +5944,7 @@ fn task_session_join(state: &State) -> std::collections::HashMap<String, Vec<usi
     let mut map: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
     for (idx, row) in state.sessions.iter().enumerate() {
         let Some(key) = &row.task_key else { continue };
-        let same_repo = row.repo_path.is_none() || row.repo_path == repo_root;
-        if !same_repo {
+        if !same_repository(repo_root.as_deref(), row.repo_path.as_deref()) {
             continue;
         }
         map.entry(key.clone()).or_default().push(idx);

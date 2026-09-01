@@ -140,6 +140,10 @@ pub fn presentation(state: &RowState) -> StatePresentation {
 /// catch-all arm.
 pub fn task_status_presentation(status: TaskStatus) -> StatePresentation {
     match status {
+        TaskStatus::Draft => StatePresentation {
+            word: "draft",
+            role: StateRole::Neutral,
+        },
         TaskStatus::Done => StatePresentation {
             word: "done",
             role: StateRole::Ok,

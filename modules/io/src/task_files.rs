@@ -23,6 +23,40 @@ use ctx_traits_core::task::{Relations, TaskDocument, TaskStatus};
 
 const ARCHIVED_DIR: &str = "archived";
 
+/// Whether a board directory supplied any documents. Unlike the legacy
+/// provider verbs, board serving distinguishes an absent or unreadable root
+/// from an empty, readable board.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "state")]
+pub enum BoardPresence {
+    Absent,
+    Unreadable { reason: String },
+    Empty,
+    Loaded,
+}
+
+/// One compact row of a fully resolved board. Prose is intentionally reduced
+/// to the shared first-paragraph projection so list consumers do not need a
+/// second filesystem read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BoardRow {
+    pub summary: TaskSummary,
+    pub relations: ctx_traits_core::task::graph::ResolvedRelations,
+    pub digest: String,
+    pub short_description: String,
+}
+
+/// The authoritative result of one board traversal.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BoardResolution {
+    pub presence: BoardPresence,
+    pub rows: Vec<BoardRow>,
+    pub sync_report: SyncReport,
+    pub resolved_at: u64,
+}
+
 /// The board-config file name, reserved among a board directory's direct
 /// children: never parsed as a task document, never resolvable as one
 /// (0063.6).
@@ -128,6 +162,7 @@ struct LoadedBoard {
     /// per key (0063.5) — what a caller's `expected_digest` is checked
     /// against.
     digests: BTreeMap<String, String>,
+    presence: BoardPresence,
 }
 
 /// One board directory's stat-sweep signature (0063.7): every direct
@@ -197,15 +232,33 @@ impl Board {
     /// (and therefore the one `documents`/`archived_keys` carries) is
     /// always the live copy when one exists.
     fn load(&self) -> Result<LoadedBoard, ProviderError> {
+        self.load_with_presence(false)
+    }
+
+    /// The single traversal shared by provider verbs and board serving. The
+    /// legacy verbs intentionally retain their historical empty-board answer
+    /// for an unreadable root; only the served board exposes that distinction.
+    fn load_with_presence(&self, retain_root_outcome: bool) -> Result<LoadedBoard, ProviderError> {
         let mut documents = BTreeMap::new();
         let mut locations: BTreeMap<String, Vec<Utf8PathBuf>> = BTreeMap::new();
         let mut archived_keys = BTreeSet::new();
         let mut parse_failures = Vec::new();
         let mut digests: BTreeMap<String, String> = BTreeMap::new();
+        let mut presence = BoardPresence::Loaded;
 
         for (dir, archived) in [(self.board_dir.clone(), false), (self.archived_dir(), true)] {
-            let Ok(entries) = std::fs::read_dir(dir.as_std_path()) else {
-                continue;
+            let entries = match std::fs::read_dir(dir.as_std_path()) {
+                Ok(entries) => entries,
+                Err(error) if !archived && retain_root_outcome => {
+                    presence = match error.kind() {
+                        std::io::ErrorKind::NotFound => BoardPresence::Absent,
+                        _ => BoardPresence::Unreadable {
+                            reason: error.to_string(),
+                        },
+                    };
+                    continue;
+                }
+                Err(_) => continue,
             };
             let mut paths: Vec<Utf8PathBuf> = entries
                 .flatten()
@@ -250,12 +303,62 @@ impl Board {
             }
         }
 
+        let presence = if matches!(presence, BoardPresence::Loaded) && documents.is_empty() {
+            BoardPresence::Empty
+        } else {
+            presence
+        };
         Ok(LoadedBoard {
             documents,
             locations,
             archived_keys,
             parse_failures,
             digests,
+            presence,
+        })
+    }
+
+    fn resolve_board(&self) -> Result<BoardResolution, ProviderError> {
+        let loaded = self.load_with_presence(true)?;
+        let duplicate_keys = loaded
+            .locations
+            .iter()
+            .filter(|(_, paths)| paths.len() > 1)
+            .map(|(key, paths)| DuplicateKey {
+                key: key.clone(),
+                locations: paths.iter().map(ToString::to_string).collect(),
+            })
+            .collect();
+        let rows = loaded
+            .documents
+            .keys()
+            .map(|key| {
+                let document = &loaded.documents[key];
+                BoardRow {
+                    summary: provider::summarize(
+                        &loaded.documents,
+                        key,
+                        loaded.archived_keys.contains(key),
+                    ),
+                    relations: graph::resolved_relations(&loaded.documents, key),
+                    digest: loaded.digests.get(key).cloned().unwrap_or_default(),
+                    short_description: provider::content_short(document).to_string(),
+                }
+            })
+            .collect();
+        let resolved_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        Ok(BoardResolution {
+            presence: loaded.presence,
+            rows,
+            sync_report: SyncReport {
+                dangling_edges: graph::dangling_edges(&loaded.documents),
+                parse_failures: loaded.parse_failures,
+                duplicate_keys,
+            },
+            resolved_at,
         })
     }
 
@@ -801,6 +904,14 @@ pub struct ReadOnlyBoard(Board);
 /// only. See [`FilesTaskBoard::open_read_write`].
 pub struct ReadWriteBoard(Board);
 
+impl ReadOnlyBoard {
+    /// Resolve the complete board from one directory traversal. This is the
+    /// served-board API; ordinary provider verbs remain independently shaped.
+    pub fn resolve_board(&self) -> Result<BoardResolution, ProviderError> {
+        self.0.resolve_board()
+    }
+}
+
 impl TaskProvider for ReadOnlyBoard {
     fn resolve(&self, task_value: &str) -> Result<Option<String>, ProviderError> {
         self.0.resolve(task_value)
@@ -887,6 +998,36 @@ mod tests {
 
     const TASK_0001: &str =
         "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"First\"\nstatus = \"ready\"\n";
+
+    #[test]
+    fn resolve_board_distinguishes_absent_empty_and_loaded_in_one_projection() {
+        let missing = tempdir().join("missing");
+        assert_eq!(
+            FilesTaskBoard::open_read(missing)
+                .resolve_board()
+                .unwrap()
+                .presence,
+            BoardPresence::Absent
+        );
+
+        let empty = tempdir();
+        let resolution = FilesTaskBoard::open_read(empty.clone())
+            .resolve_board()
+            .unwrap();
+        assert_eq!(resolution.presence, BoardPresence::Empty);
+        assert!(resolution.rows.is_empty());
+
+        write_task(
+            &empty,
+            "0001-first.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"First\"\nstatus = \"ready\"\ncontent = \"first paragraph\\n\\nsecond paragraph\"\n",
+        );
+        let resolution = FilesTaskBoard::open_read(empty).resolve_board().unwrap();
+        assert_eq!(resolution.presence, BoardPresence::Loaded);
+        assert_eq!(resolution.rows.len(), 1);
+        assert_eq!(resolution.rows[0].short_description, "first paragraph");
+        assert!(!resolution.rows[0].digest.is_empty());
+    }
 
     #[test]
     fn list_hides_archived_by_default_and_get_still_resolves_it() {

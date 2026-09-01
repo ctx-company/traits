@@ -283,6 +283,7 @@ pub enum TasksCommand {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum TaskUpdateStatus {
+    Draft,
     Ready,
     Done,
     Cancelled,

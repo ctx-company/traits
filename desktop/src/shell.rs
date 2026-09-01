@@ -345,6 +345,7 @@ fn format_time_of_day(at: SystemTime) -> String {
 }
 
 pub struct Shell {
+    screen: Screen,
     face: CenterFace,
     detail: RunDetail,
     detail_task: Option<gpui::Task<()>>,
@@ -366,6 +367,21 @@ pub struct Shell {
     /// handle, so a key press that calls `cx.notify()` would drop keyboard
     /// dispatch on the very next frame.
     spawn_focus_handle: gpui::FocusHandle,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Sessions,
+    Tasks,
+}
+
+impl Screen {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Sessions => title_bar_view::SESSIONS,
+            Self::Tasks => title_bar_view::TASKS,
+        }
+    }
 }
 
 impl Shell {
@@ -404,6 +420,7 @@ impl Shell {
         })
         .detach();
         Self {
+            screen: Screen::Sessions,
             face: CenterFace::new(RepoScope::All),
             detail: RunDetail::default(),
             detail_task: None,
@@ -413,6 +430,11 @@ impl Shell {
             row_control_tasks: HashMap::new(),
             spawn_focus_handle: cx.focus_handle(),
         }
+    }
+
+    fn switch_screen(&mut self, screen: Screen, cx: &mut Context<Self>) {
+        self.screen = screen;
+        cx.notify();
     }
 
     /// Exposed so the scoped view is exercisable and testable ahead of any UI
@@ -927,6 +949,26 @@ impl Render for Shell {
         if let Some(preview) = preview {
             body = body.child(preview);
         }
+        if self.screen == Screen::Tasks {
+            let section = |label: &'static str| {
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_size(tokens::SIZE_11)
+                    .text_color(rgb(tokens::TEXT_MUTED))
+                    .child(format!("{label} 0"))
+            };
+            body = div()
+                .debug_selector(|| "tasks-screen".to_string())
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .p(tokens::MAIN_PANE_PAD_TOP)
+                .gap(tokens::LIST_SECTION_GAP)
+                .child(section("In progress"))
+                .child(section("Ready"))
+                .child(section("Draft"));
+        }
         div()
             .debug_selector(|| "window-frame".to_string())
             .flex()
@@ -935,7 +977,23 @@ impl Render for Shell {
             .bg(rgb(tokens::CANVAS))
             .rounded(tokens::WINDOW_CORNER_RADIUS)
             .overflow_hidden()
-            .child(title_bar_view::title_bar_element(title_bar_view::SESSIONS))
+            .child(title_bar_view::title_bar_element(
+                self.screen.title(),
+                (self.screen != Screen::Sessions).then(|| {
+                    Box::new(
+                        cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
+                            shell.switch_screen(Screen::Sessions, cx);
+                        }),
+                    ) as title_bar_view::MenuHandler
+                }),
+                (self.screen != Screen::Tasks).then(|| {
+                    Box::new(
+                        cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
+                            shell.switch_screen(Screen::Tasks, cx);
+                        }),
+                    ) as title_bar_view::MenuHandler
+                }),
+            ))
             .child(body)
     }
 }
@@ -1486,12 +1544,10 @@ mod tests {
         );
     }
 
-    /// Drives the same window and proves exactly one menu label paints, and
-    /// nothing paints before the bar's leading spacer — the closing-diff
-    /// read's "no mark" statement made into a proof for the composed
-    /// element tree's geometry.
+    /// The two-entry menu has exactly one current label and its container
+    /// includes the second label plus the declared inter-entry gap.
     #[gpui::test]
-    fn the_title_bar_renders_exactly_one_menu_label_and_no_mark(cx: &mut gpui::TestAppContext) {
+    fn the_title_bar_renders_two_entries_with_one_current(cx: &mut gpui::TestAppContext) {
         let window = cx
             .update(|cx| {
                 let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
@@ -1507,10 +1563,9 @@ mod tests {
         let label = vcx
             .debug_bounds("title-bar-menu-current")
             .expect("the current-screen label actually painted this frame");
-        assert_eq!(
-            menu.size.width, label.size.width,
-            "a single-entry menu's painted width equals its one label's width; a \
-             second entry would make the container strictly wider by the gap token"
+        assert!(
+            menu.size.width > label.size.width + tokens::TITLE_BAR_MENU_GAP,
+            "the Tasks entry and declared gap expand the menu beyond its singular current label"
         );
     }
 

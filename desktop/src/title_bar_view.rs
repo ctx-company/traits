@@ -10,22 +10,57 @@
 //! (packaging, launcher, icon) needs to supply an owner-approved, tracked,
 //! licensed title-bar mark before any screen can render one.
 //!
-//! The menu carries exactly one entry, `SESSIONS` — the same
-//! rule-10-interface-word class `rail_view.rs`'s `"Spaces"` already is.
-//! The export renders four entries (Sessions · Traits · Tasks · Config),
-//! but the screen spec names only one; no `Screen` enum, no registry, no
-//! navigation is built here.
+//! The first two owned screens share this deliberately small menu. A caller
+//! supplies the navigation handlers; this view owns only the stable geometry.
 
 use gpui::prelude::*;
-use gpui::{AnyElement, div, rgb};
+use gpui::{AnyElement, SharedString, div, rgb};
 
 use crate::tokens;
 
 /// The menu's only entry — the current screen has no navigation seam yet,
 /// so this is a plain interface word, not a registry lookup.
 pub const SESSIONS: &str = "Sessions";
+pub const TASKS: &str = "Tasks";
 
-pub fn title_bar_element(current_screen: &str) -> AnyElement {
+pub type MenuHandler = Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
+
+fn menu_entry(
+    label: &'static str,
+    current_screen: &str,
+    handler: Option<MenuHandler>,
+) -> AnyElement {
+    let current = current_screen == label;
+    let element = div()
+        .id(SharedString::from(format!("title-bar-menu-{label}")))
+        .debug_selector(move || {
+            if current {
+                "title-bar-menu-current".to_string()
+            } else {
+                "title-bar-menu-entry".to_string()
+            }
+        })
+        .font_family(tokens::FONT_SANS)
+        .text_size(tokens::TITLE_BAR_MENU_SIZE)
+        .font_weight(tokens::WEIGHT_NORMAL)
+        .text_color(rgb(if current {
+            tokens::TEXT_BRIGHT
+        } else {
+            tokens::TEXT_SECONDARY
+        }))
+        .whitespace_nowrap()
+        .child(label);
+    match handler {
+        Some(handler) => element.on_click(handler).into_any_element(),
+        None => element.into_any_element(),
+    }
+}
+
+pub fn title_bar_element(
+    current_screen: &str,
+    on_sessions: Option<MenuHandler>,
+    on_tasks: Option<MenuHandler>,
+) -> AnyElement {
     let menu = div()
         .debug_selector(|| "title-bar-menu".to_string())
         .flex()
@@ -33,16 +68,8 @@ pub fn title_bar_element(current_screen: &str) -> AnyElement {
         .items_center()
         .flex_shrink_0()
         .gap(tokens::TITLE_BAR_MENU_GAP)
-        .child(
-            div()
-                .debug_selector(|| "title-bar-menu-current".to_string())
-                .font_family(tokens::FONT_SANS)
-                .text_size(tokens::TITLE_BAR_MENU_SIZE)
-                .font_weight(tokens::WEIGHT_NORMAL)
-                .text_color(rgb(tokens::TEXT_BRIGHT))
-                .whitespace_nowrap()
-                .child(current_screen.to_string()),
-        );
+        .child(menu_entry(SESSIONS, current_screen, on_sessions))
+        .child(menu_entry(TASKS, current_screen, on_tasks));
 
     div()
         .debug_selector(|| "title-bar".to_string())

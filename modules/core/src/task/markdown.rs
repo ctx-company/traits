@@ -229,6 +229,8 @@ fn classify_status(raw: &str) -> TaskStatus {
         TaskStatus::Cancelled
     } else if has_word("implemented") || has_word("done") || has_word("landed") {
         TaskStatus::Done
+    } else if has_word("draft") {
+        TaskStatus::Draft
     } else {
         TaskStatus::Ready
     }
@@ -431,6 +433,7 @@ mod tests {
             classify_status("ready to implement (owner-run: needs network)"),
             TaskStatus::Ready
         );
+        assert_eq!(classify_status("draft pending review"), TaskStatus::Draft);
     }
 
     #[test]

@@ -28,6 +28,7 @@ pub(crate) fn board_dir(board: Option<&str>) -> crate::Result<Utf8PathBuf> {
 
 pub(crate) fn status_text(derived: DerivedStatus) -> &'static str {
     match derived {
+        DerivedStatus::Draft => "draft",
         DerivedStatus::Ready => "ready",
         DerivedStatus::Blocked => "blocked",
         DerivedStatus::Done => "done",
@@ -37,6 +38,7 @@ pub(crate) fn status_text(derived: DerivedStatus) -> &'static str {
 
 fn status_tone(derived: DerivedStatus) -> RowTone {
     match derived {
+        DerivedStatus::Draft => RowTone::Default,
         DerivedStatus::Done => RowTone::Pass,
         DerivedStatus::Blocked => RowTone::Warn,
         DerivedStatus::Cancelled => RowTone::Fail,
@@ -490,6 +492,7 @@ pub(crate) fn handle_tasks_update(
     let update = TaskUpdate {
         title,
         status: status.map(|s| match s {
+            TaskUpdateStatus::Draft => TaskDocStatus::Draft,
             TaskUpdateStatus::Ready => TaskDocStatus::Ready,
             TaskUpdateStatus::Done => TaskDocStatus::Done,
             TaskUpdateStatus::Cancelled => TaskDocStatus::Cancelled,
@@ -572,6 +575,7 @@ fn effect_label(kind: EffectKind) -> &'static str {
 
 fn stored_status_text(status: Option<TaskDocStatus>) -> &'static str {
     match status {
+        Some(TaskDocStatus::Draft) => "draft",
         Some(TaskDocStatus::Ready) => "ready",
         Some(TaskDocStatus::Done) => "done",
         Some(TaskDocStatus::Cancelled) => "cancelled",

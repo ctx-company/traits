@@ -209,6 +209,7 @@ pub fn closed_status_refusal_message(marker: &ClosedStatusMarker) -> String {
     let status = match marker.status {
         ctx_traits_core::task::TaskStatus::Done => "done",
         ctx_traits_core::task::TaskStatus::Cancelled => "cancelled",
+        ctx_traits_core::task::TaskStatus::Draft => "draft",
         ctx_traits_core::task::TaskStatus::Ready => "ready",
     };
     format!(
@@ -249,6 +250,7 @@ pub struct UnmetDependency {
 /// The word a refusal/override message names an edge's derived status by.
 pub fn status_word(status: DerivedStatus) -> &'static str {
     match status {
+        DerivedStatus::Draft => "draft",
         DerivedStatus::Ready => "ready",
         DerivedStatus::Blocked => "blocked",
         DerivedStatus::Done => "done",
