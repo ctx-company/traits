@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0267.1"
 title = "Serve traits and trust and render the library rows"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
 content = """
 Teach the center to answer one repository's authored trait library — inventory, trust states, variants and lock provenance — and render the Traits screen's section and rows from that answer. One cut, because the rendering is what proves the capability and the capability is what makes the rendering honest.
