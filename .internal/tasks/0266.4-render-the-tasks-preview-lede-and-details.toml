@@ -3,7 +3,7 @@ key = "0266.4"
 title = "Render the Tasks preview lede and details"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Open the Tasks screen's 380-wide preview column with grammar rule 13's identity region — the headerless task lede and the `details` key/value block — over the repository-scoped board answer `0266.1` taught the center to serve, plus the selection-triggered detail answer that carries what a compact board row cannot. `screens/tasks.md:27-36` orders the column lede → `details` → `facts` → `checks` → `landing` → footer; this cut owns the column's use of the shared frame and the first two regions, and `0266.5` owns everything below them.
 
 Every leaf in this column is tagged `data:`. The shared `placeholders` module has no call site here, and no literal from `reference/tasks.html` — `0243.4 — everyone asks the center`, its prose, `0243.4 · in review`, `run-ab12ef · implement`, `live · frame 5 of 9` — is data. The export is geometry authority only.
@@ -23,8 +23,8 @@ Seven grounded corrections the draft this file replaces did not carry.
 **"Fail loud" is a posture, not an update contract.** A task detail can fail; a claim can disappear or change while a selection is held; and selection A's answer can arrive after B is selected. `0265.10` already landed the contract for exactly this: the compact row, the reconstructed detail and the claimed-task answer are staged under one stable selection identity and committed as a whole, a late A after selecting B leaves B intact, a rejected candidate never partially updates, last-accepted content is presented only behind an explicit stale marker, and reads fire from explicit selection only, off gpui's UI thread (`0265.10` goal 9, over `modules/cli/src/app/dashboard/worker.rs:254-415`). This cut extends that one model. A second selection or detail state machine for Tasks is a defect even when it behaves correctly.
 
 **The declared checks were workspace invariants standing in for proof.** `just test` and the metadata/lockfile command prove the workspace stayed green and gpui-free; neither observes a served task detail. `proof_center` is the existing process-boundary suite, so it is extended to prove the wire behaviour this cut adds rather than merely rerun unchanged, and the `run_view` and `tasks` filters are declared so the shared progress derivation and the non-GUI consumer are held green by name.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected components, symbols, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, and which fixture or observation shows it is the run's call.
@@ -82,8 +82,8 @@ Neither `0265.10` nor `0265.14` is reachable through `0266.1`'s closure, and a c
 11. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free, the desktop project stays outside the workspace, and the CLI and TUI stay green. Decided by `just test`, the declared `run_view` and `tasks` checks, and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no second task parser, board resolution, run-to-task join, claim precedence, state derivation, content projection, progress derivation or selection/detail state machine is created; no CLI-private type — in particular nothing from `run_view` — is imported by the desktop; no desktop-side filesystem, cache, `git`, cwd or clock read is added; no client timer, interval or filesystem watcher is added; no `placeholders` call site enters this column; no design example literal is hardcoded; no status dot, pill, badge, icon, border, fill or corner radius enters this column; the `facts`, `checks` and `landing` blocks and the footer are neither rendered nor half-rendered here; the TUI's existing in-process Tasks preview at `dashboard.rs:6364-6555` is `0266.7`'s to move and is neither migrated nor preserved as a desktop fallback; no task mutation is opened; no light-theme value is touched; no pencil artifact is edited; and no work belonging to `0266.1`, `0266.2`, `0266.3`, `0266.5`, `0266.6`, `0266.7`, `0266.8`, `0267`, `0268`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. No standalone desktop project, gpui source, desktop lockfile or desktop validation command exists at this HEAD — root `Cargo.toml` names seven workspace members and no gpui package, and `0256.1`, `0257`, `0265.5`, `0265.9`, `0265.10`, `0265.14`, `0258` and `0266.1` are all still `ready` — so no desktop path, module, component or command is named below, and the center's task request, result and delta names will differ from anything at HEAD (`modules/io/src/center.rs:84-209,265-281` has no task arm today). Discover each of them from what those tasks actually landed, and say in the work summary where the landed shape differed from what is described here. If a dependency reports complete but the desktop project, the preview primitives, the selected-detail contract, the typed progress result or the desktop lane is absent, that is an unmet prerequisite to report — not permission to build a parallel implementation of it here.
@@ -129,7 +129,12 @@ Suggested route, not a boundary. No standalone desktop project, gpui source, des
 One review pass over the completed diff before calling this done: walk `screens/tasks.md:27-32` leaf by leaf against the rendered column, naming for each of the lede title, the lede prose, `id`, `claimed` and `state` the served source it renders from and confirming no `placeholders` call site exists here; confirm the `details` heading renders and that every absence and failure form — no claim, ambiguous claim, each of the three progress absences, missing, unreadable, refused, stale, outage — renders honestly and non-placeholder; confirm `0266.5` can append its blocks into the frame's body sequence without rebuilding anything this cut owns; compare the literal geometry against `reference/tasks.html:744-827` and `tokens.md:79,82`, resolving each content conflict toward `grammar.md:6-72,117-124` and the screen artifact rather than the export; exercise the scratch boundaries listed above; then read the diff for the properties no fixture shows directly — no duplicate join, claim choice, state derivation, prose projection or progress derivation; no eager, per-row or hover read; no client timer or watcher; no gpui filesystem, cache, `git` or cwd read; no CLI-private import; no model-owner blocking; no ungated or partial commit; no example literal; no placeholder call; and no work belonging to a sibling. Then run the discovered desktop lane command and the declared checks.
 
 Permit at most one targeted repair-and-rerun round: repair one named defect, then rerun the failed command and every command after it in that order. If a second round would be needed, stop and report the exact failing command with its evidence, or the unresolved data or render contract, rather than iterating. That bound is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0266.1",
+    "0265.10",
+    "0265.14",
+]
 parent = "0266"
-depends-on = ["0266.1", "0265.10", "0265.14"]

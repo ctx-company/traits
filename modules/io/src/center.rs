@@ -162,6 +162,11 @@ enum Request {
         id: String,
         repo_key: String,
     },
+    TaskDetail {
+        id: String,
+        repo_key: String,
+        task_key: String,
+    },
     Library {
         id: String,
         repo_key: String,
@@ -191,6 +196,7 @@ impl Request {
             | Self::StandingWall { id, .. }
             | Self::ClaimedTask { id, .. }
             | Self::Board { id, .. }
+            | Self::TaskDetail { id, .. }
             | Self::Library { id, .. }
             | Self::LibraryDetail { id, .. } => id,
         }
@@ -232,6 +238,7 @@ enum ResponseResult {
     Control(ControlWireResult),
     ClaimedTask(ClaimedTaskWireResult),
     Board(Box<BoardWireResult>),
+    TaskDetail(Box<TaskDetailWireResult>),
     Library(Box<LibraryWireResult>),
     LibraryDetail(Box<crate::library::LibraryDetailResolution>),
     Error { message: String },
@@ -246,6 +253,34 @@ pub struct BoardWireResult {
     pub resolution: crate::task_files::BoardResolution,
     pub joined_runs: BTreeMap<String, Vec<ctx_traits_core::task::provider::BoardRun>>,
     pub sections: BTreeMap<String, Option<ctx_traits_core::task::provider::BoardSection>>,
+}
+
+/// Complete, repository-scoped data for one selected board task. This is a
+/// separate answer from `BoardWireResult` so list loading never transports
+/// every task's full prose or reconstructs every claiming run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+pub enum TaskDetailWireResult {
+    Missing,
+    Resolved {
+        summary: ctx_traits_core::task::provider::TaskSummary,
+        content: String,
+        state: String,
+        current_activity: bool,
+        claim: TaskClaimWire,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+pub enum TaskClaimWire {
+    NoClaim,
+    Ambiguous(Vec<String>),
+    Claim {
+        run_id: String,
+        trait_id: String,
+        progress: Result<ctx_traits_core::procedure::run::RunProgress, String>,
+    },
 }
 
 /// Repository-scoped trait library answer. Its rows and provenance are
@@ -1203,6 +1238,37 @@ pub fn board_existing(repo_key: &str) -> crate::Result<BoardWireResult> {
     }
 }
 
+/// Resolve one selected task through an already-serving center. Unlike the
+/// compact board answer this may reconstruct its one chosen claiming run, so
+/// it uses the action timeout rather than the stream timeout.
+pub fn task_detail_existing(repo_key: &str, task_key: &str) -> crate::Result<TaskDetailWireResult> {
+    match request_existing(
+        Request::TaskDetail {
+            id: next_id("task-detail"),
+            repo_key: repo_key.to_owned(),
+            task_key: task_key.to_owned(),
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::TaskDetail(detail) => Ok(*detail),
+        _ => Err(protocol_error("unexpected task-detail response")),
+    }
+}
+
+pub fn task_detail(repo_key: &str, task_key: &str) -> crate::Result<TaskDetailWireResult> {
+    match request_with_timeout(
+        Request::TaskDetail {
+            id: next_id("task-detail"),
+            repo_key: repo_key.to_owned(),
+            task_key: task_key.to_owned(),
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::TaskDetail(detail) => Ok(*detail),
+        _ => Err(protocol_error("unexpected task-detail response")),
+    }
+}
+
 /// Resolve a repository's trait library through an already-serving center.
 /// Like the board endpoint, this never causes a desktop process to spawn one.
 pub fn library_existing(repo_key: &str) -> crate::Result<LibraryWireResult> {
@@ -1876,6 +1942,8 @@ struct ResolvedRow {
     live: bool,
     holder: Option<crate::run_control::DriverHolder>,
     task_key: Option<String>,
+    run_id: String,
+    trait_id: String,
 }
 
 enum RowResolution {
@@ -3498,6 +3566,8 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                             live: row.live,
                             holder: row.live_holder.clone(),
                             task_key: row.summary.task_key.clone(),
+                            run_id: row.summary.run_id.clone(),
+                            trait_id: row.summary.trait_id.clone(),
                         }),
                         RowSelection::Ambiguous(rows) => RowResolution::Ambiguous(
                             rows.into_iter()
@@ -3545,6 +3615,27 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                         _ => RepositoryResolution::Ambiguous,
                     };
                     let _ = reply.send(Ok(resolution));
+                }
+                ModelCommand::ResolveRunId {
+                    run_id,
+                    repo_key,
+                    reply,
+                } => {
+                    let row = model
+                        .rows
+                        .values()
+                        .find(|row| row.repo_key == repo_key && row.summary.run_id == run_id)
+                        .map(|row| ResolvedRow {
+                            session_id: row.summary.session_id.clone(),
+                            ledger_path: row.ledger_path.clone(),
+                            repo_path: row.repo_path.clone(),
+                            live: row.live,
+                            holder: row.live_holder.clone(),
+                            task_key: row.summary.task_key.clone(),
+                            run_id: row.summary.run_id.clone(),
+                            trait_id: row.summary.trait_id.clone(),
+                        });
+                    let _ = reply.send(Ok(row));
                 }
             }
             last_work = Instant::now();
@@ -3617,6 +3708,11 @@ enum ModelCommand {
     ResolveRepository {
         repo_key: String,
         reply: mpsc::SyncSender<crate::Result<RepositoryResolution>>,
+    },
+    ResolveRunId {
+        run_id: String,
+        repo_key: String,
+        reply: mpsc::SyncSender<crate::Result<Option<ResolvedRow>>>,
     },
 }
 
@@ -3887,6 +3983,18 @@ fn serve_connection_worker_with_board_instants(
         if let Request::Board { repo_key, .. } = request {
             let result = run_board_request(&jobs, repo_key, &board_instants)
                 .map(|board| ResponseResult::Board(Box::new(board)))
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
+        if let Request::TaskDetail {
+            repo_key, task_key, ..
+        } = request
+        {
+            let result = run_task_detail_request(&jobs, repo_key, task_key)
+                .map(|detail| ResponseResult::TaskDetail(Box::new(detail)))
                 .unwrap_or_else(|error| ResponseResult::Error {
                     message: error.to_string(),
                 });
@@ -4191,6 +4299,112 @@ fn run_board_request(
         joined_runs,
         sections,
     })
+}
+
+fn resolve_run_id(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    repo_key: String,
+    run_id: String,
+) -> crate::Result<Option<ResolvedRow>> {
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRunId {
+        run_id,
+        repo_key,
+        reply,
+    })
+    .map_err(|_| protocol_error("model queue unavailable"))?;
+    receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("run resolution timed out"))?
+}
+
+fn run_task_detail_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    repo_key: String,
+    task_key: String,
+) -> crate::Result<TaskDetailWireResult> {
+    use ctx_traits_core::task::provider::{ClaimResolution, TaskProvider};
+
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRepository {
+        repo_key: repo_key.clone(),
+        reply,
+    })
+    .map_err(|_| protocol_error("model queue unavailable"))?;
+    let (root, runs) = match receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("repository resolution timed out"))??
+    {
+        RepositoryResolution::One { root, runs } => (root, runs),
+        RepositoryResolution::Missing => {
+            return Err(protocol_error("repository is not known to center"));
+        }
+        RepositoryResolution::Ambiguous => {
+            return Err(protocol_error("repository has ambiguous roots"));
+        }
+    };
+    let board =
+        crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root));
+    let resolution = board
+        .resolve_board()
+        .map_err(|error| protocol_error(format!("board for {root}: {error}")))?;
+    let Some(board_row) = resolution
+        .rows
+        .iter()
+        .find(|row| row.summary.key == task_key)
+    else {
+        return Ok(TaskDetailWireResult::Missing);
+    };
+    let task = board
+        .get(&task_key)
+        .map_err(|error| protocol_error(format!("task {task_key:?} could not be read: {error}")))?
+        .ok_or_else(|| {
+            protocol_error(format!("task {task_key:?} disappeared during resolution"))
+        })?;
+    let joined = ctx_traits_core::task::provider::joined_runs(&repo_key, &task_key, runs.iter());
+    let state = ctx_traits_core::task::provider::task_state(
+        board_row.summary.derived_status,
+        joined.iter().copied(),
+    );
+    let claim = match ctx_traits_core::task::provider::chosen_claim(joined.iter().copied()) {
+        ClaimResolution::NoClaim => TaskClaimWire::NoClaim,
+        ClaimResolution::Ambiguous(ids) => TaskClaimWire::Ambiguous(ids),
+        ClaimResolution::One(run) => {
+            let row =
+                resolve_run_id(jobs, repo_key.clone(), run.run_id.clone())?.ok_or_else(|| {
+                    protocol_error(format!("claiming run {:?} is unavailable", run.run_id))
+                })?;
+            let session = read_session(&row.ledger_path).map_err(|error| {
+                protocol_error(format!(
+                    "claiming run {:?} is unreadable: {error}",
+                    run.run_id
+                ))
+            })?;
+            let progress = ctx_traits_io_progress(&session);
+            TaskClaimWire::Claim {
+                run_id: row.run_id,
+                trait_id: row.trait_id,
+                progress,
+            }
+        }
+    };
+    Ok(TaskDetailWireResult::Resolved {
+        summary: board_row.summary.clone(),
+        content: ctx_traits_core::task::provider::content_lede(&task.document).to_owned(),
+        state: ctx_traits_core::task::provider::state_word(state).to_owned(),
+        current_activity: ctx_traits_core::task::provider::state_is_current_activity(state),
+        claim,
+    })
+}
+
+fn ctx_traits_io_progress(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Result<ctx_traits_core::procedure::run::RunProgress, String> {
+    let loaded = crate::run::load_trait_for_session(None, None, session, "task-detail")
+        .map_err(|error| error.to_string())?;
+    ctx_traits_core::procedure::run::plan_procedure_run(&loaded.trait_ref, session.run_id.clone())
+        .map(|plan| ctx_traits_core::procedure::run::run_progress_for(&plan, session))
+        .map_err(|error| error.to_string())
 }
 
 fn run_library_request(
@@ -4606,6 +4820,7 @@ fn handle_request(
         | Request::Control { .. }
         | Request::ClaimedTask { .. }
         | Request::Board { .. }
+        | Request::TaskDetail { .. }
         | Request::Library { .. }
         | Request::LibraryDetail { .. } => Err(protocol_error(
             "request is handled by the connection worker",

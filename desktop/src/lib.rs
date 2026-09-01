@@ -22,6 +22,7 @@ pub mod screen_header_view;
 pub mod shell;
 pub mod spawn_form;
 pub mod spawn_view;
+pub mod task_preview;
 pub mod title_bar_view;
 pub mod tokens;
 pub mod trait_library;

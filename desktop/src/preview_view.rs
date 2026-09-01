@@ -11,6 +11,36 @@ use crate::preview::{KeyValueRow, LandingBlock, NamedBlock, NowItem, ValueSegmen
 use crate::run_row::role_color;
 use crate::tokens;
 
+pub fn lede_element(lede: &crate::task_preview::Lede) -> AnyElement {
+    let mut element = div()
+        .debug_selector(|| "tasks-lede".to_string())
+        .flex()
+        .flex_col()
+        .gap(tokens::LEDE_GAP)
+        .pb(tokens::LEDE_BOTTOM_PADDING)
+        .w_full()
+        .child(
+            div()
+                .debug_selector(|| "tasks-lede-title".to_string())
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_13)
+                .text_color(rgb(tokens::TEXT_BRIGHT))
+                .child(lede.title.clone()),
+        );
+    if !lede.content.is_empty() {
+        element = element.child(
+            div()
+                .debug_selector(|| "tasks-lede-content".to_string())
+                .font_family(tokens::FONT_SANS)
+                .text_size(tokens::SIZE_11_5)
+                .line_height(tokens::LEDE_LINE_HEIGHT)
+                .text_color(rgb(tokens::TEXT_SECONDARY))
+                .child(lede.content.clone()),
+        );
+    }
+    element.into_any_element()
+}
+
 fn segment_color(segment: &ValueSegment) -> u32 {
     match segment.role {
         Some(role) => role_color(role),

@@ -357,6 +357,10 @@ pub struct Shell {
     board_repo: Option<(String, String)>,
     board_task: Option<gpui::Task<()>>,
     board_generation: u64,
+    selected_task: Option<String>,
+    task_detail: crate::task_preview::TaskDetailState,
+    task_detail_task: Option<gpui::Task<()>>,
+    task_detail_generation: u64,
     library: LibraryState,
     library_task: Option<gpui::Task<()>>,
     library_generation: u64,
@@ -456,6 +460,10 @@ impl Shell {
             board_repo: None,
             board_task: None,
             board_generation: 0,
+            selected_task: None,
+            task_detail: crate::task_preview::TaskDetailState::Loading,
+            task_detail_task: None,
+            task_detail_generation: 0,
             library: LibraryState::Failed("select a repository to view its traits".to_string()),
             library_task: None,
             library_generation: 0,
@@ -520,10 +528,23 @@ impl Shell {
             let _ = this.update(cx, |shell, cx| {
                 if shell.board_generation == generation {
                     shell.board = match result {
-                        Ok(answer) => BoardState::Accepted {
-                            answer,
-                            stale: None,
-                        },
+                        Ok(answer) => {
+                            if shell.selected_task.as_ref().is_some_and(|key| {
+                                !answer
+                                    .resolution
+                                    .rows
+                                    .iter()
+                                    .any(|row| &row.summary.key == key)
+                            }) {
+                                shell.selected_task = None;
+                                shell.task_detail_generation += 1;
+                                shell.task_detail = crate::task_preview::TaskDetailState::Loading;
+                            }
+                            BoardState::Accepted {
+                                answer,
+                                stale: None,
+                            }
+                        }
                         Err(reason) => BoardState::Failed(reason),
                     };
                     cx.notify();
@@ -592,6 +613,43 @@ impl Shell {
             let _ = this.update(cx, |shell, cx| {
                 if shell.trait_detail_generation == generation {
                     shell.trait_detail = Some(result);
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    fn select_task(&mut self, task_key: String, cx: &mut Context<Self>) {
+        if self.selected_task.as_deref() == Some(task_key.as_str()) {
+            return;
+        }
+        let Some((repo_key, _)) = &self.board_repo else {
+            return;
+        };
+        self.selected_task = Some(task_key.clone());
+        self.task_detail_generation += 1;
+        let generation = self.task_detail_generation;
+        let repo_key = repo_key.clone();
+        let request_key = task_key.clone();
+        self.task_detail = crate::task_preview::TaskDetailState::Loading;
+        self.task_detail_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    ctx_traits_io::center::task_detail_existing(&repo_key, &request_key)
+                        .map_err(|error| error.to_string())
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.task_detail_generation == generation
+                    && shell.selected_task.as_deref() == Some(task_key.as_str())
+                {
+                    shell.task_detail = match result {
+                        Ok(answer) => crate::task_preview::TaskDetailState::Accepted {
+                            answer,
+                            stale: None,
+                        },
+                        Err(reason) => crate::task_preview::TaskDetailState::Failed(reason),
+                    };
                     cx.notify();
                 }
             });
@@ -1168,8 +1226,15 @@ impl Render for Shell {
                             .child(format!("{label} {}", rows.len())),
                     );
                     for row in rows {
+                        let task_key = row.summary.key.clone();
                         group = group.child(
                             div()
+                                .id(SharedString::from(format!("task-{task_key}")))
+                                .on_click(cx.listener(
+                                    move |shell, _event: &gpui::ClickEvent, _window, cx| {
+                                        shell.select_task(task_key.clone(), cx);
+                                    },
+                                ))
                                 .flex()
                                 .flex_row()
                                 .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
@@ -1218,6 +1283,17 @@ impl Render for Shell {
                     &self.face.rail(self.detail.repo_key()),
                 ))
                 .child(tasks);
+            if self.selected_task.is_some() {
+                let lede = crate::task_preview::tasks_lede(&self.task_detail);
+                let details = crate::task_preview::tasks_details_block(&self.task_detail);
+                body = body.child(preview_view::preview_column_element(
+                    vec![
+                        preview_view::lede_element(&lede),
+                        preview_view::named_block_element("details", &details),
+                    ],
+                    None,
+                ));
+            }
         }
         if self.screen == Screen::Traits {
             let header = trait_library::traits_header(&self.library);

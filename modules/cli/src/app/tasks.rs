@@ -610,6 +610,11 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
             });
         }
     };
+    let detail = ctx_traits_io::center::task_detail(&repo_key, &task.key).map_err(|e| {
+        crate::Error::Command {
+            message: e.to_string(),
+        }
+    })?;
 
     match OutputMode::select(json, false) {
         OutputMode::Json => {
@@ -617,6 +622,7 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
                 &Envelope::ok(&serde_json::json!({
                     "task": task,
                     "close-policy": close_policy,
+                    "detail": detail,
                 })),
                 "tasks show report",
             )?;
@@ -661,6 +667,79 @@ fn show_claimed_task(session: &str, json: bool) -> crate::Result<CommandOutput<(
                     &task.description,
                     RowTone::Default,
                 ));
+            }
+            match &detail {
+                ctx_traits_io::center::TaskDetailWireResult::Missing => {
+                    panel = panel.row(PanelRow::toned(
+                        "detail",
+                        "task unavailable: missing",
+                        RowTone::Fail,
+                    ));
+                }
+                ctx_traits_io::center::TaskDetailWireResult::Resolved { state, claim, .. } => {
+                    panel = panel.row(PanelRow::toned("state", state, RowTone::Default));
+                    match claim {
+                        ctx_traits_io::center::TaskClaimWire::NoClaim => {
+                            panel =
+                                panel.row(PanelRow::toned("claimed", "no claim", RowTone::Default));
+                        }
+                        ctx_traits_io::center::TaskClaimWire::Ambiguous(ids) => {
+                            panel = panel.row(PanelRow::toned(
+                                "claimed",
+                                format!("ambiguous: {}", ids.join(", ")),
+                                RowTone::Fail,
+                            ));
+                        }
+                        ctx_traits_io::center::TaskClaimWire::Claim {
+                            run_id,
+                            trait_id,
+                            progress,
+                        } => {
+                            panel = panel.row(PanelRow::toned(
+                                "claimed",
+                                format!("{run_id} · {trait_id}"),
+                                RowTone::Default,
+                            ));
+                            match progress {
+                                Ok(ctx_traits_core::procedure::run::RunProgress::Reached {
+                                    ordinal,
+                                    total,
+                                }) => {
+                                    panel = panel.row(PanelRow::toned(
+                                        "frame",
+                                        format!("{ordinal} of {total}"),
+                                        RowTone::Default,
+                                    ));
+                                }
+                                Ok(ctx_traits_core::procedure::run::RunProgress::NoneReached {
+                                    total,
+                                }) => {
+                                    panel = panel.row(PanelRow::toned(
+                                        "frame",
+                                        format!("none reached of {total}"),
+                                        RowTone::Default,
+                                    ));
+                                }
+                                Ok(
+                                    ctx_traits_core::procedure::run::RunProgress::NoCountedFrames,
+                                ) => {
+                                    panel = panel.row(PanelRow::toned(
+                                        "frame",
+                                        "no counted frames",
+                                        RowTone::Default,
+                                    ));
+                                }
+                                Err(reason) => {
+                                    panel = panel.row(PanelRow::toned(
+                                        "frame",
+                                        format!("unresolved: {reason}"),
+                                        RowTone::Fail,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
             }
             emit_human(false, &panel, mode, || Ok(()))?;
         }
@@ -787,8 +866,6 @@ pub(crate) fn handle_tasks_show(
 mod tests {
     use super::*;
     use crate::app::test_support::{CenterPeer, read_center_request, write_center_response};
-    use std::io::{BufRead, BufReader};
-    use std::os::unix::net::UnixStream;
 
     fn tempdir() -> Utf8PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1180,10 +1257,10 @@ mod tests {
                     }
                 }),
             );
-            assert!(
-                read_line_or_eof(&stream).is_none(),
-                "exactly one request expected"
-            );
+            let mut detail_stream = crate::app::test_support::accept_center_client(&listener);
+            let detail_request = read_center_request(&detail_stream);
+            assert_eq!(detail_request["kind"], "task-detail");
+            write_center_response(&mut detail_stream, &detail_request, fixture_task_detail());
         });
         let result = handle_tasks_show(None, Some("the-session"), None, true);
         peer.join().expect("join center peer");
@@ -1296,10 +1373,24 @@ mod tests {
                     }
                 }),
             );
+            let mut detail_stream = crate::app::test_support::accept_center_client(&listener);
+            let detail_request = read_center_request(&detail_stream);
+            write_center_response(&mut detail_stream, &detail_request, fixture_task_detail());
         });
         let result = handle_tasks_show(None, Some("the-session"), None, false);
         peer.join().expect("join center peer");
         result.expect("session-addressed human rendering succeeds");
+    }
+
+    fn fixture_task_detail() -> serde_json::Value {
+        serde_json::json!({
+            "type": "task-detail",
+            "data": {"type": "resolved", "data": {
+                "summary": {"key": "0001", "title": "Fixture task", "stored-status": "ready", "derived-status": "ready", "archived": false},
+                "content": "the description", "state": "ready", "current_activity": false,
+                "claim": {"type": "no-claim"}
+            }}
+        })
     }
 
     #[test]
@@ -1368,18 +1459,5 @@ mod tests {
                 .contains("no task matching \"no-such-task\"")
         );
         let _ = std::fs::remove_dir_all(board.as_std_path());
-    }
-
-    fn read_line_or_eof(stream: &UnixStream) -> Option<String> {
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_millis(50)))
-            .expect("set peer read timeout");
-        let mut line = String::new();
-        match BufReader::new(stream.try_clone().expect("clone peer stream")).read_line(&mut line) {
-            Ok(0) => None,
-            Ok(_) if line.is_empty() => None,
-            Ok(_) => Some(line),
-            Err(_) => None,
-        }
     }
 }

@@ -49,7 +49,8 @@ pub struct PlannedFrame<'a> {
 }
 
 /// N/M, or a typed absence naming its reason.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum RunProgress {
     /// Invariant: `1 <= ordinal <= total`.
     Reached { ordinal: usize, total: usize },

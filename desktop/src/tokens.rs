@@ -149,6 +149,9 @@ pub const MAIN_PANE_GAP: Pixels = px(28.);
 pub const PREVIEW_COLUMN_WIDTH: Pixels = px(380.);
 pub const PREVIEW_COLUMN_PAD_Y: Pixels = px(18.);
 pub const PREVIEW_COLUMN_PAD_X: Pixels = px(22.);
+pub const LEDE_GAP: Pixels = px(5.);
+pub const LEDE_BOTTOM_PADDING: Pixels = px(20.);
+pub const LEDE_LINE_HEIGHT: Pixels = px(16.675);
 
 // list rows
 //

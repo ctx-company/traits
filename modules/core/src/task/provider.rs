@@ -59,6 +59,59 @@ pub enum BoardTaskState {
     Board(DerivedStatus),
 }
 
+/// The one claim selection corresponding to [`task_state`]'s precedence.
+/// Consumers must not choose a run themselves: doing so can make a rendered
+/// claim disagree with the board state that selected its section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimResolution {
+    NoClaim,
+    One(BoardRun),
+    Ambiguous(Vec<String>),
+}
+
+/// Select runs from the winning live/owner/merge precedence class only.
+pub fn chosen_claim(
+    runs: impl IntoIterator<Item = impl std::borrow::Borrow<BoardRun>>,
+) -> ClaimResolution {
+    let runs: Vec<_> = runs.into_iter().collect();
+    let winning: Vec<_> = if runs.iter().any(|run| run.borrow().live) {
+        runs.iter().filter(|run| run.borrow().live).collect()
+    } else if runs.iter().any(|run| run.borrow().awaiting_owner) {
+        runs.iter()
+            .filter(|run| run.borrow().awaiting_owner)
+            .collect()
+    } else if runs.iter().any(|run| run.borrow().not_merged) {
+        runs.iter().filter(|run| run.borrow().not_merged).collect()
+    } else {
+        Vec::new()
+    };
+    match winning.as_slice() {
+        [] => ClaimResolution::NoClaim,
+        [run] => ClaimResolution::One((*run).borrow().clone()),
+        many => {
+            ClaimResolution::Ambiguous(many.iter().map(|run| run.borrow().run_id.clone()).collect())
+        }
+    }
+}
+
+/// The closed vocabulary rendered by task consumers.
+pub fn state_word(state: BoardTaskState) -> &'static str {
+    match state {
+        BoardTaskState::InProgress => "in progress",
+        BoardTaskState::Pending => "awaiting owner",
+        BoardTaskState::AwaitingMerge => "awaiting merge",
+        BoardTaskState::Board(DerivedStatus::Draft) => "draft",
+        BoardTaskState::Board(DerivedStatus::Ready) => "ready",
+        BoardTaskState::Board(DerivedStatus::Blocked) => "blocked",
+        BoardTaskState::Board(DerivedStatus::Done) => "done",
+        BoardTaskState::Board(DerivedStatus::Cancelled) => "cancelled",
+    }
+}
+
+pub fn state_is_current_activity(state: BoardTaskState) -> bool {
+    matches!(state, BoardTaskState::InProgress)
+}
+
 /// Current-repository runs historically omit repository identity; explicitly
 /// identified runs must match the board's repository.
 pub fn same_repository(board_repo: Option<&str>, run_repo: Option<&str>) -> bool {
@@ -621,5 +674,52 @@ mod tests {
             section_of(DerivedStatus::Done, false, std::iter::empty::<&BoardRun>()),
             None
         );
+    }
+
+    #[test]
+    fn chosen_claim_uses_the_same_precedence_class_as_task_state() {
+        let settled = BoardRun {
+            run_id: "settled".to_string(),
+            repo_key: Some("repo".to_string()),
+            task_key: "0001".to_string(),
+            live: false,
+            awaiting_owner: false,
+            not_merged: true,
+        };
+        let live = BoardRun {
+            run_id: "live".to_string(),
+            live: true,
+            ..settled.clone()
+        };
+        assert_eq!(
+            chosen_claim([&settled, &live]),
+            ClaimResolution::One(live.clone())
+        );
+        let second_live = BoardRun {
+            run_id: "live-2".to_string(),
+            ..live.clone()
+        };
+        assert_eq!(
+            chosen_claim([&settled, &live, &second_live]),
+            ClaimResolution::Ambiguous(vec!["live".to_string(), "live-2".to_string()])
+        );
+        assert_eq!(chosen_claim([&settled]), ClaimResolution::One(settled));
+        assert_eq!(
+            chosen_claim(std::iter::empty::<&BoardRun>()),
+            ClaimResolution::NoClaim
+        );
+    }
+
+    #[test]
+    fn task_state_words_are_closed_and_live_is_the_only_current_activity() {
+        assert_eq!(state_word(BoardTaskState::InProgress), "in progress");
+        assert_eq!(state_word(BoardTaskState::Pending), "awaiting owner");
+        assert_eq!(state_word(BoardTaskState::AwaitingMerge), "awaiting merge");
+        assert_eq!(
+            state_word(BoardTaskState::Board(DerivedStatus::Blocked)),
+            "blocked"
+        );
+        assert!(state_is_current_activity(BoardTaskState::InProgress));
+        assert!(!state_is_current_activity(BoardTaskState::Pending));
     }
 }
