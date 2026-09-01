@@ -89,30 +89,40 @@ schema = "schema:text"
 description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
 
 [[slot]]
+id = "notify-badge"
+schema = "schema:text"
+description = "The digest's badge field, carried as text for command argv."
+
+[[slot]]
+id = "notify-digest"
+schema = "schema:notify-digest"
+description = "Scribe's per-round digest of the review verdict, fed directly into the notification commands."
+
+[[slot]]
 id = "notify-id"
 schema = "schema:text"
-description = "Activity id of this run's owner notification thread, or the literal 'unavailable' when the notifier could not start. Later notification helpers no-op on 'unavailable'."
+description = "The owner-notification activity id, exactly as `begin` printed it — every later notification step addresses this."
+
+[[slot]]
+id = "notify-journal"
+schema = "schema:text"
+description = "The digest's journal field, carried as text for command argv."
 
 [[slot]]
 id = "notify-log"
 schema = "schema:text"
-description = "Latest notification helper marker — ok/skipped/unavailable evidence for the step that just ran. Never affects run outcome."
+description = "The notifier's own JSON receipt for the most recent notification command."
+
+[[slot]]
+id = "notify-summary"
+schema = "schema:text"
+description = "The digest's summary field, carried as text for command argv."
 
 [[slot]]
 id = "owner-decisions"
 schema = "[schema:text]"
 description = "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message."
 hint = "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences."
-
-[[slot]]
-id = "review-points"
-schema = "[schema:blocker]"
-description = "The current verdict's blockers, projected for the notification helpers."
-
-[[slot]]
-id = "review-status"
-schema = "schema:text"
-description = "The current verdict's status field, projected for the notification helpers."
 
 [[slot]]
 id = "review-verdict-1"
@@ -229,6 +239,25 @@ description = "The single question to put to the owner, phrased so one short ans
 schema = "schema:text"
 required = true
 description = "Why only the owner can settle this: the contradiction, the missing authority, or the trade-off the run has no standing to decide. Grounded in what you verified, not a restatement of the question."
+
+[[schema]]
+id = "notify-digest"
+description = "The reviewer verdict digested for the owner notification thread."
+
+[schema.fields.badge]
+schema = "schema:text"
+required = true
+description = 'Short status badge for the activity, 64 characters at most, always "review: <verdict status>".'
+
+[schema.fields.journal]
+schema = "schema:text"
+required = true
+description = """One compact journal line: every still-open blocker step's text trimmed to 200 characters, joined with " | ". The literal "approved" when none are open."""
+
+[schema.fields.summary]
+schema = "schema:text"
+required = true
+description = "Multi-line prose block for the owner's phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. Empty string when the verdict is approved, which clears the previous summary."
 
 [[schema]]
 id = "owner-item"
@@ -371,6 +400,14 @@ Return this round's work summary: slot:work-summary"""
 input = ["slot:draft"]
 output = ["slot:work-summary"]
 
+[prompt.notify-digest-verdict]
+text = """
+Digest this review verdict for the owner's phone: {slot:review-verdict-1}.
+Follow each output field's own description exactly; the fields feed
+notification commands verbatim."""
+input = ["slot:review-verdict-1"]
+output = ["slot:notify-digest"]
+
 [prompt.record-the-owner-s-ruling]
 text = """
 The owner answered a summons raised during this run.
@@ -469,24 +506,10 @@ output = ["slot:notify-log"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'skipped: no python3'; exit 0; }
-exec python3 -c 'import subprocess, sys
-aid, status = sys.argv[1], sys.argv[2][:64]
-if aid == "unavailable":
-    print("skipped: no activity", end="")
-    sys.exit(0)
-try:
-    p = subprocess.run(["ctx-notify", "update", aid, "--quiet", "--status", status],
-        capture_output=True, text=True, timeout=15, check=False)
-    print(("ok: " if p.returncode == 0 else "skipped: ") + status, end="")
-except Exception:
-    print("skipped: " + status, end="")
-sys.exit(0)' "$1" "$2"""",
-    "_",
+    "ctx-notify",
+    "update",
     "{slot:notify-id}",
+    "--status",
     "Commit the work",
 ]
 
@@ -529,24 +552,10 @@ output = ["slot:notify-log"]
 
 [sequence.reviewed-refinement-body.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'skipped: no python3'; exit 0; }
-exec python3 -c 'import subprocess, sys
-aid, status = sys.argv[1], sys.argv[2][:64]
-if aid == "unavailable":
-    print("skipped: no activity", end="")
-    sys.exit(0)
-try:
-    p = subprocess.run(["ctx-notify", "update", aid, "--quiet", "--status", status],
-        capture_output=True, text=True, timeout=15, check=False)
-    print(("ok: " if p.returncode == 0 else "skipped: ") + status, end="")
-except Exception:
-    print("skipped: " + status, end="")
-sys.exit(0)' "$1" "$2"""",
-    "_",
+    "ctx-notify",
+    "update",
     "{slot:notify-id}",
+    "--status",
     "Implement the task",
 ]
 
@@ -581,82 +590,75 @@ output = ["slot:review-verdict-1"]
 on-complete = ["signal:needs-owner"]
 
 [[sequence.reviewed-refinement-body.sequence]]
-id = "notify-project-verdict"
-title = "Notify: review verdict: project the verdict"
-kind = "project"
+id = "notify-digest-verdict"
+title = "Notify: review verdict: digest the verdict"
+agent = "agent:scribe"
+prompt = "prompt:notify-digest-verdict"
 input = ["slot:review-verdict-1"]
+output = ["slot:notify-digest"]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "notify-carry-digest"
+title = "Notify: review verdict: carry the digest"
+kind = "project"
+input = ["slot:notify-digest"]
 output = [
-    "slot:review-status",
-    "slot:review-points",
+    "slot:notify-badge",
+    "slot:notify-summary",
+    "slot:notify-journal",
 ]
 
 [[sequence.reviewed-refinement-body.sequence.projection]]
-source = "slot:review-verdict-1"
-field = "status"
-destination = "slot:review-status"
+source = "slot:notify-digest"
+field = "badge"
+destination = "slot:notify-badge"
 
 [[sequence.reviewed-refinement-body.sequence.projection]]
-source = "slot:review-verdict-1"
-field = "blockers"
-destination = "slot:review-points"
+source = "slot:notify-digest"
+field = "summary"
+destination = "slot:notify-summary"
+
+[[sequence.reviewed-refinement-body.sequence.projection]]
+source = "slot:notify-digest"
+field = "journal"
+destination = "slot:notify-journal"
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "notify-review-update"
 title = "Notify: review verdict"
 input = [
     "slot:notify-id",
-    "slot:review-status",
-    "slot:review-points",
+    "slot:notify-badge",
+    "slot:notify-summary",
 ]
 output = ["slot:notify-log"]
 
 [sequence.reviewed-refinement-body.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'skipped: no python3'; exit 0; }
-exec python3 -c 'import json, subprocess, sys, time
-aid, status, points_json = sys.argv[1], sys.argv[2], sys.argv[3]
-if aid == "unavailable":
-    print("skipped: no activity", end="")
-    sys.exit(0)
-deadline = time.monotonic() + 60.0
-def left():
-    return max(1.0, min(15.0, deadline - time.monotonic()))
-def run(args):
-    try:
-        return subprocess.run(args, capture_output=True, text=True, timeout=left(), check=False).returncode
-    except Exception:
-        return -1
-opens = []
-try:
-    for blocker in (json.loads(points_json) or []):
-        for step in (blocker.get("steps") or []):
-            if isinstance(step, dict) and step.get("status") == "open":
-                opens.append(str(step.get("step"))[:200])
-except Exception:
-    opens = []
-badge = ("review: " + status)[:64]
-summary = (str(len(opens)) + " open points") if opens else ""
-markers = []
-if time.monotonic() < deadline:
-    rc = run(["ctx-notify", "update", aid, "--quiet", "--status", badge, "--summary", summary])
-    markers.append("update:" + ("ok" if rc == 0 else "skipped"))
-else:
-    markers.append("update:skipped")
-if opens:
-    if time.monotonic() < deadline:
-        rc = run(["ctx-notify", "log", aid] + opens)
-        markers.append("log:" + ("ok" if rc == 0 else "skipped") + ":" + str(len(opens)))
-    else:
-        markers.append("log:skipped:" + str(len(opens)))
-print(" ".join(markers), end="")
-sys.exit(0)' "$1" "$2" "$3"""",
-    "_",
+    "ctx-notify",
+    "update",
     "{slot:notify-id}",
-    "{slot:review-status}",
-    "{slot:review-points}",
+    "--status",
+    "{slot:notify-badge}",
+    "--summary",
+    "{slot:notify-summary}",
+]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "notify-review-journal"
+title = "Notify: review verdict: journal"
+input = [
+    "slot:notify-id",
+    "slot:notify-journal",
+]
+output = ["slot:notify-log"]
+
+[sequence.reviewed-refinement-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "log",
+    "{slot:notify-id}",
+    "{slot:notify-journal}",
 ]
 
 [[sequence.reviewed-refinement-body.sequence]]
@@ -681,22 +683,8 @@ output = ["slot:notify-id"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'unavailable'; exit 0; }
-exec python3 -c 'import json, subprocess, sys
-try:
-    p = subprocess.run(["ctx-notify", "begin", "--json", "implement: " + sys.argv[1]],
-        capture_output=True, text=True, timeout=15, check=False)
-    if p.returncode != 0:
-        print("unavailable", end="")
-    else:
-        print(str(json.loads(p.stdout)["activity_id"]), end="")
-except Exception:
-    print("unavailable", end="")
-sys.exit(0)' "$1"""",
-    "_",
+    "ctx-notify",
+    "begin",
     "{port:task}",
 ]
 
@@ -720,24 +708,10 @@ output = ["slot:notify-log"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'skipped: no python3'; exit 0; }
-exec python3 -c 'import subprocess, sys
-aid, status = sys.argv[1], sys.argv[2][:64]
-if aid == "unavailable":
-    print("skipped: no activity", end="")
-    sys.exit(0)
-try:
-    p = subprocess.run(["ctx-notify", "update", aid, "--quiet", "--status", status],
-        capture_output=True, text=True, timeout=15, check=False)
-    print(("ok: " if p.returncode == 0 else "skipped: ") + status, end="")
-except Exception:
-    print("skipped: " + status, end="")
-sys.exit(0)' "$1" "$2"""",
-    "_",
+    "ctx-notify",
+    "update",
     "{slot:notify-id}",
+    "--status",
     "Capture the session base",
 ]
 
@@ -757,24 +731,10 @@ output = ["slot:notify-log"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'skipped: no python3'; exit 0; }
-exec python3 -c 'import subprocess, sys
-aid, status = sys.argv[1], sys.argv[2][:64]
-if aid == "unavailable":
-    print("skipped: no activity", end="")
-    sys.exit(0)
-try:
-    p = subprocess.run(["ctx-notify", "update", aid, "--quiet", "--status", status],
-        capture_output=True, text=True, timeout=15, check=False)
-    print(("ok: " if p.returncode == 0 else "skipped: ") + status, end="")
-except Exception:
-    print("skipped: " + status, end="")
-sys.exit(0)' "$1" "$2"""",
-    "_",
+    "ctx-notify",
+    "update",
     "{slot:notify-id}",
+    "--status",
     "Draft the implementation plan",
 ]
 
@@ -820,22 +780,8 @@ output = ["slot:notify-log"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    """
-command -v python3 >/dev/null 2>&1 || { printf '%s' 'skipped: no python3'; exit 0; }
-exec python3 -c 'import subprocess, sys
-aid = sys.argv[1]
-if aid == "unavailable":
-    print("skipped: no activity", end="")
-    sys.exit(0)
-try:
-    p = subprocess.run(["ctx-notify", "finish", "--ok", "--quiet", aid],
-        capture_output=True, text=True, timeout=15, check=False)
-    print("finish: " + ("ok" if p.returncode == 0 else "skipped"), end="")
-except Exception:
-    print("finish: skipped", end="")
-sys.exit(0)' "$1"""",
-    "_",
+    "ctx-notify",
+    "finish",
+    "--ok",
     "{slot:notify-id}",
 ]

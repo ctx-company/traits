@@ -58,23 +58,50 @@ export const gitStatus = cdk.slot.text({
 export const notifyId = cdk.slot.text({
   id: "notify-id",
   description:
-    "Activity id of this run's owner notification thread, or the literal 'unavailable' when the notifier could not start. Later notification helpers no-op on 'unavailable'.",
+    "The owner-notification activity id, exactly as `begin` printed it — every later notification step addresses this.",
+});
+
+export const notifyDigest = cdk.slot({
+  id: "notify-digest",
+  schema: cdk.schema.object(
+    "notify-digest",
+    {
+      badge: cdk.schema.field(cdk.schema.text(), {
+        description:
+          'Short status badge for the activity, 64 characters at most, always "review: <verdict status>".',
+      }),
+      summary: cdk.schema.field(cdk.schema.text(), {
+        description:
+          "Multi-line prose block for the owner's phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. Empty string when the verdict is approved, which clears the previous summary.",
+      }),
+      journal: cdk.schema.field(cdk.schema.text(), {
+        description:
+          'One compact journal line: every still-open blocker step\'s text trimmed to 200 characters, joined with " | ". The literal "approved" when none are open.',
+      }),
+    },
+    { description: "The reviewer verdict digested for the owner notification thread." },
+  ),
+  description: "Scribe's per-round digest of the review verdict, fed directly into the notification commands.",
+});
+
+export const notifyBadge = cdk.slot.text({
+  id: "notify-badge",
+  description: "The digest's badge field, carried as text for command argv.",
+});
+
+export const notifySummary = cdk.slot.text({
+  id: "notify-summary",
+  description: "The digest's summary field, carried as text for command argv.",
+});
+
+export const notifyJournal = cdk.slot.text({
+  id: "notify-journal",
+  description: "The digest's journal field, carried as text for command argv.",
 });
 
 export const notifyLog = cdk.slot.text({
   id: "notify-log",
-  description:
-    "Latest notification helper marker — ok/skipped/unavailable evidence for the step that just ran. Never affects run outcome.",
-});
-
-export const reviewStatus = cdk.slot.text({
-  id: "review-status",
-  description: "The current verdict's status field, projected for the notification helpers.",
-});
-
-export const reviewPoints = cdk.slot.list(agents.blockerSchema, {
-  id: "review-points",
-  description: "The current verdict's blockers, projected for the notification helpers.",
+  description: "The notifier's own JSON receipt for the most recent notification command.",
 });
 
 export const stageOutput = cdk.slot.text({
@@ -108,7 +135,9 @@ export const slot = {
   gitStatus,
   stageOutput,
   notifyId,
+  notifyDigest,
+  notifyBadge,
+  notifySummary,
+  notifyJournal,
   notifyLog,
-  reviewStatus,
-  reviewPoints,
 };
