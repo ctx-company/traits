@@ -3,7 +3,7 @@ key = "0266.3"
 title = "Create a draft task through the center"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 This plan separates GOALS from APPROACH, and only the GOALS bind. Each goal names
 an observable outcome, what decides it, and what it excludes. The APPROACH
 section — discovery order, file and symbol guesses, signatures, edit order,
@@ -172,8 +172,8 @@ are not the consumer to move: they are one-shot reads that must keep working wit
 no center running (parent Correction 10), and the parent explicitly rejects
 inventing a `ctx tasks create` command, which does not exist today
 (`modules/cli/src/app/surface/cli.rs:116-272`).
-'''
-scope = '''
+"""
+scope = """
 ## GOALS — binding
 
 1. **The center creates a task on request, inside the one task protocol family,
@@ -471,8 +471,8 @@ every invariant named under Excluded.
   light-column token value, and any desktop file.
 - Anything discovered beyond these goals: that is board material, not a cell
   here.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **This is the only write in the whole `0266` slice.** Do not open task
@@ -606,7 +606,8 @@ second round would be needed, stop and report the exact failing command with its
 evidence, or the unresolved refusal, concurrency, board-update or TUI-migration
 contract, rather than iterating. That is the stop condition, not a judgement
 call.
-'''
+"""
+
 [relations]
-parent = "0266"
 depends-on = ["0266.1"]
+parent = "0266"
