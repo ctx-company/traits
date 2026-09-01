@@ -36,3 +36,10 @@ idle-seconds = 1200
 frame-seconds = 1800
 total-seconds = 21600
 idle-seconds = 600
+
+# Overnight unattended defaults (owner order 2026-09-01, bedtime): both
+# owner interaction ports off by default; flip back by removing this
+# block (dispatch-time --set cannot combine with --task).
+[defaults.port]
+owner-gate = "off"
+owner-ruling = "off"
