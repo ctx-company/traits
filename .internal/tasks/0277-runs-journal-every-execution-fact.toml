@@ -1,0 +1,177 @@
+schema-version = "0.2"
+key = "0277"
+title = "Runs journal every execution fact — what ran, when, what it printed, who decided what"
+status = "ready"
+raised = "2026-09-01"
+content = """
+Owner order 2026-09-01, after a day of forensics where four separate
+run deaths were undiagnosable from artifacts. Each incident below is a
+verified case where the machinery knew something and recorded nothing;
+together they define exactly what the journal must capture.
+
+INCIDENT 1 — a rejected step records no evidence (trait 0267.1 first
+death, session 2fa45dda). A notify command step's output was rejected
+twice with `required declared slot output was not supplied`. The
+`rejected-submissions` ledger entry carries position, slot ref, and
+that reason string — no timestamp, no exit code, no stderr, no stdout
+tail, no attempt number. Establishing that the command had exited 5
+with empty stdout took an hour of daemon-store archaeology; the
+process had known all of it.
+
+INCIDENT 2 — a retried commit self-poisons invisibly (trait 0266.4,
+session c33a0896). The frame was interrupted after `git commit`
+succeeded but before its output was submitted. Both retries re-ran the
+commit, got "nothing to commit" with a nonzero exit, and were rejected
+for empty output. Nothing recorded the first attempt's success, the
+interruption, or the retries' stderr — the run just reads as rejected.
+
+INCIDENT 3 — an interruption has no cause (same session, and every
+`interrupted` outcome tonight). `last-drive-outcome.outcome =
+"interrupted"` is the entire record. Whether the driver received a
+signal, lost its harness child, hit a budget, or was paused is not
+stored anywhere, so operator kills and machinery faults are
+indistinguishable — which tonight led to the owner being wrongly
+blamed twice.
+
+INCIDENT 4 — lifecycle actions vanish when they decline (trait 0267.1
+close, and the archived-0266.1 closure). `auto_close_landed_task`
+returns `false` on any refusal — failed checks under a gating policy,
+an unrunnable check set, or a digest mismatch from a board edit racing
+the close (tonight's actual cause) — writing nothing. A declined close
+is indistinguishable from a close nobody attempted. Check executions
+themselves are only persisted when a close succeeds (the `[closure]`
+block); in every other path their records are dropped.
+
+The session activity sidecar (`session-*.json.activity.jsonl`) already
+journals model frames (`running-tool`, `thinking`, `dispatching`) with
+millisecond timestamps. Command steps, retries, interruptions, merges,
+checks, and closes are invisible in it. That asymmetry is the gap.
+
+## Owner contract
+
+A dead run is analyzable from its files alone. For every command-step
+attempt, retry, interruption, merge, check execution, and close
+attempt, a durable, timestamped, append-only record states what ran,
+when it started and ended, what it produced (exit code plus bounded
+output tails), and what the runtime decided about it (accepted, or
+rejected/declined with the concrete reason). Each of the four
+incidents above, replayed, must be answerable from the journal alone
+— no process stdout, no daemon stores, no source-reading required.
+"""
+scope = """
+Goals below are binding. The approach is suggested; the run may
+deviate wherever a goal requires it and reports the deviation in its
+work summary.
+
+## Goals (binding)
+
+1. Command-step attempts are journaled: for every execution of a
+   command step (including each retry as its own numbered attempt),
+   the session's activity stream gains events recording step id,
+   attempt number, start and end timestamps, the resolved argv's step
+   identity (never secrets or env), exit code or kill/timeout cause,
+   and bounded stdout and stderr tails (4096 bytes each, truncation
+   marked). The existing model-frame activity writer is the seam —
+   one journal, one ordering.
+2. Runtime verdicts are journaled and enriched in the ledger: every
+   accepted submission and every rejection appends a journal event
+   naming the verdict and reason; `rejected-submissions` entries gain
+   a timestamp, the attempt number, and a reference to (or inline
+   copy of) the attempt's exit code and output tails. The reason for
+   an empty-stdout rejection distinguishes "command exited nonzero
+   with no output" from "command succeeded but printed nothing".
+3. Interruptions carry their cause: when a drive ends `interrupted`,
+   both the journal and `last-drive-outcome` record which of the
+   enumerable causes applied — signal received (which), harness child
+   exited (with its exit status), budget exhausted (which budget),
+   pause requested, or owner park — and at which step/frame the run
+   stood. An interruption arriving between a side effect and its
+   submission (incident 2's window) is visible as such.
+4. Lifecycle actions are journaled from the queue path: merge begin
+   and end with result; each declared check's execution with name,
+   duration, outcome, and bounded output tail, in every disposition
+   path (not only successful closes); every close attempt with its
+   disposition and, when declined, the concrete refusal — failed
+   check (named), unrunnable set (reason), digest mismatch, or policy.
+   A declined close also surfaces one line on the queue's stdout.
+5. The four incidents are regression-proven: scratch-session tests
+   replay (a) a step whose command exits nonzero with empty stdout,
+   (b) a successful side-effecting step interrupted before submission
+   and then retried, (c) an interrupt delivered mid-frame, and (d) a
+   close declined by digest mismatch and by a failed gating check —
+   each asserting the journal alone answers what/when/why.
+6. Bounds and hygiene: journal events are append-only through the
+   existing activity writer, tails are capped, no environment values
+   or credentials are ever written, and a run that journals nothing
+   new behaves byte-identically to today everywhere else. Existing
+   gates pass.
+
+## Approach (suggested)
+
+The activity sidecar is already the per-session journal with a stable
+envelope (`record`/`at_epoch_ms`/`event`); add new event kinds beside
+`running-tool` rather than a second file. Command execution funnels
+through the runtime's command frame path (modules/core runtime
+transitions + modules/io drive); rejections through the submission
+validation seam that writes `rejected-submissions`; interruption cause
+is known at the drive's signal/child-exit handling; lifecycle events
+live in `auto_close_landed_task`, `evaluate_task_close`,
+`run_checks`/`execute_one` (modules/cli/src/app/task_queue.rs,
+task_proposals.rs, task_checks.rs). Reuse the closure `CheckRecord`
+shape for journaled check events instead of a new one.
+
+## Out of scope
+
+- Fixing retry semantics for non-idempotent steps (incident 2's other
+  half) — record faithfully here; the retry-policy change is its own
+  task.
+- Rejection message UX and taxonomy surfaced to the TUI (board 0271
+  complements this; neither depends on the other).
+- ctx-notify daemon logging (its board's 0019).
+- Any TUI/GUI rendering of the journal; this task is capture only.
+"""
+validation = """
+## Watch
+
+The seam is volume: journaling every attempt with 8KB of tails on a
+long run must not balloon the sidecar or slow frames — cap tails,
+never buffer whole outputs, and append through the existing writer so
+ordering stays single-sourced. The privacy line is absolute: argv step
+identity yes, resolved env or interpolated secret values never.
+Incident 2's window is the subtle proof: the journal must show the
+attempt's success AND the failure to submit — two events, not one.
+
+## Done when
+
+1. Replaying incident 1: the journal shows the step's attempt with
+   exit code and empty-stdout fact, and the ledger rejection carries
+   timestamp, attempt, and tails. Decided by the scratch-session test.
+2. Replaying incident 2: journal shows attempt 1 success, the
+   interruption between execution and submission, and each retry's
+   nonzero exit — three distinguishable records. Decided by test.
+3. Replaying incident 3: `last-drive-outcome` and the journal name
+   the interruption cause and position. Decided by test.
+4. Replaying incident 4: a declined close writes its disposition and
+   refusal reason (digest mismatch named; failing check named) and
+   the queue prints one line saying so. Decided by test.
+5. Existing suites stay green: cargo test -p ctx-traits-core,
+   -p ctx-traits-io, -p ctx-traits-cli.
+"""
+
+[[checks]]
+name = "core runtime suites pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "io drive and center suites pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "cli queue, checks, and proposal suites pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+expect = "test result: ok"
+timeout-ms = 1800000
