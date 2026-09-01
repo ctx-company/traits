@@ -131,8 +131,8 @@
   },
   "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then/gate-append-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 49,
-    "end": 49
+    "start": 50,
+    "end": 50
   },
   "sequence:procedure/capture-the-session-base": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -186,8 +186,8 @@
   },
   "sequence:reviewed-refinement-body/gate-carry-surface": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 28,
-    "end": 28
+    "start": 29,
+    "end": 29
   },
   "sequence:reviewed-refinement-body/implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -236,13 +236,13 @@
   },
   "sequence:reviewed-refinement-body/owner-verdict-gate": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 35,
-    "end": 35
+    "start": 36,
+    "end": 36
   },
   "sequence:reviewed-refinement-body/record-the-owner-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 45,
-    "end": 45
+    "start": 46,
+    "end": 46
   },
   "sequence:reviewed-refinement-body/review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",

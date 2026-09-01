@@ -19,6 +19,7 @@ const GATE_SCRIPT = [
   'out=$(printf \'%s\' "$1" | ctx-annotate --stdin)',
   'case "$out" in',
   '  *\'"annotations":[]\'*) printf accepted ;;',
+  '  "") printf \'annotation gate returned no decision; not accepted\' ;;',
   '  *) printf \'%s\' "$out" ;;',
   "esac",
 ].join("\n");
