@@ -2318,15 +2318,34 @@ impl CenterModel {
                 self.rows.retain(|path, row| {
                     scan.present.contains(path) || scan.unscanned_roots.contains(&row.repo_key)
                 });
+                // This finalize can be reached while a per-request freshness
+                // slice's raw `BEGIN` is still open on this same connection,
+                // so a second raw `BEGIN` here is "cannot start a transaction
+                // within a transaction" — the same nesting persist_all's
+                // savepoint already guards against. SAVEPOINT is legal both
+                // inside and outside an open transaction.
                 self.db
-                    .execute_batch("BEGIN")
+                    .execute_batch("SAVEPOINT finalize_removals")
                     .map_err(|source| protocol_error(source.to_string()))?;
-                for ledger in &removed {
-                    self.persist_removal(ledger)?;
+                let result: crate::Result<()> = (|| {
+                    for ledger in &removed {
+                        self.persist_removal(ledger)?;
+                    }
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => {
+                        self.db
+                            .execute_batch("RELEASE finalize_removals")
+                            .map_err(|source| protocol_error(source.to_string()))?;
+                    }
+                    Err(error) => {
+                        let _ = self
+                            .db
+                            .execute_batch("ROLLBACK TO finalize_removals; RELEASE finalize_removals");
+                        return Err(error);
+                    }
                 }
-                self.db
-                    .execute_batch("COMMIT")
-                    .map_err(|source| protocol_error(source.to_string()))?;
             }
         }
         Ok(())
