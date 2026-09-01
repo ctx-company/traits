@@ -6,7 +6,6 @@
 //! that canonical under a scratch-only PATH whose fake `ctx-notify` is the
 //! only notifier reachable, so no test can touch a real daemon.
 
-use std::path::Path;
 use std::process::Command;
 
 use support::{ScratchRoot, repo_root};
