@@ -3,7 +3,7 @@ key = "0268.4"
 title = "Answer the CLI config report from the served resolution"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 This is the parity half of the Config screen, and on this screen it is the sharpest cut in the charter. `.internal/docs/gpui-desktop-face-plan.md:9-18,22-30,90-98` fixes the product rule — the center carries capabilities, faces render them, a capability reachable only from the GUI is a defect — and Config is the one screen with no dashboard equivalent to move, so nothing else in the family catches a GUI-only capability. `0268.1` teaches the center to serve one repository-scoped runtime answer; this cut makes a non-GUI face report that same answer, from that same resolution, without moving a byte of what `ctx traits doctor --config` already prints.
 
 The surface that exists today is `ctx traits doctor --config` (`modules/cli/src/app/surface/cli.rs:403-423`; routed at `modules/cli/src/app/command_handlers.rs:327-350`; handled at `modules/cli/src/app/doctor.rs:114`). It resolves through `ctx_traits_io::harness_config::resolve_config_report(Utf8Path::new("."))`, builds the CLI-private `ConfigDoctorReport`/`ConfigDoctorValue` (`doctor.rs:25-54,106-112`) and emits text or JSON (`doctor.rs:999-1087`). Which command structure carries the parity answer is route guidance and lives under `## Approach`, where it is not a boundary; what is fixed here is that one public read-only non-GUI CLI surface reports this shape, that one resolution answers both faces, that the landed report is neither duplicated nor contradicted, and that no second `runtime.toml` parser appears anywhere (`0268` Correction 10; Done-when 5).
@@ -25,8 +25,8 @@ Eight grounded corrections the draft this file replaces did not carry.
 **A retired `model-tier` declaration is a warning, and this cut must not promote it.** At this HEAD `resolve_config_report` pushes `retired model-tier declaration in <path>` onto `tier_warnings` and succeeds (`harness_config.rs:3907,3913-3916,4104-4109`), and `0268.1` preserves that shipped behaviour rather than turning it into a failure. The parity answer carries the warning through as a warning.
 
 **The draft had no stop condition.** Every rewritten sibling in this family prescribes one completed review pass and at most one targeted repair-and-rerun round, stopping with the failing command or the concrete unmet invariant if a second round would be needed. That bound is added here.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected surfaces, symbols, edit order, commands and proof mechanics, stated precisely where the grounding supports them and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, and which fixture or observation shows it is the run's call.
@@ -72,8 +72,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 8. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and no desktop dependency enters the CLI or io crates; `ctx-traits-io` still depends only on `ctx-traits-core` and its existing third-party set (`modules/io/Cargo.toml:12-29`). Decided by `just test` and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no `runtime.toml` parser, layer walk, document-set assembly, verdict derivation, instant capture, inventory scan, trust read, winner derivation or citation reconstruction is written or copied into CLI code; no third `resolve_config_report` call, no `read_store_with_sequences`, no `resolved_seats_for_role`, no `probe_harness_version` and no model-catalog probe is added on the new path; no copy of the center's assembly enters the CLI and no CLI-private type is promoted into a wire shape or imported by the desktop; no `--apply` or `--migrate-config` behaviour changes; no legacy doctor knob value, winner, label, ordering or JSON field name moves; no design example string — `smart`, `worker`, `scribe`, `opencode 0.4.2`, `ctx-company/traits`, `~/.config/ctx/traits`, `nightly · local`, `5 digests`, `13:02` — is reproduced as data; no test reads this repository's committed `.ctx/traits/runtime.toml`, its trait set, its trust store or its board; no gpui enters root resolution; and no work belonging to `0268.1`, `0268.2`, `0268.3`, `0266`, `0267`, `0269` or `0261` is done.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. `0268.1` has not landed at this HEAD — the center protocol carries no config request, result or delta (`modules/io/src/center.rs:84-209,265-281`), `ConfigReport` carries no document list, verdict, instant, trust join or screen rows (`harness_config.rs:1433-1442`), and no explicit-scope config entry point exists — so no prerequisite symbol name or signature is stated below. Discover them from what `0268.1` actually landed and say in the work summary where the landed shape differed from what is described here.
@@ -116,7 +116,8 @@ Suggested route, not a boundary. `0268.1` has not landed at this HEAD — the ce
 One review pass over the completed diff before calling this done: name, for each rendered leaf — seat identity, model, effort, per-value provenance, harness row, center row, store row, approved names, digest count, verdict, citation, instant — the served value it renders from; confirm the legacy doctor text and JSON answers are byte-stable by reading the diff for any change to knob values, winner labels, ordering or field names alongside the standing suite's result; exercise the scratch boundaries listed under **What must be proven**, including the absent-model and absent-effort seats, the private-tuple center row, every trust record category and every typed failure; then read the diff for the properties no fixture shows directly — no second resolver, parser, trust read, inventory scan, citation reconstruction, clock read or probe; no third `resolve_config_report` call; no `read_store_with_sequences`; no copied center assembly; no write path; no changed legacy value; and no gpui in root resolution. Then run the declared checks.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the concrete unmet invariant with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
-parent = "0268"
 depends-on = ["0268.1"]
+parent = "0268"

@@ -4906,3 +4906,57 @@ fn claimed_task_fails_loudly_for_a_flat_store_row_with_no_usable_repository_path
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(cwd);
 }
+
+#[test]
+fn config_answer_uses_the_private_center_socket_and_matches_the_served_response() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("config-answer");
+    let home = root.join("home");
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&repo).expect("create repo");
+    git_init(&repo);
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let child = spawn_sentinel_with_home(&root, &socket, &index, "120000", &home);
+    drop(await_socket(&socket));
+    let _environment = CenterEnvironment::install(&root);
+
+    let scope = Utf8PathBuf::from_path_buf(repo.clone()).expect("UTF-8 repository");
+    let served = ctx_traits_io::center::config_existing(&scope).expect("center config response");
+    let served_json = serde_json::to_value(&served).expect("serialize served response");
+    assert_eq!(
+        served_json["resolution"]["data"]["runtime"]
+            .as_array()
+            .expect("served runtime")
+            .iter()
+            .find(|row| row["name"] == "center")
+            .expect("center runtime row")["qualifier"],
+        socket.to_string_lossy().as_ref(),
+        "the center must serve its private tuple socket"
+    );
+
+    let mut command = controlled_command(
+        std::path::Path::new(env!("CARGO_BIN_EXE_ctx")),
+        &["traits", "config", "--json"],
+        &repo,
+        &home,
+    );
+    command.env("CTX_CENTER_SOCKET", &socket);
+    let output = command.output().expect("run config command");
+    assert!(
+        output.status.success(),
+        "config command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let local: serde_json::Value = serde_json::from_slice(&output.stdout).expect("config JSON");
+    assert_eq!(
+        local["resolution"]["data"]["runtime"], served_json["resolution"]["data"]["runtime"],
+        "CLI must render the same served runtime rows as the center"
+    );
+
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -324,6 +324,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             },
             Some(cli::TraitsCommand::Fork { id, json }) => crate::app::fork::handle_fork(&id, json),
             Some(cli::TraitsCommand::List { json, verbose }) => handle_list(json, verbose),
+            Some(cli::TraitsCommand::Config { json }) => {
+                crate::app::config_report::handle_config_report(json)
+            }
             Some(cli::TraitsCommand::Doctor {
                 path,
                 config,

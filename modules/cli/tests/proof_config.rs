@@ -1326,6 +1326,117 @@ fn raising_merger_budget_moves_derived_lock_wait_by_25x_delta() {
     );
 }
 
+#[test]
+fn config_reports_served_defaults_and_json_shape() {
+    let scratch = ScratchRoot::new("config-served-defaults");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    git_init(&repo);
+
+    let text = require_success(
+        "`ctx traits config`",
+        &["traits", "config"],
+        &repo,
+        &scratch.home(),
+    );
+    for expected in [
+        "ctx traits config",
+        "seats:\n    (none configured)",
+        "center:",
+        "store:",
+        "approved traits:  (0 distinct digests)",
+        "documents: 0",
+        "built-in defaults (no runtime document)",
+        "verdict: resolved",
+        "instant epoch millis:",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?}: {text}");
+    }
+
+    let output = run_ctx(&["traits", "config", "--json"], &repo, &scratch.home());
+    assert_exit_code(&output, 0);
+    let (json, _) = utf8(&output);
+    let answer: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(answer["resolution"]["type"], "resolved", "{answer}");
+    assert!(
+        answer["resolution"]["data"]["runtime"].is_array(),
+        "{answer}"
+    );
+    assert!(
+        answer["resolution"]["data"]["documents"].is_array(),
+        "{answer}"
+    );
+    assert!(
+        answer["resolution"]["data"]["instant-epoch-millis"].is_number(),
+        "{answer}"
+    );
+}
+
+#[test]
+fn config_renders_seat_values_and_their_independent_provenance() {
+    let scratch = ScratchRoot::new("config-served-seats");
+    let repo = scratch.home().join("repo");
+    let global = scratch.home().join("ctx/traits/runtime.toml");
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
+    fs::create_dir_all(global.parent().unwrap()).unwrap();
+    git_init(&repo);
+    fs::write(
+        &global,
+        "[agent.role.single]\nharness = 'first'\nmodel = 'global-model'\n\n[[agent.role.worker]]\nharness = 'one'\n\n[[agent.role.worker]]\nharness = 'two'\nmodel = 'worker-model'\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/traits/runtime.toml"),
+        "[agent.role.single]\nreasoning-effort = 'high'\n",
+    )
+    .unwrap();
+
+    let text = require_success(
+        "`ctx traits config` with configured seats",
+        &["traits", "config"],
+        &repo,
+        &scratch.home(),
+    );
+    for expected in [
+        "single:",
+        "model: global-model",
+        "model provenance:",
+        "reasoning effort: high",
+        "reasoning effort provenance:",
+        "worker.1:",
+        "worker.2:",
+        "worker.1:\n      model: not configured",
+        "harness: first, one, two [configured engine identity]",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?}: {text}");
+    }
+}
+
+#[test]
+fn config_fails_loudly_for_malformed_config_and_non_worktree_scope() {
+    let scratch = ScratchRoot::new("config-served-errors");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
+    git_init(&repo);
+    fs::write(repo.join(".ctx/traits/runtime.toml"), "[agent.role\n").unwrap();
+    let malformed = run_ctx(&["traits", "config"], &repo, &scratch.home());
+    assert_ne!(malformed.status.code(), Some(0));
+    let (stdout, stderr) = utf8(&malformed);
+    assert!(stdout.is_empty(), "partial output: {stdout}");
+    assert!(
+        stderr.contains("runtime.toml") || stderr.contains("parse"),
+        "{stderr}"
+    );
+
+    let outside = scratch.home().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    let refused = run_ctx(&["traits", "config"], &outside, &scratch.home());
+    assert_ne!(refused.status.code(), Some(0));
+    let (stdout, stderr) = utf8(&refused);
+    assert!(stdout.is_empty(), "partial output: {stdout}");
+    assert!(stderr.contains("not inside a Git worktree"), "{stderr}");
+}
+
 /// P475 D7 regression: a list-backed role's (`[[agent.role.<name>]]`, P456)
 /// per-seat budget rows must pair each seat's LABEL (the 1-based
 /// `seat_index` the row key already uses) with THAT SAME seat's resolved

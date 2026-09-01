@@ -399,6 +399,16 @@ pub enum TraitsCommand {
         #[arg(long)]
         verbose: bool,
     },
+    /// Report this repository's effective runtime configuration as the center serves it.
+    ///
+    /// This read-only report is scoped to the current directory and refuses a
+    /// directory outside a Git worktree. Unlike `traits internal config`, it
+    /// does not author, build, or accept configuration.
+    Config {
+        /// Emit the served answer as structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect a folder of Agent-Skills-style source files
     /// (SKILL.md/AGENTS.md/CLAUDE.md) before importing, without writing anything.
     ///

@@ -49,6 +49,7 @@ pub struct ConfigView {
     #[serde(default)]
     pub edit_target: Option<String>,
     pub tier_warnings: Vec<String>,
+    #[serde(with = "epoch_millis")]
     pub instant_epoch_millis: u128,
 }
 
@@ -89,6 +90,28 @@ pub enum ConfigResolution {
     Resolved(ConfigView),
     Refused { reason: String },
     Failed { reason: String },
+}
+
+// `serde_json` does not deserialize `u128` directly. Epoch milliseconds fit
+// in `u64`, so retain the public precision while using the JSON protocol's
+// supported integer representation.
+mod epoch_millis {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = u64::try_from(*value).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_u64(value)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(u64::deserialize(deserializer)? as u128)
+    }
 }
 
 fn layer_name(layer: ConfigLayer) -> String {

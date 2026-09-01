@@ -5014,7 +5014,9 @@ fn run_library_request(
     })
 }
 
-fn run_config_request(scope_path: &str) -> crate::Result<ConfigWireResult> {
+/// Resolves the repository-scoped config answer used by both the center and
+/// read-only local consumers.
+pub fn run_config_request(scope_path: &str) -> crate::Result<ConfigWireResult> {
     let path = Utf8Path::new(scope_path);
     if scope_path.is_empty() || !path.is_absolute() {
         return Ok(ConfigWireResult {
@@ -5058,7 +5060,7 @@ fn run_config_request(scope_path: &str) -> crate::Result<ConfigWireResult> {
             &document,
             crate::config_view::ConfigCenterIdentity {
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                socket: production_paths()?.socket.to_string(),
+                socket: center_paths()?.socket.to_string(),
             },
             instant_epoch_millis,
         )
