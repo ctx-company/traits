@@ -8,13 +8,18 @@ export default function () {
     metadata: { tag: shared.metadata.tag },
   });
 
+  shared.step.notify.begin("Open the owner notification");
   shared.step.diff.baseline("Capture the session base");
+  shared.step.notify.update("Notify: session base", "Capture the session base");
   shared.step.draft.compose("Draft the implementation plan");
+  shared.step.notify.update("Notify: plan drafted", "Draft the implementation plan");
 
   cdk.flow.loop("Reviewed refinement", (loop) => {
     shared.step.work.implement("Implement the task");
+    shared.step.notify.update("Notify: implement pass", "Implement the task");
     shared.step.diff.capture("Capture the changed files");
     shared.step.review.primarySummoning("Review the implementation");
+    shared.step.notify.reviewUpdate("Notify: review verdict");
 
     cdk.flow.when("Owner ruling", cdk.condition.signal(agents.needsOwnerSignal), () => {
       const ruling = shared.step.summon.ask("Summon the owner", agents.needsOwnerSignal);
@@ -34,7 +39,9 @@ export default function () {
     shared.step.git.commitMessage("Write the commit message");
     shared.step.git.commitStage("Stage all changes");
     shared.step.git.commitSubmit("Commit the work");
+    shared.step.notify.update("Notify: committed", "Commit the work");
   });
+  shared.step.notify.finish("Close the owner notification");
 
   return { commitReport: shared.data.commitReport };
 }

@@ -55,6 +55,28 @@ export const gitStatus = cdk.slot.text({
   description: "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
 });
 
+export const notifyId = cdk.slot.text({
+  id: "notify-id",
+  description:
+    "Activity id of this run's owner notification thread, or the literal 'unavailable' when the notifier could not start. Later notification helpers no-op on 'unavailable'.",
+});
+
+export const notifyLog = cdk.slot.text({
+  id: "notify-log",
+  description:
+    "Latest notification helper marker — ok/skipped/unavailable evidence for the step that just ran. Never affects run outcome.",
+});
+
+export const reviewStatus = cdk.slot.text({
+  id: "review-status",
+  description: "The current verdict's status field, projected for the notification helpers.",
+});
+
+export const reviewPoints = cdk.slot.list(agents.blockerSchema, {
+  id: "review-points",
+  description: "The current verdict's blockers, projected for the notification helpers.",
+});
+
 export const stageOutput = cdk.slot.text({
   id: "stage-output",
   description: "Output evidence from the git add command step.",
@@ -85,4 +107,8 @@ export const slot = {
   ownerDecisions,
   gitStatus,
   stageOutput,
+  notifyId,
+  notifyLog,
+  reviewStatus,
+  reviewPoints,
 };
