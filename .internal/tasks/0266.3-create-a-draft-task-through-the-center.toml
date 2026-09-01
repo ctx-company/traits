@@ -6,6 +6,16 @@ raised = "2026-08-29"
 closed = "2026-09-01"
 origin = "run run-185354a8960026da36fbd932d9c8cab236e749c906dd0ea0e2299b984d7de55b merged as 0dee92bb6d7f8865908e132b5515d9dc8195f2b2"
 content = """
+## Owner ruling 2026-09-01 (binding, supersedes conflicting text below)
+
+The board-changed center event (`BoardChanged` WireMessage/CenterEvent and
+its scan-driven emission) does not exist — it was 0266.1's residue. THIS
+run builds it as in-scope work, then does its own task on top. Every
+sentence below that forbids building that center prerequisite, or directs
+a park when it is absent, is satisfied by this ruling — do not park on it
+again. The served board model stays the sole source.
+
+
 This plan separates GOALS from APPROACH, and only the GOALS bind. Each goal names
 an observable outcome, what decides it, and what it excludes. The APPROACH
 section — discovery order, file and symbol guesses, signatures, edit order,
