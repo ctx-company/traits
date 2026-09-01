@@ -1,0 +1,96 @@
+schema-version = "0.2"
+key = "0276"
+title = "Collapse dual session_id/run_id identity to session-only"
+status = "draft"
+raised = "2026-09-01"
+content = """
+The runtime mints two identities per start — session-<hash> and run-<hash>, 1:1 from one
+fresh seed in modules/io/src/run.rs — and threads both through the whole stack: the session
+envelope (modules/core/src/procedure/session.rs carries Session.run_id, run_id fields on
+StartRequest/CallSubmission, and separate submission rejections for session-id mismatch,
+run-id mismatch/missing, and state-digest mismatch), the pure ledger under
+modules/core/src/procedure/run/ with nested/frame run-id copies persisted by
+modules/core/src/procedure/runtime/{state,frames}.rs, the store
+(modules/io/src/run_session.rs, ledgers as <session-id>.json under
+~/.config/ctx/traits/runs/<repo-key>/), the center daemon (modules/io/src/center.rs
+Request::FindByRunId; run_id lives only inside center_rows.summary JSON — the sqlite schema
+has no run_id column), run-adjacent io records (run_liveness.rs, merge_lock.rs,
+debug_trace.rs, run_control.rs, run_queue.rs, run_branch.rs, dispatch_preflight.rs,
+worktree.rs with the ctx/run/<id> branch namespace and refs/heads/ctx/run/ sweep), the CLI
+(merge.rs, story.rs, surface/cli.rs, session_delete.rs, lifecycle_reporting.rs,
+frame_prompt.rs, task_queue.rs, task_proposals.rs), the WASM ABI
+(modules/wasm-core/src/abi.rs run_start_json still calls SessionId::deterministic and
+deterministic_run_id; RunStartRequest has no identity field), and the desktop gpui app
+(~158 run_id occurrences across desktop/src and its tests). Roughly 637 run_id/run-id
+occurrences sit across modules/; TypeScript packages carry zero and are untouched.
+
+The brainstorm at
+.internal/brainstorms/rethink-sessions-runs-wether-we-need-both-or-session-itself-.md
+(committed 550be684d, touchpoints re-verified at HEAD e2b59d884) rules that the dual
+identity collapses to session-only in one coordinated cut with no compatibility phases.
+This charter owns that cut. Its work items, and the children that carry them:
+
+1. Mint or require one session id — native starts keep minting a fresh SessionId; the WASM
+   ABI requires a host-minted session-id and deterministic identity is removed → 0276.4.
+2. Migrate persisted state, then remove run-id immediately — schema strip with fallout and
+   center projection rebuild → 0276.2; the one-shot typed ledger migration with digest
+   recompute → 0276.7; run-adjacent io records rekeyed in code → 0276.3, with
+   pre-existing records migrated → 0276.8.
+3. Rename storage and identity vocabulary in the same migration — io run-session store →
+   0276.5; core ledger namespace and position nouns → 0276.9; runs/ storage root and env
+   vars → 0276.10; ctx/run/ → ctx/session/ refs with branch sweep and provenance →
+   0276.11.
+4. Make every consumer session-only — run-id lookup deletions and CLI session refs →
+   0276.1; desktop identity plumbing → 0276.6; desktop surfaces, actions, and tests →
+   0276.12.
+
+The stop condition no single child owns: after a successful migration there is no serde
+alias, mirrored write, dual-read path, or run_id left anywhere in the runtime — schema,
+persisted state, storage nouns, ABI, and every consumer are session-only, with the tree
+green against `just test-full` plus the three desktop gates.
+"""
+scope = """
+## Decisions
+- The owner decisions recorded in the brainstorm are settled, not open questions:
+  persisted run-id is dropped via a one-shot typed state migration; storage/vocabulary
+  renames land in that same migration; every downstream consumer (center, merge, liveness,
+  task-board/standing-wall, CLI dashboard/tasks, desktop) migrates to session_id; the
+  naming-only variant (run_id == session_id) is rejected even as a temporary state.
+- Fresh identity per start (Group 42.5 F2) is inviolable: nothing in the collapse may
+  reintroduce derived or reusable identity on the native path.
+- The one-shot migration is a single typed pass in the finished state: 0276.7 creates the
+  routine and children 0276.8 through 0276.11 extend it — never a second migration entry
+  point, serde alias, mirrored write, or dual-read path at any landed intermediate.
+- Each child lands green against `just test-full` and leaves no half-renamed public
+  schema. Two windows are open by design, never as compatibility layers: pre-existing
+  local ledgers are unreadable between 0276.2's strip and 0276.7's migration, and desktop
+  — outside CI and the root cargo workspace — is red from 0276.2 until 0276.6 restores
+  its build, then again through the 0276.9/0276.11 renames until 0276.12 closes it with
+  the three desktop gates.
+- Out of scope: re-attempt semantics (no attempt ordinal, no lineage — the door stays open
+  for a session-scoped ordinal later, never a second global namespace); any change to the
+  TypeScript packages (they carry zero run_id references — ts gates still run but no TS
+  API change is expected); compatibility layers of any kind.
+"""
+validation = """
+## Watch
+- Cross-child ordering is load-bearing: lookups die before fields (0276.1 → 0276.2), the
+  ledger migration follows the strip immediately (0276.2 → 0276.7), records rekey in code
+  before pre-existing records migrate (0276.3 → 0276.8), renames extend the same
+  migration (0276.9 → 0276.11), and desktop closes last (0276.6, then 0276.12).
+- The migration touches live machine state under ~/.config/ctx/traits/: collision refusal
+  and atomic per-artifact writes are non-negotiable in every child that extends it.
+- If any trait prompt text mentions run ids, contract text belongs in schema field
+  descriptions and resources, not prompts.
+
+## Done when
+Every child task (0276.1 through 0276.12) is closed and the stop condition holds: no serde
+alias, mirrored write, dual-read path, or run_id left in the runtime schema; persisted
+run-id dropped via the one-shot typed state migration; identity/storage nouns renamed to
+session (including the active ~/.config/ctx/traits/runs/ root and ctx/run/* refs, with
+worktree provenance and branch sweep moved together); the WASM ABI requires a host-minted
+session-id with deterministic identity removed; all downstream consumers (merge, liveness,
+task-board/standing-wall, CLI dashboard/tasks, desktop surfaces) on session_id with the
+center projection bumped and rebuilt; and the tree green against `just test-full` plus the
+three desktop gates, each carried by the child that owns the behavior.
+"""
