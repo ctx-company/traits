@@ -72,7 +72,7 @@ export const notifyDigest = cdk.slot({
       }),
       summary: cdk.schema.field(cdk.schema.text(), {
         description:
-          "Multi-line prose block for the owner's phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. Empty string when the verdict is approved, which clears the previous summary.",
+          'Multi-line prose block for the owner\'s phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. NEVER the empty string (an empty value aborts the command it feeds): when the verdict is approved, exactly "approved — all points closed".',
       }),
       journal: cdk.schema.field(cdk.schema.text(), {
         description:

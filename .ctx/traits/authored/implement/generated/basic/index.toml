@@ -277,7 +277,7 @@ description = 'Exactly "<X> open • <Y> closed" and NOTHING else — X counts s
 [schema.fields.summary]
 schema = "schema:text"
 required = true
-description = "Multi-line prose block for the owner's phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. Empty string when the verdict is approved, which clears the previous summary."
+description = """Multi-line prose block for the owner's phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. NEVER the empty string (an empty value aborts the command it feeds): when the verdict is approved, exactly "approved — all points closed"."""
 
 [schema.fields.surface]
 schema = "schema:text"
