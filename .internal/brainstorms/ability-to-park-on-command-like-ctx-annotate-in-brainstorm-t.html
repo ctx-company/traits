@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Park on command — callback-completed brainstorm gate</title>
+<style>
+  :root {
+    --ink: #1c1e21;
+    --dim: #5c6370;
+    --line: #c9cdd4;
+    --paper: #fafbfc;
+    --card: #ffffff;
+    --accent: #8a6d1f;        /* callback worker */
+    --park: #eef1f5;          /* parked band */
+    --drive: #2b5b8a;         /* drive lane */
+    --ledger: #4a7a4f;        /* ledger lane */
+    --owner: #8a6d1f;         /* worker lane */
+    --tool: #7a4a7a;          /* wrapped command lane */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px;
+    background: var(--paper); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 20px; max-width: 900px; }
+  .strip {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 10px; font-size: 13px;
+  }
+  .strip .st {
+    border: 1.5px solid var(--line); border-radius: 6px;
+    background: var(--card); padding: 6px 12px; white-space: nowrap;
+  }
+  .strip .st b { font-weight: 600; }
+  .strip .st.parked { border-color: var(--accent); background: #fdf8ea; }
+  .strip .arrow { color: var(--dim); font-size: 15px; }
+  .loopnote { color: var(--dim); font-size: 12.5px; margin: 0 0 18px; }
+  .callout {
+    border-left: 4px solid #a33; background: #fdf1f0; border-radius: 4px;
+    padding: 10px 14px; margin: 0 0 22px; font-size: 13.5px; max-width: 980px;
+  }
+  .callout b { color: #7c2a24; }
+  .scroller {
+    overflow-x: auto; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); padding: 8px 0;
+  }
+  svg { display: block; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 20px; margin: 14px 2px 0;
+    font-size: 13px; color: var(--dim); align-items: center;
+  }
+  .legend svg { display: inline-block; vertical-align: middle; }
+  .remote {
+    border-left: 4px solid var(--drive); background: #eef3f8; border-radius: 4px;
+    padding: 10px 14px; margin: 22px 0 0; font-size: 13.5px; max-width: 980px;
+  }
+  .foot { color: var(--dim); font-size: 12.5px; margin-top: 18px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Park on command: callback completion</h1>
+  <p class="sub">
+    Corrected flow for the brainstorm trait's owner-acceptance gate: a command marked
+    <code>completion: "callback"</code> is run by a tiny detached worker. The drive <b>parks</b>, and the worker
+    owns execution and reliably forwards command evidence to the center. Success completes that exact frame and resumes the run;
+    failure parks with diagnostic evidence until the user chooses retry or cancel.
+    The markdown sibling of this file is the authoritative proposal text.
+  </p>
+
+  <div class="strip" aria-label="Session status lifecycle">
+    <span class="st"><b>awaiting-agent-output</b><br>compose runs</span>
+    <span class="arrow">&#9656;</span>
+    <span class="st parked"><b>waiting-on-command</b><br>pending callback stamped</span>
+    <span class="arrow">&#9656;</span>
+    <span class="st"><b>result-landed</b><br>success or rich failure</span>
+    <span class="arrow">&#9656;</span>
+    <span class="st"><b>success: resumed</b><br>failure: retry/cancel</span>
+    <span class="arrow">&#9656;</span>
+    <span class="st"><b>completed</b><br>commit step</span>
+  </div>
+  <p class="loopnote">Annotations (not approval) route <b>resumed &#8594; awaiting-agent-output</b>: a revise frame applies them, then the callback command parks again. The existing 500-round backstop remains; waiting on an unfinished command spends no round.</p>
+
+  <div class="callout">
+    <b>Today, for contrast:</b> the gate is a blocking command step. <code>advance_commands</code> holds the
+    drive process, terminal, and worktree while the owner thinks; 10&nbsp;minutes of silence trips the idle
+    kill (<code>DEFAULT_COMMAND_IDLE_MS</code>), and the gate's fallback burns an acceptance-loop round.
+    Callback completion releases the driver and terminal; the worker necessarily retains the command's worktree.
+  </div>
+
+  <div class="scroller" role="img"
+       aria-label="Sequence diagram: the runtime persists a callback-bound command, starts and PID-binds a detached wrapper worker, and exits without cleaning up the worktree; the wrapper executes the declared command through the normal command path and retries forwarding its retained command evidence to the center, which atomically lands the result. Success resumes the drive. Timeout or command failure remains parked with rich evidence until the user explicitly retries or cancels. Callback waits have no TTL unless one is declared.">
+  <svg width="1240" height="1010" viewBox="0 0 1240 1010" xmlns="http://www.w3.org/2000/svg"
+       font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+    <defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#1c1e21"/>
+      </marker>
+      <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#5c6370"/>
+      </marker>
+    </defs>
+
+    <!-- lane headers -->
+    <g font-size="14" font-weight="600" text-anchor="middle">
+      <rect x="80"  y="14" width="180" height="44" rx="7" fill="#eef3f8" stroke="#2b5b8a" stroke-width="1.5"/>
+      <text x="170" y="32" fill="#2b5b8a">drive process</text>
+      <text x="170" y="49" font-weight="400" font-size="12" fill="#5c6370">ctx traits run · drive.rs</text>
+
+      <rect x="380" y="14" width="180" height="44" rx="7" fill="#eff5ef" stroke="#4a7a4f" stroke-width="1.5"/>
+       <text x="470" y="32" fill="#4a7a4f">center + ledger</text>
+       <text x="470" y="49" font-weight="400" font-size="12" fill="#5c6370">center.rs · authoritative session</text>
+
+      <rect x="700" y="14" width="180" height="44" rx="7" fill="#fdf8ea" stroke="#8a6d1f" stroke-width="1.5"/>
+       <text x="790" y="32" fill="#8a6d1f">wrapper worker</text>
+       <text x="790" y="49" font-weight="400" font-size="12" fill="#5c6370">ctx traits internal command-worker</text>
+
+      <rect x="1000" y="14" width="180" height="44" rx="7" fill="#f7eff7" stroke="#7a4a7a" stroke-width="1.5"/>
+       <text x="1090" y="32" fill="#7a4a7a">wrapped command</text>
+       <text x="1090" y="49" font-weight="400" font-size="12" fill="#5c6370">GATE_SCRIPT · ctx-annotate</text>
+    </g>
+
+    <!-- lifelines -->
+    <g stroke="#c9cdd4" stroke-width="1.5">
+      <line x1="170"  y1="58" x2="170"  y2="960"/>
+      <line x1="470"  y1="58" x2="470"  y2="960"/>
+      <line x1="790"  y1="58" x2="790"  y2="960"/>
+      <line x1="1090" y1="58" x2="1090" y2="960"/>
+    </g>
+
+    <!-- 1: compose (self note on drive) -->
+    <g>
+      <rect x="60" y="86" width="300" height="40" rx="6" fill="#eef3f8" stroke="#2b5b8a"/>
+      <text x="210" y="103" text-anchor="middle" font-size="12.5" fill="#1c1e21">compose frame: smart agent writes</text>
+      <text x="210" y="119" text-anchor="middle" font-size="12.5" fill="#1c1e21">.internal/brainstorms/&lt;slug&gt;.md + .html</text>
+    </g>
+
+    <!-- 2: callback command parks -->
+    <line x1="170" y1="160" x2="462" y2="160" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="316" y="146" text-anchor="middle" font-size="12.5">gate command: <tspan font-weight="600">completion = callback</tspan> + resolved frame/argv</text>
+
+    <line x1="470" y1="212" x2="178" y2="212" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="316" y="184" text-anchor="middle" font-size="12.5">persist before spawn: status = waiting-on-command,</text>
+    <text x="316" y="200" text-anchor="middle" font-size="12.5">PendingCommand{callback id, token hash, <tspan font-weight="600">wrapper PID = unset</tspan>, frame identity, argv}</text>
+
+    <!-- 3: launch worker -->
+    <line x1="470" y1="246" x2="782" y2="246" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="626" y="232" text-anchor="middle" font-size="12.5">spawn wrapper; bind its own PID; then release one-use token on private descriptor</text>
+
+    <!-- 4: drive exits -->
+    <g>
+      <rect x="60" y="276" width="300" height="40" rx="6" fill="#ffffff" stroke="#2b5b8a" stroke-dasharray="5 3"/>
+       <text x="210" y="293" text-anchor="middle" font-size="12.5" fill="#1c1e21">drive exits "awaiting-command" — run paused,</text>
+       <text x="210" y="309" text-anchor="middle" font-size="12.5" fill="#1c1e21">terminal freed; worktree + cwd preserved</text>
+    </g>
+
+    <!-- parked band -->
+    <g>
+      <rect x="60" y="336" width="1120" height="56" rx="6" fill="#eef1f5" stroke="#c9cdd4"/>
+       <text x="620" y="360" text-anchor="middle" font-size="13" font-weight="600" fill="#5c6370">DRIVE PARKED — PID-bound wrapper owns execution and result forwarding</text>
+       <text x="620" y="378" text-anchor="middle" font-size="12.5" fill="#5c6370">declared TTL expiry is failure; command execution is replayed only after an explicit retry decision</text>
+    </g>
+
+    <!-- 5: worker starts -->
+    <g>
+      <rect x="640" y="420" width="300" height="26" rx="6" fill="#fdf8ea" stroke="#8a6d1f"/>
+      <text x="790" y="437" text-anchor="middle" font-size="12.5">wrapper claims: <tspan font-weight="600">callback id + own PID + current frame</tspan></text>
+    </g>
+
+    <!-- 6: callback check -->
+    <line x1="790" y1="482" x2="478" y2="482" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="634" y="468" text-anchor="middle" font-size="12.5">claim matches live PendingCommand? (id + token + bound PID + digest)</text>
+
+    <line x1="470" y1="522" x2="782" y2="522" stroke="#5c6370" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#ahd)"/>
+    <text x="626" y="508" text-anchor="middle" font-size="12.5" fill="#5c6370">resolved cwd/env/bounds + logical/process argv</text>
+
+    <!-- 7: execute wrapped command -->
+    <line x1="790" y1="576" x2="1082" y2="576" stroke="#8a6d1f" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="936" y="548" text-anchor="middle" font-size="12.5">execute exactly as <tspan font-weight="600">cdk.step.command</tspan> via shared run_with_env:</text>
+    <text x="936" y="564" text-anchor="middle" font-size="12.5">this gate runs ctx-annotate; no callback-specific notification hook</text>
+
+    <!-- 8: owner annotates -->
+    <g>
+      <rect x="960" y="598" width="260" height="40" rx="6" fill="#f7eff7" stroke="#7a4a7a"/>
+      <text x="1090" y="615" text-anchor="middle" font-size="12.5">owner reads the diagram, annotates</text>
+      <text x="1090" y="631" text-anchor="middle" font-size="12.5">markdown lines — or accepts as-is</text>
+    </g>
+
+    <!-- 9: command result -->
+    <line x1="1090" y1="668" x2="798" y2="668" stroke="#5c6370" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#ahd)"/>
+    <text x="944" y="654" text-anchor="middle" font-size="12.5" fill="#5c6370">wrapper retains immutable RunOutput: stdout + stderr + exit/timeout/truncation</text>
+
+    <!-- 10: callback + resume -->
+    <line x1="790" y1="722" x2="478" y2="722" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="634" y="694" text-anchor="middle" font-size="12.5">retry CommandFinished{id, token, wrapper PID, digest, evidence} until terminal ack;</text>
+    <text x="634" y="710" text-anchor="middle" font-size="12.5">center lands once with typed reason + exit/stdout/stderr/timeout/truncation, then acknowledges</text>
+
+    <line x1="470" y1="762" x2="178" y2="762" stroke="#5c6370" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#ahd)"/>
+     <text x="324" y="748" text-anchor="middle" font-size="12.5" fill="#5c6370">success: start normal drive; failure: stay parked for explicit retry/cancel</text>
+
+    <!-- 11: branch -->
+    <g>
+      <rect x="60" y="790" width="300" height="42" rx="6" fill="#eef3f8" stroke="#2b5b8a"/>
+      <text x="210" y="807" text-anchor="middle" font-size="12.5" font-weight="600">owner-answer = "approved"?</text>
+      <text x="210" y="823" text-anchor="middle" font-size="12.5" fill="#5c6370">projection over the decision, no agent frame</text>
+    </g>
+
+    <!-- yes branch -->
+    <line x1="170" y1="832" x2="170" y2="898" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="184" y="870" font-size="12.5" fill="#4a7a4f" font-weight="600">yes</text>
+    <g>
+      <rect x="80" y="902" width="180" height="40" rx="6" fill="#eff5ef" stroke="#4a7a4f"/>
+      <text x="170" y="919" text-anchor="middle" font-size="12.5">commit step runs;</text>
+      <text x="170" y="935" text-anchor="middle" font-size="12.5">session <tspan font-weight="600">completed</tspan></text>
+    </g>
+
+    <!-- no branch: revise loop -->
+    <line x1="360" y1="811" x2="560" y2="811" stroke="#1c1e21" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="458" y="798" font-size="12.5" text-anchor="middle" fill="#7c2a24" font-weight="600">no — annotations present</text>
+    <g>
+      <rect x="564" y="790" width="330" height="42" rx="6" fill="#fdf1f0" stroke="#a33"/>
+      <text x="729" y="807" text-anchor="middle" font-size="12.5">revise frame: smart agent applies annotations</text>
+      <text x="729" y="823" text-anchor="middle" font-size="12.5">to BOTH artifacts (binding corrections)</text>
+    </g>
+    <path d="M 894 811 L 1180 811 L 1180 160 L 480 160" fill="none" stroke="#a33" stroke-width="1.5" stroke-dasharray="8 4"/>
+    <path d="M 490 160 L 480 160" fill="none" stroke="#a33" stroke-width="1.5" marker-end="url(#ah)"/>
+    <text x="1196" y="490" font-size="12.5" fill="#7c2a24" transform="rotate(90 1196 490)" text-anchor="middle">loop: gate parks again — max 500 rounds (runaway backstop)</text>
+  </svg>
+  </div>
+
+  <div class="legend">
+    <span><svg width="46" height="12"><line x1="0" y1="6" x2="40" y2="6" stroke="#1c1e21" stroke-width="1.5"/><path d="M38 2 L46 6 L38 10 z" fill="#1c1e21"/></svg> command / API call</span>
+    <span><svg width="46" height="12"><line x1="0" y1="6" x2="40" y2="6" stroke="#5c6370" stroke-width="1.5" stroke-dasharray="6 4"/><path d="M38 2 L46 6 L38 10 z" fill="#5c6370"/></svg> data return / notification</span>
+    <span><svg width="30" height="14"><rect x="1" y="1" width="28" height="12" fill="#eef1f5" stroke="#c9cdd4"/></svg> drive parked — worker alive</span>
+    <span><svg width="46" height="12"><line x1="0" y1="6" x2="46" y2="6" stroke="#a33" stroke-width="1.5" stroke-dasharray="8 4"/></svg> bounded revision loop</span>
+  </div>
+
+  <div class="remote">
+    <b>Remote runtime (future, not MVP):</b> the worker and center can later communicate over a remote transport
+    using the same one-use callback envelope. The first implementation stays machine-local: one Unix socket,
+    one authoritative ledger, and one detached worker. After restart, a valid successful callback starts the normal drive.
+    A callback TTL, command timeout, non-success exit, invalid output, spawn failure, or absent bound worker is a
+    recoverable failure. The run stays parked and exposes the typed reason and available command evidence with only
+    retry/cancel actions; it never automatically re-executes argv because the command may already have produced side effects.
+  </div>
+
+  <p class="foot">
+    Artifact of .internal/brainstorms/ability-to-park-on-command-like-ctx-annotate-in-brainstorm-t.md —
+    the markdown is authoritative where detail differs.
+  </p>
+</div>
+</body>
+</html>

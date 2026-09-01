@@ -116,7 +116,7 @@ lint:
 # into the slot the workspace gates build in is how a gate starts failing for
 # load rather than for a defect.
 desktop-build:
-	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo build
+	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo build --release
 
 desktop-test:
 	cd "{{desktop_dir}}" && CARGO_TARGET_DIR="{{desktop_dir}}/target" cargo test

@@ -461,6 +461,21 @@ input = [
 output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "notify-committed"
+title = "Notify: committed"
+input = ["slot:notify-id"]
+output = ["slot:notify-log"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "ctx-notify",
+    "update",
+    "{slot:notify-id}",
+    "--status",
+    "Commit the work",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
 id = "write-the-commit-message"
 title = "Write the commit message"
 agent = "agent:scribe"
@@ -498,21 +513,6 @@ argv = [
     "{slot:commit-message}",
 ]
 
-[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
-id = "notify-committed"
-title = "Notify: committed"
-input = ["slot:notify-id"]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
-argv = [
-    "ctx-notify",
-    "update",
-    "{slot:notify-id}",
-    "--status",
-    "Commit the work",
-]
-
 [[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
 id = "summon-the-owner"
 title = "Summon the owner"
@@ -533,18 +533,6 @@ slot = "slot:owner-decisions"
 operation = "append"
 
 [[sequence.reviewed-refinement-body.sequence]]
-id = "implement-the-task"
-title = "Implement the task"
-agent = "agent:worker"
-prompt = "prompt:implement-the-task"
-input = [
-    "slot:draft",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:review-verdict-2", optional = true },
-]
-output = ["slot:work-summary"]
-
-[[sequence.reviewed-refinement-body.sequence]]
 id = "notify-implement-pass"
 title = "Notify: implement pass"
 input = ["slot:notify-id"]
@@ -558,6 +546,18 @@ argv = [
     "--status",
     "Implement the task",
 ]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "implement-the-task"
+title = "Implement the task"
+agent = "agent:worker"
+prompt = "prompt:implement-the-task"
+input = [
+    "slot:draft",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
+]
+output = ["slot:work-summary"]
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "capture-the-changed-files"
@@ -689,18 +689,6 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "capture-the-session-base"
-title = "Capture the session base"
-output = ["slot:diff-base"]
-
-[procedure.sequence.command]
-argv = [
-    "git",
-    "rev-parse",
-    "HEAD",
-]
-
-[[procedure.sequence]]
 id = "notify-session-base"
 title = "Notify: session base"
 input = ["slot:notify-id"]
@@ -716,12 +704,16 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "draft-the-implementation-plan"
-title = "Draft the implementation plan"
-agent = "agent:smart"
-prompt = "prompt:draft-the-implementation-plan"
-input = ["port:task"]
-output = ["slot:draft"]
+id = "capture-the-session-base"
+title = "Capture the session base"
+output = ["slot:diff-base"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "rev-parse",
+    "HEAD",
+]
 
 [[procedure.sequence]]
 id = "notify-plan-drafted"
@@ -739,12 +731,18 @@ argv = [
 ]
 
 [[procedure.sequence]]
+id = "draft-the-implementation-plan"
+title = "Draft the implementation plan"
+agent = "agent:smart"
+prompt = "prompt:draft-the-implementation-plan"
+input = ["port:task"]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
 id = "reviewed-refinement"
 title = "Reviewed refinement"
 kind = "loop"
 sequence = "sequence:reviewed-refinement-body"
-max-iterations = 3
-on-exhausted = "continue"
 
 [procedure.sequence.until]
 slot = "slot:review-verdict-1"
