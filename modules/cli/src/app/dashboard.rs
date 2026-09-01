@@ -7180,10 +7180,22 @@ fn open_next_split_step(state: &mut State, parent: &str) {
     );
 }
 
+/// Submit all dashboard task creation through the center so the board has one
+/// serialization point regardless of which Split flow initiated it.
+fn submit_task_creation(new_task: NewTask) -> Result<TaskSummary, String> {
+    let repo_key = ctx_traits_io::state::current_repo_key().map_err(|error| error.to_string())?;
+    match ctx_traits_io::center::create_task(&repo_key, new_task)
+        .map_err(|error| error.to_string())?
+    {
+        ctx_traits_io::center::CreateTaskWireResult::Created(summary) => Ok(summary),
+        refusal => Err(refusal.to_string()),
+    }
+}
+
 /// `Confirmed`/`Cancelled` alike for a split-queue step: a reject skips this
-/// child with no write; an accept creates it via `TaskProviderMut::create`
-/// with `parent` set, carrying `validation`/`steps` through (0064's one
-/// provider-surface change). Either way, advances to the next queued child.
+/// child with no write; an accept creates it through the center with `parent`
+/// set, carrying `validation`/`steps` through. Either way, advances to the
+/// next queued child.
 fn apply_split_step(
     state: &mut State,
     parent: String,
@@ -7191,9 +7203,7 @@ fn apply_split_step(
     outcome: ModalOutcome,
 ) -> crate::Result<()> {
     if outcome == ModalOutcome::Confirmed {
-        let dir = super::tasks::board_dir(None)?;
-        let provider = FilesTaskBoard::open_read_write(dir);
-        match provider.create(NewTask {
+        match submit_task_creation(NewTask {
             title: child.title.clone(),
             content: child.content.clone(),
             status: None,
@@ -7284,9 +7294,7 @@ fn apply_task_action(
                 state.message = Some("split refused: a title is required".to_string());
                 return Ok(());
             }
-            let dir = super::tasks::board_dir(None)?;
-            let provider = FilesTaskBoard::open_read_write(dir);
-            match provider.create(NewTask {
+            match submit_task_creation(NewTask {
                 title: title.to_string(),
                 parent: Some(parent.clone()),
                 ..Default::default()

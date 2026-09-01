@@ -482,6 +482,12 @@ impl Board {
     }
 
     fn create(&self, new_task: NewTask) -> Result<TaskSummary, WriteError> {
+        if new_task.title.trim().is_empty() {
+            return Err(WriteError::InvalidField {
+                field: "title",
+                reason: "title must not be empty or whitespace-only".to_string(),
+            });
+        }
         let loaded = self.load()?;
         let key = match &new_task.parent {
             None => next_top_level_key(&loaded),
@@ -499,7 +505,7 @@ impl Board {
             key: key.clone(),
             title: new_task.title,
             status: new_task.status,
-            raised: None,
+            raised: Some(crate::audit_journal::today_date_utc()),
             closed: None,
             wall: None,
             origin: None,
@@ -1308,6 +1314,51 @@ mod tests {
             })
             .unwrap();
         assert_eq!(second_child.key, "0005.2");
+    }
+
+    #[test]
+    fn create_refuses_blank_titles_and_stamps_raised_date() {
+        let board_dir = tempdir();
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        for title in ["", " \t\n "] {
+            let error = write
+                .create(NewTask {
+                    title: title.to_string(),
+                    ..Default::default()
+                })
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                WriteError::InvalidField { field: "title", .. }
+            ));
+        }
+        assert!(
+            std::fs::read_dir(board_dir.as_std_path())
+                .unwrap()
+                .next()
+                .is_none()
+        );
+
+        let created = write
+            .create(NewTask {
+                title: "Draft task".to_string(),
+                status: Some(TaskStatus::Draft),
+                ..Default::default()
+            })
+            .unwrap();
+        let resolved = write.get(&created.key).unwrap().unwrap();
+        assert_eq!(resolved.document.status, Some(TaskStatus::Draft));
+        assert_eq!(
+            resolved.derived_status,
+            ctx_traits_core::task::graph::DerivedStatus::Draft
+        );
+        assert!(
+            resolved
+                .document
+                .raised
+                .as_deref()
+                .is_some_and(|date| date.len() == 10)
+        );
     }
 
     #[test]

@@ -382,6 +382,10 @@ fn run(
                         }
                     }
                 }
+                // Board changes are a separate subscription payload, never a
+                // run-row delta. The existing task-board reader remains until
+                // its dedicated migration consumes this event.
+                Ok(ctx_traits_io::center::CenterEvent::BoardChanged { .. }) => {}
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     if snapshots

@@ -8,6 +8,7 @@
 //! disposable machine-wide derived index for the long-lived center.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use ctx_traits_core::task::provider::TaskProvider;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -162,6 +163,11 @@ enum Request {
         id: String,
         repo_key: String,
     },
+    CreateTask {
+        id: String,
+        repo_key: String,
+        new_task: ctx_traits_core::task::provider::NewTask,
+    },
     TaskDetail {
         id: String,
         repo_key: String,
@@ -196,6 +202,7 @@ impl Request {
             | Self::StandingWall { id, .. }
             | Self::ClaimedTask { id, .. }
             | Self::Board { id, .. }
+            | Self::CreateTask { id, .. }
             | Self::TaskDetail { id, .. }
             | Self::Library { id, .. }
             | Self::LibraryDetail { id, .. } => id,
@@ -215,13 +222,30 @@ impl Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 enum WireMessage {
-    Hello { id: String },
-    Ready { id: String },
-    Response { id: String, result: ResponseResult },
-    SnapshotStart { id: String },
-    SnapshotRow { row: Box<CenterPublicRow> },
+    Hello {
+        id: String,
+    },
+    Ready {
+        id: String,
+    },
+    Response {
+        id: String,
+        result: ResponseResult,
+    },
+    SnapshotStart {
+        id: String,
+    },
+    SnapshotRow {
+        row: Box<CenterPublicRow>,
+    },
     SnapshotEnd,
-    Delta { delta: CenterDelta },
+    Delta {
+        delta: CenterDelta,
+    },
+    BoardChanged {
+        repo_key: String,
+        board: Box<BoardWireResult>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,6 +262,7 @@ enum ResponseResult {
     Control(ControlWireResult),
     ClaimedTask(ClaimedTaskWireResult),
     Board(Box<BoardWireResult>),
+    CreateTask(CreateTaskWireResult),
     TaskDetail(Box<TaskDetailWireResult>),
     Library(Box<LibraryWireResult>),
     LibraryDetail(Box<crate::library::LibraryDetailResolution>),
@@ -247,12 +272,40 @@ enum ResponseResult {
 /// Compact board data for the Tasks pane and sibling task consumers. The
 /// resolution retains every board row; joins and sections are model-owned
 /// facts layered onto it without another filesystem read.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct BoardWireResult {
     pub resolution: crate::task_files::BoardResolution,
     pub joined_runs: BTreeMap<String, Vec<ctx_traits_core::task::provider::BoardRun>>,
     pub sections: BTreeMap<String, Option<ctx_traits_core::task::provider::BoardSection>>,
+}
+
+/// Expected outcomes of a board-scoped task creation. These are data rather
+/// than protocol failures so every face can render the same refusal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+pub enum CreateTaskWireResult {
+    Created(ctx_traits_core::task::provider::TaskSummary),
+    Occupied,
+    InvalidField { field: String, reason: String },
+    UnknownParent { parent: String },
+    AmbiguousParent { parent: String },
+    BoardAbsent,
+    BoardUnreadable { reason: String },
+}
+
+impl std::fmt::Display for CreateTaskWireResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Created(summary) => write!(f, "created {}", summary.key),
+            Self::Occupied => f.write_str("another task creation is in progress"),
+            Self::InvalidField { field, reason } => write!(f, "invalid {field}: {reason}"),
+            Self::UnknownParent { parent } => write!(f, "no task {parent:?} in the board"),
+            Self::AmbiguousParent { parent } => write!(f, "parent {parent:?} is ambiguous"),
+            Self::BoardAbsent => f.write_str("task board is absent"),
+            Self::BoardUnreadable { reason } => write!(f, "task board is unreadable: {reason}"),
+        }
+    }
 }
 
 /// Complete, repository-scoped data for one selected board task. This is a
@@ -1265,6 +1318,46 @@ pub fn board_existing(repo_key: &str) -> crate::Result<BoardWireResult> {
     }
 }
 
+fn create_task_request(
+    repo_key: &str,
+    new_task: ctx_traits_core::task::provider::NewTask,
+) -> Request {
+    Request::CreateTask {
+        id: next_id("create-task"),
+        repo_key: repo_key.to_owned(),
+        new_task,
+    }
+}
+
+fn decode_create_task(result: ResponseResult) -> crate::Result<CreateTaskWireResult> {
+    match result {
+        ResponseResult::CreateTask(result) => Ok(result),
+        _ => Err(protocol_error("unexpected create-task response")),
+    }
+}
+
+/// Create one task through the repository-scoped center writer.
+pub fn create_task(
+    repo_key: &str,
+    new_task: ctx_traits_core::task::provider::NewTask,
+) -> crate::Result<CreateTaskWireResult> {
+    decode_create_task(request_with_timeout(
+        create_task_request(repo_key, new_task),
+        ACTION_TIMEOUT,
+    )?)
+}
+
+/// Same as [`create_task`], but never starts a center from this executable.
+pub fn create_task_existing(
+    repo_key: &str,
+    new_task: ctx_traits_core::task::provider::NewTask,
+) -> crate::Result<CreateTaskWireResult> {
+    decode_create_task(request_existing(
+        create_task_request(repo_key, new_task),
+        ACTION_TIMEOUT,
+    )?)
+}
+
 /// Resolve one selected task through an already-serving center. Unlike the
 /// compact board answer this may reconstruct its one chosen claiming run, so
 /// it uses the action timeout rather than the stream timeout.
@@ -1438,6 +1531,10 @@ pub enum CenterEvent {
     SnapshotRow(Box<CenterPublicRow>),
     SnapshotEnd,
     Delta(CenterDelta),
+    BoardChanged {
+        repo_key: String,
+        board: Box<BoardWireResult>,
+    },
 }
 
 pub struct CenterSubscription {
@@ -1546,6 +1643,9 @@ fn subscribe_on(
                 WireMessage::SnapshotRow { row } => Some(CenterEvent::SnapshotRow(row)),
                 WireMessage::SnapshotEnd => Some(CenterEvent::SnapshotEnd),
                 WireMessage::Delta { delta } => Some(CenterEvent::Delta(delta)),
+                WireMessage::BoardChanged { repo_key, board } => {
+                    Some(CenterEvent::BoardChanged { repo_key, board })
+                }
                 _ => None,
             };
             let Some(event) = event else { return };
@@ -1929,6 +2029,10 @@ struct CenterModel {
     // using `discover`, which is unaffected by this field. `run_server_at`'s
     // accept loop is the only driver of `warm_step`/`drain_warm_queue`.
     warm: Option<WarmScan>,
+    /// Last board answer sent for each repository. This only deduplicates
+    /// notifications; board reads remain fresh worker-side operations.
+    published_boards: HashMap<String, (Option<String>, crate::task_files::BoardPresence)>,
+    board_fingerprints: HashMap<String, crate::task_files::BoardFingerprint>,
 }
 
 /// State for one enumerate-then-drain-then-retain scan, spread across many
@@ -2003,6 +2107,10 @@ struct Subscriber {
 #[derive(Debug)]
 enum Outbound {
     Delta(CenterDelta),
+    BoardChanged {
+        repo_key: String,
+        board: Box<BoardWireResult>,
+    },
     SnapshotStart(String),
     SnapshotRow(Box<CenterPublicRow>),
     SnapshotEnd,
@@ -2166,6 +2274,8 @@ impl CenterModel {
             uncertain: false,
             pending_starts: HashMap::new(),
             warm: None,
+            published_boards: HashMap::new(),
+            board_fingerprints: HashMap::new(),
         })
     }
 
@@ -3038,6 +3148,35 @@ impl CenterModel {
         });
     }
 
+    fn publish_board(&mut self, repo_key: String, board: Box<BoardWireResult>) {
+        let identity = (
+            board.resolution.digest.clone(),
+            board.resolution.presence.clone(),
+        );
+        if self.published_boards.get(&repo_key) == Some(&identity) {
+            return;
+        }
+        self.published_boards.insert(repo_key.clone(), identity);
+        self.subscribers.retain(|_, subscriber| {
+            if !subscriber
+                .repo_key
+                .as_deref()
+                .is_none_or(|scope| scope == repo_key)
+            {
+                return true;
+            }
+            // Board answers do not mutate the run-row snapshot, so they may
+            // bypass its SnapshotEnd ordering rule.
+            subscriber
+                .outbound
+                .try_send(Outbound::BoardChanged {
+                    repo_key: repo_key.clone(),
+                    board: board.clone(),
+                })
+                .is_ok()
+        });
+    }
+
     fn refresh_liveness(
         &mut self,
         paths: &CenterPaths,
@@ -3482,6 +3621,7 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
     model.begin_scan(&paths)?;
     let mut last_work = Instant::now();
     let mut last_scan = Instant::now();
+    let mut last_board_scan = Instant::now();
     // Connection workers own every potentially slow socket operation. Jobs are
     // executed here, on the sole owner of both the model and SQLite handle.
     let (jobs, job_receiver) = mpsc::sync_channel::<ModelCommand>(MODEL_QUEUE);
@@ -3664,6 +3804,9 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                         });
                     let _ = reply.send(Ok(row));
                 }
+                ModelCommand::PublishBoard { repo_key, board } => {
+                    model.publish_board(repo_key, board);
+                }
             }
             last_work = Instant::now();
         }
@@ -3680,6 +3823,10 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             if !model.is_warming() {
                 last_scan = Instant::now();
             }
+        }
+        if last_board_scan.elapsed() >= scan_interval {
+            scan_subscribed_boards(&mut model, &jobs, &board_instants);
+            last_board_scan = Instant::now();
         }
         if last_work.elapsed() >= idle {
             prune_pending_starts(&mut model);
@@ -3698,6 +3845,88 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
             last_work = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn scan_subscribed_boards(
+    model: &mut CenterModel,
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    board_instants: &Arc<
+        Mutex<
+            HashMap<
+                String,
+                (
+                    Option<String>,
+                    crate::task_files::BoardPresence,
+                    ctx_traits_core::task::provider::SyncReport,
+                    u64,
+                ),
+            >,
+        >,
+    >,
+) {
+    let repo_keys: HashSet<String> = model
+        .subscribers
+        .values()
+        .filter_map(|subscriber| subscriber.repo_key.clone())
+        .collect();
+    for repo_key in repo_keys {
+        let mut roots: Vec<_> = model
+            .rows
+            .values()
+            .filter(|row| row.repo_key == repo_key && !row.repo_path.is_empty())
+            .map(|row| Utf8PathBuf::from(row.repo_path.clone()))
+            .collect();
+        roots.sort();
+        roots.dedup();
+        let [root] = roots.as_slice() else { continue };
+        let fingerprint =
+            match crate::task_files::board_fingerprint(&crate::task_files::repo_board_dir(root)) {
+                Ok(fingerprint) => fingerprint,
+                Err(_) => continue,
+            };
+        let changed = model
+            .board_fingerprints
+            .get(&repo_key)
+            .is_some_and(|previous| previous != &fingerprint);
+        model
+            .board_fingerprints
+            .insert(repo_key.clone(), fingerprint);
+        if !changed {
+            continue;
+        }
+        let runs = model
+            .rows
+            .values()
+            .filter(|row| row.repo_key == repo_key)
+            .filter_map(|row| {
+                row.summary.task_key.clone().map(|task_key| {
+                    ctx_traits_core::task::provider::BoardRun {
+                        run_id: row.summary.run_id.clone(),
+                        repo_key: Some(row.repo_key.clone()),
+                        task_key,
+                        live: row.live,
+                        awaiting_owner: matches!(
+                            row.summary.status,
+                            ctx_traits_core::procedure::session::Status::AwaitingInput
+                                | ctx_traits_core::procedure::session::Status::WaitingOnHuman
+                        ),
+                        not_merged: row.summary.landing.as_deref() == Some("not-merged"),
+                    }
+                })
+            })
+            .collect();
+        let jobs = jobs.clone();
+        let instants = board_instants.clone();
+        let root = root.clone();
+        std::thread::spawn(move || {
+            if let Ok(board) = assemble_board(repo_key.clone(), root, runs, &instants) {
+                let _ = jobs.try_send(ModelCommand::PublishBoard {
+                    repo_key,
+                    board: Box::new(board),
+                });
+            }
+        });
     }
 }
 
@@ -3740,6 +3969,10 @@ enum ModelCommand {
         run_id: String,
         repo_key: String,
         reply: mpsc::SyncSender<crate::Result<Option<ResolvedRow>>>,
+    },
+    PublishBoard {
+        repo_key: String,
+        board: Box<BoardWireResult>,
     },
 }
 
@@ -3887,6 +4120,10 @@ fn serve_connection_worker_with_board_instants(
                         Outbound::Delta(delta) => {
                             write_line(&mut writer_stream, &WireMessage::Delta { delta })
                         }
+                        Outbound::BoardChanged { repo_key, board } => write_line(
+                            &mut writer_stream,
+                            &WireMessage::BoardChanged { repo_key, board },
+                        ),
                         Outbound::SnapshotStart(id) => {
                             write_line(&mut writer_stream, &WireMessage::SnapshotStart { id })
                         }
@@ -4013,6 +4250,19 @@ fn serve_connection_worker_with_board_instants(
                 .unwrap_or_else(|error| ResponseResult::Error {
                     message: error.to_string(),
                 });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
+        if let Request::CreateTask {
+            repo_key, new_task, ..
+        } = request
+        {
+            let result =
+                run_create_task_request(&jobs, &paths, repo_key, new_task, &board_instants)
+                    .map(ResponseResult::CreateTask)
+                    .unwrap_or_else(|error| ResponseResult::Error {
+                        message: error.to_string(),
+                    });
             let _ = response(&mut stream, id, result);
             return;
         }
@@ -4169,8 +4419,6 @@ fn run_claimed_task_request(
     session_id: String,
     repo_key: Option<String>,
 ) -> crate::Result<ClaimedTaskWireResult> {
-    use ctx_traits_core::task::provider::TaskProvider;
-
     match resolve_row(jobs, session_id, repo_key)? {
         RowResolution::Missing => Ok(ClaimedTaskWireResult::Missing),
         RowResolution::Ambiguous(ids) => Ok(ClaimedTaskWireResult::Ambiguous(ids)),
@@ -4260,6 +4508,25 @@ fn run_board_request(
         }
     };
     let (root, runs) = root;
+    assemble_board(repo_key, root, runs, board_instants)
+}
+
+fn assemble_board(
+    repo_key: String,
+    root: Utf8PathBuf,
+    runs: Vec<ctx_traits_core::task::provider::BoardRun>,
+    board_instants: &Mutex<
+        HashMap<
+            String,
+            (
+                Option<String>,
+                crate::task_files::BoardPresence,
+                ctx_traits_core::task::provider::SyncReport,
+                u64,
+            ),
+        >,
+    >,
+) -> crate::Result<BoardWireResult> {
     let mut resolution =
         crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root))
             .resolve_board()
@@ -4326,6 +4593,150 @@ fn run_board_request(
         joined_runs,
         sections,
     })
+}
+
+fn resolve_repository(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    repo_key: String,
+) -> crate::Result<RepositoryResolution> {
+    let (reply, receiver) = mpsc::sync_channel(1);
+    jobs.try_send(ModelCommand::ResolveRepository { repo_key, reply })
+        .map_err(|_| protocol_error("model queue unavailable"))?;
+    receiver
+        .recv_timeout(STREAM_TIMEOUT)
+        .map_err(|_| protocol_error("repository resolution timed out"))?
+}
+
+fn create_lock_path(paths: &CenterPaths, repo_key: &str) -> Utf8PathBuf {
+    let safe: String = repo_key
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    paths.index.with_file_name(format!("create-{}.lock", safe))
+}
+
+fn wait_for_create_gate() -> crate::Result<()> {
+    let Ok(gate) = std::env::var("CTX_CENTER_CREATE_GATE") else {
+        return Ok(());
+    };
+    let gate = Utf8PathBuf::from(gate);
+    let waiting = Utf8PathBuf::from(format!("{}.waiting", gate));
+    std::fs::write(waiting.as_std_path(), b"waiting")
+        .map_err(|source| io_error(&waiting, source))?;
+    let deadline = Instant::now() + STREAM_TIMEOUT;
+    while !gate.exists() {
+        if Instant::now() >= deadline {
+            return Err(protocol_error("create gate timed out"));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
+}
+
+fn run_create_task_request(
+    jobs: &mpsc::SyncSender<ModelCommand>,
+    paths: &CenterPaths,
+    repo_key: String,
+    new_task: ctx_traits_core::task::provider::NewTask,
+    board_instants: &Mutex<
+        HashMap<
+            String,
+            (
+                Option<String>,
+                crate::task_files::BoardPresence,
+                ctx_traits_core::task::provider::SyncReport,
+                u64,
+            ),
+        >,
+    >,
+) -> crate::Result<CreateTaskWireResult> {
+    use ctx_traits_core::task::provider::{TaskProviderMut, WriteError};
+
+    let (root, runs) = match resolve_repository(jobs, repo_key.clone())? {
+        RepositoryResolution::One { root, runs } => (root, runs),
+        RepositoryResolution::Missing => {
+            return Err(protocol_error("repository is not known to center"));
+        }
+        RepositoryResolution::Ambiguous => {
+            return Err(protocol_error("repository has ambiguous roots"));
+        }
+    };
+    let board_dir = crate::task_files::repo_board_dir(&root);
+    let read_board = crate::task_files::FilesTaskBoard::open_read(board_dir.clone());
+    match read_board.resolve_board() {
+        Ok(resolution) => match resolution.presence {
+            crate::task_files::BoardPresence::Absent => {
+                return Ok(CreateTaskWireResult::BoardAbsent);
+            }
+            crate::task_files::BoardPresence::Unreadable { reason } => {
+                return Ok(CreateTaskWireResult::BoardUnreadable { reason });
+            }
+            crate::task_files::BoardPresence::Empty | crate::task_files::BoardPresence::Loaded => {}
+        },
+        Err(error) => {
+            return Ok(CreateTaskWireResult::BoardUnreadable {
+                reason: error.to_string(),
+            });
+        }
+    }
+    let lock_path = create_lock_path(paths, &repo_key);
+    let lock = crate::file_lock::open_lock_file_no_follow(&lock_path)
+        .map_err(|source| io_error(&lock_path, source))?;
+    if !crate::file_lock::try_lock_exclusive(&lock)
+        .map_err(|source| io_error(&lock_path, source))?
+    {
+        return Ok(CreateTaskWireResult::Occupied);
+    }
+    // The board may have been removed after the optimistic presence check;
+    // recheck under the writer lock so `create_dir_all` can never recreate it.
+    match read_board.resolve_board() {
+        Ok(resolution) => match resolution.presence {
+            crate::task_files::BoardPresence::Absent => {
+                return Ok(CreateTaskWireResult::BoardAbsent);
+            }
+            crate::task_files::BoardPresence::Unreadable { reason } => {
+                return Ok(CreateTaskWireResult::BoardUnreadable { reason });
+            }
+            crate::task_files::BoardPresence::Empty | crate::task_files::BoardPresence::Loaded => {}
+        },
+        Err(error) => {
+            return Ok(CreateTaskWireResult::BoardUnreadable {
+                reason: error.to_string(),
+            });
+        }
+    }
+    wait_for_create_gate()?;
+    let provider = crate::task_files::FilesTaskBoard::open_read_write(board_dir);
+    let created = match provider.create(new_task) {
+        Ok(summary) => summary,
+        Err(WriteError::InvalidField { field, reason }) => {
+            return Ok(CreateTaskWireResult::InvalidField {
+                field: field.to_string(),
+                reason,
+            });
+        }
+        Err(WriteError::NotFound(parent)) => {
+            return Ok(CreateTaskWireResult::UnknownParent { parent });
+        }
+        Err(WriteError::AmbiguousKey(parent)) => {
+            return Ok(CreateTaskWireResult::AmbiguousParent { parent });
+        }
+        Err(error) => return Err(protocol_error(format!("create task: {error}"))),
+    };
+    drop(lock);
+    let board = assemble_board(repo_key.clone(), root, runs, board_instants)?;
+    jobs.try_send(ModelCommand::PublishBoard {
+        repo_key,
+        board: Box::new(board),
+    })
+    .map_err(|_| protocol_error("model queue unavailable"))?;
+    Ok(CreateTaskWireResult::Created(created))
 }
 
 fn resolve_run_id(
@@ -4868,6 +5279,7 @@ fn handle_request(
         | Request::Control { .. }
         | Request::ClaimedTask { .. }
         | Request::Board { .. }
+        | Request::CreateTask { .. }
         | Request::TaskDetail { .. }
         | Request::Library { .. }
         | Request::LibraryDetail { .. } => Err(protocol_error(
@@ -5720,6 +6132,8 @@ mod tests {
                     live: false,
                     holder: None,
                     task_key: row.summary.task_key.clone(),
+                    run_id: row.summary.run_id.clone(),
+                    trait_id: row.summary.trait_id.clone(),
                 })),
                 ControlWireResult::NotLive
             ));
@@ -5746,6 +6160,8 @@ mod tests {
                 live: true,
                 holder: None,
                 task_key: row.summary.task_key.clone(),
+                run_id: row.summary.run_id.clone(),
+                trait_id: row.summary.trait_id.clone(),
             })),
             ControlWireResult::Unverifiable
         ));
@@ -5767,6 +6183,8 @@ mod tests {
                 live: true,
                 holder: row.live_holder.clone(),
                 task_key: row.summary.task_key.clone(),
+                run_id: row.summary.run_id.clone(),
+                trait_id: row.summary.trait_id.clone(),
             })),
             ControlWireResult::Unverifiable
         ));

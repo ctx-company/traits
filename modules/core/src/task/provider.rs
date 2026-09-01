@@ -313,7 +313,8 @@ pub struct DuplicateKey {
 }
 
 /// Fields a `create` call supplies; the provider assigns the key.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
 pub struct NewTask {
     pub title: String,
     pub content: String,
