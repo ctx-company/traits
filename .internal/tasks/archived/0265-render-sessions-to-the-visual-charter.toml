@@ -3,7 +3,7 @@ key = "0265"
 title = "Render Sessions to the visual charter"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Work item 0 of the visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) is complete. `tokens.md`, `grammar.md`, `screens/{sessions,tasks,traits,config,merges}.md` and `reference/<screen>.{png,html}` are committed and git-tracked under `.internal/docs/design/`. They are normative implementation input, not a debt: nothing in this charter owes work item 0 any code, and no task here re-opens pencil. Their acceptance clause — a worker implements any v1 screen from those files alone — is a statement about the artifacts, which already hold.
 
 What this charter owes is the first screen. `0256` brings the window, the center subscription and the read-only run list; `0257` adds the selected run's authoritative reconstruction; `0258` adds spawn/interrupt/pause through the center's verbs. All three were authored 2026-08-25, before the visual charter existed, and none of them names `tokens.md`, `grammar.md` or `screens/sessions.md`. This charter renders Sessions to that specification on top of their plumbing, and it does not re-author them: two authorities on one slice is a defect.
@@ -48,8 +48,8 @@ The landing block's task-close line is `TaskDocument.auto_close` over the `[task
 ### Correction 5 — every child of this charter is currently an unloadable board document
 
 All fifteen children (and this file, until this rewrite) store `status = "draft"`. `TaskStatus` is the closed `ready|done|cancelled` enum, so `ctx_traits_core::task::parse` rejects the document and `FilesTaskBoard::load` records a parse failure and skips it (`modules/io/src/task_files.rs:189-249`). Two consequences worth stating once: the board sees `0265` as a *childless* leaf, so its derived status comes from its own `depends-on` rather than from child closure (`graph.rs:129-172`); and this parent's status word is therefore not evidence about its children. Each child is activated by its own architect pass before it is dispatched, and this charter closes on the fifteen children's own closures, never on a derived word.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -110,8 +110,8 @@ After `0265.15` lands, and before this charter is called done, one review pass a
 - Confirm no screen re-derives a token, colour role, state word, glyph, dot rule, chrome element or placeholder string that a Sessions cut already extracted.
 - Exercise the boundaries the leaves depend on: fit and overflow; missing and malformed sidecar evidence; an accepted and a rejected snapshot projection; center loss and recovery; pause observed through a second subscriber; a finished run reopened after the window closes.
 - Run the desktop lane command `0256.1` established, then the workspace gates below.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **`grammar.md` and `screens/sessions.md` are the specification; the export is measurement.** Copying a value out of `reference/sessions.html` is right for geometry and wrong for content. Correction 1 lists the four places that already disagree; a fifth found during implementation is resolved the same way and reported.
@@ -139,18 +139,23 @@ Exclusions, restated so they are checkable by reading the diff: no light-theme v
 Children run in the five stages listed in `scope`; within a stage, the encoded edges are the only ordering that binds. When the last child lands, run the closing pass in this order — leaf-by-leaf review against `screens/sessions.md`, then the literal comparison against `reference/sessions.html`, then the boundary exercises, then the desktop lane command, then `just test-full`, then the root-resolution check — so a rendering defect surfaces next to the leaf that owns it rather than inside a long gate.
 
 Permit at most one targeted repair-and-rerun round at this level. A round repairs one named defect in the child that owns it, then reruns the failed step and every later step in that order. If a second round would be needed, stop and report the failing command or the failing leaf with its evidence rather than iterating; that is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
-depends-on = ["0256", "0257", "0258"]
+depends-on = [
+    "0256",
+    "0257",
+    "0258",
+]
 
 [[checks]]
 name = "workspace landing gate remains green and gpui-free in cost"
 command = "just test-full"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
-expect = "gpui absent from root resolution and lockfile"
+command = """m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc"""
 timeout-ms = 300000
+expect = "gpui absent from root resolution and lockfile"

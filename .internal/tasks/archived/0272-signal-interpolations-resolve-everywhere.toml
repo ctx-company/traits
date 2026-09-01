@@ -1,9 +1,11 @@
 schema-version = "0.2"
 key = "0272"
 title = "Signal interpolations resolve everywhere refs do"
-status = "ready"
+status = "done"
 raised = "2026-08-31"
-content = '''
+closed = "2026-08-31"
+origin = "run run-afb677276c6377080842ff5540e300a158b9253601576fcc0d6d77f0f4a5195a merged as 9f812d3facc3bd163bc8f6501bde3a18215298c5"
+content = """
 The implement trait is unbuildable from source, and has been since
 0253.6 landed: `ctx traits build implement` fails with
 
@@ -79,7 +81,7 @@ validation (`trait/procedure/command_contract.rs:13-133`) permits only
 Slot/Port/Resource/Setting, so a widened parser turns today's inert
 literal braces into a hard unsupported-kind error unless it too admits
 Signal as a runtime-fact input.
-'''
+"""
 scope = '''
 ## Goals and approach are separate
 
@@ -203,7 +205,7 @@ command and its output rather than iterating further.
   `packages/cdk`.
 - 0273's implement-source narration work.
 '''
-validation = '''
+validation = """
 ## Approach — guidance, not a boundary
 
 Suggested edit order, each point grounded in code read during
@@ -264,7 +266,7 @@ summary.
    not noise to discard.
 
 6. **Gates and review** per the binding refinement bound in scope.
-'''
+"""
 
 [relations]
 depends-on = ["0262"]
@@ -277,22 +279,56 @@ timeout-ms = 1800000
 [[checks]]
 name = "core reference grammar accepts dotted signal refs"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core reference::tests"
-expect = "test result: ok\\. [1-9]"
 timeout-ms = 1200000
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "signal payload persistence, rendering, and recency proofs pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_signal_payloads"
-expect = "test result: ok\\. [1-9]"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "end-to-end summons question carries the signal payload"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
-expect = "test result: ok\\. [1-9]"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9]'
 
 [[checks]]
 name = "committed basic canonical carries the needs-owner interpolations"
 command = '''grep -q 'signal:needs-owner\.question' .ctx/traits/authored/implement/generated/basic/index.toml && grep -q 'signal:needs-owner\.reason' .ctx/traits/authored/implement/generated/basic/index.toml && echo "needs-owner interpolations present in regenerated basic canonical"'''
 expect = "needs-owner interpolations present"
+
+[closure]
+mode = "merge"
+commit = "9f812d3facc3bd163bc8f6501bde3a18215298c5"
+
+[[closure.checks]]
+name = "per-round workspace gate remains green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"
+
+[[closure.checks]]
+name = "core reference grammar accepts dotted signal refs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core reference::tests"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "signal payload persistence, rendering, and recency proofs pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_signal_payloads"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "end-to-end summons question carries the signal payload"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "committed basic canonical carries the needs-owner interpolations"
+command = '''grep -q 'signal:needs-owner\.question' .ctx/traits/authored/implement/generated/basic/index.toml && grep -q 'signal:needs-owner\.reason' .ctx/traits/authored/implement/generated/basic/index.toml && echo "needs-owner interpolations present in regenerated basic canonical"'''
+outcome = "passed"
+detail = "exit 0, expect matched"
