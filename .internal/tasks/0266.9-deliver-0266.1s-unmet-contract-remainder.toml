@@ -1,0 +1,113 @@
+schema-version = "0.2"
+key = "0266.9"
+title = "Deliver 0266.1's unmet contract remainder — shared run-state functions, board edge cases, and the missing proofs"
+status = "ready"
+raised = "2026-09-01"
+content = """
+Owner order 2026-09-01. Task 0266.1 closed done under the three-round
+review cap with fifteen of its reviewer's twenty-six contract cells
+still open. Three of those cells (the `BoardChanged` wire event family)
+are now owned by reopened 0266.3's ruling; two (the Tasks board model
+and view) were rebuilt by 0266.2's ruling run. The remaining TEN cells
+belonged to nobody until this task. Every item below traces verbatim to
+a binding goal of 0266.1's approved contract
+(.internal/tasks/archived/0266.1-serve-the-board-and-render-the-tasks-
+sections-and-rows.toml); none is invented. The reviewer's final cell
+list survives in run session da75631e (slot review-verdict-1) as the
+provenance record.
+
+Why they were lost: the cap ended refinement mid-contract, close policy
+`merge` flips a task done regardless of check results, and the missing
+proofs could not fail any check because a check only runs tests that
+already exist. This task converts that silent residue into delivered
+work.
+
+## Owner contract
+
+0266.1's goals 1, 2, 4 and 5 are actually met: run-state derivation has
+one shared home consumed by both faces, a corrupted board is
+distinguishable from an empty one, and every behavior 0266.1 declared
+"Decided by" a test is decided by a test that exists and runs.
+"""
+scope = """
+Goals below are binding (each cites its 0266.1 source goal). Approach
+is the run's own; deviations are reported in the work summary.
+
+## Goals (binding)
+
+1. Shared run-state functions (0266.1 goal 4): move the
+   `AwaitingInput`/`WaitingOnHuman` mapping and the
+   live-then-pending-then-not-merged precedence into shared pure
+   functions, and route `task_session_join`, `task_group`, and the
+   relevant `session_group` decision in dashboard.rs through them,
+   leaving only CLI-type adaptation local. One derivation, two faces —
+   no TUI/GUI drift.
+2. Malformed-board honesty (0266.1 goal 2): track whether any task
+   candidate was encountered independently of whether it parsed, so a
+   board containing only malformed or unreadable task files resolves
+   `Loaded` with findings — never indistinguishable from an empty
+   board.
+3. Draft-status proofs (0266.1 goal 1 Decided-by): io tests that draft
+   create/update stays live and unarchived, `closed_status_marker`
+   does not refuse it, and `status_word` reports `draft`; CLI tests
+   that draft children stay queue-eligible, the update surface accepts
+   `draft`, and status text/tone render; a desktop presentation test
+   that `TaskStatus::Draft` renders the word `draft` with its role.
+4. Section-partition proof (0266.1 goal 5 Decided-by): a mixed-board
+   test whose sections' union equals the open set with empty pairwise
+   intersections, including archived and joined-draft rows.
+5. Board-resolution proofs (0266.1 goal 2 Decided-by): scratch-board
+   tests for the single-traversal load and every presence and finding
+   outcome.
+6. Center board-answer proofs (0266.1 goals 3 and 7 Decided-by):
+   extend `proof_center` with scratch repositories covering answer
+   compactness, presence distinctions, findings, repository anchoring,
+   model-owner isolation, board-event delivery, and
+   event-races-snapshot ordering. The event-delivery and race cases
+   depend on 0266.3's landed `BoardChanged` event (declared in
+   relations).
+7. Desktop integration proofs (0266.1 goals 8-10 Decided-by): using
+   the existing debug-selector/TestAppContext harness — navigation,
+   geometry, data-only content, section membership, and selection
+   invariants.
+8. Existing suites stay green; no behavior change outside goal 1's
+   refactor and goal 2's resolution finding.
+
+## Out of scope
+
+- The `BoardChanged` event itself and center_link staging (0266.3).
+- The Tasks view/model (landed via 0266.2's ruling run).
+- Any new check machinery or close-policy change.
+"""
+validation = """
+## Watch
+
+Goal 1 is a refactor of live logic both faces depend on — byte-stable
+behavior is the bar; the tests of goals 3-7 are the instrument. Do not
+write proofs against committed repo content (frozen-inventory rule):
+scratch fixtures only.
+
+## Done when
+
+1. One shared derivation for run-state mapping/precedence, consumed by
+   dashboard.rs and the desktop, proven by both faces' suites.
+2. A malformed-only board resolves Loaded-with-findings (test).
+3-7. Every listed proof exists and runs in the standard suites.
+Decided by the checks below.
+"""
+
+[relations]
+parent = "0266"
+depends-on = ["0266.3"]
+
+[[checks]]
+name = "core and io suites pass with the new proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core -p ctx-traits-io"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "cli suites including proof_center pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+expect = "test result: ok"
+timeout-ms = 1800000
