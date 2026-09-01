@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0266.2"
 title = "Render the Tasks header and provenance bar"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-cbe48df575e036fc3a817baf7578f5225f89990aeca46ad482f8809a242e3ba7 merged as 8d2940cf18b4b6e491fea55443eb9928ac506131"
 content = """
 ## Owner ruling 2026-09-01 (binding, supersedes conflicting text below)
 
@@ -633,3 +635,7 @@ depends-on = [
     "0265.13",
 ]
 parent = "0266"
+
+[closure]
+mode = "merge"
+commit = "8d2940cf18b4b6e491fea55443eb9928ac506131"
