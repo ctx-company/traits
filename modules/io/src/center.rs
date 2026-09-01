@@ -16,7 +16,7 @@ use std::net::Shutdown;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
@@ -3365,12 +3365,23 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
     // Connection workers own every potentially slow socket operation. Jobs are
     // executed here, on the sole owner of both the model and SQLite handle.
     let (jobs, job_receiver) = mpsc::sync_channel::<ModelCommand>(MODEL_QUEUE);
+    // Board reads happen in connection workers. This memo retains only the
+    // timestamp of an unchanged served answer; it is not a board-data cache.
+    let board_instants = Arc::new(Mutex::new(HashMap::new()));
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
                 let jobs = jobs.clone();
                 let worker_paths = paths.clone();
-                std::thread::spawn(move || serve_connection_worker(stream, jobs, worker_paths));
+                let board_instants = board_instants.clone();
+                std::thread::spawn(move || {
+                    serve_connection_worker_with_board_instants(
+                        stream,
+                        jobs,
+                        worker_paths,
+                        board_instants,
+                    )
+                });
                 last_work = Instant::now();
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -3610,10 +3621,37 @@ fn response(stream: &mut UnixStream, id: String, result: ResponseResult) -> crat
 /// Serve a bounded request stream. All state changes use the existing single
 /// model refresh path (`discover`), so a dropped driver event is repaired by
 /// the periodic scan rather than creating a second interpretation of ledgers.
+#[cfg(test)]
 fn serve_connection_worker(
+    stream: UnixStream,
+    jobs: mpsc::SyncSender<ModelCommand>,
+    paths: CenterPaths,
+) {
+    serve_connection_worker_with_board_instants(
+        stream,
+        jobs,
+        paths,
+        Arc::new(Mutex::new(HashMap::new())),
+    );
+}
+
+fn serve_connection_worker_with_board_instants(
     mut stream: UnixStream,
     jobs: mpsc::SyncSender<ModelCommand>,
     paths: CenterPaths,
+    board_instants: Arc<
+        Mutex<
+            HashMap<
+                String,
+                (
+                    Option<String>,
+                    crate::task_files::BoardPresence,
+                    ctx_traits_core::task::provider::SyncReport,
+                    u64,
+                ),
+            >,
+        >,
+    >,
 ) {
     if serve_handshake(&mut stream).is_err() {
         return;
@@ -3822,7 +3860,7 @@ fn serve_connection_worker(
             return;
         }
         if let Request::Board { repo_key, .. } = request {
-            let result = run_board_request(&jobs, repo_key)
+            let result = run_board_request(&jobs, repo_key, &board_instants)
                 .map(|board| ResponseResult::Board(Box::new(board)))
                 .unwrap_or_else(|error| ResponseResult::Error {
                     message: error.to_string(),
@@ -4019,6 +4057,17 @@ fn run_claimed_task_request(
 fn run_board_request(
     jobs: &mpsc::SyncSender<ModelCommand>,
     repo_key: String,
+    board_instants: &Mutex<
+        HashMap<
+            String,
+            (
+                Option<String>,
+                crate::task_files::BoardPresence,
+                ctx_traits_core::task::provider::SyncReport,
+                u64,
+            ),
+        >,
+    >,
 ) -> crate::Result<BoardWireResult> {
     let (reply, receiver) = mpsc::sync_channel(1);
     jobs.try_send(ModelCommand::ResolveRepository {
@@ -4039,10 +4088,37 @@ fn run_board_request(
         }
     };
     let (root, runs) = root;
-    let resolution =
+    let mut resolution =
         crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root))
             .resolve_board()
             .map_err(|error| protocol_error(format!("board for {root}: {error}")))?;
+    let signature = (
+        resolution.digest.clone(),
+        resolution.presence.clone(),
+        resolution.sync_report.clone(),
+    );
+    if let Ok(mut instants) = board_instants.lock() {
+        if let Some((digest, presence, report, resolved_at)) = instants.get(&repo_key)
+            && (digest.clone(), presence.clone(), report.clone()) == signature
+        {
+            resolution.resolved_at = *resolved_at;
+        } else {
+            // The wire's legacy instant is second-granular. Keep it strictly
+            // advancing even when two distinct answers resolve in one second.
+            if let Some((_, _, _, prior)) = instants.get(&repo_key) {
+                resolution.resolved_at = resolution.resolved_at.max(prior.saturating_add(1));
+            }
+            instants.insert(
+                repo_key.clone(),
+                (
+                    signature.0.clone(),
+                    signature.1.clone(),
+                    signature.2.clone(),
+                    resolution.resolved_at,
+                ),
+            );
+        }
+    }
     let joined_runs = resolution
         .rows
         .iter()

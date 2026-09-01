@@ -123,6 +123,37 @@ pub fn section_of(
     }
 }
 
+/// Counts the open board rows and their served run state. A row contributes at
+/// most once to each count, using the same precedence as [`section_of`].
+pub fn board_summary_counts<'a>(
+    rows: impl IntoIterator<Item = (&'a TaskSummary, Option<BoardSection>, &'a [BoardRun])>,
+) -> (usize, usize, usize, usize) {
+    let mut open = 0;
+    let mut sections = [false; 3];
+    let mut live = 0;
+    let mut waiting = 0;
+    for (summary, section, runs) in rows {
+        let Some(section) = section else { continue };
+        open += 1;
+        sections[match section {
+            BoardSection::InProgress => 0,
+            BoardSection::Ready => 1,
+            BoardSection::Draft => 2,
+        }] = true;
+        match task_state(summary.derived_status, runs) {
+            BoardTaskState::InProgress => live += 1,
+            BoardTaskState::Pending => waiting += 1,
+            BoardTaskState::AwaitingMerge | BoardTaskState::Board(_) => {}
+        }
+    }
+    (
+        open,
+        sections.into_iter().filter(|present| *present).count(),
+        live,
+        waiting,
+    )
+}
+
 /// A task reduced to what a list view needs: identity, title, and both the
 /// stored and derived status (they can differ — a `Ready`-stored task with
 /// an unmet dependency derives to `Blocked`).

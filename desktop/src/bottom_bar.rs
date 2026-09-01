@@ -21,6 +21,7 @@ pub enum ActionTone {
 pub enum BarActionId {
     WatchRaw,
     Pause,
+    NewTask,
 }
 
 /// A right-hand action word. Carrying no bound behaviour is the model's way

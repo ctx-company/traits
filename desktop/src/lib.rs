@@ -1,3 +1,4 @@
+pub mod board;
 pub mod bottom_bar;
 pub mod bottom_bar_view;
 pub mod center_link;

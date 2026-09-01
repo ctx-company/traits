@@ -52,9 +52,25 @@ pub struct BoardRow {
 #[serde(rename_all = "kebab-case")]
 pub struct BoardResolution {
     pub presence: BoardPresence,
+    /// Aggregate identity of the complete readable board. This is absent only
+    /// when no complete board answer exists.
+    pub digest: Option<String>,
     pub rows: Vec<BoardRow>,
     pub sync_report: SyncReport,
     pub resolved_at: u64,
+}
+
+/// Stable aggregate identity for one loaded board. `BTreeMap` supplies the
+/// canonical key order; separators make adjacent key/digest pairs unambiguous.
+pub fn board_digest(digests: &BTreeMap<String, String>) -> Digest {
+    let mut source = Vec::new();
+    for (key, digest) in digests {
+        source.extend_from_slice(key.as_bytes());
+        source.push(b'\n');
+        source.extend_from_slice(digest.as_bytes());
+        source.push(b'\n');
+    }
+    Digest::from_bytes(&source)
 }
 
 /// The board-config file name, reserved among a board directory's direct
@@ -320,6 +336,11 @@ impl Board {
 
     fn resolve_board(&self) -> Result<BoardResolution, ProviderError> {
         let loaded = self.load_with_presence(true)?;
+        let digest = matches!(
+            loaded.presence,
+            BoardPresence::Empty | BoardPresence::Loaded
+        )
+        .then(|| board_digest(&loaded.digests).as_str().to_string());
         let duplicate_keys = loaded
             .locations
             .iter()
@@ -352,6 +373,7 @@ impl Board {
             .unwrap_or_default();
         Ok(BoardResolution {
             presence: loaded.presence,
+            digest,
             rows,
             sync_report: SyncReport {
                 dangling_edges: graph::dangling_edges(&loaded.documents),
@@ -998,6 +1020,20 @@ mod tests {
 
     const TASK_0001: &str =
         "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"First\"\nstatus = \"ready\"\n";
+
+    #[test]
+    fn board_digest_is_order_independent_and_changes_with_a_document() {
+        let mut first = BTreeMap::new();
+        first.insert("0002".to_string(), "sha256:two".to_string());
+        first.insert("0001".to_string(), "sha256:one".to_string());
+        let mut second = BTreeMap::new();
+        second.insert("0001".to_string(), "sha256:one".to_string());
+        second.insert("0002".to_string(), "sha256:two".to_string());
+        assert_eq!(board_digest(&first), board_digest(&second));
+        second.insert("0002".to_string(), "sha256:changed".to_string());
+        assert_ne!(board_digest(&first), board_digest(&second));
+        assert_eq!(board_digest(&BTreeMap::new()), Digest::from_bytes(&[]));
+    }
 
     #[test]
     fn resolve_board_distinguishes_absent_empty_and_loaded_in_one_projection() {

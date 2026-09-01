@@ -52,6 +52,16 @@ pub fn sessions_summary(description: Option<&str>, counter: Option<&str>) -> Str
     }
 }
 
+/// Narration around the served Tasks-board counts. The numbers themselves are
+/// supplied by the board projection, never inferred by a view.
+pub fn board_summary(open: usize, states: usize, live: usize, waiting: usize) -> String {
+    format!(
+        "{open} {} across {states} {} — {live} live, {waiting} waiting",
+        if open == 1 { "open task" } else { "open tasks" },
+        if states == 1 { "state" } else { "states" },
+    )
+}
+
 /// `grammar.md:98` sets this value; the center serves no owner identity
 /// today, so it resolves here rather than as a literal at the rail's call
 /// site. A plain `&str`, not a [`Placeholder`]: that struct is documented

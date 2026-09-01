@@ -8,6 +8,7 @@ use gpui::{
 
 use std::collections::HashMap;
 
+use crate::board::{self, BoardState};
 use crate::bottom_bar;
 use crate::bottom_bar_view;
 use crate::center_link::{self, LinkUpdate};
@@ -349,6 +350,10 @@ pub struct Shell {
     face: CenterFace,
     detail: RunDetail,
     detail_task: Option<gpui::Task<()>>,
+    board: BoardState,
+    board_repo: Option<(String, String)>,
+    board_task: Option<gpui::Task<()>>,
+    board_generation: u64,
     spawn_form: SpawnForm,
     spawn_task: Option<gpui::Task<()>>,
     row_controls: RowControls,
@@ -426,6 +431,10 @@ impl Shell {
             face: CenterFace::new(RepoScope::All),
             detail: RunDetail::default(),
             detail_task: None,
+            board: BoardState::Failed("select a repository to view its tasks".to_string()),
+            board_repo: None,
+            board_task: None,
+            board_generation: 0,
             spawn_form: SpawnForm::default(),
             spawn_task: None,
             row_controls: RowControls::default(),
@@ -436,7 +445,60 @@ impl Shell {
 
     fn switch_screen(&mut self, screen: Screen, cx: &mut Context<Self>) {
         self.screen = screen;
+        if screen == Screen::Tasks {
+            self.load_board(cx);
+        }
         cx.notify();
+    }
+
+    /// Ask the existing center for the selected repository's served board.
+    /// The UI supplies neither a path nor a filesystem fallback.
+    fn load_board(&mut self, cx: &mut Context<Self>) {
+        let repo_key = self
+            .detail
+            .repo_key()
+            .map(str::to_owned)
+            .or_else(|| self.face.rows().first().map(|row| row.repo_key.clone()));
+        let Some(repo_key) = repo_key else {
+            self.board = BoardState::Failed("select a repository to view its tasks".to_string());
+            self.board_repo = None;
+            return;
+        };
+        let repo_path = self
+            .face
+            .rows()
+            .iter()
+            .find(|row| row.repo_key == repo_key)
+            .map(|row| row.repo_path.clone());
+        let Some(repo_path) = repo_path else {
+            self.board = BoardState::Failed("repository path is unavailable".to_string());
+            self.board_repo = None;
+            return;
+        };
+        self.board_generation += 1;
+        let generation = self.board_generation;
+        self.board = BoardState::Loading;
+        self.board_repo = Some((repo_key.clone(), repo_path));
+        self.board_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    ctx_traits_io::center::board_existing(&repo_key)
+                        .map_err(|error| error.to_string())
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.board_generation == generation {
+                    shell.board = match result {
+                        Ok(answer) => BoardState::Accepted {
+                            answer,
+                            stale: None,
+                        },
+                        Err(reason) => BoardState::Failed(reason),
+                    };
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     /// Exposed so the scoped view is exercisable and testable ahead of any UI
@@ -952,24 +1014,113 @@ impl Render for Shell {
             body = body.child(preview);
         }
         if self.screen == Screen::Tasks {
-            let section = |label: &'static str| {
-                div()
-                    .font_family(tokens::FONT_MONO)
-                    .text_size(tokens::SIZE_11)
-                    .text_color(rgb(tokens::TEXT_MUTED))
-                    .child(format!("{label} 0"))
+            let (title, summary) = match (&self.board, &self.board_repo) {
+                (BoardState::Accepted { answer, .. }, Some((repo_key, repo_path))) => {
+                    let header = board::tasks_header(answer, repo_key, repo_path);
+                    (header.title, header.summary)
+                }
+                (BoardState::Loading, _) => ("tasks".to_string(), "loading board".to_string()),
+                (BoardState::Failed(reason), _) => {
+                    ("tasks unavailable".to_string(), reason.clone())
+                }
+                (BoardState::Accepted { .. }, None) => (
+                    "tasks unavailable".to_string(),
+                    "repository scope is unavailable".to_string(),
+                ),
             };
-            body = div()
+            let mut tasks = div()
                 .debug_selector(|| "tasks-screen".to_string())
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_h_0()
                 .p(tokens::MAIN_PANE_PAD_TOP)
-                .gap(tokens::LIST_SECTION_GAP)
-                .child(section("In progress"))
-                .child(section("Ready"))
-                .child(section("Draft"));
+                .gap(tokens::MAIN_PANE_GAP)
+                .child(crate::screen_header_view::screen_header_element(
+                    &title, &summary,
+                ));
+            if let BoardState::Accepted { answer, .. } = &self.board {
+                for (section, label) in [
+                    (
+                        ctx_traits_core::task::provider::BoardSection::InProgress,
+                        "In progress",
+                    ),
+                    (
+                        ctx_traits_core::task::provider::BoardSection::Ready,
+                        "Ready",
+                    ),
+                    (
+                        ctx_traits_core::task::provider::BoardSection::Draft,
+                        "Draft",
+                    ),
+                ] {
+                    let rows: Vec<_> = answer
+                        .resolution
+                        .rows
+                        .iter()
+                        .filter(|row| {
+                            answer.sections.get(&row.summary.key).copied().flatten()
+                                == Some(section)
+                        })
+                        .collect();
+                    let mut group = div().flex().flex_col().gap(tokens::LIST_SECTION_GAP).child(
+                        div()
+                            .font_family(tokens::FONT_MONO)
+                            .text_size(tokens::SIZE_11)
+                            .text_color(rgb(tokens::TEXT_MUTED))
+                            .child(format!("{label} {}", rows.len())),
+                    );
+                    for row in rows {
+                        group = group.child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
+                                .child(
+                                    div()
+                                        .w(tokens::LIST_ROW_DOT_SIZE)
+                                        .h(tokens::LIST_ROW_DOT_SIZE)
+                                        .rounded_full()
+                                        .bg(rgb(tokens::DOT_IDLE)),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(tokens::FRAME_ROW_TEXT_GAP)
+                                        .child(
+                                            div()
+                                                .font_family(tokens::FONT_SANS)
+                                                .text_size(tokens::SIZE_12_5)
+                                                .text_color(rgb(tokens::TEXT))
+                                                .child(row.summary.title.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .font_family(tokens::FONT_SANS)
+                                                .text_size(tokens::SIZE_11)
+                                                .text_color(rgb(tokens::TEXT_SECONDARY))
+                                                .child(row.short_description.clone()),
+                                        ),
+                                ),
+                        );
+                    }
+                    tasks = tasks.child(group);
+                }
+            }
+            tasks = tasks.child(bottom_bar_view::bar_element(
+                &board::tasks_bar(&self.board),
+                None,
+            ));
+            body = div()
+                .debug_selector(|| "tasks-screen".to_string())
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(rail_view::rail_element(
+                    &self.face.rail(self.detail.repo_key()),
+                ))
+                .child(tasks);
         }
         if self.screen == Screen::Traits {
             body = div()
