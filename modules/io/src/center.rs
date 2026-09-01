@@ -337,6 +337,12 @@ pub enum TaskDetailWireResult {
     Resolved {
         summary: ctx_traits_core::task::provider::TaskSummary,
         content: String,
+        #[serde(default)]
+        scope: String,
+        #[serde(default)]
+        validation: String,
+        #[serde(default)]
+        open_steps: Vec<ctx_traits_core::task::Step>,
         state: String,
         current_activity: bool,
         #[serde(default)]
@@ -4945,6 +4951,15 @@ fn run_task_detail_request(
     Ok(TaskDetailWireResult::Resolved {
         summary: board_row.summary.clone(),
         content: ctx_traits_core::task::provider::content_lede(&task.document).to_owned(),
+        scope: task.document.scope.clone(),
+        validation: task.document.validation.clone(),
+        open_steps: task
+            .document
+            .steps
+            .iter()
+            .filter(|step| !step.done)
+            .cloned()
+            .collect(),
         state: ctx_traits_core::task::provider::state_word(state).to_owned(),
         current_activity: ctx_traits_core::task::provider::state_is_current_activity(state),
         raised: task.document.raised.clone(),
