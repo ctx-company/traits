@@ -72,6 +72,15 @@ pub fn role_color(role: StateRole) -> u32 {
     }
 }
 
+/// Task-row state words use the shared role palette, except neutral words are
+/// deliberately less prominent than general body text.
+pub fn task_stack_word_color(role: StateRole) -> u32 {
+    match role {
+        StateRole::Neutral => crate::tokens::TEXT_SECONDARY,
+        _ => role_color(role),
+    }
+}
+
 /// Exhaustive over all seven [`SessionState`] variants, no catch-all arm.
 /// `Cancelled` and `WaitingOnAgent` are judgement calls: rule 1 gives no role
 /// to "terminal but not a failure" or "in flight but not driven", so both

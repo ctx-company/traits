@@ -43,6 +43,10 @@ pub enum BoardPresence {
 pub struct BoardRow {
     pub summary: TaskSummary,
     pub relations: ctx_traits_core::task::graph::ResolvedRelations,
+    /// Declared dependency keys that are absent or not done, in document
+    /// order. Unlike `relations`, this retains dangling declarations.
+    #[serde(default)]
+    pub unmet_dependencies: Vec<String>,
     pub digest: String,
     pub short_description: String,
 }
@@ -362,6 +366,7 @@ impl Board {
                         loaded.archived_keys.contains(key),
                     ),
                     relations: graph::resolved_relations(&loaded.documents, key),
+                    unmet_dependencies: graph::unmet_dependencies(&loaded.documents, key),
                     digest: loaded.digests.get(key).cloned().unwrap_or_default(),
                     short_description: provider::content_short(document).to_string(),
                 }
@@ -1063,6 +1068,34 @@ mod tests {
         assert_eq!(resolution.rows.len(), 1);
         assert_eq!(resolution.rows[0].short_description, "first paragraph");
         assert!(!resolution.rows[0].digest.is_empty());
+    }
+
+    #[test]
+    fn resolve_board_serves_unmet_dependencies_in_declared_order() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-open.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Open\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-done.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Done\"\nstatus = \"done\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0003-dependent.toml",
+            "schema-version = \"0.2\"\nkey = \"0003\"\ntitle = \"Dependent\"\nstatus = \"ready\"\n[relations]\ndepends-on = [\"0001\", \"9999\", \"0002\"]\n",
+        );
+
+        let resolution = FilesTaskBoard::open_read(board_dir).resolve_board().unwrap();
+        let dependent = resolution
+            .rows
+            .iter()
+            .find(|row| row.summary.key == "0003")
+            .unwrap();
+        assert_eq!(dependent.unmet_dependencies, vec!["0001", "9999"]);
     }
 
     #[test]

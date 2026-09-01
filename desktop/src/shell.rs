@@ -1227,6 +1227,32 @@ impl Render for Shell {
                     );
                     for row in rows {
                         let task_key = row.summary.key.clone();
+                        let joined = answer
+                            .joined_runs
+                            .get(&row.summary.key)
+                            .map(Vec::as_slice)
+                            .unwrap_or(&[]);
+                        let stack =
+                            board::task_row_stack(&row.summary, joined, &row.unmet_dependencies);
+                        let mut stack_element = div()
+                            .flex()
+                            .flex_col()
+                            .flex_none()
+                            .items_end()
+                            .gap(tokens::LIST_ROWS_GAP_MIN)
+                            .font_family(tokens::FONT_MONO)
+                            .text_size(tokens::SIZE_10_5)
+                            .child(
+                                div()
+                                    .text_color(rgb(crate::run_row::task_stack_word_color(
+                                        stack.word_role,
+                                    )))
+                                    .child(stack.word),
+                            );
+                        if let Some(meta) = stack.meta {
+                            stack_element = stack_element
+                                .child(div().text_color(rgb(tokens::TEXT_MUTED)).child(meta));
+                        }
                         group = group.child(
                             div()
                                 .id(SharedString::from(format!("task-{task_key}")))
@@ -1237,17 +1263,19 @@ impl Render for Shell {
                                 ))
                                 .flex()
                                 .flex_row()
+                                .justify_between()
                                 .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
                                 .child(
                                     div()
                                         .w(tokens::LIST_ROW_DOT_SIZE)
                                         .h(tokens::LIST_ROW_DOT_SIZE)
                                         .rounded_full()
-                                        .bg(rgb(tokens::DOT_IDLE)),
+                                        .bg(rgb(stack.dot_color)),
                                 )
                                 .child(
                                     div()
                                         .flex()
+                                        .flex_1()
                                         .flex_col()
                                         .gap(tokens::FRAME_ROW_TEXT_GAP)
                                         .child(
@@ -1264,7 +1292,8 @@ impl Render for Shell {
                                                 .text_color(rgb(tokens::TEXT_SECONDARY))
                                                 .child(row.short_description.clone()),
                                         ),
-                                ),
+                                )
+                                .child(stack_element),
                         );
                     }
                     tasks = tasks.child(group);

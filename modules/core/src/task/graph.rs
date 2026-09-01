@@ -133,6 +133,30 @@ pub fn derived_status(documents: &BTreeMap<String, TaskDocument>, key: &str) -> 
     derived_status_inner(documents, key, &mut HashSet::new())
 }
 
+/// The declared dependency keys that currently prevent `key` from being
+/// complete. Missing targets remain in the result so consumers can report a
+/// dangling declaration rather than silently dropping it.
+pub fn unmet_dependencies(
+    documents: &BTreeMap<String, TaskDocument>,
+    key: &str,
+) -> Vec<String> {
+    let Some(document) = documents.get(key) else {
+        return Vec::new();
+    };
+    document
+        .relations
+        .depends_on
+        .iter()
+        .filter(|dependency| {
+            !matches!(
+                documents.get(*dependency).map(|_| derived_status(documents, dependency)),
+                Some(DerivedStatus::Done)
+            )
+        })
+        .cloned()
+        .collect()
+}
+
 fn derived_status_inner(
     documents: &BTreeMap<String, TaskDocument>,
     key: &str,
@@ -496,6 +520,28 @@ mod tests {
         // A dangling dependency is never treated as satisfied: the
         // dependent is blocked, not ready.
         assert_eq!(derived_status(&documents, "0002"), DerivedStatus::Blocked);
+    }
+
+    #[test]
+    fn unmet_dependencies_preserve_declared_order_and_dangling_keys() {
+        let done = doc("0001", Some(TaskStatus::Done));
+        let open = doc("0002", Some(TaskStatus::Ready));
+        let mut dependent = doc("0003", Some(TaskStatus::Ready));
+        dependent.relations.depends_on = vec![
+            "0002".to_string(),
+            "9999".to_string(),
+            "0001".to_string(),
+        ];
+        let mut draft = doc("0004", Some(TaskStatus::Draft));
+        draft.relations.depends_on = vec!["0002".to_string()];
+        let documents = snapshot(vec![done, open, dependent, draft]);
+
+        assert_eq!(
+            unmet_dependencies(&documents, "0003"),
+            vec!["0002", "9999"]
+        );
+        assert_eq!(unmet_dependencies(&documents, "0004"), vec!["0002"]);
+        assert!(unmet_dependencies(&documents, "0001").is_empty());
     }
 
     #[test]

@@ -3,7 +3,7 @@ key = "0266.6"
 title = "Render the task row state stack"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 `0266.1` renders the task row's left half — dot, title, short description — from
 the center-served board answer. This cut renders its right half: the end-aligned
 mono 10.5 stack of state over meta where the row's whole semantic load sits, and
@@ -130,8 +130,8 @@ enums an unknown variant rejects the whole answer before any row exists. What
 binds is the prohibition, not the label: no fallback to `ready`, no fabricated
 run id, no blocker line invented from an incoherent fact, and no path by which
 the dot and the words commit separately.
-'''
-scope = '''
+"""
+scope = """
 ## Done when — binding goals, and what decides each
 
 1. **The stack renders as one total presentation over the served state, with no
@@ -311,8 +311,8 @@ any edit under `.internal/docs/design/**` or to any pencil artifact; any
 design-example literal (`run-ab12ef`, `0243.4`, `implement`, `2 open questions`,
 `0253.5`) hardcoded as data or relied on as fixture authority; and any test that
 depends on or writes this repository's own `.internal/tasks`.
-'''
-validation = '''
+"""
+validation = """
 ## Approach — suggested route, not a boundary
 
 No desktop project, gpui source, desktop lockfile or desktop command exists at
@@ -485,7 +485,8 @@ exact served state, claim and blocker facts this stack consumed, anything that
 had to be added to `0266.1`'s answer and where it landed, the proof mechanics
 used where they differ from the suggested route, and every deviation from this
 approach.
-'''
+"""
+
 [relations]
-parent = "0266"
 depends-on = ["0266.1"]
+parent = "0266"
