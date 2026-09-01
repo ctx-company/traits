@@ -1435,6 +1435,9 @@ pub struct ConfigReport {
     pub runtime: RuntimeConfig,
     pub winners: BTreeMap<String, ConfigWinner>,
     pub tier_warnings: Vec<String>,
+    /// Runtime documents that existed and decoded, in effective layer order.
+    /// This is provenance only; callers must use `runtime` for resolved values.
+    pub documents: Vec<(ConfigLayer, Utf8PathBuf)>,
     /// Non-fatal attempts to override repository-owned requirements. Kept in
     /// the report so presentation layers, rather than this library, decide
     /// how and where to display them.
@@ -3173,6 +3176,12 @@ fn resolve_run_repo_key() -> Option<String> {
     Some(crate::state::repo_key(&canonical))
 }
 
+fn repo_qualifier_key_for_root(root: &Utf8Path) -> Option<String> {
+    let main_root = crate::repository::discover_main_repo_root(root).ok()?;
+    let canonical = crate::state::canonical_repo_root(&main_root).ok()?;
+    Some(crate::state::repo_key(&canonical))
+}
+
 /// The active P451 repo-qualifier key for the current invocation — `None`
 /// for an ad-hoc (non-Git) invocation. `ctx traits doctor --config` reports
 /// this so an operator copying a key from `checkouts.toml` (which also contains
@@ -4033,7 +4042,10 @@ fn resolve_config_report_impl(
     }
     // A matching global `[repo."<key>"]` is a personal qualifier. It sits
     // after repository defaults but before CTX_CONFIG defaults.
-    let active_repo_key = active_repo_qualifier_key();
+    let active_repo_key = match repo_root {
+        Some(root) => repo_qualifier_key_for_root(root),
+        None => active_repo_qualifier_key(),
+    };
     // The carried global paths are a compatibility chain, not alternatives:
     // merge every matching qualifier in legacy-to-current order.
     let personal: Vec<_> = documents
@@ -4149,6 +4161,10 @@ fn resolve_config_report_impl(
         runtime,
         winners,
         tier_warnings,
+        documents: documents
+            .iter()
+            .map(|(layer, path, _)| (*layer, path.clone()))
+            .collect(),
         requirement_conflicts,
     })
 }

@@ -2,6 +2,7 @@ pub mod board;
 pub mod bottom_bar;
 pub mod bottom_bar_view;
 pub mod center_link;
+pub mod config_screen;
 pub mod dashboard;
 pub mod detail;
 pub mod detail_tree;

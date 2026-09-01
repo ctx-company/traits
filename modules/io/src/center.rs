@@ -186,6 +186,10 @@ enum Request {
         id: String,
         repo_key: String,
     },
+    Config {
+        id: String,
+        scope_path: String,
+    },
 }
 
 impl Request {
@@ -210,7 +214,8 @@ impl Request {
             | Self::TaskDetail { id, .. }
             | Self::Library { id, .. }
             | Self::LibraryDetail { id, .. }
-            | Self::LibraryChangedNotice { id, .. } => id,
+            | Self::LibraryChangedNotice { id, .. }
+            | Self::Config { id, .. } => id,
         }
     }
 
@@ -271,6 +276,7 @@ enum ResponseResult {
     TaskDetail(Box<TaskDetailWireResult>),
     Library(Box<LibraryWireResult>),
     LibraryDetail(Box<crate::library::LibraryDetailResolution>),
+    Config(Box<ConfigWireResult>),
     Error { message: String },
 }
 
@@ -283,6 +289,14 @@ pub struct BoardWireResult {
     pub resolution: crate::task_files::BoardResolution,
     pub joined_runs: BTreeMap<String, Vec<ctx_traits_core::task::provider::BoardRun>>,
     pub sections: BTreeMap<String, Option<ctx_traits_core::task::provider::BoardSection>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConfigWireResult {
+    pub repo_key: String,
+    pub repo_path: String,
+    pub resolution: crate::config_view::ConfigResolution,
 }
 
 /// Expected outcomes of a board-scoped task creation. These are data rather
@@ -483,6 +497,9 @@ pub enum CenterDelta {
     LibraryChanged {
         repo_keys: Vec<String>,
     },
+    ConfigChanged {
+        repo_keys: Vec<String>,
+    },
 }
 
 impl CenterDelta {
@@ -494,7 +511,9 @@ impl CenterDelta {
             | Self::RowChanged { row }
             | Self::Ended { row }
             | Self::ActivityLine { row, .. } => row,
-            Self::LibraryChanged { .. } => panic!("library change has no run row"),
+            Self::LibraryChanged { .. } | Self::ConfigChanged { .. } => {
+                panic!("repository change has no run row")
+            }
         }
     }
 
@@ -523,7 +542,9 @@ impl CenterDelta {
                 row.ledger_path.clone()
             }
             Self::ActivityLine { row, .. } => row.ledger_path.clone(),
-            Self::LibraryChanged { .. } => panic!("library change cannot update run rows"),
+            Self::LibraryChanged { .. } | Self::ConfigChanged { .. } => {
+                panic!("repository change cannot update run rows")
+            }
         }
     }
 }
@@ -1406,6 +1427,19 @@ pub fn library_existing(repo_key: &str) -> crate::Result<LibraryWireResult> {
     )? {
         ResponseResult::Library(library) => Ok(*library),
         _ => Err(protocol_error("unexpected library response")),
+    }
+}
+
+pub fn config_existing(scope_path: &Utf8Path) -> crate::Result<ConfigWireResult> {
+    match request_existing(
+        Request::Config {
+            id: next_id("config"),
+            scope_path: scope_path.to_string(),
+        },
+        ACTION_TIMEOUT,
+    )? {
+        ResponseResult::Config(config) => Ok(*config),
+        _ => Err(protocol_error("unexpected config response")),
     }
 }
 
@@ -3138,7 +3172,8 @@ impl CenterModel {
             | CenterDelta::RowChanged { row }
             | CenterDelta::Ended { row }
             | CenterDelta::ActivityLine { row, .. } => vec![row.repo_key.as_str()],
-            CenterDelta::LibraryChanged { repo_keys } => {
+            CenterDelta::LibraryChanged { repo_keys }
+            | CenterDelta::ConfigChanged { repo_keys } => {
                 repo_keys.iter().map(String::as_str).collect()
             }
         };
@@ -3810,7 +3845,9 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                     let _ = reply.send(Ok(resolution));
                 }
                 ModelCommand::LibraryChanged { repo_key, reply } => {
-                    model.broadcast(CenterDelta::LibraryChanged { repo_keys: vec![repo_key] });
+                    model.broadcast(CenterDelta::LibraryChanged {
+                        repo_keys: vec![repo_key],
+                    });
                     let _ = reply.send(Ok(()));
                 }
                 ModelCommand::ResolveRunId {
@@ -4321,6 +4358,15 @@ fn serve_connection_worker_with_board_instants(
             let _ = response(&mut stream, id, result);
             return;
         }
+        if let Request::Config { scope_path, .. } = request {
+            let result = run_config_request(&scope_path)
+                .map(|config| ResponseResult::Config(Box::new(config)))
+                .unwrap_or_else(|error| ResponseResult::Error {
+                    message: error.to_string(),
+                });
+            let _ = response(&mut stream, id, result);
+            return;
+        }
         if let Request::LibraryDetail {
             repo_key, selector, ..
         } = request
@@ -4335,12 +4381,20 @@ fn serve_connection_worker_with_board_instants(
         }
         if let Request::LibraryChangedNotice { repo_key, .. } = request {
             let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
-            if jobs.try_send(ModelCommand::LibraryChanged { repo_key, reply: reply_sender }).is_err() {
+            if jobs
+                .try_send(ModelCommand::LibraryChanged {
+                    repo_key,
+                    reply: reply_sender,
+                })
+                .is_err()
+            {
                 return;
             }
             let result = match reply_receiver.recv_timeout(STREAM_TIMEOUT) {
                 Ok(Ok(())) => ResponseResult::Ok,
-                Ok(Err(error)) => ResponseResult::Error { message: error.to_string() },
+                Ok(Err(error)) => ResponseResult::Error {
+                    message: error.to_string(),
+                },
                 Err(_) => return,
             };
             let _ = response(&mut stream, id, result);
@@ -4945,6 +4999,86 @@ fn run_library_request(
     })
 }
 
+fn run_config_request(scope_path: &str) -> crate::Result<ConfigWireResult> {
+    let path = Utf8Path::new(scope_path);
+    if scope_path.is_empty() || !path.is_absolute() {
+        return Ok(ConfigWireResult {
+            repo_key: String::new(),
+            repo_path: String::new(),
+            resolution: crate::config_view::ConfigResolution::Refused {
+                reason: "config scope must be a non-empty absolute path".to_string(),
+            },
+        });
+    }
+    if !path.exists() {
+        return Ok(ConfigWireResult {
+            repo_key: String::new(),
+            repo_path: String::new(),
+            resolution: crate::config_view::ConfigResolution::Refused {
+                reason: "config scope does not exist".to_string(),
+            },
+        });
+    }
+    let Some(root) = crate::repository::discover_repo_root_at(path)? else {
+        return Ok(ConfigWireResult {
+            repo_key: String::new(),
+            repo_path: String::new(),
+            resolution: crate::config_view::ConfigResolution::Refused {
+                reason: "config scope is not inside a Git worktree".to_string(),
+            },
+        });
+    };
+    let root = crate::state::canonical_repo_root(&root)?;
+    let repo_key = crate::state::repo_key(&root);
+    let resolution = (|| {
+        let report = crate::harness_config::resolve_config_report_at(&root, &root)?;
+        let document = crate::trust::read_store()?;
+        let instant_epoch_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        crate::config_view::resolve_config_view(
+            &root,
+            report,
+            &document,
+            crate::config_view::ConfigCenterIdentity {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                socket: production_paths()?.socket.to_string(),
+            },
+            instant_epoch_millis,
+        )
+    })();
+    let resolution = match resolution {
+        Ok(view) => crate::config_view::ConfigResolution::Resolved(view),
+        Err(error) => crate::config_view::ConfigResolution::Failed {
+            reason: error.to_string(),
+        },
+    };
+    let result = ConfigWireResult {
+        repo_key,
+        repo_path: root.to_string(),
+        resolution,
+    };
+    if serde_json::to_vec(&result)
+        .map_err(|source| crate::parse::Error::JsonSerialize {
+            context: "serialize config".to_string(),
+            source,
+        })?
+        .len()
+        + 512
+        > MAX_LINE_BYTES
+    {
+        return Ok(ConfigWireResult {
+            repo_key: result.repo_key,
+            repo_path: result.repo_path,
+            resolution: crate::config_view::ConfigResolution::Refused {
+                reason: "config answer exceeds protocol size limit".to_string(),
+            },
+        });
+    }
+    Ok(result)
+}
+
 fn run_library_detail_request(
     jobs: &mpsc::SyncSender<ModelCommand>,
     repo_key: String,
@@ -5330,7 +5464,8 @@ fn handle_request(
         | Request::TaskDetail { .. }
         | Request::Library { .. }
         | Request::LibraryDetail { .. }
-        | Request::LibraryChangedNotice { .. } => Err(protocol_error(
+        | Request::LibraryChangedNotice { .. }
+        | Request::Config { .. } => Err(protocol_error(
             "request is handled by the connection worker",
         )),
     }

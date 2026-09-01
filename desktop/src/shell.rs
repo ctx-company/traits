@@ -12,6 +12,7 @@ use crate::board::{self, BoardState};
 use crate::bottom_bar;
 use crate::bottom_bar_view;
 use crate::center_link::{self, LinkUpdate};
+use crate::config_screen::{self, ConfigState};
 use crate::dashboard::Dashboard;
 use crate::detail::{self, LoadRequest, RunDetail};
 use crate::detail_view;
@@ -25,7 +26,9 @@ use crate::title_bar_view;
 use crate::tokens;
 use crate::trait_library::{self, LibraryState};
 use crate::trait_preview;
-use ctx_traits_io::library::{LibraryDetailResolution, LibraryDetailSelector, LibraryPresentationFace, LibraryRow};
+use ctx_traits_io::library::{
+    LibraryDetailResolution, LibraryDetailSelector, LibraryPresentationFace, LibraryRow,
+};
 
 pub const APP_TITLE: &str = "ctx desktop";
 
@@ -364,6 +367,9 @@ pub struct Shell {
     library: LibraryState,
     library_task: Option<gpui::Task<()>>,
     library_generation: u64,
+    config: ConfigState,
+    config_task: Option<gpui::Task<()>>,
+    config_generation: u64,
     trait_selection: Option<LibraryDetailSelector>,
     trait_detail: Option<Result<LibraryDetailResolution, String>>,
     trait_detail_task: Option<gpui::Task<()>>,
@@ -393,6 +399,7 @@ enum Screen {
     Sessions,
     Tasks,
     Traits,
+    Config,
 }
 
 impl Screen {
@@ -401,6 +408,7 @@ impl Screen {
             Self::Sessions => title_bar_view::SESSIONS,
             Self::Tasks => title_bar_view::TASKS,
             Self::Traits => title_bar_view::TRAITS,
+            Self::Config => title_bar_view::CONFIG,
         }
     }
 }
@@ -420,6 +428,11 @@ impl Shell {
                         LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys })
                             if matches!(&shell.library, LibraryState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
                     );
+                    let config_changed = matches!(
+                        &update,
+                        LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::ConfigChanged { repo_keys })
+                            if matches!(&shell.config, ConfigState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
+                    );
                     shell.face.apply(update, SystemTime::now());
                     shell.spawn_form.set_repositories(shell.face.repositories());
                     // Reconcile a `Requested` spawn status against the
@@ -436,6 +449,9 @@ impl Shell {
                         if let Some(selector) = shell.trait_selection.clone() {
                             shell.request_trait_detail(selector, cx);
                         }
+                    }
+                    if config_changed {
+                        shell.load_config(cx);
                     }
                     cx.notify();
                     outcome
@@ -467,6 +483,9 @@ impl Shell {
             library: LibraryState::Failed("select a repository to view its traits".to_string()),
             library_task: None,
             library_generation: 0,
+            config: ConfigState::Failed("select a repository to view its config".to_string()),
+            config_task: None,
+            config_generation: 0,
             trait_selection: None,
             trait_detail: None,
             trait_detail_task: None,
@@ -486,6 +505,9 @@ impl Shell {
         }
         if screen == Screen::Traits {
             self.load_library(cx);
+        }
+        if screen == Screen::Config {
+            self.load_config(cx);
         }
         cx.notify();
     }
@@ -589,6 +611,46 @@ impl Shell {
         }));
     }
 
+    fn load_config(&mut self, cx: &mut Context<Self>) {
+        let repo_path = self
+            .detail
+            .repo_key()
+            .and_then(|key| {
+                self.face
+                    .rows()
+                    .iter()
+                    .find(|row| row.repo_key == key)
+                    .map(|row| row.repo_path.clone())
+            })
+            .or_else(|| self.face.rows().first().map(|row| row.repo_path.clone()));
+        let Some(repo_path) = repo_path else {
+            self.config = config_screen::fold_config_result(
+                &self.config,
+                Err("select a repository to view its config".to_string()),
+            );
+            return;
+        };
+        self.config_generation += 1;
+        let generation = self.config_generation;
+        if !matches!(self.config, ConfigState::Accepted { .. }) {
+            self.config = ConfigState::Loading;
+        }
+        self.config_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    ctx_traits_io::center::config_existing(camino::Utf8Path::new(&repo_path))
+                        .map_err(|error| error.to_string())
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.config_generation == generation {
+                    shell.config = config_screen::fold_config_result(&shell.config, result);
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
     fn select_trait(&mut self, selector: LibraryDetailSelector, cx: &mut Context<Self>) {
         if self.trait_selection.as_ref() == Some(&selector) {
             return;
@@ -606,10 +668,12 @@ impl Shell {
             LibraryState::Loading | LibraryState::Failed(_) => return,
         };
         self.trait_detail_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move {
-                ctx_traits_io::center::library_detail_existing(&repo_key, selector)
-                    .map_err(|error| error.to_string())
-            }).await;
+            let result = cx
+                .background_spawn(async move {
+                    ctx_traits_io::center::library_detail_existing(&repo_key, selector)
+                        .map_err(|error| error.to_string())
+                })
+                .await;
             let _ = this.update(cx, |shell, cx| {
                 if shell.trait_detail_generation == generation {
                     shell.trait_detail = Some(result);
@@ -1326,7 +1390,9 @@ impl Render for Shell {
                         preview_view::checks_block_element(&checks),
                         preview_view::landing_block_element(&landing),
                     ],
-                    Some(preview_view::preview_footer_element(&board::tasks_footer(&self.board))),
+                    Some(preview_view::preview_footer_element(&board::tasks_footer(
+                        &self.board,
+                    ))),
                 ));
             }
         }
@@ -1361,33 +1427,241 @@ impl Render for Shell {
                 for row in &answer.resolution.rows {
                     let (label, selector, presentation) = match row {
                         LibraryRow::Resolved(member) => (
-                            member.family_key.clone().unwrap_or_else(|| member.id.clone()),
-                            LibraryDetailSelector { trait_id: member.id.clone(), canonical_digest: Some(member.canonical_digest.clone()), member: member.family_key.clone() },
-                            member.trust_state.presentation(LibraryPresentationFace::Desktop),
+                            member
+                                .family_key
+                                .clone()
+                                .unwrap_or_else(|| member.id.clone()),
+                            LibraryDetailSelector {
+                                trait_id: member.id.clone(),
+                                canonical_digest: Some(member.canonical_digest.clone()),
+                                member: member.family_key.clone(),
+                            },
+                            member
+                                .trust_state
+                                .presentation(LibraryPresentationFace::Desktop),
                         ),
                         LibraryRow::SourceOnly { id, .. } => (
                             id.clone(),
-                            LibraryDetailSelector { trait_id: id.clone(), canonical_digest: None, member: None },
-                            ctx_traits_io::library::LibraryTrustState::SourceOnly.presentation(LibraryPresentationFace::Desktop),
+                            LibraryDetailSelector {
+                                trait_id: id.clone(),
+                                canonical_digest: None,
+                                member: None,
+                            },
+                            ctx_traits_io::library::LibraryTrustState::SourceOnly
+                                .presentation(LibraryPresentationFace::Desktop),
                         ),
                         LibraryRow::Unreadable { id, .. } => (
                             id.clone(),
-                            LibraryDetailSelector { trait_id: id.clone(), canonical_digest: None, member: None },
-                            ctx_traits_io::library::LibraryTrustState::Unreadable.presentation(LibraryPresentationFace::Desktop),
+                            LibraryDetailSelector {
+                                trait_id: id.clone(),
+                                canonical_digest: None,
+                                member: None,
+                            },
+                            ctx_traits_io::library::LibraryTrustState::Unreadable
+                                .presentation(LibraryPresentationFace::Desktop),
                         ),
                     };
                     let selected = self.trait_selection.as_ref() == Some(&selector);
                     traits = traits.child(
                         div()
                             .id(SharedString::from(format!("trait-row-{label}")))
-                            .w_full().flex().flex_row().justify_between().items_center()
-                            .px(tokens::RAIL_ROW_PAD_X).py(tokens::RAIL_ROW_PAD_Y)
-                            .bg(rgb(if selected { tokens::SURFACE_RAISED } else { tokens::ROW_OPEN }))
-                            .child(div().font_family(tokens::FONT_SANS).text_size(tokens::SIZE_12).text_color(rgb(if selected { tokens::TEXT_BRIGHT } else { tokens::TEXT })).child(label))
-                            .child(div().font_family(tokens::FONT_MONO).text_size(tokens::SIZE_10_5).text_color(rgb(crate::run_row::role_color(match presentation.role { ctx_traits_io::library::LibraryTrustRole::SettledGood => crate::run_row::StateRole::Ok, ctx_traits_io::library::LibraryTrustRole::Danger => crate::run_row::StateRole::Danger, ctx_traits_io::library::LibraryTrustRole::Warn => crate::run_row::StateRole::Warn, ctx_traits_io::library::LibraryTrustRole::Neutral => crate::run_row::StateRole::Neutral }))).child(presentation.word))
-                            .on_click(cx.listener(move |shell, _event, _window, cx| shell.select_trait(selector.clone(), cx))),
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .justify_between()
+                            .items_center()
+                            .px(tokens::RAIL_ROW_PAD_X)
+                            .py(tokens::RAIL_ROW_PAD_Y)
+                            .bg(rgb(if selected {
+                                tokens::SURFACE_RAISED
+                            } else {
+                                tokens::ROW_OPEN
+                            }))
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_SANS)
+                                    .text_size(tokens::SIZE_12)
+                                    .text_color(rgb(if selected {
+                                        tokens::TEXT_BRIGHT
+                                    } else {
+                                        tokens::TEXT
+                                    }))
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_size(tokens::SIZE_10_5)
+                                    .text_color(rgb(crate::run_row::role_color(match presentation
+                                        .role
+                                    {
+                                        ctx_traits_io::library::LibraryTrustRole::SettledGood => {
+                                            crate::run_row::StateRole::Ok
+                                        }
+                                        ctx_traits_io::library::LibraryTrustRole::Danger => {
+                                            crate::run_row::StateRole::Danger
+                                        }
+                                        ctx_traits_io::library::LibraryTrustRole::Warn => {
+                                            crate::run_row::StateRole::Warn
+                                        }
+                                        ctx_traits_io::library::LibraryTrustRole::Neutral => {
+                                            crate::run_row::StateRole::Neutral
+                                        }
+                                    })))
+                                    .child(presentation.word),
+                            )
+                            .on_click(cx.listener(move |shell, _event, _window, cx| {
+                                shell.select_trait(selector.clone(), cx)
+                            })),
                     );
                 }
+            }
+            if self.screen == Screen::Config {
+                let mut config = div()
+                    .debug_selector(|| "config-screen".to_string())
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .pl(tokens::MAIN_PANE_PAD_LEFT)
+                    .pr(tokens::MAIN_PANE_PAD_RIGHT)
+                    .py(tokens::MAIN_PANE_PAD_TOP)
+                    .gap(tokens::MAIN_PANE_GAP);
+                match &self.config {
+                    ConfigState::Loading => {
+                        config = config.child(
+                            div()
+                                .font_family(tokens::FONT_SANS)
+                                .text_size(tokens::SIZE_12)
+                                .text_color(rgb(tokens::TEXT_SECONDARY))
+                                .child("loading config"),
+                        );
+                    }
+                    ConfigState::Failed(reason) => {
+                        config = config.child(
+                            div()
+                                .font_family(tokens::FONT_SANS)
+                                .text_size(tokens::SIZE_12)
+                                .text_color(rgb(tokens::TEXT_SECONDARY))
+                                .child(reason.clone()),
+                        );
+                    }
+                    ConfigState::Accepted { answer, stale } => match &answer.resolution {
+                        ctx_traits_io::config_view::ConfigResolution::Resolved(view) => {
+                            for (heading, rows) in [
+                                (
+                                    "Agents",
+                                    view.seats
+                                        .iter()
+                                        .map(|seat| {
+                                            (
+                                                seat.role.clone(),
+                                                seat.model
+                                                    .clone()
+                                                    .unwrap_or_else(|| "unconfigured".to_string()),
+                                                seat.reasoning_effort.clone().unwrap_or_default(),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
+                                (
+                                    "Runtime",
+                                    view.runtime
+                                        .iter()
+                                        .map(|row| {
+                                            (
+                                                row.name.clone(),
+                                                row.value.clone(),
+                                                row.qualifier.clone(),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
+                                (
+                                    "Trust",
+                                    vec![(
+                                        "approved traits".to_string(),
+                                        view.trust.approved_digests.to_string(),
+                                        view.trust.approved_members.join(", "),
+                                    )],
+                                ),
+                            ] {
+                                config = config.child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_size(tokens::SIZE_11)
+                                        .text_color(rgb(tokens::TEXT_MUTED))
+                                        .child(heading),
+                                );
+                                for (name, value, qualifier) in rows {
+                                    config = config.child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .justify_between()
+                                            .px(tokens::RAIL_ROW_PAD_X)
+                                            .py(tokens::RAIL_ROW_PAD_Y)
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_1()
+                                                    .child(
+                                                        div()
+                                                            .font_family(tokens::FONT_SANS)
+                                                            .text_size(tokens::SIZE_12)
+                                                            .text_color(rgb(tokens::TEXT))
+                                                            .child(name),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .font_family(tokens::FONT_SANS)
+                                                            .text_size(tokens::SIZE_11)
+                                                            .text_color(rgb(tokens::TEXT_SECONDARY))
+                                                            .child(qualifier),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .font_family(tokens::FONT_MONO)
+                                                    .text_size(tokens::SIZE_10_5)
+                                                    .text_color(rgb(tokens::TEXT_SECONDARY))
+                                                    .child(value),
+                                            ),
+                                    );
+                                }
+                            }
+                            if let Some(reason) = stale {
+                                config = config.child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_size(tokens::SIZE_10_5)
+                                        .text_color(rgb(tokens::TEXT_MUTED))
+                                        .child(format!("stale: {reason}")),
+                                );
+                            }
+                        }
+                        ctx_traits_io::config_view::ConfigResolution::Refused { reason }
+                        | ctx_traits_io::config_view::ConfigResolution::Failed { reason } => {
+                            config = config.child(
+                                div()
+                                    .font_family(tokens::FONT_SANS)
+                                    .text_size(tokens::SIZE_12)
+                                    .text_color(rgb(tokens::TEXT_SECONDARY))
+                                    .child(reason.clone()),
+                            );
+                        }
+                    },
+                }
+                body = div()
+                    .debug_selector(|| "config-screen".to_string())
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(rail_view::rail_element(
+                        &self.face.rail(self.detail.repo_key()),
+                    ))
+                    .child(config);
             }
             let traits = traits
                 .child(div().flex_1())
@@ -1451,6 +1725,13 @@ impl Render for Shell {
                     Box::new(
                         cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
                             shell.switch_screen(Screen::Traits, cx);
+                        }),
+                    ) as title_bar_view::MenuHandler
+                }),
+                (self.screen != Screen::Config).then(|| {
+                    Box::new(
+                        cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
+                            shell.switch_screen(Screen::Config, cx);
                         }),
                     ) as title_bar_view::MenuHandler
                 }),

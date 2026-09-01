@@ -183,6 +183,7 @@ mod tests {
             repo_path: "/work/acme/repo".to_string(),
             resolution: LibraryResolution {
                 rows,
+                orphans: vec![],
                 provenance: LibraryProvenance {
                     pinned,
                     sha: Some("sha256:123456789abcdef".to_string()),
@@ -212,6 +213,7 @@ mod tests {
             shadow: None,
             name: id.to_string(),
             summary: String::new(),
+            record: None,
         }
     }
 
@@ -325,6 +327,7 @@ mod tests {
                     source_path: "/repo/source".to_string(),
                 },
             ],
+            orphans: vec![],
             provenance: LibraryProvenance {
                 pinned: true,
                 sha: Some("sha256:123456789".to_string()),

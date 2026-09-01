@@ -345,7 +345,9 @@ pub fn resolve_library(
     let current: Vec<_> = rows
         .iter()
         .filter_map(|row| match row {
-            LibraryRow::Resolved(member) => Some((member.id.clone(), member.canonical_digest.clone())),
+            LibraryRow::Resolved(member) => {
+                Some((member.id.clone(), member.canonical_digest.clone()))
+            }
             _ => None,
         })
         .collect();
@@ -354,7 +356,11 @@ pub fn resolve_library(
         .filter(|record| record.freshness == crate::trust::TrustFreshness::Orphaned)
         .collect();
     let provenance = provenance(&rows);
-    Ok(LibraryResolution { rows, orphans, provenance })
+    Ok(LibraryResolution {
+        rows,
+        orphans,
+        provenance,
+    })
 }
 
 /// Resolve one selected library member without performing the whole-inventory
@@ -451,7 +457,8 @@ pub fn resolve_library_detail(
             }
         }
     }
-    let Some((_, selected_path, trait_ref, trait_root, digest, _, _)) = members.get(selected_index) else {
+    let Some((_, selected_path, trait_ref, trait_root, digest, _, _)) = members.get(selected_index)
+    else {
         return Ok(LibraryDetailResolution::Missing);
     };
     if selector.canonical_digest.as_deref() != Some(digest.as_str()) {
@@ -482,14 +489,23 @@ pub fn resolve_library_detail(
                 shadow: None,
                 name: trait_ref.id.as_str().to_string(),
                 summary: trait_ref.effective_summary().to_string(),
-                record: document.record_for_current(trait_ref.id.as_str(), digest.as_str()).map(|record| crate::trust::TrustReportRow {
-                    trait_id: Some(trait_ref.id.as_str().to_string()),
-                    digest: record.digest.clone(),
-                    current_digest: Some(digest.as_str().to_string()),
-                    state: record.state,
-                    freshness: if record.digest == digest.as_str() { crate::trust::TrustFreshness::Current } else { crate::trust::TrustFreshness::Stale },
-                    updated_at: record.updated_at.clone(), reason: record.reason.clone(), seq: record.seq, superseded: false,
-                }),
+                record: document
+                    .record_for_current(trait_ref.id.as_str(), digest.as_str())
+                    .map(|record| crate::trust::TrustReportRow {
+                        trait_id: Some(trait_ref.id.as_str().to_string()),
+                        digest: record.digest.clone(),
+                        current_digest: Some(digest.as_str().to_string()),
+                        state: record.state,
+                        freshness: if record.digest == digest.as_str() {
+                            crate::trust::TrustFreshness::Current
+                        } else {
+                            crate::trust::TrustFreshness::Stale
+                        },
+                        updated_at: record.updated_at.clone(),
+                        reason: record.reason.clone(),
+                        seq: record.seq,
+                        superseded: false,
+                    }),
             },
         )
         .collect();
@@ -511,17 +527,40 @@ pub fn resolve_library_detail(
             description: port.description.clone(),
         })
         .collect();
-    let trust_record = document.record_for_current(trait_ref.id.as_str(), digest.as_str()).map(|record| crate::trust::TrustReportRow {
-        trait_id: Some(trait_ref.id.as_str().to_string()), digest: record.digest.clone(), current_digest: Some(digest.as_str().to_string()), state: record.state,
-        freshness: if record.digest == digest.as_str() { crate::trust::TrustFreshness::Current } else { crate::trust::TrustFreshness::Stale },
-        updated_at: record.updated_at.clone(), reason: record.reason.clone(), seq: record.seq, superseded: false,
-    });
+    let trust_record = document
+        .record_for_current(trait_ref.id.as_str(), digest.as_str())
+        .map(|record| crate::trust::TrustReportRow {
+            trait_id: Some(trait_ref.id.as_str().to_string()),
+            digest: record.digest.clone(),
+            current_digest: Some(digest.as_str().to_string()),
+            state: record.state,
+            freshness: if record.digest == digest.as_str() {
+                crate::trust::TrustFreshness::Current
+            } else {
+                crate::trust::TrustFreshness::Stale
+            },
+            updated_at: record.updated_at.clone(),
+            reason: record.reason.clone(),
+            seq: record.seq,
+            superseded: false,
+        });
     let procedure = match &trait_ref.procedure {
         None => LibraryProcedureShape::GuidanceOnly,
-        Some(procedure) => LibraryProcedureShape::Sequence(procedure.sequence.iter().map(|item| (
-            item.id.clone().unwrap_or_else(|| "(unnamed)".to_string()),
-            item.kind.map(sequence_kind_label).map(str::to_string).unwrap_or_else(|| "(no kind)".to_string()),
-        )).collect()),
+        Some(procedure) => LibraryProcedureShape::Sequence(
+            procedure
+                .sequence
+                .iter()
+                .map(|item| {
+                    (
+                        item.id.clone().unwrap_or_else(|| "(unnamed)".to_string()),
+                        item.kind
+                            .map(sequence_kind_label)
+                            .map(str::to_string)
+                            .unwrap_or_else(|| "(no kind)".to_string()),
+                    )
+                })
+                .collect(),
+        ),
     };
     let source_path = editable_source(selected_path);
     let source_excerpt = read_source_excerpt(&source_path, 40);
@@ -541,14 +580,21 @@ pub fn resolve_library_detail(
             .collect(),
         variants,
         ports,
-        status: crate::lifecycle::resolve_package_status(trait_root)?.display_name().to_string(),
+        status: crate::lifecycle::resolve_package_status(trait_root)?
+            .display_name()
+            .to_string(),
         procedure,
         source_drift_checked: false,
         drift: "unverified".to_string(),
         source_path: source_path.to_string(),
         source_excerpt,
-        trust_reason: trust_record.as_ref().and_then(|record| record.reason.clone()).unwrap_or_default(),
-        trust_stale: trust_record.as_ref().is_some_and(|record| record.digest != digest.as_str()),
+        trust_reason: trust_record
+            .as_ref()
+            .and_then(|record| record.reason.clone())
+            .unwrap_or_default(),
+        trust_stale: trust_record
+            .as_ref()
+            .is_some_and(|record| record.digest != digest.as_str()),
         has_trust_record: trust_record.is_some(),
         trust_record,
     })
@@ -631,8 +677,15 @@ fn push_member(
                     digest: record.digest.clone(),
                     current_digest: Some(digest.as_str().to_string()),
                     state: record.state,
-                    freshness: if record.digest == digest.as_str() { crate::trust::TrustFreshness::Current } else { crate::trust::TrustFreshness::Stale },
-                    updated_at: record.updated_at.clone(), reason: record.reason.clone(), seq: record.seq, superseded: false,
+                    freshness: if record.digest == digest.as_str() {
+                        crate::trust::TrustFreshness::Current
+                    } else {
+                        crate::trust::TrustFreshness::Stale
+                    },
+                    updated_at: record.updated_at.clone(),
+                    reason: record.reason.clone(),
+                    seq: record.seq,
+                    superseded: false,
                 }),
             })));
         }
@@ -648,27 +701,49 @@ fn push_member(
 }
 
 fn editable_source(path: &camino::Utf8Path) -> Utf8PathBuf {
-    let Some(root) = crate::layout::package_root_for_manifest(path) else { return path.to_path_buf() };
-    for candidate in ["source/index.ts", "source/index.mjs", "index.ts", "index.mjs"] {
+    let Some(root) = crate::layout::package_root_for_manifest(path) else {
+        return path.to_path_buf();
+    };
+    for candidate in [
+        "source/index.ts",
+        "source/index.mjs",
+        "index.ts",
+        "index.mjs",
+    ] {
         let candidate = root.join(candidate);
-        if candidate.is_file() { return candidate; }
+        if candidate.is_file() {
+            return candidate;
+        }
     }
     path.to_path_buf()
 }
 
 fn read_source_excerpt(path: &camino::Utf8Path, max_lines: usize) -> Vec<String> {
     use std::io::BufRead;
-    let Ok(file) = std::fs::File::open(path.as_std_path()) else { return Vec::new() };
-    std::io::BufReader::new(file).lines().take(max_lines).map_while(Result::ok).collect()
+    let Ok(file) = std::fs::File::open(path.as_std_path()) else {
+        return Vec::new();
+    };
+    std::io::BufReader::new(file)
+        .lines()
+        .take(max_lines)
+        .map_while(Result::ok)
+        .collect()
 }
 
 fn sequence_kind_label(kind: ctx_traits_core::r#trait::procedure::SequenceKind) -> &'static str {
     use ctx_traits_core::r#trait::procedure::SequenceKind;
     match kind {
-        SequenceKind::Prompt => "prompt", SequenceKind::Ask => "ask", SequenceKind::Command => "command",
-        SequenceKind::Check => "check", SequenceKind::Project => "project", SequenceKind::Sequence => "sequence",
-        SequenceKind::Branch => "branch", SequenceKind::Loop => "loop", SequenceKind::ForEach => "for-each",
-        SequenceKind::Parallel => "parallel", SequenceKind::Terminal => "terminal",
+        SequenceKind::Prompt => "prompt",
+        SequenceKind::Ask => "ask",
+        SequenceKind::Command => "command",
+        SequenceKind::Check => "check",
+        SequenceKind::Project => "project",
+        SequenceKind::Sequence => "sequence",
+        SequenceKind::Branch => "branch",
+        SequenceKind::Loop => "loop",
+        SequenceKind::ForEach => "for-each",
+        SequenceKind::Parallel => "parallel",
+        SequenceKind::Terminal => "terminal",
     }
 }
 

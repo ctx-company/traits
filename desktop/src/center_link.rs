@@ -83,6 +83,9 @@ impl SnapshotAssembler {
                     vec![LinkUpdate::Delta(delta)]
                 }
             }
+            // Board changes are consumed by the board request path; they do
+            // not alter the run snapshot assembled by this link.
+            CenterEvent::BoardChanged { .. } => Vec::new(),
         }
     }
 }

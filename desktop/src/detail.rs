@@ -504,7 +504,10 @@ impl RunDetail {
     }
 
     fn follow_delta(&mut self, delta: &CenterDelta) -> FollowOutcome {
-        if matches!(delta, CenterDelta::LibraryChanged { .. }) {
+        if matches!(
+            delta,
+            CenterDelta::LibraryChanged { .. } | CenterDelta::ConfigChanged { .. }
+        ) {
             return FollowOutcome::default();
         }
         let Some(selection) = self.selected.as_mut() else {
@@ -595,7 +598,9 @@ impl RunDetail {
                     request: None,
                 }
             }
-            CenterDelta::LibraryChanged { .. } => FollowOutcome::default(),
+            CenterDelta::LibraryChanged { .. } | CenterDelta::ConfigChanged { .. } => {
+                FollowOutcome::default()
+            }
         }
     }
 

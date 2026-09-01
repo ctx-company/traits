@@ -3,7 +3,7 @@ key = "0268.1"
 title = "Serve the loaded runtime and render the Config sections"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 Teach the center to answer one repository's loaded runtime as this screen's leaf set, and render the Config screen's three sections from that answer. One cut, because the rendering is what proves the capability and the capability is what makes the rendering honest.
 
 The gap is narrower than "nothing reaches this". `handle_doctor_config` (`modules/cli/src/app/doctor.rs:114-151`) already reports effective runtime configuration with each knob's winning layer and reason over `harness_config::resolve_config_report` (`modules/io/src/harness_config.rs:3903`), and `modules/io/src/trust.rs` already holds the trust-store read. What no face reaches is this screen's shape as one answer: the configured seats with their model selector and effort side by side, the harness/center/store runtime rows, and the approved-traits row with its distinct-digest count — repository-scoped, with the documents actually read, one verdict and one captured instant carried alongside. `ConfigDoctorValue` is CLI-private (`doctor.rs:108`), so a desktop-side document parse, layer walk or trust read would be the capability-in-one-face defect even over identical bytes. This cut extracts a compact shared view at the IO boundary, gives resolution an explicit repository scope, extends the center protocol with a typed config capability, and renders the `Agents` / `Runtime` / `Trust` sections from the served answer. Moving `ctx doctor --config` onto the same resolution is `0268.4`, inside this same charter.
@@ -23,8 +23,8 @@ The gap is narrower than "nothing reaches this". `handle_doctor_config` (`module
 **Family variants do not have their own ids at this HEAD, so member identity must be carried explicitly.** The parent's Correction 8 says each variant is its own visible member with its own id; current core stores one base `Trait.id` with a separate `variant` (`modules/core/src/trait/mod.rs:365`) and `export_name` exists precisely because variants share the base id, and the CLI inventory keeps `id` and `variant` apart the same way. The binding outcome — variants never collapse into one member — is reachable only by keying visible identity on member identity including the variant, not on `trait_id` alone. Likewise `Document::record_for_current` alone cannot decide membership: it falls through to `exact_record` (`trust.rs:78-129`), which admits raw digest-only evidence the parent excludes, so the join is decided against `classify_records`' current/stale/orphaned/superseded classification with `runtime-example:` records filtered (`trust.rs:227-307`).
 
 **The check this file declared is the wrong evidence.** `proof_doctor`'s only `--config` test asserts a flag conflict (`modules/cli/tests/proof_doctor.rs:255-273`); it covers no config semantics. `modules/cli/tests/proof_config.rs` is the standing suite for layering, provenance, seat expansion and defaults, `proof_runtime_ts.rs` for the generated-document path, and `proof_center.rs` for the process boundary. The declared checks below are corrected accordingly.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is a GOAL: binding, observable, and — where a command in this repository can decide it — decided by that command. Everything under `## Approach` in the validation section is APPROACH: expected files, symbols, signatures, edit order, commands and proof mechanics, stated precisely because the grounding supports them, and never a boundary. Deviate from any of it wherever a goal requires it and record the deviation in the work summary; a deviation is not a violation and needs no escalation. Proof mechanics are named only where the grounding shows them already occurring — what must be proven is stated, which fixture or matcher observes it is the run's call.
@@ -70,8 +70,8 @@ Everything in this section, including the `## Done when` list at the end of it, 
 8. **The workspace is unmoved.** Root Cargo resolution, the root `Cargo.lock` and the existing gates stay gpui-free and the desktop project stays outside the workspace. Decided by `just test` and the declared metadata/lockfile check.
 
 Exclusions, restated so they are checkable by reading the diff: no second `runtime.toml` parser, layer resolution, inventory scan or trust reader is created; no copy of the doctor assembly enters the center and no CLI-private type is imported by the desktop; `ctx doctor --config`'s existing answers are unchanged; no write path, `--apply`, `--migrate-config` change, trust mutation, lock acquisition or `read_store_with_sequences` call appears; no light-theme value is touched; no pencil artifact is edited; no placeholder leaf is introduced in these three sections; and no work belonging to `0268.2`, `0268.3`, `0268.4`, `0266`, `0267`, `0269` or `0261` is done here.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. Every symbol is named because the grounding supports it; take a different one wherever a goal requires it and say so in the work summary.
@@ -111,7 +111,12 @@ Suggested route, not a boundary. Every symbol is named because the grounding sup
 One review pass over the completed diff before calling this done: walk `screens/config.md`'s menu entry and its three sections leaf by leaf against the rendered pane, naming the served source for each and confirming none of them is a placeholder; compare the literal geometry against `reference/config.html:251-583` and `tokens.md:71-85`, resolving content conflicts toward the spec; exercise the scratch boundaries listed above; then read the diff for the properties no fixture shows directly — one resolver and one assembly, one trust-document load, explicit scope with no residual cwd read, no desktop-side document, trust, inventory or `git` read, no client timer, no probe or scan on the model owner's request path, no write path, no CLI-private import, no new io dependency, and no gpui in root resolution. Then run the declared checks.
 
 At most one targeted repair-and-rerun round: repair one named defect and rerun whatever evidence shows the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command with its output, or the failing leaf with its evidence, rather than iterating.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0265.5",
+    "0265.9",
+    "0258",
+]
 parent = "0268"
-depends-on = ["0265.5", "0265.9", "0258"]

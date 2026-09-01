@@ -23,6 +23,7 @@ use crate::tokens;
 pub const SESSIONS: &str = "Sessions";
 pub const TASKS: &str = "Tasks";
 pub const TRAITS: &str = "Traits";
+pub const CONFIG: &str = "Config";
 
 pub type MenuHandler = Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
 
@@ -62,6 +63,7 @@ pub fn title_bar_element(
     on_sessions: Option<MenuHandler>,
     on_tasks: Option<MenuHandler>,
     on_traits: Option<MenuHandler>,
+    on_config: Option<MenuHandler>,
 ) -> AnyElement {
     let menu = div()
         .debug_selector(|| "title-bar-menu".to_string())
@@ -72,7 +74,8 @@ pub fn title_bar_element(
         .gap(tokens::TITLE_BAR_MENU_GAP)
         .child(menu_entry(SESSIONS, current_screen, on_sessions))
         .child(menu_entry(TASKS, current_screen, on_tasks))
-        .child(menu_entry(TRAITS, current_screen, on_traits));
+        .child(menu_entry(TRAITS, current_screen, on_traits))
+        .child(menu_entry(CONFIG, current_screen, on_config));
 
     div()
         .debug_selector(|| "title-bar".to_string())

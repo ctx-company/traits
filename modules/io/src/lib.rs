@@ -27,6 +27,7 @@ pub mod clock;
 pub mod command;
 pub mod config_document;
 pub mod config_source;
+pub mod config_view;
 pub mod confinement;
 pub mod context_ledger;
 pub mod debug_trace;

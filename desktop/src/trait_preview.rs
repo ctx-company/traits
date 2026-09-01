@@ -219,6 +219,16 @@ mod tests {
             agents: vec![],
             variants: vec![],
             ports: vec![],
+            status: String::new(),
+            procedure: ctx_traits_io::library::LibraryProcedureShape::Unknown,
+            source_drift_checked: false,
+            drift: String::new(),
+            source_path: String::new(),
+            source_excerpt: vec![],
+            trust_reason: String::new(),
+            trust_stale: false,
+            has_trust_record: false,
+            trust_record: None,
         })));
         assert_eq!(preview.trait_block.heading, "trait");
         assert_eq!(preview.facts_block.heading, "facts");
@@ -281,6 +291,16 @@ mod tests {
                     description: "output description".to_string(),
                 },
             ],
+            status: String::new(),
+            procedure: ctx_traits_io::library::LibraryProcedureShape::Unknown,
+            source_drift_checked: false,
+            drift: String::new(),
+            source_path: String::new(),
+            source_excerpt: vec![],
+            trust_reason: String::new(),
+            trust_stale: false,
+            has_trust_record: false,
+            trust_record: None,
         })));
         assert_eq!(preview.variants_block.rows[0].key, "first");
         assert_eq!(preview.variants_block.rows[1].key, "second");
