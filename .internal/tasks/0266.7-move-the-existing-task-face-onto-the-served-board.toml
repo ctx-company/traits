@@ -3,7 +3,7 @@ key = "0266.7"
 title = "Move the existing task face onto the served board"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 `0266.1` teaches the center to answer the board. This cut is the other half of the
 plan document's parity mechanism: an existing non-GUI face reads the board through
 that same answer, in the same release, so the capability is never one the desktop
@@ -102,8 +102,8 @@ removal (`0266.3:342-355,520-522`), so at execution time whether direct Split an
 `resync_tasks_board_after_write` still exist is a fact to inspect, not to assume in
 either direction. This cut removes display rereads; it does not expand into
 migrating every task mutation.
-'''
-scope = '''
+"""
+scope = """
 ## Goals and approach are separate
 
 Everything in this section, including the `## Done when` list at the end of it, is
@@ -308,8 +308,8 @@ the documents `0266.1` makes newly loadable, and no test writes into this
 repository's board; no work belonging to `0266.1`, `0266.2`, `0266.3`, `0266.4`,
 `0266.5`, `0266.6`, `0266.8`, `0267`-`0269` or `0261` is done; and no gpui or
 root-workspace file is touched.
-'''
-validation = '''
+"""
+validation = """
 ## Approach
 
 Suggested route, not a boundary. Every symbol is named because the grounding
@@ -483,7 +483,8 @@ The work summary names what `0266.1` actually landed and how this cut consumed i
 whether `0266.3` had landed and what that changed, whether a sibling detail boundary
 existed or this cut extended one and how far, which readers were removed, the
 focused test filters actually run, and every deviation from this approach.
-'''
+"""
+
 [relations]
-parent = "0266"
 depends-on = ["0266.1"]
+parent = "0266"
