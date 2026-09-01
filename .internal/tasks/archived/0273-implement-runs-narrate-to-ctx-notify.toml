@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0273"
 title = "Implement runs narrate to ctx-notify"
-status = "ready"
+status = "done"
 raised = "2026-08-31"
 content = """
 Owner delegation 2026-08-31: the default (basic) implement flow mirrors
