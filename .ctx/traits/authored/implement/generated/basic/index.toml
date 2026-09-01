@@ -55,6 +55,16 @@ optional = true
 description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
 
 [[port]]
+id = "owner-gate"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner annotation transport for review verdicts: 'annotate' (default) pipes each verdict's surface to ctx-annotate so the owner can accept, overrule, or extend it; 'off' auto-accepts for unattended runs."
+
+[port.default]
+value = "annotate"
+
+[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -82,6 +92,16 @@ id = "draft"
 schema = "schema:text"
 description = "smart-1's implementation draft for the task — the plan the worker implements."
 hint = "Scope (restated from the task file), files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation."
+
+[[slot]]
+id = "gate-answer"
+schema = "schema:text"
+description = "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON whose annotations are binding owner rulings."
+
+[[slot]]
+id = "gate-surface"
+schema = "schema:text"
+description = "The digest's annotation surface, carried as text for the gate command."
 
 [[slot]]
 id = "git-status"
@@ -259,6 +279,11 @@ schema = "schema:text"
 required = true
 description = "Multi-line prose block for the owner's phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. Empty string when the verdict is approved, which clears the previous summary."
 
+[schema.fields.surface]
+schema = "schema:text"
+required = true
+description = "The owner's annotation surface: every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (status):'. The verdict status on the first line. This text is what the owner annotates; fidelity to the verdict is the only requirement."
+
 [[schema]]
 id = "owner-item"
 description = "A checklist item outside in-run capability or authority, with verified substitute evidence and the owner action that closes it."
@@ -393,6 +418,7 @@ text = """
 Implement the draft task's drafted plan: {slot:draft}.
 Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
 Attached verdicts are the source of truth - work on exactly what they request.
+Owner rulings recorded this run (if any): {slot:owner-decisions} — they are binding; where a ruling overrules or extends a verdict, the ruling wins.
 Start with most complex items and aim for completing all of them.
 Don't discard your progress if you can't finish task to completion.
 
@@ -461,21 +487,6 @@ input = [
 output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
-id = "notify-committed"
-title = "Notify: committed"
-input = ["slot:notify-id"]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
-argv = [
-    "ctx-notify",
-    "update",
-    "{slot:notify-id}",
-    "--status",
-    "Commit the work",
-]
-
-[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
 id = "write-the-commit-message"
 title = "Write the commit message"
 agent = "agent:scribe"
@@ -513,6 +524,21 @@ argv = [
     "{slot:commit-message}",
 ]
 
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "notify-committed"
+title = "Notify: committed"
+input = ["slot:notify-id"]
+output = ["slot:notify-log"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "ctx-notify",
+    "update",
+    "{slot:notify-id}",
+    "--status",
+    "Commit the work",
+]
+
 [[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
 id = "summon-the-owner"
 title = "Summon the owner"
@@ -532,6 +558,34 @@ input = ["slot:summon-the-owner"]
 slot = "slot:owner-decisions"
 operation = "append"
 
+[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then.sequence]]
+id = "gate-append-ruling"
+title = "Record the owner ruling: append"
+kind = "project"
+input = ["slot:gate-answer"]
+
+[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then.sequence.projection]]
+source = "slot:gate-answer"
+destination = "slot:owner-decisions"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then.sequence.output]]
+slot = "slot:owner-decisions"
+operation = "append"
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "implement-the-task"
+title = "Implement the task"
+agent = "agent:worker"
+prompt = "prompt:implement-the-task"
+input = [
+    "slot:draft",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
+    { slot = "slot:owner-decisions", optional = true },
+]
+output = ["slot:work-summary"]
+
 [[sequence.reviewed-refinement-body.sequence]]
 id = "notify-implement-pass"
 title = "Notify: implement pass"
@@ -546,18 +600,6 @@ argv = [
     "--status",
     "Implement the task",
 ]
-
-[[sequence.reviewed-refinement-body.sequence]]
-id = "implement-the-task"
-title = "Implement the task"
-agent = "agent:worker"
-prompt = "prompt:implement-the-task"
-input = [
-    "slot:draft",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:review-verdict-2", optional = true },
-]
-output = ["slot:work-summary"]
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "capture-the-changed-files"
@@ -662,6 +704,88 @@ argv = [
 ]
 
 [[sequence.reviewed-refinement-body.sequence]]
+id = "notify-awaiting-annotations"
+title = "Notify: awaiting annotations"
+input = ["slot:notify-id"]
+output = ["slot:notify-log"]
+
+[sequence.reviewed-refinement-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "update",
+    "{slot:notify-id}",
+    "--status",
+    "awaiting owner annotations",
+]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "gate-carry-surface"
+title = "Carry the annotation surface"
+kind = "project"
+input = ["slot:notify-digest"]
+output = ["slot:gate-surface"]
+
+[[sequence.reviewed-refinement-body.sequence.projection]]
+source = "slot:notify-digest"
+field = "surface"
+destination = "slot:gate-surface"
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "owner-verdict-gate"
+title = "Annotate the verdict"
+input = [
+    "slot:gate-surface",
+    "port:owner-gate",
+]
+output = ["slot:gate-answer"]
+
+[sequence.reviewed-refinement-body.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """
+if [ "$2" = "off" ]; then
+  printf accepted
+  exit 0
+fi
+out=$(printf '%s' "$1" | ctx-annotate --stdin)
+case "$out" in
+  *'"annotations":[]'*) printf accepted ;;
+  *) printf '%s' "$out" ;;
+esac""",
+    "_",
+    "{slot:gate-surface}",
+    "{port:owner-gate}",
+]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "record-the-owner-ruling"
+title = "Record the owner ruling"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-24-reviewed-refinement-body-23-record-the-owner-ruling-then"
+
+[sequence.reviewed-refinement-body.sequence.when.not]
+slot = "slot:gate-answer"
+equals = "accepted"
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "notify-gate-result"
+title = "Notify: owner ruling"
+input = [
+    "slot:notify-id",
+    "slot:gate-answer",
+]
+output = ["slot:notify-log"]
+
+[sequence.reviewed-refinement-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "log",
+    "{slot:notify-id}",
+    "{slot:gate-answer}",
+]
+
+[[sequence.reviewed-refinement-body.sequence]]
 id = "owner-ruling"
 title = "Owner ruling"
 kind = "branch"
@@ -672,7 +796,10 @@ signal = "signal:needs-owner"
 
 [procedure]
 description = "Reviewed implementation: implement, review, refine & commit."
-input = ["port:task"]
+input = [
+    "port:owner-gate",
+    "port:task",
+]
 output = ["port:commit-report"]
 
 [[procedure.sequence]]
@@ -686,6 +813,18 @@ argv = [
     "ctx-notify",
     "begin",
     "{port:task}",
+]
+
+[[procedure.sequence]]
+id = "capture-the-session-base"
+title = "Capture the session base"
+output = ["slot:diff-base"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "rev-parse",
+    "HEAD",
 ]
 
 [[procedure.sequence]]
@@ -704,16 +843,12 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "capture-the-session-base"
-title = "Capture the session base"
-output = ["slot:diff-base"]
-
-[procedure.sequence.command]
-argv = [
-    "git",
-    "rev-parse",
-    "HEAD",
-]
+id = "draft-the-implementation-plan"
+title = "Draft the implementation plan"
+agent = "agent:smart"
+prompt = "prompt:draft-the-implementation-plan"
+input = ["port:task"]
+output = ["slot:draft"]
 
 [[procedure.sequence]]
 id = "notify-plan-drafted"
@@ -731,23 +866,21 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "draft-the-implementation-plan"
-title = "Draft the implementation plan"
-agent = "agent:smart"
-prompt = "prompt:draft-the-implementation-plan"
-input = ["port:task"]
-output = ["slot:draft"]
-
-[[procedure.sequence]]
 id = "reviewed-refinement"
 title = "Reviewed refinement"
 kind = "loop"
 sequence = "sequence:reviewed-refinement-body"
+max-iterations = 3
+on-exhausted = "continue"
 
-[procedure.sequence.until]
+[[procedure.sequence.until.all]]
 slot = "slot:review-verdict-1"
 field = "status"
 equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:gate-answer"
+equals = "accepted"
 
 [[procedure.sequence]]
 id = "check-working-tree-status"

@@ -1,3 +1,4 @@
+export * as annotate from "./annotate.ts";
 export * as diff from "./diff.ts";
 export * as draft from "./draft.ts";
 export * as git from "./git.ts";

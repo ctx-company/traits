@@ -78,6 +78,10 @@ export const notifyDigest = cdk.slot({
         description:
           'One compact journal line: every still-open blocker step\'s text trimmed to 200 characters, joined with " | ". The literal "approved" when none are open.',
       }),
+      surface: cdk.schema.field(cdk.schema.text(), {
+        description:
+          "The owner's annotation surface: every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (status):'. The verdict status on the first line. This text is what the owner annotates; fidelity to the verdict is the only requirement.",
+      }),
     },
     { description: "The reviewer verdict digested for the owner notification thread." },
   ),
@@ -99,6 +103,17 @@ export const notifyJournal = cdk.slot.text({
   description: "The digest's journal field, carried as text for command argv.",
 });
 
+export const gateSurface = cdk.slot.text({
+  id: "gate-surface",
+  description: "The digest's annotation surface, carried as text for the gate command.",
+});
+
+export const gateAnswer = cdk.slot.text({
+  id: "gate-answer",
+  description:
+    "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON whose annotations are binding owner rulings.",
+});
+
 export const notifyLog = cdk.slot.text({
   id: "notify-log",
   description: "The notifier's own JSON receipt for the most recent notification command.",
@@ -114,6 +129,14 @@ export const task = cdk.port.input.text({
   description: 'Task to implement, named by its file in .internal/tasks/ — the key ("0044" or "0044.2"), the full name, or the filename.',
 });
 
+export const ownerGate = cdk.port.input.text({
+  id: "owner-gate",
+  description:
+    "Owner annotation transport for review verdicts: 'annotate' (default) pipes each verdict's surface to ctx-annotate so the owner can accept, overrule, or extend it; 'off' auto-accepts for unattended runs.",
+  optional: true,
+  default: { value: "annotate" },
+});
+
 export const commitReport = cdk.port.output.text({
   id: "commit-report",
   description:
@@ -121,7 +144,7 @@ export const commitReport = cdk.port.output.text({
   optional: true,
 });
 
-export const port = { task, commitReport };
+export const port = { task, ownerGate, commitReport };
 
 export const slot = {
   draft,
@@ -139,5 +162,7 @@ export const slot = {
   notifyBadge,
   notifySummary,
   notifyJournal,
+  gateSurface,
+  gateAnswer,
   notifyLog,
 };

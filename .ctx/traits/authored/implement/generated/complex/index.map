@@ -16,13 +16,13 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 117,
-    "end": 117
+    "start": 140,
+    "end": 140
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 112,
-    "end": 112
+    "start": 127,
+    "end": 127
   },
   "prompt:cross-review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
@@ -176,8 +176,8 @@
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 107,
-    "end": 107
+    "start": 122,
+    "end": 122
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",

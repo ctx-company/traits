@@ -112,9 +112,14 @@ fn narration_sits_at_the_contract_sites_in_order() {
     assert_eq!(body_ids[review + 2], "notify-carry-digest");
     assert_eq!(body_ids[review + 3], "notify-review-update");
     assert_eq!(body_ids[review + 4], "notify-review-journal");
+    assert_eq!(body_ids[review + 5], "notify-awaiting-annotations");
+    assert_eq!(body_ids[review + 6], "gate-carry-surface");
+    assert_eq!(body_ids[review + 7], "owner-verdict-gate");
+    assert_eq!(body_ids[review + 8], "record-the-owner-ruling");
+    assert_eq!(body_ids[review + 9], "notify-gate-result");
     assert!(
-        index_of(&body_ids, "owner-ruling") > review + 4,
-        "review narration precedes the ruling branch"
+        index_of(&body_ids, "owner-ruling") > review + 9,
+        "narration and the annotate gate precede the ruling branch"
     );
 
     let named = canonical
@@ -146,6 +151,7 @@ fn every_notification_is_one_bare_argv_with_no_embedded_program() {
         "notify-session-base",
         "notify-plan-drafted",
         "notify-implement-pass",
+        "notify-awaiting-annotations",
         "notify-committed",
     ] {
         let argv = argv_of(&canonical, update_id);
@@ -181,9 +187,31 @@ fn every_notification_is_one_bare_argv_with_no_embedded_program() {
         ]
     );
     assert_eq!(
+        argv_of(&canonical, "notify-gate-result"),
+        vec![
+            "ctx-notify",
+            "log",
+            "{slot:notify-id}",
+            "{slot:gate-answer}"
+        ]
+    );
+    assert_eq!(
         argv_of(&canonical, "notify-finish"),
         vec!["ctx-notify", "finish", "--ok", "{slot:notify-id}"]
     );
+
+    // The verdict gate is the one sanctioned sh step (house gate shape):
+    // surface and mode ride as positional argv data, and the script knows
+    // only ctx-annotate, the off-mode, and the accepted literal.
+    let gate = argv_of(&canonical, "owner-verdict-gate");
+    assert_eq!(&gate[..2], ["sh", "-c"]);
+    assert_eq!(
+        &gate[3..],
+        ["_", "{slot:gate-surface}", "{port:owner-gate}"]
+    );
+    assert!(gate[2].contains("ctx-annotate --stdin"));
+    assert!(gate[2].contains(r#""annotations":[]"#));
+    assert!(gate[2].contains("printf accepted"));
 
     // The declarative guarantee itself: no notification step smuggles a
     // program — no shell, no interpreter, anywhere near a notifier argv.

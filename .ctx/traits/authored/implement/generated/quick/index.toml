@@ -308,6 +308,7 @@ text = """
 Implement the draft task's drafted plan: {slot:draft}.
 Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
 Attached verdicts are the source of truth - work on exactly what they request.
+Owner rulings recorded this run (if any): {slot:owner-decisions} — they are binding; where a ruling overrules or extends a verdict, the ruling wins.
 Start with most complex items and aim for completing all of them.
 Don't discard your progress if you can't finish task to completion.
 
@@ -388,6 +389,7 @@ input = [
     "slot:draft",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
+    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:work-summary"]
 

@@ -9,6 +9,7 @@ export const implement = cdk.defineStep.prompt({
     Implement the draft task's drafted plan: ${slot.draft}.
     Verdicts from previous rounds (if available): ${slot.verdict1.optional()} & ${slot.verdict2.optional()}
     Attached verdicts are the source of truth - work on exactly what they request.
+    Owner rulings recorded this run (if any): ${slot.ownerDecisions.optional()} — they are binding; where a ruling overrules or extends a verdict, the ruling wins.
     Start with most complex items and aim for completing all of them.
     Don't discard your progress if you can't finish task to completion.
   `,

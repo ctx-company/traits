@@ -10,7 +10,7 @@
 import * as cdk from "@ctx-traits/cdk";
 
 import { scribe } from "../agent.ts";
-import { notifyBadge, notifyDigest, notifyId, notifyJournal, notifyLog, notifySummary, task, verdict1 } from "../data.ts";
+import { gateAnswer, notifyBadge, notifyDigest, notifyId, notifyJournal, notifyLog, notifySummary, task, verdict1 } from "../data.ts";
 
 export function begin(title: string): void {
   cdk.step.command(title, {
@@ -57,6 +57,14 @@ export function reviewUpdate(title: string): void {
   cdk.step.command(`${title}: journal`, {
     id: "notify-review-journal",
     argv: ["ctx-notify", "log", notifyId, notifyJournal],
+    output: notifyLog,
+  });
+}
+
+export function gateResult(title: string): void {
+  cdk.step.command(title, {
+    id: "notify-gate-result",
+    argv: ["ctx-notify", "log", notifyId, gateAnswer],
     output: notifyLog,
   });
 }
