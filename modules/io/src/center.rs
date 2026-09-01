@@ -2340,9 +2340,9 @@ impl CenterModel {
                             .map_err(|source| protocol_error(source.to_string()))?;
                     }
                     Err(error) => {
-                        let _ = self
-                            .db
-                            .execute_batch("ROLLBACK TO finalize_removals; RELEASE finalize_removals");
+                        let _ = self.db.execute_batch(
+                            "ROLLBACK TO finalize_removals; RELEASE finalize_removals",
+                        );
                         return Err(error);
                     }
                 }
@@ -3976,7 +3976,7 @@ fn run_board_request(
         repo_key: repo_key.clone(),
         reply,
     })
-        .map_err(|_| protocol_error("model queue unavailable"))?;
+    .map_err(|_| protocol_error("model queue unavailable"))?;
     let root = match receiver
         .recv_timeout(STREAM_TIMEOUT)
         .map_err(|_| protocol_error("repository resolution timed out"))??
@@ -3990,9 +3990,10 @@ fn run_board_request(
         }
     };
     let (root, runs) = root;
-    let resolution = crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root))
-        .resolve_board()
-        .map_err(|error| protocol_error(format!("board for {root}: {error}")))?;
+    let resolution =
+        crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root))
+            .resolve_board()
+            .map_err(|error| protocol_error(format!("board for {root}: {error}")))?;
     let joined_runs = resolution
         .rows
         .iter()
@@ -4012,10 +4013,7 @@ fn run_board_request(
         .rows
         .iter()
         .map(|row| {
-            let joined = joined_runs
-                .get(&row.summary.key)
-                .into_iter()
-                .flatten();
+            let joined = joined_runs.get(&row.summary.key).into_iter().flatten();
             (
                 row.summary.key.clone(),
                 ctx_traits_core::task::provider::section_of(
