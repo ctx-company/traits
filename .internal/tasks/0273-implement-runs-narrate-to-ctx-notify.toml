@@ -18,12 +18,17 @@ from 0272's regenerated baseline — do not preserve or reason from the
 stale canonical diff that predates it.
 
 Verified CLI facts to build against (`/Users/rpunkfu/.cargo/bin/`
-observed 2026-08-31): `ctx-notify begin --json <TITLE>` prints
-`{"activity_id":"<uuid>",...}` (`--quiet` suppresses it — never
-combine); `update <ID> --status <TEXT>` works; `--line` is
-single-occurrence today (two flags = usage_error), so per-point updates
-issue one process call per line until ctx-notify 0017 makes it
-repeatable; `finish <--ok|--fail|--cancel> <ID>` closes the activity.
+re-verified 2026-09-01 after the upstream API update): `ctx-notify
+begin --json <TITLE>` prints `{"activity_id":"<uuid>",...}` (`--quiet`
+suppresses it — never combine); `update <ID>` combines `--status <S>`
+(short badge, ≤64 chars), `--progress <N>` (0-100), and
+`--summary <TEXT>` (multi-line prose block, ≤4096 chars; empty string
+clears it) freely in one call — one coalesced Slack edit;
+`ctx-notify log <ID> <LINE> [<LINE>...]` appends any number of
+append-only journal lines in a single invocation (alias of
+`update --line`; Slack renders the newest 5 lines rolling, full
+history stays in the event log); `finish <--ok|--fail|--cancel> <ID>
+[--detail D]` closes the activity.
 This task binds only `finish --ok` on normal fall-through completion —
 no failure/cancel finalization, no general finally mechanism.
 
@@ -31,8 +36,10 @@ no failure/cancel finalization, no general finally mechanism.
 
 Every basic-variant run opens one notify activity titled
 `implement: <task port value>`, updates it after each step with the
-step's title, follows every review verdict with the verdict status plus
-one line per still-open reviewer point, and finishes it on completion.
+step's title, follows every review verdict with one combined update
+carrying the verdict status badge and an open-point-count summary plus
+one `log` invocation appending one journal line per still-open
+reviewer point, and finishes it on completion.
 Notification trouble never affects the run: every notify step is
 failure-tolerant and records 'unavailable'/'skipped' instead of
 failing.
@@ -85,18 +92,24 @@ its work summary rather than treating it as a violation.
    and commit (`Commit the work`, inside the Maybe Commit branch); one
    reviewUpdate immediately after the review step inside the
    refinement loop (so it fires every round, before the owner-ruling
-   branch) sending `review: <approved|revise>` then one
-   `update --line` process call per still-open blocker step (exact
-   `status == "open"`, `step` text capped at 200 characters; approved
-   verdicts send only the status); one `finish --ok` after the complete
+   branch) sending one combined
+   `update --quiet --status "review: <approved|revise>" --summary <digest>`
+   (digest = the still-open blocker-step count, e.g. `3 open points`;
+   approved verdicts send the status with an empty summary to clear it)
+   then a single `log` invocation carrying one line per still-open
+   blocker step (exact `status == "open"`, `step` text capped at 200
+   characters; approved verdicts skip the log call entirely); one
+   `finish --ok` after the complete
    Maybe Commit branch, so a clean-tree run still finishes. Decided
    by: committed automated verification against the regenerated
    `.ctx/traits/authored/implement/generated/basic/index.toml` that
    confirms the notification count, this ordering and loop/branch
    placement, and the argv constraints — `begin --json` without
-   `--quiet`, `--quiet` on status updates and finish, one `--line`
-   per child invocation, the 200-character cap present,
-   `finish --ok` — without freezing the whole file as a golden; the
+   `--quiet`, `--quiet` on status updates and finish, one combined
+   status+summary update per verdict, at most one `log` invocation
+   per verdict carrying every open line, the 200-character cap
+   present, `finish --ok` — without freezing the whole file as a
+   golden; the
    existing `just test-full` runner executes it (declared in
    [[checks]]) and passes with it enabled, and the substantive diff
    review in the bounded loop below closes the same list a second
@@ -118,7 +131,10 @@ its work summary rather than treating it as a violation.
    [[checks]]).
 
 Exclusions, restated so the diff review can close them: no change to
-ctx-notify itself (repeatable `--line` is notify board 0017); no
+ctx-notify itself (the `log` verb, repeatable lines, and `--summary`
+landed upstream by 2026-09-01 — build against them, never reimplement
+or shim them); no use of `--progress` (nothing in this flow maps to a
+percentage); no
 notification wiring in quick/complex flow source; no change to review
 or summon semantics; no version bump or release change; no CDK, core,
 or runtime change; no edit to `modules/builtin/templates/implement`;
@@ -166,12 +182,15 @@ Suggested shape (the 2026-08-31 script-tested design):
   `notify-log` (a failed/timed-out command lands no output, so the
   wrapper must exit zero and print its own evidence).
 - REVIEW: one project step for both verdict fields, then a script that
-  sends the status update and pipes `review-points` JSON to python,
-  which loops the blockers' open steps calling one
-  `ctx-notify update <id> --quiet --line <text>` per point via
-  `subprocess.run(..., check=False, timeout=15)`, catching
-  `TimeoutExpired`/`FileNotFoundError`, under a caught overall
-  deadline; always exits zero.
+  pipes `review-points` JSON to python, which counts the blockers'
+  open steps, sends one combined
+  `ctx-notify update <id> --quiet --status <badge> --summary <digest>`,
+  then collects the open-step texts (each capped at 200 chars) and
+  issues a single `ctx-notify log <id> <line>...` invocation — both
+  via `subprocess.run(..., check=False, timeout=15)`, catching
+  `TimeoutExpired`/`FileNotFoundError`, inspecting each returncode
+  (nonzero degrades to a `skipped` marker, never a success-looking
+  one), under a caught overall deadline; always exits zero.
 - FINISH: `ctx-notify finish --ok "$1" --quiet || true` behind the
   same `unavailable` guard.
 - Weave points in `variant/basic/index.ts`: begin before
@@ -187,8 +206,10 @@ Suggested shape (the 2026-08-31 script-tested design):
   made successful).
 - Focused checks (goals 2 and 3): export each wrapper script text as
   a named constant from `notify.ts` so tests run the shipped script
-  verbatim; exercise them via `sh -c` with a scratch directory
-  prepended to PATH holding a fake `ctx-notify` that emits good JSON,
+  verbatim; exercise the complete shipped argv via `sh -c` with a
+  scratch-only PATH (a controlled directory plus the system shells —
+  no host installation directories, so a test can never reach the real
+  `ctx-notify` or daemon) holding a fake `ctx-notify` that emits good JSON,
   garbage, a nonzero exit, or sleeps past the deadlines — plus one
   run with no binary on PATH and one with `unavailable` as the id —
   asserting zero exit and the expected marker. The structural check
