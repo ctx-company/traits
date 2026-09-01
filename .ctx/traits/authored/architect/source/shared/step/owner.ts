@@ -10,6 +10,10 @@
 //     rewrite iteration; line ranges refer to the plan file as piped.
 // A gate-tool failure is surfaced as a non-approval with the captured
 // output so the loop continues visibly rather than dying silently.
+// Since the split authority (2026-09-01) the surface is every changed
+// task file — parent and children — concatenated under ==> headers, so
+// the owner annotates the whole family in one pass; a run that touched
+// only the parent pipes just the parent, byte-identical to before.
 // The frame budget is the outer bound on how long the owner has per
 // iteration. 0253.4's ask machinery may later replace the transport;
 // the loop semantics stay.
@@ -28,7 +32,9 @@ const GATE_SCRIPT = [
   "  printf approved",
   "  exit 0",
   "fi",
-  'out=$(ctx-annotate --stdin < "$1")',
+  'files=$(git status --porcelain .internal/tasks | sed "s/^...//" | grep -v "^$" || true)',
+  '[ -n "$files" ] || files="$1"',
+  'out=$(for f in $files; do printf "==> %s <==\\n" "$f"; cat "$f"; printf "\\n"; done | ctx-annotate --stdin)',
   'if printf \'%s\' "$out" | python3 -c \'import json,sys; sys.exit(0 if json.load(sys.stdin).get("annotations")==[] else 1)\' 2>/dev/null; then',
   "  printf approved",
   "else",

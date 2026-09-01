@@ -11,7 +11,7 @@ import { doneCriteria, durationTarget, grounding, slicePlan, taskInput, workItem
  * failure (which is exactly how the first two MVP-planning runs died: split
  * produced 8 slices against a for-each bound of 6, with no gate between).
  */
-export const MAX_SLICES = 8;
+export const MAX_SLICES = 1;
 
 const sliceCountValid = condition.any(
   Array.from({ length: MAX_SLICES }, (_, i) => condition.count(slicePlan).equals(i + 1)),
@@ -34,16 +34,15 @@ export function slices(agent: AgentHandle) {
     agent.prompt("Split the work into slices", {
       id: "split",
       input: input.prompt`
-            Break the described work into dependency-ordered slices with child tasks, as the typed plan.
+            Capture the described work as EXACTLY ONE slice with an EMPTY tasks list — one parent task (owner ruling 2026-09-01: plan delivers a single parent; decomposition belongs to architect, which splits by its own judgment after grounding in code).
             The work, as described: ${taskInput}
             The source's work items: ${workItems}
             The source's done criteria: ${doneCriteria}
             Grounding notes: ${grounding}
             Describe every slice and child as a dependency-ordered outcome at module/area and validation-gate scope. Include applicable constraints from the grounding notes, but defer exact symbols, signatures, edits, and edit sequencing to architect.
-            SHAPE FOLLOWS THE WORK — three equal shapes, none preferred: a slice with an EMPTY tasks list is one standalone bare task on the board; several such slices are several independent peer tasks; a slice with children becomes a charter. A charter is legal only when a genuine umbrella exists — a shared stop condition no single child owns. Never split into children as packaging: one coherent piece of work is ONE task.
-            SLICES ARE KEYED TO WORK ITEMS, NEVER TO STACK LAYERS: one work item that spans many layers is ONE slice whose children may cross layers — schema, authoring surface, runtime, and their tests can live in one child when that is the coherent cut. Never plan more slices than there are work items; overlapping items merge into one slice. Never plan a define-first or architecture-only slice (the contract belongs in the charter's body) and never an audit-only or parity-only slice or task (verification belongs in the validation and [[checks]] of the tasks that change the behavior).
-            Keys are symbolic: the first slice is "KEY1", the next "KEY2", and so on; children are "KEY1.1", "KEY1.2", ... in dependency order (ordinals continue ".10", ".11", ... — never zero-padded). Never invent numeric board keys — a final mechanical step assigns real numbers from the live board.
-            Plan at most eight slices — consolidate related work items into one slice rather than exceeding the cap. Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every task SYMMETRICALLY to roughly ${durationTarget} of focused agent work: split anything materially larger, merge anything materially smaller into a sibling, and never plan a task whose whole body is running gates, tests, or checks — gates ride the [[checks]] of the task that changed the code. Before returning, judge the implied total (task count times ${durationTarget}) against the described work: cover every work item with the FEWEST tasks that stay within the target. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
+            The one slice is the whole described work: its covers list every work item, its intent carries the shared stop condition, and its tasks list stays EMPTY — never pre-decompose, never emit children, never a second slice. The parent states outcome and acceptance shape at module/area and validation-gate scope; architect later judges whether it becomes a charter with children or stays the implementable unit.
+            The slice's key is symbolic: "KEY1". Never invent numeric board keys — a final mechanical step assigns the real number from the live board.
+            Record real dependencies on EXISTING board keys in depends-on. Duration target ${durationTarget} is context for stating acceptance, not a reason to trim scope: the parent may be larger than one run — architect owns making it swift.
             Do not implement anything, and write nothing to disk in this step — not task files, not notes; return only the plan. A later step writes the board from it; any file created here is out-of-plan and will not be adopted.`,
       output: slicePlan,
       include: [slicePlan.optional()],

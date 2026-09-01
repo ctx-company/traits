@@ -4,7 +4,7 @@ import * as shared from "#trait/shared/index.ts";
 
 export default function () {
   cdk.defineVariant("Default", {
-    description: "Ground one draft task, rewrite it in place as a ready execution plan, and reject open-endedness.",
+    description: "Ground one draft parent, judge its scope, split it into positional children or rewrite it in place as a ready execution plan, and reject open-endedness.",
     metadata: { tag: shared.metadata.tag },
   });
 

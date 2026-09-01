@@ -6,6 +6,11 @@ export const targetSchema = schema.object("architect-target", {
   file: schema.field(schema.text(), { description: "Repo-relative path to the one resolved task TOML file." }),
 });
 
+const childRecordSchema = schema.object("architect-child", {
+  key: schema.field(schema.text(), { description: "The child task's board key: the parent key plus a positional ordinal (\"<parent>.1\", \"<parent>.2\", ...)." }),
+  file: schema.field(schema.text(), { description: "Repo-relative path of the child task file architect wrote." }),
+});
+
 export const receiptSchema = schema.object("architect-receipt", {
   key: schema.field(schema.text(), { description: "The rewritten task's immutable board key." }),
   file: schema.field(schema.text(), { description: "Repo-relative path to the rewritten task file." }),
@@ -13,6 +18,12 @@ export const receiptSchema = schema.object("architect-receipt", {
   "status-after": schema.field(schema.text(), { description: "The task status after architect rewrote it." }),
   "relations-correction": schema.optional(
     schema.field(schema.text(), { description: "Code-proven dependency correction, when architect changed relations." }),
+  ),
+  children: schema.optional(
+    schema.field(schema.list(childRecordSchema), {
+      description:
+        "Child tasks created by the split, in dependency order, present exactly when architect judged the parent too large for one swift run and split it. Absent for a split of one.",
+    }),
   ),
 });
 

@@ -6,18 +6,18 @@
   },
   "port:owner-gate": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 59,
-    "end": 59
+    "start": 70,
+    "end": 70
   },
   "port:receipts": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 66,
-    "end": 66
+    "start": 77,
+    "end": 77
   },
   "port:task": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 55,
-    "end": 55
+    "start": 66,
+    "end": 66
   },
   "prompt:criticize-open-endedness": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
@@ -44,10 +44,15 @@
     "start": 3,
     "end": 3
   },
-  "schema:architect-receipt": {
+  "schema:architect-child": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
     "start": 9,
     "end": 9
+  },
+  "schema:architect-receipt": {
+    "file": ".ctx/traits/authored/architect/source/shared/data.ts",
+    "start": 14,
+    "end": 14
   },
   "schema:architect-target": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
@@ -76,8 +81,8 @@
   },
   "schema:task-unchanged": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 19,
-    "end": 19
+    "start": 30,
+    "end": 30
   },
   "sequence:architect-refinement-body/assert-task-unchanged-after-critic": {
     "file": ".ctx/traits/authored/architect/source/shared/step/snapshot.ts",
@@ -121,8 +126,8 @@
   },
   "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then/owner-approval-gate": {
     "file": ".ctx/traits/authored/architect/source/shared/step/owner.ts",
-    "start": 40,
-    "end": 40
+    "start": 46,
+    "end": 46
   },
   "sequence:ctx-branch-arm-s-25-architect-refinement-body-29-present-the-plan-to-the-owner-then/refresh-snapshot-after-owner-review": {
     "file": ".ctx/traits/authored/architect/source/shared/step/snapshot.ts",
@@ -146,8 +151,8 @@
   },
   "sequence:procedure/commit-task": {
     "file": ".ctx/traits/authored/architect/source/shared/step/commit.ts",
-    "start": 20,
-    "end": 20
+    "start": 21,
+    "end": 21
   },
   "sequence:procedure/extract-target-file": {
     "file": ".ctx/traits/authored/architect/source/variant/default/index.ts",
@@ -171,48 +176,48 @@
   },
   "slot:commit-log": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 49,
-    "end": 49
+    "start": 60,
+    "end": 60
   },
   "slot:critic-verdict": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 38,
-    "end": 38
+    "start": 49,
+    "end": 49
   },
   "slot:grounding": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 29,
-    "end": 29
+    "start": 40,
+    "end": 40
   },
   "slot:owner-answer": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 44,
-    "end": 44
+    "start": 55,
+    "end": 55
   },
   "slot:receipt": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 43,
-    "end": 43
+    "start": 54,
+    "end": 54
   },
   "slot:target": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 24,
-    "end": 24
+    "start": 35,
+    "end": 35
   },
   "slot:target-file": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 25,
-    "end": 25
+    "start": 36,
+    "end": 36
   },
   "slot:task-check": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 37,
-    "end": 37
+    "start": 48,
+    "end": 48
   },
   "slot:task-snapshot": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",
-    "start": 33,
-    "end": 33
+    "start": 44,
+    "end": 44
   },
   "trait:architect": {
     "file": "[eval1]",

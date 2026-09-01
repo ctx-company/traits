@@ -8,7 +8,8 @@ import * as cdk from "@ctx-traits/cdk";
 import { commitLog, targetFile } from "../data.ts";
 
 /**
- * Pathspec-commit exactly the rewritten task file. `git commit -- <path>`
+ * Board-scoped commit: the split authority means the deliverable may be
+ * the parent plus its children, so the pathspec is the board directory. `git commit -- <path>`
  * commits the working-tree state of that one path — no staging step, and
  * unrelated staged work in a non-worktree run is never swept in. A target
  * that ends the run byte-identical (re-architecting an already-ready
@@ -19,7 +20,7 @@ import { commitLog, targetFile } from "../data.ts";
 export function commitStep(title: string): void {
   cdk.step.command(title, {
     id: "commit-task",
-    input: cdk.input.command`sh -c 'if git diff --quiet -- "$1"; then echo "no changes to commit for $1"; else git commit -m "architect: execution plan" -m "$1" -- "$1"; fi' _ ${targetFile}`,
+    input: cdk.input.command`sh -c 'git add .internal/tasks && if git diff --quiet --cached -- .internal/tasks; then echo "no changes to commit for $1"; else git commit -m "architect: execution plan" -m "$1" -- .internal/tasks; fi' _ ${targetFile}`,
     output: commitLog,
   });
 }

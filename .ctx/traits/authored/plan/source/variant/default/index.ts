@@ -13,12 +13,12 @@ export default function () {
   defineVariant("Default", {
     name: "Plan",
     summary:
-      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — duration-targeted tasks (default 10-15 minutes) shaped as the work demands — bare tasks or charters with children — with typed relations, the format the board dispatch machinery actually resolves.",
+      "Turn described work into ONE board-ready parent TaskDocument in .internal/tasks/ — intent and acceptance shape with typed relations; decomposition belongs to architect (owner ruling 2026-09-01).",
     metadata: { tag: shared.metadata.tag },
     description:
-      "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — duration-targeted tasks (default 10-15 minutes) shaped as the work demands — bare tasks or charters with children — with typed relations, the format the board dispatch machinery actually resolves.",
+      "Turn described work into ONE board-ready parent TaskDocument in .internal/tasks/ — intent and acceptance shape with typed relations; decomposition belongs to architect (owner ruling 2026-09-01).",
     procedureDescription:
-      "Extract the source's work items and done criteria, ground the work in the codebase, split it into a symbolic-keyed typed slice plan shaped as the work demands, write each slice's TaskDocument TOML files in its own frame, run one bounded independent review pass, then assign final board keys mechanically from the live board and commit the written files.",
+      "Extract the source's work items and done criteria, ground the work in the codebase, shape it as one symbolic-keyed parent slice, write that parent's TaskDocument in one frame, run one bounded independent review pass, then assign final board keys mechanically from the live board and commit the written files.",
   });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
