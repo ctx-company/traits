@@ -110,6 +110,58 @@ pub const SEAT_PROSE: &str = "configuration resolved for this physical seat";
 /// data, not an action.
 pub const OWNER_HANDLE: &str = "Oskar Cieslik";
 
+/// Placeholder-served content for one Merges row. `screens/merges.md:23-29`
+/// authorizes the static rows; headings and state roles remain interface and
+/// presentation concerns outside this module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeRowContent {
+    pub title: &'static str,
+    pub description: &'static str,
+    pub state_detail: Option<&'static str>,
+    pub meta: &'static str,
+}
+
+/// `screens/merges.md:23-29` placeholder-served Landing content.
+pub const MERGE_LANDING_ROWS: &[MergeRowContent] = &[MergeRowContent {
+    title: "doctor schema guard",
+    description: "run-1a2b3c → main · guarded-change · closes 0257",
+    state_detail: Some("deep merge"),
+    meta: "gates green · +27 −1",
+}];
+
+/// `screens/merges.md:23-29` placeholder-served Awaiting approval content.
+pub const MERGE_AWAITING_ROWS: &[MergeRowContent] = &[
+    MergeRowContent {
+        title: "0252.1 — one output grammar",
+        description: "run-99ffe1 → main · every command ends in a panel",
+        state_detail: None,
+        meta: "+214 −180 · gates green",
+    },
+    MergeRowContent {
+        title: "0253.1 — signals carry payloads",
+        description: "run-77cd10 → main · schema'd emissions",
+        state_detail: None,
+        meta: "+96 −12 · security signed",
+    },
+];
+
+/// `screens/merges.md:23-29` placeholder-served Landed content. The export's
+/// relative-time prose is corrected to run-to-target form; `landed` is Ok.
+pub const MERGE_LANDED_ROWS: &[MergeRowContent] = &[
+    MergeRowContent {
+        title: "0243.3 — a closed task never re-derives to blocked",
+        description: "run-7e90ad11 → main · merge complete",
+        state_detail: None,
+        meta: "7e90ad11",
+    },
+    MergeRowContent {
+        title: "0253.2 — agent intent authoring",
+        description: "run-a0ba4f87 → main · schema 0.6",
+        state_detail: None,
+        meta: "a0ba4f87",
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +190,17 @@ mod tests {
         let summary = sessions_summary(None, Some("frame 2 of 5"));
         assert_eq!(summary, "no run description yet \u{b7} frame 2 of 5");
         assert_eq!(summary.matches('\u{b7}').count(), 1);
+    }
+
+    #[test]
+    fn merge_rows_keep_the_run_to_target_shape() {
+        for row in MERGE_LANDING_ROWS
+            .iter()
+            .chain(MERGE_AWAITING_ROWS)
+            .chain(MERGE_LANDED_ROWS)
+        {
+            assert!(row.description.contains(" → main · "));
+            assert!(!row.description.ends_with('·'));
+        }
     }
 }

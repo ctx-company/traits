@@ -10,19 +10,19 @@
 //! (packaging, launcher, icon) needs to supply an owner-approved, tracked,
 //! licensed title-bar mark before any screen can render one.
 //!
-//! The first two owned screens share this deliberately small menu. A caller
-//! supplies the navigation handlers; this view owns only the stable geometry.
+//! The owned screens share this deliberately small menu. A caller supplies
+//! the navigation handlers; this view owns only the stable geometry.
 
 use gpui::prelude::*;
 use gpui::{AnyElement, SharedString, div, rgb};
 
 use crate::tokens;
 
-/// The menu's only entry — the current screen has no navigation seam yet,
-/// so this is a plain interface word, not a registry lookup.
+/// Plain interface words, not a registry lookup.
 pub const SESSIONS: &str = "Sessions";
 pub const TASKS: &str = "Tasks";
 pub const TRAITS: &str = "Traits";
+pub const MERGES: &str = "Merges";
 pub const CONFIG: &str = "Config";
 
 pub type MenuHandler = Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
@@ -33,15 +33,24 @@ fn menu_entry(
     handler: Option<MenuHandler>,
 ) -> AnyElement {
     let current = current_screen == label;
+    let selector = if current {
+        format!("title-bar-menu-current-{label}")
+    } else {
+        format!("title-bar-menu-entry-{label}")
+    };
+    let label_element = div()
+        .debug_selector(move || format!("title-bar-menu-label-{label}"))
+        .child(label);
+    let label_element = if current {
+        div()
+            .debug_selector(|| "title-bar-menu-current".to_string())
+            .child(label_element)
+    } else {
+        label_element
+    };
     let element = div()
         .id(SharedString::from(format!("title-bar-menu-{label}")))
-        .debug_selector(move || {
-            if current {
-                "title-bar-menu-current".to_string()
-            } else {
-                "title-bar-menu-entry".to_string()
-            }
-        })
+        .debug_selector(move || selector.clone())
         .font_family(tokens::FONT_SANS)
         .text_size(tokens::TITLE_BAR_MENU_SIZE)
         .font_weight(tokens::WEIGHT_NORMAL)
@@ -51,7 +60,7 @@ fn menu_entry(
             tokens::TEXT_SECONDARY
         }))
         .whitespace_nowrap()
-        .child(label);
+        .child(label_element);
     match handler {
         Some(handler) => element.on_click(handler).into_any_element(),
         None => element.into_any_element(),
@@ -63,6 +72,7 @@ pub fn title_bar_element(
     on_sessions: Option<MenuHandler>,
     on_tasks: Option<MenuHandler>,
     on_traits: Option<MenuHandler>,
+    on_merges: Option<MenuHandler>,
     on_config: Option<MenuHandler>,
 ) -> AnyElement {
     let menu = div()
@@ -75,6 +85,7 @@ pub fn title_bar_element(
         .child(menu_entry(SESSIONS, current_screen, on_sessions))
         .child(menu_entry(TASKS, current_screen, on_tasks))
         .child(menu_entry(TRAITS, current_screen, on_traits))
+        .child(menu_entry(MERGES, current_screen, on_merges))
         .child(menu_entry(CONFIG, current_screen, on_config));
 
     div()

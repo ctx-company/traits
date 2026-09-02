@@ -362,6 +362,7 @@ pub struct Shell {
     board_task: Option<gpui::Task<()>>,
     board_generation: u64,
     selected_task: Option<String>,
+    selected_merge: usize,
     task_detail: crate::task_preview::TaskDetailState,
     task_detail_task: Option<gpui::Task<()>>,
     task_detail_generation: u64,
@@ -401,6 +402,7 @@ enum Screen {
     Sessions,
     Tasks,
     Traits,
+    Merges,
     Config,
 }
 
@@ -410,6 +412,7 @@ impl Screen {
             Self::Sessions => title_bar_view::SESSIONS,
             Self::Tasks => title_bar_view::TASKS,
             Self::Traits => title_bar_view::TRAITS,
+            Self::Merges => title_bar_view::MERGES,
             Self::Config => title_bar_view::CONFIG,
         }
     }
@@ -479,6 +482,7 @@ impl Shell {
             board_task: None,
             board_generation: 0,
             selected_task: None,
+            selected_merge: crate::merges::INITIAL_SELECTION,
             task_detail: crate::task_preview::TaskDetailState::Loading,
             task_detail_task: None,
             task_detail_generation: 0,
@@ -512,6 +516,12 @@ impl Shell {
         if screen == Screen::Config {
             self.load_config(cx);
         }
+        cx.notify();
+    }
+
+    fn select_merge(&mut self, index: usize, cx: &mut Context<Self>) {
+        let sections = crate::merges::merge_sections();
+        self.selected_merge = index.min(crate::merges::row_count(&sections).saturating_sub(1));
         cx.notify();
     }
 
@@ -1417,6 +1427,29 @@ impl Render for Shell {
                 ));
             }
         }
+        if self.screen == Screen::Merges {
+            let sections = crate::merges::merge_sections();
+            body = div()
+                .debug_selector(|| "merges-screen".to_string())
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(rail_view::rail_element(
+                    &self.face.rail(self.detail.repo_key()),
+                ))
+                .child(crate::merges_view::merges_pane_element(
+                    &sections,
+                    self.selected_merge,
+                    |index| {
+                        Some(Box::new(cx.listener(
+                            move |shell, _event: &gpui::ClickEvent, _window, cx| {
+                                shell.select_merge(index, cx);
+                            },
+                        ))
+                            as crate::merges_view::SelectHandler)
+                    },
+                ));
+        }
         if matches!(self.screen, Screen::Traits | Screen::Config) {
             let header = trait_library::traits_header(&self.library);
             let authored_count = match &self.library {
@@ -1797,6 +1830,13 @@ impl Render for Shell {
                     Box::new(
                         cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
                             shell.switch_screen(Screen::Traits, cx);
+                        }),
+                    ) as title_bar_view::MenuHandler
+                }),
+                (self.screen != Screen::Merges).then(|| {
+                    Box::new(
+                        cx.listener(|shell, _event: &gpui::ClickEvent, _window, cx| {
+                            shell.switch_screen(Screen::Merges, cx);
                         }),
                     ) as title_bar_view::MenuHandler
                 }),
@@ -2358,10 +2398,10 @@ mod tests {
         );
     }
 
-    /// The two-entry menu has exactly one current label and its container
-    /// includes the second label plus the declared inter-entry gap.
+    /// The menu has exactly one current label and more content than that
+    /// current label alone.
     #[gpui::test]
-    fn the_title_bar_renders_two_entries_with_one_current(cx: &mut gpui::TestAppContext) {
+    fn the_title_bar_renders_entries_with_one_current(cx: &mut gpui::TestAppContext) {
         let window = cx
             .update(|cx| {
                 let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
@@ -2379,8 +2419,90 @@ mod tests {
             .expect("the current-screen label actually painted this frame");
         assert!(
             menu.size.width > label.size.width + tokens::TITLE_BAR_MENU_GAP,
-            "the Tasks entry and declared gap expand the menu beyond its singular current label"
+            "the other menu entries and declared gaps expand the menu beyond its singular current label"
         );
+    }
+
+    #[gpui::test]
+    fn merges_menu_is_ordered_current_and_switches_to_content(cx: &mut gpui::TestAppContext) {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        let tasks = vcx
+            .debug_bounds("title-bar-menu-label-Tasks")
+            .expect("Tasks paints");
+        let merges = vcx
+            .debug_bounds("title-bar-menu-label-Merges")
+            .expect("Merges paints");
+        let config = vcx
+            .debug_bounds("title-bar-menu-label-Config")
+            .expect("Config paints");
+        assert!(tasks.origin.x < merges.origin.x && merges.origin.x < config.origin.x);
+        drop(vcx);
+        window
+            .update(cx, |shell, _window, cx| {
+                shell.switch_screen(Screen::Merges, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        assert!(vcx.debug_bounds("merges-pane").is_some());
+        assert!(vcx.debug_bounds("title-bar-menu-current-Merges").is_some());
+        for selector in [
+            "title-bar-menu-current-Sessions",
+            "title-bar-menu-current-Tasks",
+            "title-bar-menu-current-Traits",
+            "title-bar-menu-current-Config",
+        ] {
+            assert!(
+                vcx.debug_bounds(selector).is_none(),
+                "{selector} is not current"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn merges_selection_starts_at_landing_and_stays_singular_across_moves(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for selected in [0, 2, 3] {
+            let window = cx
+                .update(|cx| {
+                    let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                    cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+                })
+                .unwrap();
+            window
+                .update(cx, |shell, _window, cx| {
+                    shell.switch_screen(Screen::Merges, cx);
+                    shell.select_merge(selected, cx);
+                })
+                .unwrap();
+            cx.run_until_parked();
+            let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+            for (index, selector) in [
+                "merge-row-selected-0",
+                "merge-row-selected-1",
+                "merge-row-selected-2",
+                "merge-row-selected-3",
+                "merge-row-selected-4",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                assert_eq!(
+                    vcx.debug_bounds(selector).is_some(),
+                    index == selected,
+                    "{selector} is selected only at index {selected}"
+                );
+            }
+        }
     }
 
     #[test]

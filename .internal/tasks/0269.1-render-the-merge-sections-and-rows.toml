@@ -3,7 +3,7 @@ key = "0269.1"
 title = "Render the merge sections and rows"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — discovery order, file and symbol
@@ -225,8 +225,8 @@ facts, headings misfiled as placeholders, literals at call sites, CLI-private
 imports, direct reads, timers, new center capability, queue inference,
 sibling-owned work and design-artifact edits. They do not establish that a row
 rendered or that a selection held; the desktop lane decides those.
-'''
-scope = '''
+"""
+scope = """
 ## GOALS — binding
 
 ### What decides these goals
@@ -717,8 +717,8 @@ preserve every invariant named under Excluded.
 - The other three new screens (`0266`, `0267`, `0268`), packaging (`0260`), the
   summons surface (`0259`), and pencil work of any kind.
 - Anything discovered beyond these goals: that is board material, not a cell here.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **Do not fabricate merge state.** `RunSummary.landing` is terminal evidence and
@@ -878,7 +878,13 @@ rerun the failed command and every command after it in that order. If a second
 round would be needed, stop and report the exact failing command — or the
 unresolved visual or data contract — with its evidence rather than iterating. That
 is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
+depends-on = [
+    "0265.5",
+    "0265.7",
+    "0265.9",
+    "0258",
+]
 parent = "0269"
-depends-on = ["0265.5", "0265.7", "0265.9", "0258"]
