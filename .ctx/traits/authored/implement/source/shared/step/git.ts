@@ -13,9 +13,14 @@ export const commitStage = cdk.defineStep.command({
   output: slot.stageOutput,
 });
 
+// Commit-report dropped (owner ruling 2026-09-02): the step still needs
+// one output slot (command items must), so it captures into a throwaway
+// commitLog that gates nothing. Tolerant of an already-clean tree — a
+// prior seat may have committed — and always prints, so it never rejects
+// on empty output or "nothing to commit".
 export const commitSubmit = cdk.defineStep.command({
-  input: cdk.input.command`git commit -m ${slot.commitMessage}`,
-  output: port.commitReport,
+  input: cdk.input.command`sh -c 'if git diff --quiet && git diff --cached --quiet; then echo "nothing to commit"; else git commit -m "$1" && echo committed; fi' _ ${slot.commitMessage}`,
+  output: slot.commitLog,
 });
 
 export const commitMessage = cdk.defineStep.prompt({

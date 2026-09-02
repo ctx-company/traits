@@ -66,5 +66,4 @@ export default function () {
   });
   shared.step.notify.finish("Close the owner notification");
 
-  return { commitReport: shared.data.commitReport };
 }

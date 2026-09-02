@@ -14,25 +14,20 @@
     "start": 4,
     "end": 4
   },
-  "port:commit-report": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 153,
-    "end": 153
-  },
   "port:owner-gate": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 145,
-    "end": 145
+    "start": 150,
+    "end": 150
   },
   "port:owner-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 137,
-    "end": 137
+    "start": 142,
+    "end": 142
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 132,
-    "end": 132
+    "start": 137,
+    "end": 137
   },
   "prompt:draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
@@ -91,8 +86,8 @@
   },
   "schema:notify-digest": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 66,
-    "end": 66
+    "start": 71,
+    "end": 71
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
@@ -274,6 +269,11 @@
     "start": 16,
     "end": 16
   },
+  "slot:commit-log": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 53,
+    "end": 53
+  },
   "slot:commit-message": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 41,
@@ -291,48 +291,48 @@
   },
   "slot:gate-answer": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 111,
-    "end": 111
+    "start": 116,
+    "end": 116
   },
   "slot:gate-surface": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 106,
-    "end": 106
+    "start": 111,
+    "end": 111
   },
   "slot:git-status": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 53,
-    "end": 53
-  },
-  "slot:notify-badge": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 91,
-    "end": 91
-  },
-  "slot:notify-digest": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 64,
-    "end": 64
-  },
-  "slot:notify-id": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 58,
     "end": 58
   },
-  "slot:notify-journal": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 101,
-    "end": 101
-  },
-  "slot:notify-log": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 122,
-    "end": 122
-  },
-  "slot:notify-summary": {
+  "slot:notify-badge": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 96,
     "end": 96
+  },
+  "slot:notify-digest": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 69,
+    "end": 69
+  },
+  "slot:notify-id": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 63,
+    "end": 63
+  },
+  "slot:notify-journal": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 106,
+    "end": 106
+  },
+  "slot:notify-log": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 127,
+    "end": 127
+  },
+  "slot:notify-summary": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 101,
+    "end": 101
   },
   "slot:owner-decisions": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -341,8 +341,8 @@
   },
   "slot:owner-ruling-mode": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 117,
-    "end": 117
+    "start": 122,
+    "end": 122
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -356,8 +356,8 @@
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 127,
-    "end": 127
+    "start": 132,
+    "end": 132
   },
   "slot:summon-the-owner": {
     "file": ".ctx/traits/authored/implement/source/shared/step/summon.ts",

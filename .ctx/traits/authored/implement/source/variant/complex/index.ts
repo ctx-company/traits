@@ -34,5 +34,4 @@ export default function () {
     shared.step.git.commitSubmit("Commit the work");
   });
 
-  return { commitReport: shared.data.commitReport };
 }

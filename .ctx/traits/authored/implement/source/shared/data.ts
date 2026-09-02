@@ -50,6 +50,11 @@ export const ownerDecisions = cdk.slot.texts({
   hint: "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences.",
 });
 
+export const commitLog = cdk.slot.text({
+  id: "commit-log",
+  description: "Throwaway capture of the commit command's own output — not a run output port, never gates anything.",
+});
+
 export const gitStatus = cdk.slot.text({
   id: "git-status",
   description: "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
@@ -150,14 +155,7 @@ export const ownerGate = cdk.port.input.text({
   default: { value: "annotate" },
 });
 
-export const commitReport = cdk.port.output.text({
-  id: "commit-report",
-  description:
-    "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit.",
-  optional: true,
-});
-
-export const port = { task, ownerGate, ownerRuling, commitReport };
+export const port = { task, ownerGate, ownerRuling };
 
 export const slot = {
   draft,
@@ -169,6 +167,7 @@ export const slot = {
   commitMessage,
   ownerDecisions,
   gitStatus,
+  commitLog,
   stageOutput,
   ownerRulingMode,
   notifyId,

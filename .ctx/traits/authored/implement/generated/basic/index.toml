@@ -48,13 +48,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "commit-report"
-direction = "output"
-schema = "schema:text"
-optional = true
-description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
-
-[[port]]
 id = "owner-gate"
 direction = "input"
 schema = "schema:text"
@@ -85,6 +78,11 @@ id = "changed-files"
 schema = "schema:text"
 description = "Names and change-kinds of every file changed since the session base — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
 hint = "git diff --name-status against slot:diff-base; covers committed and uncommitted changes, omits untracked files."
+
+[[slot]]
+id = "commit-log"
+schema = "schema:text"
+description = "Throwaway capture of the commit command's own output — not a run output port, never gates anything."
 
 [[slot]]
 id = "commit-message"
@@ -544,13 +542,14 @@ argv = [
 id = "commit-the-work"
 title = "Commit the work"
 input = ["slot:commit-message"]
-output = ["port:commit-report"]
+output = ["slot:commit-log"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
 argv = [
-    "git",
-    "commit",
-    "-m",
+    "sh",
+    "-c",
+    'if git diff --quiet && git diff --cached --quiet; then echo "nothing to commit"; else git commit -m "$1" && echo committed; fi',
+    "_",
     "{slot:commit-message}",
 ]
 
@@ -827,7 +826,6 @@ input = [
     "port:owner-ruling",
     "port:task",
 ]
-output = ["port:commit-report"]
 
 [[procedure.sequence]]
 id = "notify-begin"
