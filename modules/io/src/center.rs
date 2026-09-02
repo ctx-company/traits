@@ -327,11 +327,25 @@ impl std::fmt::Display for CreateTaskWireResult {
     }
 }
 
+/// The per-repository board-freshness index: repo-key -> (last fingerprint,
+/// presence, sync report, generation). Aliased to keep the several
+/// threading points readable and satisfy `clippy::type_complexity`.
+pub(crate) type BoardInstants = std::collections::HashMap<
+    String,
+    (
+        Option<String>,
+        crate::task_files::BoardPresence,
+        ctx_traits_core::task::provider::SyncReport,
+        u64,
+    ),
+>;
+
 /// Complete, repository-scoped data for one selected board task. This is a
 /// separate answer from `BoardWireResult` so list loading never transports
 /// every task's full prose or reconstructs every claiming run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+#[allow(clippy::large_enum_variant)] // wire result; one instance per response
 pub enum TaskDetailWireResult {
     Missing,
     Resolved {
@@ -2137,6 +2151,7 @@ struct ResolvedRow {
     trait_id: String,
 }
 
+#[allow(clippy::large_enum_variant)] // transient, one per row resolution
 enum RowResolution {
     Missing,
     One(ResolvedRow),
@@ -3924,19 +3939,7 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
 fn scan_subscribed_boards(
     model: &mut CenterModel,
     jobs: &mpsc::SyncSender<ModelCommand>,
-    board_instants: &Arc<
-        Mutex<
-            HashMap<
-                String,
-                (
-                    Option<String>,
-                    crate::task_files::BoardPresence,
-                    ctx_traits_core::task::provider::SyncReport,
-                    u64,
-                ),
-            >,
-        >,
-    >,
+    board_instants: &Arc<Mutex<BoardInstants>>,
 ) {
     let repo_keys: HashSet<String> = model
         .subscribers
@@ -4097,19 +4100,7 @@ fn serve_connection_worker_with_board_instants(
     mut stream: UnixStream,
     jobs: mpsc::SyncSender<ModelCommand>,
     paths: CenterPaths,
-    board_instants: Arc<
-        Mutex<
-            HashMap<
-                String,
-                (
-                    Option<String>,
-                    crate::task_files::BoardPresence,
-                    ctx_traits_core::task::provider::SyncReport,
-                    u64,
-                ),
-            >,
-        >,
-    >,
+    board_instants: Arc<Mutex<BoardInstants>>,
 ) {
     if serve_handshake(&mut stream).is_err() {
         return;
@@ -4584,17 +4575,7 @@ fn run_claimed_task_request(
 fn run_board_request(
     jobs: &mpsc::SyncSender<ModelCommand>,
     repo_key: String,
-    board_instants: &Mutex<
-        HashMap<
-            String,
-            (
-                Option<String>,
-                crate::task_files::BoardPresence,
-                ctx_traits_core::task::provider::SyncReport,
-                u64,
-            ),
-        >,
-    >,
+    board_instants: &Mutex<BoardInstants>,
 ) -> crate::Result<BoardWireResult> {
     let (reply, receiver) = mpsc::sync_channel(1);
     jobs.try_send(ModelCommand::ResolveRepository {
@@ -4622,17 +4603,7 @@ fn assemble_board(
     repo_key: String,
     root: Utf8PathBuf,
     runs: Vec<ctx_traits_core::task::provider::BoardRun>,
-    board_instants: &Mutex<
-        HashMap<
-            String,
-            (
-                Option<String>,
-                crate::task_files::BoardPresence,
-                ctx_traits_core::task::provider::SyncReport,
-                u64,
-            ),
-        >,
-    >,
+    board_instants: &Mutex<BoardInstants>,
 ) -> crate::Result<BoardWireResult> {
     let mut resolution =
         crate::task_files::FilesTaskBoard::open_read(crate::task_files::repo_board_dir(&root))
@@ -4751,17 +4722,7 @@ fn run_create_task_request(
     paths: &CenterPaths,
     repo_key: String,
     new_task: ctx_traits_core::task::provider::NewTask,
-    board_instants: &Mutex<
-        HashMap<
-            String,
-            (
-                Option<String>,
-                crate::task_files::BoardPresence,
-                ctx_traits_core::task::provider::SyncReport,
-                u64,
-            ),
-        >,
-    >,
+    board_instants: &Mutex<BoardInstants>,
 ) -> crate::Result<CreateTaskWireResult> {
     use ctx_traits_core::task::provider::{TaskProviderMut, WriteError};
 

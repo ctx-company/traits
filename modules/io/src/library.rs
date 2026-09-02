@@ -97,6 +97,7 @@ pub struct LibraryDetailSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "kebab-case")]
+#[allow(clippy::large_enum_variant)] // wire result; one instance per response
 pub enum LibraryDetailResolution {
     Resolved {
         display_identity: String,
@@ -625,6 +626,7 @@ fn source_only_detail(
     })
 }
 
+#[allow(clippy::too_many_arguments)] // cohesive row-assembly params; a struct would only scatter them
 fn push_member(
     rows: &mut Vec<LibraryRow>,
     id: &str,
