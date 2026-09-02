@@ -713,11 +713,15 @@ pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "import",
     "cache",
     "sessions",
+    // 0268.4: `config` is visible again — the read-only resolved-runtime
+    // report the Config screen and CLI share.
+    "config",
     // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info`/`publish`
     // moved under this group and are now hidden aliases, so they are no longer
     // visible top-level commands and must not appear above. Their subcommands render
     // through the same panels they always did. The 2026-08-18 regroup likewise
-    // hid `export`/`host`/`migrate`/`activate`/`explain`/`config`/`task` and
+    // hid `export`/`host`/`migrate`/`activate`/`explain`/`task` (and `config`,
+    // re-surfaced by 0268.4) and
     // renamed `new` to `create`.
     "dependency",
 ];
@@ -737,7 +741,7 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
     let presentation = match name {
         "doctor" | "init" | "create" | "fork" | "list" | "build" | "generate" | "refine"
         | "critique" | "merge" | "trust" | "state" | "import" | "cache" | "check" | "diff"
-        | "run" | "answer" | "dependency" | "sessions" => Panel,
+        | "run" | "answer" | "dependency" | "sessions" | "config" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \

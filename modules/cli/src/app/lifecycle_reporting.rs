@@ -1608,6 +1608,7 @@ pub(crate) fn resolve_trait_inventory_from(
 /// unreadable package — never synthesizing digest/status/trust values for the
 /// latter. Drift is deliberately not list inventory: the dashboard computes it
 /// only for the selected preview.
+#[allow(dead_code)] // 0267.5 served-answer migration residue; deletion tracked in 0278
 pub(crate) struct DashboardTraitRow {
     pub(crate) id: String,
     pub(crate) version: String,
@@ -1631,6 +1632,7 @@ pub(crate) struct DashboardTraitRow {
 /// list`/`doctor` (P473 §1 note 2). TRAITS filters this down to
 /// `origin != Some("built-in")` itself (byte-identical to pre-P473 rows);
 /// TRUST uses the full set. The list does not compute drift.
+#[allow(dead_code)] // 0267.5 served-answer migration residue; deletion tracked in 0278
 pub(crate) fn dashboard_trait_inventory_from(
     context: &ctx_traits_io::inventory::InventoryContext,
     document: &ctx_traits_io::trust::Document,

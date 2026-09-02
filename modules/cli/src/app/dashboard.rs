@@ -38,12 +38,9 @@ use ratatui::widgets::Paragraph;
 
 use super::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
 use super::frame_prompt::summons_question;
-use super::lifecycle_reporting::{
-    DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source,
-};
+use super::lifecycle_reporting::dashboard_trait_editable_source;
 use super::merge::{MergeInputs, merge};
 use super::merge_story;
-use super::report_check::sequence_kind_label;
 use super::run_view;
 use super::session_delete::{self, ConfirmedDelete, DeletePlan};
 use super::trust_story;
@@ -300,6 +297,7 @@ struct TraitRow {
     /// from [`super::lifecycle_reporting::DashboardTraitRow::error`] rather
     /// than re-derived from `status`/`trust` text — the preview's degrade
     /// path (§4.6) checks this directly.
+    #[allow(dead_code)] // 0267.5 served-answer migration residue; deletion tracked in 0278
     error: Option<String>,
     /// A native family's variant name, when this row is one of several
     /// sharing `id` (0150) — `trait_row_label` renders `id:variant` for
@@ -2771,89 +2769,6 @@ fn merges_from_center_rows(rows: &[ctx_traits_io::center::CenterPublicRow]) -> V
     merged_rows
 }
 
-/// Builds TRUST's trait-centric rows (P473 §4.2): joins each visible trait
-/// (every tier, including built-ins — `all` is [`dashboard_trait_inventory`]'s
-/// unfiltered result) against its identity-bound-or-legacy trust record —
-/// the same preference [`trust_record_facts`] already implements for TRAITS
-/// — then appends one row per record [`ctx_traits_io::trust::classify_records`]
-/// classifies `Orphaned` (names no visible trait), so nothing in
-/// `trust.toml` becomes invisible. An unreadable trait row (no canonical
-/// digest was ever computed) is skipped, matching the old digest-centric
-/// `load_trust`'s own rule.
-/// Projects a supplied trust document for the TRUST screen. Keeping the join
-/// pure makes exact-digest authority testable without machine-local store IO.
-fn build_trust_rows_from(
-    document: &ctx_traits_io::trust::Document,
-    all: &[DashboardTraitRow],
-) -> Vec<TrustRow> {
-    let current: Vec<(String, String)> = all
-        .iter()
-        .filter(|row| row.error.is_none() && !row.canonical_digest.is_empty())
-        .map(|row| (row.id.clone(), row.canonical_digest.clone()))
-        .collect();
-
-    let mut rows = Vec::new();
-    for row in all {
-        if row.error.is_some() || row.canonical_digest.is_empty() {
-            continue;
-        }
-        let record = document.record_for_current(&row.id, &row.canonical_digest);
-        let report_row = record.map(|record| ctx_traits_io::trust::TrustReportRow {
-            trait_id: Some(row.id.clone()),
-            digest: record.digest.clone(),
-            current_digest: Some(row.canonical_digest.clone()),
-            state: record.state,
-            freshness: if record.digest == row.canonical_digest {
-                ctx_traits_io::trust::TrustFreshness::Current
-            } else {
-                ctx_traits_io::trust::TrustFreshness::Stale
-            },
-            updated_at: record.updated_at.clone(),
-            reason: record.reason.clone(),
-            seq: record.seq,
-            superseded: false,
-        });
-        rows.push(TrustRow {
-            trait_id: Some(row.id.clone()),
-            origin: row.origin.clone().unwrap_or_else(|| "repo".to_string()),
-            family: row.family.clone(),
-            variant: row.variant.clone(),
-            current_digest: row.canonical_digest.clone(),
-            recorded_digest: record.map(|record| record.digest.clone()),
-            class: trust_story::classify_trust(report_row.as_ref()),
-            updated_at: record.and_then(|record| record.updated_at.clone()),
-            reason: record.and_then(|record| record.reason.clone()),
-        });
-    }
-
-    let classified = ctx_traits_io::trust::classify_records(document, &current);
-    for orphan in classified
-        .into_iter()
-        .filter(|row| row.freshness == ctx_traits_io::trust::TrustFreshness::Orphaned)
-    {
-        rows.push(TrustRow {
-            trait_id: None,
-            origin: "orphaned".to_string(),
-            family: None,
-            variant: None,
-            current_digest: String::new(),
-            recorded_digest: Some(orphan.digest.clone()),
-            class: trust_story::TrustClass::Orphaned,
-            updated_at: orphan.updated_at.clone(),
-            reason: orphan.reason.clone(),
-        });
-    }
-
-    sort_trust_rows(&mut rows);
-    rows
-}
-
-/// The one ordering site for TRUST rows: actionable rows (a resolvable
-/// trait) sort before orphan rows, on which `a`/`b`/`A` all refuse by
-/// design — an orphan-heavy trust store must never leave the list opening
-/// on a row nothing can be done with. Ties broken by trait id, then
-/// recorded digest, mirroring `sessions_from_inventory_tagged`'s existing
-/// stable-sort precedent in this file.
 fn sort_trust_rows(rows: &mut [TrustRow]) {
     rows.sort_by(|a, b| {
         a.trait_id
@@ -3923,155 +3838,6 @@ fn detail_error(detail: &ctx_traits_io::library::LibraryDetailResolution) -> Str
     }
 }
 
-/// IO edge (§4.2): resolves the trait document, the trust record, and a
-/// bounded source excerpt, then hands off to the pure [`trait_preview_lines`]
-/// for rendering. `trust_document` is passed in rather than re-read per
-/// selection — `load_trust` already reads it once per reload.
-fn build_trait_preview(
-    row: &TraitRow,
-    trust_document: &ctx_traits_io::trust::Document,
-) -> TraitPreview {
-    let facts = trait_preview_facts(row, trust_document);
-    let lines = trait_preview_lines(&facts)
-        .iter()
-        .map(tui_ratatui::render_line)
-        .collect();
-    TraitPreview {
-        trait_id: row.id.clone(),
-        canonical_digest: row.canonical_digest.clone(),
-        lines,
-    }
-}
-
-fn trait_preview_facts(
-    row: &TraitRow,
-    trust_document: &ctx_traits_io::trust::Document,
-) -> TraitPreviewFacts {
-    let (trust_state, trust_reason, trust_stale, has_trust_record) =
-        trust_record_facts(trust_document, &row.id, &row.canonical_digest);
-    if let Some(error) = &row.error {
-        return TraitPreviewFacts {
-            id: row.id.clone(),
-            version: row.version.clone(),
-            status: row.status.clone(),
-            canonical_digest: row.canonical_digest.clone(),
-            trust_state,
-            trust_reason,
-            trust_stale,
-            has_trust_record,
-            // Drift is intentionally a selected-preview cost, never part of
-            // the TRAITS inventory scan.
-            drift: dashboard_trait_drift(&row.source_path),
-            source_drift_checked: false,
-            procedure: ProcedureShape::Unknown,
-            source_path: row.source_path.clone(),
-            source_excerpt: Vec::new(),
-            error: Some(error.clone()),
-        };
-    }
-    let (procedure, load_error) = match ctx_traits_io::run::load_trait(&row.source_path) {
-        Ok((trait_ref, ..)) => {
-            let procedure = match &trait_ref.procedure {
-                None => ProcedureShape::GuidanceOnly,
-                Some(procedure) => ProcedureShape::Sequence(
-                    procedure
-                        .sequence
-                        .iter()
-                        .map(|item| {
-                            (
-                                item.id.clone().unwrap_or_else(|| "(unnamed)".to_string()),
-                                item.kind
-                                    .map(sequence_kind_label)
-                                    .map(str::to_string)
-                                    .unwrap_or_else(|| "(no kind)".to_string()),
-                            )
-                        })
-                        .collect(),
-                ),
-            };
-            (procedure, None)
-        }
-        Err(error) => (ProcedureShape::Unknown, Some(error.to_string())),
-    };
-    let editable_source = dashboard_trait_editable_source(&row.source_path);
-    let source_path = editable_source
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| row.source_path.clone());
-    let source_excerpt = editable_source
-        .as_deref()
-        .map(|path| read_source_excerpt(path, 40))
-        .unwrap_or_default();
-    TraitPreviewFacts {
-        id: row.id.clone(),
-        version: row.version.clone(),
-        status: row.status.clone(),
-        canonical_digest: row.canonical_digest.clone(),
-        trust_state,
-        trust_reason,
-        trust_stale,
-        has_trust_record,
-        drift: dashboard_trait_drift(&row.source_path),
-        // `dashboard_trait_drift` unconditionally passes `skip_cdk_drift:
-        // true` (lifecycle_reporting.rs), so the authored source is never
-        // actually compared here yet.
-        source_drift_checked: false,
-        procedure,
-        source_path,
-        source_excerpt,
-        error: load_error,
-    }
-}
-
-/// Joins `trust_document` against `trait_id`/`canonical_digest` (§4.2 point
-/// 3): exact current-digest evidence is preferred before identity history.
-/// Returns `(state, reason, stale, has_record)` —
-/// `stale` is `load_trust`'s own "record's digest moved" notion, reused
-/// rather than re-derived.
-fn trust_record_facts(
-    document: &ctx_traits_io::trust::Document,
-    trait_id: &str,
-    canonical_digest: &str,
-) -> (String, String, bool, bool) {
-    if let Some(record) = document.record_for_current(trait_id, canonical_digest) {
-        let stale = record.digest != canonical_digest;
-        return (
-            record.state.as_str().to_string(),
-            record.reason.clone().unwrap_or_default(),
-            stale,
-            true,
-        );
-    }
-    if let Some(record) = document.record(canonical_digest) {
-        return (
-            record.state.as_str().to_string(),
-            record.reason.clone().unwrap_or_default(),
-            false,
-            true,
-        );
-    }
-    ("pending".to_string(), String::new(), false, false)
-}
-
-/// Bounded read (§4.2 point 4): reads at most `max_lines` lines via a
-/// `BufReader`, never slurping an arbitrarily large source file into memory
-/// first.
-fn read_source_excerpt(path: &camino::Utf8Path, max_lines: usize) -> Vec<String> {
-    use std::io::BufRead;
-    let Ok(file) = std::fs::File::open(path.as_std_path()) else {
-        return Vec::new();
-    };
-    std::io::BufReader::new(file)
-        .lines()
-        .take(max_lines)
-        .map_while(Result::ok)
-        .collect()
-}
-
-/// Pure renderer (§4.2, directly unit-testable): no IO, just `facts` ->
-/// styled lines. An error surfaces at the top in `Tone::Fail` (§4.6's degrade
-/// path) with the rest of the pane still rendering from whatever facts
-/// survive — never an empty pane.
 fn trait_preview_lines(facts: &TraitPreviewFacts) -> Vec<tui::Line> {
     let mut lines = Vec::new();
     if let Some(error) = &facts.error {
@@ -4252,13 +4018,6 @@ fn decide_member_apply(
 /// (a trust write never moves the digest, only the class) forces a rebuild.
 fn refresh_trust_preview_for_selection(state: &mut State) {
     refresh_trust_preview_impl(state, false);
-}
-
-/// Forces a rebuild regardless of the cache key — used after a trust write
-/// applies (§4.7), where the digest deliberately does not move but the
-/// class/recorded-digest facts must still refresh.
-fn force_rebuild_trust_preview_for_selection(state: &mut State) {
-    refresh_trust_preview_impl(state, true);
 }
 
 fn refresh_trust_preview_impl(state: &mut State, force: bool) {
@@ -5938,10 +5697,8 @@ fn edit_selected_trait_source(pane: &mut RatatuiPane, state: &mut State) -> crat
     } else {
         format!("editor exited nonzero for {}", path)
     });
-    if ok {
-        if let Some(worker) = &state.worker {
-            worker.notify_library_changed();
-        }
+    if ok && let Some(worker) = &state.worker {
+        worker.notify_library_changed();
     }
     match reposition_trait_selection(&state.traits, &trait_id) {
         Some(idx) => state.list_traits.set_selected(idx),
@@ -8753,6 +8510,7 @@ fn explanation_task_text(message: &str, elapsed: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::lifecycle_reporting::DashboardTraitRow;
     use super::*;
 
     #[test]
@@ -9071,164 +8829,6 @@ mod tests {
         assert_eq!(
             explanation_task_text("working...", Duration::from_secs(60)),
             "working... 00:01:00"
-        );
-    }
-
-    #[test]
-    fn preview_trust_prefers_current_digest_over_later_identity_history() {
-        let document = ctx_traits_io::trust::Document {
-            digests: vec![
-                ctx_traits_io::trust::TrustRecord {
-                    digest: "sha256:a".to_string(),
-                    state: ctx_traits_io::trust::TrustState::Blocked,
-                    trait_id: Some("fixture".to_string()),
-                    act: None,
-                    updated_at: None,
-                    reason: Some("A is blocked".to_string()),
-                    seq: Some(1),
-                },
-                ctx_traits_io::trust::TrustRecord {
-                    digest: "sha256:b".to_string(),
-                    state: ctx_traits_io::trust::TrustState::Verified,
-                    trait_id: Some("fixture".to_string()),
-                    act: None,
-                    updated_at: None,
-                    reason: None,
-                    seq: Some(2),
-                },
-            ],
-        };
-        assert_eq!(
-            trust_record_facts(&document, "fixture", "sha256:a"),
-            (
-                "blocked".to_string(),
-                "A is blocked".to_string(),
-                false,
-                true
-            )
-        );
-    }
-
-    #[test]
-    fn trust_facts_keep_exact_and_raw_current_evidence_ahead_of_history() {
-        let mut document = ctx_traits_io::trust::Document {
-            digests: vec![
-                ctx_traits_io::trust::TrustRecord {
-                    digest: "sha256:a".to_string(),
-                    state: ctx_traits_io::trust::TrustState::Verified,
-                    trait_id: Some("fixture".to_string()),
-                    act: None,
-                    updated_at: None,
-                    reason: None,
-                    seq: Some(1),
-                },
-                ctx_traits_io::trust::TrustRecord {
-                    digest: "sha256:b".to_string(),
-                    state: ctx_traits_io::trust::TrustState::Verified,
-                    trait_id: Some("fixture".to_string()),
-                    act: None,
-                    updated_at: None,
-                    reason: None,
-                    seq: Some(2),
-                },
-            ],
-        };
-        assert_eq!(
-            trust_record_facts(&document, "fixture", "sha256:a").0,
-            "verified"
-        );
-
-        document.digests.push(ctx_traits_io::trust::TrustRecord {
-            digest: "sha256:a".to_string(),
-            state: ctx_traits_io::trust::TrustState::Blocked,
-            trait_id: Some("fixture".to_string()),
-            act: None,
-            updated_at: None,
-            reason: None,
-            seq: Some(3),
-        });
-        assert_eq!(
-            trust_record_facts(&document, "fixture", "sha256:a").0,
-            "blocked"
-        );
-
-        document.digests.push(ctx_traits_io::trust::TrustRecord {
-            digest: "sha256:a".to_string(),
-            state: ctx_traits_io::trust::TrustState::Verified,
-            trait_id: None,
-            act: None,
-            updated_at: None,
-            reason: None,
-            seq: Some(4),
-        });
-        assert_eq!(
-            trust_record_facts(&document, "fixture", "sha256:a").0,
-            "verified"
-        );
-        let unseen = trust_record_facts(&document, "fixture", "sha256:c");
-        assert_eq!(unseen.0, "blocked");
-        assert!(
-            unseen.2,
-            "unseen current bytes must be marked stale history"
-        );
-    }
-
-    #[test]
-    fn trust_rows_keep_exact_and_raw_current_evidence_ahead_of_history() {
-        let all = [dashboard_trait_row("fixture", "sha256:a", None, None)];
-        let mut document = ctx_traits_io::trust::Document {
-            digests: vec![
-                ctx_traits_io::trust::TrustRecord {
-                    digest: "sha256:a".to_string(),
-                    state: ctx_traits_io::trust::TrustState::Verified,
-                    trait_id: Some("fixture".to_string()),
-                    act: None,
-                    updated_at: None,
-                    reason: None,
-                    seq: Some(1),
-                },
-                ctx_traits_io::trust::TrustRecord {
-                    digest: "sha256:b".to_string(),
-                    state: ctx_traits_io::trust::TrustState::Verified,
-                    trait_id: Some("fixture".to_string()),
-                    act: None,
-                    updated_at: None,
-                    reason: None,
-                    seq: Some(2),
-                },
-            ],
-        };
-        let class = |document: &ctx_traits_io::trust::Document| {
-            build_trust_rows_from(document, &all)[0].class
-        };
-        assert_eq!(class(&document), trust_story::TrustClass::Verified);
-
-        document.digests.push(ctx_traits_io::trust::TrustRecord {
-            digest: "sha256:a".to_string(),
-            state: ctx_traits_io::trust::TrustState::Blocked,
-            trait_id: Some("fixture".to_string()),
-            act: None,
-            updated_at: None,
-            reason: None,
-            seq: Some(3),
-        });
-        assert_eq!(class(&document), trust_story::TrustClass::Blocked);
-
-        document.digests.push(ctx_traits_io::trust::TrustRecord {
-            digest: "sha256:a".to_string(),
-            state: ctx_traits_io::trust::TrustState::Verified,
-            trait_id: None,
-            act: None,
-            updated_at: None,
-            reason: None,
-            seq: Some(4),
-        });
-        assert_eq!(class(&document), trust_story::TrustClass::Verified);
-
-        let unseen = [dashboard_trait_row("fixture", "sha256:c", None, None)];
-        assert_eq!(
-            build_trust_rows_from(&document, &unseen)[0].class,
-            trust_story::TrustClass::MovedBlock
         );
     }
 
@@ -13548,27 +13148,6 @@ argv = ["git", "commit", "-m", "fixture"]
             assert!(rendered.contains("Esc list"));
         }
     }
-
-    // Unreadable-row facts (row.error is Some): the preview degrades rather
-    // than attempting a trait load, surfacing the error inline at the top
-    // of the rendered lines rather than crashing or rendering an empty pane.
-    #[test]
-    fn build_trait_preview_degrades_for_unreadable_row() {
-        let mut row = trait_row("broken", "");
-        row.error = Some("parse failed".to_string());
-        let preview = build_trait_preview(&row, &ctx_traits_io::trust::Document::default());
-        assert!(!preview.lines.is_empty());
-        let rendered: String = preview.lines[0]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
-        assert!(rendered.contains("parse failed"));
-    }
-
-    // ------------------------------------------------------------------
-    // P473: TRUST trait-centric master-detail
-    // ------------------------------------------------------------------
 
     fn dashboard_trait_row(
         id: &str,

@@ -58,6 +58,7 @@ enum Command {
     Preview(SessionPreviewRequest),
     TraitDetail(ctx_traits_io::library::LibraryDetailSelector),
     /// Kept for test-only command projections; it never reads library files.
+    #[cfg(test)]
     Refresh,
     Explain(ExplanationRequest),
 }
@@ -533,6 +534,7 @@ fn record_accepted_snapshot_time(
 
 /// Wait through the reconnect backoff without making queued dashboard actions
 /// wait behind it. Commands remain local to the accepted row model.
+#[allow(clippy::too_many_arguments)] // one channel per result stream; a struct would only rename the eight
 fn wait_for_retry(
     commands: &mpsc::Receiver<Command>,
     snapshots: &mpsc::Sender<RefreshResult>,
@@ -566,6 +568,7 @@ fn wait_for_retry(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // one channel per result stream; a struct would only rename the eight
 fn handle_one_command(
     command: Command,
     snapshots: &mpsc::Sender<RefreshResult>,
@@ -591,6 +594,7 @@ fn handle_one_command(
             });
             Ok(())
         }
+        #[cfg(test)]
         Command::Refresh => {
             emit_cached_rows_snapshot(snapshots, state, rows, clear_refresh_error)?;
             Ok(())
