@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0266.8"
 title = "Bind the board bar's new task action"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
 content = '''
 ## Owner ruling 2026-09-01 (binding; granted live in session 835b2505, baked so no run re-asks)
