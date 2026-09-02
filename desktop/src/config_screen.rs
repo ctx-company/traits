@@ -11,6 +11,8 @@ use crate::rail::repo_display_name;
 use crate::run_row::{StatePresentation, StateRole};
 use crate::screen_header::ScreenHeader;
 
+// One instance per screen: boxing the Accepted payload buys nothing.
+#[allow(clippy::large_enum_variant)]
 pub enum ConfigState {
     Loading,
     Accepted {

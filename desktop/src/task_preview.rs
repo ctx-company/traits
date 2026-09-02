@@ -12,6 +12,8 @@ use crate::preview::{
 use crate::run_row::StateRole;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+// One instance per screen: boxing the Accepted payload buys nothing.
+#[allow(clippy::large_enum_variant)]
 pub enum TaskDetailState {
     Loading,
     Accepted {
