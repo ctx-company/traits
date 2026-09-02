@@ -572,6 +572,17 @@ pub struct LandingLine {
     pub role: Option<StateRole>,
 }
 
+impl LandingLine {
+    /// Placeholder-served consequences own their structural arrow here; core
+    /// continues to own the arrows on evidence-derived landing lines.
+    pub fn consequence(text: impl Into<String>) -> Self {
+        Self {
+            text: format!("→ {}", text.into()),
+            role: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LandingBlock {
     pub heading: String,

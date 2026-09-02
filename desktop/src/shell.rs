@@ -352,6 +352,23 @@ fn format_time_of_day(at: SystemTime) -> String {
     )
 }
 
+/// Repository identity is current only while the face has an accepted,
+/// connected snapshot. Stale rows remain visible elsewhere but cannot title a
+/// screen as if they were current.
+fn connected_merge_scope<'a>(
+    face: &'a CenterFace,
+    selected_repo_key: Option<&str>,
+) -> Option<(&'a str, &'a str)> {
+    let CenterState::Connected { dashboard } = face.state() else {
+        return None;
+    };
+    let rows = dashboard.rows();
+    let repo_key = selected_repo_key.or_else(|| rows.first().map(|row| row.repo_key.as_str()))?;
+    rows.iter()
+        .find(|row| row.repo_key == repo_key)
+        .map(|row| (row.repo_key.as_str(), row.repo_path.as_str()))
+}
+
 pub struct Shell {
     screen: Screen,
     face: CenterFace,
@@ -398,7 +415,7 @@ pub struct Shell {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Screen {
+pub enum Screen {
     Sessions,
     Tasks,
     Traits,
@@ -505,7 +522,7 @@ impl Shell {
         }
     }
 
-    fn switch_screen(&mut self, screen: Screen, cx: &mut Context<Self>) {
+    pub fn switch_screen(&mut self, screen: Screen, cx: &mut Context<Self>) {
         self.screen = screen;
         if screen == Screen::Tasks {
             self.load_board(cx);
@@ -1429,13 +1446,34 @@ impl Render for Shell {
         }
         if self.screen == Screen::Merges {
             let sections = crate::merges::merge_sections();
-            body = div()
+            let merge_scope = connected_merge_scope(&self.face, self.detail.repo_key());
+            let header = crate::merges::merges_header(merge_scope);
+            let merge_block = crate::merges::merges_merge_block();
+            let landing_block = crate::merges::merges_landing_block();
+            let preview_body = vec![
+                preview_view::lede_block_element(
+                    "merge",
+                    &merge_block,
+                    Some(crate::placeholders::MERGES_MERGE.prose),
+                ),
+                // `gates` and `sign-offs` reserve this position for 0269.4;
+                // they intentionally produce no element in this cut.
+                preview_view::landing_block_element(&landing_block),
+            ];
+            let merges = div()
                 .debug_selector(|| "merges-screen".to_string())
                 .flex()
+                .flex_col()
                 .flex_1()
                 .min_h_0()
-                .child(rail_view::rail_element(
-                    &self.face.rail(self.detail.repo_key()),
+                .pt(tokens::MAIN_PANE_PAD_TOP)
+                .pr(tokens::MAIN_PANE_PAD_RIGHT)
+                .pb(tokens::MAIN_PANE_PAD_BOTTOM)
+                .pl(tokens::MAIN_PANE_PAD_LEFT)
+                .gap(tokens::MAIN_PANE_GAP)
+                .child(crate::screen_header_view::screen_header_element(
+                    &header.title,
+                    &header.summary,
                 ))
                 .child(crate::merges_view::merges_pane_element(
                     &sections,
@@ -1448,6 +1486,22 @@ impl Render for Shell {
                         ))
                             as crate::merges_view::SelectHandler)
                     },
+                ))
+                .child(bottom_bar_view::bar_element(
+                    &crate::merges::merges_bar(),
+                    None,
+                ));
+            body = div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(rail_view::rail_element(
+                    &self.face.rail(self.detail.repo_key()),
+                ))
+                .child(merges)
+                .child(preview_view::overflow_preview_column_element(
+                    preview_body,
+                    preview_view::preview_footer_element(crate::placeholders::MERGES_FOOTER),
                 ));
         }
         if matches!(self.screen, Screen::Traits | Screen::Config) {
@@ -2468,6 +2522,131 @@ mod tests {
     }
 
     #[gpui::test]
+    fn merges_chrome_paints_ordered_placeholder_blocks_and_noop_actions(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+            })
+            .unwrap();
+        window
+            .update(cx, |shell, _window, cx| {
+                shell.switch_screen(Screen::Merges, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        for selector in [
+            "screen-header-title",
+            "screen-header-summary",
+            "screen-header-glyph",
+            "bottom-bar",
+            "bottom-bar-action-watch",
+            "bottom-bar-action-hold",
+            "preview-block-merge",
+            "preview-lede-merge",
+            "preview-block-landing",
+            "preview-footer",
+        ] {
+            assert!(vcx.debug_bounds(selector).is_some(), "{selector} paints");
+        }
+        let merge = vcx.debug_bounds("preview-block-merge").unwrap();
+        let landing = vcx.debug_bounds("preview-block-landing").unwrap();
+        let footer = vcx.debug_bounds("preview-footer").unwrap();
+        assert!(merge.origin.y < landing.origin.y && landing.origin.y < footer.origin.y);
+        for selector in [
+            "breadcrumb",
+            "preview-block-gates",
+            "preview-block-sign-offs",
+        ] {
+            assert!(vcx.debug_bounds(selector).is_none(), "{selector} is absent");
+        }
+        let selected_before = window
+            .read_with(cx, |shell, _| shell.selected_merge)
+            .unwrap();
+        let preview_before = vcx
+            .debug_bounds("preview-block-merge")
+            .expect("merge preview paints before no-op actions");
+        for selector in ["bottom-bar-action-watch", "bottom-bar-action-hold"] {
+            let bounds = vcx.debug_bounds(selector).expect("action paints");
+            vcx.simulate_click(
+                gpui::point(
+                    bounds.origin.x + bounds.size.width / 2.,
+                    bounds.origin.y + bounds.size.height / 2.,
+                ),
+                gpui::Modifiers::default(),
+            );
+        }
+        cx.run_until_parked();
+        assert_eq!(
+            window
+                .read_with(cx, |shell, _| shell.selected_merge)
+                .unwrap(),
+            selected_before,
+            "unbound Watch and Hold cannot change selection"
+        );
+        assert_eq!(
+            vcx.debug_bounds("preview-block-merge"),
+            Some(preview_before),
+            "unbound Watch and Hold leave the rendered preview unchanged"
+        );
+    }
+
+    #[test]
+    fn merges_geometry_uses_declared_insets_and_prose_line_height() {
+        assert_eq!(tokens::MAIN_PANE_PAD_TOP, px(18.));
+        assert_eq!(tokens::MAIN_PANE_PAD_RIGHT, px(40.));
+        assert_eq!(tokens::MAIN_PANE_PAD_BOTTOM, px(20.));
+        assert_eq!(tokens::MAIN_PANE_PAD_LEFT, px(40.));
+        assert_eq!(tokens::PREVIEW_PROSE_LINE_HEIGHT, px(17.));
+    }
+
+    #[gpui::test]
+    fn merges_preview_overflow_is_strict_for_the_composed_column(cx: &mut gpui::TestAppContext) {
+        let open_merges = |height, cx: &mut gpui::TestAppContext| {
+            let window = cx
+                .update(|cx| {
+                    let bounds = Bounds::new(
+                        gpui::point(px(0.), px(0.)),
+                        gpui::size(px(1280.), px(height)),
+                    );
+                    cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+                })
+                .unwrap();
+            window
+                .update(cx, |shell, _window, cx| {
+                    shell.switch_screen(Screen::Merges, cx);
+                })
+                .unwrap();
+            cx.run_until_parked();
+            window
+        };
+        let fit_window = open_merges(900., cx);
+        let mut vcx = gpui::VisualTestContext::from_window(fit_window.into(), cx);
+        assert!(
+            vcx.debug_bounds("merges-preview-overflow-fade-overlay").is_none(),
+            "the tall composed preview fits"
+        );
+        drop(vcx);
+        let (viewport_height, content_height) = crate::overflow_fade::take_last_measurement()
+            .expect("the preview overflow component measured the composed body");
+        let exact_height = 900. - viewport_height + content_height;
+
+        for (height, expected_overlay) in [(exact_height, false), (exact_height - 1., true)] {
+            let window = open_merges(height, cx);
+            let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+            assert_eq!(
+                vcx.debug_bounds("merges-preview-overflow-fade-overlay").is_some(),
+                expected_overlay,
+                "height {height} has the expected strict overflow result"
+            );
+        }
+    }
+
+    #[gpui::test]
     fn merges_selection_starts_at_landing_and_stays_singular_across_moves(
         cx: &mut gpui::TestAppContext,
     ) {
@@ -2619,6 +2798,33 @@ mod tests {
         assert!(!rail.is_stale());
         assert_eq!(rail.repos().len(), 1);
         assert_eq!(rail.repos()[0].repo_key, "repo-c");
+    }
+
+    #[test]
+    fn merges_header_drops_stale_scope_until_fresh_snapshot() {
+        let mut face = CenterFace::new(RepoScope::All);
+        let now = SystemTime::now();
+        let mut first = wire_row("repo-a", "run-1");
+        first.repo_path = "/work/acme/widgets".to_string();
+        face.apply(LinkUpdate::Snapshot(vec![first]), now);
+        assert_eq!(
+            crate::merges::merges_header(connected_merge_scope(&face, None)).title,
+            "merges — acme/widgets"
+        );
+
+        face.apply(LinkUpdate::Down("lost connection".to_string()), now);
+        assert_eq!(
+            crate::merges::merges_header(connected_merge_scope(&face, None)).title,
+            "merges"
+        );
+
+        let mut replacement = wire_row("repo-b", "run-2");
+        replacement.repo_path = "/srv/other/api".to_string();
+        face.apply(LinkUpdate::Snapshot(vec![replacement]), now);
+        assert_eq!(
+            crate::merges::merges_header(connected_merge_scope(&face, None)).title,
+            "merges — other/api"
+        );
     }
 
     #[test]

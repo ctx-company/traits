@@ -147,11 +147,6 @@ pub fn merges_pane_element(
         .flex_col()
         .flex_1()
         .min_h_0()
-        .pt(tokens::MAIN_PANE_PAD_TOP)
-        .pr(tokens::MAIN_PANE_PAD_RIGHT)
-        .pb(tokens::MAIN_PANE_PAD_BOTTOM)
-        .pl(tokens::MAIN_PANE_PAD_LEFT)
-        .gap(tokens::MAIN_PANE_GAP)
         .child(overflow_fade::clipped_with_overflow_fade(
             list.into_any_element(),
         ))

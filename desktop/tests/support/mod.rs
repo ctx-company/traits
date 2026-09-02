@@ -759,6 +759,25 @@ impl FakePeerConnection {
         }
     }
 
+    /// Assert that an already-subscribed desktop client writes no further
+    /// request bytes while the peer remains otherwise idle.
+    pub fn assert_no_request_bytes(&mut self, timeout: std::time::Duration) {
+        self.stream
+            .set_read_timeout(Some(timeout))
+            .expect("set fake peer read timeout");
+        let mut byte = [0u8; 1];
+        match std::io::Read::read(&mut self.stream, &mut byte) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Ok(0) => panic!("client closed while checking for unexpected request bytes"),
+            Ok(_) => panic!("client wrote unexpected request bytes"),
+            Err(error) => panic!("unexpected error checking request bytes: {error}"),
+        }
+    }
+
     fn read_line(&mut self) -> serde_json::Value {
         let mut line = String::new();
         BufReader::new(self.stream.try_clone().expect("clone fake peer stream"))

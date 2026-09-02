@@ -162,6 +162,44 @@ pub const MERGE_LANDED_ROWS: &[MergeRowContent] = &[
     },
 ];
 
+/// `screens/merges.md:19-20` supplies the Merges header summary.
+pub const MERGES_SUMMARY: &str = "One landing now · two awaiting your approval.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergesBarContent {
+    pub state_word: &'static str,
+    pub detail: &'static str,
+}
+
+/// `screens/merges.md:30-31` supplies the landing bar's served content.
+pub const MERGES_BAR: MergesBarContent = MergesBarContent {
+    state_word: "landing",
+    detail: "run-1a2b3c → main · deep merge",
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergesMergeContent {
+    pub run: &'static str,
+    pub target: &'static str,
+    pub state: &'static str,
+    pub prose: &'static str,
+}
+
+/// `screens/merges.md:34-36` supplies the Merges preview's merge content.
+pub const MERGES_MERGE: MergesMergeContent = MergesMergeContent {
+    run: "run-1a2b3c · guarded-change",
+    target: "main · deep",
+    state: "landing",
+    prose: "Doctor fails loud when the binary predates the graph schema — the schema-guard change, drafted in chat and proven in the run.",
+};
+
+/// `screens/merges.md:43-44` supplies this arrowless consequence text.
+pub const MERGES_LANDING_CONSEQUENCE: &str =
+    "Merges deep into main · closes 0257 · removes wt-1a2b3c";
+
+/// `screens/merges.md:45` supplies the Merges preview footer.
+pub const MERGES_FOOTER: &str = "merge queue · 3 pending · 2 landed this week";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +240,10 @@ mod tests {
             assert!(row.description.contains(" → main · "));
             assert!(!row.description.ends_with('·'));
         }
+    }
+
+    #[test]
+    fn merges_consequence_keeps_its_structural_arrow_outside_the_placeholder() {
+        assert!(!MERGES_LANDING_CONSEQUENCE.starts_with('→'));
     }
 }

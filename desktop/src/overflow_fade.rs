@@ -24,13 +24,13 @@ fn transparent_canvas() -> gpui::Hsla {
     color
 }
 
-fn overlay_element() -> AnyElement {
+fn overlay_element(selector: &'static str) -> AnyElement {
     div()
         // `debug_selector` is a gpui-provided no-op outside test/test-support
         // builds; it is how a runtime proof reads this element's actual
         // painted bounds (`VisualTestContext::debug_bounds`) rather than a
         // caller-recomputed proxy of what `prepaint` intended to paint.
-        .debug_selector(|| "overflow-fade-overlay".to_string())
+        .debug_selector(move || selector.to_string())
         .flex()
         .flex_row()
         .justify_center()
@@ -67,6 +67,15 @@ fn overflows(viewport_height: Pixels, content_height: Pixels) -> bool {
 /// the caller supplies content and placement; this owns the measurement and
 /// the visibility decision.
 pub fn clipped_with_overflow_fade(content: AnyElement) -> impl IntoElement {
+    clipped_with_named_overflow_fade(content, "overflow-fade-overlay")
+}
+
+/// As [`clipped_with_overflow_fade`], with a caller-owned selector for a
+/// composition that renders more than one overflow-capable region.
+pub fn clipped_with_named_overflow_fade(
+    content: AnyElement,
+    overlay_selector: &'static str,
+) -> impl IntoElement {
     OverflowFade {
         content: div()
             .debug_selector(|| "overflow-fade-content".to_string())
@@ -74,11 +83,13 @@ pub fn clipped_with_overflow_fade(content: AnyElement) -> impl IntoElement {
             .w_full()
             .child(content)
             .into_any_element(),
+        overlay_selector,
     }
 }
 
 struct OverflowFade {
     content: AnyElement,
+    overlay_selector: &'static str,
 }
 
 /// What `prepaint` resolved: the measured content height, and — only when
@@ -169,7 +180,7 @@ impl Element for OverflowFade {
                 size: size(bounds.size.width, tokens::BOTTOM_FADE_HEIGHT),
             };
 
-            let mut overlay = overlay_element();
+            let mut overlay = overlay_element(self.overlay_selector);
             overlay.layout_as_root(
                 size(
                     gpui::AvailableSpace::Definite(bounds.size.width),
@@ -266,6 +277,16 @@ mod test_observer {
     pub(super) fn take() -> Option<Observation> {
         LAST.with(|cell| cell.borrow_mut().take())
     }
+}
+
+#[cfg(test)]
+pub(crate) fn take_last_measurement() -> Option<(f32, f32)> {
+    test_observer::take().map(|observation| {
+        (
+            f32::from(observation.viewport.size.height),
+            f32::from(observation.content_height),
+        )
+    })
 }
 
 #[cfg(test)]

@@ -30,7 +30,14 @@ fn action_element(action: &BarAction, handler: Option<BarActionHandler>) -> AnyE
         ActionTone::Secondary => tokens::TEXT_SECONDARY,
         ActionTone::Muted => tokens::TEXT_MUTED,
     };
-    let element = mono_11(color).child(action.label.clone());
+    let selector = match action.id {
+        BarActionId::Watch => "bottom-bar-action-watch",
+        BarActionId::Hold => "bottom-bar-action-hold",
+        _ => "bottom-bar-action",
+    };
+    let element = mono_11(color)
+        .debug_selector(move || selector.to_string())
+        .child(action.label.clone());
     match handler {
         // gpui requires a stateful element (`.id(...)`) for `.on_click` to
         // attach; invisible in paint — no geometry, no tone.

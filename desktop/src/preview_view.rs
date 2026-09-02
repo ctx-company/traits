@@ -154,6 +154,7 @@ pub fn lede_block_element(slug: &str, block: &NamedBlock, lede: Option<&str>) ->
                 .font_family(tokens::FONT_SANS)
                 .text_size(tokens::SIZE_11_5)
                 .text_color(rgb(tokens::TEXT_SECONDARY))
+                .line_height(tokens::PREVIEW_PROSE_LINE_HEIGHT)
                 .child(lede.to_string())
                 .into_any_element(),
         );
@@ -297,7 +298,7 @@ pub fn preview_footer_element(text: &str) -> AnyElement {
 /// `Vec<AnyElement>` (not `Vec<NamedBlock>`) so `0265.11`/`.12`/`.15`'s
 /// non-key/value blocks insert between the identity block and the spacer
 /// without forking this frame.
-pub fn preview_column_element(body: Vec<AnyElement>, footer: Option<AnyElement>) -> AnyElement {
+fn preview_column_frame(body: AnyElement, footer: Option<AnyElement>) -> AnyElement {
     let mut column = div()
         .debug_selector(|| "preview-column".to_string())
         .w(tokens::PREVIEW_COLUMN_WIDTH)
@@ -306,19 +307,49 @@ pub fn preview_column_element(body: Vec<AnyElement>, footer: Option<AnyElement>)
         .px(tokens::PREVIEW_COLUMN_PAD_X)
         .flex()
         .flex_col();
-    for child in body {
-        column = column.child(child);
+    column = column.child(body);
+    if let Some(footer) = footer {
+        column = column.child(footer);
     }
-    column = column.child(
+    column.into_any_element()
+}
+
+pub fn preview_column_element(body: Vec<AnyElement>, footer: Option<AnyElement>) -> AnyElement {
+    let mut content = div().flex().flex_col().flex_1().min_h_0().w_full();
+    for child in body {
+        content = content.child(child);
+    }
+    content = content.child(
         div()
             .debug_selector(|| "preview-spacer".to_string())
             .flex_1()
             .w_full(),
     );
-    if let Some(footer) = footer {
-        column = column.child(footer);
+    preview_column_frame(content.into_any_element(), footer)
+}
+
+/// A preview whose complete body occupies the one flexible region above its
+/// footer. This is for content that must measure overflow against that whole
+/// region rather than against the ordinary column spacer.
+pub fn overflow_preview_column_element(body: Vec<AnyElement>, footer: AnyElement) -> AnyElement {
+    let mut content = div().flex().flex_col().w_full();
+    for child in body {
+        content = content.child(child);
     }
-    column.into_any_element()
+    content = content.child(
+        div()
+            .debug_selector(|| "preview-spacer".to_string())
+            .flex_1()
+            .w_full(),
+    );
+    preview_column_frame(
+        crate::overflow_fade::clipped_with_named_overflow_fade(
+            content.into_any_element(),
+            "merges-preview-overflow-fade-overlay",
+        )
+        .into_any_element(),
+        Some(footer),
+    )
 }
 
 #[cfg(test)]
