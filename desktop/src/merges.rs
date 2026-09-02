@@ -2,7 +2,10 @@
 
 use crate::bottom_bar::{ActionTone, BarAction, BarActionId, BottomBar};
 use crate::placeholders::{self, MergeRowContent};
-use crate::preview::{KeyValueRow, LandingBlock, LandingLine, NamedBlock, ValueSegment};
+use crate::preview::{
+    IdentityTone, KeyValueRow, LandingBlock, LandingLine, NamedBlock, SignOffBlock, SignOffRow,
+    ValueSegment,
+};
 use crate::rail;
 use crate::run_row::{StatePresentation, StateRole};
 use crate::screen_header::ScreenHeader;
@@ -131,6 +134,39 @@ pub fn merges_merge_block() -> NamedBlock {
                 )],
             },
         ],
+    }
+}
+
+pub fn merges_gates_block() -> NamedBlock {
+    NamedBlock {
+        heading: "gates".to_string(),
+        rows: placeholders::MERGES_GATE_ROWS
+            .iter()
+            .map(|(key, value)| KeyValueRow {
+                key: (*key).to_string(),
+                value: vec![ValueSegment::toned(*value, StateRole::Ok)],
+            })
+            .collect(),
+    }
+}
+
+pub fn merges_signoffs_block() -> SignOffBlock {
+    let tones = [
+        IdentityTone::Accent,
+        IdentityTone::Review,
+        IdentityTone::Session,
+    ];
+    SignOffBlock {
+        heading: "sign-offs".to_string(),
+        rows: placeholders::MERGES_SIGNOFF_ROWS
+            .iter()
+            .zip(tones)
+            .map(|(content, tone)| SignOffRow {
+                identity: content.identity.to_string(),
+                tone,
+                role_and_time: content.role_and_time.to_string(),
+            })
+            .collect(),
     }
 }
 
@@ -270,6 +306,79 @@ mod tests {
         assert_eq!(
             landing.lines[0].text,
             format!("→ {}", placeholders::MERGES_LANDING_CONSEQUENCE)
+        );
+    }
+
+    #[test]
+    fn gates_and_signoffs_reuse_placeholder_content_in_order() {
+        let gates = merges_gates_block();
+        assert_eq!(gates.heading, "gates");
+        assert_eq!(
+            gates
+                .rows
+                .iter()
+                .map(|row| row.key.as_str())
+                .collect::<Vec<_>>(),
+            ["cargo test", "drift · embed", "ts-format", "worktree"]
+        );
+        assert_eq!(
+            gates
+                .rows
+                .iter()
+                .map(|row| (row.value[0].text.as_str(), row.value[0].role))
+                .collect::<Vec<_>>(),
+            [
+                ("pass", Some(StateRole::Ok)),
+                ("pass", Some(StateRole::Ok)),
+                ("pass", Some(StateRole::Ok)),
+                ("clean", Some(StateRole::Ok))
+            ]
+        );
+        assert_eq!(
+            gates
+                .rows
+                .iter()
+                .map(|row| row.key.as_str())
+                .collect::<Vec<_>>(),
+            placeholders::MERGES_GATE_ROWS
+                .iter()
+                .map(|(key, _)| *key)
+                .collect::<Vec<_>>()
+        );
+
+        let signoffs = merges_signoffs_block();
+        assert_eq!(signoffs.heading, "sign-offs");
+        assert_eq!(
+            signoffs
+                .rows
+                .iter()
+                .map(|row| row.identity.as_str())
+                .collect::<Vec<_>>(),
+            ["architect@1.4", "security@0.9", "@oskar"]
+        );
+        assert_eq!(
+            signoffs
+                .rows
+                .iter()
+                .map(|row| row.role_and_time.as_str())
+                .collect::<Vec<_>>(),
+            ["author · 14:49", "review · 14:47", "approved · 15:12"]
+        );
+        assert_eq!(
+            signoffs.rows.iter().map(|row| row.tone).collect::<Vec<_>>(),
+            [
+                IdentityTone::Accent,
+                IdentityTone::Review,
+                IdentityTone::Session
+            ]
+        );
+        assert_eq!(
+            signoffs.rows[0].identity,
+            placeholders::MERGES_SIGNOFF_ROWS[0].identity
+        );
+        assert_eq!(
+            signoffs.rows[2].role_and_time,
+            placeholders::MERGES_SIGNOFF_ROWS[2].role_and_time
         );
     }
 }

@@ -72,6 +72,26 @@ pub struct NamedBlock {
     pub rows: Vec<KeyValueRow>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityTone {
+    Accent,
+    Review,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignOffRow {
+    pub identity: String,
+    pub tone: IdentityTone,
+    pub role_and_time: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignOffBlock {
+    pub heading: String,
+    pub rows: Vec<SignOffRow>,
+}
+
 fn trait_row(row: &RunRow, baseline: &DetailBaseline) -> KeyValueRow {
     let mut value = vec![ValueSegment::neutral(row.trait_id.clone())];
     match &baseline.variant {

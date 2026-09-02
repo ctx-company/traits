@@ -7,7 +7,10 @@
 use gpui::prelude::*;
 use gpui::{AnyElement, div, rgb};
 
-use crate::preview::{KeyValueRow, LandingBlock, NamedBlock, NowItem, ValueSegment, VerdictBlock};
+use crate::preview::{
+    IdentityTone, KeyValueRow, LandingBlock, NamedBlock, NowItem, SignOffBlock, SignOffRow,
+    ValueSegment, VerdictBlock,
+};
 use crate::run_row::role_color;
 use crate::task_preview::ChecksBlock;
 use crate::tokens;
@@ -121,6 +124,52 @@ fn named_block_shell(slug: &str, heading: &str, children: Vec<AnyElement>) -> An
 pub fn named_block_element(slug: &str, block: &NamedBlock) -> AnyElement {
     let rows = block.rows.iter().map(kv_row_element).collect();
     named_block_shell(slug, &block.heading, rows)
+}
+
+fn identity_tone_color(tone: IdentityTone) -> u32 {
+    match tone {
+        IdentityTone::Accent => tokens::ACCENT,
+        IdentityTone::Review => tokens::REVIEW,
+        IdentityTone::Session => tokens::TEXT_SESSION,
+    }
+}
+
+fn signoff_row_element(index: usize, row: &SignOffRow) -> AnyElement {
+    div()
+        .debug_selector(move || format!("preview-signoff-{index}"))
+        .w_full()
+        .flex()
+        .flex_row()
+        .justify_between()
+        .items_center()
+        .child(
+            div()
+                .debug_selector(move || format!("preview-signoff-{index}-identity"))
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10_5)
+                .text_color(rgb(identity_tone_color(row.tone)))
+                .opacity(tokens::IDENTITY_HANDLE_OPACITY)
+                .child(row.identity.clone()),
+        )
+        .child(
+            div()
+                .debug_selector(move || format!("preview-signoff-{index}-meta"))
+                .font_family(tokens::FONT_MONO)
+                .text_size(tokens::SIZE_10)
+                .text_color(rgb(tokens::TEXT_FAINT))
+                .child(row.role_and_time.clone()),
+        )
+        .into_any_element()
+}
+
+pub fn signoff_block_element(block: &SignOffBlock) -> AnyElement {
+    let rows = block
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| signoff_row_element(index, row))
+        .collect();
+    named_block_shell("sign-offs", &block.heading, rows)
 }
 
 /// Checks are a heading followed by plain lines, not empty-key fact rows.
@@ -805,6 +854,17 @@ mod tests {
         };
         assert_eq!(segment_color(&state), role_color(StateRole::Ok));
         assert_ne!(segment_color(&state), tokens::TEXT);
+    }
+
+    #[test]
+    fn signoff_identity_tones_and_opacity_resolve_through_shared_tokens() {
+        assert_eq!(identity_tone_color(IdentityTone::Accent), tokens::ACCENT);
+        assert_eq!(identity_tone_color(IdentityTone::Review), tokens::REVIEW);
+        assert_eq!(
+            identity_tone_color(IdentityTone::Session),
+            tokens::TEXT_SESSION
+        );
+        assert_eq!(tokens::IDENTITY_HANDLE_OPACITY, 0.8);
     }
 
     #[gpui::test]

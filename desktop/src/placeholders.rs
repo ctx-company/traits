@@ -193,6 +193,38 @@ pub const MERGES_MERGE: MergesMergeContent = MergesMergeContent {
     prose: "Doctor fails loud when the binary predates the graph schema — the schema-guard change, drafted in chat and proven in the run.",
 };
 
+/// One placeholder-served sign-off entry. Presentation tones remain outside
+/// this module alongside the existing [`MergeRowContent`] state roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignOffContent {
+    pub identity: &'static str,
+    pub role_and_time: &'static str,
+}
+
+/// `screens/merges.md:37-39` supplies the placeholder-served gate rows.
+pub const MERGES_GATE_ROWS: &[(&str, &str)] = &[
+    ("cargo test", "pass"),
+    ("drift · embed", "pass"),
+    ("ts-format", "pass"),
+    ("worktree", "clean"),
+];
+
+/// `screens/merges.md:40-42` supplies the placeholder-served sign-offs.
+pub const MERGES_SIGNOFF_ROWS: &[SignOffContent] = &[
+    SignOffContent {
+        identity: "architect@1.4",
+        role_and_time: "author · 14:49",
+    },
+    SignOffContent {
+        identity: "security@0.9",
+        role_and_time: "review · 14:47",
+    },
+    SignOffContent {
+        identity: "@oskar",
+        role_and_time: "approved · 15:12",
+    },
+];
+
 /// `screens/merges.md:43-44` supplies this arrowless consequence text.
 pub const MERGES_LANDING_CONSEQUENCE: &str =
     "Merges deep into main · closes 0257 · removes wt-1a2b3c";

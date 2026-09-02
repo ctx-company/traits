@@ -60,6 +60,9 @@ pub const WARN_DIM: u32 = 0x917a4a;
 pub const DANGER: u32 = 0xe08b7f;
 pub const REVIEW: u32 = 0xc49af0;
 pub const REVIEW_DIM: u32 = 0x8469a2;
+/// `grammar.md:16-19` and `screens/merges.md:40-42` set every sign-off
+/// identity, including `@oskar`, to this opacity.
+pub const IDENTITY_HANDLE_OPACITY: f32 = 0.8;
 
 // ---------------------------------------------------------------------
 // Diff row washes — tokens.md:50-51. Literals in the source design, not

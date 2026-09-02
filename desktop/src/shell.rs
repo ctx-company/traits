@@ -1449,6 +1449,8 @@ impl Render for Shell {
             let merge_scope = connected_merge_scope(&self.face, self.detail.repo_key());
             let header = crate::merges::merges_header(merge_scope);
             let merge_block = crate::merges::merges_merge_block();
+            let gates_block = crate::merges::merges_gates_block();
+            let signoffs_block = crate::merges::merges_signoffs_block();
             let landing_block = crate::merges::merges_landing_block();
             let preview_body = vec![
                 preview_view::lede_block_element(
@@ -1456,8 +1458,8 @@ impl Render for Shell {
                     &merge_block,
                     Some(crate::placeholders::MERGES_MERGE.prose),
                 ),
-                // `gates` and `sign-offs` reserve this position for 0269.4;
-                // they intentionally produce no element in this cut.
+                preview_view::named_block_element("gates", &gates_block),
+                preview_view::signoff_block_element(&signoffs_block),
                 preview_view::landing_block_element(&landing_block),
             ];
             let merges = div()
@@ -2548,21 +2550,34 @@ mod tests {
             "bottom-bar-action-hold",
             "preview-block-merge",
             "preview-lede-merge",
+            "preview-block-gates",
+            "preview-block-sign-offs",
             "preview-block-landing",
             "preview-footer",
         ] {
             assert!(vcx.debug_bounds(selector).is_some(), "{selector} paints");
         }
         let merge = vcx.debug_bounds("preview-block-merge").unwrap();
+        let gates = vcx.debug_bounds("preview-block-gates").unwrap();
+        let signoffs = vcx.debug_bounds("preview-block-sign-offs").unwrap();
         let landing = vcx.debug_bounds("preview-block-landing").unwrap();
         let footer = vcx.debug_bounds("preview-footer").unwrap();
-        assert!(merge.origin.y < landing.origin.y && landing.origin.y < footer.origin.y);
-        for selector in [
-            "breadcrumb",
-            "preview-block-gates",
-            "preview-block-sign-offs",
-        ] {
+        assert!(
+            merge.origin.y < gates.origin.y
+                && gates.origin.y < signoffs.origin.y
+                && signoffs.origin.y < landing.origin.y
+                && landing.origin.y < footer.origin.y
+        );
+        for selector in ["breadcrumb"] {
             assert!(vcx.debug_bounds(selector).is_none(), "{selector} is absent");
+        }
+        for selected in [1, 2] {
+            window
+                .update(cx, |shell, _window, cx| shell.select_merge(selected, cx))
+                .unwrap();
+            cx.run_until_parked();
+            assert_eq!(vcx.debug_bounds("preview-block-gates"), Some(gates));
+            assert_eq!(vcx.debug_bounds("preview-block-sign-offs"), Some(signoffs));
         }
         let selected_before = window
             .read_with(cx, |shell, _| shell.selected_merge)
