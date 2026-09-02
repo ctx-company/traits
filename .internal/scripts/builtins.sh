@@ -35,7 +35,9 @@ esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILTINS="$REPO_ROOT/modules/builtin"
-CTX="${CTX_BIN:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/debug/ctx}"
+CTX_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+case "$CTX_TARGET_DIR" in /*) ;; *) CTX_TARGET_DIR="$REPO_ROOT/$CTX_TARGET_DIR" ;; esac
+CTX="${CTX_BIN:-$CTX_TARGET_DIR/debug/ctx}"
 
 if [[ ! -x "$CTX" ]]; then
   echo "builtins.sh: no ctx binary at $CTX — run 'cargo build -p ctx-traits-cli' first" >&2
