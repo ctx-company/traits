@@ -1,0 +1,83 @@
+schema-version = "0.2"
+key = "0278"
+title = "The dashboard reads state instantly and never flashes"
+status = "draft"
+raised = "2026-09-02"
+content = """
+Owner-reported, Claude-investigated 2026-09-02. Opening `ctx traits`
+shows placeholder zeroes for 2-3 seconds before real sessions appear,
+occasionally freezes the whole TUI for ~10 seconds, and — already
+loaded — flashes a pane empty and back on every refresh. Reading local
+state into a list should be effectively instant; today it is not.
+
+Five findings from reading the current read/paint pipeline
+(modules/cli/src/app/dashboard.rs, dashboard/worker.rs,
+modules/io/src/center.rs). They share one root: the pipeline clears
+state and re-fetches where it should keep what it has and reconcile,
+and it re-does work per open that could be cached.
+
+1. The center re-serializes every session row from scratch on every
+   subscribe, and ships the full row when the list needs a fraction of
+   it — O(sessions) serde work per open, growing with the corpus.
+2. Task-board reads happen on the render thread (startup and the
+   staleness refresh), so a board read blocks input — the ~10s freeze.
+3. The list starts empty and paints placeholder zeroes before the
+   first snapshot exists, then replaces wholesale.
+4. Nothing persists the last snapshot to disk for the sessions list,
+   so every fresh process round-trips the center before showing
+   anything — even though the tasks board already has exactly this
+   disk-cache pattern.
+5. Steady-state refresh blanks the preview (and any nulled-then-
+   refetched pane) whenever the thing being viewed changed — which for
+   a live session is every cycle — instead of swapping content in
+   place. This is the mid-session flash.
+
+## Owner contract
+
+Opening the dashboard shows real, last-known state on the first frame.
+Reads never run on the render thread. A refresh updates rows and
+previews in place — no pane blanks and refills, at startup or while
+loaded. Snapshot cost does not grow unbounded with the session count.
+"""
+scope = """
+Goals below are binding outcomes; the route is the architect's to
+decide. This is deliberately light on implementation — architect
+grounds it and splits it.
+
+## Goals (binding, observable)
+
+1. Instant first paint: opening the dashboard shows real session rows
+   on the first frame, seeded from a durable client-side cache, not
+   placeholder zeroes.
+2. No render-thread reads: no filesystem or store read runs on the
+   thread that polls input and draws; the TUI stays responsive
+   throughout a refresh.
+3. Reconcile, never clear-and-refill: a refresh updates the session
+   list and the open preview in place; no pane goes empty then
+   repopulates, at startup or in steady state (including while viewing
+   a live, updating session).
+4. Cheap snapshots: the per-open snapshot cost is bounded and does not
+   scale linearly with total sessions the way it does today — the
+   center serves list rows without re-serializing every full row from
+   scratch on each subscribe.
+5. The improvements hold as the corpus grows and as sessions update
+   live; existing dashboard behavior and tests stay green.
+
+## Out of scope
+- The giant-ledger accumulation and the >1MiB `get` silent-close are
+  their own concerns; this task is the read/paint pipeline.
+- No visual redesign; this is latency and stability only.
+"""
+validation = """
+## Done when
+1. A cold open renders real rows on the first frame (cache-seeded).
+2. No read runs on the render thread; a board/refresh cannot freeze
+   input.
+3. List and preview refresh in place with no empty-then-filled flash,
+   proven for both a static and a live-updating selection.
+4. Snapshot cost is shown not to grow linearly with session count.
+5. The dashboard's existing suites stay green.
+
+The instruments and their exact assertions are the architect's to
+choose.
+"""
