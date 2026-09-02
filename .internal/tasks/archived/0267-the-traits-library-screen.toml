@@ -3,7 +3,7 @@ key = "0267"
 title = "The Traits (Library) screen"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Traits is one of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders a trait library. This charter is that screen — authored trait rows, trust states, the lockfile provenance bar, and the selected-trait preview — built per `.internal/docs/design/screens/traits.md` on the vocabulary `0265` extracted while rendering Sessions.
 
 The screen is small and fully specified. The main pane is a header titled after the authoring repository with a counts-from-data italic summary in placeholder phrasing, a single `Authored — N` section of deliberately dotless trait rows (a trait is not stateful in the frame sense), and a bottom bar reading `pinned` in ok with `skill-lock @ <sha> · N digests` provenance and an `author trait` action the spec itself tags a v1 placeholder. The 380-wide preview is four key/value blocks — `trait`, `facts`, `variants`, `ports` — and a footer citing the same provenance; every leaf in that column is `data:`. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
@@ -134,8 +134,8 @@ Unchanged means observably unchanged: `Screen::Traits`' id/version/status/trust/
 ### Correction 12 — degrade per package, fail loud per resolution
 
 These are two different failures and the draft conflated them. One unreadable package is represented as a typed row with its error shown inline (`lifecycle_reporting.rs:1541-1551`; `dashboard.rs:13407-13421`) and never aborts the scan — that degradation is existing behaviour and survives. A failed repository scope, a failed trust-store read or a failed provenance resolution is catastrophic for the whole answer and fails it loudly rather than shipping a partial library that looks complete.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -199,8 +199,8 @@ After the last child lands, and before this charter is called done, one review p
 - Exercise the boundaries the leaves depend on: a family with mixed verified/unreviewed/blocked members; a standalone package and a multi-variant one; an authored package with source but no generated manifest; an unreadable package beside readable ones; a trait declaring neither `task` nor `duration`; missing, malformed and digest-mismatched package locks; an unknown repository scope; an accepted and a rejected snapshot projection; a trust write observed through the served answer; center loss and recovery; and a lagging subscriber evicted.
 - Read the diff for the properties no fixture shows directly: one assembly and one trust-document load feeding both faces, one provenance resolution feeding bar and footer, no inventory rescan for one selection, no client timer, no desktop filesystem or `git` read, and no second live reader left behind for the moved TUI screens.
 - Run the focused proofs the children declare (`proof_trust_family_report`, the dashboard projections) plus `modules/cli/tests/proof_center.rs`, which is the existing process-boundary center suite and the right place to prove a new wire capability even though no child declares it today; then `just test-full` and the gpui-free root-resolution check below; then, if `0256.1` has by then established a desktop lane command, that command too as supplementary proof of the rendered screen.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **`grammar.md` and `screens/traits.md` are the specification; the export is measurement.** Copying a value out of `reference/traits.html` is right for geometry and wrong for content; the known conflicts are in content Correction 9 and a further one found during implementation is resolved the same way and reported.
@@ -236,9 +236,13 @@ Exclusions, restated so they are checkable by reading the diff: no light-theme v
 Children run in the three stages listed in `scope`; within a stage, the encoded edges are the only ordering that binds. When the last child lands, the suggested closing route is: leaf-by-leaf review against `screens/traits.md`, then the literal geometry comparison against `reference/traits.html`, then the boundary exercises, then the diff read for the single-resolution and no-second-reader properties, then the focused proofs, then `just test-full` and the root-resolution check, with the desktop lane command added once `0256.1` has landed one. The reason for that shape is cheap evidence first, so a rendering or aggregation defect surfaces next to the leaf that owns it rather than inside a long gate. The sequence is guidance, not a boundary: a pass that reorders it, folds steps together, or reaches the same evidence another way is legitimate and reports the deviation in its work summary.
 
 The stop condition binds. Permit at most one targeted repair-and-rerun round at this level: a round repairs one named defect in the child that owns it, then reruns whatever closing evidence is needed to show the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command or the failing leaf with its evidence rather than iterating; that is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
-depends-on = ["0265", "0258"]
+depends-on = [
+    "0265",
+    "0258",
+]
 
 [[checks]]
 name = "workspace landing gate remains green and gpui-free in cost"
@@ -247,5 +251,5 @@ timeout-ms = 1800000
 
 [[checks]]
 name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
+command = """m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc"""
 timeout-ms = 300000

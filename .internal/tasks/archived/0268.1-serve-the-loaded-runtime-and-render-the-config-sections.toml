@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0268.1"
 title = "Serve the loaded runtime and render the Config sections"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-5e9f989b38c471fb8374970262851d138f5db0f5f4676e81a750bb45929c6326 merged as 44b2fa30938e9213c35ab4e7d60a8085c924240c"
 content = """
 Teach the center to answer one repository's loaded runtime as this screen's leaf set, and render the Config screen's three sections from that answer. One cut, because the rendering is what proves the capability and the capability is what makes the rendering honest.
 
@@ -120,3 +122,7 @@ depends-on = [
     "0258",
 ]
 parent = "0268"
+
+[closure]
+mode = "merge"
+commit = "44b2fa30938e9213c35ab4e7d60a8085c924240c"

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0266.7"
 title = "Move the existing task face onto the served board"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
 closed = "2026-09-01"
 origin = "run run-a4b8a1af7db7c1577c0fe0557d0284602f476531f855679f408f8f07330e61f3 merged as d7d98b6ddfcdf3d9034d05dbc42c3bc261f3635f"
@@ -493,4 +493,4 @@ parent = "0266"
 
 [closure]
 mode = "merge"
-commit = "d7d98b6ddfcdf3d9034d05dbc42c3bc261f3635f"
+commit = "752494730033992dc71e6b260ee9f23536323c5d"

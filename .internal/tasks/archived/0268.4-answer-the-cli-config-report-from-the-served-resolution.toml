@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0268.4"
 title = "Answer the CLI config report from the served resolution"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-25ceafc3497f13c26c6b4dff3d7842d32764bc65ddc80fa49bc0eccea83fb6bd merged as be87e100ed976f183238daf638b06bd1b246da82"
 content = """
 This is the parity half of the Config screen, and on this screen it is the sharpest cut in the charter. `.internal/docs/gpui-desktop-face-plan.md:9-18,22-30,90-98` fixes the product rule — the center carries capabilities, faces render them, a capability reachable only from the GUI is a defect — and Config is the one screen with no dashboard equivalent to move, so nothing else in the family catches a GUI-only capability. `0268.1` teaches the center to serve one repository-scoped runtime answer; this cut makes a non-GUI face report that same answer, from that same resolution, without moving a byte of what `ctx traits doctor --config` already prints.
 
@@ -121,3 +123,7 @@ At most one targeted repair-and-rerun round: repair one named defect and rerun w
 [relations]
 depends-on = ["0268.1"]
 parent = "0268"
+
+[closure]
+mode = "merge"
+commit = "be87e100ed976f183238daf638b06bd1b246da82"

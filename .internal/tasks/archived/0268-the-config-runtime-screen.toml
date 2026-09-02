@@ -3,7 +3,7 @@ key = "0268"
 title = "The Config (Runtime) screen"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Config is one of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders runtime configuration. This charter is that screen — the `Agents` / `Runtime` / `Trust` sections, the `runtime.toml` provenance bar, and the selected-seat preview — built per `.internal/docs/design/screens/config.md` on the vocabulary `0265` extracted while rendering Sessions.
 
 The screen is small and its forms are fully specified. The main pane is a header titled after the repository with a counts-from-data italic summary in placeholder phrasing, three sections of **dotless config rows** (config is settings, not state, so grammar rule 4's dots do not apply at all), and a bottom bar whose left half is an earned verdict plus provenance and whose right half is an `edit runtime.toml` action the spec tags a v1 placeholder. The 380-wide preview is a `seat` block, a `facts` key/value block and a footer citing the same provenance the bar cites. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
@@ -132,8 +132,8 @@ The invariant: **the action targets the editable source behind the one document 
 `reference/config.html` is the geometry authority and worth copying from for exactly that: the 1440×900 frame with its only radius 10 (`:26`), rail 260 (`:93`), preview 380 with padding `[18,22]` (`:620`), and the bottom bar's `#23262d` 1px border with padding `[10,14]` (`:591`), against `tokens.md:71-85`'s title bar 36, main padding `[18,40,20,40]` gap 28, section gap 12 and row gaps.
 
 It conflicts with the normative artifacts on content, and each conflict resolves toward the spec: the export renders preview model/effort/used-by values in sans where grammar rule 7 requires mono 10.5 values; it carries rail counts and a `ctx-logo-white.png` that `0265` has already ruled out; and every string in it is illustration. `tokens.md`'s dark column is normative and the light column stays untouched. `tokens.md` names IBM Plex Sans and Mono and the repository ships no font faces — `0265.1` owns that resolution and this screen must not silently fall back to a system face. A further conflict found during implementation resolves the same way and is reported.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -199,8 +199,8 @@ After the last child lands, and before this charter is called done, one review p
 - Exercise the boundaries the leaves depend on: no runtime document at any layer; a malformed hand document; stale and never-built generated output; several layers where model and effort win differently; a single-table role, a list-backed role and an absent role; an absent reasoning effort; a seat resolving differently under a trait or variant qualifier; several configured harnesses and a failing or slow probe; a missing and a malformed trust store; stale, blocked, raw and orphaned trust records; an unknown repository scope; a config and a trust change arriving as events; a rejected projection; center loss and recovery; and bar/footer verdict-and-time equality.
 - Read the diff for the properties no fixture shows directly: one resolver and one assembly, one trust load, no desktop-side document or trust read, no client timer, no probe or scan on the model owner's request path, no write path, no CLI-private type imported by the desktop, and no gpui in root resolution.
 - Run the focused proofs — `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_config`, `--test proof_center`, and `--test proof_runtime_ts` for the generated-document path — then `just test-full` and the root-resolution check; then, if `0256.1` has by then established a desktop lane command, that command too as supplementary proof of the rendered screen.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **`grammar.md` and `screens/config.md` are the specification; the export is measurement.** Copying a value out of `reference/config.html` is right for geometry and wrong for content; the known conflicts are in Correction 12 and a further one found during implementation is resolved the same way and reported.
@@ -241,9 +241,13 @@ Exclusions, restated so they are checkable by reading the diff: no light-theme v
 Children run in the three stages listed in `scope`; within a stage, the encoded edges are the only ordering that binds. When the last child lands, the suggested closing route is: leaf-by-leaf review against `screens/config.md`, then the literal geometry comparison against `reference/config.html`, then the boundary exercises, then the diff read for the single-resolution and no-second-reader properties, then the focused config, center and runtime-TypeScript proofs, then `just test-full` and the root-resolution check, with the desktop lane command added once `0256.1` has landed one. The reason for that shape is cheap evidence first, so a rendering or provenance defect surfaces next to the leaf that owns it rather than inside a long gate. The sequence is guidance, not a boundary: a pass that reorders it, folds steps together, or reaches the same evidence another way is legitimate and reports the deviation in its work summary.
 
 The stop condition binds. Permit at most one targeted repair-and-rerun round at this level: a round repairs one named defect in the child that owns it, then reruns whatever closing evidence is needed to show the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command or the failing leaf with its evidence rather than iterating; that is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
-depends-on = ["0265", "0258"]
+depends-on = [
+    "0265",
+    "0258",
+]
 
 [[checks]]
 name = "workspace landing gate remains green and gpui-free in cost"

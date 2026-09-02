@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0267.4"
 title = "Render the Traits preview variants and ports blocks"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-d1d0eb26779ce009c163c3fb55e095fc6dd4780d3b1005b10b42d87c1d220329 merged as ca179bf54e262605df45c53deefa7b7203cf7438"
 content = """
 Close the Traits preview column with the two blocks `0267.3` left after `trait` and `facts` — `variants` and `ports` — and with the provenance footer that ends it. `screens/traits.md:24-31` orders the column `trait` → `facts` → `variants` → `ports` → footer, and grammar rule 13 puts fact blocks before a flex spacer and a provenance footer (`grammar.md:117-124`); this cut owns everything after `facts`.
 
@@ -127,3 +129,7 @@ depends-on = [
     "0267.2",
 ]
 parent = "0267"
+
+[closure]
+mode = "merge"
+commit = "ca179bf54e262605df45c53deefa7b7203cf7438"

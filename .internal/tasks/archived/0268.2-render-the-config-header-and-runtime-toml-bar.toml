@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0268.2"
 title = "Render the Config header and runtime.toml bar"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-2335412043a5d778c5864aae3fa2da9d403e55b8316cb4f8544db2f94ea5de61 merged as 3f5f6f68372bac0211d18cf16ad234350a7165a1"
 content = """
 Give the Config screen its chrome — grammar rule 6's header and rule 8/12's provenance bar — over the one repository-scoped answer `0268.1` taught the center to serve. This cut renders; it resolves nothing.
 
@@ -130,3 +132,7 @@ depends-on = [
     "0265.13",
 ]
 parent = "0268"
+
+[closure]
+mode = "merge"
+commit = "3f5f6f68372bac0211d18cf16ad234350a7165a1"

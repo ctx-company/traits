@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0267.5"
 title = "Move the TUI Traits and Trust screens onto the served answer"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-01"
+origin = "run run-b21ac58d343a1adbe3d3a6beddda680fd3d5175a39cdb2a1423533638ea118b3 merged as 6eed73e2c487f4d73712a4f9a8ef7d66a37b742e"
 content = """
 `0267.1` teaches the center to answer one repository's trait library with its trust classification. This cut is the parity half and the charter's honesty half: the TUI's `Screen::Traits` and `Screen::Trust` stop reading the filesystem and read that same answer, so the library becomes a capability the center serves and every face renders rather than a desktop-only reader with a second in-process implementation living beside it.
 
@@ -96,3 +98,7 @@ At most one targeted repair-and-rerun round: repair one named defect and rerun w
 [relations]
 depends-on = ["0267.1"]
 parent = "0267"
+
+[closure]
+mode = "merge"
+commit = "6eed73e2c487f4d73712a4f9a8ef7d66a37b742e"
