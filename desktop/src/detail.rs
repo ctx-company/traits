@@ -484,6 +484,7 @@ impl RunDetail {
         match update {
             LinkUpdate::Snapshot(rows) => self.follow_snapshot(rows),
             LinkUpdate::Delta(delta) => self.follow_delta(delta),
+            LinkUpdate::Board { .. } => FollowOutcome::default(),
             LinkUpdate::Down(reason) => self.follow_down(reason),
         }
     }

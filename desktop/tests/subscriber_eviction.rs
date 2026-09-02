@@ -62,6 +62,7 @@ fn a_backlog_then_shutdown_is_reported_as_a_lost_subscription_and_recovers() {
                 face.apply(LinkUpdate::Snapshot(rows), SystemTime::now());
             }
             Ok(update @ LinkUpdate::Delta(_)) => face.apply(update, SystemTime::now()),
+            Ok(LinkUpdate::Board { .. }) => {}
             Ok(LinkUpdate::Down(reason)) => break reason,
             Err(async_channel::TryRecvError::Empty) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(20));

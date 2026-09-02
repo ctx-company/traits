@@ -14,6 +14,7 @@ pub enum ActionTone {
     Primary,
     Secondary,
     Muted,
+    Danger,
 }
 
 /// Which action a `BarAction` is, independent of its display label — the

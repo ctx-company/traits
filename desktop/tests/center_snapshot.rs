@@ -124,6 +124,9 @@ fn link_delivers_exactly_one_coherent_snapshot_and_stays_open() {
         ctx_traits_desktop::center_link::LinkUpdate::Delta(_) => {
             panic!("a delta must not arrive before the initial snapshot")
         }
+        ctx_traits_desktop::center_link::LinkUpdate::Board { .. } => {
+            panic!("a board update must not arrive before the initial snapshot")
+        }
         ctx_traits_desktop::center_link::LinkUpdate::Down(message) => {
             panic!("center link reported down: {message}")
         }
@@ -143,6 +146,7 @@ fn link_delivers_exactly_one_coherent_snapshot_and_stays_open() {
     while Instant::now() < drain_until {
         match updates.try_recv() {
             Ok(ctx_traits_desktop::center_link::LinkUpdate::Delta(_)) => {}
+            Ok(ctx_traits_desktop::center_link::LinkUpdate::Board { .. }) => {}
             Ok(ctx_traits_desktop::center_link::LinkUpdate::Snapshot(_)) => {
                 panic!("a second snapshot arrived; the initial snapshot was not exclusive")
             }

@@ -8,7 +8,7 @@ use gpui::{
 
 use std::collections::HashMap;
 
-use crate::board::{self, BoardState};
+use crate::board::{self, BoardState, NewTaskEntry};
 use crate::bottom_bar;
 use crate::bottom_bar_view;
 use crate::center_link::{self, LinkUpdate};
@@ -126,6 +126,7 @@ impl CenterFace {
                     dashboard.apply(delta);
                 }
             }
+            LinkUpdate::Board { .. } => {}
             LinkUpdate::Down(reason) => {
                 self.state = match std::mem::replace(&mut self.state, CenterState::Connecting) {
                     CenterState::Connected { dashboard } => CenterState::Stale {
@@ -378,6 +379,13 @@ pub struct Shell {
     board_repo: Option<(String, String)>,
     board_task: Option<gpui::Task<()>>,
     board_generation: u64,
+    board_stale_reason: Option<String>,
+    /// Changes only when the active board is replaced, not when that board
+    /// receives a newer answer.
+    board_scope_generation: u64,
+    new_task_entry: NewTaskEntry,
+    create_task_task: Option<gpui::Task<()>>,
+    create_task_generation: u64,
     selected_task: Option<String>,
     selected_merge: usize,
     task_detail: crate::task_preview::TaskDetailState,
@@ -412,6 +420,7 @@ pub struct Shell {
     /// handle, so a key press that calls `cx.notify()` would drop keyboard
     /// dispatch on the very next frame.
     spawn_focus_handle: gpui::FocusHandle,
+    new_task_focus_handle: gpui::FocusHandle,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -437,58 +446,34 @@ impl Screen {
 
 impl Shell {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let updates = center_link::start(None);
-        cx.spawn(async move |this, cx| {
-            while let Ok(update) = updates.recv().await {
-                let outcome = this.update(cx, |shell, cx| {
-                    // Detail sees the update first — it reads nothing from
-                    // the face, and feeding it first keeps stream order
-                    // exact for both consumers.
-                    let outcome = shell.detail.follow(&update);
-                    let library_changed = matches!(
-                        &update,
-                        LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys })
-                            if matches!(&shell.library, LibraryState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
-                    );
-                    let config_changed = matches!(
-                        &update,
-                        LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::ConfigChanged { repo_keys })
-                            if matches!(&shell.config, ConfigState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
-                    );
-                    shell.face.apply(update, SystemTime::now());
-                    shell.spawn_form.set_repositories(shell.face.repositories());
-                    // Reconcile a `Requested` spawn status against the
-                    // now-current row list, not just this update's own
-                    // delta: the row's `Appeared` delta and the request's
-                    // `Started` response are scheduled on independent
-                    // connections and can land in either order, so
-                    // `submit_spawn`'s settle callback runs the same
-                    // reconciliation on its own arrival too.
-                    reconcile_spawn_status(&shell.face, &mut shell.spawn_form);
-                    reconcile_row_controls(&shell.face, &mut shell.row_controls);
-                    if library_changed {
-                        shell.load_library(cx);
-                        if let Some(selector) = shell.trait_selection.clone() {
-                            shell.request_trait_detail(selector, cx);
+        Self::new_inner(cx, true)
+    }
+
+    #[doc(hidden)]
+    pub fn new_for_test(cx: &mut Context<Self>) -> Self {
+        Self::new_inner(cx, false)
+    }
+
+    fn new_inner(cx: &mut Context<Self>, connect_center: bool) -> Self {
+        if connect_center {
+            let updates = center_link::start(None);
+            cx.spawn(async move |this, cx| {
+                while let Ok(update) = updates.recv().await {
+                    let outcome = this.update(cx, |shell, cx| {
+                        shell.apply_link_update(update, SystemTime::now(), cx)
+                    });
+                    match outcome {
+                        Ok(outcome) => {
+                            if let Some(request) = outcome.request {
+                                let _ = this.update(cx, |shell, cx| shell.spawn_load(request, cx));
+                            }
                         }
+                        Err(_) => break,
                     }
-                    if config_changed {
-                        shell.load_config(cx);
-                    }
-                    cx.notify();
-                    outcome
-                });
-                match outcome {
-                    Ok(outcome) => {
-                        if let Some(request) = outcome.request {
-                            let _ = this.update(cx, |shell, cx| shell.spawn_load(request, cx));
-                        }
-                    }
-                    Err(_) => break,
                 }
-            }
-        })
-        .detach();
+            })
+            .detach();
+        }
         Self {
             screen: Screen::Sessions,
             face: CenterFace::new(RepoScope::All),
@@ -498,6 +483,11 @@ impl Shell {
             board_repo: None,
             board_task: None,
             board_generation: 0,
+            board_stale_reason: None,
+            board_scope_generation: 0,
+            new_task_entry: NewTaskEntry::default(),
+            create_task_task: None,
+            create_task_generation: 0,
             selected_task: None,
             selected_merge: crate::merges::INITIAL_SELECTION,
             task_detail: crate::task_preview::TaskDetailState::Loading,
@@ -519,6 +509,7 @@ impl Shell {
             row_controls: RowControls::default(),
             row_control_tasks: HashMap::new(),
             spawn_focus_handle: cx.focus_handle(),
+            new_task_focus_handle: cx.focus_handle(),
         }
     }
 
@@ -545,6 +536,8 @@ impl Shell {
     /// Ask the existing center for the selected repository's served board.
     /// The UI supplies neither a path nor a filesystem fallback.
     fn load_board(&mut self, cx: &mut Context<Self>) {
+        self.new_task_entry.deactivated();
+        self.board_scope_generation += 1;
         let repo_key = self
             .detail
             .repo_key()
@@ -578,31 +571,126 @@ impl Shell {
                 })
                 .await;
             let _ = this.update(cx, |shell, cx| {
-                if shell.board_generation == generation {
-                    shell.board = match result {
-                        Ok(answer) => {
-                            if shell.selected_task.as_ref().is_some_and(|key| {
-                                !answer
-                                    .resolution
-                                    .rows
-                                    .iter()
-                                    .any(|row| &row.summary.key == key)
-                            }) {
-                                shell.selected_task = None;
-                                shell.task_detail_generation += 1;
-                                shell.task_detail = crate::task_preview::TaskDetailState::Loading;
-                            }
-                            BoardState::Accepted {
-                                answer,
-                                stale: None,
-                            }
-                        }
-                        Err(reason) => BoardState::Failed(reason),
-                    };
+                if shell.settle_board_load(generation, result) {
                     cx.notify();
                 }
             });
         }));
+    }
+
+    fn settle_board_load(
+        &mut self,
+        generation: u64,
+        result: Result<ctx_traits_io::center::BoardWireResult, String>,
+    ) -> bool {
+        if self.board_generation != generation {
+            return false;
+        }
+        self.board = match result {
+            // A one-shot answer can still populate the board while its
+            // subscription is stale; the stale marker describes that link.
+            Ok(answer) => self.accepted_board(answer),
+            Err(reason) => BoardState::Failed(reason),
+        };
+        true
+    }
+
+    fn accepted_board(&mut self, answer: ctx_traits_io::center::BoardWireResult) -> BoardState {
+        if self.selected_task.as_ref().is_some_and(|key| {
+            !answer
+                .resolution
+                .rows
+                .iter()
+                .any(|row| &row.summary.key == key)
+        }) {
+            self.selected_task = None;
+            self.task_detail_generation += 1;
+            self.task_detail = crate::task_preview::TaskDetailState::Loading;
+        }
+        BoardState::Accepted {
+            answer,
+            stale: self.board_stale_reason.clone(),
+        }
+    }
+
+    fn accept_board_update(
+        &mut self,
+        repo_key: String,
+        answer: ctx_traits_io::center::BoardWireResult,
+    ) {
+        if self.board_repo.as_ref().map(|(key, _)| key) != Some(&repo_key) {
+            return;
+        }
+        let previous = match &self.board {
+            BoardState::Accepted { answer, .. } => Some(answer.clone()),
+            BoardState::Loading | BoardState::Failed(_) => None,
+        };
+        self.board_generation += 1;
+        self.board_stale_reason = None;
+        self.new_task_entry
+            .board_accepted(previous.as_ref(), &answer);
+        self.board = self.accepted_board(answer);
+    }
+
+    /// Apply one subscription update to every surface that follows the center.
+    /// Keeping this reducer shared with the pump prevents lifecycle tests from
+    /// bypassing the production `LinkUpdate` routing.
+    fn apply_link_update(
+        &mut self,
+        update: LinkUpdate,
+        now: SystemTime,
+        cx: &mut Context<Self>,
+    ) -> detail::FollowOutcome {
+        // Detail sees the update first — it reads nothing from the face, and
+        // feeding it first keeps stream order exact for both consumers.
+        let outcome = self.detail.follow(&update);
+        let board_update = match &update {
+            LinkUpdate::Board { repo_key, board } => Some((repo_key.clone(), (**board).clone())),
+            _ => None,
+        };
+        let subscription_down = match &update {
+            LinkUpdate::Down(reason) => Some(reason.clone()),
+            _ => None,
+        };
+        let library_changed = matches!(
+            &update,
+            LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::LibraryChanged { repo_keys })
+                if matches!(&self.library, LibraryState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
+        );
+        let config_changed = matches!(
+            &update,
+            LinkUpdate::Delta(ctx_traits_io::center::CenterDelta::ConfigChanged { repo_keys })
+                if matches!(&self.config, ConfigState::Accepted { answer, .. } if repo_keys.contains(&answer.repo_key))
+        );
+        self.face.apply(update, now);
+        if let Some((repo_key, board)) = board_update {
+            self.accept_board_update(repo_key, board);
+        }
+        if let Some(reason) = subscription_down {
+            self.new_task_entry.subscription_down();
+            self.mark_board_stale(reason);
+        }
+        self.spawn_form.set_repositories(self.face.repositories());
+        reconcile_spawn_status(&self.face, &mut self.spawn_form);
+        reconcile_row_controls(&self.face, &mut self.row_controls);
+        if library_changed {
+            self.load_library(cx);
+            if let Some(selector) = self.trait_selection.clone() {
+                self.request_trait_detail(selector, cx);
+            }
+        }
+        if config_changed {
+            self.load_config(cx);
+        }
+        cx.notify();
+        outcome
+    }
+
+    fn mark_board_stale(&mut self, reason: String) {
+        self.board_stale_reason = Some(reason.clone());
+        if let BoardState::Accepted { stale, .. } = &mut self.board {
+            *stale = Some(reason);
+        }
     }
 
     /// Ask the existing center for the selected repository's served library.
@@ -869,6 +957,122 @@ impl Shell {
             self.submit_spawn(request, cx);
         }
         cx.notify();
+    }
+
+    fn activate_new_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_task_entry.activate();
+        self.new_task_focus_handle.focus(window);
+        cx.notify();
+    }
+
+    fn new_task_key(&mut self, event: &gpui::KeyDownEvent, cx: &mut Context<Self>) {
+        match event.keystroke.key.as_str() {
+            "escape" => self.new_task_entry.cancel(),
+            "backspace" => self.new_task_entry.backspace(),
+            "enter" => self.submit_new_task(cx),
+            _ => {
+                if let Some(text) = &event.keystroke.key_char {
+                    for ch in text.chars() {
+                        self.new_task_entry.insert_char(ch);
+                    }
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn submit_new_task(&mut self, cx: &mut Context<Self>) {
+        let Some((repo_key, _)) = &self.board_repo else {
+            return;
+        };
+        self.create_task_generation += 1;
+        let Some(request) = self.new_task_entry.submit(
+            repo_key.clone(),
+            self.create_task_generation,
+            self.board_scope_generation,
+        ) else {
+            return;
+        };
+        let generation = request.generation;
+        let board_scope_generation = request.board_scope_generation;
+        let request_repo = request.repo_key.clone();
+        self.create_task_task = Some(cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_spawn(async move {
+                    let (sender, receiver) = async_channel::bounded(1);
+                    std::thread::spawn(move || {
+                        let _ = sender.send_blocking(board::dispatch_create(request));
+                    });
+                    receiver
+                        .recv()
+                        .await
+                        .expect("create worker must return its outcome")
+                })
+                .await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.board_repo.as_ref().map(|(key, _)| key) == Some(&request_repo)
+                    && shell.board_scope_generation == board_scope_generation
+                    && shell.new_task_entry.settle(
+                        &request_repo,
+                        generation,
+                        board_scope_generation,
+                        outcome,
+                    )
+                {
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    #[doc(hidden)]
+    pub fn set_board_for_test(
+        &mut self,
+        repo_key: String,
+        repo_path: String,
+        answer: ctx_traits_io::center::BoardWireResult,
+        cx: &mut Context<Self>,
+    ) {
+        // Keep test-driven repository changes subject to the same pending
+        // create teardown as `load_board`'s production switch path.
+        self.new_task_entry.deactivated();
+        self.board_scope_generation += 1;
+        self.screen = Screen::Tasks;
+        self.board_repo = Some((repo_key, repo_path));
+        self.board = self.accepted_board(answer);
+        cx.notify();
+    }
+
+    #[doc(hidden)]
+    pub fn apply_link_update_for_test(&mut self, update: LinkUpdate, cx: &mut Context<Self>) {
+        self.apply_link_update(update, SystemTime::now(), cx);
+    }
+
+    #[doc(hidden)]
+    pub fn new_task_action_for_test(&self) -> crate::bottom_bar::BarAction {
+        self.new_task_entry.action()
+    }
+
+    #[doc(hidden)]
+    pub fn new_task_awaits_result_for_test(&self) -> bool {
+        self.new_task_entry.awaits_result()
+    }
+
+    #[doc(hidden)]
+    pub fn board_answer_for_test(&self) -> Option<ctx_traits_io::center::BoardWireResult> {
+        match &self.board {
+            BoardState::Accepted { answer, .. } => Some(answer.clone()),
+            BoardState::Loading | BoardState::Failed(_) => None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn board_has_task_for_test(&self, title: &str) -> bool {
+        matches!(
+            &self.board,
+            BoardState::Accepted { answer, .. }
+                if answer.resolution.rows.iter().any(|row| row.summary.title == title)
+        )
     }
 
     /// Send `request` through the center's existing-only spawn entry on
@@ -1238,7 +1442,7 @@ impl Render for Shell {
                         }),
                     ) as bottom_bar_view::BarActionHandler
                 });
-            column = column.child(bottom_bar_view::bar_element(&bar, on_pause));
+            column = column.child(bottom_bar_view::bar_element(&bar, on_pause, None));
         }
         let rail = rail_view::rail_element(&self.face.rail(self.detail.repo_key()));
         // The preview reads exclusively from `RunDetail::preview_state` —
@@ -1330,13 +1534,18 @@ impl Render for Shell {
                                 == Some(section)
                         })
                         .collect();
-                    let mut group = div().flex().flex_col().gap(tokens::LIST_SECTION_GAP).child(
-                        div()
-                            .font_family(tokens::FONT_MONO)
-                            .text_size(tokens::SIZE_11)
-                            .text_color(rgb(tokens::TEXT_MUTED))
-                            .child(format!("{label} {}", rows.len())),
-                    );
+                    let mut group = div()
+                        .debug_selector(|| format!("tasks-section-{section:?}"))
+                        .flex()
+                        .flex_col()
+                        .gap(tokens::LIST_SECTION_GAP)
+                        .child(
+                            div()
+                                .font_family(tokens::FONT_MONO)
+                                .text_size(tokens::SIZE_11)
+                                .text_color(rgb(tokens::TEXT_MUTED))
+                                .child(format!("{label} {}", rows.len())),
+                        );
                     for row in rows {
                         let task_key = row.summary.key.clone();
                         let joined = answer
@@ -1356,6 +1565,10 @@ impl Render for Shell {
                             .text_size(tokens::SIZE_10_5)
                             .child(
                                 div()
+                                    .debug_selector({
+                                        let word = stack.word.clone();
+                                        move || format!("task-status-{word}")
+                                    })
                                     .text_color(rgb(crate::run_row::task_stack_word_color(
                                         stack.word_role,
                                     )))
@@ -1411,10 +1624,25 @@ impl Render for Shell {
                     tasks = tasks.child(group);
                 }
             }
-            tasks = tasks.child(bottom_bar_view::bar_element(
-                &board::tasks_bar(&self.board),
-                None,
-            ));
+            let on_new_task: bottom_bar_view::BarActionHandler =
+                Box::new(cx.listener(|shell, _event: &gpui::ClickEvent, window, cx| {
+                    shell.activate_new_task(window, cx);
+                }));
+            tasks = tasks.child(
+                div()
+                    .id("new-task-entry")
+                    .track_focus(&self.new_task_focus_handle)
+                    .on_key_down(
+                        cx.listener(|shell, event: &gpui::KeyDownEvent, _window, cx| {
+                            shell.new_task_key(event, cx);
+                        }),
+                    )
+                    .child(bottom_bar_view::bar_element(
+                        &board::tasks_bar(&self.board, &self.new_task_entry),
+                        None,
+                        Some(on_new_task),
+                    )),
+            );
             body = div()
                 .debug_selector(|| "tasks-screen".to_string())
                 .flex()
@@ -1491,6 +1719,7 @@ impl Render for Shell {
                 ))
                 .child(bottom_bar_view::bar_element(
                     &crate::merges::merges_bar(),
+                    None,
                     None,
                 ));
             body = div()
@@ -1789,6 +2018,7 @@ impl Render for Shell {
                     .child(bottom_bar_view::bar_element(
                         &config_screen::config_bar(&self.config),
                         None,
+                        None,
                     ));
                 body = div()
                     .debug_selector(|| "config-screen".to_string())
@@ -1824,6 +2054,7 @@ impl Render for Shell {
                     .child(div().flex_1())
                     .child(bottom_bar_view::bar_element(
                         &trait_library::traits_bar(&self.library),
+                        None,
                         None,
                     ));
                 body = div()
@@ -1912,8 +2143,12 @@ impl Render for Shell {
 mod tests {
     use super::*;
     use crate::row_control::RowOutcome;
-    use ctx_traits_io::center::{CenterDelta, CenterPublicRow};
+    use ctx_traits_core::task::TaskStatus;
+    use ctx_traits_core::task::graph::DerivedStatus;
+    use ctx_traits_core::task::provider::{BoardSection, TaskSummary};
+    use ctx_traits_io::center::{BoardWireResult, CenterDelta, CenterPublicRow};
     use ctx_traits_io::run_summary::RunSummary;
+    use ctx_traits_io::task_files::{BoardPresence, BoardResolution, BoardRow};
     use gpui::px;
 
     fn wire_row(repo_key: &str, run_id: &str) -> CenterPublicRow {
@@ -1928,6 +2163,42 @@ mod tests {
             live: true,
             modified_epoch_secs: 0,
         }
+    }
+
+    fn empty_board() -> BoardWireResult {
+        BoardWireResult {
+            resolution: BoardResolution {
+                presence: BoardPresence::Empty,
+                digest: Some("sha256:fixture".to_string()),
+                rows: Vec::new(),
+                sync_report: ctx_traits_core::task::provider::SyncReport::default(),
+                resolved_at: 0,
+            },
+            joined_runs: Default::default(),
+            sections: Default::default(),
+        }
+    }
+
+    fn board_with_task(key: &str, title: &str) -> BoardWireResult {
+        let mut board = empty_board();
+        board.resolution.presence = BoardPresence::Loaded;
+        board.resolution.rows.push(BoardRow {
+            summary: TaskSummary {
+                key: key.to_string(),
+                title: title.to_string(),
+                stored_status: Some(TaskStatus::Draft),
+                derived_status: DerivedStatus::Draft,
+                archived: false,
+            },
+            relations: Default::default(),
+            unmet_dependencies: Vec::new(),
+            digest: "sha256:task".to_string(),
+            short_description: String::new(),
+        });
+        board
+            .sections
+            .insert(key.to_string(), Some(BoardSection::Draft));
+        board
     }
 
     /// A readable, non-live, `last_drive_outcome: "paused"` wire row — unlike
@@ -2336,6 +2607,343 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn new_task_entry_keeps_keyboard_focus_and_escape_restores_the_action(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = cx.update(|cx| cx.new(Shell::new));
+        let window = cx
+            .update(|cx| {
+                let shell = shell.clone();
+                cx.open_window(Default::default(), move |_, _| shell)
+            })
+            .unwrap();
+        shell.update(cx, |shell, cx| {
+            shell.screen = Screen::Tasks;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        let before = visual
+            .debug_bounds("bottom-bar")
+            .expect("the Tasks bar paints before entry activation");
+        assert!(
+            visual.debug_bounds("bottom-bar-action-NewTask").is_some(),
+            "the rendered Tasks bar contains the NewTask action slot"
+        );
+        let action_bounds = visual
+            .debug_bounds("bottom-bar-action-NewTask")
+            .expect("the NewTask action paints before activation");
+        visual.simulate_click(
+            gpui::point(
+                action_bounds.origin.x + action_bounds.size.width / 2.,
+                action_bounds.origin.y + action_bounds.size.height / 2.,
+            ),
+            gpui::Modifiers::default(),
+        );
+        visual.run_until_parked();
+
+        let active = visual
+            .debug_bounds("bottom-bar")
+            .expect("the Tasks bar remains painted while the entry is active");
+        assert_eq!(
+            before, active,
+            "opening the in-bar entry changes no bar geometry"
+        );
+
+        for key in ["a", "b", "backspace"] {
+            cx.dispatch_keystroke(*window, gpui::Keystroke::parse(key).unwrap());
+            cx.run_until_parked();
+        }
+        let editing_label = window
+            .update(cx, |shell, _window, _cx| {
+                shell.new_task_entry.action().label
+            })
+            .unwrap();
+        assert_eq!(editing_label, "new task: a");
+
+        cx.dispatch_keystroke(*window, gpui::Keystroke::parse("escape").unwrap());
+        cx.run_until_parked();
+        let action = window
+            .update(cx, |shell, _window, _cx| shell.new_task_entry.action())
+            .unwrap();
+        assert_eq!(action.label, "new task");
+        assert_eq!(action.tone, crate::bottom_bar::ActionTone::Primary);
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        let after = visual
+            .debug_bounds("bottom-bar")
+            .expect("the Tasks bar remains painted after cancellation");
+        assert_eq!(before, after, "entry activation changes no bar geometry");
+    }
+
+    #[gpui::test]
+    fn terminal_board_events_free_the_new_task_guard_without_accepting_late_results(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = cx.update(|cx| cx.new(Shell::new));
+        shell.update(cx, |shell, cx| {
+            shell.board_repo = Some(("repo-a".to_string(), "/repo-a".to_string()));
+            shell.board = shell.accepted_board(empty_board());
+
+            shell.new_task_entry.activate();
+            shell.new_task_entry.insert_char('a');
+            let first = shell
+                .new_task_entry
+                .submit("repo-a".to_string(), 1, shell.board_scope_generation)
+                .expect("first request");
+            shell.apply_link_update(
+                LinkUpdate::Board {
+                    repo_key: "repo-a".to_string(),
+                    board: Box::new(empty_board()),
+                },
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            shell.new_task_entry.activate();
+            shell.new_task_entry.insert_char('b');
+            let second = shell
+                .new_task_entry
+                .submit("repo-a".to_string(), 2, shell.board_scope_generation)
+                .expect("board acceptance must free the guard");
+            assert!(!shell.new_task_entry.settle(
+                &first.repo_key,
+                first.generation,
+                first.board_scope_generation,
+                board::CreateOutcome::Failed("late first result".to_string()),
+            ));
+            assert!(shell.new_task_entry.settle(
+                &second.repo_key,
+                second.generation,
+                second.board_scope_generation,
+                board::CreateOutcome::Failed("second result".to_string()),
+            ));
+
+            shell.new_task_entry.activate();
+            shell.new_task_entry.insert_char('c');
+            let third = shell
+                .new_task_entry
+                .submit("repo-a".to_string(), 3, shell.board_scope_generation)
+                .expect("third request");
+            shell.apply_link_update(
+                LinkUpdate::Down("connection closed".to_string()),
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            shell.new_task_entry.activate();
+            shell.new_task_entry.insert_char('d');
+            let fourth = shell
+                .new_task_entry
+                .submit("repo-a".to_string(), 4, shell.board_scope_generation)
+                .expect("subscription loss must free the guard");
+            assert!(!shell.new_task_entry.settle(
+                &third.repo_key,
+                third.generation,
+                third.board_scope_generation,
+                board::CreateOutcome::Failed("late third result".to_string()),
+            ));
+            assert!(shell.new_task_entry.settle(
+                &fourth.repo_key,
+                fourth.generation,
+                fourth.board_scope_generation,
+                board::CreateOutcome::Failed("fourth result".to_string()),
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn new_task_reply_does_not_change_the_board_but_its_board_changed_does(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = cx.update(|cx| cx.new(Shell::new));
+        shell.update(cx, |shell, cx| {
+            shell.board_repo = Some(("repo-a".to_string(), "/repo-a".to_string()));
+            shell.board = shell.accepted_board(empty_board());
+            shell.new_task_entry.activate();
+            for ch in "owner title".chars() {
+                shell.new_task_entry.insert_char(ch);
+            }
+            let request = shell
+                .new_task_entry
+                .submit("repo-a".to_string(), 1, shell.board_scope_generation)
+                .expect("the owner title creates one request");
+            let created = TaskSummary {
+                key: "draft-key".to_string(),
+                title: "owner title".to_string(),
+                stored_status: None,
+                derived_status: DerivedStatus::Ready,
+                archived: false,
+            };
+            assert!(shell.new_task_entry.settle(
+                &request.repo_key,
+                request.generation,
+                request.board_scope_generation,
+                board::CreateOutcome::Result(ctx_traits_io::center::CreateTaskWireResult::Created(
+                    created,
+                )),
+            ));
+            assert!(matches!(
+                &shell.board,
+                BoardState::Accepted { answer, .. } if answer.resolution.rows.is_empty()
+            ));
+
+            shell.apply_link_update(
+                LinkUpdate::Board {
+                    repo_key: "repo-a".to_string(),
+                    board: Box::new(board_with_task("draft-key", "owner title")),
+                },
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            assert!(matches!(
+                &shell.board,
+                BoardState::Accepted { answer, .. }
+                    if answer.resolution.rows.len() == 1
+                        && answer.resolution.rows[0].summary.title == "owner title"
+                        && answer.sections.get("draft-key") == Some(&Some(BoardSection::Draft))
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn board_subscription_loss_stays_visible_until_a_matching_board_update(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = cx.update(|cx| cx.new(Shell::new));
+        shell.update(cx, |shell, cx| {
+            shell.board_repo = Some(("repo-a".to_string(), "/repo-a".to_string()));
+            shell.board = shell.accepted_board(empty_board());
+            shell.apply_link_update(
+                LinkUpdate::Down("connection closed".to_string()),
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            assert_eq!(
+                board::tasks_bar(&shell.board, &shell.new_task_entry)
+                    .state
+                    .word,
+                "unavailable"
+            );
+            assert_eq!(
+                board::tasks_footer(&shell.board),
+                "stale: connection closed"
+            );
+
+            shell.apply_link_update(
+                LinkUpdate::Board {
+                    repo_key: "repo-b".to_string(),
+                    board: Box::new(empty_board()),
+                },
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            assert_eq!(
+                board::tasks_bar(&shell.board, &shell.new_task_entry)
+                    .state
+                    .word,
+                "unavailable",
+                "an unrelated board answer must not make repo-a current"
+            );
+
+            shell.apply_link_update(
+                LinkUpdate::Board {
+                    repo_key: "repo-a".to_string(),
+                    board: Box::new(empty_board()),
+                },
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            assert_eq!(
+                board::tasks_bar(&shell.board, &shell.new_task_entry)
+                    .state
+                    .word,
+                "synced"
+            );
+            assert!(board::tasks_footer(&shell.board).contains("synced"));
+        });
+    }
+
+    #[gpui::test]
+    fn subscription_loss_does_not_invalidate_an_in_flight_board_load(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = cx.update(|cx| cx.new(Shell::new));
+        shell.update(cx, |shell, cx| {
+            shell.board_repo = Some(("repo-a".to_string(), "/repo-a".to_string()));
+            shell.board_generation = 7;
+            shell.board = BoardState::Loading;
+
+            shell.apply_link_update(
+                LinkUpdate::Down("connection closed".to_string()),
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            assert_eq!(
+                shell.board_generation, 7,
+                "a subscription outage must not reject an already-issued board request"
+            );
+            assert!(shell.settle_board_load(7, Ok(empty_board())));
+            assert!(matches!(
+                &shell.board,
+                BoardState::Accepted {
+                    stale: Some(reason),
+                    ..
+                } if reason == "connection closed"
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn recovery_snapshot_does_not_replace_the_stale_active_board_or_lose_late_refusal_correlation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = cx.update(|cx| cx.new(Shell::new));
+        shell.update(cx, |shell, cx| {
+            shell.board_repo = Some(("repo-a".to_string(), "/repo-a".to_string()));
+            shell.board = shell.accepted_board(empty_board());
+            shell.apply_link_update(
+                LinkUpdate::Snapshot(vec![wire_row("repo-a", "run-a")]),
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            shell.new_task_entry.activate();
+            shell.new_task_entry.insert_char('a');
+            let request = shell
+                .new_task_entry
+                .submit("repo-a".to_string(), 1, shell.board_scope_generation)
+                .expect("request is correlated before the disconnect");
+
+            shell.apply_link_update(
+                LinkUpdate::Down("connection closed".to_string()),
+                SystemTime::UNIX_EPOCH,
+                cx,
+            );
+            assert_eq!(
+                board::tasks_bar(&shell.board, &shell.new_task_entry)
+                    .state
+                    .word,
+                "unavailable"
+            );
+            shell.apply_link_update(LinkUpdate::Snapshot(vec![]), SystemTime::UNIX_EPOCH, cx);
+            assert_eq!(
+                board::tasks_bar(&shell.board, &shell.new_task_entry)
+                    .state
+                    .word,
+                "unavailable",
+                "a recovering snapshot cannot replace the subscribed board"
+            );
+            assert!(shell.new_task_entry.settle(
+                &request.repo_key,
+                request.generation,
+                request.board_scope_generation,
+                board::CreateOutcome::Failed("late refusal".to_string()),
+            ));
+            assert!(
+                shell.new_task_entry.action().label.contains("late refusal"),
+                "disconnect recovery must not discard the originating request correlation"
+            );
+        });
+    }
+
     #[test]
     fn window_options_carries_title_and_bounds() {
         let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
@@ -2568,9 +3176,8 @@ mod tests {
                 && signoffs.origin.y < landing.origin.y
                 && landing.origin.y < footer.origin.y
         );
-        for selector in ["breadcrumb"] {
-            assert!(vcx.debug_bounds(selector).is_none(), "{selector} is absent");
-        }
+        let selector = "breadcrumb";
+        assert!(vcx.debug_bounds(selector).is_none(), "{selector} is absent");
         for selected in [1, 2] {
             window
                 .update(cx, |shell, _window, cx| shell.select_merge(selected, cx))
@@ -2642,7 +3249,8 @@ mod tests {
         let fit_window = open_merges(900., cx);
         let mut vcx = gpui::VisualTestContext::from_window(fit_window.into(), cx);
         assert!(
-            vcx.debug_bounds("merges-preview-overflow-fade-overlay").is_none(),
+            vcx.debug_bounds("merges-preview-overflow-fade-overlay")
+                .is_none(),
             "the tall composed preview fits"
         );
         drop(vcx);
@@ -2654,7 +3262,8 @@ mod tests {
             let window = open_merges(height, cx);
             let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
             assert_eq!(
-                vcx.debug_bounds("merges-preview-overflow-fade-overlay").is_some(),
+                vcx.debug_bounds("merges-preview-overflow-fade-overlay")
+                    .is_some(),
                 expected_overlay,
                 "height {height} has the expected strict overflow result"
             );

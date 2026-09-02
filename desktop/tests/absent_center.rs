@@ -42,6 +42,9 @@ fn absent_center_reports_down_once_then_recovers_when_one_appears() {
             Ok(LinkUpdate::Down(reason)) => downs.push(reason),
             Ok(LinkUpdate::Snapshot(_)) => panic!("no center exists; a snapshot must not arrive"),
             Ok(LinkUpdate::Delta(_)) => panic!("no center exists; a delta must not arrive"),
+            Ok(LinkUpdate::Board { .. }) => {
+                panic!("no center exists; a board update must not arrive")
+            }
             Err(async_channel::TryRecvError::Empty) => {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -88,6 +91,9 @@ fn absent_center_reports_down_once_then_recovers_when_one_appears() {
             Ok(LinkUpdate::Snapshot(rows)) => break rows,
             Ok(LinkUpdate::Down(_)) => {}
             Ok(LinkUpdate::Delta(_)) => panic!("no delta expected before a fresh snapshot"),
+            Ok(LinkUpdate::Board { .. }) => {
+                panic!("no board update expected before a fresh snapshot")
+            }
             Err(async_channel::TryRecvError::Empty) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(20));
             }

@@ -5,11 +5,13 @@ mod support;
 
 use std::time::Duration;
 
-use ctx_traits_desktop::shell::{Shell, Screen, window_options};
+use ctx_traits_desktop::shell::{Screen, Shell, window_options};
 use gpui::{AppContext, Bounds, VisualTestContext, px, size};
 
 fn click(vcx: &mut VisualTestContext, selector: &'static str) {
-    let bounds = vcx.debug_bounds(selector).expect("interactive element paints");
+    let bounds = vcx
+        .debug_bounds(selector)
+        .expect("interactive element paints");
     vcx.simulate_click(
         gpui::point(
             bounds.origin.x + bounds.size.width / 2.,
@@ -50,15 +52,25 @@ fn merges_actions_and_cross_section_selection_do_not_write_to_center(
 
     let mut vcx = VisualTestContext::from_window(window.into(), cx);
     for selector in ["preview-block-merge", "preview-block-landing"] {
-        assert!(vcx.debug_bounds(selector).is_some(), "{selector} paints before interaction");
+        assert!(
+            vcx.debug_bounds(selector).is_some(),
+            "{selector} paints before interaction"
+        );
     }
     click(&mut vcx, "bottom-bar-action-watch");
     click(&mut vcx, "bottom-bar-action-hold");
     click(&mut vcx, "merge-row-2");
     cx.run_until_parked();
 
-    for selector in ["merge-row-selected-2", "preview-block-merge", "preview-block-landing"] {
-        assert!(vcx.debug_bounds(selector).is_some(), "{selector} remains rendered");
+    for selector in [
+        "merge-row-selected-2",
+        "preview-block-merge",
+        "preview-block-landing",
+    ] {
+        assert!(
+            vcx.debug_bounds(selector).is_some(),
+            "{selector} remains rendered"
+        );
     }
     connection.assert_no_request_bytes(Duration::from_millis(250));
 }

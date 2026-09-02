@@ -140,6 +140,7 @@ fn a_run_started_outside_the_desktop_becomes_visible_with_no_polling() {
             Ok(LinkUpdate::Down(message)) => {
                 panic!("center link reported down: {message}")
             }
+            Ok(LinkUpdate::Board { .. }) => {}
             Err(async_channel::TryRecvError::Empty) => {
                 if Instant::now() >= deadline {
                     panic!("the externally started run never appeared before the deadline");

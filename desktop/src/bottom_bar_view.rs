@@ -5,7 +5,7 @@
 //! `detail_view.rs`'s convention.
 
 use gpui::prelude::*;
-use gpui::{AnyElement, div, rgb};
+use gpui::{AnyElement, SharedString, div, rgb};
 
 use crate::bottom_bar::{ActionTone, BarAction, BarActionId, BottomBar};
 use crate::run_row::role_color;
@@ -29,10 +29,12 @@ fn action_element(action: &BarAction, handler: Option<BarActionHandler>) -> AnyE
         ActionTone::Primary => tokens::TEXT_BRIGHT,
         ActionTone::Secondary => tokens::TEXT_SECONDARY,
         ActionTone::Muted => tokens::TEXT_MUTED,
+        ActionTone::Danger => tokens::DANGER,
     };
     let selector = match action.id {
         BarActionId::Watch => "bottom-bar-action-watch",
         BarActionId::Hold => "bottom-bar-action-hold",
+        BarActionId::NewTask => "bottom-bar-action-NewTask",
         _ => "bottom-bar-action",
     };
     let element = mono_11(color)
@@ -42,7 +44,7 @@ fn action_element(action: &BarAction, handler: Option<BarActionHandler>) -> AnyE
         // gpui requires a stateful element (`.id(...)`) for `.on_click` to
         // attach; invisible in paint — no geometry, no tone.
         Some(handler) => element
-            .id("bottom-bar-pause")
+            .id(SharedString::from(format!("bottom-bar-{:?}", action.id)))
             .on_click(handler)
             .into_any_element(),
         None => element.into_any_element(),
@@ -54,7 +56,11 @@ fn action_element(action: &BarAction, handler: Option<BarActionHandler>) -> AnyE
 /// only when supplied — the caller (`Shell::render`) decides eligibility;
 /// this component still binds no behaviour of its own beyond wiring the one
 /// handler it is given.
-pub fn bar_element(bar: &BottomBar, on_pause: Option<BarActionHandler>) -> AnyElement {
+pub fn bar_element(
+    bar: &BottomBar,
+    on_pause: Option<BarActionHandler>,
+    on_new_task: Option<BarActionHandler>,
+) -> AnyElement {
     let mut left = div()
         .id("bottom-bar-state")
         .flex()
@@ -73,14 +79,19 @@ pub fn bar_element(bar: &BottomBar, on_pause: Option<BarActionHandler>) -> AnyEl
         .items_center()
         .gap(tokens::BOTTOM_BAR_GAP);
     let mut on_pause = on_pause;
+    let mut on_new_task = on_new_task;
     for (index, action) in bar.actions.iter().enumerate() {
         if index > 0 {
             right = right.child(mono_11(tokens::TEXT_FAINT).child("·"));
         }
-        let handler = if action.id == BarActionId::Pause {
-            on_pause.take()
-        } else {
-            None
+        let handler = match action.id {
+            BarActionId::Pause => on_pause.take(),
+            BarActionId::NewTask => on_new_task.take(),
+            BarActionId::WatchRaw
+            | BarActionId::AuthorTrait
+            | BarActionId::EditRuntimeToml
+            | BarActionId::Watch
+            | BarActionId::Hold => None,
         };
         right = right.child(action_element(action, handler));
     }
@@ -144,7 +155,7 @@ mod tests {
         let bar = sessions_bar(&row, None, None);
         // Constructing the element must not panic and must reach an
         // `AnyElement` — proof this render path needs no `App`/`Context`.
-        let _element: AnyElement = bar_element(&bar, None);
+        let _element: AnyElement = bar_element(&bar, None, None);
     }
 
     #[test]
@@ -157,7 +168,7 @@ mod tests {
             detail: Vec::new(),
             actions: Vec::new(),
         };
-        let _element: AnyElement = bar_element(&bar, None);
+        let _element: AnyElement = bar_element(&bar, None, None);
     }
 
     #[test]
@@ -185,6 +196,6 @@ mod tests {
         };
         let bar = sessions_bar(&row, None, None);
         let handler: BarActionHandler = Box::new(|_, _, _| {});
-        let _element: AnyElement = bar_element(&bar, Some(handler));
+        let _element: AnyElement = bar_element(&bar, Some(handler), None);
     }
 }

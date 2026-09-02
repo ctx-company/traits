@@ -9,7 +9,7 @@
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use ctx_traits_io::center::{self, CenterDelta, CenterEvent, CenterPublicRow};
+use ctx_traits_io::center::{self, BoardWireResult, CenterDelta, CenterEvent, CenterPublicRow};
 
 /// Fixed reconnect backoff, parity with the CLI dashboard worker's
 /// `wait_for_retry` (`modules/cli/src/app/dashboard/worker.rs`).
@@ -26,6 +26,10 @@ const CONSUMER_POLL_INTERVAL: Duration = Duration::from_millis(200);
 pub enum LinkUpdate {
     Snapshot(Vec<CenterPublicRow>),
     Delta(CenterDelta),
+    Board {
+        repo_key: String,
+        board: Box<BoardWireResult>,
+    },
     /// The subscription is down, with a reason. Absent-at-first-contact vs.
     /// mid-stream loss vs. eviction are indistinguishable on this wire and
     /// must stay that way — the face classifies the transition, not the
@@ -83,9 +87,9 @@ impl SnapshotAssembler {
                     vec![LinkUpdate::Delta(delta)]
                 }
             }
-            // Board changes are consumed by the board request path; they do
-            // not alter the run snapshot assembled by this link.
-            CenterEvent::BoardChanged { .. } => Vec::new(),
+            CenterEvent::BoardChanged { repo_key, board } => {
+                vec![LinkUpdate::Board { repo_key, board }]
+            }
         }
     }
 }
@@ -234,7 +238,10 @@ fn announce(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ctx_traits_core::task::provider::SyncReport;
     use ctx_traits_io::run_summary::RunSummary;
+    use ctx_traits_io::task_files::{BoardPresence, BoardResolution};
+    use std::collections::BTreeMap;
 
     fn row(run_id: &str) -> Box<CenterPublicRow> {
         Box::new(CenterPublicRow {
@@ -252,6 +259,20 @@ mod tests {
 
     fn ended_delta(run_id: &str) -> CenterDelta {
         CenterDelta::Ended { row: row(run_id) }
+    }
+
+    fn empty_board() -> Box<BoardWireResult> {
+        Box::new(BoardWireResult {
+            resolution: BoardResolution {
+                presence: BoardPresence::Empty,
+                digest: Some("sha256:fixture".to_string()),
+                rows: Vec::new(),
+                sync_report: SyncReport::default(),
+                resolved_at: 0,
+            },
+            joined_runs: BTreeMap::new(),
+            sections: BTreeMap::new(),
+        })
     }
 
     fn snapshot_run_ids(updates: &[LinkUpdate]) -> Vec<&str> {
@@ -293,6 +314,21 @@ mod tests {
         let updates = assembler.accept(CenterEvent::SnapshotEnd);
         assert_eq!(snapshot_run_ids(&updates), vec!["a", "b"]);
         assert_eq!(updates.len(), 1);
+    }
+
+    #[test]
+    fn board_changed_is_forwarded_immediately_during_a_snapshot() {
+        let mut assembler = SnapshotAssembler::default();
+        assembler.accept(CenterEvent::SnapshotStart);
+        let updates = assembler.accept(CenterEvent::BoardChanged {
+            repo_key: "repo-a".to_string(),
+            board: empty_board(),
+        });
+        assert!(matches!(
+            updates.as_slice(),
+            [LinkUpdate::Board { repo_key, .. }] if repo_key == "repo-a"
+        ));
+        assert!(assembler.accept(CenterEvent::SnapshotEnd).len() == 1);
     }
 
     #[test]

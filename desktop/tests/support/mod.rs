@@ -722,6 +722,51 @@ impl FakePeerConnection {
         }));
     }
 
+    /// Read the desktop's existing-only create request and return its wire
+    /// identity plus the owner-provided task payload.
+    pub fn read_create_task_request(&mut self) -> (String, String, serde_json::Value) {
+        let request = self.read_line();
+        assert_eq!(
+            request["kind"], "create-task",
+            "expected a create-task request"
+        );
+        let id = request["id"]
+            .as_str()
+            .expect("create-task request id")
+            .to_string();
+        let repo_key = request["repo_key"]
+            .as_str()
+            .expect("create-task repo key")
+            .to_string();
+        (id, repo_key, request["new_task"].clone())
+    }
+
+    /// Respond to a create request using the public result's serde shape.
+    pub fn send_create_task_result(
+        &mut self,
+        id: &str,
+        result: &ctx_traits_io::center::CreateTaskWireResult,
+    ) {
+        self.write_line(&serde_json::json!({
+            "kind": "response",
+            "id": id,
+            "result": {"type": "create-task", "data": result},
+        }));
+    }
+
+    /// Send a complete board answer to an existing subscription.
+    pub fn send_board_changed(
+        &mut self,
+        repo_key: &str,
+        board: &ctx_traits_io::center::BoardWireResult,
+    ) {
+        self.write_line(&serde_json::json!({
+            "kind": "board-changed",
+            "repo_key": repo_key,
+            "board": board,
+        }));
+    }
+
     /// Serve a complete snapshot in one call: start, each row, end.
     pub fn serve_snapshot(&mut self, id: &str, rows: &[CenterPublicRow]) {
         self.send_snapshot_start(id);

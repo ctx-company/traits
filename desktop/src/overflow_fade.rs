@@ -659,7 +659,7 @@ mod tests {
                 .w(px(300.))
                 .h(self.viewport_height)
                 .child(crate::detail_view::detail_element(&self.tree))
-                .child(bar_element(&bar, None))
+                .child(bar_element(&bar, None, None))
                 .into_any_element()
         }
     }

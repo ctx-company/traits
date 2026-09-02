@@ -68,6 +68,7 @@ fn drive_until_len(
                     assert!(detail.apply(request.generation, outcome));
                 }
             }
+            Ok(LinkUpdate::Board { .. }) => {}
             Err(async_channel::TryRecvError::Empty) => {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -116,6 +117,7 @@ fn drive_until_header(
                     assert!(detail.apply(request.generation, outcome));
                 }
             }
+            Ok(LinkUpdate::Board { .. }) => {}
             Err(async_channel::TryRecvError::Empty) => {
                 std::thread::sleep(Duration::from_millis(20));
             }

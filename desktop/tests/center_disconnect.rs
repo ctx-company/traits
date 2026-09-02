@@ -95,6 +95,7 @@ fn mid_stream_disconnect_shows_stale_then_recovers_from_a_fresh_snapshot() {
             Ok(LinkUpdate::Down(reason)) => {
                 panic!("expected the pre-shutdown delta, got Down({reason})")
             }
+            Ok(LinkUpdate::Board { .. }) => {}
             Err(error) => panic!("link channel ended before the delta arrived: {error}"),
         }
     }
