@@ -1,0 +1,270 @@
+schema-version = "0.2"
+key = "0280.4"
+title = "Disk-full is a typed park at the dispatch boundary, and it resumes"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order,
+commands, proof mechanics. Deviate from any of it whenever a goal requires it,
+and report the deviation in the work summary; a deviation is not a violation
+and needs no escalation.
+
+Parent `0280` goal 4, core half: below a configured free-space floor the
+driver parks the run with a typed `disk-full` reason instead of dispatching;
+the park is settled (the center never rewrites it to `interrupted`), the frame
+stays unsubmitted, and resuming after space is freed continues the same run.
+Surfacing the park in dashboard, queue, and the human run report is `0280.5`.
+
+Charter decision this child implements (binding, see `0280`): the runtime has
+no typed build frame, and name/tool heuristics are ungrounded — so
+"build-producing dispatch" resolves conservatively to *every* dispatch. The
+headroom probe is one `statvfs` call; every frame the driver is about to
+execute in the worktree (harness step, MCP dispatch, concurrent-wave sibling,
+auto-executed command/check) is gated by the same shared preflight.
+
+## Grounded against HEAD 129dd0f70
+
+- Probe: `environment::available_disk_bytes(path)` returns available bytes via
+  Unix statvfs, `Ok(None)` on unsupported platforms
+  (`modules/io/src/environment.rs:91-122`). It requires an existing path;
+  worktree and cache root may sit on different volumes; named cache paths may
+  not exist yet.
+- Boundary pattern to reuse: `drive_loop` inspects the next frame and checks
+  run/token budgets before dispatch, returning a report without submitting the
+  frame when a boundary fires (`modules/cli/src/app/drive.rs:2244-2536`).
+  Dispatch sites the preflight must cover: sequential CLI harness dispatch
+  (:3048-3246), MCP dispatch (:2732-2790), the concurrent wave
+  (`attempt_concurrent_wave`, :2927-3010), and auto-executed command/check
+  frames (`advance_commands`, :2316-2377).
+- Outcome typing: `DriveOutcomeKind` has no `DiskFull`; unknown wire strings
+  become `Other(String)` (`modules/core/src/procedure/session.rs:1104-1226`).
+  `is_settled_pause` (:1235-1243) is the single authority the center uses to
+  protect parked outcomes from orphan-repair rewriting to `interrupted`
+  (`modules/io/src/center.rs:3315-3408,3537-3556`). `SessionState::derive`
+  maps only interrupted/killed to `Cancelled`
+  (`modules/core/src/procedure/activity.rs:26-55`); a disk-full park must
+  keep a nonterminal underlying status so resume re-enters the same frame.
+- Config: `[merge] disk-floor-mb` exists with a 2048 MiB default, `0`
+  disables (`modules/io/src/harness_config.rs:1327-1370,1494-1575`) — under
+  `[merge]`, protecting only declared landing gates. The parent requires the
+  new floor under `[worktree.retention]`. Retention leaves demand the full
+  explicit lifecycle: `ConfigLeaf` variant, naming, merge, provenance, and
+  tests (:900-1044,1087-1139,4278-4310,5834-5927), plus regenerated
+  TypeScript (`packages/config/src/generated.ts:259-283`; `just
+  sdk-generate` / `just sdk-check`).
+- The incident's second face: when the frame itself fills the disk, dispatch
+  fails and today records bare `interrupted`; even the outcome write can fail,
+  the exact stale-ledger class 0280 describes (`drive.rs:1537-1565`). The
+  injected write-failure hook `TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE`
+  (`modules/io/src/run_session.rs:630`) already exists and is exercised by
+  `proof_center` and `proof_summons`. A snapshot is not a reservation: the
+  preflight alone cannot prove no-ENOSPC-death, so ENOSPC surfacing
+  mid-dispatch must classify as disk-full (goal 4) and a failed outcome
+  write must not strand the session (goal 5).
+- Resume: `ctx traits internal drive --session <ledger>` re-enters the
+  retained worktree and unresolved frame. Model proofs:
+  `proof_budget_pause::declared_token_ceiling_pauses_typed_at_the_boundary_then_resumes_on_raise`
+  and `proof_center::paused_worktree_run_retains_its_worktree_and_resume_reuses_it`.
+
+## GOALS — binding
+
+1. **A typed `disk-full` outcome exists and is a settled pause.**
+   `DriveOutcomeKind` gains a variant with wire value `disk-full`,
+   round-tripping through `from_wire`/wire emission, included in
+   `is_settled_pause`, not mapped to `Cancelled` by `SessionState::derive`,
+   with an exit code following the existing pause mappings
+   (`drive.rs:1624-1634`).
+   Decided by: the declared wire-value grep check plus the declared gate
+   checks (core unit tests cover wire round-trip and settled-pause
+   membership).
+   Excluded: dashboard/queue/report presentation (0280.5).
+
+2. **One configured floor under `[worktree.retention]`.** A `disk-floor-mb`
+   leaf on `WorktreeRetentionConfig` whose default is 2048 MiB (the shipped
+   `[merge] disk-floor-mb` precedent) with `0`
+   disabling it, carried through the full explicit leaf lifecycle
+   (`ConfigLeaf` variant, merge, provenance, leaf tests) and regenerated
+   TypeScript. Omission keeps the default floor; the existing `[merge]`
+   disk-floor is untouched.
+   Decided by: the declared `just sdk-check` check and the config leaf tests
+   inside the declared `just test` gate.
+   Excluded: any other new knob; relocating or changing `[merge]
+   disk-floor-mb`.
+
+3. **Every dispatch is preflighted; below the floor the run parks with the
+   frame unsubmitted.** One shared preflight helper probes free space for the
+   volumes that matter (worktree path, and the repository cache root via
+   nearest existing ancestor when paths are missing — one policy, not copied
+   statvfs calls) and gates all four dispatch sites. Below the floor the
+   driver returns without submitting the frame, records the typed `disk-full`
+   outcome with the floor and observed bytes in its evidence, and leaves the
+   session resumable. A probe returning `None` or an error never parks
+   (matching merge's deliberate leniency).
+   Decided by: a behavioral proof driving a scratch-repository run whose
+   configured floor exceeds the volume's observed available bytes and
+   observing the typed `disk-full` outcome in the ledger with the worktree,
+   branch, and unsubmitted frame intact; plus the declared gate checks.
+   Excluded: reserving space or guaranteeing headroom against concurrent
+   writers; per-frame build heuristics.
+
+4. **Mid-dispatch ENOSPC classifies as `disk-full`, not `interrupted`.** When
+   harness dispatch or its retry fails and the underlying I/O error is
+   ENOSPC, the recorded outcome is the typed `disk-full`.
+   Decided by: a unit-level classification test on the error-mapping path;
+   full disk-exhaustion simulation is not required.
+   Excluded: retroactively repairing the two incident ledgers; guaranteeing
+   headroom against concurrent writers.
+
+5. **Disk-full authority survives a failed outcome write.** When the typed
+   `disk-full` outcome cannot be persisted because the write itself fails,
+   the session does not end as bare `interrupted` and is not stranded as
+   permanently stale nonterminal state: the typed disk-full park is either
+   durably preserved or reconstructed by the next reader — center orphan
+   repair or a resume drive, observing available bytes below the configured
+   floor — before any rewrite to `interrupted`.
+   Decided by: a behavioral proof that injects the outcome-write failure via
+   the existing `TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE` hook, runs the reader
+   path, and observes typed disk-full authority rather than `interrupted`;
+   plus the declared `proof_center` check.
+   Excluded: guaranteeing the write succeeds while the volume stays full;
+   any new sidecar persistence channel (it would fail under the same
+   ENOSPC).
+
+6. **Restored space resumes the same run.** After a disk-full park, driving
+   the same session when the observed available bytes satisfy its configured
+   floor continues from the unsubmitted frame, in the same worktree, to
+   completion.
+   Decided by: a behavioral proof observing that same retained session
+   resume and complete once observed available space satisfies the
+   configured floor; plus the declared gate checks.
+   Excluded: automatic resumption or space watching; resume stays an explicit
+   drive.
+
+7. **Existing suites stay green.** Budget/credits/awaiting-owner pause
+   behavior, center orphan repair for existing settled pauses, and their
+   proofs are unchanged.
+   Decided by: the declared `proof_budget_pause`, `proof_center`, and
+   `just test` checks.
+'''
+scope = '''
+## Decisions
+
+- Conservative gating: every dispatch site preflights; the cost is one or two
+  statvfs calls per frame. This is the charter's resolution of the missing
+  build-frame type — no name/tool heuristics.
+- Default floor: 2048 MiB, matching the `[merge]` precedent; `0` disables.
+  The default is binding (goal 2), not a suggestion.
+- The park stores floor + observed bytes in typed evidence so 0280.5 can
+  render "why" without string parsing.
+- Reconstruction (goal 5) is the honest answer to a write that ENOSPC can
+  always defeat: no write path can be guaranteed on a full volume, so the
+  authority lives in the reader. Rewriting a below-floor unheld nonterminal
+  session to `interrupted` is the defect; classifying it as the typed park
+  is correct going forward because a resume below the floor must park
+  immediately anyway.
+- The disk-full proofs live most naturally beside the budget-pause boundary
+  proofs (`modules/cli/tests/proof_budget_pause.rs`) or the center pause
+  proofs — implementer's choice of home.
+- Depends on 0280.1 because preservation is part of this park's contract:
+  with the exit-time prunes retired, a disk-full park provably keeps its
+  declared artifacts warm.
+
+## APPROACH — suggested route, not a boundary
+
+1. Core typing first: `DiskFull` variant, wire value `disk-full`, settled
+   pause membership, exit-code mapping, `SessionState::derive` untouched for
+   it (verify it does not fall into the Cancelled arm), unit tests beside the
+   existing settled-pause tests (`session.rs:6520-6524`).
+2. Config leaf: `disk_floor_mb` on `WorktreeRetentionConfig`
+   (`harness_config.rs:424-457`) with the full leaf lifecycle mirroring
+   `MergeDiskFloorMb`'s enumeration/merge/provenance shape; `just
+   sdk-generate`, `just ts-build`.
+3. Shared preflight helper (io or drive-level) wrapping
+   `available_disk_bytes` with nearest-existing-ancestor fallback; call it
+   from the frame-boundary seam so all four dispatch sites are covered ahead
+   of dispatch — prefer one chokepoint before dispatch fans out over four
+   copies.
+4. Park path: mirror the budget-pause return-without-submission shape,
+   including evidence, `record_drive_outcome` wiring, and the demotion-path
+   audit at `drive.rs:1537-1565` so a disk-full park is not demoted to
+   `harness-failed`.
+5. ENOSPC mapping: inspect the dispatch error chain for raw OS error 28 /
+   `StorageFull` at the existing retry/failure classification, route to the
+   disk-full outcome.
+6. Reconstruction: at center orphan repair (`center.rs:3315-3408,3537-3556`)
+   and at resume entry, before an unheld nonterminal ledger is rewritten to
+   `interrupted`, probe available bytes against the session's configured
+   floor and, when below it, settle the session as the typed disk-full park
+   instead. Prove it with `TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE` set during the
+   park, then the reader pass — home beside the existing `proof_center`
+   orphan cases, which already use that hook.
+7. Proofs and gates: for the park proof, an enormous configured floor in a
+   scratch repository makes any real volume sit below it without filling a
+   disk; for the resume act, lowering the floor is the suggested way to make
+   observed space satisfy it. Gates: `CARGO_TARGET_DIR=target cargo test -p
+   ctx-traits-cli --test proof_budget_pause`; `CARGO_TARGET_DIR=target cargo
+   test -p ctx-traits-cli --test proof_center`; `just sdk-check`; `just
+   test`. Isolate the build cache (`CARGO_TARGET_DIR=target`) before
+   trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- The center must never rewrite a disk-full park to `interrupted` — settled
+  pause membership is the single authority; do not patch the center
+  separately.
+- The frame must remain unsubmitted; a park that consumes the frame breaks
+  resume.
+- Probe leniency: `None`/error never parks — matching the merge precedent.
+- No test may fill a real disk or depend on host free space being small; the
+  floor is the lever.
+
+## Done when
+
+- Typed `disk-full` exists on the wire, is a settled pause, and maps to a
+  pause-style exit code — unit-proven.
+- `[worktree.retention] disk-floor-mb` exists with default 2048 MiB, `0`
+  disabling, the full leaf lifecycle, and regenerated TypeScript;
+  `just sdk-check` green.
+- A scratch run whose configured floor exceeds observed available bytes
+  parks typed with worktree/branch/frame intact — behaviorally proven.
+- ENOSPC during dispatch classifies as disk-full — unit-proven.
+- A disk-full park whose outcome write fails is settled as typed disk-full
+  by the next reader, never bare `interrupted` — proven with the injected
+  write failure.
+- The same retained session resumes to completion once observed available
+  space satisfies its configured floor — behaviorally proven.
+- `proof_budget_pause`, `proof_center`, and `just test` green.
+'''
+[relations]
+parent = "0280"
+depends-on = ["0280.1"]
+
+[[checks]]
+name = "typed disk-full wire value exists in the session outcome model"
+command = "grep -n 'disk-full' modules/core/src/procedure/session.rs"
+expect = "disk-full"
+
+[[checks]]
+name = "generated config carries the retention disk floor without drift"
+command = "just sdk-check"
+timeout-ms = 1800000
+
+[[checks]]
+name = "budget-pause boundary suite is green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_budget_pause"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 1800000
+
+[[checks]]
+name = "center proof suite is green including orphan-repair behavior"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 1800000
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

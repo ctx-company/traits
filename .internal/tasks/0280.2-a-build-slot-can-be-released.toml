@@ -1,0 +1,140 @@
+schema-version = "0.2"
+key = "0280.2"
+title = "A build slot can be released: emptied on disk, cleared in the registry"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order,
+commands, proof mechanics. Deviate from any of it whenever a goal requires it,
+and report the deviation in the work summary; a deviation is not a violation
+and needs no escalation.
+
+Parent `0280` goal 3: a freed build slot must be empty on disk, not merely
+reassignable, and the registry must reflect it. Today `target_slot` has no
+release operation at all — reclaim means reassign-and-overwrite, and slot
+bytes persist forever. This child is the mechanism only: a safe, typed,
+ownership-verified release API with unit proofs. Wiring it into landed/killed
+outcomes is `0280.3`.
+
+## Grounded against HEAD 129dd0f70
+
+- `modules/io/src/target_slot.rs`: four slots per repository
+  (`DEFAULT_TARGET_SLOTS`, :30-35); registry `<build-slots>/slots.json` with
+  one `assignments[index] = worktree-path`, a stamp, and a counter (:37-50).
+- `resolve` serializes read/modify/write with `slots.lock`, returns the
+  existing assignment for the same worktree, prefers unassigned or
+  dead-worktree slots, else reassigns the least-recently-assigned slot
+  (:52-116). Registry parse failure silently becomes an empty default
+  registry (:130-155). No release exists.
+- Overflow: a fifth live worktree is assigned an already-used physical slot
+  (:100-107) and the registry records only the latest assignee. Therefore
+  current registry ownership is the only attributable claim; an earlier
+  assignee whose slot was stolen has already forfeited its bytes to the new
+  tenant under the shipped model. The 0280 charter accepts this bound: release
+  must verify current ownership under the lock and must never delete a slot it
+  cannot attribute to the releasing worktree.
+- Existing unit proofs (:170-218) cover stable assignment, four distinct
+  slots, and reuse after worktree deletion — nothing about release.
+- `{cache-slot}` resolution and consumers are in
+  `modules/io/src/harness_config.rs:517-588`; the slot path is
+  `<cache-root>/build-slots/slot-N` (`modules/io/src/layout/mod.rs:711-723`).
+
+## GOALS — binding
+
+1. **A locked, ownership-verified release operation exists in `target_slot`.**
+   Given the build-slots root and a worktree path, it takes `slots.lock`,
+   and only when the registry currently assigns a slot to exactly that
+   worktree path does it delete the slot directory's contents and clear that
+   assignment row, in one serialized operation. It returns a typed result
+   distinguishing at least: released (with bytes reclaimed observable for
+   evidence), not-owner/no-assignment (skip, delete nothing), and
+   already-absent slot directory (success, idempotent).
+   Decided by: the declared `target_slot` unit-suite check; the release,
+   not-owner, and idempotence behaviors are judged by the suite's
+   assertions, however the implementer arranges them — no test count is a
+   criterion.
+   Excluded: any call site outside tests (0280.3 wires it); pid/liveness
+   tracking; changing `resolve`, slot count, or the overflow model.
+
+2. **Release is safe under the failure modes the registry already has.**
+   Releasing when the slot directory is missing succeeds idempotently;
+   releasing when the registry is malformed deletes nothing (a registry that
+   cannot attribute ownership must not authorize deletion — this deliberately
+   diverges from `resolve`'s reset-to-default leniency, which hands out
+   assignments but never deletes); a release and a resolve racing are
+   serialized by `slots.lock`.
+   Decided by: unit proofs for missing-directory idempotence, not-owner skip,
+   and malformed-registry refusal; the lock-serialization claim rides on the
+   same `slots.lock` acquisition `resolve` already uses and needs no new
+   concurrency proof if the implementation shares that acquisition path.
+   Excluded: repairing malformed registries (out of scope for the family).
+
+3. **Existing suites stay green.** `resolve` behavior is unchanged.
+   Decided by: the declared `just test` check.
+'''
+scope = '''
+## Decisions
+
+- Ownership = current registry assignment under `slots.lock`. The overflow
+  victim (slot stolen by a fifth worktree) is not protected — the shipped
+  overflow model already overwrites its bytes, and the charter documents this
+  accepted bound. Release never deletes without a current matching assignment.
+- Delete slot *contents* and clear the assignment; whether the empty slot
+  directory itself remains is the implementer's choice, as long as the freed
+  state is observable and `resolve` treats the slot as free.
+- The typed result exists so 0280.3 can record ledger evidence; shape it for
+  that consumer (bytes reclaimed or a per-slot outcome), but do not add ledger
+  types here.
+- No changes to `cache.rs` named-cache primitives here: named-cache reclaim
+  is 0280.3's concern (last-run-out, per the charter); this child is the slot
+  mechanism only.
+
+## APPROACH — suggested route, not a boundary
+
+1. Add the release function beside `resolve` in
+   `modules/io/src/target_slot.rs`, sharing the `slots.lock` acquisition and
+   registry read/write helpers (:52-155) rather than duplicating them.
+2. Deletion should be a plain recursive remove of the slot directory contents
+   — the slot path is wholly owned by the runtime under
+   `<cache-root>/build-slots/`, so worktree-relative safety machinery from
+   `retention.rs` does not apply here; keep the path derivation shared with
+   `resolve` so release can never address a foreign directory.
+3. Unit proofs in the same file, following the existing test style (:170-218):
+   release-empties-and-clears, release-by-non-owner-deletes-nothing,
+   release-missing-directory-is-ok, malformed-registry-refuses,
+   released-slot-is-preferred-by-next-resolve.
+4. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io target_slot`,
+   then `just test`. In a run worktree, isolate the build cache
+   (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Never delete on an unattributable registry — leniency is for assignment,
+  strictness is for deletion.
+- Slot bytes and the registry row change under one lock acquisition, not two.
+- Proofs use scratch directories only (existing test style already does).
+
+## Done when
+
+- The release API exists with the typed result, and release-empties-and-clears,
+  not-owner skip, missing-directory idempotence, malformed-registry refusal,
+  and released-slot-preferred-by-next-resolve are each asserted by the unit
+  suite (in whatever test arrangement the implementer chooses).
+- `resolve` proofs still pass unchanged; `just test` is green.
+'''
+[relations]
+parent = "0280"
+
+[[checks]]
+name = "target_slot unit suite is green including release behavior"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io target_slot"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 900000
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

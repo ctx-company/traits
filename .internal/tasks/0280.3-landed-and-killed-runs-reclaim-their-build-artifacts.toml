@@ -1,0 +1,248 @@
+schema-version = "0.2"
+key = "0280.3"
+title = "Landed and killed runs reclaim their build artifacts, recorded in the ledger"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order,
+commands, proof mechanics. Deviate from any of it whenever a goal requires it,
+and report the deviation in the work summary; a deviation is not a violation
+and needs no escalation.
+
+Parent `0280` goals 1 and 3: a `landed` (merge completed) or `killed` run
+leaves no build tree and no slot bytes behind, the reclaim happens as part of
+the outcome before the queue advances, the freed slot is empty on disk with
+its registry row cleared, and the removal is recorded in the authoritative
+session ledger. `0280.1` retired the old prunes; `0280.2` built the slot
+release; this child wires reclaim into the two terminal outcomes.
+
+Charter decision this child implements (binding, see `0280`): reclaim covers
+the worktree's declared retention paths, the run's ownership-verified build
+slot, and — last-run-out — the declared shared named build caches
+(`<cache-root>/build/<name>`). Named caches are one repository-global
+directory shared by every concurrent, parked, and failed run, so per-run
+unconditional deletion would destroy another run's preserved state; the
+current slot registry alone does not solve that conflict. The last-run-out
+rule keeps both binding outcomes: a landed or killed run deletes the declared
+named caches only when no other run of the repository still holds preserved
+state — meaning no other retained run worktree exists — and otherwise
+records a typed skip, leaving the caches intact for the preserved runs.
+
+## Grounded against HEAD 129dd0f70
+
+- Landed transaction: a successful merge fast-forwards the default branch,
+  applies seed harvest, removes the worktree, deletes the branch; any failure
+  after the fast-forward is typed `PostMergeCleanupFailure`, never `Parked`
+  (`modules/cli/src/app/merge.rs:2277-2360`). The terminal
+  `MergeStatus::Merged` frame is appended only after all cleanup succeeds
+  (:2363-2384). That is the transaction to join.
+- Worktree deletion already removes build trees physically inside the
+  worktree; it cannot remove `{cache-slot}` bytes, which live under the
+  global cache root (`modules/io/src/layout/mod.rs:711-723`).
+- Killed: a live-TUI instant kill sets `DriveReport.status = "killed"`
+  (`modules/cli/src/app/drive.rs:3380-3385`; MCP path near :9065);
+  `DriveOutcomeKind::Killed` is persisted with exit code 130
+  (`modules/core/src/procedure/session.rs:1104-1226`; `drive.rs:1624-1634`).
+  The single post-loop chokepoint before `record_drive_outcome`
+  (`drive.rs:~1414-1579`, where 0280.1 removed the unconditional prune) is
+  where killed reclaim belongs. Killed runs retain worktree and branch
+  (0243.5); reclaim removes artifacts inside and beside them, never the
+  worktree or branch themselves.
+- Queue ordering is free: `drive_task_queue` calls `drive_session`
+  synchronously and only then advances (`modules/cli/src/app/run.rs:874-1010`),
+  so reclaim completed inside `drive()`/`merge()` before return precedes queue
+  advancement with no queue-side deletion logic.
+- Ledger seams: `record_drive_outcome` re-reads and atomically rewrites the
+  session, storing a typed outcome plus `DriveTerminalEvidence`
+  (`modules/io/src/run_session.rs:617-652`) — killed reclaim evidence extends
+  that. Merge evidence is append-only in `Provenance.merge_frames` via
+  `append_merge_frame` (:295-330) — landed reclaim evidence belongs in the
+  terminal merge evidence. The activity sidecar is best-effort and
+  non-authoritative; it cannot be the record.
+- Reuse: `retention::prune_terminal_cheap_artifacts` accepts any declared path
+  list and returns one `RetentionOutcome` per path, retaining earlier
+  successes on later failure (`modules/io/src/retention.rs:145-241`), with all
+  worktree-safety machinery in `prune_worktree_artifact` (:18-143). The slot
+  release and its typed result come from `0280.2`.
+- Named-cache reuse: `cache::{prune_named_build_cache,
+  prune_declared_build_caches}` already validate exact repository-owned
+  paths, reject symlinked/special targets, measure bytes, and treat absence
+  as success (`modules/io/src/cache.rs:259-445`). One caveat:
+  `prune_declared_build_caches` collects into `Result` and stops at the
+  first error, which cannot satisfy an evidence contract requiring every
+  target and every failure recorded — generalize to per-cache outcomes
+  rather than duplicating the safety checks.
+- Attribution source for last-run-out: the slot registry
+  (`<build-slots>/slots.json` under `slots.lock`, `target_slot.rs:37-116`)
+  is the one locked, enumerable record of run worktrees; `resolve` already
+  distinguishes assignments whose worktree path still exists on disk from
+  dead ones.
+- Proof homes: `modules/cli/tests/proof_merge_on_completion.rs` (landing
+  removes worktree; parked retains) and `modules/cli/tests/support`
+  (isolated homes, controlled process helpers) for a killed-run observation.
+
+## GOALS — binding
+
+1. **A landed run's slot is empty and unregistered, recorded in the ledger.**
+   Inside merge's existing post-fast-forward cleanup transaction, before the
+   terminal `Merged` frame is appended: the run's build slot is released via
+   the 0280.2 API (ownership-verified; a not-owner result is a recorded skip,
+   not an error), and the terminal merge evidence records the reclaim result.
+   A reclaim failure joins the existing `PostMergeCleanupFailure` typing.
+   Decided by: the declared `proof_merge_on_completion` suite check, extended
+   with a case observing on disk, after an automatic landing: slot contents
+   gone, registry row cleared, and the ledger's merge evidence carrying the
+   reclaim record.
+   Excluded: named-cache deletion (that is goal 3's contract, not part of
+   the slot step); touching the fast-forward, harvest, worktree-removal, or
+   branch-deletion steps beyond inserting the reclaim; any queue-side
+   cleanup.
+
+2. **A killed run's worktree build trees and slot are gone, recorded in the
+   ledger.** At the post-loop chokepoint, when the outcome is killed: the
+   combined declared retention paths (cheap + expensive tiers) are pruned
+   from the retained worktree via the existing retention machinery, the build
+   slot is released, and the reclaim results travel in the killed outcome's
+   `DriveTerminalEvidence` through `record_drive_outcome`. Reclaim failures
+   degrade to recorded per-target failures and never prevent the killed
+   outcome itself from being recorded. Worktree and branch survive untouched.
+   Decided by: a behavioral proof driving a run to a killed outcome in a
+   scratch home and observing on disk: declared paths gone, slot empty and
+   unregistered, worktree and branch present, ledger evidence carrying the
+   reclaim record; plus the declared gate checks.
+   Excluded: reclaim on any other drive outcome (parked, failed, paused,
+   awaiting-owner, interrupted, completed all preserve — 0280.1's contract);
+   making killed runs resumable.
+
+3. **Declared named build caches reclaim last-run-out, preserved otherwise.**
+   On a landed or killed outcome, as part of the same reclaim: when no other
+   run of the repository still holds preserved state (no other retained run
+   worktree exists), the declared named build caches
+   (`<cache-root>/build/<name>`) are deleted and the deletion is recorded in
+   the same ledger evidence; when any other retained run worktree exists —
+   live, parked, failed, paused, or awaiting-owner — nothing under
+   `<cache-root>/build/` is deleted and the evidence records a typed skip
+   with its reason. Both faces are binding. The last-out decision and any
+   deletion happen under one `slots.lock` acquisition so a racing resolve
+   cannot interleave.
+   Decided by: behavioral proofs observing both faces on disk in a scratch
+   home — a sole run's landed and killed outcomes leave the declared cache
+   directories gone with the ledger recording the reclaim; with a second
+   preserved run present the directories survive and the ledger records the
+   skip — plus the declared `proof_merge_on_completion` and `just test`
+   checks.
+   Excluded: deleting undeclared neighbors under `<cache-root>/build/`;
+   lease or reference-count infrastructure; changing the manual
+   `ctx traits cache prune --build` command.
+
+4. **Existing suites stay green.** Landed runs still remove worktree and
+   branch; parked merges still retain everything (0280.1's proofs must not
+   regress).
+   Decided by: the declared `proof_merge_on_completion`, `target_slot`, and
+   `just test` checks.
+'''
+scope = '''
+## Decisions
+
+- Ledger evidence is typed, written through the guarded session writers, and
+  shaped for consumers (dashboard/queue read typed evidence, never parse
+  warning strings). Its exact field shape is the implementer's choice; it must
+  distinguish per-target success, skip (not-owner), and failure, and be
+  visible in the landed merge frame and the killed drive outcome respectively.
+- Killed reclaim prunes both declared tiers because the owner contract says a
+  killed run leaves no build tree; the expensive tier's time-based expiry
+  remains uncalled and out of scope.
+- The drive-completed-but-not-yet-merged window preserves everything; landed
+  reclaim runs only in merge's transaction.
+- Last-run-out attribution: "another run holds preserved state" is decided
+  under `slots.lock` from the slot registry — after this run's row is
+  cleared, any remaining assignment whose worktree path still exists on disk
+  counts as a preserved run. A killed run's own retained worktree does not
+  block its reclaim (its row was just cleared); a parked or failed run's
+  retained worktree does. The registry is the suggested attribution source;
+  if the run finds a more faithful locked enumeration of retained run
+  worktrees, deviating is fine — the binding rule is the two faces of goal
+  3, not the enumeration mechanism.
+- Named-cache evidence must be per-cache (target, outcome, bytes or reason);
+  `prune_declared_build_caches`' stop-at-first-error collect does not
+  provide that — generalize it rather than copying its safety checks.
+
+## APPROACH — suggested route, not a boundary
+
+1. Extend `DriveTerminalEvidence` (and the `DriveOutcome` it lands in) with an
+   optional typed reclaim record; extend the terminal merge evidence
+   similarly. Wire through `record_drive_outcome` and `append_merge_frame`.
+2. In `merge.rs`, inside the post-fast-forward cleanup sequence (:2277-2360),
+   release the slot keyed by the worktree path before the worktree is removed
+   (the release API is keyed by assignee path), capture the typed result, and
+   include it in the terminal frame appended at :2363-2384.
+3. In `drive.rs`, at the chokepoint where 0280.1 removed the unconditional
+   prune, add the killed-only branch: combine `retention.cheap` and
+   `retention.expensive`, call `prune_terminal_cheap_artifacts`, release the
+   slot, fold both into the evidence handed to `record_drive_outcome`. Cover
+   both the CLI and MCP killed paths — they converge on the same outcome
+   recording; verify that convergence rather than duplicating reclaim.
+3b. Named caches: one shared last-run-out step called from both terminal
+   sites, ideally folded into the 0280.2 release path so the last-out check,
+   the row clear, and the cache deletion share one `slots.lock` acquisition.
+   Reuse the exact-path/no-follow safety of `cache::prune_named_build_cache`
+   per declared name; return per-cache typed outcomes (delete / skip /
+   failure) for the ledger evidence.
+4. Proofs: extend `proof_merge_on_completion` for the landed shape. For
+   killed, use the scratch-home helpers in `modules/cli/tests/support`; if
+   driving a genuine mid-frame kill is not reachable from a proof today,
+   proving the reclaim at the outcome chokepoint through whatever controlled
+   path produces a recorded killed outcome is acceptable — state the route
+   taken in the work summary.
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_merge_on_completion`, `CARGO_TARGET_DIR=target cargo test -p
+   ctx-traits-io target_slot`, `just test`. Isolate the build cache
+   (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Reclaim before queue advancement comes free from the synchronous call
+  structure — do not add queue-side deletion.
+- Never remove the killed run's worktree or branch; 0243.5 behavior stands.
+- A not-owner slot release is a recorded skip; deleting an unowned slot is the
+  concurrency defect this family exists to avoid. A named-cache delete while
+  another retained run worktree exists is the same defect — the skip face of
+  goal 3 is as binding as the delete face.
+- No frozen-inventory or behavior-freezing tests; scratch fixtures only.
+
+## Done when
+
+- Landed: slot empty + registry cleared + merge-frame reclaim evidence, proven
+  on disk by the merge-completion suite.
+- Killed: declared worktree paths gone, slot empty + registry cleared,
+  worktree and branch intact, killed outcome evidence carries the reclaim
+  record — proven in a scratch home.
+- Named caches: sole-run landed and killed outcomes leave declared
+  `<cache-root>/build/<name>` directories deleted with ledger evidence; with
+  a second preserved run present they survive and the ledger records the
+  typed skip — both faces proven on disk.
+- Parked/failed preservation proofs from 0280.1 still pass; `just test` green.
+'''
+[relations]
+parent = "0280"
+depends-on = ["0280.1", "0280.2"]
+
+[[checks]]
+name = "merge-completion proof suite is green including landed slot reclaim"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_merge_on_completion"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 1800000
+
+[[checks]]
+name = "target_slot suite is green after wiring release call sites"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io target_slot"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 900000
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

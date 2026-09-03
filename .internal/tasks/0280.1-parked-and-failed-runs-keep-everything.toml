@@ -1,0 +1,148 @@
+schema-version = "0.2"
+key = "0280.1"
+title = "Parked and failed runs keep everything: retire the exit-time prunes"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order,
+commands, proof mechanics. Deviate from any of it whenever a goal requires it,
+and report the deviation in the work summary; a deviation is not a violation
+and needs no escalation.
+
+Parent `0280` (owner decision 1, binding): a `parked` or `failed` run keeps
+everything it needs to resume warm — worktree, branch, build slot, cache.
+Two shipped behaviors violate that today, and this child removes both. It is
+pure policy retirement: it deletes destructive calls and lands no new reclaim
+(that is `0280.3`) and no disk-full machinery (that is `0280.4`).
+
+## Grounded against HEAD 129dd0f70
+
+- `drive()` unconditionally prunes the configured `retention.cheap` worktree
+  paths after every drive that acquired the driver lock, before recording the
+  outcome (`modules/cli/src/app/drive.rs:1414-1448`). That removes cheap
+  artifacts from failed, awaiting-owner, paused, budget-paused, interrupted,
+  and killed runs alike.
+- After every merge report with status `parked`, `merge()` concatenates the
+  cheap and expensive retention declarations and prunes them
+  (`modules/cli/src/app/merge.rs:852-897`). This is the 0138 policy that 0280
+  explicitly supersedes: parked runs must resume warm.
+- The merge disk-floor park reason and its presentation claim declared caches
+  were pruned (`merge.rs:2572-2582`; `modules/cli/src/app/merge_story.rs:587-588`).
+  Once the park no longer prunes, those messages are lies and must change.
+- `WorktreeRetentionConfig.cheap` is doc-commented "deleted at every drive
+  exit" (`modules/io/src/harness_config.rs:447-449`). The struct derives
+  `JsonSchema`; doc-comment changes flow into
+  `packages/config/src/generated.ts` via `just sdk-generate` and drift is
+  caught by `just sdk-check`.
+- Existing proofs: `modules/cli/tests/proof_merge_on_completion.rs` already
+  proves parked merges retain worktree and branch; nothing yet proves declared
+  retention paths survive a park or a failure. `modules/cli/tests/support`
+  provides isolated HOME/XDG/TMPDIR scratch homes.
+
+Transitional state, accepted by the charter: between this child landing and
+`0280.3` landing, killed and completed runs also prune nothing at exit. That
+direction is safe (keeps too much, deletes nothing wrong) and short-lived.
+
+## GOALS — binding
+
+1. **No drive outcome prunes worktree artifacts at exit.** The unconditional
+   cheap-tier prune after `drive_loop` is removed; a failed, paused,
+   budget-paused, awaiting-owner, interrupted, or killed drive leaves every
+   declared retention path in the worktree exactly as the run left it.
+   Decided by: the declared per-round gate check plus a behavioral proof (an
+   existing proof home or a new case in one) showing a non-completed drive
+   leaves a declared cheap path intact on disk.
+   Excluded: any new reclaim call (0280.3); changes to worktree/branch
+   retention rules themselves (0243.5 behavior stands untouched).
+
+2. **A parked merge prunes nothing and says so.** The merge-park prune of
+   cheap+expensive declarations is removed, and the disk-floor park reason and
+   story text no longer claim caches were pruned. A parked merge retains
+   worktree, branch, and every declared retention path.
+   Decided by: the declared `proof_merge_on_completion` suite check, extended
+   with a case observing a declared retention path surviving a merge park on
+   disk.
+   Excluded: changing when merge parks or the disk-floor probe itself; any
+   `[merge] disk-floor-mb` semantics change.
+
+3. **The configuration documentation tells the new truth.** The
+   `WorktreeRetentionConfig` doc comments no longer promise deletion at every
+   drive exit; regenerated TypeScript matches.
+   Decided by: the declared `just sdk-check` check.
+   Excluded: adding any new configuration leaf (0280.4 owns the only new one).
+
+4. **Existing suites stay green.** No behavior outside the two retired prunes
+   changes.
+   Decided by: the declared `just test` check.
+'''
+scope = '''
+## Decisions
+
+- This child only deletes destructive behavior; landed/killed reclaim arrives
+  in `0280.3` and must not be anticipated here.
+- `expensive_tier_is_warm` keeps its absent caller — time-based expiry is out
+  of scope for the whole 0280 family.
+- Retention path safety machinery (`modules/io/src/retention.rs`) is kept
+  intact and unmodified: 0280.3 reuses it.
+- Message text changes stay minimal: the disk-floor park reason stops claiming
+  a prune happened; no broader merge-story rework.
+
+## APPROACH — suggested route, not a boundary
+
+1. Remove the cheap-tier prune block in `modules/cli/src/app/drive.rs`
+   (~1414-1448) and its now-dead plumbing.
+2. Remove the parked-merge prune block in `modules/cli/src/app/merge.rs`
+   (~852-897); update the disk-floor reason (`merge.rs:~2572-2582`) and
+   `merge_story.rs:~587-588` wording.
+3. Update the `WorktreeRetentionConfig` doc comments in
+   `modules/io/src/harness_config.rs` (~424-457), then `just sdk-generate`
+   and `just ts-build`.
+4. Add preservation proofs where the fixtures already exist: a
+   `proof_merge_on_completion` case that declares a retention path, parks a
+   merge, and observes the path still on disk; a drive-outcome preservation
+   observation in whichever existing proof home already produces a
+   non-completed drive (budget pause is the cheapest: `proof_budget_pause`
+   already parks at a boundary). State what is proven — declared paths
+   survive — and choose the observation freely.
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_merge_on_completion`, `just sdk-check`, `just test`. In a run
+   worktree, isolate the build cache (`CARGO_TARGET_DIR=target`) before
+   trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Do not delete or weaken `retention.rs` safety logic — only its call sites
+  change.
+- No behavior-freezing or frozen-inventory tests: proofs use scratch fixtures
+  under `modules/cli/tests/support`, never committed repo content.
+- The disk-floor park must still park; only its claim about pruning changes.
+
+## Done when
+
+- No code path prunes declared retention paths on any drive exit or on a
+  parked merge; a proof observes a declared path surviving a park and a
+  non-completed drive on disk.
+- Disk-floor park messages no longer claim caches were pruned.
+- `just sdk-check` and `just test` pass.
+'''
+[relations]
+parent = "0280"
+
+[[checks]]
+name = "merge-completion proof suite is green including park preservation"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_merge_on_completion"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 1800000
+
+[[checks]]
+name = "generated config docs match the new retention semantics"
+command = "just sdk-check"
+timeout-ms = 1800000
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

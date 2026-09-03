@@ -1,0 +1,136 @@
+schema-version = "0.2"
+key = "0280.5"
+title = "Dashboard, queue, and run report disk-full as a park, never a failure"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome, what decides it, and what it excludes. The APPROACH
+section is the architect's suggested route — files, symbols, edit order,
+commands, proof mechanics. Deviate from any of it whenever a goal requires it,
+and report the deviation in the work summary; a deviation is not a violation
+and needs no escalation.
+
+Parent `0280` goal 4, surface half: the dashboard and queue report `disk-full`
+— never `interrupted`, never `Failure` — and the human single-run flow treats
+it as a park like credits, budget, and awaiting-owner. `0280.4` delivered the
+typed outcome and evidence; this child makes every reader tell the truth.
+
+## Grounded against HEAD 129dd0f70
+
+- Queue: every `TaskQueueOutcome::NotCompleted` is fail-toned, halts by
+  default, and closes the final panel as `Failure`
+  (`modules/cli/src/app/run.rs:751-843,874-1010,1211-1230`). The recorded
+  drive outcome is copied into `NotCompleted` labels, so today a disk-full
+  park would appear parenthetically inside a failure — violating the parent.
+- Human single-run handling special-cases credits, budget, and awaiting-owner
+  parks; an unrecognized report is treated as terminal failure and can open
+  the retained failure modal (`run.rs:1418-1453`). Disk-full must join that
+  shared park classification, not get patched into queue text alone.
+- Dashboard: row state and phase text derive from raw session status;
+  outcome-specific presentation exists only for awaiting-owner summons
+  (`modules/cli/src/app/dashboard.rs:1900-1995,2344-2414`). Without a
+  projection change a disk-full session shows `awaiting agent output`.
+- The typed outcome carries evidence (floor + observed bytes, from 0280.4);
+  projections consume the typed outcome, never parse warning strings.
+- Test homes: queue classification unit tests in
+  `run.rs::task_queue_drive_tests`; dashboard classification tests inside
+  `dashboard.rs`.
+
+## GOALS — binding
+
+1. **The queue reports a disk-full run as parked, not failed.** A queue entry
+   whose drive records the typed disk-full outcome is classified as a park in
+   the same family as budget/credits/awaiting-owner: its label says
+   `disk-full`, it is not fail-toned, and the closing panel does not report
+   `Failure` on its account. Whether a disk-full park halts or continues the
+   queue follows the existing behavior of the park family it joins — match
+   what budget-pause does today rather than inventing a third policy.
+   Decided by: the declared queue unit-test check plus the declared gate.
+   Excluded: changing failure semantics of any other outcome; new queue
+   panels.
+
+2. **The human single-run flow treats disk-full as a park.** The shared
+   classification at `run.rs:1418-1453` recognizes the typed outcome: no
+   retained-failure modal, and the message states the disk-full reason.
+   Decided by: unit coverage in the same shared classification tests and the
+   declared gate.
+   Excluded: automatic resume or space watching.
+
+3. **The dashboard row says why.** A session whose last drive outcome is the
+   typed disk-full park shows a disk-full row state/phase (mirroring the
+   awaiting-owner precedent), not `awaiting agent output` or an interrupted
+   look.
+   Decided by: the declared dashboard unit-test check.
+   Excluded: new dashboard screens or actions; center protocol changes
+   (0280.4 already settled the outcome at the source of truth).
+
+4. **Existing suites stay green.** All other outcome classifications are
+   byte-for-byte in behavior.
+   Decided by: the declared `just test` check.
+'''
+scope = '''
+## Decisions
+
+- One shared park classification: disk-full threads through the same
+  predicate/family the existing parks use (the settled-pause authority from
+  0280.4), so queue, human run, and dashboard cannot drift apart.
+- Wording stays minimal and typed-evidence-driven: reason plus observed
+  floor/bytes where the surface already shows detail; no new prose systems.
+- This child is presentation and classification only — no lifecycle, config,
+  or reclaim changes.
+
+## APPROACH — suggested route, not a boundary
+
+1. Extend the park recognition in `run.rs` (queue outcome construction
+   ~751-843 and the human classification ~1418-1453) keyed on the typed
+   outcome — prefer reusing `is_settled_pause` or the existing park matches
+   over a new ad-hoc list.
+2. Extend the dashboard projection where awaiting-owner already specializes
+   (`dashboard.rs:1900-1995,2344-2414`).
+3. Unit tests beside the existing ones: a disk-full queue entry is non-fail
+   park-toned with the reason in its label and no `Failure` close; the human
+   path skips the failure modal; the dashboard row maps the outcome to the
+   disk-full state.
+4. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli
+   task_queue_drive`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli
+   dashboard`, `just test`. Isolate the build cache
+   (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Never classify by string-matching a label; only the typed outcome decides.
+- Do not soften genuine failures: only the typed disk-full moves out of the
+  failure family.
+- Match the existing park family's halt/continue behavior; do not invent a
+  new queue policy.
+
+## Done when
+
+- Queue, human single-run, and dashboard all present a typed disk-full
+  outcome as a park with its reason; no `Failure` close, no failure modal,
+  no `awaiting agent output` mask — each unit-proven in its existing test
+  home.
+- `just test` green.
+'''
+[relations]
+parent = "0280"
+depends-on = ["0280.4"]
+
+[[checks]]
+name = "queue classification unit tests are green including the disk-full park"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli task_queue_drive"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 1800000
+
+[[checks]]
+name = "dashboard classification unit tests are green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli dashboard"
+expect = 'test result: ok\. [1-9][0-9]* passed'
+timeout-ms = 1800000
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000
