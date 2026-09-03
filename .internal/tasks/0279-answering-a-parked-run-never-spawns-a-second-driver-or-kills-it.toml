@@ -1,0 +1,92 @@
+schema-version = "0.2"
+key = "0279"
+title = "Answering a parked run never spawns a second driver or kills it"
+status = "draft"
+raised = "2026-09-03"
+content = """
+Owner-reported, Claude-verified 2026-09-03 on ctx.traits run 7635b756
+(0266.9). The run parked at a summons ask; the owner answered from the
+live run view; the run died and became permanently unresumable, and
+the owner's answer never reached it. Three runtime rules compounded:
+
+1. The parked driver (a queue process, `ctx traits run --task
+   0266,0269`) stayed alive holding the session's driver lock while it
+   waited for the owner.
+2. The run view was only an observer of that session, so on answer it
+   asked the center to RESUME the session, and the center spawned a
+   second driver (`ctx traits internal drive --session … --progress
+   none`, center.rs `resume_argv`, start-log 33340-start-139). That
+   driver was refused by the lock the first driver still held —
+   verbatim: `drive refused: another process already holds the P423
+   driver lock for this ledger … driver-lock-busy`, zero frames.
+3. The refused resume cancelled the ask and recorded the session
+   `interrupted`; the queue driver saw its session go terminal and
+   exited with "Failure". A cancelled parked ask is then classified
+   terminal by design (dashboard.rs
+   `classify_session_maps_cancelled_parked_ask_to_terminal`), so every
+   resume path refuses it: "cannot be resumed from its current state".
+
+Net effect: one answer from a non-driver surface killed a resumable run
+and stranded three rounds of work in its worktree. Only the driver's
+own in-process TUI (`--progress tui`) answers safely today, because it
+feeds the drive loop directly instead of spawning.
+
+Separately observed, same lifecycle: when a run parks, the live run
+view CLOSES instead of pausing in place with the ask, and the queue
+renders the park as "Failure".
+
+## Owner contract
+
+A session has exactly one driver, running in the background, and it is
+the only process that ever holds the lock or advances frames. Every
+surface — dashboard, live run view, CLI `answer`, the driver's own TUI
+— is a presentation and sender layer: it delivers a ruling to that
+driver and never spawns a competing one. A park is that one driver
+waiting; an answer from any surface wakes it. Cancelling an ask returns
+the session to resumable, never terminal. A parked run stays live in
+the run view with the ask surfaced, and is reported as parked, not
+failed.
+"""
+scope = """
+Goals below are binding outcomes; the route is the architect's to
+decide. Deliberately light on implementation — architect grounds it
+and splits it.
+
+## Goals (binding, observable)
+
+1. Single driver ownership: answering a parked session from the
+   dashboard, the live run view, or `ctx traits answer` never spawns a
+   second driver. The answer is delivered to the existing driver (or
+   durably to the ledger for it to consume) and that driver resumes.
+   `driver-lock-busy` cannot be produced by an answer.
+2. The same behavior whether the parked driver is a single dispatch, a
+   queue, or an in-process TUI run — the surface used to answer makes
+   no difference to the outcome.
+3. Cancelling an ask (Esc, modal close, a failed answer path) leaves
+   the session resumable with the ask re-askable; it never classifies
+   the session terminal. The pinning test is inverted accordingly.
+4. A park keeps the live run view open, paused in place with the ask
+   surfaced for answering there; the queue and dashboard report the
+   run as parked/awaiting-owner, never as a failure.
+5. Regression proofs for the incident shape: parked queue-driven
+   session + answer from an observer surface → one driver, answer
+   consumed, run continues; cancelled ask → still resumable.
+6. Existing suites stay green.
+
+## Out of scope
+- The annotate gate's stdin path (already in-driver and correct).
+- Any change to trait authoring surfaces or the ask schema.
+"""
+validation = """
+## Done when
+1. Answering a parked queue-driven run from the run view continues the
+   run in the same driver; no second driver is spawned; the answer is
+   in the ledger.
+2. A cancelled ask leaves the session resumable and the ask re-fires
+   on resume.
+3. A park leaves the live run view open with the ask surfaced, and is
+   reported as parked, not failed.
+4. Existing suites stay green.
+
+The instruments and exact assertions are the architect's to choose.
+"""

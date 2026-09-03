@@ -36,3 +36,9 @@ idle-seconds = 1200
 frame-seconds = 1800
 total-seconds = 21600
 idle-seconds = 600
+
+# Owner order 2026-09-03: summons off until 0279 lands (answering a park
+# from any non-driver surface spawns a second driver and kills the run).
+# The annotate gate stays on — its stdin path runs inside the driver.
+[defaults.port]
+owner-ruling = "off"
