@@ -3,7 +3,7 @@ key = "0280.2"
 title = "A build slot can be released: emptied on disk, cleared in the registry"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — files, symbols, edit order,
@@ -73,8 +73,8 @@ outcomes is `0280.3`.
 
 3. **Existing suites stay green.** `resolve` behavior is unchanged.
    Decided by: the declared `just test` check.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Ownership = current registry assignment under `slots.lock`. The overflow
@@ -108,8 +108,8 @@ scope = '''
 4. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io target_slot`,
    then `just test`. In a run worktree, isolate the build cache
    (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Never delete on an unattributable registry — leniency is for assignment,
@@ -124,15 +124,16 @@ validation = '''
   and released-slot-preferred-by-next-resolve are each asserted by the unit
   suite (in whatever test arrangement the implementer chooses).
 - `resolve` proofs still pass unchanged; `just test` is green.
-'''
+"""
+
 [relations]
 parent = "0280"
 
 [[checks]]
 name = "target_slot unit suite is green including release behavior"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io target_slot"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "workspace gate is green"

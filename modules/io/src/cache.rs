@@ -397,7 +397,7 @@ pub fn prune_build_target_cache(
 /// Recursively measure a declared cache without following symlinks. The root
 /// has already passed the no-follow guard; nested symlinks contribute no bytes
 /// and are never traversed by the deletion path either.
-fn directory_size(path: &Utf8Path) -> crate::Result<u64> {
+pub(crate) fn directory_size(path: &Utf8Path) -> crate::Result<u64> {
     let mut bytes = 0;
     for entry in std::fs::read_dir(path.as_std_path()).map_err(|source| {
         crate::environment::Error::Filesystem {

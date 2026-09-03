@@ -19,8 +19,8 @@
 //! Assignment is by worktree, recorded in a registry beside the slots, so the
 //! same run resolves to the same slot on every frame and a parked worktree
 //! keeps its slot (resuming it stays warm). A slot is reclaimed when the
-//! worktree it was assigned to no longer exists — no pid liveness, no release
-//! hook, nothing to leak when a driver is killed.
+//! worktree it was assigned to no longer exists — no pid liveness or liveness
+//! tracking. An explicit release hook also clears a completed worktree's slot.
 
 use std::collections::BTreeMap;
 
@@ -49,6 +49,23 @@ struct Registry {
     counter: u64,
 }
 
+/// Result of releasing a build-cache slot assignment.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    /// The assignment belonged to the worktree and was removed.
+    Released { bytes_reclaimed: u64 },
+    /// The worktree did not own an assignment, so nothing was deleted.
+    NotOwner,
+    /// The registry could not be parsed, so deletion was deliberately skipped.
+    UnattributableRegistry,
+}
+
+enum RegistryState {
+    Missing,
+    Malformed,
+    Parsed(Registry),
+}
+
 /// Resolve the build-cache slot directory for `worktree_root`, creating it if
 /// needed. Repeated calls for the same worktree return the same path.
 pub fn resolve(
@@ -63,18 +80,15 @@ pub fn resolve(
             source,
         }
     })?;
-    let registry_path = slots_root.join(REGISTRY);
     // Two runs dispatched at once resolve their slot at the same moment; the
     // registry read-modify-write has to be serialised or both take slot 0 and
     // then contend for the whole build.
-    let lock_path = slots_root.join("slots.lock");
-    let lock = crate::file_lock::open_lock_file_no_follow(&lock_path)
-        .and_then(|file| crate::file_lock::lock_exclusive_blocking(&file).map(|()| file))
-        .map_err(|source| crate::environment::Error::Filesystem {
-            path: lock_path.to_string(),
-            source,
-        })?;
-    let mut registry = read_registry(&registry_path)?;
+    let lock = acquire_slots_lock(slots_root)?;
+    let registry_path = slots_root.join(REGISTRY);
+    let mut registry = match load_registry(&registry_path)? {
+        RegistryState::Parsed(registry) => registry,
+        RegistryState::Missing | RegistryState::Malformed => Registry::default(),
+    };
     let worktree = worktree_root.to_string();
 
     if let Some((index, _)) = registry
@@ -116,8 +130,73 @@ pub fn resolve(
     slot
 }
 
+/// Empty and release the slot currently assigned to `worktree_root`.
+///
+/// The assignment check, deletion, and registry update happen while holding
+/// the slots lock, so a non-owner can never delete another worktree's slot.
+pub fn release(slots_root: &Utf8Path, worktree_root: &Utf8Path) -> crate::Result<ReleaseOutcome> {
+    if !slots_root.exists() {
+        return Ok(ReleaseOutcome::NotOwner);
+    }
+
+    let lock = acquire_slots_lock(slots_root)?;
+    let registry_path = slots_root.join(REGISTRY);
+    let mut registry = match load_registry(&registry_path)? {
+        RegistryState::Missing => return Ok(ReleaseOutcome::NotOwner),
+        RegistryState::Malformed => return Ok(ReleaseOutcome::UnattributableRegistry),
+        RegistryState::Parsed(registry) => registry,
+    };
+    let worktree = worktree_root.to_string();
+    let Some(index) = registry
+        .assignments
+        .iter()
+        .find(|(_, assigned)| *assigned == &worktree)
+        .map(|(index, _)| index.clone())
+    else {
+        return Ok(ReleaseOutcome::NotOwner);
+    };
+
+    let slot = slot_path(slots_root, &index);
+    let bytes_reclaimed = if slot.exists() {
+        crate::cache::directory_size(&slot)?
+    } else {
+        0
+    };
+    if let Err(source) = std::fs::remove_dir_all(slot.as_std_path())
+        && source.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(crate::environment::Error::Filesystem {
+            path: slot.to_string(),
+            source,
+        }
+        .into());
+    }
+    registry.assignments.remove(&index);
+    registry.stamps.remove(&index);
+    write_registry(&registry_path, &registry)?;
+    drop(lock);
+    Ok(ReleaseOutcome::Released { bytes_reclaimed })
+}
+
+fn acquire_slots_lock(slots_root: &Utf8Path) -> crate::Result<std::fs::File> {
+    let lock_path = slots_root.join("slots.lock");
+    crate::file_lock::open_lock_file_no_follow(&lock_path)
+        .and_then(|file| crate::file_lock::lock_exclusive_blocking(&file).map(|()| file))
+        .map_err(|source| {
+            crate::environment::Error::Filesystem {
+                path: lock_path.to_string(),
+                source,
+            }
+            .into()
+        })
+}
+
+fn slot_path(slots_root: &Utf8Path, index: &str) -> Utf8PathBuf {
+    slots_root.join(format!("slot-{index}"))
+}
+
 fn ensure_slot_dir(slots_root: &Utf8Path, index: &str) -> crate::Result<Utf8PathBuf> {
-    let path = slots_root.join(format!("slot-{index}"));
+    let path = slot_path(slots_root, index);
     std::fs::create_dir_all(path.as_std_path()).map_err(|source| {
         crate::environment::Error::Filesystem {
             path: path.to_string(),
@@ -127,10 +206,13 @@ fn ensure_slot_dir(slots_root: &Utf8Path, index: &str) -> crate::Result<Utf8Path
     Ok(path)
 }
 
-fn read_registry(path: &Utf8Path) -> crate::Result<Registry> {
+fn load_registry(path: &Utf8Path) -> crate::Result<RegistryState> {
     match std::fs::read_to_string(path.as_std_path()) {
-        Ok(text) => Ok(serde_json::from_str(&text).unwrap_or_default()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Registry::default()),
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(registry) => Ok(RegistryState::Parsed(registry)),
+            Err(_) => Ok(RegistryState::Malformed),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RegistryState::Missing),
         Err(source) => Err(crate::environment::Error::Filesystem {
             path: path.to_string(),
             source,
@@ -215,5 +297,103 @@ mod tests {
             first, next,
             "the warmed directory is the point — a finished run's slot must be reused, not abandoned"
         );
+    }
+
+    #[test]
+    fn release_empties_the_slot_and_clears_the_assignment() {
+        let base = scratch("release");
+        let slots_root = base.join("targets");
+        let worktree = base.join("wt-a");
+        std::fs::create_dir_all(worktree.as_std_path()).unwrap();
+        let slot = resolve(&slots_root, &worktree, 4).unwrap();
+        std::fs::write(slot.join("warm-artifact").as_std_path(), b"warm").unwrap();
+
+        let ReleaseOutcome::Released { bytes_reclaimed } = release(&slots_root, &worktree).unwrap()
+        else {
+            panic!("the assigned slot must be released");
+        };
+        assert!(bytes_reclaimed > 0);
+        assert!(!slot.exists());
+
+        let reassigned = resolve(&slots_root, &worktree, 4).unwrap();
+        assert_eq!(reassigned, slot);
+        assert!(
+            std::fs::read_dir(reassigned.as_std_path())
+                .unwrap()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn release_by_a_non_owner_deletes_nothing() {
+        let base = scratch("not-owner");
+        let slots_root = base.join("targets");
+        let owner = base.join("wt-a");
+        let non_owner = base.join("wt-b");
+        std::fs::create_dir_all(owner.as_std_path()).unwrap();
+        std::fs::create_dir_all(non_owner.as_std_path()).unwrap();
+        let slot = resolve(&slots_root, &owner, 4).unwrap();
+        let artifact = slot.join("warm-artifact");
+        std::fs::write(artifact.as_std_path(), b"warm").unwrap();
+
+        assert_eq!(
+            release(&slots_root, &non_owner).unwrap(),
+            ReleaseOutcome::NotOwner
+        );
+        assert!(artifact.exists());
+        assert_eq!(resolve(&slots_root, &owner, 4).unwrap(), slot);
+    }
+
+    #[test]
+    fn releasing_a_missing_slot_directory_is_ok() {
+        let base = scratch("missing-slot");
+        let slots_root = base.join("targets");
+        let worktree = base.join("wt-a");
+        std::fs::create_dir_all(worktree.as_std_path()).unwrap();
+        let slot = resolve(&slots_root, &worktree, 4).unwrap();
+        std::fs::remove_dir_all(slot.as_std_path()).unwrap();
+
+        assert_eq!(
+            release(&slots_root, &worktree).unwrap(),
+            ReleaseOutcome::Released { bytes_reclaimed: 0 }
+        );
+        assert_eq!(
+            release(&slots_root, &worktree).unwrap(),
+            ReleaseOutcome::NotOwner
+        );
+    }
+
+    #[test]
+    fn a_malformed_registry_refuses_to_release() {
+        let base = scratch("malformed");
+        let slots_root = base.join("targets");
+        let worktree = base.join("wt-a");
+        std::fs::create_dir_all(worktree.as_std_path()).unwrap();
+        let slot = resolve(&slots_root, &worktree, 4).unwrap();
+        let artifact = slot.join("warm-artifact");
+        std::fs::write(artifact.as_std_path(), b"warm").unwrap();
+        std::fs::write(slots_root.join(REGISTRY).as_std_path(), "not json").unwrap();
+
+        assert_eq!(
+            release(&slots_root, &worktree).unwrap(),
+            ReleaseOutcome::UnattributableRegistry
+        );
+        assert!(artifact.exists());
+    }
+
+    #[test]
+    fn a_released_slot_is_preferred_by_the_next_resolve() {
+        let base = scratch("reuse");
+        let slots_root = base.join("targets");
+        let first_worktree = base.join("wt-a");
+        let next_worktree = base.join("wt-b");
+        std::fs::create_dir_all(first_worktree.as_std_path()).unwrap();
+        std::fs::create_dir_all(next_worktree.as_std_path()).unwrap();
+        let first = resolve(&slots_root, &first_worktree, 4).unwrap();
+
+        release(&slots_root, &first_worktree).unwrap();
+        let next = resolve(&slots_root, &next_worktree, 4).unwrap();
+        assert_eq!(next, first);
     }
 }
