@@ -1727,6 +1727,7 @@ mod now_and_verdict_tests {
             evidence: vec!["landed=deadbeef".to_string()],
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         }];
         let state = accepted_state(&baseline_value);
         let block = sessions_landing_block(Some(&state)).expect("landing block");

@@ -2489,6 +2489,7 @@ mod resolve_input_value_tokens_setting_tests {
                 answer_slot: "slot:ask-owner".to_string(),
                 schema_ref: None,
             }),
+            reclaim: None,
         }
     }
 
@@ -2565,6 +2566,7 @@ mod resolve_input_value_tokens_setting_tests {
             budget_pause: None,
             tokens_by_model: None,
             summons: None,
+            reclaim: None,
         });
         assert!(
             !is_live_summons(&session, &ask_frame),

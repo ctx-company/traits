@@ -1608,6 +1608,7 @@ mod tests {
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         let rows = landing_lines_from_frames(
             true,
@@ -2128,6 +2129,7 @@ description = "A test trait."
             budget_pause: None,
             tokens_by_model: None,
             summons: None,
+            reclaim: None,
         });
         let ledger_path = camino::Utf8PathBuf::from(format!(
             "/tmp/ctx-traits-run-view-ledger-seed-{}.json",

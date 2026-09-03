@@ -25,6 +25,9 @@
 use std::collections::BTreeMap;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use ctx_traits_core::procedure::session::{
+    NamedCacheReclaimRecord, ReclaimEvidence, SlotReclaimRecord, WorktreeReclaimRecord,
+};
 use serde::{Deserialize, Serialize};
 
 /// How many build-cache slots a repository hands out. Four covers the
@@ -139,7 +142,90 @@ pub fn release(slots_root: &Utf8Path, worktree_root: &Utf8Path) -> crate::Result
         return Ok(ReleaseOutcome::NotOwner);
     }
 
-    let lock = acquire_slots_lock(slots_root)?;
+    let _lock = acquire_slots_lock(slots_root)?;
+    release_locked(slots_root, worktree_root)
+}
+
+/// Reclaim one terminal run while holding the slot lock through the last-run
+/// decision and named-cache deletion. The returned evidence is complete even
+/// when individual destructive operations fail.
+pub fn reclaim_terminal(
+    slots_root: &Utf8Path,
+    repo_root: &Utf8Path,
+    worktree_root: &Utf8Path,
+    worktrees_root: &Utf8Path,
+    cache_names: &std::collections::BTreeSet<String>,
+    worktree_paths: Vec<WorktreeReclaimRecord>,
+) -> ReclaimEvidence {
+    let lock_result = std::fs::create_dir_all(slots_root.as_std_path())
+        .map_err(|source| {
+            crate::Error::from(crate::environment::Error::Filesystem {
+                path: slots_root.to_string(),
+                source,
+            })
+        })
+        .and_then(|()| acquire_slots_lock(slots_root));
+    let _lock = match lock_result {
+        Ok(lock) => lock,
+        Err(error) => {
+            let error = error.to_string();
+            return ReclaimEvidence {
+                worktree_paths,
+                slot: SlotReclaimRecord::Failed {
+                    error: error.clone(),
+                },
+                named_caches: failed_caches(cache_names, error),
+            };
+        }
+    };
+    let slot = match release_locked(slots_root, worktree_root) {
+        Ok(ReleaseOutcome::Released { bytes_reclaimed }) => {
+            SlotReclaimRecord::Released { bytes_reclaimed }
+        }
+        Ok(ReleaseOutcome::NotOwner) => SlotReclaimRecord::NotOwner,
+        Ok(ReleaseOutcome::UnattributableRegistry) => SlotReclaimRecord::UnattributableRegistry,
+        Err(error) => SlotReclaimRecord::Failed {
+            error: error.to_string(),
+        },
+    };
+    let preserved = preserved_worktrees(slots_root, worktrees_root, worktree_root);
+    let named_caches = match preserved {
+        Ok(paths) if paths.is_empty() => cache_names
+            .iter()
+            .map(|name| {
+                match crate::cache::prune_named_build_cache(repo_root, name, cache_names, false) {
+                    Ok(outcome) if outcome.existed => NamedCacheReclaimRecord::Deleted {
+                        name: outcome.name,
+                        bytes_reclaimed: outcome.byte_size,
+                    },
+                    Ok(outcome) => NamedCacheReclaimRecord::Absent { name: outcome.name },
+                    Err(error) => NamedCacheReclaimRecord::Failed {
+                        name: name.clone(),
+                        error: error.to_string(),
+                    },
+                }
+            })
+            .collect(),
+        Ok(paths) => cache_names
+            .iter()
+            .map(|name| NamedCacheReclaimRecord::SkippedPreservedRuns {
+                name: name.clone(),
+                preserved_worktrees: paths.clone(),
+            })
+            .collect(),
+        Err(error) => failed_caches(cache_names, error.to_string()),
+    };
+    ReclaimEvidence {
+        worktree_paths,
+        slot,
+        named_caches,
+    }
+}
+
+fn release_locked(
+    slots_root: &Utf8Path,
+    worktree_root: &Utf8Path,
+) -> crate::Result<ReleaseOutcome> {
     let registry_path = slots_root.join(REGISTRY);
     let mut registry = match load_registry(&registry_path)? {
         RegistryState::Missing => return Ok(ReleaseOutcome::NotOwner),
@@ -174,8 +260,76 @@ pub fn release(slots_root: &Utf8Path, worktree_root: &Utf8Path) -> crate::Result
     registry.assignments.remove(&index);
     registry.stamps.remove(&index);
     write_registry(&registry_path, &registry)?;
-    drop(lock);
     Ok(ReleaseOutcome::Released { bytes_reclaimed })
+}
+
+fn preserved_worktrees(
+    slots_root: &Utf8Path,
+    worktrees_root: &Utf8Path,
+    own_worktree: &Utf8Path,
+) -> crate::Result<Vec<String>> {
+    let mut paths = Vec::new();
+    match load_registry(&slots_root.join(REGISTRY))? {
+        RegistryState::Parsed(registry) => {
+            for assigned in registry.assignments.into_values() {
+                let path = Utf8Path::new(&assigned);
+                if path != own_worktree && path.exists() {
+                    paths.push(assigned);
+                }
+            }
+        }
+        RegistryState::Missing => {}
+        RegistryState::Malformed => {
+            return Err(crate::Error::Usage {
+                message: "build-slot registry is unreadable; refusing named-cache reclaim"
+                    .to_string(),
+            });
+        }
+    }
+    if worktrees_root.exists() {
+        for entry in std::fs::read_dir(worktrees_root.as_std_path()).map_err(|source| {
+            crate::environment::Error::Filesystem {
+                path: worktrees_root.to_string(),
+                source,
+            }
+        })? {
+            let entry = entry.map_err(|source| crate::environment::Error::Filesystem {
+                path: worktrees_root.to_string(),
+                source,
+            })?;
+            let path =
+                Utf8PathBuf::from_path_buf(entry.path()).map_err(|path| crate::Error::Usage {
+                    message: format!("worktree path is not UTF-8: {}", path.display()),
+                })?;
+            if path != own_worktree
+                && entry
+                    .file_type()
+                    .map_err(|source| crate::environment::Error::Filesystem {
+                        path: path.to_string(),
+                        source,
+                    })?
+                    .is_dir()
+            {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn failed_caches(
+    cache_names: &std::collections::BTreeSet<String>,
+    error: String,
+) -> Vec<NamedCacheReclaimRecord> {
+    cache_names
+        .iter()
+        .map(|name| NamedCacheReclaimRecord::Failed {
+            name: name.clone(),
+            error: error.clone(),
+        })
+        .collect()
 }
 
 fn acquire_slots_lock(slots_root: &Utf8Path) -> crate::Result<std::fs::File> {

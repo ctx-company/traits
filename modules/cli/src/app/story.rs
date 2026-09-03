@@ -1352,6 +1352,7 @@ mod tests {
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         }];
         assert_ne!(
             outcome_rows(&story, "This run is blocked.", None),

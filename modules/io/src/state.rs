@@ -363,6 +363,13 @@ pub fn global_cache_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
     Ok(global_trait_root()?.join("cache").join(repo_key))
 }
 
+/// Shared build-slot root for a repository and all of its linked worktrees.
+pub fn build_slots_root(repo_root: &Utf8Path) -> crate::Result<Utf8PathBuf> {
+    let main_root = crate::repository::discover_main_repo_root(repo_root)?;
+    let canonical = canonical_repo_root(&main_root)?;
+    Ok(global_cache_root(&repo_key(&canonical))?.join("build-slots"))
+}
+
 /// One state family that still sits at its pre-0235 location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateMigrationEntry {

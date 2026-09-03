@@ -1370,6 +1370,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             notifier.clone(),
         )
     };
+    let terminal_worktree = input.execution_dir.map(camino::Utf8PathBuf::from);
     let drive_result = drive_loop(
         input,
         drive_started,
@@ -1418,6 +1419,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // auto-land (P460's `complete_after_drive` gates on `outcome ==
     // "completed"`).
     let _ = tripwire_checkpoint(&mut report, &ledger_path, tripwire.as_mut());
+    test_only_force_killed_outcome(&mut report);
     report.warnings.extend(worktree_retry_warnings);
     report.warnings.extend(resume_retry_warnings);
     // P427: one grouped line per built-in harness the implicit `default`
@@ -1498,6 +1500,22 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     } else {
         None
     };
+    let reclaim = if report.status == "killed" {
+        terminal_worktree.map(|worktree| {
+            let retention_paths = profile
+                .worktree
+                .retention
+                .cheap
+                .iter()
+                .chain(profile.worktree.retention.expensive.iter())
+                .cloned()
+                .collect::<Vec<_>>();
+            let cache_names = profile.worktree.build_cache.keys().cloned().collect();
+            ctx_traits_io::reclaim::terminal_reclaim(&worktree, &retention_paths, &cache_names)
+        })
+    } else {
+        None
+    };
     let evidence = ctx_traits_core::procedure::session::DriveTerminalEvidence {
         effective_budget: Some(budget_evidence(&budget)),
         token_usage,
@@ -1505,6 +1523,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         rate_limit: report.rate_limit.clone(),
         tokens_by_model: tokens_by_model.clone(),
         summons,
+        reclaim,
     };
     // Stamp why the conductor exited; the ledger status alone cannot tell a
     // timed-out drive from one that is still running. Best-effort: a marker
@@ -7913,6 +7932,7 @@ fn attempt_concurrent_wave(
 use ctx_traits_io::env_reference::{
     TESTHOOK_CHECKPOINT_ONE_APPLIED, TESTHOOK_CHECKPOINT_WAVE_PERSISTED,
     TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL, TESTHOOK_FAIL_TERMINAL_WRITE_ORDINAL,
+    TESTHOOK_FORCE_KILLED_OUTCOME,
 };
 #[cfg(not(debug_assertions))]
 const TESTHOOK_CHECKPOINT_WAVE_PERSISTED: &str = "";
@@ -7922,6 +7942,20 @@ const TESTHOOK_CHECKPOINT_ONE_APPLIED: &str = "";
 const TESTHOOK_FAIL_TERMINAL_WRITE_ORDINAL: &str = "";
 #[cfg(not(debug_assertions))]
 const TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL: &str = "";
+#[cfg(not(debug_assertions))]
+const TESTHOOK_FORCE_KILLED_OUTCOME: &str = "";
+
+/// Debug-only proof hook: retain normal loop execution, then force the one
+/// terminal branch whose post-loop reclaim and durable outcome are under test.
+#[cfg(debug_assertions)]
+fn test_only_force_killed_outcome(report: &mut DriveReport) {
+    if std::env::var_os(TESTHOOK_FORCE_KILLED_OUTCOME).is_some() {
+        report.status = "killed".to_string();
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn test_only_force_killed_outcome(_report: &mut DriveReport) {}
 
 /// P402 test-only durable-state-boundary checkpoint (blocker 3,
 /// `p402-proof-absent-and-tests-misplaced`). A no-op in every real

@@ -345,6 +345,214 @@ fn worktree_merge_lands_automatically_and_exits_zero() {
     );
 }
 
+fn init_reclaim_fixture(repo: &Path, home: &Path) {
+    init_fixture_repo_inner(repo, home, "main", "true", |repo| {
+        fs::write(
+            repo.join(".gitignore"),
+            ".ctx/traits/worktrees/\ncache-path\n",
+        )
+        .unwrap();
+        fs::write(
+            repo.join(".ctx/traits/runtime.toml"),
+            "[merge]\ngate = [[\"sh\", \"-c\", \"true\"]]\n\n[worktree]\nsetup = [[\"sh\", \"-c\", \"mkdir -p \\\"$SLOT_DIR\\\" \\\"$BUILD_CACHE\\\" && touch \\\"$SLOT_DIR/build-output\\\" \\\"$BUILD_CACHE/named-output\\\" && printf '%s' \\\"$BUILD_CACHE\\\" > cache-path\"]]\n\n[worktree.env]\nSLOT_DIR = \"{cache-slot}\"\n\n[worktree.build-cache.terminal-proof]\nenv = \"BUILD_CACHE\"\n",
+        )
+        .unwrap();
+    });
+}
+
+fn slots_registry(home: &Path) -> PathBuf {
+    let mut directories = vec![home.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(&directory).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name == "slots.json") {
+                return path;
+            }
+            if entry.file_type().unwrap().is_dir() {
+                directories.push(path);
+            }
+        }
+    }
+    panic!(
+        "fixture run did not create a build-slot registry below {}",
+        home.display()
+    );
+}
+
+fn assigned_slot(registry_path: &Path, worktree: &Path) -> PathBuf {
+    let registry: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(registry_path).unwrap()).unwrap();
+    let canonical_worktree = fs::canonicalize(worktree).unwrap();
+    let index = registry["assignments"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .find(|(_, assigned)| assigned.as_str() == canonical_worktree.to_str())
+        .map(|(index, _)| index)
+        .unwrap_or_else(|| {
+            panic!(
+                "fixture worktree {} owns no build slot in {registry}",
+                canonical_worktree.display()
+            )
+        });
+    registry_path
+        .parent()
+        .unwrap()
+        .join(format!("slot-{index}"))
+}
+
+fn completed_reclaim_run(repo: &Path, home: &Path) -> (String, String, PathBuf) {
+    let output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        repo,
+        home,
+    );
+    assert_exit_code(&output, 0);
+    let value = value_json(&output);
+    let run_id = value["value"]["session"]["run-id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let session_path = value["value"]["session-path"].as_str().unwrap().to_string();
+    let worktree = fs::read_dir(repo.join(".ctx/traits/worktrees"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    (run_id, session_path, worktree)
+}
+
+#[test]
+fn landed_reclaim_deletes_declared_named_cache_and_records_evidence() {
+    let scratch = ScratchRoot::new("terminal-reclaim-landed");
+    let repo = scratch.home().join("repo");
+    init_reclaim_fixture(&repo, &scratch.home());
+    let (run_id, session_path, worktree) = completed_reclaim_run(&repo, &scratch.home());
+    let cache = PathBuf::from(fs::read_to_string(worktree.join("cache-path")).unwrap());
+    let registry = slots_registry(&scratch.home());
+    let slot = assigned_slot(&registry, &worktree);
+    assert!(cache.join("named-output").is_file());
+    assert!(slot.join("build-output").is_file());
+
+    let merge = run_ctx(
+        &["traits", "merge", &run_id, "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&merge, 0);
+    assert!(!cache.exists(), "last run must reclaim its declared cache");
+    assert!(!slot.exists(), "landing must empty the owned build slot");
+    let registry_after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&registry).unwrap()).unwrap();
+    assert!(
+        registry_after["assignments"]
+            .as_object()
+            .unwrap()
+            .is_empty(),
+        "landing must clear its slot assignment: {registry_after}"
+    );
+    let ledger: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(session_path).unwrap()).unwrap();
+    let frame = ledger["provenance"]["merge-frames"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap();
+    assert_eq!(frame["status"], "merged");
+    assert!(frame["reclaim"]["slot"].get("released").is_some());
+    assert!(frame["reclaim"]["named-caches"][0].get("deleted").is_some());
+}
+
+#[test]
+fn landed_reclaim_preserves_named_cache_when_another_worktree_exists() {
+    let scratch = ScratchRoot::new("terminal-reclaim-preserved-run");
+    let repo = scratch.home().join("repo");
+    init_reclaim_fixture(&repo, &scratch.home());
+    let (run_id, session_path, worktree) = completed_reclaim_run(&repo, &scratch.home());
+    let cache = PathBuf::from(fs::read_to_string(worktree.join("cache-path")).unwrap());
+    fs::create_dir_all(repo.join(".ctx/traits/worktrees/retained-other-run")).unwrap();
+
+    let merge = run_ctx(
+        &["traits", "merge", &run_id, "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&merge, 0);
+    assert!(cache.join("named-output").is_file());
+    let ledger: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(session_path).unwrap()).unwrap();
+    let frame = ledger["provenance"]["merge-frames"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap();
+    assert_eq!(frame["status"], "merged");
+    assert!(
+        frame["reclaim"]["named-caches"][0]
+            .get("skipped-preserved-runs")
+            .is_some()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn reclaim_failure_is_recorded_before_later_cleanup() {
+    let scratch = ScratchRoot::new("terminal-reclaim-failure");
+    let repo = scratch.home().join("repo");
+    init_reclaim_fixture(&repo, &scratch.home());
+    let (run_id, session_path, worktree) = completed_reclaim_run(&repo, &scratch.home());
+    let cache = PathBuf::from(fs::read_to_string(worktree.join("cache-path")).unwrap());
+    fs::remove_dir_all(&cache).unwrap();
+    std::os::unix::fs::symlink(scratch.home().join("outside"), &cache).unwrap();
+
+    let merge = run_ctx(
+        &["traits", "merge", &run_id, "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&merge, EXIT_MERGE_FAILED);
+    assert!(
+        worktree.exists(),
+        "reclaim failure must retain the worktree"
+    );
+    let ledger: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
+    let branch = ledger["provenance"]["worktree"]["branch"]
+        .as_str()
+        .expect("worktree provenance names its branch");
+    assert!(
+        Command::new("git")
+            .args([
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}")
+            ])
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let frame = ledger["provenance"]["merge-frames"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap();
+    assert_eq!(frame["status"], "post-merge-cleanup-failure");
+    assert!(frame["reclaim"]["named-caches"][0].get("failed").is_some());
+}
+
 #[test]
 fn landing_gate_failure_parks_and_exits_distinct_status() {
     let scratch = ScratchRoot::new("p460-parks");

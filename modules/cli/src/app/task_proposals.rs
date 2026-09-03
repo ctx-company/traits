@@ -720,6 +720,7 @@ mod tests {
             evidence,
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         }
     }
 

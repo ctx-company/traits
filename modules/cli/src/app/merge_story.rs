@@ -905,6 +905,7 @@ mod tests {
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         }
     }
 
@@ -1075,6 +1076,7 @@ mod tests {
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         let explanation = explain_frame(&cleanup_frame);
         assert_eq!(explanation.class, ParkClass::CleanupFailedAfterLanding);
@@ -1089,6 +1091,7 @@ mod tests {
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         let explanation = explain_frame(&recovery_frame);
         assert_eq!(explanation.class, ParkClass::RecoveryUnconfirmed);
@@ -1133,6 +1136,7 @@ mod tests {
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         let explanation = explain_frame(&merged_frame);
         assert_eq!(explanation.class, ParkClass::Landed);
@@ -1160,6 +1164,7 @@ mod tests {
                 evidence: Vec::new(),
                 park_reason: None,
                 deep_decisions: Vec::new(),
+                reclaim: None,
             };
             let explanation = explain_frame(&in_progress_frame);
             assert_eq!(
@@ -1195,6 +1200,7 @@ mod tests {
                 main_commits: vec!["deadbeef".to_string()],
             }),
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         let explanation = explain_frame(&frame);
         assert_eq!(explanation.class, ParkClass::StaleBaseOverlap);
@@ -1351,6 +1357,7 @@ mod tests {
                     evidence: Vec::new(),
                     park_reason: None,
                     deep_decisions: Vec::new(),
+                    reclaim: None,
                 };
                 let draft = activity_event(&MergeProgress::FrameRecorded(&frame));
                 assert!(

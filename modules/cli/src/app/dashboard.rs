@@ -9700,6 +9700,7 @@ mod tests {
             budget_pause: None,
             tokens_by_model: None,
             summons: None,
+            reclaim: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: format!("wt-{run_id}"),
@@ -9833,6 +9834,7 @@ argv = ["git", "commit", "-m", "fixture"]
             budget_pause: None,
             tokens_by_model: None,
             summons: None,
+            reclaim: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: format!("wt-{run_id}"),
@@ -9989,6 +9991,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("append merge frame");
@@ -10583,6 +10586,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write parked merge session");
@@ -10685,6 +10689,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write parked merge session");
@@ -11347,6 +11352,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         let ledger_path = scratch_ledger_path("landing-fallback");
         let reconstruction = reconstruct_panes(&session, &ledger_path);
@@ -11681,6 +11687,7 @@ argv = ["git", "commit", "-m", "fixture"]
                 answer_slot: "slot:ask-owner".to_string(),
                 schema_ref: Some("schema:text".to_string()),
             }),
+            reclaim: None,
         });
         session
     }
@@ -11985,6 +11992,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
 
         assert_eq!(
@@ -12048,6 +12056,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         assert_eq!(
             merge_row_headline(MergeClass::Landed, Some(&merged_frame), false),
@@ -12066,6 +12075,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         let headline = merge_row_headline(MergeClass::Parked, Some(&parked_frame), false);
         assert!(!headline.is_empty());
@@ -13615,6 +13625,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: vec!["landed=abc123".to_string()],
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         assert!(crate::app::run::unmerged_fact(&session).is_none());
     }
@@ -13710,6 +13721,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: vec!["landed=abc123".to_string()],
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         assert_eq!(
             landed.state_digest, session.state_digest,

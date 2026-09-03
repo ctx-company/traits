@@ -15,6 +15,7 @@
 //! unresolved conflict, judgment call, red gate, or lost fast-forward race
 //! parks the run with its branch and worktree intact.
 
+use std::collections::BTreeSet;
 use std::io::IsTerminal;
 use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
@@ -586,6 +587,12 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
     let repo_root = ctx_traits_io::repository::discover_repo_root()?;
     let runtime_config = ctx_traits_io::harness_config::resolve_runtime_config(Utf8Path::new("."))?;
     let merge_policy = runtime_config.effective_merge_policy();
+    let declared_cache_names: BTreeSet<String> = runtime_config
+        .worktree
+        .build_cache
+        .keys()
+        .cloned()
+        .collect();
     // P488: resolve the landing branch exactly ONCE per merge attempt — a
     // retry after `git remote set-head` repair (or an `[merge] branch` edit)
     // picks up the fix, but within this one attempt the name is frozen.
@@ -709,6 +716,7 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
             evidence: lock_frame_evidence,
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         };
         if let Some(live) = input.live.as_ref() {
             live.emit(&MergeProgress::LockAcquired);
@@ -794,6 +802,7 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
             overlap_evidence: &mut overlap_evidence,
             confinement_warnings: &mut confinement_warnings,
             gate_warnings: &mut gate_warnings,
+            declared_cache_names: &declared_cache_names,
             attempt,
             mechanical_only: entered_merger,
             merger_path_entered: &mut merger_path_entered,
@@ -916,6 +925,9 @@ struct MergeLockedInputs<'a> {
     /// is user-visible in plain AND `--json` output, not only in the
     /// persisted `Gates`-frame ledger evidence.
     gate_warnings: &'a mut Vec<String>,
+    /// Frozen before entering the merge lifecycle, so cleanup does not
+    /// re-resolve mutable configuration after the fast-forward.
+    declared_cache_names: &'a BTreeSet<String>,
     attempt: u64,
     mechanical_only: bool,
     merger_path_entered: &'a mut bool,
@@ -974,6 +986,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
         overlap_evidence,
         confinement_warnings,
         gate_warnings,
+        declared_cache_names,
         attempt,
         mechanical_only,
         merger_path_entered,
@@ -1912,6 +1925,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                 evidence: with_retry_evidence(merger_evidence.clone(), retry_warnings),
                 park_reason: None,
                 deep_decisions: accumulated_deep_decisions.clone(),
+                reclaim: None,
             };
             if let Some(live) = input.live.as_ref() {
                 live.emit(&MergeProgress::FrameRecorded(&reconciled_frame));
@@ -2084,6 +2098,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                         evidence: with_retry_evidence(adjudication_evidence, retry_warnings),
                         park_reason: None,
                         deep_decisions: decisions,
+                        reclaim: None,
                     };
                     if let Some(live) = input.live.as_ref() {
                         live.emit(&MergeProgress::FrameRecorded(&harvest_frame));
@@ -2267,24 +2282,39 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     if let Some(live) = input.live.as_ref() {
         live.emit(&MergeProgress::StageEntered(MergeStage::Cleanup));
     }
+    let mut reclaim = None;
     let cleanup_failure =
         match ctx_traits_io::worktree::apply_harvest_plan(repo_root, &harvest_plan) {
             Err(error) => Some(("seed harvest apply failed", error.to_string())),
             Ok(()) => {
-                match ctx_traits_io::worktree::remove_worktree(
-                    repo_root,
+                let evidence = ctx_traits_io::reclaim::terminal_reclaim(
                     &worktree_path,
-                    retry_warnings,
-                ) {
-                    Err(error) => Some(("worktree removal failed", error.to_string())),
-                    Ok(()) => match ctx_traits_io::worktree::delete_branch(
+                    &[],
+                    declared_cache_names,
+                );
+                let reclaim_failed = evidence.has_failures();
+                reclaim = Some(evidence);
+                if reclaim_failed {
+                    Some((
+                        "terminal artifact reclaim failed",
+                        "one or more declared artifacts could not be reclaimed".to_string(),
+                    ))
+                } else {
+                    match ctx_traits_io::worktree::remove_worktree(
                         repo_root,
-                        &worktree.branch,
+                        &worktree_path,
                         retry_warnings,
                     ) {
-                        Err(error) => Some(("branch delete failed", error.to_string())),
-                        Ok(()) => None,
-                    },
+                        Err(error) => Some(("worktree removal failed", error.to_string())),
+                        Ok(()) => match ctx_traits_io::worktree::delete_branch(
+                            repo_root,
+                            &worktree.branch,
+                            retry_warnings,
+                        ) {
+                            Err(error) => Some(("branch delete failed", error.to_string())),
+                            Ok(()) => None,
+                        },
+                    }
                 }
             }
         };
@@ -2301,6 +2331,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
             evidence: with_retry_evidence(landed_evidence, retry_warnings),
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim,
         };
         if let Some(live) = input.live.as_ref() {
             live.emit(&MergeProgress::FrameRecorded(&cleanup_frame));
@@ -2325,6 +2356,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
         evidence: with_retry_evidence(landed_evidence, retry_warnings),
         park_reason: None,
         deep_decisions: Vec::new(),
+        reclaim,
     };
     if let Some(live) = input.live.as_ref() {
         live.emit(&MergeProgress::FrameRecorded(&merged_frame));
@@ -2677,6 +2709,7 @@ fn run_landing_gate(
         evidence: with_retry_evidence(gate_evidence, retry_warnings),
         park_reason: None,
         deep_decisions: Vec::new(),
+        reclaim: None,
     };
     if let Some(live) = live {
         live.emit(&MergeProgress::FrameRecorded(&gates_passed_frame));
@@ -2994,6 +3027,7 @@ fn recovery_failure(
         evidence: with_retry_evidence(evidence, retry_warnings),
         park_reason: None,
         deep_decisions: Vec::new(),
+        reclaim: None,
     };
     persist_terminal_frame(session_path, live, frame)?;
     Ok(MergeReport {
@@ -3060,6 +3094,7 @@ fn park_with_detail(
         evidence: with_retry_evidence(evidence, retry_warnings),
         park_reason: None,
         deep_decisions: Vec::new(),
+        reclaim: None,
     };
     persist_terminal_frame(target.session_path, live, frame)?;
     let cli_reason = match detail {
@@ -3106,6 +3141,7 @@ fn park_with_deep_decisions(
         evidence: with_retry_evidence(evidence, retry_warnings),
         park_reason: None,
         deep_decisions,
+        reclaim: None,
     };
     persist_terminal_frame(target.session_path, live, frame)?;
     Ok(MergeReport {
@@ -3167,6 +3203,7 @@ fn park_stale_base_overlap(
             main_commits: main_commits.to_vec(),
         }),
         deep_decisions: Vec::new(),
+        reclaim: None,
     };
     if let Some(live) = live {
         live.emit(&MergeProgress::FrameRecorded(&frame));
@@ -3217,6 +3254,7 @@ fn park_out_of_tree_mutation(
             frame: finding.frame.clone(),
         }),
         deep_decisions: Vec::new(),
+        reclaim: None,
     };
     if let Some(live) = live {
         live.emit(&MergeProgress::FrameRecorded(&frame));

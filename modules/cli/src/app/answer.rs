@@ -562,6 +562,7 @@ mod tests {
                     answer_slot: "slot:ask-owner".to_string(),
                     schema_ref: Some("schema:text".to_string()),
                 }),
+                reclaim: None,
             }),
             provenance: ctx_traits_core::procedure::session::Provenance {
                 started_by: CallerProvenance {

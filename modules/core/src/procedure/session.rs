@@ -907,6 +907,7 @@ argv = ["git", "commit", "-m", "fixture"]
             budget_pause: None,
             tokens_by_model: None,
             summons: None,
+            reclaim: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: "wt-fixture".to_string(),
@@ -952,6 +953,7 @@ argv = ["git", "commit", "-m", "fixture"]
             evidence: vec!["landed=abc123".to_string()],
             park_reason: None,
             deep_decisions: Vec::new(),
+            reclaim: None,
         });
         assert_eq!(
             landing_state(&session),
@@ -1074,6 +1076,77 @@ pub struct MergeFrame {
     /// standard ledgers stay byte-identical.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deep_decisions: Vec<DeepMergeDecision>,
+    /// Terminal artifact reclaim observations. Absent on non-terminal and
+    /// historical frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reclaim: Option<ReclaimEvidence>,
+}
+
+/// Per-path result of terminal worktree artifact reclaim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct WorktreeReclaimRecord {
+    pub path: String,
+    pub removed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Ownership-checked build-slot reclaim result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum SlotReclaimRecord {
+    Released { bytes_reclaimed: u64 },
+    NotOwner,
+    UnattributableRegistry,
+    Failed { error: String },
+}
+
+/// Result for one declared named build cache.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum NamedCacheReclaimRecord {
+    Deleted {
+        name: String,
+        bytes_reclaimed: u64,
+    },
+    Absent {
+        name: String,
+    },
+    SkippedPreservedRuns {
+        name: String,
+        preserved_worktrees: Vec<String>,
+    },
+    Failed {
+        name: String,
+        error: String,
+    },
+}
+
+/// Typed observations from reclaiming terminal run artifacts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct ReclaimEvidence {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worktree_paths: Vec<WorktreeReclaimRecord>,
+    pub slot: SlotReclaimRecord,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named_caches: Vec<NamedCacheReclaimRecord>,
+}
+
+impl ReclaimEvidence {
+    pub fn has_failures(&self) -> bool {
+        self.worktree_paths.iter().any(|path| path.error.is_some())
+            || matches!(self.slot, SlotReclaimRecord::Failed { .. })
+            || self
+                .named_caches
+                .iter()
+                .any(|cache| matches!(cache, NamedCacheReclaimRecord::Failed { .. }))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1327,6 +1400,8 @@ pub struct DriveOutcome {
     /// `DriveOutcomeKind::AwaitingOwner`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summons: Option<SummonsRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reclaim: Option<ReclaimEvidence>,
 }
 
 /// The durable question evidence for a run parked `awaiting-owner` on an
@@ -1427,6 +1502,7 @@ pub struct DriveTerminalEvidence {
     pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
     /// See [`DriveOutcome::summons`] (P0253.4).
     pub summons: Option<SummonsRecord>,
+    pub reclaim: Option<ReclaimEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

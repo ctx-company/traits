@@ -68,6 +68,7 @@ pub mod project_lock;
 pub mod provider_client;
 pub mod publish;
 pub mod read;
+pub mod reclaim;
 pub mod registry;
 pub mod repository;
 pub mod resource;

@@ -571,10 +571,7 @@ fn resolve_worktree_env_value(
         let Some(worktree_root) = worktree_root else {
             return Ok(None);
         };
-        let main_root = crate::repository::discover_main_repo_root(repo_root)?;
-        let canonical = crate::state::canonical_repo_root(&main_root)?;
-        let key = crate::state::repo_key(&canonical);
-        let slots_root = crate::state::global_cache_root(&key)?.join("build-slots");
+        let slots_root = crate::state::build_slots_root(repo_root)?;
         let slot = crate::target_slot::resolve(
             &slots_root,
             worktree_root,
