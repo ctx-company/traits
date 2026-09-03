@@ -34,8 +34,9 @@ not grow unbounded with the session count.
    best-effort from the worker.
 2. `0278.2` — no reads on the input-and-draw thread (finding 2): startup
    board fallback, staleness refresh, `s` refresh, `task_session_join` repo
-   resolution, and MERGES git enumeration move to async worker channels; the
-   renderer retains previous content until replacements arrive.
+   resolution, MERGES git enumeration, and the read work inside story
+   submission, answer flows, and task actions move to async worker channels;
+   the renderer retains previous content until replacements arrive.
 3. `0278.3` — refreshes reconcile in place (finding 5): same-selection
    refresh retains the preview and swaps it atomically via the existing
    `refresh_attached_view` path; selection changes show an explicit pending
@@ -48,16 +49,17 @@ No child depends on another to compile or to hold its own contract; the
 positional order above is the suggested execution order (it minimizes churn
 in the shared startup and apply paths).
 
-## Family-wide rulings (grounded; owner attention flagged where noted)
+## Family-wide rulings (grounded)
 
-- **Render-thread coverage (OWNER ATTENTION).** The literal contract "reads
-  never run on the render thread" is bound in 0278.2 to every automatic,
-  periodic, and selection-driven read path — the paths that run without a
-  mutating user command and cause the observed freezes. Explicit mutating
-  action paths (story submission, answer flows, task mutations) keep the
-  0243.4 brief's selected-detail/mutation exception; moving whole mutation
-  flows off-thread is a different contract this family does not take. If the
-  owner wants the literal universal reading, that is a follow-up task.
+- **Render-thread coverage is universal.** The contract "reads never run on
+  the render thread" is literal: no filesystem or store read runs on the
+  thread that polls input and draws — automatic, periodic, selection-driven,
+  and explicit-action paths alike, including story submission, answer flows,
+  and task actions. The 0243.4 brief's allowance for mutation paths to reopen
+  one authoritative ledger governs which ledger may be read, never which
+  thread reads it; on the dashboard those reads dispatch to the worker and
+  their results apply asynchronously, preserving each flow's existing
+  user-visible behavior. 0278.2 binds every evidenced call site.
 - **Pre-loop seeding is not a render-thread read.** A bounded cache-file read
   during `State` construction, before the input/draw loop starts, follows the
   shipped task-board precedent. Once the loop runs, no reads.
@@ -89,7 +91,9 @@ in the shared startup and apply paths).
 
 The family is done when all four children are done and the contract holds
 together on one build: a cold open with a warm cache paints real rows on the
-first frame; input stays live through board and session refreshes; a static
+first frame; input stays live through board and session refreshes and through
+story, answer, and task actions, with no filesystem or store read left on the
+input/draw thread; a static
 and a live-updating selection both refresh with no pane blanking; a repeat
 subscribe over an unchanged corpus performs no full-row reserialization; the
 dashboard and center suites and the full landing gate (`just test-full`) are
@@ -116,10 +120,9 @@ tests green) → every child's suites plus the umbrella stop condition.
 
 Out of scope for the whole family: giant-ledger accumulation and the
 greater-than-1MiB `get` silent-close (their own concerns); visual redesign
-beyond 0278.3's explicit pending marker; moving explicit mutating action
-flows off the render thread (charter ruling, owner attention); a thinner
-list-row wire type or a worker-to-renderer delta protocol (lean line);
-desktop-side caching or reconciliation changes.
+beyond 0278.3's explicit pending marker; a thinner list-row wire type or a
+worker-to-renderer delta protocol (lean line); desktop-side caching or
+reconciliation changes.
 '''
 validation = '''
 ## Done when
@@ -127,9 +130,11 @@ validation = '''
 1. All four children are status done.
 2. A cold open with a warm cache renders real rows on the first frame, and a
    cacheless open behaves exactly as today (0278.1's proofs).
-3. No automatic, periodic, or selection-driven read runs on the input/draw
-   thread; board and MERGES results arrive async with previous content
-   retained (0278.2's proofs).
+3. No filesystem or store read — automatic, periodic, selection-driven, or
+   explicit-action (story, answer, task actions) — runs on the input/draw
+   thread; board, MERGES, and action-path results arrive async with previous
+   content retained and each flow's user-visible behavior preserved (0278.2's
+   proofs).
 4. Static and live selections refresh in place with no empty-then-filled
    pane, and activity-only deltas no longer reproject every row (0278.3's
    proofs, including the rewritten clearing test).

@@ -33,6 +33,11 @@ seconds. Selection-driven git work and repo resolution also block the loop.
 - MERGES preview selection performs repository discovery, default-branch
   resolution, merge-base, changed paths, and commit enumeration synchronously
   (`dashboard.rs:4218-4239,4259-4343`).
+- Explicit action paths — story submission, answer flows, and task actions —
+  also perform center/store/filesystem reads on the input thread
+  (`dashboard.rs:2240-2302,4514-4605,6542-6639,6722-6799`). The parent's
+  owner contract is literal: no filesystem or store read runs on the thread
+  that polls input and draws, so these call sites are in scope here.
 - Async precedent: the worker's `TraitDetail` request/result channel
   (`dashboard/worker.rs:16-28,195-213,585-595`); renderer-side
   `apply_preview_results` rejects stale identities (`dashboard.rs:1604-1621`).
@@ -65,12 +70,17 @@ seconds. Selection-driven git work and repo resolution also block the loop.
    thread, exercised by the suite. The exact mechanism is the run's choice.
    Decided by: dashboard lib suite.
 
-4. **Scope ruling (charter-carried).** Explicit mutating action paths —
-   story submission, answer flows, task mutations
-   (`dashboard.rs:2240-2302,4514-4605,6542-6639,6722-6799`) — keep the
-   0243.4 brief's selected-detail/mutation exception and are excluded from
-   this child. Every automatic, periodic, and selection-driven read is
-   covered. This ruling is flagged for owner attention in the parent charter.
+4. **Explicit action paths read off-thread too.** Story submission, answer
+   flows, and task action paths
+   (`dashboard.rs:2240-2302,4514-4605,6542-6639,6722-6799`) dispatch their
+   center/store/filesystem reads to a background thread and apply results
+   through an async channel, preserving each flow's existing user-visible
+   behavior — same prompts, same outcomes, same error surfaces. The 0243.4
+   brief's allowance for mutation paths to reopen one authoritative ledger
+   constrains which ledger may be read, not which thread reads it. After this
+   child, no filesystem or store read remains on the input/draw thread.
+   Decided by: dashboard lib suite, which must assert the off-thread dispatch
+   and behavior preservation for these paths.
 
 5. **Existing suites stay green.** Decided by the declared checks.
 '''
@@ -102,7 +112,14 @@ scope = '''
 4. MERGES: compute default-branch/merge-base/changed-paths/commits in the
    worker handler and deliver a projected result; pending state renders an
    explicit marker, never a silently empty pane (consistent with 0278.3).
-5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+5. Action paths: split each story/answer/task-action flow into a read phase
+   dispatched as a worker request and an apply phase driven by the result,
+   following the same request/result-with-identity pattern; where a flow's
+   mutation depends on a fresh read, carry the read result into the mutation
+   request rather than re-reading on the renderer. A debug-only thread guard
+   in the shared read helpers (goal 3) is the natural regression fence for
+   these sites as well.
+6. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
    dashboard`, then `just test`. Isolate the build cache
    (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a failure.
 '''
@@ -112,15 +129,17 @@ validation = '''
 - The renderer retains the last board snapshot until a replacement arrives —
   moving the read must not introduce a new blank-then-fill.
 - Stale results for a changed selection are rejected, not installed.
-- The excluded mutating-action paths are left as they are; do not expand into
-  them.
+- Action flows keep their user-visible behavior; making a read asynchronous
+  must not reorder, drop, or silently swallow a flow's outcome or error.
 
 ## Done when
 
-- No board/filesystem/git/store read remains in the startup-miss path, the
-  staleness refresh, the `s` refresh, `task_session_join`, or MERGES preview
-  selection on the input/draw thread, and the suite asserts the async
-  delivery, retention, and regression-guard behaviors.
+- No board/filesystem/git/store read remains on the input/draw thread in the
+  startup-miss path, the staleness refresh, the `s` refresh,
+  `task_session_join`, MERGES preview selection, story submission, answer
+  flows, or task action paths, and the dashboard lib suite asserts the async
+  delivery, retention, behavior-preservation, and regression-guard behaviors
+  for all of them.
 - The dashboard lib suite and `just test` are green.
 '''
 
