@@ -1,0 +1,184 @@
+schema-version = "0.2"
+key = "0279.2"
+title = "The parked driver keeps the lock and waits for its answer"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0279` heart. This child replaces the `0253.4` no-waiting-process
+lifecycle: at an Ask the one driver now stays alive, holds the lock, and
+waits — while the durable unheld park remains the contract for process death
+and interruption. It also gives the driver an answer inbox so `0279.3` has
+something to deliver to.
+
+## Grounded against HEAD 72a42faa3
+
+- `drive_loop` maps `Status::WaitingOnHuman` to report status
+  `awaiting-owner` and returns (`modules/cli/src/app/drive.rs:2494-2555`);
+  `drive` then records `AwaitingOwner`, calls `notifier.ended()`, drops
+  `DriverLockGuard`, and returns (`drive.rs:1483-1577`). `Ended` is a final
+  row refresh, not deletion (`modules/io/src/center.rs:2767-2792`).
+- The kernel `flock` on `<ledger>.json.driver-lock` is the sole driver
+  authority (`modules/io/src/run_control.rs:1-40`); `DriverLockGuard` owns
+  lock, authenticated Unix control socket, holder metadata, and liveness row
+  (`run_control.rs:113-182,395-478`). The socket accepts only one-byte
+  `Interrupt`/`Pause` and answers `ok`; the callback runs on the control
+  listener thread (`run_control.rs:50-94,248-314,564-637`). No answer
+  payload or typed response exists.
+- Session persistence rewrites the whole JSON ledger atomically
+  (`run_session.rs:157-193`), so a listener thread must never call
+  `run::set` while the drive thread may write. The sanctioned handoff is
+  the `PendingSessionTitle` pattern: worker leaves data in memory, drive
+  thread persists at a frame boundary (`drive.rs:5222-5232`).
+- Budget: `drive_loop` charges `started.elapsed() - attach_wait_paused`
+  against `total_seconds` (`drive.rs:2309-2329`); `wait_for_attach_advance`
+  is the existing accounting pattern for external waits
+  (`drive.rs:5084-5143`). Completed `0253.7` requires owner wait to burn no
+  frame/idle budget.
+- `DriveOutcomeKind::AwaitingOwner` is a settled pause
+  (`modules/core/src/procedure/session.rs:1311-1322`); the center preserves
+  the `waiting-on-human` + `awaiting-owner` shape (`center.rs:6480-6526`).
+  Core rejection keeps the same Ask frame at `WaitingOnHuman`
+  (`session.rs:3387-3437`) but a rebuilt session clears
+  `last_drive_outcome` (`session.rs:2734-2771`), which can strip
+  `is_live_summons`.
+- An attached observer panel closes only when shared classification turns
+  terminal (`run_view.rs:581-624`), so a genuinely held waiting driver
+  naturally keeps observers open once this child lands.
+
+## GOALS — binding
+
+1. **The driver owns the park.** When a drive — single dispatch, queue
+   member, or TUI run alike — reaches an authored Ask, it durably records
+   `AwaitingOwner` (so the park survives `kill -9`, preserving `0253.4`'s
+   unheld-park contract), publishes the transition as a live waiting row
+   (no `ended`), retains `DriverLockGuard`, and blocks awaiting an answer
+   instead of returning. On an accepted answer the same process resumes the
+   loop and continues to normal completion.
+   Decided by: a process-level proof in the declared suites — parked drive
+   observed with lock held, durable `AwaitingOwner`, live row; answer
+   delivered; same process continues and completes.
+   Excluded: how surfaces route answers to the socket (`0279.3`);
+   park presentation in queue/single-run/dashboard/run view (`0279.5`).
+
+2. **The control socket accepts a typed Answer.** The authenticated driver
+   socket gains an Answer command carrying the state-digest-bound
+   submission (the `0279.1` shared shape) and returns a typed
+   accept/refusal result. The listener thread never writes the ledger: it
+   hands the submission to the drive thread, which validates via the
+   shared semantics, persists, and resumes. Malformed or unauthenticated
+   traffic is refused without invoking any callback, exactly as today.
+   Decided by: `run_control` unit tests for transport (accept, refuse,
+   malformed, unauthenticated) plus the goal-1 continuation proof.
+   Excluded: any change to `Interrupt`/`Pause` semantics.
+
+3. **Refusal leaves the question standing.** A delivered answer that is
+   stale (state digest mismatch), mistargeted, schema-invalid, or rejected
+   by core validation produces a distinct refusal to the sender while the
+   driver keeps waiting on the same live Ask: same frame, `WaitingOnHuman`,
+   durable `AwaitingOwner` evidence still satisfying `is_live_summons`.
+   Duplicate or late deliveries after acceptance are refused distinctly and
+   do not disturb the resumed run. A transport failure — a malformed,
+   unauthenticated, or aborted socket exchange — delivers nothing and
+   leaves the same live Ask standing.
+   Decided by: run_control/drive-side tests in the declared suites.
+
+4. **Waiting is budget-free.** Time spent parked at an Ask charges nothing
+   against wall (`total_seconds`) or frame budget; a run that waits an hour
+   and is then answered has the same remaining budget as one answered
+   immediately.
+   Decided by: a drive-side test asserting the accounting.
+
+5. **Interrupting a waiting driver yields today's durable park.** Interrupt
+   or pause during the wait ends the process cleanly with the recorded
+   `AwaitingOwner` park, lock released, session resumable — the waiting
+   driver is an addition on top of the durable park, never a replacement
+   for it. No `driver-lock-busy` is produced by anything in this child.
+   Decided by: process proof plus existing suites staying green.
+
+6. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- Durable evidence is written before the wait begins: record `AwaitingOwner`
+  and persist at the park boundary first, then wait. That single ordering
+  makes `kill -9`, interrupt, and answer-later all safe.
+- The wait lives inside the drive process while the loop is suspended —
+  reuse the accounting principle of `attach_wait_paused`, not necessarily
+  its ledger-polling mechanism; the socket delivery is the wakeup, with any
+  polling purely a fallback.
+- The center notifier publishes the waiting state as a row refresh, not
+  `ended`; `ended` fires only when the process actually ends (answer →
+  completion, or interrupt → park).
+- Single-writer is absolute: the listener thread enqueues; only the drive
+  thread touches the ledger.
+
+## APPROACH — suggested route, not a boundary
+
+1. Extend `run_control.rs`: a typed request enum over the socket
+   (`Interrupt`, `Pause`, `Answer(payload)`) with a typed response,
+   preserving the existing one-byte behavior for the legacy commands or
+   migrating both ends together; thread an answer-delivery callback/channel
+   through `DriverLockGuard` socket setup.
+2. In `drive.rs`, replace the `WaitingOnHuman` early-return with:
+   persist `AwaitingOwner` + notify (row refresh), then block on an answer
+   mailbox (channel) also fed by interrupt/pause signals; on accepted
+   answer apply via the `0279.1` shared semantics on the drive thread and
+   continue the loop; exclude the waited span from budget accounting.
+3. Keep the post-loop path intact for the interrupt case so today's report
+   status, notifier `ended`, and guard drop still happen.
+4. Proof home: combine `proof_summons`'s scratch Ask fixture with
+   `proof_center`-style detached-process machinery, in whichever of the two
+   suites fits better; observe held lock, durable question, delivery,
+   continuation.
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io
+   run_control`, the summons proofs, then `just test`. Isolate the build
+   cache (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a
+   gate failure.
+'''
+validation = '''
+## Watch
+
+- No listener-thread ledger writes; grep yourself honest before the gate.
+- Worktree identity: the resumed loop keeps using the persisted session's
+  verified worktree and resolved ledger path.
+- Shared io protocol changes must stay usable by the desktop later; if a
+  type shared with the desktop is touched, run `just desktop-test` and
+  `just desktop-lint` and report them.
+- Scratch fixtures only; no frozen-inventory or behavior-freezing tests.
+
+## Done when
+
+- Park-with-held-lock, socket answer delivery, refusal-keeps-waiting,
+  budget-free wait, and interrupt-to-durable-park are each asserted by
+  suites the declared checks run.
+- `run_control`, `proof_summons`, and `just test` are green.
+'''
+
+[relations]
+parent = "0279"
+depends-on = ["0279.1"]
+
+[[checks]]
+name = "run_control transport suite is green including answer delivery"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io run_control"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "summons process proofs are green including the waiting driver"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

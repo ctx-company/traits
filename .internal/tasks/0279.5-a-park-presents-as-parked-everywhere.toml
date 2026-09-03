@@ -1,0 +1,162 @@
+schema-version = "0.2"
+key = "0279.5"
+title = "A park presents as parked everywhere"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0279` goal 4 plus the surface halves of goals 1-2. With `0279.2` the
+driver waits and with `0279.3` every surface can deliver; this child makes
+the park look like a park: the live view pauses in place with the Ask
+answerable, the queue and single-run output stop calling a summons a
+failure, and the dashboard says awaiting-owner instead of a bare `live`.
+
+## Grounded against HEAD 72a42faa3
+
+- `RunPanel::request_input` is a reusable in-process modal/reply-channel:
+  the input thread keeps painting while the drive thread blocks; its only
+  production caller is the `AwaitingInput` missing-port branch
+  (`run_view.rs:876-905`; `drive.rs:2512-2549`). Escape sends `None`
+  non-mutatingly (`run_view.rs:1419-1442`).
+- The driver panel closes at a park via ownership teardown, not because the
+  panel treats `WaitingOnHuman` as terminal: `RunPanelGuard` →
+  `PanelHandoff` → `MergeSpanGuard` drop closes it (`drive.rs:2072-2087`;
+  `run.rs:654-701,1893-1925`). An attached observer closes only when shared
+  classification turns terminal (`run_view.rs:581-624`); the observer has
+  no answer action today (`run_view.rs:1481-1502`).
+- The queue treats every non-completed drive except typed disk-full as
+  fail-toned `TaskQueueOutcome::NotCompleted`, halts, and closes the panel
+  as `Failure`; `queue_not_completed` receives the just-persisted outcome
+  but consults it only for disk-full; `TaskQueueOutcome::Parked` means a
+  parked merge and is intentionally fail-toned
+  (`run.rs:759-876,917-1023,1338-1380`).
+- A single-run summons falls through `print_final_output`'s
+  `!run_completed` branch into a Failure panel even though
+  `human_terminal_failure` already exempts a recorded summons; with merge
+  intent, `complete_after_drive` exits through `EXIT_RUN_NOT_COMPLETED`
+  (`run.rs:1492-1586,2175-2353,2062-2111,1810-1860`). Disk-full is the
+  existing typed non-failure park precedent.
+- Dashboard rows classify every held lock as `SessionClass::Live` with
+  state text `live` (`dashboard.rs:1913-1922,2363-2408`); Ask enrichment
+  already builds `summons: <question> (<wait>)` for a `WaitingOnHuman` Ask
+  (`dashboard.rs:1809-1855,1964-2010`). Desktop summons UI belongs to the
+  `0259` family.
+
+## GOALS — binding
+
+1. **The driver's own view answers in place.** A `--progress tui` drive
+   reaching an Ask keeps its panel open, paused in place with the question
+   surfaced; submitting feeds the waiting drive loop directly (no socket
+   round-trip needed in-process); Escape closes the modal only — the Ask
+   stays live and the driver keeps waiting.
+   Decided by: run-view/drive-side tests in the declared suites.
+   Excluded: Ask authoring, schemas, and the annotate stdin path.
+
+2. **An observer stays open and can answer.** An attached observer of a
+   held, waiting session does not close at the park; it surfaces the Ask
+   and offers answering, routed through `0279.3`'s shared path — never a
+   resume spawn. Cancelling the observer modal changes nothing.
+   Decided by: run-view tests plus the suites `0279.3` pinned.
+
+3. **The queue reports a park as a park.** A queue member whose drive ends
+   at a live Ask (interrupted while waiting) is reported as
+   parked/awaiting-owner with the question visible — a typed Ask-park,
+   non-failure in tone, distinct from the merge park, which keeps today's
+   fail-toned behavior unchanged.
+   Decided by: the task-queue lib suite.
+
+4. **Single-run output and exit say parked, not failed.** A human dispatch
+   ending at a live Ask renders a park panel (question + how to answer),
+   not the Failure panel, and its exit treatment is typed like the
+   disk-full park precedent rather than the generic not-completed failure.
+   Decided by: run-output tests in the declared suites.
+
+5. **The dashboard shows awaiting-owner without lying about liveness.** A
+   held waiting driver's row keeps the liveness fact but presents the
+   summons/awaiting-owner state (question and wait) instead of bare `live`;
+   an unheld durable park keeps its existing awaiting-owner presentation.
+   Decided by: the dashboard lib suite.
+
+6. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- Reuse `request_input` for the driver-TUI Ask modal rather than adding a
+  second modal mechanism; the observer reuses the same presentation with
+  `0279.3` routing as its sender.
+- Ask park and merge park stay distinct variants; do not make the existing
+  merge-park non-failing, and keep disk-full's typed treatment as the
+  pattern, not a shared code path to force-fit.
+- CLI styling follows the house palette: named ANSI, dim labels, no new
+  colors for the park panel.
+
+## APPROACH — suggested route, not a boundary
+
+1. Drive side: at the Ask wait (from `0279.2`), when a panel is attached,
+   surface the question via `request_input` and feed submissions into the
+   same answer mailbox the socket uses; keep the panel out of the teardown
+   handoff until the drive actually ends.
+2. Observer side: extend `run_view.rs` with an answer action enabled when
+   the observed session satisfies `is_live_summons`, calling the `0279.3`
+   route and refreshing on the typed result.
+3. Queue: give `queue_not_completed` an Ask-park branch on the persisted
+   `AwaitingOwner` outcome (the disk-full pattern), with a new typed
+   outcome variant and awaiting-owner wording; leave halt semantics for
+   parks explicit and documented in the change.
+4. Single run: add the summons case beside credits/budget/disk-full in
+   `print_final_output` and a typed park classification in
+   `complete_after_drive`'s merge-intent path.
+5. Dashboard: thread the Ask enrichment into the held-lock presentation so
+   `live` + summons renders awaiting-owner state text with the question.
+6. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   dashboard`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   task_queue_drive`, then `just test`. Isolate the build cache
+   (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a gate
+   failure.
+'''
+validation = '''
+## Watch
+
+- Liveness honesty: a held row must never present as unheld; awaiting-owner
+  presentation is additive to the liveness fact, not a replacement.
+- No spawn from any presentation path; senders only route via `0279.3`.
+- Merge-park and generic failure behavior stay byte-for-byte in tone and
+  exit for non-Ask cases.
+- No native/desktop notification UI (that is `0259`'s arc).
+
+## Done when
+
+- In-place driver answering, observer keep-open-and-answer, queue Ask-park
+  wording, single-run park panel and typed exit, and dashboard
+  awaiting-owner presentation are each asserted by suites the declared
+  checks run.
+- Dashboard, task-queue suites and `just test` are green.
+'''
+
+[relations]
+parent = "0279"
+depends-on = ["0279.2", "0279.3"]
+
+[[checks]]
+name = "dashboard lib suite is green including awaiting-owner presentation"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "task queue suite is green including the ask-park outcome"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib task_queue_drive"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

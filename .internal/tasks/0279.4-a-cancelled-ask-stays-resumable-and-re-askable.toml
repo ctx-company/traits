@@ -1,0 +1,170 @@
+schema-version = "0.2"
+key = "0279.4"
+title = "A cancelled ask stays resumable and re-askable"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0279` goal 3. The incident's data loss came from classification: a
+parked Ask that picked up an `Interrupted` outcome became terminal
+`Cancelled`, so every resume path refused it and three rounds of work were
+stranded. This child inverts that ruling at the shared derivation and closes
+the evidence leak that makes a rejected answer strip the Ask's durable
+proof. It is independently landable: it has no compile or behavior
+dependency on the other children.
+
+## Grounded against HEAD 72a42faa3
+
+- `SessionState::derive` makes a held lock authoritative as `Running`, then
+  maps every unheld `Interrupted`/`Killed` outcome to terminal `Cancelled`
+  regardless of status (`modules/core/src/procedure/activity.rs:26-55`).
+  Dashboard `classify_session` delegates to it (`dashboard.rs:1913-1922`),
+  and the pinned test
+  `classify_session_maps_cancelled_parked_ask_to_terminal`
+  (`dashboard.rs:11595-11613`) asserts the exact behavior the parent
+  requires inverting: unheld `WaitingOnHuman + Interrupted` is terminal.
+- Core rejection deliberately keeps the same Ask frame at
+  `Status::WaitingOnHuman` (`modules/core/src/procedure/session.rs:
+  3387-3437`), but every rebuilt session sets `last_drive_outcome: None`
+  (`session.rs:2734-2771`). A persisted rejected answer can therefore stop
+  satisfying `is_live_summons` (`frame_prompt.rs:527-551`), and once unheld
+  becomes eligible for center orphan repair to `Interrupted`
+  (`center.rs:3394-3502`) — `AwaitingOwner` is a settled pause
+  (`session.rs:1311-1322`) and the center pins the parked shape
+  (`center.rs:6480-6526`).
+- Modal cancellation is already non-mutating: dashboard
+  `ModalOutcome::Cancelled` exits before `apply_session_action`
+  (`dashboard.rs:4928-4977`) and `RunPanel` Escape sends `None`
+  (`run_view.rs:1419-1442`). The defect boundary is persistence and
+  re-arming, not Esc handling.
+- Resume proof precedent: `proof_summons.rs:266-419` proves durable
+  question, answer acceptance, and consumption on a scratch fixture.
+
+## GOALS — binding
+
+1. **An interrupted parked Ask derives resumable, never terminal.** In the
+   shared derivation, an unheld session whose status is a live Ask
+   (`WaitingOnHuman`) with an `Interrupted` or `Killed` outcome classifies
+   as resumable/awaiting-owner, and every resume path accepts it. The
+   pinned dashboard test is inverted to assert the new contract. Only the
+   parked-Ask case changes: interrupted sessions at any other status keep
+   today's terminal `Cancelled` derivation.
+   Decided by: core suite plus the dashboard lib suite (the inverted test).
+   Excluded: presentation wording (`0279.5`); the held-lock `Running`
+   derivation, untouched.
+
+2. **A failed answer cannot strip the Ask's durable evidence.** After a
+   rejected submission is persisted, the session still satisfies
+   `is_live_summons`: the same frame, `WaitingOnHuman`, and durable
+   `AwaitingOwner` evidence present in the persisted session — and center
+   orphan repair never stamps a durably parked Ask `interrupted`. Parsing
+   errors, stale submissions, and modal closure leave the prior question
+   untouched. (Socket transport failures are `0279.2`'s observable — the
+   child that introduces the transport.)
+   Decided by: core suite (rebuild/rejection evidence) and center suite
+   (orphan-repair boundary).
+
+3. **Resume re-fires the ask.** Resuming a previously interrupted parked
+   Ask brings the run back to the same Ask frame with its question intact
+   and accepts an answer normally.
+   Decided by: a scratch-fixture proof in the declared suites.
+
+4. **Cancel paths stay non-mutating.** Esc and modal close continue to
+   write nothing; the existing behavior is kept pinned.
+   Decided by: existing dashboard/run-view tests staying green.
+
+5. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- Fix the semantics at `SessionState::derive`, not per-surface: dashboard,
+  desktop projection, and resume gating all delegate to the shared
+  derivation, so one inversion carries every consumer.
+- Prefer preserving the recorded `AwaitingOwner` outcome across
+  rejected-answer rebuilds; re-establishing it immediately after the
+  rebuild is an acceptable alternative route to the same persisted
+  evidence. Do not widen `is_live_summons` to trust raw status: the
+  durable-evidence rule (`0253.4`) is what keeps unattended parks honest.
+
+## APPROACH — suggested route, not a boundary
+
+1. In `activity.rs`, branch the unheld `Interrupted`/`Killed` mapping on
+   the live-Ask status before falling through to `Cancelled`; add core
+   tests for both the inverted case and the preserved non-Ask cases.
+2. In `session.rs`, keep or restore the settled `AwaitingOwner` outcome
+   when persisting a rejected Ask submission (the rebuild currently clears
+   it); assert `is_live_summons` still holds afterward.
+3. Extend the center orphan-repair tests to cover a parked Ask whose
+   outcome was cleared or interrupted — repair must not make it terminal.
+4. Invert `classify_session_maps_cancelled_parked_ask_to_terminal` into the
+   resumable assertion, renaming it to say what it now proves.
+5. Re-fire proof beside `proof_summons`'s existing fixture: park, interrupt,
+   resume, observe the same question, answer, complete.
+6. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-core`,
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center`,
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard`,
+   `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_summons`, then `just test`. `just test` runs unit suites only, so
+   the `proof_summons` integration run is the gate that exercises the
+   re-fire proof. Isolate the build cache (`CARGO_TARGET_DIR=target`) in
+   a run worktree before trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- The inversion is surgical: non-Ask interrupted/killed sessions must keep
+  deriving terminal `Cancelled`; prove the negative case too.
+- No behavior-freezing tests beyond the contract: scratch fixtures, no
+  committed-repo-content dependencies.
+- Held-lock derivation (`Running`) and `0279.2`'s waiting driver are
+  unaffected by this child.
+
+## Done when
+
+- Derivation inversion (plus preserved non-Ask cases), rejected-answer
+  evidence preservation, orphan-repair safety, and the re-fire proof are
+  each asserted by suites the declared checks run; the declared
+  `proof_summons` check is the one that exercises the interrupted-Ask
+  resume-and-re-fire proof.
+- Core, center, dashboard suites, `proof_summons`, and `just test` are
+  green.
+'''
+
+[relations]
+parent = "0279"
+
+[[checks]]
+name = "core suite is green including the derivation inversion"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "center suite is green including orphan-repair ask safety"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "dashboard lib suite is green including the inverted pin"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "summons process proofs are green including the resume-and-re-fire proof"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

@@ -1,0 +1,138 @@
+schema-version = "0.2"
+key = "0279.1"
+title = "Answer submission semantics move below the CLI"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0279` foundation. Answer validation and outcome semantics today live
+in CLI-private code, so the driver-side and routing children (`0279.2`,
+`0279.3`) would have to copy them — the exact duplication the parent is meant
+to remove. This child relocates them once, behavior-preserving.
+
+## Grounded against HEAD 72a42faa3
+
+- `AnswerSubmission` (ledger path, trait/store resolution, target, schema,
+  expected state digest, value, caller provenance, advance flag) and
+  `AnswerSubmissionOutcome` (`Cancelled`, `Stale`, `LockHeld`,
+  `RejectedCorrection`, `NotRouted`, ...) are private to
+  `modules/cli/src/app/answer.rs:33-44`. `submit_answer` acquires
+  maintenance ownership, rereads the ledger, requires matching state digest,
+  live summons, target, and schema, then calls `ctx_traits_io::run::set`
+  (`answer.rs:87-134`).
+- The dashboard reuses the same CLI module in-process; no non-CLI consumer
+  can reach it today. Center and driver code live in `ctx-traits-io`/`cli`
+  layers below/beside it — copying `submit_answer` into them would invert
+  the dependency direction (cli depends on io, never the reverse).
+- Ask validity is decided by `is_live_summons` (Ask frame + derived
+  `WaitingOnHuman` + durable `AwaitingOwner` outcome,
+  `modules/cli/src/app/frame_prompt.rs:527-551`).
+- Core already owns acceptance semantics: `resolve_run_set_submission`
+  builds a state-digest-bound `CallSubmission` with caller provenance
+  (`modules/core/src/procedure/session.rs:2042-2088`) and
+  `submit_current_frame_set` requires an Ask answer to be a human
+  current-frame set with no agent/harness attribution
+  (`session.rs:2577-2586,2813-2922`). `run::set` is the persistence adapter
+  (`modules/io/src/run.rs:3034-3143`).
+- Shipped behavior that must not change here: `ctx traits answer` surface
+  (`modules/cli/src/surface/cli.rs:878-918`), `--no-resume`
+  (`answer.rs:292-308`), post-answer resume (`answer.rs:342-371`), dashboard
+  answer flow (`modules/cli/src/app/dashboard.rs:5013-5111`), and the
+  process proofs `proof_summons.rs:266-419` and `:661-743`.
+
+## GOALS — binding
+
+1. **One shared implementation of answer submission.** The submission shape,
+   validation order (reread, state digest, live summons, target, schema),
+   and the outcome distinctions of `AnswerSubmissionOutcome` live in exactly
+   one place below the CLI — reachable from `ctx-traits-io` without any CLI
+   type — and both `answer.rs` and the dashboard consume it. Every Ask
+   validity helper the shared transaction needs (`is_live_summons` at
+   minimum) has exactly one non-CLI implementation. No duplicate copy of
+   the validation or the helpers remains in CLI-private code.
+   Decided by: the declared suites staying green after the relocation.
+   Excluded: any behavior change; any new routing logic (that is `0279.3`);
+   any center wire-protocol type.
+
+2. **Observable behavior is identical.** `ctx traits answer` (session
+   resolution, `--value`, `--value-json`, store/file, `--no-resume`,
+   `--json` reporting) and the dashboard answer flow behave exactly as
+   today, including post-answer resume and every refusal message class.
+   Decided by: `proof_summons` (both the park/answer/consume proof and the
+   `--no-resume` proof) and the dashboard lib suite, unmodified in what they
+   assert.
+
+3. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- Home is `ctx-traits-io` (beside `run.rs`/`run_control.rs`), not core: the
+  transaction reads ledgers, acquires maintenance ownership, and calls
+  `run::set`, all io concerns. Pure pieces (Ask validity over a session
+  value) may sink to core where that is the cheaper cut.
+- This is a relocation, not a redesign: keep the maintenance-acquire path
+  and `LockHeld` outcome exactly as they are. `0279.2`/`0279.3` change who
+  may apply an answer; this child only makes the semantics reusable.
+- CLI keeps its presentation: human/JSON reporting, exit codes, and the
+  post-answer `drive()` call stay in `answer.rs` as a thin adapter.
+
+## APPROACH — suggested route, not a boundary
+
+1. Introduce an answer module in `modules/io/src/` carrying the submission
+   struct, outcome enum, and the validate-then-set transaction; port
+   `submit_answer`'s body with its exact ordering.
+2. Move `is_live_summons` (and the stored-question helpers it leans on)
+   into the new io module, or sink the pure session-value pieces to core —
+   either placement satisfies the goal's one-non-CLI-implementation
+   invariant; leave CLI-facing wrappers in `frame_prompt.rs` if callers
+   want them.
+3. Rewire `answer.rs` and the dashboard answer action to the shared calls;
+   delete the CLI-private originals in the same change.
+4. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_summons`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli
+   --lib dashboard`, then `just test`. In a run worktree, isolate the build
+   cache (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Dependency direction: cli depends on io/core, never the reverse; no CLI
+  type appears in the shared signatures.
+- No shared center wire type changes; if one is touched anyway, run
+  `just desktop-test` and `just desktop-lint` and report them.
+- No behavior drift hidden as refactor: refusal outcomes, ordering, and
+  ledger writes byte-for-byte equivalent in effect.
+
+## Done when
+
+- The shared implementation exists below the CLI, both existing consumers
+  use it, and no duplicate remains.
+- `proof_summons`, the dashboard lib suite, and `just test` are green.
+'''
+
+[relations]
+parent = "0279"
+
+[[checks]]
+name = "summons process proofs stay green after the relocation"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "dashboard lib suite stays green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

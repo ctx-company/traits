@@ -1,0 +1,196 @@
+schema-version = "0.2"
+key = "0279.3"
+title = "Every surface delivers answers to the one driver"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0279` routing. With `0279.2` a parked driver may be alive and
+holding the lock; the answer surfaces still assume the old
+park-with-no-driver world: CLI `answer` acquires maintenance ownership and
+then calls `drive()` itself, and a dashboard answer asks the center to spawn
+a resume. This child gives every surface one routing decision — deliver to
+the holder, or apply-and-replace when there is provably no holder — and pins
+the incident regression.
+
+## Grounded against HEAD 72a42faa3
+
+- `submit_answer` returns `LockHeld` when a driver holds the lock
+  (`modules/cli/src/app/answer.rs:87-91`); after a successful CLI answer,
+  `handle_answer` calls `drive()` in-process unless completed or
+  `--no-resume` (`answer.rs:342-371`); after a successful dashboard answer,
+  `apply_session_action` requests `center::start_session`
+  (`modules/cli/src/app/dashboard.rs:5013-5111`), which spawns
+  `ctx traits internal drive --session <ledger> --progress none` via
+  `resume_argv` (`modules/io/src/center.rs:1208-1239,5218-5358`).
+- `MaintenanceLockGuard` is expressly for unheld ledgers
+  (`modules/io/src/run_control.rs:145-163,480-512`); a busy `drive`
+  contender returns `driver-lock-busy` with zero frames and no ledger write
+  (`modules/cli/src/app/drive.rs:1162-1259`) — that status stays valid for
+  explicit competing drives only.
+- The strongest reusable relay precedent is center `run_control_request`:
+  resolve by identity, require a live row and matching holder session ID,
+  contact the authenticated socket via the holder's unguessable token, and
+  keep missing/ambiguous/non-live/unverifiable/refused/acknowledged
+  distinct (`center.rs:4581-4630`). Do not trust cached `row.live` or
+  holder PID over the socket handshake.
+- `--no-resume` and its process proof are shipped behavior
+  (`answer.rs:292-308`; `proof_summons.rs:661-743`).
+- Incident evidence from the parent (run `7635b756`): observer answer →
+  center RESUME → second driver → `driver-lock-busy` → session
+  `interrupted`/terminal. Static HEAD does not reproduce that exact chain
+  (no production observer-answer path exists), so the regression proof pins
+  the contract forward rather than claiming a HEAD reproduction.
+- Proof machinery: `modules/cli/tests/proof_center.rs` has detached
+  center/driver process fixtures, registration, controls, and delta
+  observation; `proof_summons.rs:266-419` has the scratch Ask fixture and
+  consumed-answer assertion.
+
+## GOALS — binding
+
+1. **One shared routing decision below the CLI.** A single io-level entry
+   point takes a resolved session plus the `0279.1` submission and decides:
+   (a) lock held and holder verified via the authenticated socket → relay
+   the answer to that exact holder (`0279.2`'s Answer command) and return
+   the holder's typed result — no maintenance ownership, no external ledger
+   write, no spawn; (b) lock provably unheld with a durable parked Ask →
+   apply only the current Ask's answer under maintenance ownership — the
+   maintenance-owned apply never executes a following command or agent
+   frame (today's `advance_command_frames = true` transaction does; this
+   child must make the unheld apply persist the answer alone); the caller
+   may then start at most one replacement driver through the existing
+   resume path — a first driver, never a second — and all continuation,
+   including following command frames, is performed only by that
+   replacement driver under the driver lock; (c) lock held but
+   the holder unverifiable → fail closed with a distinct outcome, never
+   falling through to a write or a spawn. Missing, ambiguous, stale, and
+   refused stay distinct outcomes.
+   Decided by: io-level tests of the three-way decision in the declared
+   suites.
+   Excluded: a center wire-protocol Answer request (deferred to the `0259`
+   family, which builds its center-served submission path on this
+   boundary); any desktop UI.
+
+2. **Both existing surfaces use it and neither can spawn a competitor.**
+   CLI `ctx traits answer` and the dashboard answer action route through
+   goal 1. After a held-driver delivery, the CLI does not call `drive()`
+   and the dashboard does not request `center::start_session` — the
+   existing driver simply continues. No answer path can produce
+   `driver-lock-busy`.
+   Decided by: the incident proof (goal 4) plus the dashboard and summons
+   suites.
+   Excluded: the observer run-view sender — `0279.5` adds it on this same
+   route.
+
+3. **`--no-resume` is reconciled, not ignored — and unheld answers never
+   self-advance.** Unheld ordinary: the answer is applied without advancing
+   any following frame, then at most one replacement driver is started and
+   performs the continuation. Unheld `--no-resume`: the answer is applied,
+   no following frame is advanced, and no driver is started — the accepted
+   session is left unadvanced at the frame after the Ask. Held: the command
+   fails closed with a typed refusal explaining a live driver owns
+   advancement (an answer delivered to a waiting driver necessarily lets it
+   advance); no answer is delivered and the Ask is untouched.
+   Decided by: the `proof_summons` suite (declared check below), extended
+   to distinguish answer persistence from later driver-owned frame
+   advancement for both ordinary and `--no-resume` unheld submissions, plus
+   the held refusal case.
+
+4. **The incident shape is a pinned regression.** A queue-driven session
+   parks at an Ask with its original driver alive and holding the lock; an
+   answer is submitted from a non-driver surface; the proof asserts exactly
+   one driver ever exists (no second `internal drive` spawn or registration),
+   the same holder consumes the answer as ordinary accepted slot evidence
+   with human caller provenance, and the run continues to completion,
+   observed durably (ledger) with center deltas as corroboration.
+   Decided by: a detached-process proof in the declared suites.
+
+5. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- No center wire protocol change in this family. Every in-scope surface
+  (CLI, dashboard, run view) runs on the machine that can reach the socket
+  and the ledger, so the shared io function is sufficient; `0259` later
+  serves the same boundary over the center for native/remote summons.
+- `center::start_session` remains the sanctioned unheld-resume spawn path;
+  it is simply never invoked after a held-driver delivery. The CLI's
+  in-process `drive()` after an unheld apply is likewise the replacement
+  driver and stays — but it is the replacement driver, not the apply, that
+  advances frames: the unheld apply must stop setting
+  `advance_command_frames = true`, leaving command-frame execution to the
+  driver that holds the lock.
+- Fail closed beats optimistic: an unverifiable holder returns a distinct
+  refusal telling the owner to retry or inspect, because a wrong guess
+  either forks a driver or writes under a live one.
+
+## APPROACH — suggested route, not a boundary
+
+1. Build the routing function in `modules/io` beside the `0279.1` answer
+   module, reusing `run_control::{try_acquire, try_acquire_maintenance,
+   DriverHolder, control_socket_path}` and the `run_control_request`
+   resolution/verification discipline.
+2. Rewire `handle_answer`: route; on held-relay success report the
+   continuation without driving; on unheld success keep today's `drive()`
+   unless `--no-resume`/completed; new typed refusals get clear human and
+   `--json` renderings.
+3. Rewire the dashboard answer action to the same route; drop the
+   unconditional post-answer `start_session` request in favor of
+   unheld-only.
+4. Incident proof in `proof_center.rs` (process machinery) using the
+   `proof_summons` Ask fixture shape: park a queue drive with `0279.2`'s
+   waiting driver, answer via the shared route from another process, assert
+   single-driver, consumption, continuation.
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_center`, `... --test proof_summons`, then `just test`. Isolate the
+   build cache (`CARGO_TARGET_DIR=target`) in a run worktree before
+   trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Dependency direction holds: io never calls cli; surfaces stay thin.
+- The race distinctions survive: holder died between resolve and relay ⇒
+  a distinct outcome, then the unheld path is a fresh explicit decision,
+  never an automatic fallthrough.
+- Center deltas corroborate but never decide correctness; the ledger does.
+- Shared io types touched ⇒ run `just desktop-test`/`just desktop-lint`.
+
+## Done when
+
+- The three-way routing, the CLI and dashboard rewiring, `--no-resume`
+  reconciliation, and the incident regression are each asserted by suites
+  the declared checks run. In particular the declared `proof_summons` check
+  is what decides that an unheld answering process executes no following
+  frame, that ordinary continuation is performed by a replacement driver,
+  and that `--no-resume` leaves the accepted session unadvanced.
+- `proof_center`, `proof_summons`, and `just test` are green.
+'''
+
+[relations]
+parent = "0279"
+depends-on = ["0279.1", "0279.2"]
+
+[[checks]]
+name = "center process proofs are green including the incident regression"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "summons proofs are green including no-resume reconciliation and driver-only frame advancement"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

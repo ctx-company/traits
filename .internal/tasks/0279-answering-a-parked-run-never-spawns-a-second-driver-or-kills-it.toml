@@ -1,92 +1,195 @@
 schema-version = "0.2"
 key = "0279"
 title = "Answering a parked run never spawns a second driver or kills it"
-status = "draft"
+status = "ready"
 raised = "2026-09-03"
-content = """
-Owner-reported, Claude-verified 2026-09-03 on ctx.traits run 7635b756
-(0266.9). The run parked at a summons ask; the owner answered from the
-live run view; the run died and became permanently unresumable, and
-the owner's answer never reached it. Three runtime rules compounded:
+content = '''
+Charter. This file carries the shared intent, the family-wide rulings, and
+the umbrella stop condition. It lands no code of its own: every execution
+plan lives in the children, each of which separates binding goals from
+suggested approach in its own text. An implementation cut written against
+this file instead of a child is the failure mode to avoid.
 
-1. The parked driver (a queue process, `ctx traits run --task
-   0266,0269`) stayed alive holding the session's driver lock while it
-   waited for the owner.
-2. The run view was only an observer of that session, so on answer it
-   asked the center to RESUME the session, and the center spawned a
-   second driver (`ctx traits internal drive --session … --progress
-   none`, center.rs `resume_argv`, start-log 33340-start-139). That
-   driver was refused by the lock the first driver still held —
-   verbatim: `drive refused: another process already holds the P423
-   driver lock for this ledger … driver-lock-busy`, zero frames.
-3. The refused resume cancelled the ask and recorded the session
-   `interrupted`; the queue driver saw its session go terminal and
-   exited with "Failure". A cancelled parked ask is then classified
-   terminal by design (dashboard.rs
-   `classify_session_maps_cancelled_parked_ask_to_terminal`), so every
-   resume path refuses it: "cannot be resumed from its current state".
+## The problem (owner-reported, Claude-verified 2026-09-03, run 7635b756)
 
-Net effect: one answer from a non-driver surface killed a resumable run
-and stranded three rounds of work in its worktree. Only the driver's
-own in-process TUI (`--progress tui`) answers safely today, because it
-feeds the drive loop directly instead of spawning.
+The run parked at a summons Ask; the owner answered from the live run view;
+the answer never reached the run. Observed chain: the queue driver stayed
+alive holding the driver lock; the observer surface asked the center to
+RESUME; the center spawned a second `internal drive` that was refused
+`driver-lock-busy` with zero frames; the refused resume left the session
+`interrupted`, which classifies a parked Ask terminal — permanently
+unresumable, three rounds of work stranded. Separately observed, same
+lifecycle: a park closes the live run view and the queue renders it as
+"Failure". Note for the record: static HEAD `72a42faa3` does not reproduce
+that exact chain (grounding shows no production observer-answer path and a
+lock normally released at an Ask); the family's proofs pin the intended
+contract forward instead of claiming a HEAD reproduction. Summons remain
+switched off in the implement trait (commit `5a11b125e`) until this family
+lands.
 
-Separately observed, same lifecycle: when a run parks, the live run
-view CLOSES instead of pausing in place with the ask, and the queue
-renders the park as "Failure".
+## Owner contract (binding)
 
-## Owner contract
+A session has exactly one driver, running in the background, and it is the
+only process that ever holds the lock or advances frames. Every surface —
+dashboard, live run view, CLI `answer`, the driver's own TUI — is a
+presentation and sender layer: it delivers a ruling to that driver and never
+spawns a competing one. A park is that one driver waiting; an answer from
+any surface wakes it. Cancelling an ask returns the session to resumable,
+never terminal. A parked run stays live in the run view with the ask
+surfaced, and is reported as parked, not failed.
 
-A session has exactly one driver, running in the background, and it is
-the only process that ever holds the lock or advances frames. Every
-surface — dashboard, live run view, CLI `answer`, the driver's own TUI
-— is a presentation and sender layer: it delivers a ruling to that
-driver and never spawns a competing one. A park is that one driver
-waiting; an answer from any surface wakes it. Cancelling an ask returns
-the session to resumable, never terminal. A parked run stays live in
-the run view with the ask surfaced, and is reported as parked, not
-failed.
-"""
-scope = """
-Goals below are binding outcomes; the route is the architect's to
-decide. Deliberately light on implementation — architect grounds it
-and splits it.
+## The children
 
-## Goals (binding, observable)
+1. `0279.1` — answer submission semantics move below the CLI: the
+   CLI-private `AnswerSubmission`/`AnswerSubmissionOutcome` validation
+   transaction relocates to a shared io boundary, behavior-preserving, so
+   driver, routing, and surfaces consume one implementation.
+2. `0279.2` — the parked driver keeps the lock and waits: at an Ask the
+   driver durably records `AwaitingOwner`, publishes a live waiting row,
+   retains the lock, and blocks on an answer mailbox fed by a new typed
+   Answer command on the authenticated control socket; waiting burns no
+   budget; interrupt yields today's durable unheld park.
+3. `0279.3` — every surface delivers answers to the one driver: one
+   io-level routing decision (held → verified socket relay; provably unheld
+   parked → maintenance apply plus at most one replacement driver; held but
+   unverifiable → fail closed), wired into CLI `answer` and the dashboard;
+   `--no-resume` reconciled; the incident regression proof.
+4. `0279.4` — a cancelled ask stays resumable and re-askable: the shared
+   derivation stops classifying an unheld interrupted parked Ask terminal
+   (pinned test inverted), rejected answers cannot strip the Ask's durable
+   evidence, resume re-fires the ask. Independently landable.
+5. `0279.5` — a park presents as parked everywhere: the driver TUI answers
+   in place, an observer stays open and can answer, the queue and
+   single-run output report a typed Ask-park instead of Failure, the
+   dashboard shows awaiting-owner without hiding liveness.
 
-1. Single driver ownership: answering a parked session from the
-   dashboard, the live run view, or `ctx traits answer` never spawns a
-   second driver. The answer is delivered to the existing driver (or
-   durably to the ledger for it to consume) and that driver resumes.
-   `driver-lock-busy` cannot be produced by an answer.
-2. The same behavior whether the parked driver is a single dispatch, a
-   queue, or an in-process TUI run — the surface used to answer makes
-   no difference to the outcome.
-3. Cancelling an ask (Esc, modal close, a failed answer path) leaves
-   the session resumable with the ask re-askable; it never classifies
-   the session terminal. The pinning test is inverted accordingly.
-4. A park keeps the live run view open, paused in place with the ask
-   surfaced for answering there; the queue and dashboard report the
-   run as parked/awaiting-owner, never as a failure.
-5. Regression proofs for the incident shape: parked queue-driven
-   session + answer from an observer surface → one driver, answer
-   consumed, run continues; cancelled ask → still resumable.
-6. Existing suites stay green.
+Positional order is the suggested execution order; `0279.4` carries no
+dependency on the others and may land at any point.
 
-## Out of scope
-- The annotate gate's stdin path (already in-driver and correct).
-- Any change to trait authoring surfaces or the ask schema.
-"""
-validation = """
+## Family-wide rulings (grounded)
+
+- **One driver, end to end — this replaces `0253.4`'s "never idles" rule.**
+  Parking no longer ends the drive process: the driver records durable
+  `AwaitingOwner` evidence first, then waits while holding the lock. The
+  durable unheld park remains the contract for process death, interrupt,
+  and pause — the waiting driver is added on top of durable parking, never
+  instead of it. An unanswered summons still survives `kill -9`.
+- **Answer routing is an authority decision, decided by the lock.** Held:
+  relay the state-digest-bound answer to that exact verified holder; no
+  maintenance ownership, no external ledger write, no `start_session`.
+  Provably unheld with a durable parked Ask: maintenance apply persists
+  only the current Ask's answer and executes no following frame, then at
+  most one replacement driver via the existing resume path — a first
+  driver, never a second — performs all continuation under the driver
+  lock. Held but unverifiable: fail closed. No answer
+  path may ever produce `driver-lock-busy`; that status stays valid only
+  for an explicit competing drive, which still performs zero frames and no
+  ledger write.
+- **Single writer.** No listener/background thread performs whole-ledger
+  writes; answer application happens on the drive thread via the
+  established handoff pattern (`PendingSessionTitle` precedent).
+- **Owner wait is free.** Waiting for a human charges no frame or wall
+  budget (completed `0253.7`; `attach_wait_paused` accounting principle).
+- **Failure leaves the question standing.** Rejected submissions, stale
+  digests, transport failures, Esc, and modal close all leave the Ask live
+  with `is_live_summons` intact; cancellation or interruption of a parked
+  Ask derives resumable, never terminal. Accepted answers are ordinary slot
+  evidence with human caller provenance and no agent/harness attribution.
+- **`--no-resume` is reconciled, not ignored.** Unheld applies the answer
+  without starting a driver and leaves following frames unadvanced; held
+  fails closed with a typed refusal, because an answer delivered to a live
+  driver necessarily lets it advance.
+- **Ask park is not merge park.** `TaskQueueOutcome::Parked` (merge) stays
+  fail-toned; disk-full is the typed non-failure park precedent the Ask
+  park follows; presentation keeps liveness honest — a held row never
+  presents as unheld.
+- **The center stays a disposable relay.** Correctness lives in the held
+  driver and the ledger; center deltas corroborate, never decide. No center
+  wire-protocol Answer request in this family — the `0259` family builds
+  its center-served submission path on the io boundary `0279.1`/`0279.3`
+  create — and no native or desktop notification UI. Any touch of a type
+  shared with the desktop requires running `just desktop-test` and
+  `just desktop-lint` in-run, since no workspace gate covers desktop.
+- **Out of the whole family.** Trait authoring surfaces, the Ask schema,
+  signal interpolation, choice-schema expansion, and the annotate gate's
+  stdin path (already in-driver and correct).
+
+## Umbrella stop condition
+
+The family is done when all five children are done and the contract holds
+together on one build: a queue-driven session parks with its driver alive
+and holding the lock; an answer from an observer surface reaches that same
+driver, which consumes it and continues — exactly one driver ever exists;
+cancelling or interrupting the parked Ask leaves the session resumable and
+the ask re-fires on resume; the live view stays open through the park with
+the ask answerable; queue, single-run output, and dashboard all say
+parked/awaiting-owner, never failure; and the full landing gate
+(`just test-full`) is green. The closing review after the last child
+verifies the cross-child seams — the socket mailbox versus surface routing,
+the derivation inversion versus presentation, `--no-resume` semantics
+across surfaces, and the re-enabling decision for the implement trait's
+summons switch (an owner call, not a child deliverable) — rather than
+re-reviewing each child.
+
+## Acceptance shape
+
+Behavioral proofs at the state/suite level plus detached-process proofs on
+scratch fixtures — no frozen-inventory or behavior-freezing tests. Each
+child carries its own checks; the charter's checks verify the family's
+joined suites and gates.
+'''
+scope = '''
+The draft's binding goals distribute as follows, binding in the children:
+goal 1 (single driver ownership, answer delivered to the existing driver,
+no `driver-lock-busy` from an answer) → `0279.2` for the waiting driver and
+`0279.3` for routing; goal 2 (same behavior for dispatch, queue, and
+in-process TUI) → `0279.2`'s driver-side contract plus `0279.5`'s surfaces;
+goal 3 (cancelling an ask leaves the session resumable, pinned test
+inverted) → `0279.4`; goal 4 (live view stays open and parked runs report
+as parked/awaiting-owner) → `0279.5`; goal 5 (incident-shape and
+cancelled-ask regressions) → `0279.3` and `0279.4` respectively; goal 6
+(existing suites stay green) → every child's checks plus the umbrella stop
+condition.
+
+Out of scope for the whole family: the annotate gate's stdin path, trait
+authoring surfaces and the ask schema, a center wire-protocol Answer
+request, and native/desktop notification UI (the `0259` family's arc).
+'''
+validation = '''
 ## Done when
-1. Answering a parked queue-driven run from the run view continues the
-   run in the same driver; no second driver is spawned; the answer is
-   in the ledger.
-2. A cancelled ask leaves the session resumable and the ask re-fires
-   on resume.
-3. A park leaves the live run view open with the ask surfaced, and is
-   reported as parked, not failed.
-4. Existing suites stay green.
 
-The instruments and exact assertions are the architect's to choose.
-"""
+1. All five children are status done.
+2. The incident shape passes as a regression: parked queue-driven session
+   with its lock held + answer from an observer surface → one driver, the
+   answer consumed by that driver as ordinary slot evidence, the run
+   continues (`0279.3`'s proof).
+3. A cancelled or interrupted parked ask stays resumable and re-fires on
+   resume (`0279.4`'s proofs).
+4. A park keeps the live view open with the ask answerable, and queue,
+   single-run, and dashboard report parked/awaiting-owner, not failure
+   (`0279.2`/`0279.5`'s proofs).
+5. `just test-full` is green on the family's final state, and desktop
+   commands were run and reported wherever shared types were touched.
+'''
+
+[[checks]]
+name = "all five children are done"
+command = 'for f in .internal/tasks/0279.1-*.toml .internal/tasks/0279.2-*.toml .internal/tasks/0279.3-*.toml .internal/tasks/0279.4-*.toml .internal/tasks/0279.5-*.toml; do grep -l "^status = \"done\"" $f || exit 1; done'
+expect = "0279"
+
+[[checks]]
+name = "summons process proofs are green on the joined family"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "center process proofs are green on the joined family"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "full landing gate is green"
+command = "just test-full"
+timeout-ms = 3600000
