@@ -1,0 +1,155 @@
+schema-version = "0.2"
+key = "0277.2"
+title = "Journal every command-step attempt through the activity sidecar"
+status = "ready"
+raised = "2026-09-03"
+content = """
+Second child of 0277. The session activity sidecar
+(session-*.json.activity.jsonl) already journals model frames with
+millisecond timestamps, but command steps are invisible in it: a
+command that ran, retried, or was killed leaves no durable trace of
+what executed, when, or what it printed (incident 1's missing
+evidence, incident 2's invisible attempts). advance_command_frames in
+modules/io/src/run.rs is the only seam guaranteed to observe every
+actual command execution, including callers outside the main drive
+loop — but it has no writer access today, and there is no durable
+command-attempt counter anywhere, so retries after a process restart
+cannot be numbered by a drive-local counter.
+
+This child adds execution-event record kinds to the existing sidecar
+and journals a start and an end event for every command-step attempt,
+with attempt numbering that survives process boundaries, using the
+runner facts delivered by 0277.1.
+"""
+scope = """
+This plan separates GOALS from APPROACH. Goals are binding: each
+Done-when states an observable outcome and the existing command that
+decides it. The approach is the architect's suggested route; the run
+may deviate from any of it whenever a goal requires it and reports
+the deviation in its work summary — a deviation is not a violation.
+
+## Goals (binding)
+
+1. New ActivityRecord execution-event variants exist beside the model
+   variants (at minimum: command attempt started, command attempt
+   ended) in modules/io/src/activity_sidecar.rs, serialized in the
+   existing envelope (record tag, kebab-case, at-epoch-ms). Old
+   sidecars still decode; tolerant reads still skip malformed lines;
+   round-trip unit tests sit beside the writer.
+2. Every execution of a command step through advance_command_frames
+   journals: an attempt-started event (step identity, attempt number,
+   start timestamp) before the process outcome is known, and an
+   attempt-ended event (end timestamp, exit code or signal, kill or
+   timeout cause, and bounded stdout and stderr tails — 4096 bytes
+   each, truncation marked). Step identity is the item id plus
+   source/run indexes plus position path — never resolved argv, never
+   env values, never interpolated data.
+3. Attempt numbering is durable: a command re-executed by a later
+   drive or resume of the same session gets the next attempt number,
+   not attempt 1 again. Numbering is derived from durable session
+   artifacts, not process-local state.
+4. Consumers of the exhaustive ActivityRecord match — story
+   projection (modules/cli/src/app/story.rs) and desktop detail tree
+   (desktop/src/detail_tree.rs) — compile and ignore the new records;
+   no rendering is added.
+5. Privacy is test-proven: a scratch fixture whose command receives a
+   worktree env-overlay value and an interpolated argv value shows
+   neither value anywhere in the resulting activity JSONL.
+6. Byte-identity elsewhere: sessions that execute no command steps
+   produce byte-identical sidecars; model-frame journaling, center
+   forwarding, and drive reporting behave unchanged.
+7. Durable appends: an execution-event record counts as durably
+   appended only once the writer has requested synchronization of
+   that record's bytes to durable storage — write_all plus flush
+   alone is not durability — and the observer is notified only after
+   the durable append, so any record a downstream consumer heard of
+   exists on disk across a process crash. The single sidecar file,
+   the one-whole-line O_APPEND discipline, and tolerant reads of
+   malformed trailing lines are all preserved under this change.
+
+Done-when is decided by: CARGO_TARGET_DIR=target cargo test -p
+ctx-traits-io, -p ctx-traits-cli, and just desktop-test (goal 4's
+desktop compilation).
+
+## Approach (suggested)
+
+Thread an optional activity writer (or an observer closure) into
+advance_command_frames (modules/io/src/run.rs:4915-5400) from the
+drive path where ActivityRecorder already owns the writer
+(modules/cli/src/app/drive.rs:485-710,1325-1331); callers without a
+writer journal nothing, preserving byte-identity. Take timestamps,
+exit or signal cause, and tails from the 0277.1 runner observation
+rather than re-deriving them. For durable attempt numbers, count
+prior attempt-started records for the same position identity when
+opening the session's sidecar (reads already tolerate truncation), or
+persist a per-position counter in a durable artifact — either route
+satisfies goal 3; say which was chosen in the work summary. Reuse
+PathSegment identity (modules/core/src/procedure/runtime/state.rs:
+313-326) for repeated-step disambiguation. Keep the writer's existing
+one-whole-line O_APPEND discipline so concurrent title/narration
+writers stay safe. For goal 7, the existing activity writer stops at
+write_all + flush and never calls sync_data/sync_all; the fsynced
+audit writer (modules/io/src/audit_journal.rs:68-116) is the
+repository's synchronization precedent — follow it or any equivalent
+correct durability arrangement, reporting the choice in the work
+summary. Model-frame records may keep their current flush-only
+behavior; goal 7 binds execution-event records. Model fixtures on
+proof_capture_budgets.rs and the support crate's scratch homes.
+
+## Out of scope
+
+- Verdict/rejection journaling and ledger enrichment (0277.3).
+- Interruption cause and the incident 2/3 proofs (0277.4).
+- Merge, check, and close events (0277.5).
+- Any TUI/GUI/story rendering of the new records.
+- Retry-policy changes for non-idempotent commands.
+"""
+validation = """
+## Watch
+
+Volume and ordering: every attempt appends up to roughly 8KB of
+tails; append through the one existing writer so the activity file
+stays the single ordering source — never a second file, never
+buffered whole outputs. The privacy line is absolute: position-based
+step identity yes, resolved argv or env values never — incident 1
+needs evidence, not secrets.
+
+## Done when
+
+1. Round-trip and tolerant-read unit tests for the new variants pass.
+   Decided by the io suite.
+2. A scratch-session fixture running a failing command shows paired
+   attempt-started/attempt-ended records with exit code and tails; a
+   re-executed command shows attempt 2. Decided by the cli suite.
+3. The privacy fixture (goal 5) passes. Decided by the cli suite.
+4. Desktop and story compile with the new variants ignored. Story is
+   compiled by the cli suite; the desktop crate is outside the root
+   workspace, so this is decided by just desktop-test.
+5. A unit test beside the writer proves goal 7: an execution-event
+   append requests durable synchronization before the observer is
+   notified, observer notification order is preserved, and tolerant
+   reads still skip malformed trailing lines. Decided by the io
+   suite.
+"""
+
+[relations]
+parent = "0277"
+depends-on = ["0277.1"]
+
+[[checks]]
+name = "io suite passes with sidecar record tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "cli suite passes with attempt journaling proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+expect = "test result: ok"
+timeout-ms = 1800000
+
+[[checks]]
+name = "desktop compiles ignoring new record variants"
+command = "just desktop-test"
+expect = "test result: ok"
+timeout-ms = 3600000

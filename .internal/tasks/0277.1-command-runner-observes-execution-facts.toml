@@ -1,0 +1,142 @@
+schema-version = "0.2"
+key = "0277.1"
+title = "Command runner observes execution facts: true byte-bounded tails, timing, and termination cause"
+status = "ready"
+raised = "2026-09-03"
+content = """
+First child of 0277 (runs journal every execution fact). Every later
+journal event needs facts the process runner currently discards: the
+shared command path in modules/io/src/command.rs today returns exit
+code and a captured prefix, but no start/end times, no terminating
+signal, no kill-by-operator flag, and no true stream tail — the
+capped reader retains the first capture-limit bytes and drains the
+rest, so the last 4096 bytes of a truncated stream are unrecoverable
+(command.rs:259-300). run_raw reduces ExitStatus to status.code() and
+loses ExitStatusExt::signal() (command.rs:568-610), and RunOutput
+never exposes run_kill::was_killed, so a TUI-killed command reads as
+a generic failure with no exit code.
+
+This child makes the runner observe and return those facts without
+changing any existing consumer's behavior. It creates the shared
+byte-bounded tail primitive the sibling children (journal events,
+ledger rejection evidence, check-execution records) all reuse.
+"""
+scope = """
+This plan separates GOALS from APPROACH. Goals are binding: each
+Done-when states an observable outcome and the existing command that
+decides it. The approach is the architect's suggested route; the run
+may deviate from any of it whenever a goal requires it and reports
+the deviation in its work summary — a deviation is not a violation.
+
+## Goals (binding)
+
+1. True stream tails: for both stdout and stderr, the command path
+   retains the trailing bytes of the real stream — each tail capped
+   at 4096 bytes, truncation explicitly marked — even when the
+   existing capture limit discarded the middle of the stream. Tails
+   are collected inside the existing streaming reader engine with
+   bounded memory; whole outputs are never buffered. The tail is a
+   valid UTF-8 string in serialized form while honoring the strict
+   byte ceiling.
+2. Termination cause: the runner's result exposes, when applicable,
+   the terminating signal number (currently lost in run_raw), whether
+   the process group was killed through the run-kill mechanism, and
+   the already-typed idle-versus-wall timeout cause. A killed command
+   is distinguishable from an ordinary nonzero exit.
+3. Timing: the runner's result exposes an explicit start fact and an
+   explicit end fact for the process — both present, both with
+   millisecond precision — measured at the spawn/wait boundary in
+   IO; core stays clock-free.
+4. Shared tail primitive: exactly one tail-clipping implementation
+   exists in shared code — byte-bounded, UTF-8-safe,
+   truncation-marking — usable by later children for journal tails,
+   rejection evidence, and check records; the existing check-verdict
+   tail path (failure_tail/clipped_tail in modules/core/src/
+   procedure/session.rs) produces its output through that same
+   implementation with consistent truncation-marker vocabulary, and
+   no second clipping implementation remains anywhere.
+5. Byte-identity elsewhere: existing consumers of RunOutput see
+   unchanged captured stdout/stderr, truncation flags, exit codes,
+   success values, and serialization. New facts are additive.
+6. Unit coverage beside command.rs proves: tail correctness when
+   output exceeds both the capture limit and the tail cap; tail
+   equals full output when short; truncation marking; UTF-8 boundary
+   safety on multibyte output; signal cause on a signal-killed child;
+   timeout causes; timing presence.
+
+Done-when is decided by: CARGO_TARGET_DIR=target cargo test -p
+ctx-traits-io (new unit tests included), -p ctx-traits-core (tail
+extraction), and -p ctx-traits-cli (byte-identity: no existing
+consumer's behavior changes). All three are declared checks below.
+
+## Approach (suggested)
+
+Extend read_capped_observed (modules/io/src/command.rs:259-300) with
+a bounded trailing ring buffer per stream alongside the existing
+prefix capture, so one drain pass yields prefix, truncation flag, and
+tail. Carry start/end instants around the spawn/wait in
+run_with_env/run_raw (command.rs:186-225,486-612). Preserve
+ExitStatusExt::signal() where run_raw currently keeps only
+status.code(). Expose run_kill::was_killed observed at completion.
+Add the new fields to RunOutput (command.rs:126-148) or a companion
+observation struct — whichever keeps existing constructors and tests
+untouched. Put the pure tail-clipping helper where both io and core
+can reach it (core is acceptable: byte-slicing is pure), and align
+its marker text with the vocabulary of failure_tail/clipped_tail
+(modules/core/src/procedure/session.rs:3228-3297). Whether
+failure_tail delegates to the new primitive or both call one
+extracted helper is the run's choice — either arrangement satisfies
+goal 4; report which was chosen in the work summary. Follow the
+existing proof style of modules/cli/tests/proof_capture_budgets.rs
+for any fixture-level coverage, but unit tests beside command.rs are
+the primary seam.
+
+## Out of scope
+
+- Writing any journal record (0277.2).
+- Ledger or rejection changes (0277.3).
+- Interruption-cause plumbing (0277.4).
+- Check/merge/close facts (0277.5).
+- Changing capture limits, retry semantics, or command success rules.
+"""
+validation = """
+## Watch
+
+Memory bounds are the seam: the tail buffer must be O(cap), collected
+during the existing concurrent drain — a post-hoc tail over captured
+prefixes silently reports the wrong bytes whenever capture truncated.
+The UTF-8 ceiling is bytes, not characters; clipping must not split a
+code point in the serialized string while never exceeding 4096 bytes.
+
+## Done when
+
+1. New unit tests beside command.rs prove tails, termination cause,
+   and timing per goals 1-3 and 6. Decided by the io suite.
+2. The shared tail primitive exists and the check-verdict tail path
+   is not a second implementation. Decided by the core and io suites
+   staying green after the extraction.
+3. No existing test's expectations changed to accommodate the new
+   fields. Decided by the io and cli suites.
+"""
+
+[relations]
+parent = "0277"
+depends-on = []
+
+[[checks]]
+name = "io suite passes with runner observation tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "core suite green after tail extraction"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "cli suite green with unchanged consumer behavior"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+expect = "test result: ok"
+timeout-ms = 1800000

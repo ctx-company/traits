@@ -1,0 +1,148 @@
+schema-version = "0.2"
+key = "0277.3"
+title = "Journal every runtime verdict and enrich rejected-attempt evidence in the ledger"
+status = "ready"
+raised = "2026-09-03"
+content = """
+Third child of 0277; carries the incident 1 regression proof. Today a
+RejectedAttempt holds only sequence index, position path, optional
+digest, and a reason string — no timestamp, attempt number, exit
+code, or output (modules/core/src/procedure/runtime/frames.rs:
+614-631). Worse, the failed-ordinary-command path in
+modules/io/src/run.rs:5206-5271 sets evidence stdout/stderr to None
+while holding the process output in hand, which is exactly why
+session 2fa45dda's rejection read as an unexplained missing-output
+error. And the fixed reason string, required declared slot output was
+not supplied, cannot distinguish a command that exited nonzero with
+no output from one that succeeded but printed nothing. Preflight
+rejections with persist_session = false never touch the ledger at
+all, so verdict journaling cannot key off ledger writes.
+
+This child journals every acceptance and rejection as an event
+through one shared helper, and enriches command-caused rejected
+attempts with timestamp, attempt number, exit code, and bounded
+output tails — backward-compatibly.
+"""
+scope = """
+This plan separates GOALS from APPROACH. Goals are binding: each
+Done-when states an observable outcome and the existing command that
+decides it. The approach is the architect's suggested route; the run
+may deviate from any of it whenever a goal requires it and reports
+the deviation in its work summary — a deviation is not a violation.
+
+## Goals (binding)
+
+1. Every accepted submission and every rejection appends one journal
+   verdict event naming the verdict, the concrete reason, and the
+   caller provenance already carried in CallSubmission.caller. This
+   includes non-persisting preflight rejections: a verdict event is
+   written even when persist_session is false and no ledger mutation
+   occurs.
+2. One shared response-persist-and-journal helper serves all IO
+   submission entry points — run::call, terminal_failure_call, the
+   set current-frame submission, and the direct command/check
+   submissions inside advance_command_frames — so accepted/rejected
+   event logic cannot drift between paths.
+3. RejectedAttempt gains optional fields — timestamp, attempt number,
+   exit code, stdout tail, stderr tail (4096 bytes each, truncation
+   marked) — using the repository's serde default plus
+   skip_serializing_if pattern: old ledgers decode, and a rejected
+   attempt without the new evidence serializes byte-identically to
+   today. Attempt-order truth stays in the activity JSONL; the
+   existing rejected-attempt sort is not relied on for ordering.
+4. The failed or output-truncated ordinary-command path stops
+   discarding process output: the rejection evidence recorded for
+   such a step carries the exit code and output tails the process
+   produced.
+5. An empty-stdout rejection distinguishes, in its recorded reason,
+   a command that exited nonzero producing no output from a command
+   that succeeded but printed nothing.
+6. Incident 1 is regression-proven: a scratch-session test replays a
+   command step exiting nonzero with empty stdout and asserts, from
+   the activity journal and ledger files alone, the attempt's exit
+   code and empty-stdout fact plus a rejection carrying timestamp,
+   attempt number, and tails.
+
+Done-when is decided by: CARGO_TARGET_DIR=target cargo test -p
+ctx-traits-core, -p ctx-traits-io, -p ctx-traits-cli, and just
+desktop-test (the verdict record is a new outer ActivityRecord
+variant, and the desktop crate's exhaustive match is outside the
+root workspace).
+
+## Approach (suggested)
+
+Enrich command-caused rejections centrally in submit_run_submission
+(modules/core/src/procedure/session.rs:2398-2575), where trusted
+command evidence and the final validation report meet — not in each
+validator branch. Keep core pure: timestamps and tails arrive as
+typed evidence built at the IO boundary (0277.1 primitives, 0277.2
+attempt numbers). Distinguish the two empty-output cases where the
+missing-output reason is currently minted (runtime/
+transitions_rejection.rs:36-43 and session.rs:3412-3419), using the
+submitted command evidence's exit code. Build the shared helper in
+modules/io/src/run.rs around the entry points at run.rs:2924-3139 and
+5132-5390, emitting the 0277.2 record kinds (add a verdict variant
+beside them). Remember new optional fields alter ledger digests only
+when present — core session/runtime compatibility tests should prove
+old-ledger decode and absent-evidence byte-identity. Fixture style:
+support-crate scratch sessions as in proof_capture_budgets.rs.
+
+## Out of scope
+
+- Interruption cause, the debug checkpoint, incidents 2 and 3
+  (0277.4).
+- Merge/check/close journaling (0277.5).
+- Rejection message UX or taxonomy surfaced to the TUI (board 0271).
+- Changing retry semantics or what the runtime accepts.
+"""
+validation = """
+## Watch
+
+Do not let verdict journaling depend on a ledger write happening —
+persist_session false paths still journal. New RejectedAttempt fields
+must leave absent-evidence serialization byte-identical or every
+existing ledger digest expectation breaks. Enrich in one core seam;
+duplicating tails into each validator branch is the drift this task
+exists to prevent.
+
+## Done when
+
+1. Incident 1 scratch test (goal 6) passes. Decided by the cli suite.
+2. Core compatibility tests prove old-ledger decode and unchanged
+   serialization for evidence-free rejections. Decided by the core
+   suite.
+3. Verdict events appear for accepted, rejected-persisting, and
+   rejected-non-persisting submissions in unit or fixture coverage.
+   Decided by the io and cli suites.
+4. All three package suites stay green, and the desktop crate
+   compiles ignoring the verdict record variant. Decided by the
+   declared package checks plus just desktop-test.
+"""
+
+[relations]
+parent = "0277"
+depends-on = ["0277.1", "0277.2"]
+
+[[checks]]
+name = "core suite passes with rejection compatibility tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "io suite passes with verdict helper tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+expect = "test result: ok"
+timeout-ms = 1200000
+
+[[checks]]
+name = "cli suite passes with incident 1 proof"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+expect = "test result: ok"
+timeout-ms = 1800000
+
+[[checks]]
+name = "desktop compiles ignoring the verdict variant"
+command = "just desktop-test"
+expect = "test result: ok"
+timeout-ms = 3600000
