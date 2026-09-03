@@ -1,0 +1,136 @@
+schema-version = "0.2"
+key = "0278.1"
+title = "A durable sessions cache seeds the first frame"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0278` goal 1 (findings 3 and 4): the sessions list starts empty and
+paints placeholder state until the center round-trip completes, because
+nothing persists the last snapshot client-side. The task board already has
+exactly the needed disk-cache pattern.
+
+## Grounded against HEAD 5eaa21992
+
+- `State::new_without_worker...` initializes `sessions`, `sessions_visible`,
+  `session_preview` empty with `has_snapshot=false`
+  (`modules/cli/src/app/dashboard.rs:1251-1322`); `State::reload` only queues
+  `worker.refresh` (`dashboard.rs:1401-1409`); the footer renders
+  `loading...` until the first snapshot (`dashboard.rs:8496-8505`, locked by
+  `footer_shows_loading_only_before_the_first_snapshot`, :8841-8851). There
+  is no durable sessions-list cache anywhere.
+- The worker starts with an empty row map and subscribes machine-wide via
+  `center::subscribe(None)`; rows become visible only after SnapshotEnd,
+  projection, channel delivery, and `State::apply_snapshot`
+  (`dashboard/worker.rs:293-304,361-402`; `dashboard.rs:1623-1705`).
+- Cache precedent: `modules/io/src/task_board_cache.rs` — schema-versioned
+  JSON, corrupt/unreadable/wrong-schema treated as a miss, symlink safety,
+  atomic temp-plus-rename (:1-10,19-40,64-109). Cache roots resolve through
+  `modules/io/src/state.rs:344-364,442-455`. Cache writes are best-effort;
+  cached data is derived evidence, never authority (`dashboard.rs:6062-6079`).
+- A live session emits frequent `RowChanged`/`ActivityLine` deltas; the
+  persistence policy must not turn every event into a synchronous disk write.
+- `apply_snapshot` preserves selection by stable session identity and retains
+  the old model on refresh errors (`dashboard.rs:1635-1705`).
+
+## GOALS — binding
+
+1. **A warm cold open shows real rows on the first frame.** With a cache left
+   by a prior run, `State` construction seeds real SESSIONS and MERGES rows
+   before any worker snapshot exists; the first draw renders those rows and
+   the footer no longer claims bare `loading...` (cached rows may carry the
+   existing stale/syncing affordance until live truth arrives — cached state
+   must never present itself as live).
+   Decided by: dashboard lib suite assertions that construct `State` against
+   a warm cache with no worker snapshot delivered and observe rows plus
+   footer state.
+   Excluded: PTY-level first-frame capture (state-level assertions decide);
+   0194's session-overlay semantics outside the dashboard.
+
+2. **Cache misses are silent and writes are safe.** Absent, corrupt,
+   unreadable, or wrong-schema cache data yields exactly today's empty start;
+   writes are atomic temp-plus-rename and best-effort (a failed write never
+   affects rendering); the write policy is debounced/bounded so a live event
+   storm does not become per-event synchronous disk writes.
+   Decided by: unit tests of the cache module (they run under the declared
+   `just test` check).
+   Excluded: any cache-repair machinery.
+
+3. **Live truth supersedes the seed with no empty intermediate state.** The
+   first accepted worker snapshot reconciles through the existing
+   `apply_snapshot` path — selection preserved by stable identity — and at no
+   point between seed and live commit do the lists render empty.
+   Decided by: dashboard lib suite.
+
+4. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- The sessions subscription is machine-wide (`subscribe(None)`) and rows span
+  repositories, so the cache is machine-wide too — one fixed path under the
+  cache base `state.rs` resolves, not a per-repo-key root.
+- Persist the projected dashboard rows (the SESSIONS/MERGES vectors of
+  `DashboardSnapshot`), not `RunSummary`, with an independent schema version.
+  This decouples the cache from `CENTER_PROJECTION_VERSION` and touches no
+  shared center type.
+- The seed read happens during `State` construction, before the input/draw
+  loop starts — the same startup slot the task-board cache uses
+  (`dashboard.rs:6207-6247`). Per the charter ruling, a bounded pre-loop
+  cache-file read is not a render-thread read; once the loop runs, no reads
+  (0278.2's contract).
+
+## APPROACH — suggested route, not a boundary
+
+1. New cache module following `task_board_cache.rs` exactly: schema-versioned
+   JSON, miss-on-anything-wrong, symlink safety, atomic temp-plus-rename.
+2. Seed in the production `State` constructors beside
+   `load_tasks_board_at_startup` (`dashboard.rs:1222-1238`), with a
+   cache-seeded flag so `has_snapshot`/loading semantics stay honest until
+   the first live snapshot commits.
+3. Write from the worker thread when an accepted snapshot commits, debounced
+   (minimum interval and/or row-set-change detection, plus a final write on
+   clean shutdown); never from the renderer.
+4. Rewrite `footer_shows_loading_only_before_the_first_snapshot` to the new
+   contract (loading only when neither cache nor live rows exist) rather than
+   deleting it.
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   dashboard`, then `just test`. In a run worktree, isolate the build cache
+   (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
+'''
+validation = '''
+## Watch
+
+- Cache is evidence, never authority: cached rows keep a stale/syncing
+  affordance until the first live commit; a cache write failure is invisible
+  to rendering.
+- No reads added to the running input/draw loop; the seed is pre-loop only.
+- Proofs use scratch cache directories, never committed repo content.
+
+## Done when
+
+- Warm-open seeding, miss-safety, debounced best-effort writes, and
+  seed-to-live reconciliation are each asserted by suites the declared checks
+  run.
+- The dashboard lib suite and `just test` are green.
+'''
+
+[relations]
+parent = "0278"
+
+[[checks]]
+name = "dashboard lib suite is green including cache-seeded first paint"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

@@ -1,0 +1,143 @@
+schema-version = "0.2"
+key = "0278.3"
+title = "Refreshes reconcile in place: no pane blanks and refills"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0278` goal 3 (finding 5): steady-state refresh blanks the preview
+whenever the viewed thing changed — for a live session, every cycle — instead
+of swapping content in place. This is the observed mid-session flash.
+
+## Grounded against HEAD 5eaa21992
+
+- For a selected session, `State::apply_snapshot` sets `session_preview=None`
+  when identity changed OR `changed_ledger_path` matches the selected ledger,
+  then queues a replacement (`modules/cli/src/app/dashboard.rs:1674-1692`).
+  `sessions_preview_pane_lines` maps `None` to two empty vectors, so the
+  panes render empty until the async result lands
+  (`dashboard.rs:7721-7743,7767-7813`).
+- The clearing behavior is locked by
+  `selected_center_event_refreshes_the_retained_preview`
+  (`dashboard.rs:8957-8971`). Per the parent's owner contract, that assertion
+  is the defect: the test must be rewritten, not defended.
+- The good half already exists: unchanged snapshots and unrelated events
+  retain the preview (`dashboard.rs:8913-8955`); selection is preserved by
+  stable identity (`dashboard.rs:8887-9059`).
+- In-place machinery is reusable: worker `preview` calls
+  `refresh_attached_view` on a cached identity-matched `AttachedView` and
+  returns the replacement atomically (`dashboard/worker.rs:669-681`);
+  `refresh_attached_view` refreshes activity/landing facts on an unchanged
+  digest, swaps reconstructed fields on a changed digest, and installs an
+  explicit unreadable state on read failure — never an empty view
+  (`dashboard.rs:3581-3637,3763-3774`). `apply_preview_results` rejects stale
+  identities (`dashboard.rs:1604-1621`).
+- Cost coupling: an `ActivityLine` delta does not alter the row map, yet the
+  worker clones the entire accepted map and reprojects every row into a full
+  `DashboardSnapshot` for it (`center.rs:544-568`; `worker.rs:429-451`), so
+  steady-state work is O(total rows) per live event.
+- Staging/rollback and stale-retention semantics must survive: staged initial
+  snapshots commit only complete, rejected candidates force reconnect,
+  disconnects retain last accepted state (`worker.rs:333-451,508-567`; tests
+  at :988-1177,1527-1647). Only `Ended` removes a row (`center.rs:544-568`).
+
+## GOALS — binding
+
+1. **A same-selection refresh never clears the preview.** When the selected
+   session's identity is unchanged and its ledger changed, the current
+   preview is retained and an in-place replacement is queued and installed
+   atomically; the progress/journey panes never render empty between the
+   event and the replacement. Proven for a static selection and for a live
+   selection receiving repeated changed-ledger events (the preview stays
+   populated across the whole cycle).
+   `selected_center_event_refreshes_the_retained_preview` is rewritten to
+   lock retention-then-replacement.
+   Decided by: dashboard lib suite.
+
+2. **A selection change shows an explicit pending state, never a silently
+   empty pane.** A pending preview renders an explicit marker line rather
+   than two empty vectors; when refreshing the same selection there is
+   content, so the marker appears only for genuinely new selections.
+   Decided by: dashboard lib suite.
+   Excluded: any visual redesign beyond the marker line.
+
+3. **Activity-only deltas stop reprojecting the world.** An `ActivityLine`
+   delta no longer rebuilds and emits a full `DashboardSnapshot`; for the
+   selected ledger it still drives goal 1's in-place preview refresh; for
+   any other ledger it is cheap. Staging/rollback, Ended-only removal, and
+   stale-retention semantics are unchanged.
+   Decided by: worker/dashboard tests in the lib suite (for example by
+   observing emitted snapshots in the existing worker test harness).
+   Excluded: restructuring `RowChanged` handling into a delta protocol — the
+   charter's lean line keeps full projected-snapshot emission for genuine row
+   changes.
+
+4. **Existing retention and selection suites stay green.** Unchanged-snapshot
+   and unrelated-event retention, identity-stable selection, worker rollback
+   and reconnect tests all pass; decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- Reuse, never duplicate: the in-place path is worker `preview` +
+  `refresh_attached_view` + `apply_preview_results`; goal 1 is a routing and
+  condition change, not a second refresh mechanism.
+- Read-failure honesty carries over: a failed refresh shows the explicit
+  unreadable state `refresh_attached_view` already installs, never a blank.
+- Excluded here: per-open subscribe cost (0278.4); board pane delivery
+  (0278.2); the durable cache seed (0278.1).
+
+## APPROACH — suggested route, not a boundary
+
+1. Change the clearing condition at `dashboard.rs:1674-1692`: identity
+   unchanged + selected ledger changed → keep `session_preview`, queue the
+   in-place refresh; identity changed → pending marker per goal 2.
+2. For activity-only deltas, short-circuit before the full clone/projection
+   in `worker.rs:429-451`, forwarding a lightweight selected-ledger signal
+   (or routing straight into the existing preview request queue) instead of
+   `emit_snapshot`.
+3. Map the pending state in `sessions_preview_pane_lines`
+   (`dashboard.rs:7721-7743`) to the explicit marker.
+4. Rewrite the locked test; add the static and live-cycle retention proofs
+   beside the existing retention tests (`dashboard.rs:8887-9059`).
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   dashboard`, then `just test`. Isolate the build cache
+   (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a failure.
+'''
+validation = '''
+## Watch
+
+- Stale replacements for a changed selection must still be rejected
+  (`apply_preview_results` identity filtering stays intact).
+- The activity short-circuit must not starve the selected preview of live
+  updates — that is the coupling goal 1 and goal 3 share.
+- Do not weaken staging/rollback: a rejected snapshot candidate still leaves
+  the accepted state untouched.
+
+## Done when
+
+- Same-selection retention-then-replacement (static and live), the explicit
+  pending marker, and the activity-only no-reprojection behavior are each
+  asserted by the dashboard lib suite, with the old clearing test rewritten.
+- The dashboard lib suite and `just test` are green.
+'''
+
+[relations]
+parent = "0278"
+
+[[checks]]
+name = "dashboard lib suite is green including in-place preview retention"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

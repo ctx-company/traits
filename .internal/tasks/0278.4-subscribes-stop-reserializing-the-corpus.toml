@@ -1,0 +1,134 @@
+schema-version = "0.2"
+key = "0278.4"
+title = "Subscribes stop re-serializing the whole corpus"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0278` goal 4 (finding 1): every dashboard open pays O(total sessions)
+cloning, sorting, and fresh JSON serialization in the center, even when no
+row changed — per-open cost grows linearly with the corpus.
+
+## Grounded against HEAD 5eaa21992
+
+- Every subscribe calls `public_rows`, which iterates the complete model,
+  clones every `RunSummary` and string field through `public_row`, and sorts
+  the resulting vector (`modules/io/src/center.rs:3074-3113,5625-5655`); the
+  subscriber retains the full `VecDeque<CenterPublicRow>` (:2170-2183).
+- The socket writer runs `serde_json::to_vec` per row per subscriber via
+  generic `write_line` (`center.rs:924-970,4303-4319`).
+- `large_snapshot_uses_one_bounded_queue_slot` proves bounded queueing, not
+  bounded generation/serialization cost (`center.rs:9235-9267`). Ordering and
+  backpressure invariants are covered at :3074-3191,3260-3322 with tests at
+  :8848-9163.
+- The incremental model to preserve: unchanged fingerprints avoid reparsing;
+  changed fingerprints parse at most once per reconciliation; only committed
+  deltas are published (`center.rs:2384-2413,2503-2654,2840-2958`).
+- Compatibility: `CenterPublicRow`/`CenterEvent`/`CenterDelta` are shared
+  with CLI tasks/reporting and the GPUI desktop (`desktop/src/center_link.rs`,
+  `desktop/src/dashboard.rs`); the root workspace excludes desktop
+  (`Cargo.toml:1-12`). `CENTER_SCHEMA_VERSION` stays 1 and
+  `CENTER_PROJECTION_VERSION` stays 3 for the persisted summary projection
+  (`center.rs:77-85,884-900,2250-2324`).
+
+## GOALS — binding
+
+1. **Unchanged rows are not re-serialized per open.** The center serves
+   snapshot rows to a new subscriber reusing per-row serialized bytes cached
+   when the row last changed: after an unchanged model, a second subscribe
+   performs zero full-row serde serializations, and a changed row's bytes are
+   rebuilt at most once per change — not once per subscriber per open. The
+   wire stays byte-compatible `CenterPublicRow` JSON lines: no protocol or
+   shared-type change, desktop and older clients unaffected.
+   Decided by: a center unit test observing serialization counts through
+   test-visible instrumentation — a counter or equivalent; the run chooses
+   the observation mechanism.
+   Excluded: transmitting fewer rows or a thinner list row type — a
+   list-projection wire change is a protocol decision this family does not
+   take; the bound is reserialization cost, not payload width. Client-side
+   costs are 0278.3's.
+
+2. **Snapshot invariants stay green.** SnapshotStart-rows-SnapshotEnd
+   ordering, pending updates held until End and drained FIFO, overload
+   disconnect, and the bounded-queue-slot proof all pass unchanged.
+   Decided by: the declared center suite check.
+
+3. **The center's incremental model is preserved.** Fingerprint-based reparse
+   avoidance and committed-delta publication are untouched; byte-cache
+   invalidation rides the same commit path that publishes deltas, so cache
+   and published state can never disagree.
+   Decided by: the declared center suite check plus the goal-1 test.
+
+4. **Suites stay green; desktop stays compiling.** The persisted SQLite row
+   shape is unchanged (projection version 3, schema version 1). If any type
+   shared with desktop is nevertheless touched, run `just desktop-test` and
+   `just desktop-lint` in-run and report the result — the root workspace and
+   both declared checks exclude desktop.
+   Decided by: the declared checks, plus the reported desktop commands when
+   applicable.
+'''
+scope = '''
+## Decisions
+
+- Cache serialized bytes, not a second row model: the authoritative row stays
+  `CenterModel`'s `RunSummary` + metadata; the cache holds only the encoded
+  snapshot line for reuse and is invalidated by the commit that changes the
+  row. Disposable, like the SQLite index.
+- Sorting: `public_rows` sorts per subscribe. Maintaining sorted order
+  incrementally is optional — do it only if the byte cache alone leaves an
+  observed hotspot that matters; do not build it speculatively.
+
+## APPROACH — suggested route, not a boundary
+
+1. Hold the cached bytes where the model owns rows (`CenterModel`,
+   `center.rs:2080-2110`) or at the snapshot-build seam (`public_rows`);
+   rebuild a row's bytes in the commit path that already publishes its delta.
+2. Add a write path beside `write_line` that accepts pre-serialized bytes for
+   snapshot rows (`center.rs:924-970,4303-4319`); everything else keeps the
+   generic path.
+3. The goal-1 test: warm a model, subscribe twice, assert the second
+   subscribe's full-row serialization count is zero and that changing one row
+   rebuilds exactly that row's bytes once.
+4. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center`, then
+   `just test`; `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test
+   proof_center` for the real-process seam if the subscribe path changed
+   shape. Isolate the build cache (`CARGO_TARGET_DIR=target`) in a run
+   worktree before trusting a failure.
+'''
+validation = '''
+## Watch
+
+- Byte-for-byte wire compatibility: an installed older client and the desktop
+  read the same JSON lines as before.
+- Invalidation and delta publication commit together; a cached line must
+  never outlive the row state it encoded.
+- Warm-slice behavior is untouched: subscribing during corpus warming still
+  sees model rows plus subsequent deltas.
+
+## Done when
+
+- The zero-reserialization-on-unchanged-model and once-per-change assertions
+  pass in the center suite; ordering/backpressure/bounded-queue proofs pass
+  unchanged; `just test` is green; desktop commands were run and reported if
+  shared types were touched.
+'''
+
+[relations]
+parent = "0278"
+
+[[checks]]
+name = "center suite is green including serialization-count proof"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

@@ -1,83 +1,162 @@
 schema-version = "0.2"
 key = "0278"
 title = "The dashboard reads state instantly and never flashes"
-status = "draft"
+status = "ready"
 raised = "2026-09-02"
-content = """
-Owner-reported, Claude-investigated 2026-09-02. Opening `ctx traits`
-shows placeholder zeroes for 2-3 seconds before real sessions appear,
-occasionally freezes the whole TUI for ~10 seconds, and — already
-loaded — flashes a pane empty and back on every refresh. Reading local
-state into a list should be effectively instant; today it is not.
+content = '''
+Charter. This file carries the shared intent, the family-wide rulings, and
+the umbrella stop condition. It lands no code of its own: every execution
+plan lives in the children, each of which separates binding goals from
+suggested approach in its own text. An implementation cut written against
+this file instead of a child is the failure mode to avoid.
 
-Five findings from reading the current read/paint pipeline
-(modules/cli/src/app/dashboard.rs, dashboard/worker.rs,
-modules/io/src/center.rs). They share one root: the pipeline clears
-state and re-fetches where it should keep what it has and reconcile,
-and it re-does work per open that could be cached.
+## The problem (owner-reported, Claude-investigated 2026-09-02)
 
-1. The center re-serializes every session row from scratch on every
-   subscribe, and ships the full row when the list needs a fraction of
-   it — O(sessions) serde work per open, growing with the corpus.
-2. Task-board reads happen on the render thread (startup and the
-   staleness refresh), so a board read blocks input — the ~10s freeze.
-3. The list starts empty and paints placeholder zeroes before the
-   first snapshot exists, then replaces wholesale.
-4. Nothing persists the last snapshot to disk for the sessions list,
-   so every fresh process round-trips the center before showing
-   anything — even though the tasks board already has exactly this
-   disk-cache pattern.
-5. Steady-state refresh blanks the preview (and any nulled-then-
-   refetched pane) whenever the thing being viewed changed — which for
-   a live session is every cycle — instead of swapping content in
-   place. This is the mid-session flash.
+Opening `ctx traits` shows placeholder zeroes for 2-3 seconds before real
+sessions appear, occasionally freezes the whole TUI for ~10 seconds, and —
+already loaded — flashes a pane empty and back on every refresh. The five
+findings share one root: the pipeline clears state and re-fetches where it
+should keep what it has and reconcile, and it re-does per-open work that
+could be cached.
 
-## Owner contract
+## Owner contract (binding)
 
-Opening the dashboard shows real, last-known state on the first frame.
-Reads never run on the render thread. A refresh updates rows and
-previews in place — no pane blanks and refills, at startup or while
-loaded. Snapshot cost does not grow unbounded with the session count.
-"""
-scope = """
-Goals below are binding outcomes; the route is the architect's to
-decide. This is deliberately light on implementation — architect
-grounds it and splits it.
+Opening the dashboard shows real, last-known state on the first frame. Reads
+never run on the render thread. A refresh updates rows and previews in place
+— no pane blanks and refills, at startup or while loaded. Snapshot cost does
+not grow unbounded with the session count.
 
-## Goals (binding, observable)
+## The children
 
-1. Instant first paint: opening the dashboard shows real session rows
-   on the first frame, seeded from a durable client-side cache, not
-   placeholder zeroes.
-2. No render-thread reads: no filesystem or store read runs on the
-   thread that polls input and draws; the TUI stays responsive
-   throughout a refresh.
-3. Reconcile, never clear-and-refill: a refresh updates the session
-   list and the open preview in place; no pane goes empty then
-   repopulates, at startup or in steady state (including while viewing
-   a live, updating session).
-4. Cheap snapshots: the per-open snapshot cost is bounded and does not
-   scale linearly with total sessions the way it does today — the
-   center serves list rows without re-serializing every full row from
-   scratch on each subscribe.
-5. The improvements hold as the corpus grows and as sessions update
-   live; existing dashboard behavior and tests stay green.
+1. `0278.1` — a durable sessions cache seeds the first frame (findings 3+4):
+   machine-wide, schema-versioned, miss-on-anything-wrong client cache of the
+   projected dashboard rows, seeded pre-loop, written debounced and
+   best-effort from the worker.
+2. `0278.2` — no reads on the input-and-draw thread (finding 2): startup
+   board fallback, staleness refresh, `s` refresh, `task_session_join` repo
+   resolution, and MERGES git enumeration move to async worker channels; the
+   renderer retains previous content until replacements arrive.
+3. `0278.3` — refreshes reconcile in place (finding 5): same-selection
+   refresh retains the preview and swaps it atomically via the existing
+   `refresh_attached_view` path; selection changes show an explicit pending
+   marker; activity-only deltas stop triggering full reprojection.
+4. `0278.4` — subscribes stop re-serializing the corpus (finding 1): the
+   center caches per-row serialized snapshot bytes invalidated at commit, so
+   an open re-serializes nothing unchanged; wire stays byte-compatible.
 
-## Out of scope
-- The giant-ledger accumulation and the >1MiB `get` silent-close are
-  their own concerns; this task is the read/paint pipeline.
-- No visual redesign; this is latency and stability only.
-"""
-validation = """
+No child depends on another to compile or to hold its own contract; the
+positional order above is the suggested execution order (it minimizes churn
+in the shared startup and apply paths).
+
+## Family-wide rulings (grounded; owner attention flagged where noted)
+
+- **Render-thread coverage (OWNER ATTENTION).** The literal contract "reads
+  never run on the render thread" is bound in 0278.2 to every automatic,
+  periodic, and selection-driven read path — the paths that run without a
+  mutating user command and cause the observed freezes. Explicit mutating
+  action paths (story submission, answer flows, task mutations) keep the
+  0243.4 brief's selected-detail/mutation exception; moving whole mutation
+  flows off-thread is a different contract this family does not take. If the
+  owner wants the literal universal reading, that is a follow-up task.
+- **Pre-loop seeding is not a render-thread read.** A bounded cache-file read
+  during `State` construction, before the input/draw loop starts, follows the
+  shipped task-board precedent. Once the loop runs, no reads.
+- **Cache is evidence, never authority.** The sessions cache is machine-wide
+  (the subscription is `subscribe(None)` and rows span repositories), stores
+  projected dashboard rows rather than `RunSummary` (decoupled from
+  `CENTER_PROJECTION_VERSION`), renders with a stale/syncing affordance until
+  live truth commits, and treats every read/parse failure as a miss. This is
+  stricter than 0194's permitted `syncing` placeholder: real last-known rows
+  on frame one when a cache exists.
+- **The lean line on steady-state cost.** The family removes the two proven
+  linear costs — per-open reserialization (0278.4) and activity-storm full
+  reprojection (0278.3). It deliberately keeps full projected-snapshot
+  emission for genuine `RowChanged` events and does not rebuild the
+  worker-to-renderer channel into a delta protocol; revisit only with
+  observed evidence that the remaining cost matters.
+- **An explicit pending marker is honest state, not a flash.** Only a
+  genuinely new selection may show it; a refresh of the thing already shown
+  must never lose content.
+- **The center's model stays authoritative and incremental.** No client-side
+  store scans return; fingerprint reparse-avoidance and committed-delta
+  publication are untouched; only `Ended` removes a row, via the shared
+  `CenterDelta::apply_to`. Wire bytes, `CENTER_SCHEMA_VERSION` 1, and
+  `CENTER_PROJECTION_VERSION` 3 are preserved; any touch of a type shared
+  with the desktop requires running `just desktop-test`/`just desktop-lint`
+  in-run, since no workspace gate covers desktop.
+
+## Umbrella stop condition
+
+The family is done when all four children are done and the contract holds
+together on one build: a cold open with a warm cache paints real rows on the
+first frame; input stays live through board and session refreshes; a static
+and a live-updating selection both refresh with no pane blanking; a repeat
+subscribe over an unchanged corpus performs no full-row reserialization; the
+dashboard and center suites and the full landing gate (`just test-full`) are
+green. The closing review after the last child verifies the cross-child
+seams — startup ordering of cache seed versus async board delivery, preview
+retention under the new activity routing, cache honesty versus the
+stale/syncing affordance — rather than re-reviewing each child.
+
+## Acceptance shape
+
+Behavioral proofs at the state/suite level using scratch fixtures — no
+frozen-inventory or behavior-freezing tests. Each child carries its own
+checks; the charter's checks verify the family's joined suites and gates.
+'''
+scope = '''
+The draft's binding goals distribute as follows, binding in the children:
+goal 1 (instant cache-seeded first paint) → 0278.1; goal 2 (no render-thread
+reads, responsive TUI) → 0278.2 under the charter's coverage ruling; goal 3
+(reconcile in place, never clear-and-refill, static and live) → 0278.3 for
+session list/preview and 0278.2 for board/MERGES delivery; goal 4 (bounded
+per-open snapshot cost, no per-subscribe reserialization) → 0278.4; goal 5
+(holds as the corpus grows and sessions update live; existing behavior and
+tests green) → every child's suites plus the umbrella stop condition.
+
+Out of scope for the whole family: giant-ledger accumulation and the
+greater-than-1MiB `get` silent-close (their own concerns); visual redesign
+beyond 0278.3's explicit pending marker; moving explicit mutating action
+flows off the render thread (charter ruling, owner attention); a thinner
+list-row wire type or a worker-to-renderer delta protocol (lean line);
+desktop-side caching or reconciliation changes.
+'''
+validation = '''
 ## Done when
-1. A cold open renders real rows on the first frame (cache-seeded).
-2. No read runs on the render thread; a board/refresh cannot freeze
-   input.
-3. List and preview refresh in place with no empty-then-filled flash,
-   proven for both a static and a live-updating selection.
-4. Snapshot cost is shown not to grow linearly with session count.
-5. The dashboard's existing suites stay green.
 
-The instruments and their exact assertions are the architect's to
-choose.
-"""
+1. All four children are status done.
+2. A cold open with a warm cache renders real rows on the first frame, and a
+   cacheless open behaves exactly as today (0278.1's proofs).
+3. No automatic, periodic, or selection-driven read runs on the input/draw
+   thread; board and MERGES results arrive async with previous content
+   retained (0278.2's proofs).
+4. Static and live selections refresh in place with no empty-then-filled
+   pane, and activity-only deltas no longer reproject every row (0278.3's
+   proofs, including the rewritten clearing test).
+5. A second subscribe over an unchanged corpus performs zero full-row
+   reserializations, with ordering/backpressure proofs unchanged (0278.4's
+   proofs).
+6. `just test-full` is green on the family's final state, and desktop
+   commands were run and reported wherever shared types were touched.
+'''
+[[checks]]
+name = "all four children are done"
+command = 'for f in .internal/tasks/0278.1-*.toml .internal/tasks/0278.2-*.toml .internal/tasks/0278.3-*.toml .internal/tasks/0278.4-*.toml; do grep -l "^status = \"done\"" $f || exit 1; done'
+expect = "0278"
+
+[[checks]]
+name = "dashboard lib suite is green on the joined family"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "center suite is green on the joined family"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000

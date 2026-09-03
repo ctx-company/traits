@@ -1,0 +1,139 @@
+schema-version = "0.2"
+key = "0278.2"
+title = "No reads on the input-and-draw thread"
+status = "ready"
+raised = "2026-09-03"
+content = '''
+This plan separates GOALS from APPROACH. The GOALS section is binding: each
+names an observable outcome, what decides it, and what it excludes. The
+APPROACH section is the architect's suggested route — files, symbols, edit
+order, commands, proof mechanics. Deviate from any of it whenever a goal
+requires it, and report the deviation in the work summary; a deviation is not
+a violation and needs no escalation.
+
+Parent `0278` goal 2 (finding 2): board reads run on the render thread at
+startup and on the staleness refresh, so a slow board read freezes input for
+seconds. Selection-driven git work and repo resolution also block the loop.
+
+## Grounded against HEAD 5eaa21992
+
+- Startup board load is synchronous on the UI thread: both production `State`
+  constructors call `load_tasks_board_at_startup` before returning
+  (`modules/cli/src/app/dashboard.rs:1222-1238`); on a cache miss it runs the
+  full live `read_board_snapshot` before frame one (`dashboard.rs:6207-6247`).
+- The 250ms input loop calls `refresh_tasks_board_if_stale` every two seconds
+  (`dashboard.rs:2901-2921`): `board_fingerprint` directory metadata reads
+  and, when stale, a full board read on the input/draw thread
+  (`dashboard.rs:6163-6204`). `read_board_snapshot` does
+  `FilesTaskBoard::list(true)`, one `get` per summary, `sync`, and another
+  fingerprint sweep (`dashboard.rs:6026-6048`); the `s` refresh invokes it
+  synchronously too (`dashboard.rs:6082-6109`).
+- `task_session_join` calls `resolve_repo_root(None)` renderer-side while
+  rebuilding task rows/previews (`dashboard.rs:5870-5887,5890-5968,6250-6283`).
+- MERGES preview selection performs repository discovery, default-branch
+  resolution, merge-base, changed paths, and commit enumeration synchronously
+  (`dashboard.rs:4218-4239,4259-4343`).
+- Async precedent: the worker's `TraitDetail` request/result channel
+  (`dashboard/worker.rs:16-28,195-213,585-595`); renderer-side
+  `apply_preview_results` rejects stale identities (`dashboard.rs:1604-1621`).
+- Center board serving exists (`center::board_existing`, `BoardWireResult`,
+  `BoardChanged`) but board-watch scope derives only from repository-scoped
+  subscribers, and the CLI subscribes machine-wide (`center.rs:4050-4069`;
+  `worker.rs:304`) — a concrete scope mismatch if used naively.
+
+## GOALS — binding
+
+1. **Automatic board reads leave the renderer.** The startup live-fallback
+   read, the periodic staleness refresh, and the `s` refresh all execute on a
+   background thread and deliver results through an async channel; the
+   renderer keeps the previous board snapshot (or the cache-seeded one) until
+   a replacement arrives — the board pane never empties while waiting, and no
+   board filesystem read remains in the input/draw loop.
+   Decided by: dashboard lib suite.
+   Excluded: changing board staleness cadence or board cache format.
+
+2. **Selection-driven repo/git work leaves the loop.** `task_session_join` no
+   longer resolves the repo root on the renderer; MERGES preview selection no
+   longer performs git discovery/enumeration synchronously — it requests
+   async, renders an explicit pending state for a new selection, and retains
+   previous content when refreshing the same selection.
+   Decided by: dashboard lib suite.
+
+3. **The covered paths cannot silently regress onto the renderer.** Some
+   suite-decided evidence exists beyond code shape — for example a debug-only
+   thread guard asserting the shared read helpers run off the renderer
+   thread, exercised by the suite. The exact mechanism is the run's choice.
+   Decided by: dashboard lib suite.
+
+4. **Scope ruling (charter-carried).** Explicit mutating action paths —
+   story submission, answer flows, task mutations
+   (`dashboard.rs:2240-2302,4514-4605,6542-6639,6722-6799`) — keep the
+   0243.4 brief's selected-detail/mutation exception and are excluded from
+   this child. Every automatic, periodic, and selection-driven read is
+   covered. This ruling is flagged for owner attention in the parent charter.
+
+5. **Existing suites stay green.** Decided by the declared checks.
+'''
+scope = '''
+## Decisions
+
+- Keep the board reader client-owned and fingerprint-based, but run it on the
+  worker/background thread. Switching to center board serving
+  (`center::board_existing` + `BoardChanged`) is a permitted deviation, not a
+  requirement: the machine-wide `subscribe(None)` does not establish a
+  current-repository board watch, so that route requires solving the scope
+  mismatch first — take it only if it turns out simpler in practice.
+- Resolve the repo root once (startup or worker-side) and carry it; the
+  renderer never calls `resolve_repo_root`.
+- Board cache writes stay best-effort, per the existing pattern
+  (`dashboard.rs:6062-6079`).
+
+## APPROACH — suggested route, not a boundary
+
+1. Extend the worker's request/result channels following the `TraitDetail`
+   precedent: a board-refresh request kind and a MERGES-detail request kind,
+   results applied with stale-identity rejection like `apply_preview_results`.
+2. Move `read_board_snapshot`/`board_fingerprint` execution into the worker;
+   the renderer keeps only queue-request and apply-result steps, plus the
+   retained previous snapshot.
+3. Startup: with 0278.1's pre-loop cache seed pattern, the board pane seeds
+   from `task-board-snapshot.json` as today; the live fallback on miss
+   becomes the first async board request instead of a blocking read.
+4. MERGES: compute default-branch/merge-base/changed-paths/commits in the
+   worker handler and deliver a projected result; pending state renders an
+   explicit marker, never a silently empty pane (consistent with 0278.3).
+5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
+   dashboard`, then `just test`. Isolate the build cache
+   (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a failure.
+'''
+validation = '''
+## Watch
+
+- The renderer retains the last board snapshot until a replacement arrives —
+  moving the read must not introduce a new blank-then-fill.
+- Stale results for a changed selection are rejected, not installed.
+- The excluded mutating-action paths are left as they are; do not expand into
+  them.
+
+## Done when
+
+- No board/filesystem/git/store read remains in the startup-miss path, the
+  staleness refresh, the `s` refresh, `task_session_join`, or MERGES preview
+  selection on the input/draw thread, and the suite asserts the async
+  delivery, retention, and regression-guard behaviors.
+- The dashboard lib suite and `just test` are green.
+'''
+
+[relations]
+parent = "0278"
+
+[[checks]]
+name = "dashboard lib suite is green including off-thread read delivery"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
+
+[[checks]]
+name = "workspace gate is green"
+command = "just test"
+timeout-ms = 1800000
