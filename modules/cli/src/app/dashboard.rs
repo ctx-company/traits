@@ -1922,6 +1922,20 @@ fn classify_session(
     }
 }
 
+/// A persisted disk-full outcome is a resumable park, so let it name the row
+/// instead of showing the interrupted frame's awaiting-agent-output state.
+fn disk_full_park_presentation(
+    live: bool,
+    outcome: Option<&ctx_traits_core::procedure::session::DriveOutcomeKind>,
+) -> Option<(&'static str, &'static str)> {
+    (!live
+        && matches!(
+            outcome,
+            Some(ctx_traits_core::procedure::session::DriveOutcomeKind::DiskFull)
+        ))
+    .then_some(("disk-full", "disk-full: free space, then resume"))
+}
+
 /// Blocker 3 (P509): the dashboard lists sessions machine-wide, but a
 /// relative `trait_source.path` resolves against the *dashboard's own* cwd
 /// unless overridden. When the row carries an ALL-mode `repo_path`, join it
@@ -2377,15 +2391,21 @@ fn sessions_from_center_rows(rows: &[ctx_traits_io::center::CenterPublicRow]) ->
                     serde_json::from_value(serde_json::Value::String(outcome.clone())).ok()
                 });
                 let class = classify_session(row.live, &summary.status, outcome.as_ref());
-                let state_text = if row.live {
+                let mut state_text = if row.live {
                     "live".to_string()
                 } else {
                     run_view::session_status(&summary.status).to_string()
                 };
-                let phase = run_view::session_text::phase_text_from_parts(
+                let mut phase = run_view::session_text::phase_text_from_parts(
                     &summary.status,
                     summary.current_sequence_title.as_deref(),
                 );
+                if let Some((parked_state, parked_phase)) =
+                    disk_full_park_presentation(row.live, outcome.as_ref())
+                {
+                    state_text = parked_state.to_string();
+                    phase = parked_phase.to_string();
+                }
                 let elapsed_text = tui::elapsed_text(Duration::from_secs(summary.elapsed_seconds));
                 let tokens_text = dashboard_tokens_text_from_summary(summary);
                 (
@@ -11588,6 +11608,37 @@ argv = ["git", "commit", "-m", "fixture"]
         );
         assert_eq!(
             classify_session(false, &Status::WaitingOnHuman, None),
+            SessionClass::Resumable
+        );
+    }
+
+    #[test]
+    fn disk_full_park_presentation_only_overrides_non_live_disk_full_rows() {
+        use ctx_traits_core::procedure::session::{DriveOutcomeKind, Status};
+
+        assert_eq!(
+            disk_full_park_presentation(false, Some(&DriveOutcomeKind::DiskFull)),
+            Some(("disk-full", "disk-full: free space, then resume"))
+        );
+        assert_eq!(
+            disk_full_park_presentation(true, Some(&DriveOutcomeKind::DiskFull)),
+            None
+        );
+        assert_eq!(
+            disk_full_park_presentation(false, Some(&DriveOutcomeKind::Paused)),
+            None
+        );
+        assert_eq!(
+            disk_full_park_presentation(false, Some(&DriveOutcomeKind::AwaitingOwner)),
+            None
+        );
+        assert_eq!(disk_full_park_presentation(false, None), None);
+        assert_eq!(
+            classify_session(
+                false,
+                &Status::AwaitingAgentOutput,
+                Some(&DriveOutcomeKind::DiskFull)
+            ),
             SessionClass::Resumable
         );
     }

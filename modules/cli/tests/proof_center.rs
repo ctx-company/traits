@@ -3575,6 +3575,13 @@ transport = "cli"
         "outcome persistence is best effort: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("decode demoted drive report");
+    assert_eq!(report["value"]["drive"]["status"], "harness-failed");
+    assert!(
+        report["value"]["drive"].get("disk-full-park").is_none(),
+        "an unpersisted disk-full park must not remain in the returned report"
+    );
     let parked = ctx_traits_io::run_session::read_run_session(
         &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
     )

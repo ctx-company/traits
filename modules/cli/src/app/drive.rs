@@ -1533,8 +1533,8 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // Stamp why the conductor exited; the ledger status alone cannot tell a
     // timed-out drive from one that is still running. Best-effort: a marker
     // write failure must not mask the drive outcome itself — except for a
-    // credits pause, whose entire point is a resumable persisted marker; if
-    // that write fails, reporting the pause as resumable would be a lie.
+    // resumable park, whose entire point is a persisted marker; if that write
+    // fails, reporting the pause as resumable would be a lie.
     if let Err(error) = ctx_traits_io::run_session::record_drive_outcome(
         session,
         session_store,
@@ -1547,10 +1547,12 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             || report.budget_pause.is_some()
             || report.status == "paused"
             || report.status == "awaiting-owner"
+            || report.status == "disk-full"
         {
             report.status = "harness-failed".to_string();
             report.credits_pause = None;
             report.budget_pause = None;
+            report.disk_full_park = None;
         }
         report
             .warnings
@@ -4499,6 +4501,9 @@ pub fn print_report(
     if let Some(pause) = &report.budget_pause {
         print_budget_pause(pause, report.tokens_by_model.as_ref(), &report.session)?;
     }
+    if let Some(park) = &report.disk_full_park {
+        print_disk_full_park(park, &report.session)?;
+    }
     if let Some(merge) = &report.merge {
         crate::app::merge::print_report(merge, crate::app::presentation::HumanOutputMode::Compact)?;
     }
@@ -4639,6 +4644,42 @@ pub fn print_budget_pause(
             format!("ctx traits internal drive --session {session}"),
             RowTone::Default,
         ));
+    emit_human(
+        false,
+        &panel,
+        crate::app::presentation::HumanOutputMode::Compact,
+        || Ok(()),
+    )
+}
+
+/// Rendering counterpart to the other resumable parks. Zero available bytes
+/// is explicit unknown evidence from an ENOSPC observation, not a claim that
+/// the disk is exactly full.
+pub fn print_disk_full_park(
+    park: &ctx_traits_core::procedure::session::DiskFullPark,
+    session: &str,
+) -> crate::Result<()> {
+    let observed = if park.available_bytes == 0 {
+        format!("unknown bytes at {}", park.probed_path)
+    } else {
+        format!("{} bytes at {}", park.available_bytes, park.probed_path)
+    };
+    let panel = Panel::new(
+        "ctx",
+        "drive",
+        PanelStatus::Blocked("parked (disk-full)".to_string()),
+    )
+    .row(PanelRow::toned(
+        "floor",
+        format!("{} MiB", park.floor_mb),
+        RowTone::Default,
+    ))
+    .row(PanelRow::toned("observed", observed, RowTone::Default))
+    .next(PanelRow::toned(
+        "resume",
+        format!("ctx traits internal drive --session {session}"),
+        RowTone::Default,
+    ));
     emit_human(
         false,
         &panel,

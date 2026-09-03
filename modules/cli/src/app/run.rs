@@ -568,7 +568,7 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
         };
     }
 
-    let (drive, final_session) = loop {
+    let (drive, final_session, drive_outcome) = loop {
         let drive = match drive_once!() {
             Ok(drive) => drive,
             Err(error) => {
@@ -607,6 +607,13 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
                 continue;
             }
         };
+        // `status` rebuilds the session projection and deliberately drops this
+        // terminal marker. Retain the just-persisted typed record privately so
+        // queue classification can distinguish a disk-full park afterward.
+        let drive_outcome =
+            ctx_traits_io::run_session::read_run_session(camino::Utf8Path::new(&session_arg))
+                .ok()
+                .and_then(|session| session.last_drive_outcome);
         let final_session = ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
             trait_file: input.file,
             trait_id: None,
@@ -617,10 +624,10 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
         .map(|inspected| inspected.session)
         .unwrap_or_else(|_| outcome.session.clone());
         if !human_terminal_failure(!json, &final_session, &drive) {
-            break (drive, final_session);
+            break (drive, final_session, drive_outcome);
         }
         let Some(panel) = panel_handoff.take() else {
-            break (drive, final_session);
+            break (drive, final_session, drive_outcome);
         };
         let line = short_failure_line(failure_reason(&final_session, &drive).as_deref());
         panel.open_failure_modal(&line);
@@ -639,7 +646,7 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
             crate::app::run_view::FailureChoice::Abort => {
                 retained_failure_line = Some(line);
                 panel_handoff.give(panel);
-                break (drive, final_session);
+                break (drive, final_session, drive_outcome);
             }
         }
     };
@@ -685,6 +692,7 @@ fn drive_session(input: SessionStartInputs<'_>) -> crate::Result<CompletionOutco
         merger_stdout_observer,
     )?;
     let completion = completion
+        .with_drive_outcome(drive_outcome)
         .with_drive_report(&drive)
         .with_human_terminal_failure(!json, &drive);
     // Close (or no-op, if this run never got a panel) the merge span's live
@@ -759,6 +767,11 @@ pub(crate) enum TaskQueueOutcome {
     NotMerged,
     Parked,
     MergeFailed,
+    /// The drive parked before dispatch because available disk space was below
+    /// the configured floor. This halts the queue, but is not a failure.
+    DiskFull {
+        park: Option<ctx_traits_core::procedure::session::DiskFullPark>,
+    },
     /// The run reached a terminal state that is not `Completed` — rejected on
     /// a step, blocked, still waiting on an agent or a human, cancelled. The
     /// session status and the recorded drive outcome are carried verbatim so
@@ -773,20 +786,21 @@ pub(crate) enum TaskQueueOutcome {
 }
 
 impl TaskQueueOutcome {
-    /// Row tone derived from `halts()` — the single classification
-    /// authority; never a second match on the variants.
+    /// Row tone is driven by the failure classification, not queue control
+    /// flow: a disk-full park halts but remains a warning.
     fn tone(&self) -> crate::app::presentation::RowTone {
-        if self.halts() {
+        if self.fails() {
             crate::app::presentation::RowTone::Fail
+        } else if matches!(self, TaskQueueOutcome::DiskFull { .. }) {
+            crate::app::presentation::RowTone::Warn
         } else {
             crate::app::presentation::RowTone::Pass
         }
     }
 
-    /// A failed run or a parked/failed merge halts the queue by default
-    /// (owner ruling 2026-08-17) — `--continue-on-failure` is the only
-    /// thing that lets the queue run past one of these.
-    fn halts(&self) -> bool {
+    /// The failure family: the authority for failure-toned rows and failure
+    /// panel closing text.
+    fn fails(&self) -> bool {
         matches!(
             self,
             TaskQueueOutcome::Parked
@@ -794,6 +808,12 @@ impl TaskQueueOutcome {
                 | TaskQueueOutcome::NotCompleted { .. }
                 | TaskQueueOutcome::Failed { .. }
         )
+    }
+
+    /// A failed run, parked/failed merge, or disk-full park halts the queue
+    /// by default; `--continue-on-failure` is the only override.
+    fn halts(&self) -> bool {
+        self.fails() || matches!(self, TaskQueueOutcome::DiskFull { .. })
     }
 
     fn label(&self) -> String {
@@ -804,6 +824,11 @@ impl TaskQueueOutcome {
             TaskQueueOutcome::NotMerged => "committed, not merged".to_string(),
             TaskQueueOutcome::Parked => "parked".to_string(),
             TaskQueueOutcome::MergeFailed => "merge failed".to_string(),
+            TaskQueueOutcome::DiskFull { park: Some(park) } => format!(
+                "parked: disk-full (floor {} MiB, {} bytes free at {})",
+                park.floor_mb, park.available_bytes, park.probed_path
+            ),
+            TaskQueueOutcome::DiskFull { park: None } => "parked: disk-full".to_string(),
             TaskQueueOutcome::NotCompleted { status, outcome } => match outcome {
                 Some(outcome) => format!("not completed: {status} ({outcome})"),
                 None => format!("not completed: {status}"),
@@ -829,9 +854,17 @@ impl TaskQueueOutcome {
 /// for the other seven variants.
 fn queue_not_completed(
     session: &ctx_traits_core::procedure::session::Session,
+    drive_outcome: Option<&ctx_traits_core::procedure::session::DriveOutcome>,
 ) -> Option<TaskQueueOutcome> {
     if session.status == ctx_traits_core::procedure::session::Status::Completed {
         return None;
+    }
+    if let Some(recorded) = drive_outcome
+        && recorded.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::DiskFull
+    {
+        return Some(TaskQueueOutcome::DiskFull {
+            park: recorded.disk_full.clone(),
+        });
     }
     Some(TaskQueueOutcome::NotCompleted {
         status: super::run_view::session_text::session_status(&session.status).to_string(),
@@ -924,7 +957,9 @@ pub(crate) fn handle_task_queue_run(
                     TaskQueueOutcome::Failed {
                         message: "run completed with status failed".to_string(),
                     }
-                } else if let Some(not_completed) = queue_not_completed(&completion.session) {
+                } else if let Some(not_completed) =
+                    queue_not_completed(&completion.session, completion.drive_outcome.as_ref())
+                {
                     not_completed
                 } else {
                     use ctx_traits_core::procedure::session::LandingState;
@@ -972,12 +1007,15 @@ pub(crate) fn handle_task_queue_run(
     }
 
     let any_halting = outcomes.iter().any(|(_, outcome)| outcome.halts());
+    let any_failed = outcomes.iter().any(|(_, outcome)| outcome.fails());
     if any_halting {
         return Err(crate::Error::AlreadyReported {
-            message: if halted {
+            message: if any_failed && halted {
                 "task queue halted".to_string()
-            } else {
+            } else if any_failed {
                 "task queue completed with failures".to_string()
+            } else {
+                "task queue parked: disk-full".to_string()
             },
             exit_code: crate::app::error::EXIT_RUN_FAILED,
         });
@@ -1108,7 +1146,65 @@ mod task_queue_drive_tests {
     }
 
     #[test]
-    fn tone_is_derived_from_halts_for_every_variant() {
+    fn queue_uses_current_typed_drive_record_after_session_refresh() {
+        use ctx_traits_core::procedure::session::{DriveOutcome, Session};
+
+        // This is the status projection returned after `refresh_run_session`:
+        // it deliberately has no terminal marker of its own.
+        let session: Session = serde_json::from_value(serde_json::json!({
+            "schema-version": "0.1.0",
+            "session-id": "session-fixture",
+            "run-id": "run-fixture",
+            "trait-id": "fixture-trait",
+            "current-run-index": 0,
+            "status": "awaiting-agent-output",
+            "provenance": {
+                "started-by": {"surface": "test", "caller": "queue-fixture"},
+                "state-source": "test",
+                "started-at-epoch": 1000,
+            },
+            "ledger": {
+                "run-id": "run-fixture",
+                "trait-id": "fixture-trait",
+                "current-run-index": 0,
+                "final-state": "running",
+            },
+            "state-digest": "sha256:fixture",
+        }))
+        .expect("fixture session deserializes");
+        assert!(session.last_drive_outcome.is_none());
+
+        let disk_full: DriveOutcome = serde_json::from_value(serde_json::json!({
+            "outcome": "disk-full",
+            "recorded-at-epoch": 1000,
+            "disk-full": {
+                "floor-mb": 512,
+                "available-bytes": 42,
+                "probed-path": "/worktree",
+            },
+        }))
+        .expect("disk-full record deserializes");
+        assert!(matches!(
+            queue_not_completed(&session, Some(&disk_full)),
+            Some(TaskQueueOutcome::DiskFull { park: Some(park) })
+                if park.floor_mb == 512
+                    && park.available_bytes == 42
+                    && park.probed_path == "/worktree"
+        ));
+
+        let budget: DriveOutcome = serde_json::from_value(serde_json::json!({
+            "outcome": "paused-budget-exhausted",
+            "recorded-at-epoch": 1000,
+        }))
+        .expect("budget record deserializes");
+        assert!(matches!(
+            queue_not_completed(&session, Some(&budget)),
+            Some(TaskQueueOutcome::NotCompleted { outcome: None, .. })
+        ));
+    }
+
+    #[test]
+    fn failure_tones_and_halts_are_classified_independently() {
         use crate::app::presentation::RowTone;
 
         assert_eq!(TaskQueueOutcome::Parked.tone(), RowTone::Fail);
@@ -1138,6 +1234,20 @@ mod task_queue_drive_tests {
         );
         assert_eq!(TaskQueueOutcome::Completed.tone(), RowTone::Pass);
         assert_eq!(TaskQueueOutcome::NotMerged.tone(), RowTone::Pass);
+        let disk_full = TaskQueueOutcome::DiskFull {
+            park: Some(ctx_traits_core::procedure::session::DiskFullPark {
+                floor_mb: 512,
+                available_bytes: 42,
+                probed_path: "/worktree".to_string(),
+            }),
+        };
+        assert!(disk_full.halts());
+        assert!(!disk_full.fails());
+        assert_eq!(disk_full.tone(), RowTone::Warn);
+        assert_eq!(
+            disk_full.label(),
+            "parked: disk-full (floor 512 MiB, 42 bytes free at /worktree)"
+        );
     }
 
     #[test]
@@ -1206,13 +1316,29 @@ mod task_queue_drive_tests {
         assert!(!lines.iter().any(|line| line.starts_with("  ")));
         assert_eq!(lines.last(), Some(&"Success".to_string()));
     }
+
+    #[test]
+    fn disk_full_halts_as_a_park_and_continue_runs_past_it() {
+        let queue = vec!["0001".to_string(), "0002".to_string()];
+        let (outcomes, halted) =
+            drive_task_queue(&queue, false, |_| TaskQueueOutcome::DiskFull { park: None });
+        assert!(halted);
+        assert_eq!(outcomes.len(), 1);
+        let lines = task_queue_panel(&outcomes, halted, queue.len()).plain_lines();
+        assert_eq!(lines.last(), Some(&"Parked".to_string()));
+        assert!(!lines.iter().any(|line| line == "Failure"));
+
+        let (outcomes, halted) =
+            drive_task_queue(&queue, true, |_| TaskQueueOutcome::DiskFull { park: None });
+        assert!(!halted);
+        assert_eq!(outcomes.len(), 2);
+    }
 }
 
 /// The final `--task` queue report (0195/0252.9), routed through the shared
 /// panel kit for every non-JSON mode. Closing state is driven by whether any
-/// outcome halts, never by `halted` alone — a queue that ran to its last
-/// member and failed there is `Failure` with nothing left to continue,
-/// exactly like a queue halted mid-way with everything attempted.
+/// outcome failed, never by `halted` alone; a disk-full park still halts but
+/// closes as a park rather than a failure.
 fn task_queue_panel(
     outcomes: &[(String, TaskQueueOutcome)],
     halted: bool,
@@ -1220,12 +1346,15 @@ fn task_queue_panel(
 ) -> crate::app::presentation::Panel {
     use crate::app::presentation::{Panel, PanelRow, PanelStatus, RowTone};
 
-    let failed = outcomes.iter().any(|(_, outcome)| outcome.halts());
+    let failed = outcomes.iter().any(|(_, outcome)| outcome.fails());
+    let parked = outcomes.iter().any(|(_, outcome)| outcome.halts());
     let mut panel = Panel::new(
         "task queue",
         "",
         if failed {
             PanelStatus::Blocked("Failure".to_string())
+        } else if parked {
+            PanelStatus::Blocked("Parked".to_string())
         } else {
             PanelStatus::Passed("Success".to_string())
         },
@@ -1424,13 +1553,15 @@ fn human_terminal_failure(
         human_output,
         drive.credits_pause.is_some(),
         drive.budget_pause.is_some(),
+        drive.disk_full_park.is_some(),
         drive.status == "awaiting-owner",
         session.status.clone(),
         drive.final_session_status.clone(),
     )
 }
 
-/// `summons_parked` is keyed on the drive's own reported outcome string
+/// `disk_full_parked` is carried only when the durable disk-full evidence was
+/// retained in the report. `summons_parked` is keyed on the drive's own reported outcome string
 /// (`report.status`, downgraded to `"harness-failed"` if the drive-outcome
 /// marker failed to persist, mirroring `credits_paused`/`budget_paused`) —
 /// never the session's raw `Status::WaitingOnHuman`, which reflects frame
@@ -1441,6 +1572,7 @@ fn human_terminal_failure_values(
     human_output: bool,
     credits_paused: bool,
     budget_paused: bool,
+    disk_full_parked: bool,
     summons_parked: bool,
     session_status: ctx_traits_core::procedure::session::Status,
     drive_status: Option<ctx_traits_core::procedure::session::Status>,
@@ -1448,6 +1580,7 @@ fn human_terminal_failure_values(
     human_output
         && !credits_paused
         && !budget_paused
+        && !disk_full_parked
         && !summons_parked
         && !run_completed_status(session_status, drive_status)
 }
@@ -1639,12 +1772,23 @@ pub(crate) fn disposition_for_merge_status(
 pub(crate) struct CompletionOutcome {
     pub(crate) session: ctx_traits_core::procedure::session::Session,
     pub(crate) merge: Option<crate::app::merge::MergeReport>,
+    /// The just-persisted marker retained across `run::status` reconstruction
+    /// for private queue classification; it is never part of public output.
+    drive_outcome: Option<ctx_traits_core::procedure::session::DriveOutcome>,
     failure_reason: Option<String>,
     human_terminal_failure: bool,
     disposition: CompletionDisposition,
 }
 
 impl CompletionOutcome {
+    fn with_drive_outcome(
+        mut self,
+        drive_outcome: Option<ctx_traits_core::procedure::session::DriveOutcome>,
+    ) -> Self {
+        self.drive_outcome = drive_outcome;
+        self
+    }
+
     /// Attach the drive-local part of a terminal failure explanation before
     /// the outcome is converted into the command's established exit mapping.
     pub(crate) fn with_drive_report(mut self, drive: &crate::app::drive::DriveReport) -> Self {
@@ -1928,6 +2072,7 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            drive_outcome: None,
             failure_reason: None,
             human_terminal_failure: false,
             disposition: CompletionDisposition::NoIntent,
@@ -1937,6 +2082,7 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            drive_outcome: None,
             failure_reason: None,
             human_terminal_failure: false,
             disposition: CompletionDisposition::DriveNotCompleted,
@@ -1958,6 +2104,7 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            drive_outcome: None,
             failure_reason: None,
             human_terminal_failure: false,
             disposition: CompletionDisposition::DriveNotCompleted,
@@ -1982,6 +2129,7 @@ pub(crate) fn complete_after_drive(
         return Ok(CompletionOutcome {
             session: final_session,
             merge: None,
+            drive_outcome: None,
             failure_reason: None,
             human_terminal_failure: false,
             disposition: disposition_for_merge_status(status),
@@ -2017,6 +2165,7 @@ pub(crate) fn complete_after_drive(
     Ok(CompletionOutcome {
         session,
         merge: Some(report),
+        drive_outcome: None,
         failure_reason: None,
         human_terminal_failure: false,
         disposition,
@@ -2045,6 +2194,10 @@ fn print_final_output(
             drive.tokens_by_model.as_ref(),
             &drive.session,
         )?;
+        return Ok(());
+    }
+    if let Some(park) = &drive.disk_full_park {
+        crate::app::drive::print_disk_full_park(park, &drive.session)?;
         return Ok(());
     }
 
@@ -2802,27 +2955,31 @@ mod completion_disposition_tests {
             false,
             false,
             false,
-            Status::Failed,
-            Some(Status::Failed),
-        ));
-        assert!(!human_terminal_failure_values(
-            true,
-            true,
-            false,
             false,
             Status::Failed,
             Some(Status::Failed),
         ));
         assert!(!human_terminal_failure_values(
             true,
-            false,
             true,
+            false,
+            false,
             false,
             Status::Failed,
             Some(Status::Failed),
         ));
         assert!(!human_terminal_failure_values(
             true,
+            false,
+            true,
+            false,
+            false,
+            Status::Failed,
+            Some(Status::Failed),
+        ));
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
             false,
             false,
             false,
@@ -2831,6 +2988,7 @@ mod completion_disposition_tests {
         ));
         assert!(human_terminal_failure_values(
             true,
+            false,
             false,
             false,
             false,
@@ -2849,6 +3007,7 @@ mod completion_disposition_tests {
             false,
             false,
             true,
+            false,
             Status::WaitingOnHuman,
             Some(Status::WaitingOnHuman),
         ));
@@ -2862,8 +3021,31 @@ mod completion_disposition_tests {
             false,
             false,
             false,
+            false,
             Status::WaitingOnHuman,
             Some(Status::WaitingOnHuman),
+        ));
+    }
+
+    #[test]
+    fn terminal_failure_exempts_a_recorded_disk_full_park() {
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
+            false,
+            true,
+            false,
+            Status::AwaitingAgentOutput,
+            Some(Status::AwaitingAgentOutput),
+        ));
+        assert!(human_terminal_failure_values(
+            true,
+            false,
+            false,
+            false,
+            false,
+            Status::AwaitingAgentOutput,
+            Some(Status::AwaitingAgentOutput),
         ));
     }
 
