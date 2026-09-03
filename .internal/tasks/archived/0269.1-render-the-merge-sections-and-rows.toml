@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0269.1"
 title = "Render the merge sections and rows"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-02"
+origin = "run run-fdeb53ea79bca1e5de27c8b103dc9901fc50df846a7a3374e0cff5b08079e48f merged as f461ef8b15ba5cc1bc15a813499d6b549e92467b"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
@@ -888,3 +890,7 @@ depends-on = [
     "0258",
 ]
 parent = "0269"
+
+[closure]
+mode = "merge"
+commit = "f461ef8b15ba5cc1bc15a813499d6b549e92467b"

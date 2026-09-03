@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0269.2"
 title = "Render the Merges chrome and placeholder preview blocks"
-status = "ready"
+status = "done"
 raised = "2026-08-29"
+closed = "2026-09-02"
+origin = "run run-67f3500584d241f6fca339a4fc98e2329f7fda1e49ffb818c511548aa9a4a9a0 merged as b2e2b73d0e994c9f362485ded4d26c6f21d551d0"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
@@ -974,3 +976,7 @@ depends-on = [
     "0265.15",
 ]
 parent = "0269"
+
+[closure]
+mode = "merge"
+commit = "b2e2b73d0e994c9f362485ded4d26c6f21d551d0"
