@@ -722,6 +722,26 @@ mod tests {
     }
 
     #[test]
+    fn draft_tasks_are_dispatchable_and_named_as_draft() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0050-example.toml",
+            "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"draft\"\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let task = resolve_dispatch_task(&implement_trait_with_board(), trait_root, Some("0050"))
+            .unwrap()
+            .bound()
+            .expect("draft task resolves");
+
+        assert_eq!(closed_status_marker(&task), None);
+        assert_eq!(status_word(DerivedStatus::Draft), "draft");
+    }
+
+    #[test]
     fn dependency_marker_none_when_every_dependency_is_closed() {
         let dir = tempfile_dir();
         let board_dir = dir.join("tasks");

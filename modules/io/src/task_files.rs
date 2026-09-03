@@ -265,6 +265,7 @@ impl Board {
         let mut parse_failures = Vec::new();
         let mut digests: BTreeMap<String, String> = BTreeMap::new();
         let mut presence = BoardPresence::Loaded;
+        let mut saw_candidate = false;
 
         for (dir, archived) in [(self.board_dir.clone(), false), (self.archived_dir(), true)] {
             let entries = match std::fs::read_dir(dir.as_std_path()) {
@@ -289,6 +290,7 @@ impl Board {
                 .collect();
             paths.sort();
             for path in paths {
+                saw_candidate = true;
                 let text = match std::fs::read_to_string(path.as_std_path()) {
                     Ok(text) => text,
                     Err(e) => {
@@ -323,7 +325,10 @@ impl Board {
             }
         }
 
-        let presence = if matches!(presence, BoardPresence::Loaded) && documents.is_empty() {
+        let presence = if matches!(presence, BoardPresence::Loaded)
+            && documents.is_empty()
+            && !saw_candidate
+        {
             BoardPresence::Empty
         } else {
             presence
@@ -1077,6 +1082,20 @@ mod tests {
     }
 
     #[test]
+    fn resolve_board_keeps_a_malformed_only_board_loaded_with_its_finding() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "broken.toml", "this is not task toml");
+
+        let resolution = FilesTaskBoard::open_read(board_dir)
+            .resolve_board()
+            .unwrap();
+        assert_eq!(resolution.presence, BoardPresence::Loaded);
+        assert!(resolution.rows.is_empty());
+        assert_eq!(resolution.sync_report.parse_failures.len(), 1);
+        assert!(resolution.digest.is_some());
+    }
+
+    #[test]
     fn resolve_board_serves_unmet_dependencies_in_declared_order() {
         let board_dir = tempdir();
         write_task(
@@ -1104,6 +1123,82 @@ mod tests {
             .find(|row| row.summary.key == "0003")
             .unwrap();
         assert_eq!(dependent.unmet_dependencies, vec!["0001", "9999"]);
+    }
+
+    #[test]
+    fn resolve_board_serves_duplicate_dangling_and_document_facts_together() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-live.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Live\"\nstatus = \"ready\"\n[relations]\ndepends-on = [\"0002\", \"missing\"]\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-related.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Related\"\nstatus = \"ready\"\n",
+        );
+        std::fs::create_dir_all(board_dir.join(ARCHIVED_DIR).as_std_path()).unwrap();
+        write_task(
+            &board_dir.join(ARCHIVED_DIR),
+            "0001-archived.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Archived copy\"\nstatus = \"done\"\n",
+        );
+
+        let resolution = FilesTaskBoard::open_read(board_dir)
+            .resolve_board()
+            .unwrap();
+        assert_eq!(resolution.presence, BoardPresence::Loaded);
+        assert_eq!(resolution.rows.len(), 2);
+        let live = resolution
+            .rows
+            .iter()
+            .find(|row| row.summary.key == "0001")
+            .expect("live row");
+        assert_eq!(live.summary.title, "Live");
+        assert_eq!(live.unmet_dependencies, vec!["0002", "missing"]);
+        assert_eq!(live.relations.depends_on[0].key, "0002");
+        assert!(!live.digest.is_empty());
+        assert!(resolution.digest.is_some());
+        assert_eq!(resolution.sync_report.duplicate_keys.len(), 1);
+        assert_eq!(resolution.sync_report.duplicate_keys[0].key, "0001");
+        assert_eq!(resolution.sync_report.dangling_edges.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_board_reports_an_unreadable_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let board_dir = tempdir();
+        let original = std::fs::metadata(board_dir.as_std_path())
+            .unwrap()
+            .permissions();
+        struct RestorePermissions(Utf8PathBuf, std::fs::Permissions);
+        impl Drop for RestorePermissions {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(self.0.as_std_path(), self.1.clone());
+            }
+        }
+        let _restore = RestorePermissions(board_dir.clone(), original);
+        std::fs::set_permissions(
+            board_dir.as_std_path(),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+        // Root ignores permission modes, so only assert this Unix-specific
+        // outcome when the mode is effective on the current test host.
+        if std::fs::read_dir(board_dir.as_std_path()).is_ok() {
+            return;
+        }
+
+        let resolution = FilesTaskBoard::open_read(board_dir)
+            .resolve_board()
+            .unwrap();
+        assert!(matches!(
+            resolution.presence,
+            BoardPresence::Unreadable { .. }
+        ));
     }
 
     #[test]
@@ -1348,6 +1443,14 @@ mod tests {
             .unwrap();
         let resolved = write.get(&created.key).unwrap().unwrap();
         assert_eq!(resolved.document.status, Some(TaskStatus::Draft));
+        assert!(!resolved.archived);
+        assert!(board_dir.join("0001-draft-task.toml").exists());
+        assert!(
+            !board_dir
+                .join(ARCHIVED_DIR)
+                .join("0001-draft-task.toml")
+                .exists()
+        );
         assert_eq!(
             resolved.derived_status,
             ctx_traits_core::task::graph::DerivedStatus::Draft
@@ -1358,6 +1461,35 @@ mod tests {
                 .raised
                 .as_deref()
                 .is_some_and(|date| date.len() == 10)
+        );
+    }
+
+    #[test]
+    fn update_to_draft_keeps_a_task_live_and_unarchived() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+        let board = FilesTaskBoard::open_read_write(board_dir.clone());
+
+        let updated = board
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Draft),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(!updated.summary.archived);
+        assert!(board_dir.join("0001-first.toml").exists());
+        assert!(
+            !board_dir
+                .join(ARCHIVED_DIR)
+                .join("0001-first.toml")
+                .exists()
+        );
+        assert_eq!(
+            board.get("0001").unwrap().unwrap().document.status,
+            Some(TaskStatus::Draft)
         );
     }
 

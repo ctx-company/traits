@@ -1062,6 +1062,49 @@ mod tests {
     }
 
     #[test]
+    fn tasks_update_accepts_draft_and_renders_it_neutrally() {
+        let board = tempdir();
+        write_task(
+            &board,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        handle_tasks_update(
+            "0001",
+            Some(board.as_str()),
+            None,
+            Some(TaskUpdateStatus::Draft),
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            false,
+            None,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            FilesTaskBoard::open_read(board)
+                .get("0001")
+                .unwrap()
+                .unwrap()
+                .document
+                .status,
+            Some(TaskDocStatus::Draft)
+        );
+        assert_eq!(status_text(DerivedStatus::Draft), "draft");
+        assert_eq!(status_tone(DerivedStatus::Draft), RowTone::Default);
+    }
+
+    #[test]
     fn center_task_facts_exclude_only_explicitly_unreadable_rows() {
         let readable: ctx_traits_io::center::CenterPublicRow =
             serde_json::from_value(serde_json::json!({

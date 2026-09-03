@@ -49,6 +49,36 @@ pub struct BoardRun {
     pub not_merged: bool,
 }
 
+impl BoardRun {
+    /// Reduces a persisted run into the facts used by board precedence.
+    pub fn from_run(
+        run_id: impl Into<String>,
+        repo_key: Option<String>,
+        task_key: impl Into<String>,
+        live: bool,
+        status: &crate::procedure::session::Status,
+        landing: Option<&str>,
+    ) -> Self {
+        Self {
+            run_id: run_id.into(),
+            repo_key,
+            task_key: task_key.into(),
+            live,
+            awaiting_owner: awaiting_owner_status(status),
+            not_merged: landing == Some("not-merged"),
+        }
+    }
+}
+
+/// Whether a persisted run status awaits action from the human owner.
+pub fn awaiting_owner_status(status: &crate::procedure::session::Status) -> bool {
+    matches!(
+        status,
+        crate::procedure::session::Status::AwaitingInput
+            | crate::procedure::session::Status::WaitingOnHuman
+    )
+}
+
 /// The precedence result used by task consumers that retain the richer legacy
 /// task groups. It keeps run facts and board state in one shared decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -552,6 +582,7 @@ pub fn resolve_task(
 mod tests {
     use super::*;
     use crate::task::Relations;
+    use std::collections::BTreeSet;
 
     fn doc(key: &str, status: Option<TaskStatus>) -> TaskDocument {
         TaskDocument {
@@ -675,6 +706,88 @@ mod tests {
             section_of(DerivedStatus::Done, false, std::iter::empty::<&BoardRun>()),
             None
         );
+    }
+
+    #[test]
+    fn board_sections_partition_a_mixed_board_without_closed_or_archived_rows() {
+        let live = BoardRun {
+            run_id: "live".to_string(),
+            repo_key: Some("repo".to_string()),
+            task_key: "0001".to_string(),
+            live: true,
+            awaiting_owner: false,
+            not_merged: false,
+        };
+        let pending = BoardRun {
+            run_id: "pending".to_string(),
+            task_key: "0002".to_string(),
+            live: false,
+            awaiting_owner: true,
+            not_merged: false,
+            ..live.clone()
+        };
+        let joined_draft = BoardRun {
+            run_id: "joined-draft".to_string(),
+            task_key: "0003".to_string(),
+            live: false,
+            awaiting_owner: false,
+            not_merged: true,
+            ..live.clone()
+        };
+        let rows = [
+            ("0001", DerivedStatus::Ready, false, vec![&live]),
+            ("0002", DerivedStatus::Blocked, false, vec![&pending]),
+            ("0003", DerivedStatus::Draft, false, vec![&joined_draft]),
+            ("0004", DerivedStatus::Draft, false, vec![]),
+            ("0005", DerivedStatus::Done, false, vec![]),
+            ("0006", DerivedStatus::Cancelled, false, vec![]),
+            ("0007", DerivedStatus::Ready, true, vec![]),
+        ];
+        let mut sections: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for (key, status, archived, joined) in rows {
+            if let Some(section) = section_of(status, archived, joined) {
+                let name = match section {
+                    BoardSection::InProgress => "in-progress",
+                    BoardSection::Ready => "ready",
+                    BoardSection::Draft => "draft",
+                };
+                sections.entry(name).or_default().insert(key);
+            }
+        }
+        let open = BTreeSet::from(["0001", "0002", "0003", "0004"]);
+        let union: BTreeSet<_> = sections.values().flatten().copied().collect();
+        assert_eq!(union, open);
+        assert!(sections.values().enumerate().all(|(index, section)| {
+            sections
+                .values()
+                .skip(index + 1)
+                .all(|other| section.is_disjoint(other))
+        }));
+        assert_eq!(sections.get("draft"), Some(&BTreeSet::from(["0004"])));
+        assert!(
+            sections
+                .get("ready")
+                .is_some_and(|section| section.contains("0003"))
+        );
+    }
+
+    #[test]
+    fn board_run_reduction_owns_awaiting_owner_and_landing_mappings() {
+        use crate::procedure::session::Status;
+
+        assert!(awaiting_owner_status(&Status::AwaitingInput));
+        assert!(awaiting_owner_status(&Status::WaitingOnHuman));
+        assert!(!awaiting_owner_status(&Status::Completed));
+        let run = BoardRun::from_run(
+            "run",
+            Some("repo".to_string()),
+            "0001",
+            false,
+            &Status::WaitingOnHuman,
+            Some("not-merged"),
+        );
+        assert!(run.awaiting_owner);
+        assert!(run.not_merged);
     }
 
     #[test]

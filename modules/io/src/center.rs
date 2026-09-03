@@ -2173,10 +2173,13 @@ struct Subscriber {
     // The writer pulls the next row only after it has written the preceding
     // message, so a large snapshot cannot occupy one queue allocation.
     snapshot: Option<VecDeque<CenterPublicRow>>,
-    // Deltas racing a streamed snapshot must follow SnapshotEnd. This remains
+    // SnapshotEnd has entered the writer queue, but the writer has not yet
+    // confirmed it reached the peer. Updates must remain pending until then.
+    snapshot_end_queued: bool,
+    // Updates racing a streamed snapshot must follow SnapshotEnd. This remains
     // bounded so a peer that cannot consume the snapshot cannot retain model
     // state indefinitely.
-    pending_deltas: VecDeque<CenterDelta>,
+    pending: VecDeque<Outbound>,
 }
 
 #[derive(Debug)]
@@ -2189,6 +2192,30 @@ enum Outbound {
     SnapshotStart(String),
     SnapshotRow(Box<CenterPublicRow>),
     SnapshotEnd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnapshotFrame {
+    Start,
+    Row,
+    End,
+    Update,
+}
+
+/// Drain queued post-snapshot updates without treating ordinary channel
+/// backpressure as a disconnected subscriber. Returns false only on disconnect.
+fn send_pending(subscriber: &mut Subscriber) -> bool {
+    while let Some(message) = subscriber.pending.pop_front() {
+        match subscriber.outbound.try_send(message) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(message)) => {
+                subscriber.pending.push_front(message);
+                return true;
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+        }
+    }
+    true
 }
 
 impl CenterModel {
@@ -3054,6 +3081,22 @@ impl CenterModel {
         // Snapshot rows are streamed one at a time. Racing deltas are retained
         // in the subscriber's bounded pending queue and released only after
         // the writer confirms SnapshotEnd reached the peer.
+        if let Some(repo_key) = repo_key.as_deref()
+            && let Some(root) = self
+                .rows
+                .values()
+                .find(|row| row.repo_key == repo_key && !row.repo_path.is_empty())
+                .map(|row| Utf8PathBuf::from(row.repo_path.clone()))
+            && let Ok(fingerprint) =
+                crate::task_files::board_fingerprint(&crate::task_files::repo_board_dir(&root))
+        {
+            // The first watcher owns the scan baseline. Replacing it for a
+            // later watcher could absorb a change owed to the first one.
+            self.board_fingerprints
+                .entry(repo_key.to_string())
+                .or_insert(fingerprint);
+        }
+        // Baseline setup precedes the first observable snapshot frame.
         outbound
             .try_send(Outbound::SnapshotStart(request_id.clone()))
             .map_err(|_| protocol_error("subscriber outbound queue is full"))?;
@@ -3063,16 +3106,45 @@ impl CenterModel {
                 repo_key: repo_key.clone(),
                 outbound,
                 snapshot: Some(public_rows(self, repo_key.as_deref()).into()),
-                pending_deltas: VecDeque::new(),
+                snapshot_end_queued: false,
+                pending: VecDeque::new(),
             },
         );
         Ok(())
     }
 
+    // Test-only shorthand for acknowledging the next snapshot frame.
+    #[cfg(test)]
     fn advance_snapshot(&mut self, id: u64) {
+        let frame = self
+            .subscribers
+            .get(&id)
+            .map(|subscriber| {
+                if subscriber.snapshot_end_queued {
+                    SnapshotFrame::End
+                } else if subscriber.snapshot.as_ref().is_some_and(VecDeque::is_empty) {
+                    SnapshotFrame::Row
+                } else {
+                    SnapshotFrame::Start
+                }
+            })
+            .unwrap_or(SnapshotFrame::Start);
+        self.acknowledge_snapshot(id, frame);
+    }
+
+    fn acknowledge_snapshot(&mut self, id: u64, frame: SnapshotFrame) {
         let mut remove = false;
         if let Some(subscriber) = self.subscribers.get_mut(&id) {
-            if let Some(snapshot) = subscriber.snapshot.as_mut() {
+            if frame == SnapshotFrame::End && subscriber.snapshot_end_queued {
+                // This credit follows the completed SnapshotEnd write, so all
+                // queued updates now follow its transaction on the wire.
+                subscriber.snapshot_end_queued = false;
+                subscriber.snapshot = None;
+                remove = !send_pending(subscriber);
+            } else if !matches!(frame, SnapshotFrame::End | SnapshotFrame::Update)
+                && !subscriber.snapshot_end_queued
+                && let Some(snapshot) = subscriber.snapshot.as_mut()
+            {
                 // Fill the bounded outbound channel on every credit instead
                 // of releasing one row per credit: a per-row credit costs one
                 // owner-loop tick per row (the loop tail sleeps between
@@ -3091,17 +3163,9 @@ impl CenterModel {
                     match subscriber.outbound.try_send(next) {
                         Ok(()) => {
                             if completed {
-                                // The end marker is queued; queued deltas
-                                // follow it on the wire in channel order.
-                                subscriber.snapshot = None;
-                                if let Some(delta) = subscriber.pending_deltas.pop_front()
-                                    && subscriber
-                                        .outbound
-                                        .try_send(Outbound::Delta(delta))
-                                        .is_err()
-                                {
-                                    remove = true;
-                                }
+                                // Keep the snapshot active until the writer
+                                // confirms that SnapshotEnd reached the peer.
+                                subscriber.snapshot_end_queued = true;
                                 break;
                             }
                         }
@@ -3117,13 +3181,8 @@ impl CenterModel {
                         }
                     }
                 }
-            } else if let Some(delta) = subscriber.pending_deltas.pop_front()
-                && subscriber
-                    .outbound
-                    .try_send(Outbound::Delta(delta))
-                    .is_err()
-            {
-                remove = true;
+            } else if subscriber.snapshot.is_none() {
+                remove = !send_pending(subscriber);
             }
         }
         if remove {
@@ -3211,10 +3270,12 @@ impl CenterModel {
                 return true;
             }
             if subscriber.snapshot.is_some() {
-                if subscriber.pending_deltas.len() == SUBSCRIBER_QUEUE {
+                if subscriber.pending.len() == SUBSCRIBER_QUEUE {
                     return false;
                 }
-                subscriber.pending_deltas.push_back(message.clone());
+                subscriber
+                    .pending
+                    .push_back(Outbound::Delta(message.clone()));
                 return true;
             }
             subscriber
@@ -3241,8 +3302,16 @@ impl CenterModel {
             {
                 return true;
             }
-            // Board answers do not mutate the run-row snapshot, so they may
-            // bypass its SnapshotEnd ordering rule.
+            if subscriber.snapshot.is_some() {
+                if subscriber.pending.len() == SUBSCRIBER_QUEUE {
+                    return false;
+                }
+                subscriber.pending.push_back(Outbound::BoardChanged {
+                    repo_key: repo_key.clone(),
+                    board: board.clone(),
+                });
+                return true;
+            }
             subscriber
                 .outbound
                 .try_send(Outbound::BoardChanged {
@@ -3777,7 +3846,7 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                 ModelCommand::Unsubscribe { id } => {
                     model.subscribers.remove(&id);
                 }
-                ModelCommand::SnapshotNext { id } => model.advance_snapshot(id),
+                ModelCommand::SnapshotNext { id, frame } => model.acknowledge_snapshot(id, frame),
                 ModelCommand::WatchStart {
                     token,
                     notify,
@@ -3831,11 +3900,22 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                     roots.dedup();
                     let resolution = match roots.len() {
                         0 => match crate::state::read_repo_index() {
-                            Ok(index) => match index.into_iter().filter(|entry| entry.key == repo_key).collect::<Vec<_>>().as_slice() {
-                                [entry] => RepositoryResolution::One { root: Utf8PathBuf::from(entry.path.clone()), runs: Vec::new() },
+                            Ok(index) => match index
+                                .into_iter()
+                                .filter(|entry| entry.key == repo_key)
+                                .collect::<Vec<_>>()
+                                .as_slice()
+                            {
+                                [entry] => RepositoryResolution::One {
+                                    root: Utf8PathBuf::from(entry.path.clone()),
+                                    runs: Vec::new(),
+                                },
                                 _ => RepositoryResolution::Missing,
                             },
-                            Err(error) => { let _ = reply.send(Err(error)); continue; }
+                            Err(error) => {
+                                let _ = reply.send(Err(error));
+                                continue;
+                            }
                         },
                         1 => RepositoryResolution::One {
                             root: roots.remove(0),
@@ -3845,19 +3925,14 @@ fn run_server_at(paths: CenterPaths, idle: Duration, scan_interval: Duration) ->
                                 .filter(|row| row.repo_key == repo_key)
                                 .filter_map(|row| {
                                     let task_key = row.summary.task_key.clone()?;
-                                    Some(ctx_traits_core::task::provider::BoardRun {
-                                        run_id: row.summary.run_id.clone(),
-                                        repo_key: Some(row.repo_key.clone()),
+                                    Some(ctx_traits_core::task::provider::BoardRun::from_run(
+                                        row.summary.run_id.clone(),
+                                        Some(row.repo_key.clone()),
                                         task_key,
-                                        live: row.live,
-                                        awaiting_owner: matches!(
-                                            row.summary.status,
-                                            ctx_traits_core::procedure::session::Status::AwaitingInput
-                                                | ctx_traits_core::procedure::session::Status::WaitingOnHuman
-                                        ),
-                                        not_merged: row.summary.landing.as_deref()
-                                            == Some("not-merged"),
-                                    })
+                                        row.live,
+                                        &row.summary.status,
+                                        row.summary.landing.as_deref(),
+                                    ))
                                 })
                                 .collect(),
                         },
@@ -3977,18 +4052,14 @@ fn scan_subscribed_boards(
             .filter(|row| row.repo_key == repo_key)
             .filter_map(|row| {
                 row.summary.task_key.clone().map(|task_key| {
-                    ctx_traits_core::task::provider::BoardRun {
-                        run_id: row.summary.run_id.clone(),
-                        repo_key: Some(row.repo_key.clone()),
+                    ctx_traits_core::task::provider::BoardRun::from_run(
+                        row.summary.run_id.clone(),
+                        Some(row.repo_key.clone()),
                         task_key,
-                        live: row.live,
-                        awaiting_owner: matches!(
-                            row.summary.status,
-                            ctx_traits_core::procedure::session::Status::AwaitingInput
-                                | ctx_traits_core::procedure::session::Status::WaitingOnHuman
-                        ),
-                        not_merged: row.summary.landing.as_deref() == Some("not-merged"),
-                    }
+                        row.live,
+                        &row.summary.status,
+                        row.summary.landing.as_deref(),
+                    )
                 })
             })
             .collect();
@@ -4023,6 +4094,7 @@ enum ModelCommand {
     },
     SnapshotNext {
         id: u64,
+        frame: SnapshotFrame,
     },
     WatchStart {
         token: String,
@@ -4184,6 +4256,14 @@ fn serve_connection_worker_with_board_instants(
             let snapshot_credit = jobs.clone();
             let writer = std::thread::spawn(move || {
                 while let Ok(message) = receiver.recv() {
+                    let frame = match &message {
+                        Outbound::SnapshotStart(_) => Some(SnapshotFrame::Start),
+                        Outbound::SnapshotRow(_) => Some(SnapshotFrame::Row),
+                        Outbound::SnapshotEnd => Some(SnapshotFrame::End),
+                        Outbound::Delta(_) | Outbound::BoardChanged { .. } => {
+                            Some(SnapshotFrame::Update)
+                        }
+                    };
                     let write = match message {
                         Outbound::Delta(delta) => {
                             write_line(&mut writer_stream, &WireMessage::Delta { delta })
@@ -4206,11 +4286,12 @@ fn serve_connection_worker_with_board_instants(
                         break;
                     }
                     // Only the worker waits for model capacity. The owner
-                    // never waits for this socket and emits at most one next
-                    // snapshot message for each completed write.
-                    if snapshot_credit
-                        .send(ModelCommand::SnapshotNext { id })
-                        .is_err()
+                    // never waits for this socket and receives the precise
+                    // frame identity needed to retain deltas through End.
+                    if let Some(frame) = frame
+                        && snapshot_credit
+                            .send(ModelCommand::SnapshotNext { id, frame })
+                            .is_err()
                     {
                         break;
                     }
@@ -5821,8 +5902,11 @@ mod tests {
     #[test]
     fn start_watch_retries_cleanup_after_temporary_queue_backpressure() {
         let (jobs, receiver) = mpsc::sync_channel(1);
-        jobs.send(ModelCommand::SnapshotNext { id: 1 })
-            .expect("fill model queue");
+        jobs.send(ModelCommand::SnapshotNext {
+            id: 1,
+            frame: SnapshotFrame::Start,
+        })
+        .expect("fill model queue");
         let watch = StartWatch {
             jobs: jobs.clone(),
             token: "token".to_string(),
@@ -5835,7 +5919,7 @@ mod tests {
 
         assert!(matches!(
             receiver.recv(),
-            Ok(ModelCommand::SnapshotNext { id: 1 })
+            Ok(ModelCommand::SnapshotNext { id: 1, .. })
         ));
         assert!(
             matches!(receiver.recv_timeout(STREAM_TIMEOUT), Ok(ModelCommand::ForgetStart { token }) if token == "token")
@@ -5848,8 +5932,11 @@ mod tests {
     #[test]
     fn start_watch_cleanup_stops_after_sustained_queue_backpressure() {
         let (jobs, receiver) = mpsc::sync_channel(1);
-        jobs.send(ModelCommand::SnapshotNext { id: 1 })
-            .expect("fill model queue");
+        jobs.send(ModelCommand::SnapshotNext {
+            id: 1,
+            frame: SnapshotFrame::Start,
+        })
+        .expect("fill model queue");
         let (done, completed) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
             forget_start_with_retry(jobs, "token".to_string());
@@ -5861,7 +5948,7 @@ mod tests {
             .expect("cleanup must stop while model capacity remains unavailable");
         assert!(matches!(
             receiver.recv(),
-            Ok(ModelCommand::SnapshotNext { id: 1 })
+            Ok(ModelCommand::SnapshotNext { id: 1, .. })
         ));
     }
 
@@ -6217,7 +6304,8 @@ mod tests {
                 repo_key: None,
                 outbound,
                 snapshot: None,
-                pending_deltas: VecDeque::new(),
+                snapshot_end_queued: false,
+                pending: VecDeque::new(),
             },
         );
 
@@ -7836,7 +7924,8 @@ mod tests {
                 repo_key: None,
                 outbound,
                 snapshot: None,
-                pending_deltas: VecDeque::new(),
+                snapshot_end_queued: false,
+                pending: VecDeque::new(),
             },
         );
         model.discover(&paths).expect("discover corrupt ledger");
@@ -7871,7 +7960,8 @@ mod tests {
                 repo_key: None,
                 outbound,
                 snapshot: None,
-                pending_deltas: VecDeque::new(),
+                snapshot_end_queued: false,
+                pending: VecDeque::new(),
             },
         );
         model.begin_scan(&paths).expect("begin warm scan");
@@ -7917,7 +8007,8 @@ mod tests {
                 repo_key: None,
                 outbound,
                 snapshot: None,
-                pending_deltas: VecDeque::new(),
+                snapshot_end_queued: false,
+                pending: VecDeque::new(),
             },
         );
         model.begin_scan(&paths).expect("begin warm scan");
@@ -7991,7 +8082,8 @@ mod tests {
                 repo_key: None,
                 outbound,
                 snapshot: None,
-                pending_deltas: VecDeque::new(),
+                snapshot_end_queued: false,
+                pending: VecDeque::new(),
             },
         );
         std::thread::sleep(Duration::from_millis(2));
@@ -8741,6 +8833,7 @@ mod tests {
         assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
         model.advance_snapshot(1);
         assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+        model.advance_snapshot(1);
         model.broadcast_activity(ledger.as_str(), test_activity());
         assert!(matches!(
             receiver.recv(),
@@ -8777,11 +8870,311 @@ mod tests {
         assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
         model.advance_snapshot(1);
         assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+        model.advance_snapshot(1);
         assert!(matches!(
             receiver.recv(),
             Ok(Outbound::Delta(CenterDelta::ActivityLine { .. }))
         ));
         assert_eq!(model.subscribers.len(), 1);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn board_change_racing_snapshot_follows_snapshot_end() {
+        let root = scratch("board-snapshot-race");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let board_dir = crate::task_files::repo_board_dir(&root);
+        std::fs::create_dir_all(board_dir.as_std_path()).expect("create board");
+        std::fs::write(
+            board_dir.join("board.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"board\"\ntitle = \"Board\"\nstatus = \"ready\"\n",
+        )
+        .expect("write board");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("construct model");
+        let (sender, receiver) = mpsc::sync_channel(4);
+        model
+            .subscribe(1, "test-subscription".to_string(), None, sender)
+            .expect("subscribe");
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotStart(_))));
+
+        let instants = Mutex::new(HashMap::new());
+        let board = assemble_board(
+            "repository".to_string(),
+            root.clone(),
+            Vec::new(),
+            &instants,
+        )
+        .expect("assemble board");
+        model.publish_board("repository".to_string(), Box::new(board));
+        model.advance_snapshot(1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
+        model.advance_snapshot(1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+        model.advance_snapshot(1);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::BoardChanged { repo_key, .. }) if repo_key == "repository"
+        ));
+        assert_eq!(
+            model.rows.len(),
+            1,
+            "fixture keeps a snapshot row in flight"
+        );
+        let _ = std::fs::remove_file(ledger.as_std_path());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn snapshot_end_credit_retains_a_full_pending_board_event() {
+        let root = scratch("board-snapshot-full");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let board_dir = crate::task_files::repo_board_dir(&root);
+        std::fs::create_dir_all(board_dir.as_std_path()).expect("create board");
+        std::fs::write(
+            board_dir.join("board.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"board\"\ntitle = \"Board\"\nstatus = \"ready\"\n",
+        )
+        .expect("write board");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("construct model");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        model
+            .subscribe(1, "test-subscription".to_string(), None, sender)
+            .expect("subscribe");
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotStart(_))));
+
+        let instants = Mutex::new(HashMap::new());
+        let board = assemble_board(
+            "repository".to_string(),
+            root.clone(),
+            Vec::new(),
+            &instants,
+        )
+        .expect("assemble board");
+        model.publish_board("repository".to_string(), Box::new(board));
+        model.advance_snapshot(1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
+        model.advance_snapshot(1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+
+        // A different queued message consumes the sole outbound slot while the
+        // writer's SnapshotEnd credit arrives. The board change must remain
+        // pending rather than disconnecting the subscriber.
+        let subscriber = model.subscribers.get(&1).expect("subscriber remains");
+        subscriber
+            .outbound
+            .try_send(Outbound::Delta(CenterDelta::ActivityLine {
+                row: Box::new(public_rows(&model, None).remove(0)),
+                activity: test_activity(),
+            }))
+            .expect("fill outbound queue");
+        model.advance_snapshot(1);
+        assert_eq!(model.subscribers.len(), 1, "full queue retains subscriber");
+        assert!(matches!(receiver.recv(), Ok(Outbound::Delta(_))));
+        model.advance_snapshot(1);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::BoardChanged { repo_key, .. }) if repo_key == "repository"
+        ));
+        let _ = std::fs::remove_file(ledger.as_std_path());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn post_snapshot_updates_drain_in_fifo_order_after_transient_fullness() {
+        let root = scratch("snapshot-pending-fifo");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let board_dir = crate::task_files::repo_board_dir(&root);
+        std::fs::create_dir_all(board_dir.as_std_path()).expect("create board");
+        std::fs::write(
+            board_dir.join("board.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"board\"\ntitle = \"Board\"\nstatus = \"ready\"\n",
+        )
+        .expect("write board");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("construct model");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        model
+            .subscribe(1, "test-subscription".to_string(), None, sender)
+            .expect("subscribe");
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotStart(_))));
+
+        let instants = Mutex::new(HashMap::new());
+        let board = assemble_board(
+            "repository".to_string(),
+            root.clone(),
+            Vec::new(),
+            &instants,
+        )
+        .expect("assemble board");
+        let pending = &mut model.subscribers.get_mut(&1).expect("subscriber").pending;
+        pending.push_back(Outbound::Delta(CenterDelta::LibraryChanged {
+            repo_keys: vec!["first".to_string()],
+        }));
+        pending.push_back(Outbound::BoardChanged {
+            repo_key: "repository".to_string(),
+            board: Box::new(board),
+        });
+        pending.push_back(Outbound::Delta(CenterDelta::LibraryChanged {
+            repo_keys: vec!["last".to_string()],
+        }));
+        assert_eq!(model.subscribers[&1].pending.len(), 3);
+
+        model.advance_snapshot(1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
+        model.advance_snapshot(1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+
+        // The End credit encounters an occupied outbound queue. It must retain
+        // all post-snapshot updates, then each completed update credits the next.
+        model.subscribers[&1]
+            .outbound
+            .try_send(Outbound::Delta(CenterDelta::LibraryChanged {
+                repo_keys: vec!["filler".to_string()],
+            }))
+            .expect("fill outbound queue");
+        model.advance_snapshot(1);
+        assert_eq!(model.subscribers[&1].pending.len(), 3);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::Delta(CenterDelta::LibraryChanged { .. }))
+        ));
+
+        model.acknowledge_snapshot(1, SnapshotFrame::Update);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::Delta(CenterDelta::LibraryChanged { repo_keys })) if repo_keys == vec!["first"]
+        ));
+        model.acknowledge_snapshot(1, SnapshotFrame::Update);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::BoardChanged { repo_key, .. }) if repo_key == "repository"
+        ));
+        model.acknowledge_snapshot(1, SnapshotFrame::Update);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::Delta(CenterDelta::LibraryChanged { repo_keys })) if repo_keys == vec!["last"]
+        ));
+        model.acknowledge_snapshot(1, SnapshotFrame::Update);
+        assert!(model.subscribers[&1].pending.is_empty());
+
+        let _ = std::fs::remove_file(ledger.as_std_path());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn row_credit_cannot_release_board_change_before_snapshot_end() {
+        let root = scratch("board-snapshot-frame-credit");
+        let paths = paths(root.clone());
+        let ledger = write_fixture_ledger(&root, "repository", "completed");
+        let board_dir = crate::task_files::repo_board_dir(&root);
+        std::fs::create_dir_all(board_dir.as_std_path()).expect("create board");
+        std::fs::write(
+            board_dir.join("board.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"board\"\ntitle = \"Board\"\nstatus = \"ready\"\n",
+        )
+        .expect("write board");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("construct model");
+        let (sender, receiver) = mpsc::sync_channel(4);
+        model
+            .subscribe(1, "test-subscription".to_string(), None, sender)
+            .expect("subscribe");
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotStart(_))));
+        let row = public_rows(&model, None).remove(0);
+        model.subscribers.get_mut(&1).expect("subscriber").snapshot =
+            Some(VecDeque::from([row.clone(), row]));
+
+        let instants = Mutex::new(HashMap::new());
+        let board = assemble_board(
+            "repository".to_string(),
+            root.clone(),
+            Vec::new(),
+            &instants,
+        )
+        .expect("assemble board");
+        model.publish_board("repository".to_string(), Box::new(board));
+        assert_eq!(model.subscribers[&1].pending.len(), 1);
+        model.acknowledge_snapshot(1, SnapshotFrame::Start);
+        assert!(model.subscribers[&1].snapshot_end_queued);
+        assert_eq!(model.subscribers[&1].pending.len(), 1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
+
+        // SnapshotEnd is queued behind this row. Its earlier credit must not
+        // release the pending BoardChanged before End reaches the peer.
+        model.acknowledge_snapshot(1, SnapshotFrame::Row);
+        assert!(model.subscribers[&1].snapshot.is_some());
+        assert!(model.subscribers[&1].snapshot_end_queued);
+        assert_eq!(model.subscribers[&1].pending.len(), 1);
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
+        assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+        match receiver.try_recv() {
+            Err(mpsc::TryRecvError::Empty) => {}
+            other => panic!("row acknowledgement released pending output: {other:?}"),
+        }
+
+        model.acknowledge_snapshot(1, SnapshotFrame::End);
+        assert!(matches!(
+            receiver.recv(),
+            Ok(Outbound::BoardChanged { repo_key, .. }) if repo_key == "repository"
+        ));
+        let _ = std::fs::remove_file(ledger.as_std_path());
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn later_subscriber_preserves_existing_board_fingerprint_baseline() {
+        let root = scratch("board-fingerprint-baseline");
+        let paths = paths(root.clone());
+        let repository = root.join("repository");
+        let _ledger = write_fixture_ledger(&root, "repository", "completed");
+        let board_dir = crate::task_files::repo_board_dir(&repository);
+        std::fs::create_dir_all(board_dir.as_std_path()).expect("create board");
+        std::fs::write(
+            board_dir.join("first.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"first\"\ntitle = \"First\"\nstatus = \"ready\"\n",
+        )
+        .expect("write first board");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("construct model");
+        let canonical =
+            crate::state::canonical_repo_root(&repository).expect("canonical repository");
+        let repo_key = crate::state::repo_key(&canonical);
+        let row = model.rows.values_mut().next().expect("fixture row");
+        row.repo_key = repo_key.clone();
+        row.repo_path = canonical.to_string();
+        let (first_sender, _first_receiver) = mpsc::sync_channel(2);
+        model
+            .subscribe(1, "first".to_string(), Some(repo_key.clone()), first_sender)
+            .expect("first subscriber");
+        let baseline = model
+            .board_fingerprints
+            .get(&repo_key)
+            .expect("first subscription sets baseline")
+            .clone();
+        std::fs::write(
+            board_dir.join("second.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"second\"\ntitle = \"Second\"\nstatus = \"ready\"\n",
+        )
+        .expect("mutate watched board");
+        let (second_sender, _second_receiver) = mpsc::sync_channel(2);
+        model
+            .subscribe(
+                2,
+                "second".to_string(),
+                Some(repo_key.clone()),
+                second_sender,
+            )
+            .expect("second subscriber");
+        assert_eq!(
+            model.board_fingerprints.get(&repo_key),
+            Some(&baseline),
+            "a later subscription cannot absorb an existing watcher's change"
+        );
         let _ = std::fs::remove_dir_all(root.as_std_path());
     }
 
@@ -8853,6 +9246,7 @@ mod tests {
         let _ = receiver.recv().expect("snapshot row");
         model.advance_snapshot(1);
         let _ = receiver.recv().expect("snapshot end");
+        model.advance_snapshot(1);
         crate::run_session::write_run_session(&ledger, &fixture_session("completed"))
             .expect("write final outcome");
         handle_request(
@@ -8916,6 +9310,7 @@ mod tests {
             assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
             model.advance_snapshot(id);
             assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+            model.advance_snapshot(id);
         }
 
         model.broadcast_activity(first.as_str(), test_activity());

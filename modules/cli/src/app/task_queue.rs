@@ -138,13 +138,10 @@ mod tests {
                 .map(|child| ResolvedEdge {
                     key: child.key.clone(),
                     title: child.title.clone(),
-                    status: if matches!(
-                        child.status,
-                        Some(TaskStatus::Done) | Some(TaskStatus::Cancelled)
-                    ) {
-                        DerivedStatus::Done
-                    } else {
-                        DerivedStatus::Ready
+                    status: match child.status {
+                        Some(TaskStatus::Done) | Some(TaskStatus::Cancelled) => DerivedStatus::Done,
+                        Some(TaskStatus::Draft) => DerivedStatus::Draft,
+                        _ => DerivedStatus::Ready,
                     },
                 })
                 .collect();
@@ -236,6 +233,21 @@ mod tests {
                 "0001.9".to_string(),
                 "0001.10".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn charter_expands_draft_children() {
+        let provider = FixtureProvider(BTreeMap::from([
+            ("0001".to_string(), doc("0001", None, None)),
+            (
+                "0001.1".to_string(),
+                doc("0001.1", Some(TaskStatus::Draft), Some("0001")),
+            ),
+        ]));
+        assert_eq!(
+            expand_task_queue(&provider, &["0001".to_string()]).unwrap(),
+            vec!["0001.1".to_string()]
         );
     }
 

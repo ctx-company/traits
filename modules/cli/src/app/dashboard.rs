@@ -2070,10 +2070,15 @@ fn session_group(
     {
         return SessionGroup::Failed;
     }
+    if ctx_traits_core::task::provider::awaiting_owner_status(status) {
+        return SessionGroup::Pending;
+    }
     match status {
         ctx_traits_core::procedure::session::Status::AwaitingAgentOutput => SessionGroup::Resumable,
         ctx_traits_core::procedure::session::Status::AwaitingInput
-        | ctx_traits_core::procedure::session::Status::WaitingOnHuman => SessionGroup::Pending,
+        | ctx_traits_core::procedure::session::Status::WaitingOnHuman => {
+            unreachable!("awaiting-owner statuses return before the dashboard mapping")
+        }
         ctx_traits_core::procedure::session::Status::Completed => SessionGroup::Completed,
         ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired
         | ctx_traits_core::procedure::session::Status::BlockedAgentUnassigned

@@ -3,7 +3,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::{Mutex, mpsc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use camino::Utf8PathBuf;
@@ -814,6 +815,17 @@ fn spawn_sentinel_with_cwd(
     idle_ms: &str,
     cwd: &std::path::Path,
 ) -> ChildGuard {
+    spawn_sentinel_with_cwd_and_scan(root, socket, index, idle_ms, cwd, "20")
+}
+
+fn spawn_sentinel_with_cwd_and_scan(
+    root: &std::path::Path,
+    socket: &std::path::Path,
+    index: &std::path::Path,
+    idle_ms: &str,
+    cwd: &std::path::Path,
+    scan_ms: &str,
+) -> ChildGuard {
     ChildGuard(
         std::process::Command::new(env!("CARGO_BIN_EXE_ctx"))
             .arg("__ctx-center")
@@ -822,7 +834,7 @@ fn spawn_sentinel_with_cwd(
             .env("CTX_CENTER_RUNS_ROOT", root)
             .env("CTX_CENTER_INDEX", index)
             .env("CTX_CENTER_IDLE_MS", idle_ms)
-            .env("CTX_CENTER_SCAN_MS", "20")
+            .env("CTX_CENTER_SCAN_MS", scan_ms)
             .env("CTX_CENTER_LIVENESS_ROOT", root.join("liveness"))
             .current_dir(cwd)
             .spawn()
@@ -4628,6 +4640,39 @@ fn write_claimed_ledger_at(
         .expect("write claimed-task fixture ledger");
 }
 
+fn seed_board_repository(
+    root: &std::path::Path,
+    repo: &Utf8PathBuf,
+    session_id: &str,
+) -> (String, std::fs::File) {
+    let repo_key = ctx_traits_io::state::repo_key(
+        &ctx_traits_io::state::canonical_repo_root(repo).expect("canonical repository"),
+    );
+    let ledger = repo.join(format!(".ctx/runs/{session_id}.json"));
+    write_claimed_ledger_at(&ledger, session_id, &format!("{session_id}-run"), None);
+    let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+    let lock = ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path)
+        .expect("open fixture driver lock");
+    ctx_traits_io::file_lock::lock_exclusive_blocking(&lock).expect("hold fixture driver lock");
+    ctx_traits_io::run_liveness::upsert_row(
+        &Utf8PathBuf::from_path_buf(root.join("liveness")).expect("UTF-8 liveness root"),
+        &ctx_traits_io::run_liveness::LiveRunFacts {
+            session_id: session_id.to_string(),
+            run_id: format!("{session_id}-run"),
+            repo_key: repo_key.clone(),
+            repo_path: repo.to_string(),
+            ledger_path: ledger,
+            worktree_path: None,
+            branch: None,
+            log_path: None,
+        },
+        std::process::id(),
+        1000,
+    )
+    .expect("seed liveness row");
+    (repo_key, lock)
+}
+
 /// End-to-end wire proof for `Request::ClaimedTask` (0265.2): the center
 /// answers a run-addressed claimed-task read over the real socket, every
 /// unresolvable case fails loudly, `TaskProvider::get`'s live-then-archived
@@ -4905,6 +4950,442 @@ fn claimed_task_fails_loudly_for_a_flat_store_row_with_no_usable_repository_path
     drop(child);
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(cwd);
+}
+
+/// The board request is resolved from the repository recorded by the center,
+/// not the sentinel's cwd. Its compact answer retains board findings without
+/// transporting task prose.
+#[test]
+fn board_answer_over_the_real_socket_is_repository_anchored_compact_and_honest() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("board-answer-wire-proof");
+    let repo = scratch("board-answer-wire-proof-repo");
+    std::fs::create_dir_all(&root).expect("create center root");
+    std::fs::create_dir_all(&repo).expect("create repository");
+    let repo = Utf8PathBuf::from_path_buf(repo).expect("UTF-8 repository");
+    let cwd = scratch("board-answer-wire-proof-cwd");
+    std::fs::create_dir_all(&cwd).expect("create center cwd");
+    std::fs::create_dir_all(cwd.join(".internal/tasks")).expect("create trap board");
+    std::fs::write(
+        cwd.join(".internal/tasks/trap.toml"),
+        "schema-version = \"0.2\"\nkey = \"trap\"\ntitle = \"Trap task\"\nstatus = \"ready\"\n",
+    )
+    .expect("write trap board");
+    let repo_key = ctx_traits_io::state::repo_key(
+        &ctx_traits_io::state::canonical_repo_root(&repo).expect("canonical repository"),
+    );
+    let board = repo.join(".internal/tasks");
+    std::fs::create_dir_all(board.as_std_path()).expect("create board");
+    std::fs::write(
+        board.join("0001-live.toml").as_std_path(),
+        "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Real task\"\nstatus = \"ready\"\ncontent = \"first paragraph\\n\\nsecond paragraph\"\n[relations]\ndepends-on = [\"missing\"]\n",
+    )
+    .expect("write live board task");
+    let archived = board.join("archived");
+    std::fs::create_dir_all(archived.as_std_path()).expect("create archive");
+    std::fs::write(
+        archived.join("0001-copy.toml").as_std_path(),
+        "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Archived copy\"\nstatus = \"done\"\n",
+    )
+    .expect("write duplicate task");
+    std::fs::write(board.join("broken.toml").as_std_path(), "not task TOML")
+        .expect("write malformed task");
+    for index in 2..=1001 {
+        std::fs::write(
+            board.join(format!("{index:04}-compact.toml")).as_std_path(),
+            format!(
+                "schema-version = \"0.2\"\nkey = \"{index:04}\"\ntitle = \"Compact {index}\"\nstatus = \"ready\"\ncontent = \"first paragraph for {index}\\n\\nsecond paragraph that must not cross the wire\\n\\nthird paragraph\"\n"
+            ),
+        )
+        .expect("write compact board task");
+    }
+
+    let ledger = repo.join(".ctx/runs/board-answer.json");
+    write_claimed_ledger_at(&ledger, "board-answer", "board-answer-run", Some("0001"));
+    let lock_path = ctx_traits_io::run_control::driver_lock_path(&ledger);
+    let held_lock = ctx_traits_io::file_lock::open_lock_file_no_follow(&lock_path)
+        .expect("open fixture driver lock");
+    ctx_traits_io::file_lock::lock_exclusive_blocking(&held_lock)
+        .expect("hold fixture driver lock");
+    let liveness_root = Utf8PathBuf::from_path_buf(root.join("liveness")).expect("UTF-8 liveness");
+    ctx_traits_io::run_liveness::upsert_row(
+        &liveness_root,
+        &ctx_traits_io::run_liveness::LiveRunFacts {
+            session_id: "board-answer".to_string(),
+            run_id: "board-answer-run".to_string(),
+            repo_key: repo_key.clone(),
+            repo_path: repo.to_string(),
+            ledger_path: ledger,
+            worktree_path: None,
+            branch: None,
+            log_path: None,
+        },
+        std::process::id(),
+        1000,
+    )
+    .expect("seed liveness row");
+    // The real socket snapshot must outlast the board scan interval. These
+    // rows are deliberately distinct run ledgers, not board documents.
+    for index in 2..=1001 {
+        let session_id = format!("snapshot-{index:04}");
+        let run_id = format!("snapshot-run-{index:04}");
+        let ledger = repo.join(format!(".ctx/runs/{session_id}.json"));
+        write_claimed_ledger_at(&ledger, &session_id, &run_id, None);
+        ctx_traits_io::run_liveness::upsert_row(
+            &liveness_root,
+            &ctx_traits_io::run_liveness::LiveRunFacts {
+                session_id,
+                run_id,
+                repo_key: repo_key.clone(),
+                repo_path: repo.to_string(),
+                ledger_path: ledger,
+                worktree_path: None,
+                branch: None,
+                log_path: None,
+            },
+            std::process::id(),
+            1000,
+        )
+        .expect("seed snapshot liveness row");
+    }
+
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let child = spawn_sentinel_with_cwd_and_scan(&root, &socket, &index, "120000", &cwd, "100");
+    drop(await_socket(&socket));
+    let _environment = CenterEnvironment::install(&root);
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    let answer = loop {
+        match ctx_traits_io::center::board_existing(&repo_key) {
+            Ok(answer) => break answer,
+            Err(error) if Instant::now() < deadline => {
+                let _ = error;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("board request never resolved: {error}"),
+        }
+    };
+    assert_eq!(answer.resolution.rows.len(), 1001);
+    let real = answer
+        .resolution
+        .rows
+        .iter()
+        .find(|row| row.summary.key == "0001")
+        .expect("requested repository row");
+    assert_eq!(real.summary.title, "Real task");
+    assert_eq!(real.short_description, "first paragraph");
+    assert!(
+        answer
+            .resolution
+            .rows
+            .iter()
+            .all(|row| row.summary.key != "trap")
+    );
+    assert_eq!(answer.resolution.sync_report.parse_failures.len(), 1);
+    assert_eq!(answer.resolution.sync_report.duplicate_keys.len(), 1);
+    assert_eq!(answer.resolution.sync_report.dangling_edges.len(), 1);
+    let wire = serde_json::to_vec(&answer).expect("serialize compact board answer");
+    assert!(wire.len() < 1_000_000, "board answer exceeds line limit");
+    let wire_text = String::from_utf8(wire).expect("JSON is UTF-8");
+    assert!(!wire_text.contains("second paragraph"));
+    for omitted in ["\"content\"", "\"scope\"", "\"validation\"", "\"checks\""] {
+        assert!(!wire_text.contains(omitted), "compact rows omit {omitted}");
+    }
+
+    // Board reads run in the connection worker. The model-owner's lookup must
+    // complete while an already-submitted, independently owned traversal is
+    // still parsing content which the compact wire answer deliberately omits.
+    std::fs::write(
+        board.join("overlap.toml").as_std_path(),
+        format!(
+            "schema-version = \"0.2\"\nkey = \"overlap\"\ntitle = \"Overlap task\"\nstatus = \"ready\"\ncontent = \"short summary\\n\\n{}\"\n",
+            "x".repeat(1024 * 1024)
+        ),
+    )
+    .expect("write traversal overlap task");
+    let mut resolve_stream = await_socket(&socket);
+    resolve_stream
+        .write_all(b"{\"kind\":\"hello\",\"id\":\"resolve-overlap\"}\n")
+        .expect("write resolve overlap hello");
+    let mut resolve_ready = String::new();
+    BufReader::new(
+        resolve_stream
+            .try_clone()
+            .expect("clone resolve overlap stream"),
+    )
+    .read_line(&mut resolve_ready)
+    .expect("read resolve overlap ready");
+    assert_eq!(
+        resolve_ready,
+        "{\"kind\":\"ready\",\"id\":\"resolve-overlap\"}\n"
+    );
+    let resolving = Arc::new(AtomicBool::new(false));
+    let board_running = resolving.clone();
+    let board_socket = socket.clone();
+    let request_repo = repo_key.clone();
+    let (submitted, submitted_receiver) = mpsc::sync_channel(1);
+    let first = std::thread::spawn(move || {
+        let mut stream = await_socket(&board_socket);
+        stream
+            .write_all(b"{\"kind\":\"hello\",\"id\":\"board-overlap\"}\n")
+            .expect("write board overlap hello");
+        let mut ready = String::new();
+        BufReader::new(stream.try_clone().expect("clone board overlap stream"))
+            .read_line(&mut ready)
+            .expect("read board overlap ready");
+        assert_eq!(ready, "{\"kind\":\"ready\",\"id\":\"board-overlap\"}\n");
+        board_running.store(true, Ordering::Release);
+        stream
+            .write_all(
+                format!(
+                    "{{\"kind\":\"board\",\"id\":\"board-overlap\",\"repo_key\":{}}}\n",
+                    serde_json::to_string(&request_repo).expect("encode repository key")
+                )
+                .as_bytes(),
+            )
+            .expect("submit board request");
+        submitted.send(()).expect("report submitted board request");
+        let mut response = String::new();
+        BufReader::new(stream)
+            .read_line(&mut response)
+            .expect("read board response");
+        board_running.store(false, Ordering::Release);
+        response
+    });
+    submitted_receiver
+        .recv_timeout(PROCESS_DEADLINE)
+        .expect("board request reaches the server socket");
+    resolve_stream
+        .write_all(
+            format!(
+                "{{\"kind\":\"resolve\",\"id\":\"resolve-overlap\",\"session_id\":\"board-answer\",\"repo_key\":{}}}\n",
+                serde_json::to_string(&repo_key).expect("encode repository key")
+            )
+            .as_bytes(),
+        )
+        .expect("submit model resolve request");
+    let mut resolved = String::new();
+    BufReader::new(resolve_stream)
+        .read_line(&mut resolved)
+        .expect("read model resolve response");
+    assert!(
+        resolving.load(Ordering::Acquire),
+        "model owner responded before the large board request completed"
+    );
+    let board_response = first.join().expect("first board thread");
+    assert!(
+        board_response.contains("\"kind\":\"response\""),
+        "the submitted board request receives its response: {board_response}"
+    );
+    assert!(resolved.contains("\"kind\":\"response\""));
+    assert!(resolved.contains("board-answer"));
+
+    // Hold the raw socket after SnapshotStart so the writer remains inside the
+    // real snapshot across several 20ms board scans before the mutation is
+    // published. `CenterSubscription` has a reader thread, so it cannot prove
+    // this wire-level ordering: it would eagerly drain the snapshot itself.
+    let mut subscription_stream = await_socket(&socket);
+    subscription_stream
+        .write_all(b"{\"kind\":\"hello\",\"id\":\"board-race\"}\n")
+        .expect("write board-race hello");
+    let mut ready = String::new();
+    BufReader::new(
+        subscription_stream
+            .try_clone()
+            .expect("clone board-race stream for ready"),
+    )
+    .read_line(&mut ready)
+    .expect("read board-race ready");
+    assert_eq!(ready, "{\"kind\":\"ready\",\"id\":\"board-race\"}\n");
+    subscription_stream
+        .write_all(
+            format!(
+                "{{\"kind\":\"subscribe\",\"id\":\"board-race\",\"repo_key\":{}}}\n",
+                serde_json::to_string(&repo_key).expect("encode repository key")
+            )
+            .as_bytes(),
+        )
+        .expect("subscribe to board events");
+    subscription_stream
+        .set_read_timeout(Some(PROCESS_DEADLINE))
+        .expect("set board-race read deadline");
+    let mut reader = BufReader::new(
+        subscription_stream
+            .try_clone()
+            .expect("clone board-race stream for snapshot"),
+    );
+    let mut first = String::new();
+    reader
+        .read_line(&mut first)
+        .expect("read board-race snapshot start");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&first)
+            .expect("decode board-race snapshot start")["kind"],
+        "snapshot-start"
+    );
+    // The event key is deliberately outside the initial compact board range.
+    // Do not drain the snapshot until several scan intervals have elapsed.
+    std::fs::write(
+        board.join("1002-event.toml").as_std_path(),
+        "schema-version = \"0.2\"\nkey = \"1002\"\ntitle = \"Board race event\"\nstatus = \"ready\"\n",
+    )
+    .expect("write unsolicited board change");
+    std::thread::sleep(Duration::from_millis(120));
+    let mut saw_end = false;
+    let mut saw_change = false;
+    let mut snapshot_rows = 0;
+    let mut board_changes = 0;
+    while !saw_change {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .expect("board subscription event");
+        assert!(
+            !line.is_empty(),
+            "board subscription disconnected before event"
+        );
+        let event: serde_json::Value = serde_json::from_str(&line).expect("decode board event");
+        match event["kind"].as_str() {
+            Some("snapshot-row") => snapshot_rows += 1,
+            Some("snapshot-end") => {
+                assert!(
+                    snapshot_rows > 64,
+                    "the board mutation races a backpressured multi-credit snapshot"
+                );
+                saw_end = true;
+            }
+            Some("board-changed") => {
+                board_changes += 1;
+                assert!(saw_end, "board delta follows snapshot transaction");
+                assert_eq!(event["repo_key"], repo_key);
+                saw_change = event["board"]["resolution"]["rows"]
+                    .as_array()
+                    .expect("board change rows")
+                    .iter()
+                    .any(|row| {
+                        row["summary"]["key"] == "1002"
+                            && row["summary"]["title"] == "Board race event"
+                    });
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(board_changes, 1, "one board mutation yields one event");
+    let duplicate_deadline = Instant::now() + Duration::from_millis(2500);
+    while Instant::now() < duplicate_deadline {
+        subscription_stream
+            .set_read_timeout(Some(
+                duplicate_deadline.saturating_duration_since(Instant::now()),
+            ))
+            .expect("set duplicate board-event deadline");
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => panic!("subscription disconnected after board event"),
+            Ok(_)
+                if serde_json::from_str::<serde_json::Value>(&line)
+                    .expect("decode trailing board event")["kind"]
+                    == "board-changed" =>
+            {
+                board_changes += 1;
+            }
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break;
+            }
+            Err(error) => panic!("read trailing board event: {error}"),
+        }
+    }
+    assert_eq!(
+        board_changes, 1,
+        "the board mutation must not be duplicated"
+    );
+
+    drop(held_lock);
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(repo);
+    let _ = std::fs::remove_dir_all(cwd);
+}
+
+#[test]
+fn board_request_distinguishes_absent_unreadable_and_empty_repositories() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("board-presence-wire-proof");
+    std::fs::create_dir_all(&root).expect("create center root");
+    let absent = Utf8PathBuf::from_path_buf(scratch("board-absent-repo")).expect("UTF-8 repo");
+    let empty = Utf8PathBuf::from_path_buf(scratch("board-empty-repo")).expect("UTF-8 repo");
+    let unreadable =
+        Utf8PathBuf::from_path_buf(scratch("board-unreadable-repo")).expect("UTF-8 repo");
+    for repo in [&absent, &empty, &unreadable] {
+        std::fs::create_dir_all(repo.as_std_path()).expect("create repository");
+    }
+    std::fs::create_dir_all(empty.join(".internal/tasks").as_std_path())
+        .expect("create empty board");
+    let unreadable_board = unreadable.join(".internal/tasks");
+    std::fs::create_dir_all(unreadable_board.as_std_path()).expect("create unreadable board");
+    let original = std::fs::metadata(unreadable_board.as_std_path())
+        .unwrap()
+        .permissions();
+    struct RestorePermissions(Utf8PathBuf, std::fs::Permissions);
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(self.0.as_std_path(), self.1.clone());
+        }
+    }
+    let _restore = RestorePermissions(unreadable_board.clone(), original);
+    std::fs::set_permissions(
+        unreadable_board.as_std_path(),
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .expect("make board unreadable");
+    let (absent_key, absent_lock) = seed_board_repository(&root, &absent, "board-absent");
+    let (empty_key, empty_lock) = seed_board_repository(&root, &empty, "board-empty");
+    let (unreadable_key, unreadable_lock) =
+        seed_board_repository(&root, &unreadable, "board-unreadable");
+    let socket = root.join("center.sock");
+    let index = root.join("index.sqlite3");
+    let child = spawn_sentinel(&root, &socket, &index, "120000");
+    drop(await_socket(&socket));
+    let _environment = CenterEnvironment::install(&root);
+
+    let absent_answer = ctx_traits_io::center::board_existing(&absent_key)
+        .expect("absent board is a successful, distinct wire answer");
+    assert_eq!(
+        absent_answer.resolution.presence,
+        ctx_traits_io::task_files::BoardPresence::Absent
+    );
+    let empty_answer = ctx_traits_io::center::board_existing(&empty_key)
+        .expect("empty board remains a successful answer");
+    assert_eq!(
+        empty_answer.resolution.presence,
+        ctx_traits_io::task_files::BoardPresence::Empty
+    );
+    if std::fs::read_dir(unreadable_board.as_std_path()).is_err() {
+        let unreadable_answer = ctx_traits_io::center::board_existing(&unreadable_key)
+            .expect("unreadable board is a successful, distinct wire answer");
+        assert!(matches!(
+            unreadable_answer.resolution.presence,
+            ctx_traits_io::task_files::BoardPresence::Unreadable { .. }
+        ));
+    }
+
+    drop(absent_lock);
+    drop(empty_lock);
+    drop(unreadable_lock);
+    drop(child);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(absent);
+    let _ = std::fs::remove_dir_all(empty);
+    let _ = std::fs::remove_dir_all(unreadable);
 }
 
 #[test]

@@ -596,13 +596,11 @@ impl Shell {
     }
 
     fn accepted_board(&mut self, answer: ctx_traits_io::center::BoardWireResult) -> BoardState {
-        if self.selected_task.as_ref().is_some_and(|key| {
-            !answer
-                .resolution
-                .rows
-                .iter()
-                .any(|row| &row.summary.key == key)
-        }) {
+        if self
+            .selected_task
+            .as_ref()
+            .is_some_and(|key| !matches!(answer.sections.get(key), Some(Some(_))))
+        {
             self.selected_task = None;
             self.task_detail_generation += 1;
             self.task_detail = crate::task_preview::TaskDetailState::Loading;
@@ -1534,20 +1532,26 @@ impl Render for Shell {
                                 == Some(section)
                         })
                         .collect();
-                    let mut group = div()
+                    let group = div()
                         .debug_selector(|| format!("tasks-section-{section:?}"))
                         .flex()
                         .flex_col()
-                        .gap(tokens::LIST_SECTION_GAP)
                         .child(
                             div()
+                                .debug_selector(|| format!("tasks-section-heading-{section:?}"))
+                                .debug_selector({
+                                    let heading = format!("{label} {}", rows.len());
+                                    move || format!("tasks-section-heading-value-{heading}")
+                                })
                                 .font_family(tokens::FONT_MONO)
                                 .text_size(tokens::SIZE_11)
                                 .text_color(rgb(tokens::TEXT_MUTED))
                                 .child(format!("{label} {}", rows.len())),
                         );
+                    let mut rows_element = div().flex().flex_col().gap(tokens::LIST_ROWS_GAP_MIN);
                     for row in rows {
                         let task_key = row.summary.key.clone();
+                        let click_task_key = task_key.clone();
                         let joined = answer
                             .joined_runs
                             .get(&row.summary.key)
@@ -1578,24 +1582,33 @@ impl Render for Shell {
                             stack_element = stack_element
                                 .child(div().text_color(rgb(tokens::TEXT_MUTED)).child(meta));
                         }
-                        group = group.child(
+                        rows_element = rows_element.child(
                             div()
                                 .id(SharedString::from(format!("task-{task_key}")))
+                                .debug_selector({
+                                    let task_key = task_key.clone();
+                                    move || format!("tasks-section-{section:?}-row-{task_key}")
+                                })
                                 .on_click(cx.listener(
                                     move |shell, _event: &gpui::ClickEvent, _window, cx| {
-                                        shell.select_task(task_key.clone(), cx);
+                                        shell.select_task(click_task_key.clone(), cx);
                                     },
                                 ))
                                 .flex()
                                 .flex_row()
                                 .justify_between()
-                                .gap(tokens::ROW_DOT_TEXT_GAP_MIN)
+                                .items_start()
+                                .py(tokens::LIST_ROW_PAD_Y_OPEN)
+                                .px(tokens::LIST_ROW_PAD_X_MAX)
+                                .gap(tokens::ROW_DOT_TEXT_GAP_MAX)
                                 .child(
-                                    div()
-                                        .w(tokens::LIST_ROW_DOT_SIZE)
-                                        .h(tokens::LIST_ROW_DOT_SIZE)
-                                        .rounded_full()
-                                        .bg(rgb(stack.dot_color)),
+                                    div().pt(tokens::FRAME_DOT_WRAP_PAD_TOP).child(
+                                        div()
+                                            .w(tokens::LIST_ROW_DOT_SIZE)
+                                            .h(tokens::LIST_ROW_DOT_SIZE)
+                                            .rounded_full()
+                                            .bg(rgb(stack.dot_color)),
+                                    ),
                                 )
                                 .child(
                                     div()
@@ -1605,6 +1618,14 @@ impl Render for Shell {
                                         .gap(tokens::FRAME_ROW_TEXT_GAP)
                                         .child(
                                             div()
+                                                .debug_selector({
+                                                    let task_key = task_key.clone();
+                                                    move || format!("task-title-{task_key}")
+                                                })
+                                                .debug_selector({
+                                                    let title = row.summary.title.clone();
+                                                    move || format!("task-title-value-{title}")
+                                                })
                                                 .font_family(tokens::FONT_SANS)
                                                 .text_size(tokens::SIZE_12_5)
                                                 .text_color(rgb(tokens::TEXT))
@@ -1612,6 +1633,18 @@ impl Render for Shell {
                                         )
                                         .child(
                                             div()
+                                                .debug_selector({
+                                                    let task_key = task_key.clone();
+                                                    move || format!("task-description-{task_key}")
+                                                })
+                                                .debug_selector({
+                                                    let description = row.short_description.clone();
+                                                    move || {
+                                                        format!(
+                                                            "task-description-value-{description}"
+                                                        )
+                                                    }
+                                                })
                                                 .font_family(tokens::FONT_SANS)
                                                 .text_size(tokens::SIZE_11)
                                                 .text_color(rgb(tokens::TEXT_SECONDARY))
@@ -1621,7 +1654,7 @@ impl Render for Shell {
                                 .child(stack_element),
                         );
                     }
-                    tasks = tasks.child(group);
+                    tasks = tasks.child(group.gap(tokens::LIST_SECTION_GAP).child(rows_element));
                 }
             }
             let on_new_task: bottom_bar_view::BarActionHandler =
@@ -2199,6 +2232,234 @@ mod tests {
             .sections
             .insert(key.to_string(), Some(BoardSection::Draft));
         board
+    }
+
+    #[gpui::test]
+    fn board_selection_follows_open_sections_across_resection_and_closes(
+        _cx: &mut gpui::TestAppContext,
+    ) {
+        let shell = _cx.update(|cx| cx.new(Shell::new));
+        shell.update(_cx, |shell, _cx| {
+            shell.board_repo = Some(("repo".to_string(), "/repo".to_string()));
+            let mut initial = board_with_task("selected", "Selected");
+            initial
+                .sections
+                .insert("selected".to_string(), Some(BoardSection::Ready));
+            shell.board = shell.accepted_board(initial);
+            shell.select_task("selected".to_string(), _cx);
+            assert_eq!(shell.selected_task.as_deref(), Some("selected"));
+
+            let mut resectioned = board_with_task("other", "Other");
+            resectioned.resolution.rows.push(
+                board_with_task("selected", "Selected")
+                    .resolution
+                    .rows
+                    .remove(0),
+            );
+            resectioned
+                .sections
+                .insert("selected".to_string(), Some(BoardSection::InProgress));
+            shell.board = shell.accepted_board(resectioned);
+            assert_eq!(
+                shell.selected_task.as_deref(),
+                Some("selected"),
+                "a retained task remains selected when its open section changes"
+            );
+
+            let mut closed = board_with_task("selected", "Selected");
+            closed.sections.insert("selected".to_string(), None);
+            shell.board = shell.accepted_board(closed);
+            assert!(
+                shell.selected_task.is_none(),
+                "rows retained for board history cannot retain an open-pane selection"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn tasks_navigation_returns_to_the_preserved_sessions_state(cx: &mut gpui::TestAppContext) {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+            })
+            .unwrap();
+        window
+            .update(cx, |shell, _window, cx| {
+                shell
+                    .detail
+                    .select(&live_run_row("repo", "/repo/session.json", "session-1"));
+                assert!(matches!(shell.screen, Screen::Sessions));
+                assert_eq!(shell.detail.selected_key(), Some("/repo/session.json"));
+                shell.switch_screen(Screen::Tasks, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        assert!(vcx.debug_bounds("title-bar-menu-current-Tasks").is_some());
+        for selector in [
+            "title-bar-menu-current-Sessions",
+            "title-bar-menu-current-Traits",
+            "title-bar-menu-current-Merges",
+            "title-bar-menu-current-Config",
+        ] {
+            assert!(vcx.debug_bounds(selector).is_none());
+        }
+        drop(vcx);
+        window
+            .update(cx, |shell, _window, cx| {
+                shell.switch_screen(Screen::Sessions, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        assert!(
+            vcx.debug_bounds("title-bar-menu-current-Sessions")
+                .is_some()
+        );
+        for selector in [
+            "title-bar-menu-current-Tasks",
+            "title-bar-menu-current-Traits",
+            "title-bar-menu-current-Merges",
+            "title-bar-menu-current-Config",
+        ] {
+            assert!(vcx.debug_bounds(selector).is_none());
+        }
+        drop(vcx);
+        window
+            .update(cx, |shell, _window, _cx| {
+                assert!(matches!(shell.screen, Screen::Sessions));
+                assert_eq!(shell.detail.selected_key(), Some("/repo/session.json"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn tasks_screen_renders_answer_content_and_partitions_open_rows(cx: &mut gpui::TestAppContext) {
+        let window = cx
+            .update(|cx| {
+                let bounds = Bounds::new(gpui::point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
+                cx.open_window(window_options(bounds), |_, cx| cx.new(Shell::new))
+            })
+            .unwrap();
+        window
+            .update(cx, |shell, _window, cx| {
+                let mut answer = board_with_task("ready-a", "Answer ready title");
+                answer.resolution.rows[0].short_description =
+                    "Answer ready description".to_string();
+                answer
+                    .sections
+                    .insert("ready-a".to_string(), Some(BoardSection::Ready));
+                for (key, title, description, section) in [
+                    (
+                        "ready-b",
+                        "Second ready title",
+                        "Second ready description",
+                        BoardSection::Ready,
+                    ),
+                    (
+                        "progress",
+                        "Answer progress title",
+                        "Answer progress description",
+                        BoardSection::InProgress,
+                    ),
+                    (
+                        "draft",
+                        "Answer draft title",
+                        "Answer draft description",
+                        BoardSection::Draft,
+                    ),
+                ] {
+                    let mut row = board_with_task(key, title).resolution.rows.remove(0);
+                    row.short_description = description.to_string();
+                    answer.resolution.rows.push(row);
+                    answer.sections.insert(key.to_string(), Some(section));
+                }
+                let mut closed = board_with_task("closed", "Closed must not render")
+                    .resolution
+                    .rows
+                    .remove(0);
+                closed.summary.stored_status = Some(TaskStatus::Done);
+                closed.summary.derived_status = DerivedStatus::Done;
+                answer.resolution.rows.push(closed);
+                answer.sections.insert("closed".to_string(), None);
+                let mut archived = board_with_task("archived", "Archived must not render")
+                    .resolution
+                    .rows
+                    .remove(0);
+                archived.summary.archived = true;
+                answer.resolution.rows.push(archived);
+                answer.sections.insert("archived".to_string(), None);
+                shell.set_board_for_test("repo".to_string(), "/repo".to_string(), answer, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        for selector in [
+            "tasks-section-InProgress",
+            "tasks-section-Ready",
+            "tasks-section-Draft",
+            "tasks-section-heading-value-In progress 1",
+            "tasks-section-heading-value-Ready 2",
+            "tasks-section-heading-value-Draft 1",
+            "tasks-section-Ready-row-ready-a",
+            "task-title-value-Answer ready title",
+            "task-description-value-Answer ready description",
+            "tasks-section-Ready-row-ready-b",
+            "task-title-value-Second ready title",
+            "task-description-value-Second ready description",
+            "tasks-section-InProgress-row-progress",
+            "task-title-value-Answer progress title",
+            "task-description-value-Answer progress description",
+            "tasks-section-Draft-row-draft",
+            "task-title-value-Answer draft title",
+            "task-description-value-Answer draft description",
+        ] {
+            assert!(
+                vcx.debug_bounds(selector).is_some(),
+                "{selector} paints from the answer"
+            );
+        }
+        // Titles are section-independent selectors, so these exclusions cover
+        // every section rather than only the sections listed below.
+        assert!(vcx.debug_bounds("task-title-closed").is_none());
+        assert!(vcx.debug_bounds("task-title-archived").is_none());
+        for selector in [
+            "tasks-section-InProgress-row-ready-a",
+            "tasks-section-Draft-row-ready-a",
+            "tasks-section-InProgress-row-ready-b",
+            "tasks-section-Draft-row-ready-b",
+            "tasks-section-Ready-row-progress",
+            "tasks-section-Draft-row-progress",
+            "tasks-section-InProgress-row-draft",
+            "tasks-section-Ready-row-draft",
+            "tasks-section-Ready-row-closed",
+            "tasks-section-Draft-row-archived",
+        ] {
+            assert!(
+                vcx.debug_bounds(selector).is_none(),
+                "{selector} must not paint outside its served section"
+            );
+        }
+        let heading = vcx
+            .debug_bounds("tasks-section-heading-value-Ready 2")
+            .unwrap();
+        let first = vcx
+            .debug_bounds("tasks-section-Ready-row-ready-a")
+            .unwrap();
+        let second = vcx
+            .debug_bounds("tasks-section-Ready-row-ready-b")
+            .unwrap();
+        assert_eq!(
+            first.origin.y - (heading.origin.y + heading.size.height),
+            tokens::LIST_SECTION_GAP + px(0.5),
+            "the painted text box rounds the 12px section token by half a pixel"
+        );
+        assert_eq!(
+            second.origin.y - (first.origin.y + first.size.height),
+            tokens::LIST_ROWS_GAP_MIN
+        );
+        assert_eq!(first.origin.x, second.origin.x);
     }
 
     /// A readable, non-live, `last_drive_outcome: "paused"` wire row — unlike
