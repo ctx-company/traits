@@ -645,6 +645,7 @@ pub fn record_drive_outcome(
         exit_code: evidence.exit_code,
         rate_limit: evidence.rate_limit,
         budget_pause,
+        disk_full: evidence.disk_full,
         tokens_by_model: evidence.tokens_by_model,
         summons: evidence.summons,
         reclaim: evidence.reclaim,
@@ -676,6 +677,30 @@ pub fn record_interrupted_outcome_in_session(
         exit_code: None,
         rate_limit: None,
         budget_pause: None,
+        disk_full: None,
+        tokens_by_model: None,
+        summons: None,
+        reclaim: None,
+    });
+    write_run_session(path, loaded)
+}
+
+/// Persist a typed disk-space park using an already loaded session.
+pub fn record_disk_full_outcome_in_session(
+    path: &Utf8Path,
+    loaded: &mut ctx_traits_core::procedure::session::Session,
+    disk_full: ctx_traits_core::procedure::session::DiskFullPark,
+) -> crate::Result<()> {
+    loaded.last_drive_outcome = Some(ctx_traits_core::procedure::session::DriveOutcome {
+        outcome: ctx_traits_core::procedure::session::DriveOutcomeKind::DiskFull,
+        recorded_at_epoch: epoch_seconds(),
+        provider_credits_pause: None,
+        effective_budget: None,
+        token_usage: None,
+        exit_code: None,
+        rate_limit: None,
+        budget_pause: None,
+        disk_full: Some(disk_full),
         tokens_by_model: None,
         summons: None,
         reclaim: None,

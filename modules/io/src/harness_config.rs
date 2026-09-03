@@ -454,6 +454,10 @@ pub struct WorktreeRetentionConfig {
     /// Optional override for the default seven-day expensive-tier grace.
     #[serde(default)]
     pub expensive_grace_days: Option<u64>,
+    /// Dispatch-boundary free-space floor in MiB. `None` uses 2048, while `0`
+    /// disables this preflight; distinct from `[merge] disk-floor-mb`.
+    #[serde(default)]
+    pub disk_floor_mb: Option<u64>,
 }
 
 /// One named build-artifact cache declaration
@@ -910,6 +914,7 @@ enum ConfigLeaf {
     WorktreeRetentionCheap,
     WorktreeRetentionExpensive,
     WorktreeRetentionExpensiveGraceDays,
+    WorktreeRetentionDiskFloorMb,
     WorktreeEnabled,
     BudgetMaxFrames,
     BudgetFrameSeconds,
@@ -978,6 +983,7 @@ impl ConfigLeaf {
         Self::WorktreeRetentionCheap,
         Self::WorktreeRetentionExpensive,
         Self::WorktreeRetentionExpensiveGraceDays,
+        Self::WorktreeRetentionDiskFloorMb,
         Self::WorktreeEnabled,
         Self::BudgetMaxFrames,
         Self::BudgetFrameSeconds,
@@ -1038,6 +1044,7 @@ impl ConfigLeaf {
             Self::WorktreeRetentionCheap => "worktree.retention.cheap",
             Self::WorktreeRetentionExpensive => "worktree.retention.expensive",
             Self::WorktreeRetentionExpensiveGraceDays => "worktree.retention.expensive-grace-days",
+            Self::WorktreeRetentionDiskFloorMb => "worktree.retention.disk-floor-mb",
             Self::WorktreeEnabled => "worktree.enabled",
             Self::BudgetMaxFrames => "budget.max-frames",
             Self::BudgetFrameSeconds => "budget.frame-seconds",
@@ -1121,6 +1128,7 @@ impl ConfigLeaf {
             | Self::WorktreeRetentionCheap
             | Self::WorktreeRetentionExpensive
             | Self::WorktreeRetentionExpensiveGraceDays
+            | Self::WorktreeRetentionDiskFloorMb
             | Self::WorktreeEnabled
             | Self::BudgetMaxFrames
             | Self::BudgetFrameSeconds
@@ -1365,6 +1373,8 @@ pub const DEFAULT_MERGE_GATE_SECONDS: u64 = 1_800;
 /// call: high enough to catch an ENOSPC-class failure before it wastes a
 /// build, low enough to not false-park a small VM. Config always wins.
 pub const DEFAULT_MERGE_DISK_FLOOR_MB: u64 = 2_048;
+/// Default dispatch-boundary free-space floor (0280).
+pub const DEFAULT_WORKTREE_DISK_FLOOR_MB: u64 = DEFAULT_MERGE_DISK_FLOOR_MB;
 /// Default total number of attempts for a retryable merge race.
 pub const DEFAULT_MERGE_RETRY_ATTEMPTS: u64 = 5;
 /// Default base delay for exponential merge-race backoff.
@@ -4304,6 +4314,9 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
             target.worktree.retention.expensive_grace_days =
                 source.worktree.retention.expensive_grace_days
         }
+        ConfigLeaf::WorktreeRetentionDiskFloorMb => {
+            target.worktree.retention.disk_floor_mb = source.worktree.retention.disk_floor_mb
+        }
         ConfigLeaf::WorktreeEnabled => target.worktree.enabled = source.worktree.enabled,
         ConfigLeaf::BudgetMaxFrames => {
             target
@@ -5919,6 +5932,15 @@ fn merge_project_config(
         record_winner(
             winners,
             "worktree.retention.expensive-grace-days",
+            layer,
+            source.clone(),
+        );
+    }
+    if next.worktree.retention.disk_floor_mb.is_some() {
+        base.worktree.retention.disk_floor_mb = next.worktree.retention.disk_floor_mb;
+        record_winner(
+            winners,
+            "worktree.retention.disk-floor-mb",
             layer,
             source.clone(),
         );
@@ -8678,11 +8700,13 @@ mod config_tests {
             cheap: vec!["target/incremental".to_string()],
             expensive: vec!["target".to_string()],
             expensive_grace_days: Some(3),
+            disk_floor_mb: Some(4096),
         };
         configured.authored_requirements = [
             ConfigLeaf::WorktreeRetentionCheap,
             ConfigLeaf::WorktreeRetentionExpensive,
             ConfigLeaf::WorktreeRetentionExpensiveGraceDays,
+            ConfigLeaf::WorktreeRetentionDiskFloorMb,
         ]
         .into_iter()
         .map(|leaf| {
@@ -8718,8 +8742,15 @@ mod config_tests {
             vec!["target".to_string()]
         );
         assert_eq!(effective.worktree.retention.expensive_grace_days, Some(3));
+        assert_eq!(effective.worktree.retention.disk_floor_mb, Some(4096));
         assert_eq!(
             winners["worktree.retention.cheap"].source.as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            winners["worktree.retention.disk-floor-mb"]
+                .source
+                .as_deref(),
             Some("repo")
         );
     }
@@ -9012,6 +9043,7 @@ mod config_tests {
                     cheap: vec!["global-cheap".into()],
                     expensive: vec!["global-expensive".into()],
                     expensive_grace_days: Some(7),
+                    disk_floor_mb: None,
                 },
                 ..WorktreeConfig::default()
             },
@@ -9516,6 +9548,7 @@ mod config_tests {
                 "[\"environment\"]",
             ),
             (ConfigLeaf::WorktreeRetentionExpensiveGraceDays, "1", "2"),
+            (ConfigLeaf::WorktreeRetentionDiskFloorMb, "1", "2"),
             (ConfigLeaf::WorktreeEnabled, "false", "true"),
             (ConfigLeaf::BudgetMaxFrames, "1", "2"),
             (ConfigLeaf::BudgetFrameSeconds, "1", "2"),

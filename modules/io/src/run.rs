@@ -4713,6 +4713,200 @@ output = ["port:commit-report"]
     }
 }
 
+#[cfg(test)]
+mod command_disk_floor_tests {
+    use super::*;
+
+    fn command_trait(kind: &str, marker: &Utf8Path) -> ctx_traits_core::Trait {
+        ctx_traits_core::encoding::decode_trait(
+            ctx_traits_core::encoding::Encoding::Toml,
+            &format!(
+                r#"id = "command-disk-floor-{kind}"
+schema-version = "0.5"
+version = "0.1.0"
+name = "Command disk floor"
+description = "Command/check dispatch boundary fixture."
+
+[[slot]]
+id = "command-output"
+schema = "schema:text"
+description = "Local command output."
+
+[procedure]
+description = "One local dispatch."
+
+[[procedure.sequence]]
+id = "local-dispatch"
+title = "Local dispatch"
+kind = "{kind}"
+cmd = "touch {}"
+output = ["slot:command-output"]
+"#,
+                marker
+            ),
+        )
+        .expect("command disk-floor fixture decodes")
+    }
+
+    fn start_command_session(
+        trait_ref: &ctx_traits_core::Trait,
+    ) -> ctx_traits_core::procedure::session::Session {
+        ctx_traits_core::procedure::session::start_run_session(
+            trait_ref,
+            &ctx_traits_core::manifest::PackageStatus::Ready,
+            &ctx_traits_core::r#trait::TrustVerdict::Verified,
+            serde_json::from_value(serde_json::json!({
+                "session-id": "command-disk-floor-session",
+                "run-id": "command-disk-floor-run",
+                "provenance": { "started-by": { "surface": "test", "caller": "disk-floor" }, "state-source": "test" },
+            }))
+            .expect("start request"),
+        )
+        .expect("session starts")
+    }
+
+    fn test_repo(name: &str) -> Utf8PathBuf {
+        let root = std::env::temp_dir().join(format!("ctx-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".ctx/traits")).expect("create test repo");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status()
+            .expect("initialize test repository");
+        assert!(status.success(), "initialize test repository");
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=ctx test",
+                "-c",
+                "user.email=ctx@example.test",
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "fixture",
+            ])
+            .current_dir(&root)
+            .status()
+            .expect("commit test repository");
+        assert!(status.success(), "commit test repository");
+        Utf8PathBuf::from_path_buf(root).expect("UTF-8 test repo")
+    }
+
+    fn write_floor(repo: &Utf8Path, floor_mb: u64) {
+        std::fs::create_dir_all(repo.join(".ctx/traits"))
+            .expect("create disk-floor config directory");
+        std::fs::write(
+            repo.join(".ctx/traits/runtime.toml"),
+            format!("[worktree.retention]\ndisk-floor-mb = {floor_mb}\n"),
+        )
+        .expect("write disk-floor config");
+    }
+
+    #[test]
+    fn command_advance_preflights_each_command() {
+        let repo = test_repo("command-disk-floor");
+        write_floor(&repo, 1_073_741_824);
+        for marker_name in ["first-command-ran", "second-command-ran"] {
+            let marker = repo.join(marker_name);
+            let trait_ref = command_trait("command", &marker);
+            let error = match advance_command_frames(
+                &trait_ref,
+                &repo,
+                start_command_session(&trait_ref),
+                None,
+                Some(&repo),
+                &BTreeMap::new(),
+                None,
+            ) {
+                Err(error) => error,
+                Ok(_) => panic!("the configured floor parks before local dispatch"),
+            };
+            assert!(matches!(error, crate::Error::DiskFull { .. }));
+            assert!(!marker.exists(), "subprocess must not run while parked");
+        }
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn command_advance_uses_invocation_repo_disk_floor_on_linked_worktree_resume() {
+        let repo = test_repo("linked-command-disk-floor");
+        let linked = repo.join("linked-worktree");
+        let status = std::process::Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "linked-disk-floor",
+                linked.as_str(),
+            ])
+            .current_dir(repo.as_std_path())
+            .status()
+            .expect("create linked worktree");
+        assert!(status.success(), "create linked worktree");
+        write_floor(&repo, 1_073_741_824);
+        write_floor(&linked, 1);
+        let marker = linked.join("command-ran");
+        let trait_ref = command_trait("command", &marker);
+        let error = match advance_command_frames(
+            &trait_ref,
+            &linked,
+            start_command_session(&trait_ref),
+            None,
+            Some(&linked),
+            &BTreeMap::new(),
+            None,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("main checkout floor controls a linked-worktree command"),
+        };
+        assert!(matches!(error, crate::Error::DiskFull { .. }));
+        assert!(
+            !marker.exists(),
+            "linked-worktree subprocess must not run while parked"
+        );
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn command_advance_uses_invocation_repo_disk_floor_without_worktree() {
+        let _process_wide = crate::lock_process_wide_test();
+        let invocation_repo = test_repo("host-command-disk-floor-invocation");
+        let external_trait_repo = test_repo("host-command-disk-floor-trait");
+        write_floor(&invocation_repo, 1_073_741_824);
+        write_floor(&external_trait_repo, 1);
+        let marker = invocation_repo.join("command-ran");
+        let trait_ref = command_trait("command", &marker);
+        let original_dir = std::env::current_dir().expect("capture invocation directory");
+        std::env::set_current_dir(invocation_repo.as_std_path())
+            .expect("use invocation repository as current directory");
+        let result = advance_command_frames(
+            &trait_ref,
+            &external_trait_repo,
+            start_command_session(&trait_ref),
+            None,
+            None,
+            &BTreeMap::new(),
+            None,
+        );
+        std::env::set_current_dir(original_dir).expect("restore invocation directory");
+
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("the invocation repository floor controls a no-worktree command"),
+        };
+        assert!(matches!(error, crate::Error::DiskFull { .. }));
+        assert!(
+            !marker.exists(),
+            "external trait-root subprocess must not run while the invocation floor parks"
+        );
+        let _ = std::fs::remove_dir_all(invocation_repo);
+        let _ = std::fs::remove_dir_all(external_trait_repo);
+    }
+}
+
 struct CommandAdvance {
     session: ctx_traits_core::procedure::session::Session,
     failure: Option<CommandStepFailure>,
@@ -4788,10 +4982,42 @@ fn advance_command_frames(
         // a long idle budget still dies on an unrelated, shorter wall.
         // Resolved here rather than threaded from the caller because a
         // command step is the only consumer, and this runs once per gate.
-        let command_policy = exec_dir
-            .or(Some(Utf8Path::new(".")))
-            .and_then(|dir| crate::harness_config::resolve_runtime_config(dir).ok())
+        // The generated worktree can retain an older config than the invoking
+        // checkout. Resolve both command policy and disk policy at the main
+        // repository so a resumed command observes the same authority as drive.
+        let invocation_dir = exec_dir.map(ToOwned::to_owned).or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|path| Utf8PathBuf::from_path_buf(path).ok())
+        });
+        let config_root = invocation_dir
+            .as_deref()
+            .and_then(|dir| crate::repository::discover_main_repo_root(dir).ok());
+        let command_config = config_root.as_deref().and_then(|root| {
+            crate::harness_config::resolve_config_report_at(root, root)
+                .ok()
+                .map(|report| report.runtime)
+        });
+        let command_policy = command_config
+            .as_ref()
             .map(|config| config.effective_run_policy());
+        let disk_floor_mb = command_config
+            .as_ref()
+            .and_then(|config| config.worktree.retention.disk_floor_mb)
+            .unwrap_or(crate::harness_config::DEFAULT_WORKTREE_DISK_FLOOR_MB);
+        if let Some(observation) = crate::environment::dispatch_disk_observation(
+            invocation_dir.as_deref(),
+            config_root.as_deref(),
+            disk_floor_mb,
+        ) {
+            return Err(crate::Error::DiskFull {
+                disk_full: ctx_traits_core::procedure::session::DiskFullPark {
+                    floor_mb: disk_floor_mb,
+                    available_bytes: observation.available_bytes,
+                    probed_path: observation.probed_path.to_string(),
+                },
+            });
+        }
         let (wall_bound, idle_bound) = resolve_command_bounds(command_policy.as_ref(), command);
         let timeout_ms = wall_bound.map(|bound| bound.millis);
         let idle_timeout_ms = idle_bound.map(|bound| bound.millis);
@@ -4811,7 +5037,7 @@ fn advance_command_frames(
         // the same signal can never retroactively change what this
         // activation's replay sees.
         let signal_emission_ceiling = frame.signal_emission_ceiling;
-        let outcome = crate::command::run_with_env(
+        let outcome = match crate::command::run_with_env(
             crate::command::RunRequest {
                 argv: &process_argv,
                 cwd: cwd.as_deref(),
@@ -4828,7 +5054,32 @@ fn advance_command_frames(
                 tick_observer: tick_observer.cloned(),
             },
             env_overlay,
-        )?;
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) if crate::environment::error_chain_is_disk_full(&error) => {
+                let observation = crate::environment::dispatch_disk_available(
+                    invocation_dir.as_deref(),
+                    config_root.as_deref(),
+                );
+                return Err(crate::Error::DiskFull {
+                    disk_full: ctx_traits_core::procedure::session::DiskFullPark {
+                        floor_mb: disk_floor_mb,
+                        available_bytes: observation
+                            .as_ref()
+                            .map_or(0, |value| value.available_bytes),
+                        probed_path: observation.map_or_else(
+                            || {
+                                invocation_dir
+                                    .as_deref()
+                                    .map_or_else(|| ".".to_string(), ToString::to_string)
+                            },
+                            |value| value.probed_path.to_string(),
+                        ),
+                    },
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Check {
             let verdict = outcome.success;
             let mut warnings = vec![format!(

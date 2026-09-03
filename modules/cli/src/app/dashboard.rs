@@ -9703,6 +9703,7 @@ mod tests {
             exit_code: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full: None,
             tokens_by_model: None,
             summons: None,
             reclaim: None,
@@ -9837,6 +9838,7 @@ argv = ["git", "commit", "-m", "fixture"]
             exit_code: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full: None,
             tokens_by_model: None,
             summons: None,
             reclaim: None,
@@ -11684,6 +11686,7 @@ argv = ["git", "commit", "-m", "fixture"]
             exit_code: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full: None,
             tokens_by_model: None,
             summons: Some(SummonsRecord {
                 step_id: summons_step_id.to_string(),

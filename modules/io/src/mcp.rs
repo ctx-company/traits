@@ -573,6 +573,10 @@ fn mcp_error_envelope<T>(error: &crate::Error, call_payload: bool) -> Envelope<T
                 response
             }
         },
+        crate::Error::DiskFull { disk_full } => ResponseError::new("io.disk-full", "disk full")
+            .with_detail("floor-mb", disk_full.floor_mb.to_string())
+            .with_detail("available-bytes", disk_full.available_bytes.to_string())
+            .with_detail("path", disk_full.probed_path.clone()),
         crate::Error::Parse(parse) => match parse {
             crate::parse::Error::JsonDeserialize { .. }
             | crate::parse::Error::JsonSerialize { .. } => {

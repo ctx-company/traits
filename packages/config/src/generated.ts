@@ -278,6 +278,7 @@ export interface WorktreeConfinementConfig {
 
 export interface WorktreeRetentionConfig {
   cheap?: string[];
+  diskFloorMb?: number;
   expensive?: string[];
   expensiveGraceDays?: number;
 }

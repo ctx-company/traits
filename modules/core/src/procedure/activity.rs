@@ -326,6 +326,18 @@ mod tests {
     }
 
     #[test]
+    fn disk_full_outcome_keeps_an_agent_waiting_session_resumable() {
+        assert_eq!(
+            SessionState::derive(
+                &Status::AwaitingAgentOutput,
+                Some(&DriveOutcomeKind::DiskFull),
+                false,
+            ),
+            SessionState::WaitingOnAgent
+        );
+    }
+
+    #[test]
     fn frame_spans_reports_a_positive_span_for_a_unique_frame() {
         let spans = FrameSpans::from_events(vec![("frame", 1_000), ("frame", 3_000)].into_iter());
         assert_eq!(spans.span("frame", 1), Some(Duration::from_millis(2_000)));

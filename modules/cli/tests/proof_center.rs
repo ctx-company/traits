@@ -3516,6 +3516,102 @@ fn failed_outcome_write_on_a_pause_reports_harness_failed_and_emits_no_ended_not
 }
 
 #[test]
+fn failed_disk_full_outcome_write_is_reconstructed_by_center_from_foreign_cwd() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-disk-full-reconstruction");
+    let (repo, home, fixture) = prepare_drive_fixture(&root, FixtureRelease::AfterFixedDelay);
+    std::fs::write(
+        repo.join(".ctx/traits/runtime.toml"),
+        format!(
+            r#"schema-version = "0.4"
+
+[worktree.retention]
+disk-floor-mb = 1073741824
+
+[harness.fixture]
+kind = "custom"
+bin = "{}"
+transports = ["cli"]
+version-probe = ["--fixture-probe"]
+
+[harness.fixture.cli]
+argv = []
+prompt-via = "stdin"
+output = "claude-stream-json"
+
+[agent.role.worker]
+harness = "fixture"
+transport = "cli"
+"#,
+            root.join("fixture-harness.sh").display()
+        ),
+    )
+    .expect("raise disk floor in invocation repository");
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let ledger_text = ledger.to_string_lossy().into_owned();
+    let output = controlled_command(
+        std::path::Path::new(env!("CARGO_BIN_EXE_ctx")),
+        &[
+            "traits",
+            "run",
+            "--file",
+            &fixture,
+            "--out",
+            &ledger_text,
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    )
+    .env("CTX_INTERNAL_TESTHOOK_FAIL_DRIVE_OUTCOME_WRITE", "1")
+    .output()
+    .expect("drive with failed disk-full outcome write");
+    assert!(
+        output.status.success(),
+        "outcome persistence is best effort: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parked = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger"),
+    )
+    .expect("read unrecorded disk-full ledger");
+    assert!(
+        parked.last_drive_outcome.is_none(),
+        "the injected write failure must leave repair work for the center"
+    );
+
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let foreign_cwd = root.join("foreign-cwd");
+    std::fs::create_dir_all(&foreign_cwd).expect("create foreign center cwd");
+    let mut sentinel = ChildGuard(
+        sentinel_with_home_command(&root, &socket, &root.join("index.sqlite3"), "5000", &home)
+            .current_dir(&foreign_cwd)
+            .spawn()
+            .expect("spawn center from foreign cwd"),
+    );
+    drop(await_socket(&socket));
+    await_outcome(&ledger, "disk-full");
+    let repaired = ctx_traits_io::run_session::read_run_session(
+        &Utf8PathBuf::from_path_buf(ledger).expect("UTF-8 ledger"),
+    )
+    .expect("read repaired ledger");
+    let outcome = repaired
+        .last_drive_outcome
+        .as_ref()
+        .expect("center records typed disk-full outcome");
+    assert_eq!(outcome.outcome.as_str(), "disk-full");
+    assert!(outcome.disk_full.is_some(), "repair retains disk evidence");
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn real_driver_notifications_follow_their_durable_write_checkpoints() {
     let _serial = SENTINEL_TEST_LOCK
         .lock()

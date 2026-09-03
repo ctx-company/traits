@@ -318,6 +318,9 @@ pub struct DriveReport {
     /// Present only when `status` is `paused-budget-exhausted` (0130).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_pause: Option<ctx_traits_core::procedure::runtime::BudgetExhaustedPause>,
+    /// Present only when dispatch parked below `[worktree.retention] disk-floor-mb`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_full_park: Option<ctx_traits_core::procedure::session::DiskFullPark>,
     /// See [`ctx_traits_core::procedure::session::DriveOutcome::tokens_by_model`]
     /// (0130). `None` when this drive observed no tokens at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1243,6 +1246,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             bound_fired: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full_park: None,
             tokens_by_model: None,
         };
         push_capability(
@@ -1523,6 +1527,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         rate_limit: report.rate_limit.clone(),
         tokens_by_model: tokens_by_model.clone(),
         summons,
+        disk_full: report.disk_full_park.clone(),
         reclaim,
     };
     // Stamp why the conductor exited; the ledger status alone cannot tell a
@@ -1625,12 +1630,72 @@ fn drive_report_exit_code(status: &str) -> u8 {
     }
 }
 
+#[cfg(test)]
+mod disk_full_tests {
+    use super::drive_report_exit_code;
+
+    #[test]
+    fn disk_full_uses_the_existing_pause_exit_code() {
+        assert_eq!(drive_report_exit_code("disk-full"), 1);
+    }
+}
+
+/// Apply one durable report shape for both boundary probes and ENOSPC after a
+/// physical dispatch. An ENOSPC probe can be unknowable, so only that case
+/// uses zero as explicit unknown evidence.
+fn park_for_disk_full(
+    report: &mut DriveReport,
+    floor_mb: u64,
+    observation: Option<ctx_traits_io::environment::DiskFullObservation>,
+    execution_dir: Option<&camino::Utf8Path>,
+    session_status: &ctx_traits_core::procedure::session::Status,
+) {
+    let park = observation.map_or_else(
+        || ctx_traits_core::procedure::session::DiskFullPark {
+            floor_mb,
+            available_bytes: 0,
+            probed_path: execution_dir.map_or_else(|| ".".to_string(), ToString::to_string),
+        },
+        |observation| ctx_traits_core::procedure::session::DiskFullPark {
+            floor_mb,
+            available_bytes: observation.available_bytes,
+            probed_path: observation.probed_path.to_string(),
+        },
+    );
+    park_for_disk_full_evidence(report, park, session_status);
+}
+
 fn cooperative_stop_status() -> &'static str {
     if crate::app::interrupt::is_paused() {
         "paused"
     } else {
         "interrupted"
     }
+}
+
+fn park_for_disk_full_evidence(
+    report: &mut DriveReport,
+    park: ctx_traits_core::procedure::session::DiskFullPark,
+    session_status: &ctx_traits_core::procedure::session::Status,
+) {
+    report.status = "disk-full".to_string();
+    report.events.push(DriveEvent {
+        event: "disk-full".to_string(),
+        role: None,
+        harness: None,
+        detail: format!(
+            "worktree.retention.disk-floor-mb={}MiB; observed {} bytes at {}",
+            park.floor_mb, park.available_bytes, park.probed_path
+        ),
+        duration_ms: None,
+    });
+    report.disk_full_park = Some(park);
+    report.final_session_status = Some(session_status.clone());
+    report.session_state = Some(ctx_traits_core::procedure::activity::SessionState::derive(
+        session_status,
+        Some(&ctx_traits_core::procedure::session::DriveOutcomeKind::DiskFull),
+        false,
+    ));
 }
 
 fn cooperative_stop_detail() -> &'static str {
@@ -1769,6 +1834,7 @@ fn busy_report(input: &DriveInputs<'_>) -> DriveReport {
         bound_fired: None,
         rate_limit: None,
         budget_pause: None,
+        disk_full_park: None,
         tokens_by_model: None,
     }
 }
@@ -2137,6 +2203,7 @@ fn drive_loop(
         bound_fired: None,
         rate_limit: None,
         budget_pause: None,
+        disk_full_park: None,
         tokens_by_model: None,
     };
     report
@@ -2176,6 +2243,11 @@ fn drive_loop(
     // sequential cursor actually reaches that branch. Empty and never
     // touched when `max_in_flight <= 1` (the default).
     let mut pending_wave_cache = PendingWaveCache::new();
+    let disk_floor_mb = profile
+        .worktree
+        .retention
+        .disk_floor_mb
+        .unwrap_or(ctx_traits_io::harness_config::DEFAULT_WORKTREE_DISK_FLOOR_MB);
     let narrator_warm_pool = harness_stream::NarratorWarmPool::default();
     let narrator_trace_sequence = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     // Terminal-restore guard (owner incident 2026-07-22; P551 hoisted to
@@ -2294,7 +2366,6 @@ fn drive_loop(
             );
             return Ok(report);
         }
-
         // P479 loop-top checkpoint: runs BEFORE the next frame resolves or
         // dispatches anything, so an out-of-tree escape can never buy another
         // paid frame. On the first iteration this call only takes the
@@ -2338,8 +2409,8 @@ fn drive_loop(
             refresh_run_panel(&mut run_panel.0, &mut input, &outcome.session);
             command_started_event(&outcome.session, run_panel.0.is_some());
             let revisions_before = outcome.session.slot_revisions.len();
-            outcome =
-                ctx_traits_io::run::advance_commands(ctx_traits_io::run::AdvanceCommandsRequest {
+            outcome = match ctx_traits_io::run::advance_commands(
+                ctx_traits_io::run::AdvanceCommandsRequest {
                     trait_file: input.file,
                     trait_id: None,
                     session: input.session,
@@ -2348,7 +2419,30 @@ fn drive_loop(
                     execution_env: &worktree_env,
                     elapsed_seconds: current_elapsed_seconds(),
                     tick_observer: run_panel.0.as_ref().map(run_view::RunPanel::tick_observer),
-                })?;
+                },
+            ) {
+                Ok(outcome) => outcome,
+                Err(ctx_traits_io::Error::DiskFull { disk_full }) => {
+                    park_for_disk_full_evidence(&mut report, disk_full, &outcome.session.status);
+                    return Ok(report);
+                }
+                Err(error) => {
+                    if ctx_traits_io::environment::error_chain_is_disk_full(&error) {
+                        park_for_disk_full(
+                            &mut report,
+                            disk_floor_mb,
+                            ctx_traits_io::environment::dispatch_disk_available(
+                                input.execution_dir,
+                                None,
+                            ),
+                            input.execution_dir,
+                            &outcome.session.status,
+                        );
+                        return Ok(report);
+                    }
+                    return Err(error.into());
+                }
+            };
             if let Some(observer) = input.frame_observer.as_ref() {
                 for revision in outcome.session.slot_revisions.iter().skip(revisions_before) {
                     if let Some(payload) = revision.submitted_payload.as_ref() {
@@ -2478,6 +2572,26 @@ fn drive_loop(
             report.status = "no-frame".to_string();
             return Ok(report);
         };
+        // This gate belongs immediately before dispatch, not at loop top:
+        // terminal and human-waiting sessions must retain their disposition.
+        // Cached concurrent outcomes are already-paid dispatches and must be
+        // drained before any new preflight can park the session.
+        if pending_wave_cache.is_empty()
+            && let Some(observation) = ctx_traits_io::environment::dispatch_disk_observation(
+                input.execution_dir,
+                None,
+                disk_floor_mb,
+            )
+        {
+            park_for_disk_full(
+                &mut report,
+                disk_floor_mb,
+                Some(observation),
+                input.execution_dir,
+                &outcome.session.status,
+            );
+            return Ok(report);
+        }
         if tui_degraded_to_status {
             progress(input.progress, "in-progress");
         }
@@ -2751,7 +2865,7 @@ fn drive_loop(
             {
                 push_capability(&mut report, capability);
             }
-            if drive_mcp_frame(
+            let mcp_advanced = match drive_mcp_frame(
                 &input,
                 &mut report,
                 budget,
@@ -2775,7 +2889,26 @@ fn drive_loop(
                         .and_then(|payloads| payloads.spawn_sandbox.clone()),
                 },
                 activity,
-            )? {
+            ) {
+                Ok(advanced) => advanced,
+                Err(error) => {
+                    if ctx_traits_io::environment::error_chain_is_disk_full(&error) {
+                        park_for_disk_full(
+                            &mut report,
+                            disk_floor_mb,
+                            ctx_traits_io::environment::dispatch_disk_available(
+                                input.execution_dir,
+                                None,
+                            ),
+                            input.execution_dir,
+                            &outcome.session.status,
+                        );
+                        return Ok(report);
+                    }
+                    return Err(error);
+                }
+            };
+            if mcp_advanced {
                 continue;
             }
             return Ok(report);
@@ -3163,6 +3296,19 @@ fn drive_loop(
                 // `apply_concurrent_terminal_failure` adapter.
                 Some(Ok(result)) => result,
                 Some(Err(error)) => {
+                    if ctx_traits_io::environment::error_chain_is_disk_full(&error) {
+                        park_for_disk_full(
+                            &mut report,
+                            disk_floor_mb,
+                            ctx_traits_io::environment::dispatch_disk_available(
+                                input.execution_dir,
+                                None,
+                            ),
+                            input.execution_dir,
+                            &outcome.session.status,
+                        );
+                        return Ok(report);
+                    }
                     apply_concurrent_terminal_failure(
                         &mut report,
                         &input,
@@ -3185,7 +3331,7 @@ fn drive_loop(
                         frame.item_id.clone().unwrap_or_else(|| frame.title.clone()),
                         ctx_traits_core::procedure::activity::ActivityKind::Dispatching,
                     );
-                    run_cli_harness_with_warm_fallback(
+                    match run_cli_harness_with_warm_fallback(
                         &mut report,
                         &mut warm_harness_sessions,
                         &mut warm_harness_respawn_used,
@@ -3233,7 +3379,25 @@ fn drive_loop(
                             billing: harness.billing.unwrap_or_default(),
                             model: plan.model.clone(),
                         },
-                    )?
+                    ) {
+                        Ok(run) => run,
+                        Err(error) => {
+                            if ctx_traits_io::environment::error_chain_is_disk_full(&error) {
+                                park_for_disk_full(
+                                    &mut report,
+                                    disk_floor_mb,
+                                    ctx_traits_io::environment::dispatch_disk_available(
+                                        input.execution_dir,
+                                        None,
+                                    ),
+                                    input.execution_dir,
+                                    &outcome.session.status,
+                                );
+                                return Ok(report);
+                            }
+                            return Err(error);
+                        }
+                    }
                 }
             };
             if live_output.is_none() {

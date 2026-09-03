@@ -20,6 +20,13 @@ pub enum Error {
     #[error(transparent)]
     Environment(#[from] crate::environment::Error),
 
+    /// A command/check frame was deliberately not spawned because a known
+    /// dispatch volume is below the configured floor.
+    #[error("disk full: {} bytes available at {}", disk_full.available_bytes, disk_full.probed_path)]
+    DiskFull {
+        disk_full: ctx_traits_core::procedure::session::DiskFullPark,
+    },
+
     #[error(transparent)]
     Parse(#[from] crate::parse::Error),
 

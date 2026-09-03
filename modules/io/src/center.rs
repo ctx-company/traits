@@ -3455,10 +3455,46 @@ impl CenterModel {
                         };
                         let summary = crate::run_summary::RunSummary::from_session(&session);
                         if !terminal(&summary) && !settled_pause(&summary) {
-                            crate::run_session::record_interrupted_outcome_in_session(
-                                ledger,
-                                &mut session,
-                            )?;
+                            let repo_path = camino::Utf8Path::new(&row.repo_path);
+                            let disk_full = crate::harness_config::resolve_config_report_at(
+                                repo_path, repo_path,
+                            )
+                            .ok()
+                            .and_then(|report| {
+                                let config = report.runtime;
+                                let floor_mb = config.worktree.retention.disk_floor_mb.unwrap_or(
+                                    crate::harness_config::DEFAULT_WORKTREE_DISK_FLOOR_MB,
+                                );
+                                let worktree = summary
+                                    .worktree_path
+                                    .as_deref()
+                                    .map(camino::Utf8Path::new)
+                                    .unwrap_or(repo_path);
+                                crate::environment::dispatch_disk_observation(
+                                    Some(worktree),
+                                    Some(repo_path),
+                                    floor_mb,
+                                )
+                                .map(|observation| {
+                                    ctx_traits_core::procedure::session::DiskFullPark {
+                                        floor_mb,
+                                        available_bytes: observation.available_bytes,
+                                        probed_path: observation.probed_path.to_string(),
+                                    }
+                                })
+                            });
+                            if let Some(disk_full) = disk_full {
+                                crate::run_session::record_disk_full_outcome_in_session(
+                                    ledger,
+                                    &mut session,
+                                    disk_full,
+                                )?;
+                            } else {
+                                crate::run_session::record_interrupted_outcome_in_session(
+                                    ledger,
+                                    &mut session,
+                                )?;
+                            }
                         }
                         // Clear stale display metadata for both terminal and repaired
                         // ledgers while maintenance ownership still excludes a driver.

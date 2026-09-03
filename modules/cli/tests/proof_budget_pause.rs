@@ -9,6 +9,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Command;
 
 use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
 
@@ -264,6 +265,244 @@ printf '{{"answer2":"done2"}}'
     assert_eq!(
         resumed_report["status"], "completed",
         "resumed report: {resumed_report}"
+    );
+}
+
+#[test]
+fn disk_floor_parks_before_dispatch_then_resumes_same_worktree() {
+    let scratch = ScratchRoot::new("p0280-disk-floor");
+    let repo = scratch.home().join("repo");
+    let home = scratch.home();
+    let ledger = repo.join(".ctx/runs/fixture.json");
+    fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+    let script = home.join("worker.sh");
+    let log_dir = repo.join(".ctx/debug/prompts");
+    write_executable(
+        &script,
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "--fixture-probe" ]; then
+  printf 'fixture-worker-1.0\n'
+  exit 0
+fi
+mkdir -p "{log_dir}"
+COUNT=$(ls "{log_dir}" 2>/dev/null | wc -l | tr -d ' ')
+touch "{log_dir}/prompt-$COUNT.txt"
+if [ "$COUNT" = "0" ]; then
+  printf '{{"answer1":"done"}}'
+else
+  printf '{{"answer2":"done2"}}'
+fi
+"#,
+            log_dir = log_dir.display(),
+        ),
+    );
+    init_fixture_repo(&repo, &home, "disk-worker", &script, 1000);
+    let config = repo.join(".ctx/traits/runtime.toml");
+    fs::write(
+        &config,
+        format!(
+            "{}\n[worktree]\nenabled = true\n\n[worktree.retention]\ndisk-floor-mb = 1073741824\n",
+            ctx_toml("disk-worker", &script, 1000)
+        ),
+    )
+    .unwrap();
+    let add = Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .status()
+        .expect("stage worktree fixture");
+    assert!(add.success(), "stage worktree fixture");
+    let commit = Command::new("git")
+        .args([
+            "-c",
+            "user.name=ctx test",
+            "-c",
+            "user.email=ctx@example.test",
+            "commit",
+            "-m",
+            "fixture",
+        ])
+        .current_dir(&repo)
+        .status()
+        .expect("commit worktree fixture");
+    assert!(commit.success(), "commit worktree fixture");
+
+    let output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/fixture-0130/generated/index.toml",
+            "--out",
+            &ledger.to_string_lossy(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&output, 0);
+    let report = value_json(&output)["value"]["drive"].clone();
+    assert_eq!(report["status"], "disk-full", "report: {report}");
+    assert_eq!(
+        report["disk-full-park"]["floor-mb"], 1_073_741_824u64,
+        "report: {report}"
+    );
+    assert_eq!(
+        report["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| event["event"] == "harness-run")
+            .count(),
+        0,
+        "the parked frame must not dispatch: {report}"
+    );
+    let parked = ctx_traits_io::run_session::read_run_session(
+        camino::Utf8Path::from_path(&ledger).expect("UTF-8 ledger"),
+    )
+    .expect("read parked ledger");
+    let worktree = parked
+        .provenance
+        .worktree
+        .clone()
+        .expect("park retains a worktree");
+    assert!(
+        Path::new(worktree.path.as_deref().expect("worktree path")).exists(),
+        "parked worktree remains available"
+    );
+    assert!(
+        parked.next_frame.is_some(),
+        "parked frame remains unsubmitted"
+    );
+    assert_eq!(
+        parked
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.as_str()),
+        Some("disk-full")
+    );
+    assert!(
+        parked
+            .last_drive_outcome
+            .as_ref()
+            .and_then(|outcome| outcome.disk_full.as_ref())
+            .is_some(),
+        "typed disk evidence is durable"
+    );
+
+    fs::write(
+        &config,
+        format!(
+            "{}\n[worktree]\nenabled = true\n\n[worktree.retention]\ndisk-floor-mb = 1\n",
+            ctx_toml("disk-worker", &script, 1000)
+        ),
+    )
+    .unwrap();
+    let resumed = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--session",
+            &ledger.to_string_lossy(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&resumed, 0);
+    assert_eq!(value_json(&resumed)["value"]["status"], "completed");
+    let completed = ctx_traits_io::run_session::read_run_session(
+        camino::Utf8Path::from_path(&ledger).expect("UTF-8 ledger"),
+    )
+    .expect("read completed ledger");
+    assert_eq!(
+        completed.provenance.worktree.as_ref(),
+        Some(&worktree),
+        "resume must retain the parked worktree identity, branch, and path"
+    );
+}
+
+#[test]
+fn disk_floor_does_not_rewrite_completed_session() {
+    let scratch = ScratchRoot::new("p0280-disk-floor-completed");
+    let repo = scratch.home().join("repo");
+    let home = scratch.home();
+    let ledger = repo.join(".ctx/runs/fixture.json");
+    fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+    let script = home.join("worker.sh");
+    write_executable(
+        &script,
+        r##"#!/bin/sh
+if [ "$1" = "--fixture-probe" ]; then
+  printf 'fixture-worker-1.0\n'
+  exit 0
+fi
+printf '{"answer1":"done","answer2":"done2"}'
+"##,
+    );
+    init_fixture_repo(&repo, &home, "disk-completed-worker", &script, 1000);
+
+    let completed = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/fixture-0130/generated/index.toml",
+            "--out",
+            &ledger.to_string_lossy(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&completed, 0);
+    assert_eq!(
+        value_json(&completed)["value"]["drive"]["status"],
+        "completed"
+    );
+
+    fs::write(
+        repo.join(".ctx/traits/runtime.toml"),
+        format!(
+            "{}\n[worktree.retention]\ndisk-floor-mb = 1073741824\n",
+            ctx_toml("disk-completed-worker", &script, 1000)
+        ),
+    )
+    .unwrap();
+    let redriven = run_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--session",
+            &ledger.to_string_lossy(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&redriven, 0);
+    assert_eq!(value_json(&redriven)["value"]["status"], "completed");
+    let session = ctx_traits_io::run_session::read_run_session(
+        camino::Utf8Path::from_path(&ledger).expect("UTF-8 ledger"),
+    )
+    .expect("read completed ledger");
+    assert_eq!(
+        session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.as_str()),
+        Some("completed")
     );
 }
 

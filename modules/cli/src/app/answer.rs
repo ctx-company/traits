@@ -554,6 +554,7 @@ mod tests {
                 exit_code: None,
                 rate_limit: None,
                 budget_pause: None,
+                disk_full: None,
                 tokens_by_model: None,
                 summons: Some(SummonsRecord {
                     step_id: "ask-owner".to_string(),

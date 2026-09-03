@@ -905,6 +905,7 @@ argv = ["git", "commit", "-m", "fixture"]
             exit_code: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full: None,
             tokens_by_model: None,
             summons: None,
             reclaim: None,
@@ -1192,6 +1193,8 @@ pub enum DriveOutcomeKind {
     /// P130: a declared run/seat token or estimated-cost ceiling was reached
     /// at the frame-dispatch boundary. See [`BudgetExhaustedPause`].
     PausedBudgetExhausted,
+    /// 0280: dispatch parked before submitting a frame because free space is below policy.
+    DiskFull,
     DriverLockBusy,
     ConcurrencyConductorBusy,
     TotalBudgetExhausted,
@@ -1237,6 +1240,7 @@ impl DriveOutcomeKind {
             "paused" => Self::Paused,
             "paused-provider-credits" => Self::PausedProviderCredits,
             "paused-budget-exhausted" => Self::PausedBudgetExhausted,
+            "disk-full" => Self::DiskFull,
             "driver-lock-busy" => Self::DriverLockBusy,
             "concurrency-conductor-busy" => Self::ConcurrencyConductorBusy,
             "total-budget-exhausted" => Self::TotalBudgetExhausted,
@@ -1275,6 +1279,7 @@ impl DriveOutcomeKind {
             Self::Paused => "paused",
             Self::PausedProviderCredits => "paused-provider-credits",
             Self::PausedBudgetExhausted => "paused-budget-exhausted",
+            Self::DiskFull => "disk-full",
             Self::DriverLockBusy => "driver-lock-busy",
             Self::ConcurrencyConductorBusy => "concurrency-conductor-busy",
             Self::TotalBudgetExhausted => "total-budget-exhausted",
@@ -1311,6 +1316,7 @@ impl DriveOutcomeKind {
             Self::Paused
                 | Self::PausedProviderCredits
                 | Self::PausedBudgetExhausted
+                | Self::DiskFull
                 | Self::AwaitingOwner
         )
     }
@@ -1383,6 +1389,9 @@ pub struct DriveOutcome {
     /// on every existing ledger (this field is new and additive).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_pause: Option<BudgetExhaustedPause>,
+    /// Present only when `outcome` is `disk-full` (0280).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_full: Option<DiskFullPark>,
     /// Observed output tokens attributed to the resolved model id that
     /// produced them (0130): the work seat's `AgentAssignment.model`,
     /// narrator/guide's own agent-table model, or `"unknown"` for a
@@ -1424,6 +1433,16 @@ pub struct SummonsRecord {
     pub answer_slot: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_ref: Option<String>,
+}
+
+/// Typed evidence for a dispatch-boundary disk-space park (0280).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename_all = "kebab-case")]
+pub struct DiskFullPark {
+    pub floor_mb: u64,
+    pub available_bytes: u64,
+    pub probed_path: String,
 }
 
 /// The effective drive budget recorded as evidence alongside a
@@ -1502,6 +1521,8 @@ pub struct DriveTerminalEvidence {
     pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
     /// See [`DriveOutcome::summons`] (P0253.4).
     pub summons: Option<SummonsRecord>,
+    /// See [`DriveOutcome::disk_full`] (0280).
+    pub disk_full: Option<DiskFullPark>,
     pub reclaim: Option<ReclaimEvidence>,
 }
 
@@ -6592,10 +6613,18 @@ output = ["slot:first", "slot:second"]
     }
 
     #[test]
+    fn disk_full_drive_outcome_kind_round_trips_the_wire_value() {
+        let outcome = DriveOutcomeKind::from_wire("disk-full");
+        assert_eq!(outcome, DriveOutcomeKind::DiskFull);
+        assert_eq!(outcome.as_str(), "disk-full");
+    }
+
+    #[test]
     fn settled_pause_covers_every_durable_resumable_pause() {
         assert!(DriveOutcomeKind::Paused.is_settled_pause());
         assert!(DriveOutcomeKind::PausedProviderCredits.is_settled_pause());
         assert!(DriveOutcomeKind::PausedBudgetExhausted.is_settled_pause());
+        assert!(DriveOutcomeKind::DiskFull.is_settled_pause());
         assert!(DriveOutcomeKind::AwaitingOwner.is_settled_pause());
         assert!(!DriveOutcomeKind::Other("paused-ish".to_string()).is_settled_pause());
     }

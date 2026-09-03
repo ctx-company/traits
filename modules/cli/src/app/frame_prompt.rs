@@ -2481,6 +2481,7 @@ mod resolve_input_value_tokens_setting_tests {
             exit_code: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full: None,
             tokens_by_model: None,
             summons: Some(ctx_traits_core::procedure::session::SummonsRecord {
                 step_id: step_id.to_string(),
@@ -2564,6 +2565,7 @@ mod resolve_input_value_tokens_setting_tests {
             exit_code: None,
             rate_limit: None,
             budget_pause: None,
+            disk_full: None,
             tokens_by_model: None,
             summons: None,
             reclaim: None,
