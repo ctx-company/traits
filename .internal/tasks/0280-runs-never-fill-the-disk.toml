@@ -1,0 +1,103 @@
+schema-version = "0.2"
+key = "0280"
+title = "Runs never fill the disk: reclaim on landed and killed, park on disk-full"
+status = "draft"
+raised = "2026-09-03"
+content = """
+Owner-reported 2026-09-03, third occurrence in two days. At 12:04 two
+runs in two repositories (ctx.traits 0266.9 fe3f5f32, ctx-annotate
+0003.1 04e62287) hit ENOSPC mid-dispatch; both drivers retried the
+harness dispatch and recorded a bare `interrupted` at 12:06:47 and
+12:06:52 with no reason. The previous night 154 GB had to be freed by
+hand (23 dead worktrees, 10 build slots); by noon the slot cache was
+back at 51 GB and the disk was full again.
+
+Why nothing reclaims automatically today, from the source:
+
+- `target_slot.rs`: four build slots per repository, each "a full build
+  tree". A slot is reclaimed "when the worktree it was assigned to no
+  longer exists — no pid liveness, no release" — and reclaim means
+  reassign, never empty: the previous tenant's build tree stays until
+  overwritten. Since a `--worktree` run retains its worktree after
+  every outcome (0243.5), assignments never free.
+- P511 `[worktree.retention]`: the `cheap` tier (deleted at drive exit)
+  is empty in this repo; the `expensive = ["target"]` tier has a 7-day
+  grace whose expiry check has no caller outside tests. Declared build
+  caches are pruned only by the manual `cache prune --build`.
+- No headroom check exists anywhere: dispatch proceeds onto a full
+  disk and the harness dies silently.
+- 0270 explicitly deferred this: "Auto-deleting or auto-archiving
+  anything (retention stays a separate owner decision)". This task is
+  that decision.
+
+## Owner decisions (binding)
+
+1. KEEP everything for `parked` and `failed` runs — worktree, branch,
+   build slot, cache. Failed runs must remain resumable (resumability
+   itself is 0270/0279's concern; this task only guarantees their
+   artifacts survive).
+2. REMOVE, on `landed` and on `killed`: the run's worktree build trees
+   (its `target`/build outputs) AND its entries under the per-repository
+   cache root (`~/.config/ctx/traits/cache/<repo>/…`: its build slot
+   contents and declared build caches). The worktree and branch follow
+   the existing landed/killed rules.
+3. Disk-full is a PARK, not a death: before dispatching a frame that
+   builds, check free headroom; below the threshold, park the run with
+   a typed `disk-full` reason (not `interrupted`), so it resumes once
+   space is freed and the dashboard says why.
+
+## Owner contract
+
+A landed or killed run leaves no build tree and no cache slot behind.
+A parked or failed run keeps everything it needs to resume warm. A run
+never dies of ENOSPC — it parks with a reason. The slot cache stops
+growing without bound across days of dogfooding.
+"""
+scope = """
+Goals below are binding outcomes; the route is the architect's to
+decide. Deliberately light on implementation — architect grounds it
+and splits it.
+
+## Goals (binding, observable)
+
+1. On a `landed` outcome (merge completed) and on `killed`: the run's
+   worktree build trees and its cache-root entries (slot contents,
+   declared build caches) are removed as part of the outcome, before
+   the queue advances. The removal is recorded in the ledger.
+2. On `parked` and `failed`: nothing is removed. Resuming a parked or
+   failed run finds its worktree, branch, slot, and cache exactly as
+   left (warm resume is preserved).
+3. A build slot freed by goal 1 is empty on disk, not merely
+   reassignable; the slot registry reflects it.
+4. Pre-dispatch headroom: when free space on the cache/worktree volume
+   is below a configured threshold (with a sane default), the driver
+   parks the run with a typed `disk-full` reason instead of dispatching.
+   The park is resumable once space exists; the dashboard and queue
+   report `disk-full`, never `interrupted` or `Failure`.
+5. The reclaim rules and the threshold are configuration under the
+   existing `[worktree.retention]` family, not new top-level knobs;
+   omission keeps today's behavior only for the tiers this task does
+   not touch.
+6. Regression proofs for the incident shapes: landed → slot and cache
+   gone; killed → gone; parked/failed → intact; full disk → park with
+   `disk-full`, then resume after space is freed. Existing suites stay
+   green.
+
+## Out of scope
+- Making failed/interrupted runs resumable (0270/0279).
+- Time-based expiry of the expensive tier (its caller stays absent;
+  landed/killed reclaim makes it moot for this product's usage).
+- Any change to worktree branch naming or the landing flow itself.
+"""
+validation = """
+## Done when
+1. A landed run's slot and cache entries are gone from disk and the
+   ledger records the reclaim; same for a killed run.
+2. A parked run and a failed run keep worktree, branch, slot, and cache
+   intact and resume warm.
+3. Dispatch onto a volume below the threshold parks with `disk-full`;
+   freeing space and resuming continues the run.
+4. Existing suites stay green.
+
+The instruments and exact assertions are the architect's to choose.
+"""
