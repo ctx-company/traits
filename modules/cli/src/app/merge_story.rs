@@ -584,9 +584,7 @@ fn next_action_for(class: ParkClass) -> &'static str {
         }
         ParkClass::GateFailed => "fix the failing gate command locally, then retry",
         ParkClass::GateLeftDirty => "inspect and clean the worktree after the gate ran, then retry",
-        ParkClass::GateDiskFloor => {
-            "declared regenerable caches were pruned; free space and re-run merge"
-        }
+        ParkClass::GateDiskFloor => "free space and re-run merge",
         ParkClass::LandingMainAdvanced | ParkClass::LandingMainNotClean => "retry the merge",
         ParkClass::LandingFastForwardFailed => {
             "inspect the target branch by hand (a non-fast-forward state is unexpected), then retry"

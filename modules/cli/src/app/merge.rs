@@ -849,52 +849,6 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
         std::thread::sleep(Duration::from_millis(backoff_ms));
         attempt += 1;
     }
-    // P462: every park class (including a standalone `ctx traits merge`
-    // with no drive in flight) leaves the worktree parked for triage, but
-    // the park promise never covered declared regenerable artifacts — prune
-    // both retention tiers here, the single chokepoint downstream of every
-    // park-returning exit inside `merge_locked`, since none of those exits
-    // (`park_with_detail`, `park_with_deep_decisions`, and the standalone
-    // gate/preflight parks) carries the worktree path itself.
-    if report.status == "parked"
-        && let Some(worktree_path) = worktree
-            .path
-            .as_deref()
-            .map(Utf8Path::new)
-            .filter(|path| path.is_dir())
-    {
-        let declared: Vec<String> = runtime_config
-            .worktree
-            .retention
-            .cheap
-            .iter()
-            .chain(runtime_config.worktree.retention.expensive.iter())
-            .cloned()
-            .collect();
-        let outcomes =
-            ctx_traits_io::retention::prune_terminal_cheap_artifacts(worktree_path, &declared);
-        let removed: Vec<_> = outcomes.iter().filter(|outcome| outcome.removed).collect();
-        if !removed.is_empty() {
-            report.warnings.push(format!(
-                "park retention removed declared regenerable artifacts: {}",
-                removed
-                    .iter()
-                    .map(|outcome| outcome.relative_path.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        for outcome in outcomes
-            .into_iter()
-            .filter(|outcome| outcome.error.is_some())
-        {
-            report.warnings.push(format!(
-                "park retention cleanup failed for {}: {}",
-                outcome.relative_path,
-                outcome.error.unwrap_or_default()
-            ));
-        }
-    }
     report.warnings.extend(retry_warnings.into_vec());
     report.warnings.extend(default_branch_warnings);
     report.warnings.extend(confinement_warnings);
@@ -2575,8 +2529,7 @@ fn run_landing_gate(
                     MergeStage::Gates,
                     format!(
                         "{} {available_bytes} bytes free, below the {floor_bytes}-byte floor \
-                         (merge.disk-floor-mb={}); declared regenerable caches were pruned; \
-                         free space and re-run merge",
+                         (merge.disk-floor-mb={}); free space and re-run merge",
                         reasons::GATE_DISK_FLOOR_PREFIX,
                         gate_policy.disk_floor_mb
                     ),

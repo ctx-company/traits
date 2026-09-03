@@ -444,11 +444,11 @@ pub struct WorktreeConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorktreeRetentionConfig {
-    /// Cheap, high-volume artifacts deleted at every drive exit.
+    /// Cheap, high-volume regenerable artifacts. Declared for future reclaim;
+    /// nothing deletes them at drive exit.
     #[serde(default)]
     pub cheap: Vec<String>,
-    /// Expensive artifacts retained for a warm resume; expiry sweeping is
-    /// deliberately separate from the terminal cheap-tier cleanup.
+    /// Expensive artifacts retained for a warm resume.
     #[serde(default)]
     pub expensive: Vec<String>,
     /// Optional override for the default seven-day expensive-tier grace.

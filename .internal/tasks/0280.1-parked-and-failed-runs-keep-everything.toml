@@ -3,7 +3,7 @@ key = "0280.1"
 title = "Parked and failed runs keep everything: retire the exit-time prunes"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — files, symbols, edit order,
@@ -76,8 +76,8 @@ direction is safe (keeps too much, deletes nothing wrong) and short-lived.
 4. **Existing suites stay green.** No behavior outside the two retired prunes
    changes.
    Decided by: the declared `just test` check.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - This child only deletes destructive behavior; landed/killed reclaim arrives
@@ -110,8 +110,8 @@ scope = '''
    proof_merge_on_completion`, `just sdk-check`, `just test`. In a run
    worktree, isolate the build cache (`CARGO_TARGET_DIR=target`) before
    trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Do not delete or weaken `retention.rs` safety logic — only its call sites
@@ -127,15 +127,16 @@ validation = '''
   non-completed drive on disk.
 - Disk-floor park messages no longer claim caches were pruned.
 - `just sdk-check` and `just test` pass.
-'''
+"""
+
 [relations]
 parent = "0280"
 
 [[checks]]
 name = "merge-completion proof suite is green including park preservation"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_merge_on_completion"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "generated config docs match the new retention semantics"

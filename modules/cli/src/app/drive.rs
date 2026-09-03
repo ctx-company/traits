@@ -1152,7 +1152,6 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     if let Some((path, _, _)) = restored_worktree.as_ref() {
         input.execution_dir = Some(path.as_path());
     }
-    let retention_worktree = input.execution_dir.map(camino::Utf8PathBuf::from);
     let resume_retry_warnings = restored_worktree
         .as_ref()
         .map(|(_, warnings, _)| warnings.clone())
@@ -1419,33 +1418,6 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // auto-land (P460's `complete_after_drive` gates on `outcome ==
     // "completed"`).
     let _ = tripwire_checkpoint(&mut report, &ledger_path, tripwire.as_mut());
-    if let Some(worktree) = retention_worktree.as_deref() {
-        let outcomes = ctx_traits_io::retention::prune_terminal_cheap_artifacts(
-            worktree,
-            &profile.worktree.retention.cheap,
-        );
-        let removed: Vec<_> = outcomes.iter().filter(|outcome| outcome.removed).collect();
-        if !removed.is_empty() {
-            report.warnings.push(format!(
-                "retention removed cheap artifacts: {}",
-                removed
-                    .iter()
-                    .map(|outcome| outcome.relative_path.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        for outcome in outcomes
-            .into_iter()
-            .filter(|outcome| outcome.error.is_some())
-        {
-            report.warnings.push(format!(
-                "retention cheap-artifact cleanup failed for {}: {}",
-                outcome.relative_path,
-                outcome.error.unwrap_or_default()
-            ));
-        }
-    }
     report.warnings.extend(worktree_retry_warnings);
     report.warnings.extend(resume_retry_warnings);
     // P427: one grouped line per built-in harness the implicit `default`

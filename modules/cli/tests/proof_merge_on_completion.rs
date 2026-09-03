@@ -632,11 +632,18 @@ fn no_merge_clear_waits_for_the_driver_lock_before_mutating_the_ledger() {
     );
 }
 
+/// Declared cheap retention paths survive a non-completed drive.
 #[test]
 fn incomplete_drive_with_merge_intent_exits_distinct_status_without_merging() {
     let scratch = ScratchRoot::new("p460-not-completed");
     let repo = scratch.home().join("repo");
-    init_fixture_repo(&repo, &scratch.home(), "true", "false");
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "false", |repo| {
+        fs::write(
+            repo.join(".ctx/traits/runtime.toml"),
+            "[worktree]\nsetup = [[\"sh\", \"-c\", \"mkdir -p scratch-cache && touch scratch-cache/blob\"]]\n\n[worktree.retention]\ncheap = [\"scratch-cache\"]\n",
+        )
+        .unwrap();
+    });
 
     let output = run_ctx(
         &[
@@ -658,6 +665,16 @@ fn incomplete_drive_with_merge_intent_exits_distinct_status_without_merging() {
     assert!(
         envelope["value"].get("merge").is_none(),
         "a run that never completed must never attempt a merge: {envelope}"
+    );
+    let worktree = fs::read_dir(repo.join(".ctx/traits/worktrees"))
+        .unwrap()
+        .next()
+        .expect("non-completed run retains one worktree")
+        .unwrap()
+        .path();
+    assert!(
+        worktree.join("scratch-cache/blob").is_file(),
+        "a non-completed drive must retain declared cheap artifacts"
     );
 }
 
@@ -838,14 +855,20 @@ fn no_gate_declared_lands_with_one_advisory_and_removes_worktree() {
 /// default branch advances, retaining the run's branch/worktree and
 /// recording the declared argv and captured-output path — exactly like a
 /// failing `just test` did under the pre-P477 hardcoded chain.
+/// Declared cheap and expensive retention paths survive a parked merge.
 #[test]
 fn declared_false_gate_parks_and_retains_branch_and_worktree() {
     let scratch = ScratchRoot::new("p477-false-gate");
     let repo = scratch.home().join("repo");
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
+            repo.join(".gitignore"),
+            ".ctx/traits/worktrees/\nscratch-cache/\ndeep-cache/\n",
+        )
+        .unwrap();
+        fs::write(
             repo.join(".ctx/traits/runtime.toml"),
-            "[merge]\ngate = [[\"sh\", \"-c\", \"echo gate >> gate-count; exit 1\"]]\n",
+            "[merge]\ngate = [[\"sh\", \"-c\", \"echo gate >> gate-count; exit 1\"]]\n\n[worktree]\nsetup = [[\"sh\", \"-c\", \"mkdir -p scratch-cache deep-cache && touch scratch-cache/blob deep-cache/blob\"]]\n\n[worktree.retention]\ncheap = [\"scratch-cache\"]\nexpensive = [\"deep-cache\"]\n",
         )
         .unwrap();
     });
@@ -910,6 +933,14 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
             .count(),
         1,
         "a gate verdict must park on its first invocation instead of spending retry attempts"
+    );
+    assert!(
+        worktree.join("scratch-cache/blob").is_file(),
+        "a parked merge must retain declared cheap artifacts"
+    );
+    assert!(
+        worktree.join("deep-cache/blob").is_file(),
+        "a parked merge must retain declared expensive artifacts"
     );
     let session_path = envelope["value"]["session-path"]
         .as_str()
