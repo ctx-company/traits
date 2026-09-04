@@ -10,6 +10,143 @@ use std::sync::{Arc, Mutex};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::Value;
 
+#[derive(Clone)]
+struct VerdictContext {
+    item_id: Option<String>,
+    source_index: Option<usize>,
+    position_path: Vec<ctx_traits_core::procedure::runtime::PathSegment>,
+    caller: Option<ctx_traits_core::procedure::session::CallerProvenance>,
+}
+
+impl VerdictContext {
+    fn from_submission(submission: &ctx_traits_core::procedure::session::CallSubmission) -> Self {
+        Self {
+            item_id: submission.expected_sequence_item_id.clone(),
+            source_index: submission.expected_source_index,
+            position_path: submission.expected_position_path.clone(),
+            caller: submission.caller.clone(),
+        }
+    }
+
+    fn from_frame(frame: Option<&ctx_traits_core::procedure::runtime::SequenceFrame>) -> Self {
+        Self {
+            item_id: frame.and_then(|frame| frame.item_id.clone()),
+            source_index: frame.and_then(|frame| frame.sequence_index),
+            position_path: frame
+                .map(|frame| frame.position_path.clone())
+                .unwrap_or_default(),
+            caller: None,
+        }
+    }
+}
+
+fn persist_and_journal_response(
+    ledger_path: Option<&Utf8Path>,
+    response: &ctx_traits_core::procedure::session::CallResponse,
+    context: &VerdictContext,
+) -> crate::Result<()> {
+    let Some(path) = ledger_path else {
+        return Ok(());
+    };
+    let reason = response
+        .rejected_slot_values
+        .first()
+        .map(|attempt| attempt.reason.clone())
+        .or_else(|| {
+            matches!(
+                response.response_kind,
+                ctx_traits_core::procedure::session::CallResponseKind::RejectedCorrectionRequired
+            )
+            .then(|| {
+                response
+                    .session
+                    .ledger
+                    .rejected_attempts
+                    .last()
+                    .map(|attempt| attempt.reason.clone())
+            })
+            .flatten()
+        })
+        .or_else(|| response.correction.clone())
+        .or_else(|| {
+            (!response.missing_required_outputs.is_empty()).then(|| {
+                format!(
+                    "missing required outputs: {}",
+                    response.missing_required_outputs.join(", ")
+                )
+            })
+        })
+        .unwrap_or_else(|| "accepted".to_string());
+    let mut writer = crate::activity_sidecar::ActivitySidecarWriter::open(path);
+    writer.append_verdict(crate::activity_sidecar::ActivityRecord::Verdict {
+        at_epoch_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0),
+        verdict: serde_json::to_value(&response.response_kind)
+            .ok()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .unwrap_or_else(|| "unknown".to_string()),
+        reason,
+        item_id: context.item_id.clone(),
+        source_index: context.source_index,
+        position_path: context.position_path.clone(),
+        surface: context.caller.as_ref().map(|value| value.surface.clone()),
+        caller: context.caller.as_ref().map(|value| value.caller.clone()),
+        agent: context
+            .caller
+            .as_ref()
+            .and_then(|value| value.agent.clone()),
+        harness: context
+            .caller
+            .as_ref()
+            .and_then(|value| value.harness.clone()),
+    });
+    if response.persist_session {
+        crate::run_session::write_run_session(path, &response.session)?;
+    }
+    Ok(())
+}
+
+fn command_submission_evidence(
+    outcome: &crate::command::RunOutput,
+    observation: Option<&crate::command::RunObservation>,
+    argv: Vec<String>,
+    output_slot: String,
+    executable_digest: Option<ctx_traits_core::digest::Digest>,
+    signal_emission_ceiling: usize,
+    ended_at_epoch_ms: u64,
+    attempt: Option<u32>,
+    preserve_empty_streams: bool,
+) -> ctx_traits_core::procedure::session::CommandExecutionEvidence {
+    let stdout = observation.map_or(&outcome.stdout, |value| &value.stdout_tail);
+    let stderr = observation.map_or(&outcome.stderr, |value| &value.stderr_tail);
+    let stdout_truncated = observation.map_or(outcome.stdout_truncated, |value| {
+        value.stdout_tail_truncated
+    });
+    let stderr_truncated = observation.map_or(outcome.stderr_truncated, |value| {
+        value.stderr_tail_truncated
+    });
+    let stream =
+        |value: &String| (preserve_empty_streams || !value.is_empty()).then(|| value.clone());
+    ctx_traits_core::procedure::session::CommandExecutionEvidence {
+        argv,
+        output_slot,
+        executable_digest,
+        exit_code: outcome.exit_code,
+        timed_out: outcome.timed_out,
+        stdout: stream(stdout),
+        stderr: stream(stderr),
+        stdout_was_empty: Some(outcome.stdout.is_empty()),
+        succeeded: Some(outcome.success),
+        stdout_truncated,
+        stderr_truncated,
+        signal_emission_ceiling,
+        ended_at_epoch_ms: Some(ended_at_epoch_ms),
+        attempt,
+    }
+}
+
 /// A synchronous notification emitted while a run session is being prepared.
 /// Adapters may render it, but it never changes orchestration semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2929,15 +3066,14 @@ pub fn terminal_failure_call(request: TerminalFailureRequest<'_>) -> crate::Resu
     let execution_dir = request.execution_dir.or(restored_execution_dir.as_deref());
     let loaded = load_trait_for_session(request.trait_file, request.trait_id, &session, "run")?;
     validate_pinned_approval(&session, &loaded)?;
+    let verdict_context = VerdictContext::from_frame(session.next_frame.as_deref());
     let response = ctx_traits_core::procedure::session::submit_terminal_frame_failure(
         &loaded.trait_ref,
         session,
         request.reason,
     )?;
     let write_path = write_output_path(None, &session_path)?;
-    if response.persist_session {
-        crate::run_session::write_run_session(&write_path, &response.session)?;
-    }
+    persist_and_journal_response(Some(&write_path), &response, &verdict_context)?;
     let (response, command_failure) = rebuild_call_response_after_command_advance(
         &loaded.trait_ref,
         &loaded.trait_root,
@@ -2999,6 +3135,7 @@ pub fn call(request: CallRequest<'_>) -> crate::Result<CallOutcome> {
         refreshed
     };
     validate_pinned_approval(&session, &loaded)?;
+    let verdict_context = VerdictContext::from_submission(&submission);
     let response = ctx_traits_core::procedure::session::submit_run_call(
         &loaded.trait_ref,
         session,
@@ -3007,9 +3144,7 @@ pub fn call(request: CallRequest<'_>) -> crate::Result<CallOutcome> {
     let write_path = write_output_path(request.out, &session_path)?;
     // Persist the acceptance before advancing trailing command frames: a
     // failing command must never discard already-accepted agent output.
-    if response.persist_session {
-        crate::run_session::write_run_session(&write_path, &response.session)?;
-    }
+    persist_and_journal_response(Some(&write_path), &response, &verdict_context)?;
     let (response, command_failure) = rebuild_call_response_after_command_advance(
         &loaded.trait_ref,
         &loaded.trait_root,
@@ -3109,14 +3244,13 @@ pub fn set(request: SetRequest<'_>) -> crate::Result<SetOutcome> {
             })
         }
         ctx_traits_core::procedure::session::SetResolution::CurrentFrameCall(submission) => {
+            let verdict_context = VerdictContext::from_submission(&submission);
             let response = ctx_traits_core::procedure::session::submit_current_frame_set(
                 &loaded.trait_ref,
                 session,
                 *submission,
             )?;
-            if response.persist_session {
-                crate::run_session::write_run_session(&write_path, &response.session)?;
-            }
+            persist_and_journal_response(Some(&write_path), &response, &verdict_context)?;
             let response = if request.advance_command_frames {
                 let (response, _command_failure) = rebuild_call_response_after_command_advance(
                     &loaded.trait_ref,
@@ -4629,6 +4763,7 @@ output = ["port:commit-report"]
 
     #[test]
     fn command_execution_adapter_carries_evidence_into_final_outputs() {
+        let _process_wide = crate::lock_process_wide_test();
         let trait_ref = fixture_trait();
         let request: ctx_traits_core::procedure::session::StartRequest =
             serde_json::from_value(serde_json::json!({
@@ -4718,6 +4853,14 @@ mod command_disk_floor_tests {
     use super::*;
 
     fn command_trait(kind: &str, marker: &Utf8Path) -> ctx_traits_core::Trait {
+        command_trait_with_schema(kind, marker, "schema:text")
+    }
+
+    fn command_trait_with_schema(
+        kind: &str,
+        marker: &Utf8Path,
+        output_schema: &str,
+    ) -> ctx_traits_core::Trait {
         ctx_traits_core::encoding::decode_trait(
             ctx_traits_core::encoding::Encoding::Toml,
             &format!(
@@ -4729,8 +4872,13 @@ description = "Command/check dispatch boundary fixture."
 
 [[slot]]
 id = "command-output"
-schema = "schema:text"
+schema = "{output_schema}"
 description = "Local command output."
+
+[[agent]]
+id = "test-agent"
+description = "Journal provenance fixture."
+summary = "Test agent."
 
 [procedure]
 description = "One local dispatch."
@@ -4850,7 +4998,10 @@ output = ["slot:command-output"]
             let (records, skipped) = crate::activity_sidecar::read_activity(&ledger_path);
             assert_eq!(skipped, 0);
             assert!(matches!(
-                records.last(),
+                records.iter().rev().find(|record| matches!(
+                    record,
+                    crate::activity_sidecar::ActivityRecord::CommandAttemptEnded { .. }
+                )),
                 Some(crate::activity_sidecar::ActivityRecord::CommandAttemptEnded {
                     attempt,
                     exit_code: Some(0),
@@ -4869,6 +5020,53 @@ output = ["slot:command-output"]
                 .count(),
             2
         );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| matches!(
+                    record,
+                    crate::activity_sidecar::ActivityRecord::Verdict { .. }
+                ))
+                .count(),
+            2,
+            "each command submission appends one verdict"
+        );
+        assert!(
+            records
+                .iter()
+                .filter_map(|record| match record {
+                    crate::activity_sidecar::ActivityRecord::Verdict {
+                        verdict,
+                        reason,
+                        item_id,
+                        source_index,
+                        position_path,
+                        surface,
+                        caller,
+                        ..
+                    } => Some((
+                        verdict,
+                        reason,
+                        item_id,
+                        source_index,
+                        position_path,
+                        surface,
+                        caller,
+                    )),
+                    _ => None,
+                })
+                .all(
+                    |(verdict, reason, item_id, source_index, position_path, surface, caller)| {
+                        verdict == "accepted-completed"
+                            && reason == "accepted"
+                            && item_id.as_deref() == Some("local-dispatch")
+                            && *source_index == Some(0)
+                            && position_path.is_empty()
+                            && surface.as_deref() == Some("local-runtime-command")
+                            && caller.as_deref() == Some("ctx traits trusted local runtime")
+                    }
+                )
+        );
         let unpersisted_ledger_path = repo.join("session-unpersisted.json");
         advance_command_frames(
             &trait_ref,
@@ -4884,6 +5082,332 @@ output = ["slot:command-output"]
             !crate::activity_sidecar::activity_exists(&unpersisted_ledger_path),
             "in-memory command advances must not create an activity sidecar"
         );
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn rejected_attempt_uses_observed_process_tail() {
+        let prefix = "prefix-".repeat(1_000);
+        let suffix = "PROCESS-SUFFIX";
+        let outcome = crate::command::RunOutput {
+            timeout_reason: None,
+            timeout_kind: None,
+            exit_code: Some(3),
+            stdout: prefix.clone(),
+            stdout_truncated: true,
+            stderr: String::new(),
+            stderr_truncated: false,
+            timed_out: false,
+            success: false,
+            capture_limit: prefix.len(),
+        };
+        let observation = crate::command::RunObservation {
+            started_at_epoch_ms: 1,
+            ended_at_epoch_ms: 2,
+            signal: None,
+            killed: false,
+            timeout_kind: None,
+            stdout_tail: suffix.to_string(),
+            stdout_tail_truncated: true,
+            stderr_tail: String::new(),
+            stderr_tail_truncated: false,
+        };
+        let mut evidence = command_submission_evidence(
+            &outcome,
+            Some(&observation),
+            vec!["false".to_string()],
+            "slot:command-output".to_string(),
+            None,
+            0,
+            observation.ended_at_epoch_ms,
+            Some(1),
+            true,
+        );
+        assert_eq!(evidence.stdout.as_deref(), Some(suffix));
+        assert!(evidence.stdout_truncated);
+        assert_eq!(evidence.succeeded, Some(false));
+
+        let repo = test_repo("observed-process-tail-ledger");
+        let trait_ref = command_trait("command", &repo.join("marker"));
+        let session = start_command_session(&trait_ref);
+        let frame_command = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.command.as_ref())
+            .expect("command frame has command evidence");
+        evidence.argv = frame_command.argv.clone();
+        evidence.output_slot = frame_command.output_slot.clone();
+        evidence.executable_digest = frame_command.executable_digest.clone();
+        let template = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.call_template.as_ref())
+            .cloned()
+            .expect("command frame has a call template");
+        let response = ctx_traits_core::procedure::session::submit_run_call(
+            &trait_ref,
+            session,
+            ctx_traits_core::procedure::session::CallSubmission {
+                session_id: ctx_traits_core::procedure::session::SessionId::new(
+                    template.session_id,
+                )
+                .expect("valid session id"),
+                run_id: Some(
+                    ctx_traits_core::procedure::run::Id::new(template.run_id)
+                        .expect("valid run id"),
+                ),
+                state_digest: Some(template.state_digest.clone()),
+                expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+                expected_run_index: Some(template.expected_run_index),
+                expected_source_index: template.expected_source_index,
+                expected_position_path: template.expected_position_path.clone(),
+                produced_slots: BTreeMap::new(),
+                signals: BTreeMap::new(),
+                warnings: Vec::new(),
+                command_execution: Some(evidence),
+                caller: None,
+            },
+        )
+        .expect("failed command response is returned");
+        let tail = response
+            .session
+            .ledger
+            .rejected_attempts
+            .last()
+            .and_then(|attempt| attempt.stdout_tail.as_deref())
+            .expect("rejected attempt stores stdout tail");
+        assert!(tail.contains("[earlier output truncated]"));
+        assert!(
+            tail.ends_with(suffix),
+            "ledger must retain process suffix: {tail:?}"
+        );
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn successful_empty_stdout_rejection_uses_runtime_success() {
+        let outcome = crate::command::RunOutput {
+            timeout_reason: None,
+            timeout_kind: None,
+            exit_code: Some(3),
+            stdout: String::new(),
+            stdout_truncated: false,
+            stderr: String::new(),
+            stderr_truncated: false,
+            timed_out: false,
+            success: true,
+            capture_limit: 0,
+        };
+        let evidence = command_submission_evidence(
+            &outcome,
+            None,
+            vec!["command".to_string()],
+            "slot:command-output".to_string(),
+            None,
+            0,
+            2,
+            Some(1),
+            false,
+        );
+        assert_eq!(evidence.succeeded, Some(true));
+        assert_eq!(evidence.stdout_was_empty, Some(true));
+        assert!(
+            evidence.stdout.is_none(),
+            "accepted output bytes stay unchanged"
+        );
+
+        let repo = test_repo("successful-empty-stdout-rejection");
+        let ledger_path = repo.join("session.json");
+        let trait_ref = command_trait_with_schema("command", &repo.join("marker"), "schema:number");
+        let advanced = advance_command_frames(
+            &trait_ref,
+            &repo,
+            start_command_session(&trait_ref),
+            Some(&ledger_path),
+            Some(&repo),
+            &BTreeMap::new(),
+            None,
+        )
+        .expect("empty typed command output returns a correction response");
+        let attempt = advanced
+            .session
+            .ledger
+            .rejected_attempts
+            .last()
+            .expect("typed empty output is rejected");
+        assert_eq!(
+            attempt.reason,
+            "command succeeded but printed nothing for required declared slot output"
+        );
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&ledger_path).expect("rejected response persists"),
+        )
+        .expect("ledger is JSON");
+        assert_eq!(
+            persisted["ledger"]["rejected-attempts"][0]["reason"],
+            "command succeeded but printed nothing for required declared slot output"
+        );
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn verdict_journal_covers_submission_classes() {
+        fn submission(
+            session: &ctx_traits_core::procedure::session::Session,
+            exit_code: i32,
+            state_digest: Option<ctx_traits_core::digest::Digest>,
+        ) -> ctx_traits_core::procedure::session::CallSubmission {
+            let template = session
+                .next_frame
+                .as_ref()
+                .and_then(|frame| frame.call_template.as_ref())
+                .expect("command frame has a call template");
+            let argv = session
+                .next_frame
+                .as_ref()
+                .and_then(|frame| frame.command.as_ref())
+                .expect("command frame has command evidence")
+                .argv
+                .clone();
+            ctx_traits_core::procedure::session::CallSubmission {
+                session_id: ctx_traits_core::procedure::session::SessionId::new(
+                    template.session_id.clone(),
+                )
+                .expect("valid session id"),
+                run_id: Some(
+                    ctx_traits_core::procedure::run::Id::new(template.run_id.clone())
+                        .expect("valid run id"),
+                ),
+                state_digest,
+                expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+                expected_run_index: Some(template.expected_run_index),
+                expected_source_index: template.expected_source_index,
+                expected_position_path: template.expected_position_path.clone(),
+                produced_slots: (exit_code == 0)
+                    .then(|| {
+                        [("slot:command-output".to_string(), serde_json::json!("ok"))]
+                            .into_iter()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                signals: Default::default(),
+                warnings: Vec::new(),
+                command_execution: Some(
+                    ctx_traits_core::procedure::session::CommandExecutionEvidence {
+                        argv,
+                        output_slot: "slot:command-output".to_string(),
+                        executable_digest: None,
+                        exit_code: Some(exit_code),
+                        timed_out: false,
+                        stdout: Some(String::new()),
+                        stderr: Some(String::new()),
+                        stdout_was_empty: Some(true),
+                        succeeded: Some(exit_code == 0),
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                        signal_emission_ceiling: 0,
+                        ended_at_epoch_ms: Some(42),
+                        attempt: Some(1),
+                    },
+                ),
+                caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
+                    surface: "test-surface".to_string(),
+                    caller: "test-caller".to_string(),
+                    agent: Some("test-agent".to_string()),
+                    harness: Some("test-harness".to_string()),
+                }),
+            }
+        }
+
+        let repo = test_repo("verdict-journal-submission-classes");
+        let ledger_path = repo.join("session.json");
+        let trait_ref = command_trait("command", &repo.join("marker"));
+        let cases = [
+            (0, true, "accepted-completed", "accepted"),
+            (3, true, "rejected-correction-required", "code 3"),
+            (0, false, "rejected-correction-required", "state-digest"),
+        ];
+        for (index, (exit_code, persists, verdict, reason_fragment)) in
+            cases.into_iter().enumerate()
+        {
+            let session = start_command_session(&trait_ref);
+            let expected_digest = session
+                .next_frame
+                .as_ref()
+                .and_then(|frame| frame.call_template.as_ref())
+                .map(|template| template.state_digest.clone());
+            let submitted_digest = persists
+                .then_some(expected_digest.clone())
+                .flatten()
+                .or_else(|| {
+                    Some(ctx_traits_core::digest::Digest::source(
+                        "stale-state-digest",
+                    ))
+                });
+            let response = ctx_traits_core::procedure::session::submit_run_call(
+                &trait_ref,
+                session,
+                submission(
+                    &start_command_session(&trait_ref),
+                    exit_code,
+                    submitted_digest,
+                ),
+            )
+            .expect("submission returns a response");
+            assert_eq!(response.persist_session, persists);
+            let before = std::fs::read(&ledger_path).unwrap_or_default();
+            persist_and_journal_response(
+                Some(&ledger_path),
+                &response,
+                &VerdictContext::from_submission(&submission(
+                    &start_command_session(&trait_ref),
+                    exit_code,
+                    expected_digest,
+                )),
+            )
+            .expect("response is persisted and journaled");
+            if !persists {
+                assert_eq!(std::fs::read(&ledger_path).unwrap_or_default(), before);
+            }
+            let (records, skipped) = crate::activity_sidecar::read_activity(&ledger_path);
+            assert_eq!(skipped, 0);
+            let verdicts: Vec<_> = records
+                .iter()
+                .filter(|record| {
+                    matches!(
+                        record,
+                        crate::activity_sidecar::ActivityRecord::Verdict { .. }
+                    )
+                })
+                .collect();
+            assert_eq!(verdicts.len(), index + 1, "one verdict per submission");
+            let latest = verdicts.last().expect("verdict record exists");
+            assert!(
+                matches!(
+                    latest,
+                    crate::activity_sidecar::ActivityRecord::Verdict {
+                        verdict: actual_verdict,
+                        reason,
+                        item_id: Some(item_id),
+                        source_index: Some(0),
+                        position_path,
+                        surface: Some(surface),
+                        caller: Some(caller),
+                        agent: Some(agent),
+                        harness: Some(harness),
+                        ..
+                    } if actual_verdict == verdict
+                        && reason.contains(reason_fragment)
+                        && item_id == "local-dispatch"
+                        && position_path.is_empty()
+                        && surface == "test-surface"
+                        && caller == "test-caller"
+                        && agent == "test-agent"
+                        && harness == "test-harness"
+                ),
+                "unexpected verdict record: {latest:?}"
+            );
+        }
         let _ = std::fs::remove_dir_all(repo);
     }
 
@@ -5258,6 +5782,7 @@ fn advance_command_frames(
         // `SIGINT` (delivered to the whole foreground group, the waiting gate
         // child included) from the command's own failure.
         let child_signal = observation.signal;
+        let ended_at_epoch_ms = observation.ended_at_epoch_ms;
         if let (Some(writer), Some(attempt)) = (activity_writer.as_mut(), attempt) {
             writer.append_command_attempt_ended(
                 crate::activity_sidecar::ActivityRecord::CommandAttemptEnded {
@@ -5275,9 +5800,9 @@ fn advance_command_frames(
                         crate::command::TimeoutKind::Idle => "idle".to_string(),
                         crate::command::TimeoutKind::Wall => "wall".to_string(),
                     }),
-                    stdout_tail: observation.stdout_tail,
+                    stdout_tail: observation.stdout_tail.clone(),
                     stdout_tail_truncated: observation.stdout_tail_truncated,
-                    stderr_tail: observation.stderr_tail,
+                    stderr_tail: observation.stderr_tail.clone(),
                     stderr_tail_truncated: observation.stderr_tail_truncated,
                 },
             );
@@ -5305,19 +5830,17 @@ fn advance_command_frames(
             // Built before the value, because the verdict record now carries
             // the exit code and — on failure — a bounded tail of the output,
             // all of which come from this evidence.
-            let submission_evidence =
-                ctx_traits_core::procedure::session::CommandExecutionEvidence {
-                    argv: argv.clone(),
-                    output_slot: output_slot.clone(),
-                    executable_digest: executable_digest.clone(),
-                    exit_code: outcome.exit_code,
-                    timed_out: outcome.timed_out,
-                    stdout: (!outcome.stdout.is_empty()).then(|| outcome.stdout.clone()),
-                    stderr: (!outcome.stderr.is_empty()).then(|| outcome.stderr.clone()),
-                    stdout_truncated: outcome.stdout_truncated,
-                    stderr_truncated: outcome.stderr_truncated,
-                    signal_emission_ceiling,
-                };
+            let submission_evidence = command_submission_evidence(
+                &outcome,
+                None,
+                argv.clone(),
+                output_slot.clone(),
+                executable_digest.clone(),
+                signal_emission_ceiling,
+                ended_at_epoch_ms,
+                attempt,
+                false,
+            );
             let verdict_record = ctx_traits_core::procedure::session::check_output_value(
                 verdict,
                 command,
@@ -5331,45 +5854,42 @@ fn advance_command_frames(
             for output_ref in command.output_refs() {
                 produced_slots.insert(output_ref.to_string(), verdict_record.clone());
             }
+            let caller = ctx_traits_core::procedure::session::CallerProvenance {
+                surface: "local-runtime-command".to_string(),
+                caller: "ctx traits trusted local runtime".to_string(),
+                agent: None,
+                harness: None,
+            };
+            let submission = ctx_traits_core::procedure::session::CallSubmission {
+                session_id: call_template
+                    .as_ref()
+                    .map(|template| template.session_id.clone())
+                    .and_then(|id| ctx_traits_core::procedure::session::SessionId::new(id).ok())
+                    .ok_or_else(|| {
+                        invalid_request_error(
+                            "run.command.call-template.session-id",
+                            "check frame missing call template session id",
+                        )
+                    })?,
+                run_id: Some(ctx_traits_core::procedure::run::Id::new(run_id)?),
+                state_digest: call_template
+                    .as_ref()
+                    .map(|template| template.state_digest.clone()),
+                expected_sequence_item_id: item_id,
+                expected_run_index: run_index,
+                expected_source_index: sequence_index,
+                expected_position_path: position_path,
+                produced_slots,
+                signals: std::collections::BTreeMap::new(),
+                warnings,
+                command_execution: Some(submission_evidence),
+                caller: Some(caller),
+            };
+            let verdict_context = VerdictContext::from_submission(&submission);
             let response = ctx_traits_core::procedure::session::submit_run_call(
-                trait_ref,
-                session,
-                ctx_traits_core::procedure::session::CallSubmission {
-                    session_id: call_template
-                        .as_ref()
-                        .map(|template| template.session_id.clone())
-                        .and_then(|id| ctx_traits_core::procedure::session::SessionId::new(id).ok())
-                        .ok_or_else(|| {
-                            invalid_request_error(
-                                "run.command.call-template.session-id",
-                                "check frame missing call template session id",
-                            )
-                        })?,
-                    run_id: Some(ctx_traits_core::procedure::run::Id::new(run_id)?),
-                    state_digest: call_template
-                        .as_ref()
-                        .map(|template| template.state_digest.clone()),
-                    expected_sequence_item_id: item_id,
-                    expected_run_index: run_index,
-                    expected_source_index: sequence_index,
-                    expected_position_path: position_path,
-                    produced_slots,
-                    signals: std::collections::BTreeMap::new(),
-                    warnings,
-                    command_execution: Some(submission_evidence),
-                    caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
-                        surface: "local-runtime-command".to_string(),
-                        caller: "ctx traits trusted local runtime".to_string(),
-                        agent: None,
-                        harness: None,
-                    }),
-                },
+                trait_ref, session, submission,
             )?;
-            if response.persist_session
-                && let Some(path) = persist_path
-            {
-                crate::run_session::write_run_session(path, &response.session)?;
-            }
+            persist_and_journal_response(persist_path, &response, &verdict_context)?;
             session = response.session;
             continue;
         }
@@ -5450,58 +5970,52 @@ fn advance_command_frames(
                     .expect("bound_fired is only Some when timeout_kind is Some"),
             });
             let report = format_command_report_with_bound(&outcome, bound_fired.as_ref());
+            let caller = ctx_traits_core::procedure::session::CallerProvenance {
+                surface: "local-runtime-command".to_string(),
+                caller: "ctx traits trusted local runtime".to_string(),
+                agent: None,
+                harness: None,
+            };
+            let submission = ctx_traits_core::procedure::session::CallSubmission {
+                session_id: call_template
+                    .as_ref()
+                    .map(|template| template.session_id.clone())
+                    .and_then(|id| ctx_traits_core::procedure::session::SessionId::new(id).ok())
+                    .ok_or_else(|| {
+                        invalid_request_error(
+                            "run.command.call-template.session-id",
+                            "command frame missing call template session id",
+                        )
+                    })?,
+                run_id: Some(ctx_traits_core::procedure::run::Id::new(run_id)?),
+                state_digest: call_template
+                    .as_ref()
+                    .map(|template| template.state_digest.clone()),
+                expected_sequence_item_id: item_id.clone(),
+                expected_run_index: run_index,
+                expected_source_index: sequence_index,
+                expected_position_path: position_path,
+                produced_slots: std::collections::BTreeMap::new(),
+                signals: std::collections::BTreeMap::new(),
+                warnings: vec![reason],
+                command_execution: Some(command_submission_evidence(
+                    &outcome,
+                    Some(&observation),
+                    argv.clone(),
+                    output_slot,
+                    executable_digest.clone(),
+                    signal_emission_ceiling,
+                    ended_at_epoch_ms,
+                    attempt,
+                    true,
+                )),
+                caller: Some(caller),
+            };
+            let verdict_context = VerdictContext::from_submission(&submission);
             let response = ctx_traits_core::procedure::session::submit_run_call(
-                trait_ref,
-                session,
-                ctx_traits_core::procedure::session::CallSubmission {
-                    session_id: call_template
-                        .as_ref()
-                        .map(|template| template.session_id.clone())
-                        .and_then(|id| ctx_traits_core::procedure::session::SessionId::new(id).ok())
-                        .ok_or_else(|| {
-                            invalid_request_error(
-                                "run.command.call-template.session-id",
-                                "command frame missing call template session id",
-                            )
-                        })?,
-                    run_id: Some(ctx_traits_core::procedure::run::Id::new(run_id)?),
-                    state_digest: call_template
-                        .as_ref()
-                        .map(|template| template.state_digest.clone()),
-                    expected_sequence_item_id: item_id.clone(),
-                    expected_run_index: run_index,
-                    expected_source_index: sequence_index,
-                    expected_position_path: position_path,
-                    produced_slots: std::collections::BTreeMap::new(),
-                    signals: std::collections::BTreeMap::new(),
-                    warnings: vec![reason],
-                    command_execution: Some(
-                        ctx_traits_core::procedure::session::CommandExecutionEvidence {
-                            argv: argv.clone(),
-                            output_slot,
-                            executable_digest: executable_digest.clone(),
-                            exit_code: outcome.exit_code,
-                            timed_out: outcome.timed_out,
-                            stdout: None,
-                            stderr: None,
-                            stdout_truncated: outcome.stdout_truncated,
-                            stderr_truncated: outcome.stderr_truncated,
-                            signal_emission_ceiling,
-                        },
-                    ),
-                    caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
-                        surface: "local-runtime-command".to_string(),
-                        caller: "ctx traits trusted local runtime".to_string(),
-                        agent: None,
-                        harness: None,
-                    }),
-                },
+                trait_ref, session, submission,
             )?;
-            if response.persist_session
-                && let Some(path) = persist_path
-            {
-                crate::run_session::write_run_session(path, &response.session)?;
-            }
+            persist_and_journal_response(persist_path, &response, &verdict_context)?;
             if matches!(
                 response.response_kind,
                 ctx_traits_core::procedure::session::CallResponseKind::AcceptedNextFrame
@@ -5561,60 +6075,60 @@ fn advance_command_frames(
         };
         let mut produced_slots = std::collections::BTreeMap::new();
         produced_slots.insert(output_slot.clone(), value);
-        let response = ctx_traits_core::procedure::session::submit_run_call(
-            trait_ref,
-            session,
-            ctx_traits_core::procedure::session::CallSubmission {
-                session_id: call_template
-                    .as_ref()
-                    .map(|template| template.session_id.clone())
-                    .and_then(|id| ctx_traits_core::procedure::session::SessionId::new(id).ok())
-                    .ok_or_else(|| {
-                        invalid_request_error(
-                            "run.command.call-template.session-id",
-                            "command frame missing call template session id",
-                        )
-                    })?,
-                run_id: Some(ctx_traits_core::procedure::run::Id::new(run_id)?),
-                state_digest: call_template
-                    .as_ref()
-                    .map(|template| template.state_digest.clone()),
-                expected_sequence_item_id: item_id,
-                expected_run_index: run_index,
-                expected_source_index: sequence_index,
-                expected_position_path: position_path,
-                produced_slots,
-                signals: std::collections::BTreeMap::new(),
-                warnings,
-                command_execution: Some(
-                    ctx_traits_core::procedure::session::CommandExecutionEvidence {
-                        argv: argv.clone(),
-                        output_slot,
-                        executable_digest: executable_digest.clone(),
-                        exit_code: outcome.exit_code,
-                        timed_out: outcome.timed_out,
-                        stdout: None,
-                        stderr: None,
-                        stdout_truncated: false,
-                        stderr_truncated: false,
-                        signal_emission_ceiling,
-                    },
-                ),
-                caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
-                    surface: "local-runtime-command".to_string(),
-                    caller: "ctx traits trusted local runtime".to_string(),
-                    agent: None,
-                    harness: None,
-                }),
-            },
-        )?;
+        let caller = ctx_traits_core::procedure::session::CallerProvenance {
+            surface: "local-runtime-command".to_string(),
+            caller: "ctx traits trusted local runtime".to_string(),
+            agent: None,
+            harness: None,
+        };
+        let submission = ctx_traits_core::procedure::session::CallSubmission {
+            session_id: call_template
+                .as_ref()
+                .map(|template| template.session_id.clone())
+                .and_then(|id| ctx_traits_core::procedure::session::SessionId::new(id).ok())
+                .ok_or_else(|| {
+                    invalid_request_error(
+                        "run.command.call-template.session-id",
+                        "command frame missing call template session id",
+                    )
+                })?,
+            run_id: Some(ctx_traits_core::procedure::run::Id::new(run_id)?),
+            state_digest: call_template
+                .as_ref()
+                .map(|template| template.state_digest.clone()),
+            expected_sequence_item_id: item_id,
+            expected_run_index: run_index,
+            expected_source_index: sequence_index,
+            expected_position_path: position_path,
+            produced_slots,
+            signals: std::collections::BTreeMap::new(),
+            warnings,
+            command_execution: Some(
+                ctx_traits_core::procedure::session::CommandExecutionEvidence {
+                    argv: argv.clone(),
+                    output_slot,
+                    executable_digest: executable_digest.clone(),
+                    exit_code: outcome.exit_code,
+                    timed_out: outcome.timed_out,
+                    stdout: None,
+                    stderr: None,
+                    stdout_was_empty: Some(outcome.stdout.is_empty()),
+                    succeeded: Some(outcome.success),
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                    signal_emission_ceiling,
+                    ended_at_epoch_ms: Some(ended_at_epoch_ms),
+                    attempt,
+                },
+            ),
+            caller: Some(caller),
+        };
+        let verdict_context = VerdictContext::from_submission(&submission);
+        let response =
+            ctx_traits_core::procedure::session::submit_run_call(trait_ref, session, submission)?;
         // Persist each accepted command step immediately so a later failing
         // step cannot roll back this one.
-        if response.persist_session
-            && let Some(path) = persist_path
-        {
-            crate::run_session::write_run_session(path, &response.session)?;
-        }
+        persist_and_journal_response(persist_path, &response, &verdict_context)?;
         session = response.session;
     }
 }

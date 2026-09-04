@@ -1150,6 +1150,7 @@ fn reject_envelope(report: &mut StepValidationReport, sequence_index: usize, rea
         ref_text: None,
         value_digest: None,
         reason,
+        at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
     });
 }
 

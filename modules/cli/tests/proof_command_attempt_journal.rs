@@ -48,7 +48,7 @@ fn review_and_activate(repo: &Path, home: &Path, fixture: &str) {
     commit_all(repo, "activate");
 }
 
-fn init_command_fixture(repo: &Path, home: &Path) {
+fn init_command_fixture_with_script(repo: &Path, home: &Path, script: &str) {
     let package = repo.join(".ctx/traits/demo");
     fs::create_dir_all(package.join("generated")).expect("create fixture package");
     git_init_on_branch(repo, "main");
@@ -91,7 +91,7 @@ kind = "command"
 output = ["slot:result"]
 
 [procedure.sequence.command]
-argv = ["sh", "-c", "i=0; while [ $i -lt 5000 ]; do printf o; i=$((i + 1)); done; i=0; while [ $i -lt 5000 ]; do printf e >&2; i=$((i + 1)); done; exit 7", "{{setting:private-argv}}"]
+argv = ["sh", "-c", {script:?}, "{{setting:private-argv}}"]
 "#
         ),
     )
@@ -104,6 +104,14 @@ argv = ["sh", "-c", "i=0; while [ $i -lt 5000 ]; do printf o; i=$((i + 1)); done
     .unwrap();
     commit_all(repo, "init");
     review_and_activate(repo, home, ".ctx/traits/demo/generated/index.toml");
+}
+
+fn init_command_fixture(repo: &Path, home: &Path) {
+    init_command_fixture_with_script(
+        repo,
+        home,
+        "i=0; while [ $i -lt 5000 ]; do printf o; i=$((i + 1)); done; i=0; while [ $i -lt 5000 ]; do printf e >&2; i=$((i + 1)); done; exit 7",
+    );
 }
 
 fn init_commandless_fixture(repo: &Path, home: &Path) {
@@ -251,6 +259,78 @@ fn failing_command_attempts_are_persisted_across_cli_restarts_without_secrets() 
                 .windows(ARGV_SECRET.len())
                 .any(|window| window == ARGV_SECRET.as_bytes()),
         "resolved environment and argv secrets must not enter command evidence"
+    );
+}
+
+#[test]
+fn incident_1_empty_stdout_rejection_is_provable_from_journal_and_ledger() {
+    let scratch = ScratchRoot::new("incident-1-empty-stdout");
+    let home = scratch.home();
+    let repo = home.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    init_command_fixture_with_script(&repo, &home, "exit 3");
+    let ledger = repo.join(".ctx/runs/fixture.json");
+    let sidecar = ledger.with_extension("json.activity.jsonl");
+    let _ = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--out",
+            &ledger.to_string_lossy(),
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+
+    let records: Vec<serde_json::Value> = fs::read_to_string(&sidecar)
+        .expect("failed command writes journal")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("journal record is JSON"))
+        .collect();
+    assert!(records.iter().any(|record| {
+        record["record"] == "command-attempt-ended"
+            && record["exit_code"] == 3
+            && record["stdout_tail"] == ""
+            && record["stderr_tail"] == ""
+    }));
+    let verdicts: Vec<_> = records
+        .iter()
+        .filter(|record| record["record"] == "verdict")
+        .collect();
+    assert!(
+        verdicts.iter().any(|record| {
+            record["record"] == "verdict"
+                && record["verdict"] == "rejected-correction-required"
+                && record["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("code 3"))
+        }),
+        "unexpected verdict records: {verdicts:?}"
+    );
+
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&fs::read(&ledger).expect("read persisted ledger"))
+            .expect("ledger is JSON");
+    let attempt = persisted["ledger"]["rejected-attempts"]
+        .as_array()
+        .expect("rejected attempt persists")
+        .first()
+        .expect("one rejected attempt");
+    assert!(attempt["at-epoch-ms"].as_u64().is_some());
+    assert_eq!(attempt["attempt"], 1);
+    assert_eq!(attempt["exit-code"], 3);
+    assert_eq!(attempt["stdout-tail"], "");
+    assert_eq!(attempt["stderr-tail"], "");
+    assert!(
+        attempt["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("code 3") && reason.contains("printed nothing"))
     );
 }
 

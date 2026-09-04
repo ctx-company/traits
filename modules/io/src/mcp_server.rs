@@ -385,9 +385,13 @@ fn dispatch_run_call(arguments: Value) -> ServerResult<Value> {
                 timed_out: false,
                 stdout: None,
                 stderr: None,
+                stdout_was_empty: None,
+                succeeded: None,
                 stdout_truncated: false,
                 stderr_truncated: false,
                 signal_emission_ceiling: 0,
+                ended_at_epoch_ms: None,
+                attempt: None,
             },
         );
     }

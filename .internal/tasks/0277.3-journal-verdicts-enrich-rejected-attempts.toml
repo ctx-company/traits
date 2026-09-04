@@ -120,29 +120,32 @@ exists to prevent.
 """
 
 [relations]
+depends-on = [
+    "0277.1",
+    "0277.2",
+]
 parent = "0277"
-depends-on = ["0277.1", "0277.2"]
 
 [[checks]]
 name = "core suite passes with rejection compatibility tests"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "io suite passes with verdict helper tests"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "cli suite passes with incident 1 proof"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
-expect = "test result: ok"
 timeout-ms = 1800000
+expect = "test result: ok"
 
 [[checks]]
 name = "desktop compiles ignoring the verdict variant"
 command = "just desktop-test"
-expect = "test result: ok"
 timeout-ms = 3600000
+expect = "test result: ok"

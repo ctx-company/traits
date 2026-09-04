@@ -113,6 +113,7 @@ pub fn start_procedure_run(
                     || "initial port value rejected".to_string(),
                     |v| v.reason.clone(),
                 ),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             }),
         }
     }
@@ -467,6 +468,8 @@ pub fn apply_step_output(
     mut state: State,
     envelope: StepOutputEnvelope,
 ) -> crate::Result<(State, StepValidationReport)> {
+    let missing_output_reason = envelope.missing_output_reason.clone();
+    let empty_stdout_rejection_reason = envelope.empty_stdout_rejection_reason.clone();
     let proc = procedure(trait_ref)?;
     let sequence = effective_sequence_items(proc)?;
     let report_sequence_index = current_ready_item(trait_ref, &state, &sequence)?
@@ -563,7 +566,13 @@ pub fn apply_step_output(
             );
         }
     if !report.rejected_outputs.is_empty() {
-        return reject_step_output(trait_ref, state, ready.sequence_index, report);
+        return reject_step_output(
+            trait_ref,
+            state,
+            ready.sequence_index,
+            report,
+            missing_output_reason.as_deref(),
+        );
     }
 
     let is_check_item = ready.item.effective_kind() == SequenceKind::Check;
@@ -581,6 +590,7 @@ pub fn apply_step_output(
                 ref_text: Some(output.ref_text),
                 value_digest: Some(digest),
                 reason: "slot output is not declared for the current sequence item".to_string(),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             });
             continue;
         }
@@ -592,6 +602,7 @@ pub fn apply_step_output(
                 ref_text: Some(output.ref_text),
                 value_digest: Some(digest),
                 reason: "declared output sink could not be resolved".to_string(),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             });
             continue;
         };
@@ -602,6 +613,7 @@ pub fn apply_step_output(
                 ref_text: Some(output.ref_text),
                 value_digest: Some(digest),
                 reason: "slot output was submitted more than once".to_string(),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             });
             continue;
         }
@@ -639,6 +651,7 @@ pub fn apply_step_output(
                 value_digest: Some(runtime_value.value_digest.clone()),
                 reason: "cannot rewrite an active for-each over slot with a different digest"
                     .to_string(),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             });
         } else if runtime_value
             .schema_validation
@@ -651,7 +664,10 @@ pub fn apply_step_output(
                 position_path: ready.position_path.clone(),
                 ref_text: Some(runtime_value.ref_text.clone()),
                 value_digest: Some(runtime_value.value_digest.clone()),
-                reason: "schema validation rejected slot output".to_string(),
+                reason: empty_stdout_rejection_reason
+                    .clone()
+                    .unwrap_or_else(|| "schema validation rejected slot output".to_string()),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             });
         } else {
             report.accepted_outputs.push(runtime_value.clone());
@@ -751,7 +767,13 @@ pub fn apply_step_output(
         || !report.missing_required_outputs.is_empty();
 
     if rejected {
-        return reject_step_output(trait_ref, state, ready.sequence_index, report);
+        return reject_step_output(
+            trait_ref,
+            state,
+            ready.sequence_index,
+            report,
+            missing_output_reason.as_deref(),
+        );
     }
 
     let producer_path = producer_path_for_ready(&ready);
@@ -763,8 +785,15 @@ pub fn apply_step_output(
                 ref_text: Some(runtime_value.ref_text.clone()),
                 value_digest: Some(runtime_value.value_digest.clone()),
                 reason: "slot was already written in the current scope activation".to_string(),
+                at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
             });
-            return reject_step_output(trait_ref, state, ready.sequence_index, report);
+            return reject_step_output(
+                trait_ref,
+                state,
+                ready.sequence_index,
+                report,
+                missing_output_reason.as_deref(),
+            );
         }
     }
     // All outputs accepted by this single activation (a check's `[slot,

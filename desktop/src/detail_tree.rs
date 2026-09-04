@@ -740,7 +740,8 @@ impl ActivityOverlay {
             // scope decision) and so not attached to anything below.
             ActivityRecord::StepSummary { .. } => {}
             ActivityRecord::CommandAttemptStarted { .. }
-            | ActivityRecord::CommandAttemptEnded { .. } => {}
+            | ActivityRecord::CommandAttemptEnded { .. }
+            | ActivityRecord::Verdict { .. } => {}
         }
     }
 

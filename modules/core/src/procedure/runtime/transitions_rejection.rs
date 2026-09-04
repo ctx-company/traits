@@ -6,6 +6,7 @@ fn reject_step_output(
     mut state: State,
     sequence_index: usize,
     mut report: StepValidationReport,
+    missing_output_reason: Option<&str>,
 ) -> crate::Result<(State, StepValidationReport)> {
     let rejection_path = state.active_path.clone();
     state.rejected_attempts.extend(
@@ -31,6 +32,7 @@ fn reject_step_output(
             ref_text: Some(signal.signal_ref.to_string()),
             value_digest: Some(signal.evidence_digest.clone()),
             reason: signal.reason.clone(),
+            at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
         });
     }
     for missing in &report.missing_required_outputs {
@@ -39,7 +41,10 @@ fn reject_step_output(
             position_path: rejection_path.clone(),
             ref_text: Some(missing.clone()),
             value_digest: None,
-            reason: "required declared slot output was not supplied".to_string(),
+            reason: missing_output_reason
+                .unwrap_or(MISSING_REQUIRED_OUTPUT_REASON)
+                .to_string(),
+            at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
         });
     }
     let sequence = effective_sequence_items(procedure(trait_ref)?)?;

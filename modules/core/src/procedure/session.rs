@@ -1684,6 +1684,13 @@ pub struct CommandExecutionEvidence {
     /// Bounded captured stderr, when the executing adapter captured it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr: Option<String>,
+    /// Whether the process wrote no stdout, retained even where forwarding the
+    /// stream itself would alter pre-existing accepted-command ledger bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_was_empty: Option<bool>,
+    /// The local runner's success verdict, including declared nonzero codes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub succeeded: Option<bool>,
     #[serde(default, rename = "stdout-truncated")]
     pub stdout_truncated: bool,
     #[serde(default, rename = "stderr-truncated")]
@@ -1693,6 +1700,58 @@ pub struct CommandExecutionEvidence {
     /// which this becomes at the submission boundary.
     #[serde(default, rename = "signal-emission-ceiling")]
     pub signal_emission_ceiling: usize,
+    #[serde(
+        default,
+        rename = "ended-at-epoch-ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ended_at_epoch_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+struct RejectedAttemptEvidence {
+    at_epoch_ms: Option<u64>,
+    attempt: Option<u32>,
+    exit_code: Option<i32>,
+    stdout_tail: Option<String>,
+    stderr_tail: Option<String>,
+    stdout_was_empty: Option<bool>,
+    command_succeeded: bool,
+}
+
+impl RejectedAttemptEvidence {
+    fn from_command(command: &CommandExecutionEvidence) -> Self {
+        const TAIL_LIMIT: usize = 4_096;
+        Self {
+            at_epoch_ms: command.ended_at_epoch_ms,
+            attempt: command.attempt,
+            exit_code: command.exit_code,
+            stdout_tail: command
+                .stdout
+                .as_deref()
+                .map(|text| crate::text::tail_clipped(text, TAIL_LIMIT, command.stdout_truncated)),
+            stderr_tail: command
+                .stderr
+                .as_deref()
+                .map(|text| crate::text::tail_clipped(text, TAIL_LIMIT, command.stderr_truncated)),
+            stdout_was_empty: command
+                .stdout_was_empty
+                .or_else(|| command.stdout.as_ref().map(String::is_empty)),
+            command_succeeded: command
+                .succeeded
+                .unwrap_or(command.exit_code == Some(0) && !command.timed_out),
+        }
+    }
+
+    fn stamp(&self, attempt: &mut RejectedAttempt) {
+        attempt.at_epoch_ms = self.at_epoch_ms;
+        attempt.attempt = self.attempt;
+        attempt.exit_code = self.exit_code;
+        attempt.stdout_tail = self.stdout_tail.clone();
+        attempt.stderr_tail = self.stderr_tail.clone();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2402,6 +2461,11 @@ fn submit_run_submission(
     current_frame_set: bool,
 ) -> crate::Result<CallResponse> {
     let preflight = preflight_call_rejection(trait_ref, &session, &submission, current_frame_set)?;
+    let rejected_attempt_evidence = preflight
+        .trusted_command_execution
+        .then(|| submission.command_execution.as_ref())
+        .flatten()
+        .map(RejectedAttemptEvidence::from_command);
     if let Some(report) = preflight.rejection {
         if preflight.non_persisting_rejection {
             let next = reject_without_persisting(session, report);
@@ -2409,7 +2473,12 @@ fn submit_run_submission(
             response.persist_session = false;
             return Ok(response);
         }
-        let next = reject_without_advancing(trait_ref, session, report)?;
+        let next = reject_without_advancing(
+            trait_ref,
+            session,
+            report,
+            rejected_attempt_evidence.as_ref(),
+        )?;
         return Ok(call_response(
             next,
             CallResponseKind::RejectedCorrectionRequired,
@@ -2514,6 +2583,13 @@ fn submit_run_submission(
             })
             .collect(),
         warnings: submission.warnings,
+        missing_output_reason: preflight
+            .trusted_command_execution
+            .then(|| missing_output_rejection_reason(rejected_attempt_evidence.as_ref())),
+        empty_stdout_rejection_reason: rejected_attempt_evidence
+            .as_ref()
+            .filter(|evidence| evidence.stdout_was_empty == Some(true))
+            .map(|evidence| missing_output_rejection_reason(Some(evidence))),
     };
 
     let (candidate_state, mut report) =
@@ -2533,6 +2609,11 @@ fn submit_run_submission(
             ref_text: Some(value.ref_text.clone()),
             value_digest: Some(value.value_digest.clone()),
             reason: "schema validation requires external evidence or is unsupported".to_string(),
+            at_epoch_ms: None,
+            attempt: None,
+            exit_code: None,
+            stdout_tail: None,
+            stderr_tail: None,
         })
         .collect();
 
@@ -2551,7 +2632,12 @@ fn submit_run_submission(
         // `call_response`'s `accepted_slot_values` despite never having been
         // committed.
         report.accepted_outputs.clear();
-        let next = reject_without_advancing(trait_ref, session, report)?;
+        let next = reject_without_advancing(
+            trait_ref,
+            session,
+            report,
+            rejected_attempt_evidence.as_ref(),
+        )?;
         return Ok(call_response(
             next,
             CallResponseKind::RejectedCorrectionRequired,
@@ -3372,14 +3458,18 @@ fn reject_without_advancing(
     trait_ref: &Trait,
     session: Session,
     mut report: StepValidationReport,
+    evidence: Option<&RejectedAttemptEvidence>,
 ) -> crate::Result<Session> {
     let rejection_path = current_rejection_path(&session);
     stamp_report_rejection_path(&mut report, &rejection_path);
     let mut state = session.ledger;
     rollback_active_parallel_branch(trait_ref, &mut state)?;
-    state
-        .rejected_attempts
-        .extend(report.rejected_outputs.clone());
+    for mut attempt in report.rejected_outputs.clone() {
+        if let Some(evidence) = evidence {
+            evidence.stamp(&mut attempt);
+        }
+        state.rejected_attempts.push(attempt);
+    }
     for signal in report
         .signal_validation
         .iter()
@@ -3391,6 +3481,11 @@ fn reject_without_advancing(
             ref_text: Some(signal.signal_ref.to_string()),
             value_digest: Some(signal.evidence_digest.clone()),
             reason: signal.reason.clone(),
+            at_epoch_ms: evidence.and_then(|value| value.at_epoch_ms),
+            attempt: evidence.and_then(|value| value.attempt),
+            exit_code: evidence.and_then(|value| value.exit_code),
+            stdout_tail: evidence.and_then(|value| value.stdout_tail.clone()),
+            stderr_tail: evidence.and_then(|value| value.stderr_tail.clone()),
         });
     }
     for missing in &report.missing_required_outputs {
@@ -3399,7 +3494,12 @@ fn reject_without_advancing(
             position_path: rejection_path.clone(),
             ref_text: Some(missing.clone()),
             value_digest: None,
-            reason: "required declared slot output was not supplied".to_string(),
+            reason: missing_output_rejection_reason(evidence),
+            at_epoch_ms: evidence.and_then(|value| value.at_epoch_ms),
+            attempt: evidence.and_then(|value| value.attempt),
+            exit_code: evidence.and_then(|value| value.exit_code),
+            stdout_tail: evidence.and_then(|value| value.stdout_tail.clone()),
+            stderr_tail: evidence.and_then(|value| value.stderr_tail.clone()),
         });
     }
     let mut next = build_session(
@@ -3419,6 +3519,44 @@ fn reject_without_advancing(
         next.status = Status::Rejected;
     }
     Ok(next)
+}
+
+fn missing_output_rejection_reason(evidence: Option<&RejectedAttemptEvidence>) -> String {
+    let Some(evidence) = evidence else {
+        return crate::procedure::runtime::MISSING_REQUIRED_OUTPUT_REASON.to_string();
+    };
+    if evidence.stdout_was_empty == Some(false) {
+        return match evidence.exit_code {
+            Some(exit_code) if evidence.command_succeeded => format!(
+                "command succeeded but did not supply required declared slot output (exit code {exit_code})"
+            ),
+            Some(exit_code) => format!(
+                "command exited with code {exit_code} without supplying required declared slot output"
+            ),
+            None => "command did not supply required declared slot output".to_string(),
+        };
+    }
+    match evidence.exit_code {
+        Some(_) if evidence.command_succeeded && evidence.stdout_was_empty == Some(true) => {
+            "command succeeded but printed nothing for required declared slot output".to_string()
+        }
+        Some(exit_code) => format!(
+            "command exited with code {exit_code}{} for required declared slot output",
+            if evidence.stdout_was_empty == Some(true) {
+                " and printed nothing"
+            } else {
+                " without captured stdout"
+            }
+        ),
+        None => format!(
+            "command did not produce an exit code{} for required declared slot output",
+            if evidence.stdout_was_empty == Some(true) {
+                " and printed nothing"
+            } else {
+                " without captured stdout"
+            }
+        ),
+    }
 }
 
 fn reject_without_persisting(mut session: Session, mut report: StepValidationReport) -> Session {
@@ -3559,6 +3697,11 @@ fn rejected_envelope(sequence_index: usize, reason: &str) -> RejectedAttempt {
         ref_text: None,
         value_digest: None,
         reason: reason.to_string(),
+        at_epoch_ms: None,
+        attempt: None,
+        exit_code: None,
+        stdout_tail: None,
+        stderr_tail: None,
     }
 }
 
@@ -3666,9 +3809,13 @@ mod command_capture_truncation_tests {
             timed_out: false,
             stdout: None,
             stderr: None,
+            stdout_was_empty: None,
+            succeeded: None,
             stdout_truncated,
             stderr_truncated: false,
             signal_emission_ceiling: 0,
+            ended_at_epoch_ms: None,
+            attempt: None,
         }
     }
 
@@ -3837,9 +3984,13 @@ mod check_output_tests {
             timed_out: false,
             stdout: (!stdout.is_empty()).then(|| stdout.to_string()),
             stderr: (!stderr.is_empty()).then(|| stderr.to_string()),
+            stdout_was_empty: Some(stdout.is_empty()),
+            succeeded: Some(false),
             stdout_truncated: false,
             stderr_truncated: false,
             signal_emission_ceiling: 0,
+            ended_at_epoch_ms: None,
+            attempt: None,
         }
     }
 
@@ -4735,9 +4886,13 @@ argv = ["check", "{slot:verdict}"]
                 timed_out: false,
                 stdout: None,
                 stderr: None,
+                stdout_was_empty: None,
+                succeeded: None,
                 stdout_truncated: false,
                 stderr_truncated: false,
                 signal_emission_ceiling: 0,
+                ended_at_epoch_ms: None,
+                attempt: None,
             }),
             caller: Some(CallerProvenance {
                 surface: "local-runtime-command".to_string(),
@@ -4827,9 +4982,13 @@ argv = ["check", "{slot:verdict}"]
             timed_out: false,
             stdout: None,
             stderr: None,
+            stdout_was_empty: None,
+            succeeded: None,
             stdout_truncated: false,
             stderr_truncated: false,
             signal_emission_ceiling: 0,
+            ended_at_epoch_ms: None,
+            attempt: None,
         };
         let verdict =
             check_output_value(true, &command, &CheckEvidence::from_submission(&evidence));
@@ -4910,9 +5069,13 @@ argv = ["check", "{slot:verdict}"]
             timed_out: false,
             stdout: None,
             stderr: None,
+            stdout_was_empty: None,
+            succeeded: None,
             stdout_truncated: false,
             stderr_truncated: false,
             signal_emission_ceiling: 0,
+            ended_at_epoch_ms: None,
+            attempt: None,
         };
         let verdict =
             check_output_value(true, &command, &CheckEvidence::from_submission(&evidence));
@@ -6645,6 +6808,42 @@ output = ["slot:first", "slot:second"]
         assert_eq!(
             serde_json::to_string(&DriveOutcomeKind::AwaitingOwner).unwrap(),
             "\"awaiting-owner\""
+        );
+    }
+
+    #[test]
+    fn missing_output_reason_distinguishes_command_evidence() {
+        assert_eq!(
+            missing_output_rejection_reason(None),
+            "required declared slot output was not supplied"
+        );
+        let failed = RejectedAttemptEvidence {
+            at_epoch_ms: None,
+            attempt: None,
+            exit_code: Some(3),
+            stdout_tail: Some(String::new()),
+            stderr_tail: Some(String::new()),
+            stdout_was_empty: Some(true),
+            command_succeeded: false,
+        };
+        assert!(missing_output_rejection_reason(Some(&failed)).contains("code 3"));
+        let succeeded = RejectedAttemptEvidence {
+            // A command frame may explicitly declare a nonzero success code.
+            exit_code: Some(3),
+            command_succeeded: true,
+            ..failed.clone()
+        };
+        assert_eq!(
+            missing_output_rejection_reason(Some(&succeeded)),
+            "command succeeded but printed nothing for required declared slot output"
+        );
+        let outputful_failure = RejectedAttemptEvidence {
+            stdout_was_empty: Some(false),
+            ..failed
+        };
+        assert_eq!(
+            missing_output_rejection_reason(Some(&outputful_failure)),
+            "command exited with code 3 without supplying required declared slot output"
         );
     }
 }

@@ -518,6 +518,8 @@ pub struct StepSignalOutput {
     pub producer_harness: Option<String>,
 }
 
+pub const MISSING_REQUIRED_OUTPUT_REASON: &str = "required declared slot output was not supplied";
+
 /// Caller/model-supplied JSON response shape for one step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -537,6 +539,15 @@ pub struct StepOutputEnvelope {
     pub signals: Vec<StepSignalOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Trusted runtime context for a missing command output. Absent envelopes
+    /// retain the legacy generic rejection wording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missing_output_reason: Option<String>,
+    /// Trusted runtime context for a command that produced an empty value which
+    /// then failed schema validation. Kept separate from missing output so an
+    /// outputful schema failure retains its schema-specific reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty_stdout_rejection_reason: Option<String>,
 }
 
 /// Validated runtime signal emission.
@@ -628,6 +639,16 @@ pub struct RejectedAttempt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_digest: Option<Digest>,
     pub reason: String,
+    #[serde(default, rename = "at-epoch-ms", skip_serializing_if = "Option::is_none")]
+    pub at_epoch_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+    #[serde(default, rename = "exit-code", skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, rename = "stdout-tail", skip_serializing_if = "Option::is_none")]
+    pub stdout_tail: Option<String>,
+    #[serde(default, rename = "stderr-tail", skip_serializing_if = "Option::is_none")]
+    pub stderr_tail: Option<String>,
 }
 
 /// Next action after step-output validation.
@@ -693,4 +714,16 @@ pub struct LedgerValidationReport {
     pub contract_valid: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<String>,
+}
+
+#[cfg(test)]
+mod frames_tests {
+    use super::RejectedAttempt;
+
+    #[test]
+    fn rejected_attempt_without_runtime_evidence_preserves_legacy_json() {
+        let legacy = r#"{"sequence-index":1,"reason":"rejected"}"#;
+        let parsed: RejectedAttempt = serde_json::from_str(legacy).expect("legacy rejected attempt");
+        assert_eq!(serde_json::to_string(&parsed).expect("serialize"), legacy);
+    }
 }

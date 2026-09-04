@@ -83,6 +83,20 @@ pub enum ActivityRecord {
         stderr_tail: String,
         stderr_tail_truncated: bool,
     },
+    /// P277.3: one durable verdict for every runtime submission, including
+    /// rejections that deliberately leave the ledger unchanged.
+    Verdict {
+        at_epoch_ms: u64,
+        verdict: String,
+        reason: String,
+        item_id: Option<String>,
+        source_index: Option<usize>,
+        position_path: Vec<PathSegment>,
+        surface: Option<String>,
+        caller: Option<String>,
+        agent: Option<String>,
+        harness: Option<String>,
+    },
 }
 
 impl ActivityRecord {
@@ -94,6 +108,7 @@ impl ActivityRecord {
             ActivityRecord::Narration { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::CommandAttemptStarted { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::CommandAttemptEnded { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::Verdict { at_epoch_ms, .. } => *at_epoch_ms,
         }
     }
 
@@ -248,6 +263,11 @@ impl ActivitySidecarWriter {
 
     pub fn append_command_attempt_ended(&mut self, record: ActivityRecord) {
         debug_assert!(matches!(record, ActivityRecord::CommandAttemptEnded { .. }));
+        self.append_durable_line(&record);
+    }
+
+    pub fn append_verdict(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::Verdict { .. }));
         self.append_durable_line(&record);
     }
 

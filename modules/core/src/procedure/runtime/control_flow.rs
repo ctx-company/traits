@@ -1866,6 +1866,7 @@ pub fn apply_terminal_frame_failure(
             ref_text: None,
             value_digest: Some(value_digest),
             reason: reason.to_string(),
+            at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
         }],
         missing_required_outputs: Vec::new(),
         unfilled_optional_outputs: Vec::new(),
@@ -1875,7 +1876,7 @@ pub fn apply_terminal_frame_failure(
         warnings: Vec::new(),
         next_action: StepNextAction::Rejected,
     };
-    let (state, report) = reject_step_output(trait_ref, state, sequence_index, report)?;
+    let (state, report) = reject_step_output(trait_ref, state, sequence_index, report, None)?;
     Ok(Some((state, report)))
 }
 
@@ -2289,6 +2290,7 @@ pub(crate) fn bind_current_for_each_item(trait_ref: &Trait, state: &mut State) -
                 || "for-each item binding rejected".to_string(),
                 |v| v.reason.clone(),
             ),
+            at_epoch_ms: None, attempt: None, exit_code: None, stdout_tail: None, stderr_tail: None,
         });
         return Ok(());
     }
