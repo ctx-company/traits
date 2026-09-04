@@ -9727,6 +9727,8 @@ mod tests {
             tokens_by_model: None,
             summons: None,
             reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: format!("wt-{run_id}"),
@@ -9862,6 +9864,8 @@ argv = ["git", "commit", "-m", "fixture"]
             tokens_by_model: None,
             summons: None,
             reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: format!("wt-{run_id}"),
@@ -11747,6 +11751,8 @@ argv = ["git", "commit", "-m", "fixture"]
                 schema_ref: Some("schema:text".to_string()),
             }),
             reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
         });
         session
     }

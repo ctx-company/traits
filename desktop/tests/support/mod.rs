@@ -399,6 +399,8 @@ pub fn complete_session(path: &Utf8Path) -> Session {
         summons: None,
         reclaim: None,
         disk_full: None,
+        interruption_cause: None,
+        interruption_position: None,
     });
     ctx_traits_io::run_session::write_run_session(path, &session)
         .expect("rewrite ledger as completed");
@@ -431,6 +433,8 @@ pub fn pause_session(path: &Utf8Path) -> Session {
         summons: None,
         reclaim: None,
         disk_full: None,
+        interruption_cause: None,
+        interruption_position: None,
     });
     ctx_traits_io::run_session::write_run_session(path, &session)
         .expect("rewrite ledger as paused");

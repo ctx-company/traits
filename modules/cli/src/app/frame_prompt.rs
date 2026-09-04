@@ -2491,6 +2491,8 @@ mod resolve_input_value_tokens_setting_tests {
                 schema_ref: None,
             }),
             reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
         }
     }
 
@@ -2569,6 +2571,8 @@ mod resolve_input_value_tokens_setting_tests {
             tokens_by_model: None,
             summons: None,
             reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
         });
         assert!(
             !is_live_summons(&session, &ask_frame),

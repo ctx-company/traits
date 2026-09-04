@@ -564,6 +564,8 @@ mod tests {
                     schema_ref: Some("schema:text".to_string()),
                 }),
                 reclaim: None,
+                interruption_cause: None,
+                interruption_position: None,
             }),
             provenance: ctx_traits_core::procedure::session::Provenance {
                 started_by: CallerProvenance {

@@ -1529,6 +1529,8 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         summons,
         disk_full: report.disk_full_park.clone(),
         reclaim,
+        interruption_cause: None,
+        interruption_position: None,
     };
     // Stamp why the conductor exited; the ledger status alone cannot tell a
     // timed-out drive from one that is still running. Best-effort: a marker

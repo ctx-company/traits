@@ -131,29 +131,32 @@ that window deterministic.
 """
 
 [relations]
+depends-on = [
+    "0277.2",
+    "0277.3",
+]
 parent = "0277"
-depends-on = ["0277.2", "0277.3"]
 
 [[checks]]
 name = "core suite passes with drive-outcome compatibility"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "io suite passes with orphan-repair cause tests"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "cli suite passes with incident 2 and 3 proofs"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
-expect = "test result: ok"
 timeout-ms = 1800000
+expect = "test result: ok"
 
 [[checks]]
 name = "desktop compiles with drive-outcome and record changes"
 command = "just desktop-test"
-expect = "test result: ok"
 timeout-ms = 3600000
+expect = "test result: ok"

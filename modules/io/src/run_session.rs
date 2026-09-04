@@ -649,6 +649,8 @@ pub fn record_drive_outcome(
         tokens_by_model: evidence.tokens_by_model,
         summons: evidence.summons,
         reclaim: evidence.reclaim,
+        interruption_cause: evidence.interruption_cause,
+        interruption_position: evidence.interruption_position,
     });
     write_run_session(&path, &loaded)
 }
@@ -681,6 +683,8 @@ pub fn record_interrupted_outcome_in_session(
         tokens_by_model: None,
         summons: None,
         reclaim: None,
+        interruption_cause: None,
+        interruption_position: None,
     });
     write_run_session(path, loaded)
 }
@@ -704,6 +708,8 @@ pub fn record_disk_full_outcome_in_session(
         tokens_by_model: None,
         summons: None,
         reclaim: None,
+        interruption_cause: None,
+        interruption_position: None,
     });
     write_run_session(path, loaded)
 }

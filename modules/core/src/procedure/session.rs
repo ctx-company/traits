@@ -909,6 +909,8 @@ argv = ["git", "commit", "-m", "fixture"]
             tokens_by_model: None,
             summons: None,
             reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: "wt-fixture".to_string(),
@@ -1226,6 +1228,42 @@ pub enum DriveOutcomeKind {
     Other(String),
 }
 
+/// The first known reason a drive stopped before completing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum InterruptionCause {
+    OperatorSignal {
+        signal: i32,
+    },
+    ControlSocket,
+    PauseRequested,
+    BudgetExhausted {
+        budget: crate::procedure::runtime::BudgetCeilingKind,
+    },
+    OwnerPark,
+    HarnessChildExited {
+        exit_status: i32,
+    },
+    TuiKill,
+    OrphanRepaired,
+}
+
+/// The active frame identity captured when a drive was interrupted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct InterruptionPosition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_path: Vec<PathSegment>,
+}
+
 impl DriveOutcomeKind {
     pub fn from_wire(value: impl Into<String>) -> Self {
         match value.into().as_str() {
@@ -1411,6 +1449,12 @@ pub struct DriveOutcome {
     pub summons: Option<SummonsRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reclaim: Option<ReclaimEvidence>,
+    /// Typed stop evidence. Absent on ledgers written before interruption
+    /// causes were recorded and on non-interrupted outcomes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interruption_cause: Option<InterruptionCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interruption_position: Option<InterruptionPosition>,
 }
 
 /// The durable question evidence for a run parked `awaiting-owner` on an
@@ -1524,6 +1568,10 @@ pub struct DriveTerminalEvidence {
     /// See [`DriveOutcome::disk_full`] (0280).
     pub disk_full: Option<DiskFullPark>,
     pub reclaim: Option<ReclaimEvidence>,
+    /// See [`DriveOutcome::interruption_cause`].
+    pub interruption_cause: Option<InterruptionCause>,
+    /// See [`DriveOutcome::interruption_position`].
+    pub interruption_position: Option<InterruptionPosition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -6809,6 +6857,18 @@ output = ["slot:first", "slot:second"]
             serde_json::to_string(&DriveOutcomeKind::AwaitingOwner).unwrap(),
             "\"awaiting-owner\""
         );
+    }
+
+    #[test]
+    fn old_drive_outcome_without_interruption_evidence_decodes() {
+        let outcome: DriveOutcome =
+            serde_json::from_str(r#"{"outcome":"interrupted","recorded-at-epoch":42}"#)
+                .expect("old session outcome decodes");
+
+        assert_eq!(outcome.outcome, DriveOutcomeKind::Interrupted);
+        assert_eq!(outcome.recorded_at_epoch, 42);
+        assert_eq!(outcome.interruption_cause, None);
+        assert_eq!(outcome.interruption_position, None);
     }
 
     #[test]
