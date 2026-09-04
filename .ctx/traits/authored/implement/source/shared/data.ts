@@ -32,7 +32,7 @@ export const draft = cdk.slot({
         ),
         {
           description:
-            "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task.",
+            "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. The stage is the unit of completeness: the reviewer grades the stage, never a round, and a round is one attempt at finishing the current stage — the worker attempts the whole stage and, when it cannot finish, reports what is left. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task.",
         },
       ),
       approach: cdk.schema.field(cdk.schema.text(), {

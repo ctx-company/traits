@@ -132,6 +132,157 @@ pub struct GuardPredicate {
     pub any: Vec<GuardExpr>,
 }
 
+impl GuardExpr {
+    /// The guard as one readable line, in the same vocabulary the runtime's
+    /// guard evaluations use for their `predicate` labels
+    /// (`slot:x.field == "value"`, `present(slot:x)`, `signal:done`), so a
+    /// frame can tell an agent what ends the loop it is in without a second
+    /// spelling of the condition language. Composition renders as
+    /// `all of: a; b`, `any of: a; b`, and `not (a)`.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Ref(ref_text) => ref_text.clone(),
+            Self::Any(items) => describe_composition("any of", items),
+            Self::Predicate(predicate) => predicate.describe(),
+        }
+    }
+}
+
+impl GuardPredicate {
+    /// See [`GuardExpr::describe`].
+    pub fn describe(&self) -> String {
+        if !self.all.is_empty() {
+            return describe_composition("all of", &self.all);
+        }
+        if !self.any.is_empty() {
+            return describe_composition("any of", &self.any);
+        }
+        if let Some(inner) = self.not.as_ref() {
+            return format!("not ({})", inner.describe());
+        }
+        if let Some(signal) = self.signal.as_deref() {
+            return signal.to_string();
+        }
+        if let Some(condition) = self.condition.as_deref() {
+            return condition.to_string();
+        }
+        if let Some(target) = self.empty.as_deref() {
+            return format!("empty({target})");
+        }
+        if let Some(target) = self.present.as_deref() {
+            return match self.field.as_deref() {
+                Some(field) => format!("present({target}.{field})"),
+                None => format!("present({target})"),
+            };
+        }
+        if let Some(iteration) = self.iteration {
+            return format!("iteration == {iteration}");
+        }
+        if let Some(iteration) = self.iteration_at_least {
+            return format!("iteration >= {iteration}");
+        }
+        if let Some(threshold) = self.elapsed_seconds_at_least.as_ref() {
+            return format!("elapsed-seconds >= {threshold}");
+        }
+        let subject = if let Some(count) = self.count.as_deref() {
+            match (self.field.as_deref(), self.field_equals.as_ref()) {
+                (Some(field), Some(value)) => format!("count({count} where {field} == {value})"),
+                _ => format!("count({count})"),
+            }
+        } else if let Some(slot) = self.slot.as_deref() {
+            match self.field.as_deref() {
+                Some(field) => format!("{slot}.{field}"),
+                None => slot.to_string(),
+            }
+        } else if let Some(output) = self.output.as_deref() {
+            match self.field.as_deref() {
+                Some(field) => format!("output({output}).{field}"),
+                None => format!("output({output})"),
+            }
+        } else {
+            return "(guard)".to_string();
+        };
+        let comparison = [
+            ("==", self.equals.as_ref()),
+            ("<", self.less_than.as_ref()),
+            ("<=", self.at_most.as_ref()),
+            (">", self.greater_than.as_ref()),
+            (">=", self.at_least.as_ref()),
+        ]
+        .into_iter()
+        .find_map(|(symbol, value)| value.map(|value| format!(" {symbol} {value}")));
+        match comparison {
+            Some(comparison) => format!("{subject}{comparison}"),
+            None => format!("present({subject})"),
+        }
+    }
+}
+
+fn describe_composition(label: &str, items: &[GuardExpr]) -> String {
+    let parts: Vec<String> = items.iter().map(GuardExpr::describe).collect();
+    format!("{label}: {}", parts.join("; "))
+}
+
+#[cfg(test)]
+mod describe_tests {
+    use super::{GuardExpr, GuardPredicate};
+
+    fn field_equals(slot: &str, field: &str, value: &str) -> GuardExpr {
+        GuardExpr::Predicate(Box::new(GuardPredicate {
+            slot: Some(slot.to_string()),
+            field: Some(field.to_string()),
+            equals: Some(serde_json::Value::String(value.to_string())),
+            ..GuardPredicate::default()
+        }))
+    }
+
+    #[test]
+    fn leaf_predicates_read_like_runtime_labels() {
+        assert_eq!(
+            field_equals("slot:review-verdict-1", "status", "approved").describe(),
+            "slot:review-verdict-1.status == \"approved\""
+        );
+        let bare = GuardExpr::Predicate(Box::new(GuardPredicate {
+            slot: Some("slot:draft".to_string()),
+            ..GuardPredicate::default()
+        }));
+        assert_eq!(bare.describe(), "present(slot:draft)");
+        assert_eq!(
+            GuardExpr::Ref("signal:done".to_string()).describe(),
+            "signal:done"
+        );
+    }
+
+    #[test]
+    fn compositions_read_as_all_any_and_not() {
+        let all = GuardExpr::Predicate(Box::new(GuardPredicate {
+            all: vec![
+                field_equals("slot:v", "status", "approved"),
+                GuardExpr::Predicate(Box::new(GuardPredicate {
+                    slot: Some("slot:gate".to_string()),
+                    equals: Some(serde_json::Value::String("accepted".to_string())),
+                    ..GuardPredicate::default()
+                })),
+            ],
+            ..GuardPredicate::default()
+        }));
+        assert_eq!(
+            all.describe(),
+            "all of: slot:v.status == \"approved\"; slot:gate == \"accepted\""
+        );
+        let negated = GuardExpr::Predicate(Box::new(GuardPredicate {
+            not: Some(Box::new(GuardExpr::Ref("signal:stop".to_string()))),
+            ..GuardPredicate::default()
+        }));
+        assert_eq!(negated.describe(), "not (signal:stop)");
+        let any = GuardExpr::Any(vec![
+            GuardExpr::Ref("signal:a".to_string()),
+            GuardExpr::Ref("signal:b".to_string()),
+        ]);
+        assert_eq!(any.describe(), "any of: signal:a; signal:b");
+    }
+}
+
 /// A named condition body keyed by `[condition.<id>]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]

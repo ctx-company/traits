@@ -267,7 +267,7 @@ description = "The task's scope restated from the task file: what is in, what is
 [schema.fields.stages]
 schema = "[schema:stage]"
 required = true
-description = "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task."
+description = "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. The stage is the unit of completeness: the reviewer grades the stage, never a round, and a round is one attempt at finishing the current stage — the worker attempts the whole stage and, when it cannot finish, reports what is left. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task."
 
 [[schema]]
 id = "owner-item"
@@ -345,7 +345,7 @@ description = "Cross-task seam citations ONLY: counterpart work belonging to a D
 
 [schema.fields.stages]
 schema = "[schema:stage-status]"
-description = "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages."
+description = "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. The stage is the unit of completeness: this verdict grades the stage, never the round — a round is one attempt at finishing the current stage, and a worker that could not finish reports what is left. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages."
 
 [schema.fields.status]
 schema = "schema:text"

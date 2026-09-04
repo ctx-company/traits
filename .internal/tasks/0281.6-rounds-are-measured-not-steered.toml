@@ -1,0 +1,49 @@
+schema-version = "0.2"
+key = "0281.6"
+title = "Rounds are measured, not steered: a per-round table from the ledger and the activity journal"
+status = "ready"
+raised = "2026-09-04"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`. With the loop steered only by the owner's annotations, the
+question "is it converging" needs numbers the ledger already holds but no
+surface shows: how much of its budget a worker round used, how many steps it
+closed against how many the reviewer added, whether a stage flipped. These
+decide seat selection and budget sizing; they never trigger anything.
+
+## GOALS, binding
+
+1. **A per-round table for one run.** `ctx traits stats` (or the run's
+   inspection surface) lists, per round: worker minutes used against the
+   frame budget, tool calls, steps closed, added and reopened, stage flips,
+   reviewer minutes, gate wait, rejections. Read-only, from the session
+   ledger and the activity journal; no new records.
+
+2. **The dashboard shows the last row.** The session preview carries the
+   most recent round's line.
+
+3. **Nothing acts on the numbers.** No park, no re-dispatch, no annotation is
+   derived from them.
+"""
+scope = """
+## Decisions
+
+- The phone journal keeps "stage k/n • X open • Y closed"; minutes stay on
+  the terminal surfaces.
+- The first use is a seat comparison: 0011.5's resolver stage on two worker
+  seats, same task, the table decides.
+"""
+validation = """
+## Done when
+
+- The table renders for a finished run and for a live one, with every column
+  sourced from an existing record.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.5"]

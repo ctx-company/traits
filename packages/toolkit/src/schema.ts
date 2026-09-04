@@ -476,7 +476,7 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
     stages: schema.field(schema.list(stageStatusSchema), {
       required: false,
       description:
-        "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages.",
+        "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. The stage is the unit of completeness: this verdict grades the stage, never the round — a round is one attempt at finishing the current stage, and a worker that could not finish reports what is left. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages.",
     }),
   },
   {

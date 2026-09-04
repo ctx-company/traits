@@ -1,0 +1,63 @@
+schema-version = "0.2"
+key = "0281.4"
+title = "A gate survives Ctrl-C: the run pane hands the terminal to the child, and a killed gate is an interruption"
+status = "ready"
+raised = "2026-09-04"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`, follow-up found on the first live run of the new loop
+(0011.5, session 83a365bd, 2026-09-04 14:28). The round-3 verdict gate's
+ctx-annotate child ended with signal 9 and `killed: true` in the command
+journal. The run pane's input pump keeps reading keys while a gate child
+shares the terminal, and under the P551 rule a Ctrl-C read by the pump is an
+instant kill of the registered child group. The gate died with no output, the
+frame was rejected as "trusted local command failed", the drive recorded
+`interrupted`, and the driver exited. The two deaths of 2026-09-04 morning had
+the same signature; 0281.3's SIGINT handling covers the terminal path, not
+this one.
+
+## GOALS, binding
+
+1. **A gate child owns the terminal.** While a command frame runs with the
+   run pane live, the pane's input pump is paused, the same switch already
+   used around `$EDITOR`, so keys reach the child. Ctrl-C then means the
+   child's own cancel; the terminal SIGINT path (0281.3) parks the run
+   resumably.
+   Excluded: changing P551's meaning for harness frames.
+
+2. **A killed command frame is an interruption, not a failure.** When a kill
+   request lands on a command frame (the journal records `killed`), the
+   runner returns the same typed interruption as for SIGINT: nothing
+   submitted, the frame pending, resume re-asks the gate.
+
+3. **Proven.** A unit test for the classifier's kill branch, and a proof
+   that a pane-live command frame runs with the pump paused.
+"""
+scope = """
+## Decisions
+
+- The pump pause is scoped to command frames only; harness frames keep the
+  instant-kill rule.
+
+## APPROACH, suggested route
+
+- `modules/cli/src/app/drive.rs` around the command-frame dispatch: pause and
+  resume the run panel's pump (see `RatatuiPane::suspend`).
+- `modules/io/src/run.rs`: extend `command_interrupted_by_stop` with the
+  killed flag from `run_kill::was_killed`.
+"""
+validation = """
+## Done when
+
+- Ctrl-C inside the annotate window during a live gate leaves the run parked
+  and resumable, with no rejected submission and no failure modal.
+- The classifier tests cover SIGINT, kill, and ordinary failure.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.3"]

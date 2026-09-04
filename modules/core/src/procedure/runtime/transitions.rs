@@ -178,6 +178,28 @@ pub fn intro_sequence_frame(trait_ref: &Trait, state: &State) -> crate::Result<S
     })
 }
 
+/// The readable form of a loop item's `until` guard, found by the loop's id
+/// across the top-level procedure and every named sequence. `None` when the
+/// loop has no `until` (it ends on `abort-if` or its bound alone) or the id
+/// is not a loop item.
+pub fn loop_until_text(trait_ref: &Trait, loop_id: &str) -> Option<String> {
+    let top_level = trait_ref
+        .procedure
+        .as_ref()
+        .map(|procedure| procedure.sequence.iter())
+        .into_iter()
+        .flatten();
+    let named = trait_ref
+        .sequences
+        .iter()
+        .flat_map(|(_, sequence)| sequence.sequence.iter());
+    top_level
+        .chain(named)
+        .find(|item| item.id.as_deref() == Some(loop_id) && item.until.is_some())
+        .and_then(|item| item.until.as_ref())
+        .map(|until| until.describe())
+}
+
 /// Build the next sequence frame or an explicit blocked/completed result.
 pub fn next_sequence_frame(
     trait_ref: &Trait,
@@ -252,11 +274,21 @@ fn build_sequence_frame(
     );
     if let Some(loop_context) = ready.loop_context.as_ref() {
         if loop_context.max_iterations == usize::MAX {
-            frame_text.push_str(&format!(
-                "Loop {} iteration {} (unbounded — exits on its own guard)\n",
-                loop_context.loop_id,
-                loop_context.iteration_index + 1,
-            ));
+            // 0281.5: name the guard, not just its existence — an agent that
+            // knows "repeats until the verdict is approved" knows it is one
+            // attempt inside a loop, which is the fact a fresh session lacks.
+            match loop_until_text(trait_ref, &loop_context.loop_id) {
+                Some(until) => frame_text.push_str(&format!(
+                    "Loop {} iteration {} (unbounded — repeats until {until})\n",
+                    loop_context.loop_id,
+                    loop_context.iteration_index + 1,
+                )),
+                None => frame_text.push_str(&format!(
+                    "Loop {} iteration {} (unbounded — exits on its own guard)\n",
+                    loop_context.loop_id,
+                    loop_context.iteration_index + 1,
+                )),
+            }
         } else {
             frame_text.push_str(&format!(
                 "Loop {} iteration {}/{}\n",

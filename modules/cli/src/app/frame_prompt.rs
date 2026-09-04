@@ -73,6 +73,12 @@ pub(crate) struct ResolvedFramePrompt {
     /// Whether the ready top-level prompt contributed non-empty behavior guidance.
     pub(crate) ready_prompt_behavior_participated: bool,
     pub(crate) behavior_items: String,
+    /// The `<context>` children (0281.5): where this step sits in the run
+    /// and the time it has — loop position with the loop's exit guard, and
+    /// this frame's time budget. Facts the runtime holds, never
+    /// instructions. Empty outside any loop when no budget is resolved, so
+    /// such frames render byte-identically to before.
+    pub(crate) context_section: String,
 }
 
 /// One `<spec>` child: what a value MEANS, plus the author's advisory `hint`
@@ -221,6 +227,16 @@ pub(crate) fn frame_prompt(
         context.input_section,
         indent_block(&context.prompt_section, 4)
     ));
+    // 0281.5: after the per-frame values (it changes per frame too, so the
+    // cacheable prefix is unaffected) and before the output contract, which
+    // stays the closing instruction. Facts only: where the step sits and the
+    // time it has.
+    if !context.context_section.is_empty() {
+        envelope.push_str(&format!(
+            "<context>\n  <info>Where this step sits in the run and the time it has. Facts from the runtime, not instructions.</info>\n{}</context>\n\n",
+            context.context_section
+        ));
+    }
     envelope.push_str(&requested_output_contract_section_with_spec(
         schema,
         &context.output_spec,
@@ -651,7 +667,201 @@ pub(crate) fn resolved_frame_prompt(
         behavior_items: guidance
             .map(|guidance| guidance.behavior)
             .unwrap_or_default(),
+        context_section: context_section(loaded, session, frame),
     })
+}
+
+/// The `<context>` children for a frame (0281.5): the loop it sits in with
+/// that loop's `until` guard, and this frame's time budget. Every value
+/// comes from the canonical or the ledger; nothing here tells the agent
+/// what to do with the facts.
+fn context_section(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    session: &ctx_traits_core::procedure::session::Session,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> String {
+    let until = frame.loop_context.as_ref().and_then(|context| {
+        ctx_traits_core::procedure::runtime::loop_until_text(&loaded.trait_ref, &context.loop_id)
+    });
+    render_context(
+        frame.loop_context.as_ref(),
+        until.as_deref(),
+        &session.resolved_budgets,
+    )
+}
+
+/// Pure renderer behind [`context_section`], so the block's shape is
+/// provable without a loaded trait: one `<loop>` line when the frame is
+/// inside a loop, one `<time>` line when the frame budget is resolved.
+///
+/// The loop is described by its iteration and its exit condition only.
+/// Its id, like every sequence ref, is authoring bookkeeping the model
+/// cannot act on and stays out of the envelope (P561); the condition is
+/// spelled with the same bare value names the `<data>` block uses.
+///
+/// Time is this frame's own ceiling and nothing else (owner ruling
+/// 2026-09-04): the idle bound and the run's remainder would read as
+/// deadlines to plan around, and a worker told "ends after 20 min without
+/// output" plans twenty-minute rounds.
+fn render_context(
+    loop_context: Option<&ctx_traits_core::procedure::runtime::LoopContext>,
+    until: Option<&str>,
+    budgets: &[ctx_traits_core::procedure::runtime::ResolvedBudgetRecord],
+) -> String {
+    let mut lines = Vec::new();
+    if let Some(context) = loop_context {
+        let iteration = context.iteration_index.saturating_add(1);
+        let bound = if context.max_iterations == usize::MAX {
+            String::new()
+        } else {
+            format!(" of at most {}", context.max_iterations)
+        };
+        let ends = match until {
+            Some(until) => format!("repeats until {}", bare_guard_text(until)),
+            None => "exits on its own guard".to_string(),
+        };
+        lines.push(format!(
+            "  <loop iteration=\"{iteration}\">this step is inside a loop: iteration {iteration}{bound}; the loop {}</loop>",
+            sanitize_spec_text(&ends),
+        ));
+    }
+    // `<time>`, not `<budget>`: the output contract already uses `<budget>`
+    // for the response byte ceiling, and one word must not mean two things
+    // in one frame.
+    if let Some(frame_seconds) = budgets
+        .iter()
+        .find(|record| record.field == "frame-seconds")
+        .and_then(|record| record.value.as_u64())
+    {
+        lines.push(format!(
+            "  <time>this step may take up to {}</time>",
+            format_duration(frame_seconds)
+        ));
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+/// Rewrites the runtime's qualified refs in a guard description
+/// (`slot:review-verdict-1.status == "approved"`) to the bare names the
+/// `<data>` block uses (`review-verdict-1.status == "approved"`), the same
+/// rendering concern [`bare_reference_names`] applies to prompt text.
+fn bare_guard_text(text: &str) -> String {
+    let mut rendered = text.to_string();
+    for prefix in ["slot:", "port:", "output:", "signal:", "condition:"] {
+        let mut out = String::with_capacity(rendered.len());
+        let mut rest = rendered.as_str();
+        while let Some(at) = rest.find(prefix) {
+            let (before, after) = rest.split_at(at);
+            out.push_str(before);
+            let after = &after[prefix.len()..];
+            let id_len = after
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '/'))
+                .unwrap_or(after.len());
+            out.push_str(&after[..id_len]);
+            rest = &after[id_len..];
+        }
+        out.push_str(rest);
+        rendered = out;
+    }
+    rendered
+}
+
+/// `3600` → `1 h`, `5400` → `1 h 30 min`, `240` → `4 min`, `45` → `45 s`.
+fn format_duration(seconds: u64) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let rest = seconds % 60;
+    match (hours, minutes, rest) {
+        (0, 0, rest) => format!("{rest} s"),
+        (0, minutes, 0) => format!("{minutes} min"),
+        (0, minutes, rest) => format!("{minutes} min {rest} s"),
+        (hours, 0, _) => format!("{hours} h"),
+        (hours, minutes, _) => format!("{hours} h {minutes} min"),
+    }
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::{format_duration, render_context};
+    use ctx_traits_core::procedure::runtime::{
+        BudgetSourceLayer, LoopContext, ResolvedBudgetRecord,
+    };
+
+    fn budget(field: &str, seconds: u64) -> ResolvedBudgetRecord {
+        ResolvedBudgetRecord {
+            field: field.to_string(),
+            value: serde_json::json!(seconds),
+            source: BudgetSourceLayer::Author,
+        }
+    }
+
+    #[test]
+    fn a_loop_frame_names_its_iteration_and_exit_guard() {
+        let context = LoopContext {
+            loop_id: "reviewed-refinement".to_string(),
+            sequence_id: None,
+            iteration_index: 2,
+            max_iterations: usize::MAX,
+        };
+        let rendered = render_context(
+            Some(&context),
+            Some("all of: slot:review-verdict-1.status == \"approved\""),
+            &[],
+        );
+        assert!(
+            rendered.contains("<loop iteration=\"3\">this step is inside a loop: iteration 3;"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("repeats until all of: review-verdict-1.status == \"approved\""),
+            "{rendered}"
+        );
+        // The loop's id is authoring bookkeeping and never reaches the model.
+        assert!(!rendered.contains("reviewed-refinement"), "{rendered}");
+        assert!(!rendered.contains("slot:"), "{rendered}");
+        assert!(!rendered.contains("<time>"), "{rendered}");
+    }
+
+    #[test]
+    fn time_names_only_this_frames_ceiling() {
+        let rendered = render_context(
+            None,
+            None,
+            &[
+                budget("frame-seconds", 3600),
+                budget("idle-seconds", 1200),
+                budget("total-seconds", 10800),
+            ],
+        );
+        assert!(
+            rendered.contains("<time>this step may take up to 1 h</time>"),
+            "{rendered}"
+        );
+        // The idle bound and the run's remainder are deadlines a worker would
+        // plan around; they stay out (owner ruling 2026-09-04).
+        assert!(!rendered.contains("20 min"), "{rendered}");
+        assert!(!rendered.contains("3 h"), "{rendered}");
+        // Never `<budget>`: the output contract owns that word (response bytes).
+        assert!(!rendered.contains("<budget>"), "{rendered}");
+        assert!(!rendered.contains("<loop"), "{rendered}");
+    }
+
+    #[test]
+    fn nothing_to_say_renders_nothing() {
+        assert_eq!(render_context(None, None, &[]), "");
+    }
+
+    #[test]
+    fn durations_read_naturally() {
+        assert_eq!(format_duration(45), "45 s");
+        assert_eq!(format_duration(240), "4 min");
+        assert_eq!(format_duration(3600), "1 h");
+        assert_eq!(format_duration(5400), "1 h 30 min");
+    }
 }
 
 /// Resolves the exact declaration a frame was produced from by structural

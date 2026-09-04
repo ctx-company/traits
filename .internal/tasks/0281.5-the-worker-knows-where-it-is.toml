@@ -1,0 +1,90 @@
+schema-version = "0.2"
+key = "0281.5"
+title = "The worker knows where it is: loop position and budget in the envelope, the stage as the unit of completeness"
+status = "ready"
+raised = "2026-09-04"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`, follow-up found on the first live run of the new loop
+(0011.5, session 83a365bd, 2026-09-04). The worker's rounds lasted ten, six
+and four minutes of a sixty-minute frame, each a self-contained slice, and its
+own summary said why: "substantially larger cross-module surgery than fits
+safely in one round without risking a half-finished, non-compiling state". It
+stops by choice, because it knows neither its budget nor what a round is. The
+harness envelope (P561/P562) deliberately dropped the runtime header, so a
+fresh session sees no loop position at all, and nothing anywhere states the
+frame's time ceiling.
+
+The fix is facts, not instructions: the runtime renders where the step sits
+and how much time it has, from data it already holds, for every seat of every
+trait; and the artifact that defines a stage says what a round is relative to
+it.
+
+## GOALS, binding
+
+1. **The envelope states the loop position with its exit condition.** A frame
+   inside a loop carries a `<context>` block naming the iteration and the
+   loop's `until` guard rendered from the canonical, spelled with the bare
+   value names the `<data>` block uses ("repeats until
+   review-verdict-1.status == \"approved\""). Never the loop's id: loop and
+   sequence identifiers are authoring bookkeeping and stay out of the
+   model's view (P561). Frames outside a loop carry no loop line.
+   Excluded: any statement about continuity of the working tree; any
+   instruction about how to use the time.
+
+2. **The envelope states this step's budget, and only that.** The same block
+   names the frame's wall ceiling from the session's resolved budgets
+   ("this step may take up to 1 h"). The idle bound and the run's remaining
+   time stay out (owner ruling 2026-09-04): they read as deadlines to plan
+   around, and a worker told it ends after twenty idle minutes plans
+   twenty-minute rounds. An absent budget renders nothing.
+
+3. **The block is stable-last.** It renders after the per-frame values and
+   never before the cacheable prefix; frames without a loop or a budget are
+   byte-identical to today.
+
+4. **The stage definition says what a round is.** The shared stage schema and
+   the implement draft's `stages` field state: a stage's goal is its only
+   requirement; the reviewer grades the stage, never the round; a round is
+   one attempt at finishing the current stage; try to finish it, and say
+   what is left if you cannot.
+
+5. **Proven.** Unit tests for the guard renderer and the situation block
+   (loop, budget, none), and the composed envelope carrying the block.
+"""
+scope = """
+## Decisions
+
+- No continuity sentence: users frame a run as one atomic landing and a frame
+  as one attempt; nothing in the envelope suggests handing off half-done work.
+- The MCP transport keeps its frame summary; the loop line there gains the
+  same guard text.
+
+## APPROACH, suggested route
+
+- `modules/core/src/trait/condition.rs`: `GuardExpr::describe`.
+- `modules/core/src/procedure/runtime/transitions.rs`: `loop_until_text`,
+  used by the frame summary's loop line.
+- `modules/cli/src/app/frame_prompt.rs`: a `<context>` element after
+  `<input>` built from the frame's loop context, the loop's `until`, and the
+  session's resolved frame budget.
+- `packages/toolkit/src/schema.ts` and the implement draft schema: the stage
+  sentence.
+"""
+validation = """
+## Done when
+
+- A worker frame in the implement loop shows the loop position with the
+  approval guard and the sixty-minute frame budget, and a frame outside any
+  loop shows neither.
+- The next live run's worker rounds are judged on the stage, and the
+  round-length pattern is measured, not steered.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.3"]

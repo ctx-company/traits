@@ -108,6 +108,9 @@ fn persist_and_journal_response(
     Ok(())
 }
 
+// Evidence assembly over positional facts from two different records; kept
+// flat so each field's origin stays visible at the call sites.
+#[allow(clippy::too_many_arguments)]
 fn command_submission_evidence(
     outcome: &crate::command::RunOutput,
     observation: Option<&crate::command::RunObservation>,
@@ -5283,13 +5286,13 @@ output = ["slot:command-output"]
                 expected_run_index: Some(template.expected_run_index),
                 expected_source_index: template.expected_source_index,
                 expected_position_path: template.expected_position_path.clone(),
-                produced_slots: (exit_code == 0)
-                    .then(|| {
-                        [("slot:command-output".to_string(), serde_json::json!("ok"))]
-                            .into_iter()
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                produced_slots: if exit_code == 0 {
+                    [("slot:command-output".to_string(), serde_json::json!("ok"))]
+                        .into_iter()
+                        .collect()
+                } else {
+                    Default::default()
+                },
                 signals: Default::default(),
                 warnings: Vec::new(),
                 command_execution: Some(

@@ -2511,7 +2511,7 @@ fn submit_run_submission(
     let preflight = preflight_call_rejection(trait_ref, &session, &submission, current_frame_set)?;
     let rejected_attempt_evidence = preflight
         .trusted_command_execution
-        .then(|| submission.command_execution.as_ref())
+        .then_some(submission.command_execution.as_ref())
         .flatten()
         .map(RejectedAttemptEvidence::from_command);
     if let Some(report) = preflight.rejection {
