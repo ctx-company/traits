@@ -26,6 +26,7 @@ export {
   SCOPE_SPLIT_DOCTRINE,
   scribeRole,
   SMART_VARIANT_DOCTRINE,
+  stageStatusSchema,
   STRICT_VARIANT_DOCTRINE,
   TASK_CHECK_DOCTRINE,
   workerRole,
@@ -36,6 +37,7 @@ export type {
   DispositionValue,
   NeedsOwnerValue,
   ReviewVerdictValue,
+  StageStatusValue,
 } from "@ctx-traits/toolkit";
 export { FEASIBILITY_DOCTRINE, feasibilityGate, feasibilityVerdictSchema } from "./feasibility.ts";
 export type { FeasibilityGateOptions, FeasibilityVerdictValue } from "./feasibility.ts";

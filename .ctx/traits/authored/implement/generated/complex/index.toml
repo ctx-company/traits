@@ -78,9 +78,8 @@ hint = "git rev-parse HEAD captured before any work; worker commits during the l
 
 [[slot]]
 id = "draft"
-schema = "schema:text"
-description = "smart-1's implementation draft for the task — the plan the worker implements."
-hint = "Scope (restated from the task file), files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation."
+schema = "schema:implementation-draft"
+description = "smart-1's implementation plan for the task — the plan the worker implements and the verdict's stage ledger walks."
 
 [[slot]]
 id = "git-status"
@@ -161,6 +160,10 @@ description = "Repo-relative path + section for the house rule this blocker cite
 schema = "schema:text"
 description = "The owner's annotation note, verbatim, when one applies to the whole blocker — its order, its scope, its standing. Applied by the reviewer when the annotation was made; carried verbatim while the blocker survives. Blockers are listed in the order the worker executes them, and an owner's ordering ruling is what moves a blocker in that list."
 
+[schema.fields.stage]
+schema = "schema:text"
+description = "The id of the plan stage this blocker belongs to: the stage whose goal it prevents. A blocker on the first open stage, or a regression of a done stage's goal, is the worker's work now; a blocker on a later stage is filed here and not worked until that stage is the first open one. Absent only when the plan carries no stages."
+
 [schema.fields.steps]
 schema = "[schema:blocker-step]"
 required = true
@@ -238,6 +241,30 @@ required = true
 description = "The owner's note, verbatim from the gate answer's text field."
 
 [[schema]]
+id = "implementation-draft"
+description = "smart-1's implementation plan for the task — what the loop operates on. A plan, not an implementation."
+
+[schema.fields.approach]
+schema = "schema:text"
+required = true
+description = "The suggested route: files to touch, symbols, edit order, reuse opportunities, validation plan. Guidance the worker may deviate from in service of a goal, reporting the deviation in the work summary."
+
+[schema.fields.risks]
+schema = "schema:text"
+required = true
+description = "What could go wrong and how the route mitigates it."
+
+[schema.fields.scope]
+schema = "schema:text"
+required = true
+description = "The task's scope restated from the task file: what is in, what is explicitly out."
+
+[schema.fields.stages]
+schema = "[schema:stage]"
+required = true
+description = "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task."
+
+[[schema]]
 id = "owner-item"
 description = "A checklist item outside in-run capability or authority, with verified substitute evidence and the owner action that closes it."
 
@@ -311,6 +338,10 @@ description = "Checklist items of THIS task that no in-run effort can satisfy, a
 schema = "schema:text"
 description = "Cross-task seam citations ONLY: counterpart work belonging to a DIFFERENT task on the task board, each citing that task's file name. Never in-task scope — an unimplemented item of THIS task's checklist is a blocker, and unimplemented in-task scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-task seam exists."
 
+[schema.fields.stages]
+schema = "[schema:stage-status]"
+description = "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages."
+
 [schema.fields.status]
 schema = "schema:text"
 required = true
@@ -324,6 +355,47 @@ allowed = [
 schema = "schema:text"
 required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
+
+[[schema]]
+id = "stage"
+description = "One stage of the plan: an id and the goal that defines it."
+
+[schema.fields.goal]
+schema = "schema:text"
+required = true
+description = "What must be observable when this stage is done, taken from the task's Done-when. A goal is the only requirement of its stage."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = 'Short kebab-case slug naming the stage, stable for the whole run (e.g. "resolver", "flip-context", "delete-old").'
+
+[[schema]]
+id = "stage-status"
+description = "One plan stage in the verdict's ledger: id, whether its goal holds, the evidence, and the owner's ruling on it when one exists."
+
+[schema.fields.evidence]
+schema = "schema:text"
+required = true
+description = "Why the status is what it is: what you ran or read. Empty only for a stage nobody has reached yet."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "The stage id exactly as the plan's stages list names it."
+
+[schema.fields.ruling]
+schema = "schema:text"
+description = "The owner's annotation note on this stage, verbatim, when one exists (an order to start it now, to treat it as done, to change its goal). Applied by the reviewer and carried verbatim."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "done only when you verified with your own tools that the stage's goal is observable in the working tree; open otherwise. A done stage whose goal stops holding goes back to open, with the evidence that shows it — that is the only kind of regression there is."
+allowed = [
+    "open",
+    "done",
+]
 
 [[agent]]
 id = "scribe"
@@ -360,7 +432,7 @@ id = "review-before-final"
 
 [prompt.cross-review-the-implementation]
 text = """
-Review the implemented state against the draft {slot:draft} as source of truth.
+Review the implemented state against the plan {slot:draft} as source of truth; the task file is what the plan must cover, read it with your tools.
 Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
 Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
 Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
@@ -375,17 +447,15 @@ input = [
 output = ["slot:review-verdict-2"]
 
 [prompt.draft-the-implementation-plan]
-text = """
-Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
-Scope, files to touch, approach, reuse opportunities, validation plan, risks."""
+text = "Draft the implementation plan for {port:task}, read it and the relevant code with your tools."
 input = ["port:task"]
 output = ["slot:draft"]
 
 [prompt.implement-the-task]
 text = """
-Implement the plan: {slot:draft}.
+Implement the plan: {slot:draft}. Your objective this round is the first open stage of the verdict's stage ledger — before any verdict exists, the plan's first stage.
 The reviewer's verdict on the current state, with the owner's annotations applied (if any): {slot:review-verdict-1} & {slot:review-verdict-2}
-Don't discard your progress if you can't finish the task to completion.
+Don't discard your progress if you can't finish the stage to completion.
 
 Return this round's work summary: slot:work-summary"""
 input = ["slot:draft"]
@@ -393,7 +463,7 @@ output = ["slot:work-summary"]
 
 [prompt.review-the-implementation]
 text = """
-  Review the implemented state against the draft {slot:draft} as source of truth.
+  Review the implemented state against the plan {slot:draft} as source of truth; the task file is what the plan must cover, read it with your tools.
   Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
   Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
   Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.

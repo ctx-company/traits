@@ -5,7 +5,7 @@ import { smart } from "../agent.ts";
 import { slot } from "../data.ts";
 
 const reviewBody = cdk.input.prompt`
-  Review the implemented state against the draft ${slot.draft} as source of truth.
+  Review the implemented state against the plan ${slot.draft} as source of truth; the task file is what the plan must cover, read it with your tools.
   Worker's summary: ${slot.workSummary}, Changed files ${slot.changedFiles}.
   Verdicts from previous rounds (if available): ${slot.verdict1.optional()} & ${slot.verdict2.optional()}
   Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.
@@ -53,7 +53,7 @@ export const apply = cdk.defineStep.prompt({
 export const secondary = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
-    Review the implemented state against the draft ${slot.draft} as source of truth.
+    Review the implemented state against the plan ${slot.draft} as source of truth; the task file is what the plan must cover, read it with your tools.
     Worker's summary: ${slot.workSummary}, Changed files ${slot.changedFiles}.
     Verdicts from previous rounds (if available): ${slot.verdict1.optional()} & ${slot.verdict2.optional()}
     Don't rush the approval, take as many rounds as it needs, while staying pragmatic and task-focused.

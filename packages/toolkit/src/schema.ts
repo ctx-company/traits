@@ -130,6 +130,7 @@ export type BlockerValue = {
   readonly "rule-source"?: string;
   readonly "rule-quote"?: string;
   readonly ruling?: string;
+  readonly stage?: string;
 };
 
 export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
@@ -138,6 +139,11 @@ export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
     id: schema.field(schema.text(), {
       description:
         "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline).",
+    }),
+    stage: schema.field(schema.text(), {
+      required: false,
+      description:
+        "The id of the plan stage this blocker belongs to: the stage whose goal it prevents. A blocker on the first open stage, or a regression of a done stage's goal, is the worker's work now; a blocker on a later stage is filed here and not worked until that stage is the first open one. Absent only when the plan carries no stages.",
     }),
     where: schema.field(schema.text(), {
       description: "Repo-relative files and paths involved.",
@@ -185,6 +191,46 @@ export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
   {
     description:
       "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, the falsifiable check that clears it, and the owner's ruling on it when one exists.",
+  },
+);
+
+/** One plan stage's standing in the verdict's ledger, as accepted values. */
+export type StageStatusValue = {
+  readonly id: string;
+  readonly status: "open" | "done";
+  readonly evidence: string;
+  readonly ruling?: string;
+};
+
+/**
+ * One entry of the verdict's stage ledger: the plan's stage by id, whether
+ * its goal holds, on what evidence, and the owner's ruling on it when one
+ * exists. The ledger is what makes the plan survive past round 1 — the
+ * first open stage is the worker's objective, and nothing outside its goal
+ * and the goals of done stages is required.
+ */
+export const stageStatusSchema: SchemaHandle<StageStatusValue> = schema.object(
+  "stage-status",
+  {
+    id: schema.field(schema.text(), {
+      description: "The stage id exactly as the plan's stages list names it.",
+    }),
+    status: schema.field(schema.enum(["open", "done"] as const), {
+      description:
+        "done only when you verified with your own tools that the stage's goal is observable in the working tree; open otherwise. A done stage whose goal stops holding goes back to open, with the evidence that shows it — that is the only kind of regression there is.",
+    }),
+    evidence: schema.field(schema.text(), {
+      description: "Why the status is what it is: what you ran or read. Empty only for a stage nobody has reached yet.",
+    }),
+    ruling: schema.field(schema.text(), {
+      required: false,
+      description:
+        "The owner's annotation note on this stage, verbatim, when one exists (an order to start it now, to treat it as done, to change its goal). Applied by the reviewer and carried verbatim.",
+    }),
+  },
+  {
+    description:
+      "One plan stage in the verdict's ledger: id, whether its goal holds, the evidence, and the owner's ruling on it when one exists.",
   },
 );
 
@@ -381,6 +427,7 @@ export type ReviewVerdictValue = {
   readonly remaining?: string;
   readonly "owner-items"?: readonly unknown[];
   readonly dispositions?: readonly DispositionValue[];
+  readonly stages?: readonly StageStatusValue[];
 };
 
 export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.object(
@@ -425,6 +472,11 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
       required: false,
       description:
         "One entry per owner annotation applied to this verdict, in the order annotated. Present exactly when the gate answer carried annotations; absent otherwise. Every annotation gets exactly one entry — none dropped, none merged into another, none reworded — and the edit each entry describes is visible in this same verdict (a status, a ruling, an order, a new step). The next surface shows these lines so the owner can check the application and correct it by annotating again. A later round carries earlier rulings in the items they landed on, not here: this list is this application only.",
+    }),
+    stages: schema.field(schema.list(stageStatusSchema), {
+      required: false,
+      description:
+        "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages.",
     }),
   },
   {

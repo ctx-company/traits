@@ -25,9 +25,12 @@ aliases = ["implement-complex"]
 name = "@ctx-traits/implement"
 access = "public"
 
+# frame-seconds 3600 (0281.2): the worker's objective is a plan stage, and
+# a stage needs a whole session — under the old 20-minute ceiling the
+# worker stopped after 3 to 11 minutes and chose the cheapest cells.
 [budget]
 max-frames = 1000
-frame-seconds = 1200
+frame-seconds = 3600
 total-seconds = 10800
 max-retries = 3
 idle-seconds = 1200

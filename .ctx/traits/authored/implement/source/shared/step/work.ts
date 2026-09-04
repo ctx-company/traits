@@ -13,9 +13,9 @@ import { slot } from "../data.ts";
 export const implement = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
-    Implement the plan: ${slot.draft}.
+    Implement the plan: ${slot.draft}. Your objective this round is the first open stage of the verdict's stage ledger — before any verdict exists, the plan's first stage.
     The reviewer's verdict on the current state, with the owner's annotations applied (if any): ${slot.verdict1.optional()} & ${slot.verdict2.optional()}
-    Don't discard your progress if you can't finish the task to completion.
+    Don't discard your progress if you can't finish the stage to completion.
   `,
   output: cdk.output.prompt`
     Return this round's work summary: ${slot.workSummary}

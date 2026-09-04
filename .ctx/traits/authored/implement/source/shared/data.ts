@@ -1,10 +1,51 @@
 import * as cdk from "@ctx-traits/cdk";
 import * as agents from "@ctx-traits/agents";
 
-export const draft = cdk.slot.text({
+// The plan the loop operates on (0281.2). Prose everywhere except `stages`:
+// an ordered list the verdict's stage ledger walks, so the plan survives
+// past round 1. The permissive rule lives in the stages description and
+// nowhere else: a goal is the only requirement of its stage, nothing
+// unstated is a restriction.
+export const draft = cdk.slot({
   id: "draft",
-  description: "smart-1's implementation draft for the task — the plan the worker implements.",
-  hint: "Scope (restated from the task file), files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation.",
+  schema: cdk.schema.object(
+    "implementation-draft",
+    {
+      scope: cdk.schema.field(cdk.schema.text(), {
+        description: "The task's scope restated from the task file: what is in, what is explicitly out.",
+      }),
+      stages: cdk.schema.field(
+        cdk.schema.list(
+          cdk.schema.object(
+            "stage",
+            {
+              id: cdk.schema.field(cdk.schema.text(), {
+                description: 'Short kebab-case slug naming the stage, stable for the whole run (e.g. "resolver", "flip-context", "delete-old").',
+              }),
+              goal: cdk.schema.field(cdk.schema.text(), {
+                description:
+                  "What must be observable when this stage is done, taken from the task's Done-when. A goal is the only requirement of its stage.",
+              }),
+            },
+            { description: "One stage of the plan: an id and the goal that defines it." },
+          ),
+        ),
+        {
+          description:
+            "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task.",
+        },
+      ),
+      approach: cdk.schema.field(cdk.schema.text(), {
+        description:
+          "The suggested route: files to touch, symbols, edit order, reuse opportunities, validation plan. Guidance the worker may deviate from in service of a goal, reporting the deviation in the work summary.",
+      }),
+      risks: cdk.schema.field(cdk.schema.text(), {
+        description: "What could go wrong and how the route mitigates it.",
+      }),
+    },
+    { description: "smart-1's implementation plan for the task — what the loop operates on. A plan, not an implementation." },
+  ),
+  description: "smart-1's implementation plan for the task — the plan the worker implements and the verdict's stage ledger walks.",
 });
 
 export const workSummary = cdk.slot.text({
@@ -81,11 +122,11 @@ export const notifyDigest = cdk.slot({
       }),
       journal: cdk.schema.field(cdk.schema.text(), {
         description:
-          'Exactly "<X> open \u2022 <Y> closed" and NOTHING else \u2014 X counts steps with status "open" and Y counts steps with any completed status, across every blocker in the verdict. No step texts, no prose, no punctuation beyond the bullet.',
+          'Exactly "stage <k>/<n> \u2022 <X> open \u2022 <Y> closed" and NOTHING else \u2014 k is the 1-based position of the first open stage in the verdict\'s stage ledger (n when every stage is done), n the number of stages, X counts steps with status "open" and Y counts steps with status "done" or "dropped", across every blocker in the verdict. When the verdict carries no stage ledger, exactly "<X> open \u2022 <Y> closed". No step texts, no prose, no punctuation beyond the bullets.',
       }),
       surface: cdk.schema.field(cdk.schema.text(), {
         description:
-          "The owner's annotation surface: every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (status):'; a step's status and, when present, its ruling follow the step text on the same line. The verdict status on the first line. After the blockers: the advisory VERBATIM under a line reading 'ADVISORY:', then — when the verdict carries dispositions — one line per disposition under 'RULINGS APPLIED:', each as '<action> — <applied-to> — <note>'. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the verdict is the only requirement.",
+          "The owner's annotation surface. The verdict status on the first line. Then, when the verdict carries a stage ledger, one line per stage under 'STAGES:' as '<id> (<status>): <evidence>' with its ruling when present, in ledger order. Then every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (stage, status):'; a step's status and, when present, its ruling follow the step text on the same line. After the blockers: the advisory VERBATIM under a line reading 'ADVISORY:', then — when the verdict carries dispositions — one line per disposition under 'RULINGS APPLIED:', each as '<action> — <applied-to> — <note>'. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the verdict is the only requirement.",
       }),
     },
     { description: "The reviewer verdict digested for the owner notification thread." },
