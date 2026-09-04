@@ -2,8 +2,12 @@
 // 2026-09-01): after the verdict narration, the scribe's verbatim
 // annotation surface is piped to ctx-annotate and the run blocks until
 // the owner accepts (no annotations) or rules (any annotations). The
-// decision JSON is appended to the run's owner-decisions record, which
-// the reviewer already treats as settled law and the worker now reads.
+// decision JSON is appended to the run's owner-decisions record for the
+// commit message; the reviewer then applies the annotations to its own
+// verdict (0281.1) — the worker only ever sees the applied verdict.
+// `--raw` makes every annotation carry the exact surface text it was made
+// on, which is an exact substring of the verdict because the surface is a
+// verbatim copy: that quote is the anchor, so no line map is needed.
 // The gate script is the house gate shape (plan/brainstorm lineage):
 // positional sh -c, runtime text as argv data, an off-mode for
 // unattended runs, and no interpreter beyond sh's own case match.
@@ -16,13 +20,20 @@ const GATE_SCRIPT = [
   "  printf accepted",
   "  exit 0",
   "fi",
-  'out=$(printf \'%s\' "$1" | ctx-annotate --stdin)',
+  'out=$(printf \'%s\' "$1" | ctx-annotate --stdin --raw)',
   'case "$out" in',
   '  *\'"annotations":[]\'*) printf accepted ;;',
   '  "") printf \'annotation gate returned no decision; not accepted\' ;;',
   '  *) printf \'%s\' "$out" ;;',
   "esac",
 ].join("\n");
+
+// A human answers this step, not a process: the wall and idle ceilings
+// are declared here because an undeclared command step inherits a
+// 120-second default that kills the gate mid-wait ("required output not
+// supplied"), which is how two runs died on 2026-09-04. Four hours is the
+// machine fallback's command ceiling; the gate stays inside it.
+const GATE_CEILING_MS = 4 * 60 * 60 * 1000;
 
 /** Carry the digest's surface into a text slot the gate argv can address. */
 export function carrySurface(title: string): void {
@@ -37,6 +48,8 @@ export function verdictGate(title: string): void {
     id: "owner-verdict-gate",
     argv: ["sh", "-c", GATE_SCRIPT, "_", gateSurface, ownerGate],
     output: gateAnswer,
+    timeoutMs: GATE_CEILING_MS,
+    idleTimeoutMs: GATE_CEILING_MS,
   });
 }
 

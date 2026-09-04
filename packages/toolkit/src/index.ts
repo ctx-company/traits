@@ -24,6 +24,7 @@ export {
   blockerSchema,
   blockerStepSchema,
   deviationReportSchema,
+  dispositionSchema,
   feasibilityVerdictSchema,
   leftoverSchema,
   ownerItemSchema,
@@ -34,6 +35,7 @@ export {
 export type {
   BlockerStepValue,
   BlockerValue,
+  DispositionValue,
   FeasibilityVerdictValue,
   ReviewerVerdictValue,
   ReviewVerdictValue,

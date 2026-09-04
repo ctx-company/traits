@@ -18,7 +18,6 @@ export const primary = cdk.defineStep.prompt({
   output: cdk.output.prompt`
     Return the typed review verdict: (${slot.verdict1}).
     Verdict should come with proposed solutions.
-    Put solutions in most efficient order.
   `,
 });
 
@@ -29,8 +28,26 @@ export const primarySummoning = cdk.defineStep.prompt({
   output: cdk.output.prompt`
     Return the typed review verdict: (${slot.verdict1}).
     Verdict should come with proposed solutions.
-    Put solutions in most efficient order.
   `.extend`Separately: for any contradiction or question only the owner can answer, emit ${agents.needsOwnerSignal}.`,
+});
+
+// The apply pass (0281.1): one interpreter, one artifact. Runs right after
+// an annotated gate and before the next implement round, so the worker only
+// ever sees the applied verdict. The verdict is this step's own output, so
+// it rides in as an optional include and is referenced in prose (the
+// sanctioned self-input form); the vocabulary of what an annotation can do
+// lives in the verdict schema's dispositions field, not here.
+export const apply = cdk.defineStep.prompt({
+  agent: smart,
+  input: cdk.input.prompt`
+    The owner annotated your verdict at the gate: ${slot.gateAnswer}.
+    Each annotation carries the exact surface text it was made on (raw) and the owner's note (text); the surface was a verbatim copy of the verdict, so raw locates the item.
+    Apply every annotation to your current verdict (attached as input) against the plan ${slot.draft}. Annotations are binding edits, never arguments: where you disagree, apply it and say so in the advisory.
+  `,
+  include: [slot.verdict1.optional()],
+  output: cdk.output.prompt`
+    Return the same verdict, edited, with one disposition per annotation: (${slot.verdict1}).
+  `,
 });
 
 export const secondary = cdk.defineStep.prompt({

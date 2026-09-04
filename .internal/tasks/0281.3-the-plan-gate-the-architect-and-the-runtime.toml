@@ -1,0 +1,76 @@
+schema-version = "0.2"
+key = "0281.3"
+title = "The plan gate, the architect without distillation, and a gate that Ctrl-C cannot kill"
+status = "ready"
+raised = "2026-09-04"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`, phase 3, after `0281.2`. The owner only ever sees verdicts, so
+"atomic does not mean one round" was said at round 3 for money instead of at
+round 0 for free. The architect carries a plan's meaning through paraphrase
+and injects process rules and checks that fight the loop. Both runs today died
+on a SIGINT during a gate. This child closes those three.
+
+## GOALS, binding
+
+1. **The owner can annotate the plan before round 1.** Behind a `plan-gate`
+   port (`annotate` default, `off` for unattended runs), the draft is
+   digested to a verbatim surface and piped through the same gate; an
+   annotated draft is recomposed with the annotations as binding input until
+   the owner accepts it. Its annotations reach the first review round as
+   dispositions like any other.
+   Excluded: a new gate mechanism; a different surface format.
+
+2. **Architect goals quote their source.** Each Done-when goal a child carries
+   is followed by the verbatim line(s) of the parent plan or design it comes
+   from; the critic blocks a goal without a source or whose source does not
+   say that.
+
+3. **Tasks carry no process mechanics and no checks.** Decisions and Watch
+   state outcome decisions and risks; the critic blocks text that instructs
+   commit, round or review behavior. The architect emits no `[[checks]]`;
+   the reviewer validates against the goal. Check-less tasks close on merge
+   under the configured auto-close policy, confirmed before landing.
+
+4. **Ctrl-C at a gate parks the run resumably.** A SIGINT while a gate step
+   waits cancels the gate and records a resumable park; the failure modal
+   and the "trusted local command failed" rejection no longer follow from it.
+   Excluded: changing the gate's transport.
+"""
+scope = """
+## Decisions
+
+- The plan gate reuses the verdict gate's shape: scribe digest, sh gate,
+  `--raw`, same annotate tool, one port.
+- Architect doctrine changes live in the rewrite and critic prompts of the
+  architect trait and nowhere else.
+
+## APPROACH, suggested route
+
+- `.ctx/traits/authored/implement/source/variant/basic/index.ts` and
+  `.../step/draft.ts`, `.../step/annotate.ts`: the draft digest, the gate,
+  the recompose loop, the port.
+- `.ctx/traits/authored/architect/source/shared/step/rewrite.ts` and
+  `critic.ts`: sources under goals, no process mechanics, no checks doctrine.
+- `modules/io/src/harness_config.rs` (`[tasks]` auto-close policy) to confirm
+  check-less closure.
+- `modules/io/src/run.rs` and the driver's signal path for the gate park.
+"""
+validation = """
+## Done when
+
+- A run with `plan-gate=annotate` shows the draft surface before round 1, and
+  an annotation on it changes the recomposed draft.
+- An architected child shows a verbatim source under each goal and no
+  `[[checks]]`; the critic blocks a fabricated one.
+- Ctrl-C during a live gate leaves the run parked and resumable, with no
+  failure modal.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.2"]

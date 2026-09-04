@@ -34,6 +34,16 @@ export default function () {
     shared.step.annotate.recordRuling("Record the owner ruling");
     shared.step.notify.gateResult("Notify: owner ruling");
 
+    // 0281.1: an annotated verdict is applied by the reviewer before the
+    // next implement round — the worker only ever sees the applied verdict.
+    cdk.flow.when(
+      "Owner annotated",
+      cdk.condition.not(cdk.condition.equals(shared.data.gateAnswer, "accepted")),
+      () => {
+        shared.step.review.apply("Apply the owner's annotations");
+      },
+    );
+
     cdk.flow.when("Owner ruling", cdk.condition.signal(agents.needsOwnerSignal), () => {
       // owner-ruling=off (unattended nights): the summons branch is skipped —
       // the escalation stays in the verdict for morning review, nothing parks.
@@ -49,12 +59,11 @@ export default function () {
 
     // Owner ruling 2026-09-01 (superseding the three-round cap): the
     // annotate gate is the owner's own per-round control, so the loop has
-    // no iteration ceiling again. Approval alone does not end it — the
-    // owner can overrule an approved verdict by annotating it.
-    loop.untilAll([
-      cdk.condition.equals(shared.data.verdict1.status, "approved"),
-      cdk.condition.equals(shared.data.gateAnswer, "accepted"),
-    ]);
+    // no iteration ceiling again. The exit reads the APPLIED verdict
+    // (0281.1): an approved verdict the owner annotated with new work
+    // comes back as revise and the loop continues; a revise verdict the
+    // owner overruled to approved ends it.
+    loop.untilAll([cdk.condition.equals(shared.data.verdict1.status, "approved")]);
   });
 
   shared.step.git.status("Check working tree status");

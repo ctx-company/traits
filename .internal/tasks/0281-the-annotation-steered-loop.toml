@@ -1,0 +1,126 @@
+schema-version = "0.2"
+key = "0281"
+title = "The annotation-steered loop: the plan survives every round, rulings bite, nothing is restricted unless stated"
+status = "ready"
+raised = "2026-09-04"
+content = '''
+Charter. This file carries the finding, the design, and the family-wide
+decisions; the three children carry the execution plans, one per phase.
+
+## The finding (ctx-gate 0011.5, run c7fe1e13, seven rounds, 2026-09-04)
+
+Seven rounds produced four lines of cutover out of 684 references, while the
+reviewer's resolver family grew from 10 to 11 steps and the worker fixed one
+concrete resolver cell per round. Nobody malfunctioned. The trait's own text
+produced it:
+
+- The worker's prompt says "attached verdicts are the source of truth, work
+  on exactly what they request" and "start with most complex items". The
+  draft governs round 1 only; from round 2 the reviewer's flat list is the
+  plan.
+- The reviewer is told to "put solutions in most efficient order", so cheap
+  concrete fixes sit on top every round and the cutover sits at the bottom.
+- An owner ruling reaches both seats as the raw ctx-annotate JSON with line
+  numbers into a surface neither seat receives, and the prompt lets it win
+  only "where it overrules or extends a verdict". An ordering ruling
+  overrules nothing, so it decays after one round. The reviewer noted
+  "contrary to the settled ruling" in the advisory, which the phone surface
+  omits, and issued the identical verdict.
+- The task carried a process rule ("no intermediate commit may leave a mix")
+  that the process already guarantees, and the worker quoted it in round 1 to
+  refuse the cutover. The worker stopped after 3 to 11 minutes of a 20-minute
+  frame by choice, every round.
+- A round that obeys a ruling and a round that ignores it get the same
+  verdict: there is no mechanism, only prose.
+
+## The design
+
+The plan is the state machine, the verdict is a measurement, the ruling is an
+edit to typed state. The flow is unchanged: draft, then implement, review,
+annotate until approved, then commit.
+
+1. The draft stays the operative plan and gains one typed list, `stages`:
+   id and goal, in order. A goal is what must be observable when the stage is
+   done. Nothing else is required while it is open: whatever a later stage
+   covers may be in any state, and that is neither a defect nor a regression.
+   Restrictions exist only as goals; anything unstated is allowed. A done
+   stage's goal must keep holding; when it stops, the reviewer reopens it.
+2. The verdict carries the stage ledger (status and evidence per stage), each
+   blocker names its stage, and a step can be `deferred` or `dropped` by the
+   owner as well as `open` or `done`. The worker's objective is the first open
+   stage; blockers on later stages are filed, not worked.
+3. An annotation is applied by the reviewer to its own verdict right after
+   the gate and before the next implement round: one interpreter, one
+   artifact. The annotation's anchor is the exact text it was made on
+   (`ctx-annotate --raw`), the note stays free text, and every annotation
+   gets a typed disposition in the verdict (deferred, dropped, done, added,
+   ordered, ruled, answered, unclear). The worker only ever sees the applied
+   verdict. A ruled step done differently from its ruling is a blocker.
+4. The surface the owner annotates shows the stage ledger, the blockers and
+   steps verbatim, the advisory, and last round's dispositions.
+5. One annotate pass on the draft before round 1, behind a port, so the plan
+   can be corrected before any money is spent.
+6. Architect: goals quote their source, tasks carry no process mechanics and
+   no `[[checks]]`; the reviewer validates against the goal.
+7. Runtime: the gate step has a real ceiling, and Ctrl-C at a gate parks
+   resumably instead of failing the step.
+
+No counters, no automatic parks, no maps, no parsing. The owner's per-round
+annotation is the control; the job of every change is to make it bite and to
+put enough on the surface to steer from.
+
+## Family-wide decisions (owner, 2026-09-04)
+
+- The draft is what the loop operates on; the task file is what the reviewer
+  validates against. "Atomic stage, commit only when the whole tree compiles"
+  is correct as a plan statement and needs no allowance text.
+- No restriction is implied. Allowances are never enumerated; only goals are.
+- No "N rounds then park" fuses. The process stays alive: the owner overrules
+  and steers, the reviewer stays strict, and correctness is enforced by
+  review, not by counters.
+- Keep the trait simple from a trait writer's perspective: typed fields in
+  existing schemas, conventions in field descriptions, three deleted
+  sentences, one port. No new step kinds.
+- Tasks carry no checks; that belongs to the reviewer.
+
+## The children
+
+1. `0281.1` annotations that bite: `--raw`, the apply pass, dispositions,
+   deferred and dropped, the three deleted sentences, the gate ceiling, the
+   surface additions. Landable and testable alone.
+2. `0281.2` stages: the typed `stages` list in the draft, the stage ledger in
+   the verdict, stage on every blocker, the worker's stage objective, the
+   sixty-minute frame, and the first-round coverage check.
+3. `0281.3` the plan gate, the architect doctrine, and the runtime: the
+   pre-round-1 annotate pass on the draft, goals with quoted sources and no
+   process mechanics or checks in tasks, Ctrl-C at a gate parks resumably.
+
+## Umbrella stop condition
+
+A cutover-shaped task (0011.5 rerun from a fresh worktree) attempts its flip
+stage the round after the resolver stage is marked done; an owner annotation
+"not now" on a step keeps it deferred across later rounds without repetition;
+an ordering annotation moves the annotated blocker to the top of the next
+round's work; every annotation appears on the following surface with a
+disposition; and the implement trait's three variants build, export and land
+through the usual package gates.
+'''
+scope = '''
+In scope: the implement trait (all three variants inherit the shared steps),
+the shared review schemas in the toolkit (optional fields only, so other
+consumers keep working), the architect trait's rewrite and critic steps, and
+the driver's handling of a gate interrupted by Ctrl-C.
+
+Out of scope: any change to ctx-annotate (its `--raw` flag already carries the
+quote), the summons path (needs-owner questions keep their scribe record),
+the board/auto-close policy beyond confirming check-less tasks close on merge,
+and the design-to-plan carry inside the plan trait.
+'''
+validation = '''
+## Done when
+
+- All three children are done.
+- The umbrella stop condition holds on a live run.
+'''
+
+[relations]

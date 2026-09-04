@@ -41,23 +41,28 @@
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 125,
-    "end": 125
+    "start": 135,
+    "end": 135
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 91,
-    "end": 91
+    "start": 92,
+    "end": 92
+  },
+  "schema:disposition": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 207,
+    "end": 207
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 238,
-    "end": 238
+    "start": 301,
+    "end": 301
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 322,
-    "end": 322
+    "start": 386,
+    "end": 386
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",

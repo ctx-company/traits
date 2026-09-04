@@ -77,8 +77,8 @@ description = "Working-tree status captured immediately before the commit tail: 
 [[slot]]
 id = "owner-decisions"
 schema = "[schema:text]"
-description = "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message."
-hint = "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences."
+description = "Every owner ruling made during this run — one formatted entry per summons, one gate answer per annotated verdict — the run's durable decision record, carried into the commit message. Annotations reach the seats through the verdict the reviewer applied them to, not through this record."
+hint = "One entry per ruling: a summons entry is the question and the owner's answer in one or two sentences; a gate entry is the ctx-annotate decision JSON verbatim."
 
 [[slot]]
 id = "review-verdict-1"
@@ -110,7 +110,7 @@ trigger = "on-demand"
 
 [[schema]]
 id = "blocker"
-description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, the falsifiable check that clears it, and the owner's ruling on it when one exists."
 
 [schema.fields.done-when]
 schema = "schema:text"
@@ -144,6 +144,10 @@ description = "The exact authoritative line(s) the cited rule quotes, verified a
 schema = "schema:text"
 description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
 
+[schema.fields.ruling]
+schema = "schema:text"
+description = "The owner's annotation note, verbatim, when one applies to the whole blocker — its order, its scope, its standing. Applied by the reviewer when the annotation was made; carried verbatim while the blocker survives. Blockers are listed in the order the worker executes them, and an owner's ordering ruling is what moves a blocker in that list."
+
 [schema.fields.steps]
 schema = "[schema:blocker-step]"
 required = true
@@ -161,21 +165,64 @@ description = "Repo-relative files and paths involved."
 
 [[schema]]
 id = "blocker-step"
-description = "One step of a blocker's required fix, with verified progress state."
+description = "One step of a blocker's required fix, with verified progress state and the owner's ruling on it when one exists."
 
 [schema.fields.evidence]
 schema = "schema:text"
 description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
 
+[schema.fields.ruling]
+schema = "schema:text"
+description = "The owner's annotation note, verbatim, when one applies to this step. The worker executes a ruled step as the ruling says, not as the step text alone says; a ruled step done differently from its ruling is a blocker next round. Carried verbatim while the step survives."
+
 [schema.fields.status]
 schema = "schema:text"
 required = true
-description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+description = """"open", "done", "deferred" or "dropped". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone. deferred and dropped are set only when the reviewer applies an owner annotation (recorded in the verdict's dispositions): deferred is the owner's "not now" — kept on record, not executed until the owner or its stage says so; dropped is the owner's "no" — kept on record, never executed. Neither blocks approval, and the reviewer never reopens either on its own."""
 
 [schema.fields.step]
 schema = "schema:text"
 required = true
 description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
+id = "disposition"
+description = "One owner annotation applied to the verdict by the reviewer: anchor text, note, target, action taken, and a one-sentence account. Annotations are binding edits, never arguments; where the reviewer disagrees it applies the annotation anyway and records the disagreement in the advisory."
+
+[schema.fields.action]
+schema = "schema:text"
+required = true
+description = "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as evidence); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed)."
+allowed = [
+    "deferred",
+    "dropped",
+    "done",
+    "added",
+    "ordered",
+    "ruled",
+    "answered",
+    "unclear",
+]
+
+[schema.fields.applied-to]
+schema = "schema:text"
+required = true
+description = 'Where the annotation landed: a blocker id, "<blocker-id>/step <n>", "stage <id>", "advisory", or "plan".'
+
+[schema.fields.note]
+schema = "schema:text"
+required = true
+description = "One sentence: what changed in this verdict because of the annotation, or the question back to the owner when action is unclear."
+
+[schema.fields.raw]
+schema = "schema:text"
+required = true
+description = "The annotated surface text, verbatim from the gate answer's raw field. This is the anchor: it is an exact substring of the verdict's own blocker, step, stage or advisory text."
+
+[schema.fields.text]
+schema = "schema:text"
+required = true
+description = "The owner's note, verbatim from the gate answer's text field."
 
 [[schema]]
 id = "owner-item"
@@ -214,7 +261,7 @@ description = 'The closest in-run verification actually produced and verified by
 
 [[schema]]
 id = "review-verdict"
-description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if a blocking defect remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly."
+description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer."
 
 [schema.fields.advisory]
 schema = "schema:text"
@@ -223,7 +270,11 @@ description = "Non-blocking notes: subjective style, naming, taste, optional imp
 [schema.fields.blockers]
 schema = "[schema:blocker]"
 required = true
-description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Listed in the order the worker executes them — the plan's order, then the owner's ordering rulings; never sorted by how cheap a fix is. Non-empty when status is revise. When approved the list holds no open step: a blocker whose steps are all done or dropped is removed and named in the advisory, a blocker still holding a deferred step stays listed so the deferral is on record. Always return the key (an empty list, never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure."
+
+[schema.fields.dispositions]
+schema = "[schema:disposition]"
+description = "One entry per owner annotation applied to this verdict, in the order annotated. Present exactly when the gate answer carried annotations; absent otherwise. Every annotation gets exactly one entry — none dropped, none merged into another, none reworded — and the edit each entry describes is visible in this same verdict (a status, a ruling, an order, a new step). The next surface shows these lines so the owner can check the application and correct it by annotating again. A later round carries earlier rulings in the items they landed on, not here: this list is this application only."
 
 [schema.fields.escalation]
 schema = "schema:text"
@@ -250,7 +301,7 @@ description = "Cross-task seam citations ONLY: counterpart work belonging to a D
 [schema.fields.status]
 schema = "schema:text"
 required = true
-description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
+description = "approved when no step in any blocker has status open (advisory notes, deferred steps and dropped steps may still exist); revise when at least one step is open. A step the owner deferred or dropped never keeps status at revise."
 allowed = [
     "approved",
     "revise",
@@ -303,12 +354,9 @@ output = ["slot:draft"]
 
 [prompt.implement-the-task]
 text = """
-Implement the draft task's drafted plan: {slot:draft}.
-Verdicts from previous rounds (if available): {slot:review-verdict-1} & {slot:review-verdict-2}
-Attached verdicts are the source of truth - work on exactly what they request.
-Owner rulings recorded this run (if any): {slot:owner-decisions} — they are binding; where a ruling overrules or extends a verdict, the ruling wins.
-Start with most complex items and aim for completing all of them.
-Don't discard your progress if you can't finish task to completion.
+Implement the plan: {slot:draft}.
+The reviewer's verdict on the current state, with the owner's annotations applied (if any): {slot:review-verdict-1} & {slot:review-verdict-2}
+Don't discard your progress if you can't finish the task to completion.
 
 Return this round's work summary: slot:work-summary"""
 input = ["slot:draft"]
@@ -387,7 +435,6 @@ input = [
     "slot:draft",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
-    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:work-summary"]
 

@@ -1,0 +1,111 @@
+schema-version = "0.2"
+key = "0281.1"
+title = "Annotations that bite: applied by the reviewer, carried with their quote, answered with a disposition"
+status = "ready"
+raised = "2026-09-04"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`, phase 1. Today an owner annotation reaches the worker and the
+reviewer as raw ctx-annotate JSON whose line numbers point into a surface
+neither seat receives, and the worker's prompt lets a ruling win only "where
+it overrules or extends a verdict". The reviewer carries the ruling as prose
+and issues the same list; the worker picks the same cheap cells. This child
+makes one seat interpret every annotation, records what it did, and gives the
+owner two new step outcomes to rule with.
+
+## GOALS, binding
+
+1. **Every annotation carries the exact text it was made on.** The gate runs
+   ctx-annotate with `--raw`, so each annotation in the gate answer holds the
+   annotated surface text verbatim next to the owner's note.
+   Excluded: any change to ctx-annotate; any line-to-item map in the trait.
+
+2. **The reviewer applies annotations to its own verdict before the next
+   implement round.** When the gate answer is not `accepted`, one reviewer
+   step reads the current verdict and the gate answer and returns the same
+   verdict edited: steps deferred, dropped or marked done by ruling, blockers
+   reordered, steps added with the owner's note as their ruling, questions
+   answered. It never argues with an annotation; disagreement goes in the
+   advisory. Each annotation gets exactly one disposition entry.
+   Excluded: the worker interpreting raw annotations; a second interpreter.
+
+3. **Steps can be deferred or dropped, and a ruling travels with its step.**
+   Step status accepts `deferred` and `dropped` beside `open` and `done`;
+   steps and blockers gain an optional `ruling` holding the owner's note
+   verbatim; the verdict gains `dispositions`. Status is `approved` exactly
+   when no step is `open`; deferred and dropped steps never block and are
+   never reopened by the reviewer.
+   Excluded: rewriting frozen step text; stage fields (0281.2).
+
+4. **The worker executes the applied verdict and nothing else.** Its prompt
+   names the plan, the verdict on the current state and the owner's
+   annotations on it; the sentences "attached verdicts are the source of
+   truth, work on exactly what they request" and "start with most complex
+   items" are gone, as is the reviewer's "put solutions in most efficient
+   order". A ruled step done differently from its ruling is a blocker next
+   round.
+
+5. **The owner sees what the reviewer knows.** The annotation surface adds
+   the advisory verbatim and last round's dispositions, one line each, after
+   the blockers and steps.
+
+6. **The gate has a real ceiling and cannot fail the run by waiting.** The
+   gate step declares its own wall and idle timeouts, long enough for a
+   human, instead of inheriting the 120-second default.
+
+7. **The loop exits on the applied verdict.** Approval alone ends the loop
+   once annotations have been applied: an annotated approved verdict that
+   gains open steps continues; a revise verdict the owner overrules to
+   approved ends.
+"""
+scope = """
+## Decisions
+
+- One interpreter: the reviewer seat, right after the gate, only when the
+  gate answer is not `accepted`. The worker never receives raw annotations.
+- The gate answer slot stays text (`accepted` or the ctx-annotate JSON). The
+  raw JSON is also appended to owner-decisions for the commit message, as
+  today.
+- Schema additions are optional fields in the shared toolkit schemas so the
+  architect's critic and every other consumer keep working unchanged.
+- Conventions live in field descriptions, not prompts (owner ruling
+  2026-08-30).
+
+## APPROACH, suggested route
+
+- `.ctx/traits/authored/implement/source/shared/step/annotate.ts`: `--raw`
+  on the gate argv; `timeoutMs` and `idleTimeoutMs` on the gate step.
+- `.../step/review.ts`: an `apply` step (smart seat) with the verdict as
+  optional self-input and the gate answer as input, output the verdict;
+  remove the ordering sentence from the primary outputs.
+- `.../step/work.ts`: the new worker prompt.
+- `.../shared/data.ts`: surface and gate-answer descriptions.
+- `.../variant/basic/index.ts`: the `when annotated` branch after the gate,
+  and the exit condition on the applied verdict.
+- `packages/toolkit/src/schema.ts`: step status text, `ruling` on step and
+  blocker, `dispositions` on the verdict, status and blockers descriptions.
+- Build with `ctx traits build implement`, then `just ts-typecheck`,
+  `just ts-test`, `just test`.
+"""
+validation = """
+## Watch
+
+- No new step kinds, no counters, no parsing in sh beyond the existing case.
+- The digest's verbatim requirement is what makes `--raw` sufficient: never
+  let the surface paraphrase.
+
+## Done when
+
+- A live small task, annotated once with "not now" on a step and once with
+  "this first" on a blocker, shows next round: the step deferred and not
+  worked, the blocker at the top and worked first, and both annotations on
+  the surface with dispositions.
+- The implement package builds, exports and passes the workspace gate.
+"""
+
+[relations]
+parent = "0281"

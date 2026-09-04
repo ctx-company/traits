@@ -46,8 +46,8 @@ export const commitMessage = cdk.slot.text({
 export const ownerDecisions = cdk.slot.texts({
   id: "owner-decisions",
   description:
-    "Every owner ruling made during this run, one formatted entry per summons — the run's durable decision record, carried into later review rounds and the commit message.",
-  hint: "One entry per ruling: the question the run could not settle, and the owner's answer, in one or two sentences.",
+    "Every owner ruling made during this run — one formatted entry per summons, one gate answer per annotated verdict — the run's durable decision record, carried into the commit message. Annotations reach the seats through the verdict the reviewer applied them to, not through this record.",
+  hint: "One entry per ruling: a summons entry is the question and the owner's answer in one or two sentences; a gate entry is the ctx-annotate decision JSON verbatim.",
 });
 
 export const commitLog = cdk.slot.text({
@@ -85,7 +85,7 @@ export const notifyDigest = cdk.slot({
       }),
       surface: cdk.schema.field(cdk.schema.text(), {
         description:
-          "The owner's annotation surface: every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (status):'. The verdict status on the first line. This text is what the owner annotates; fidelity to the verdict is the only requirement.",
+          "The owner's annotation surface: every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (status):'; a step's status and, when present, its ruling follow the step text on the same line. The verdict status on the first line. After the blockers: the advisory VERBATIM under a line reading 'ADVISORY:', then — when the verdict carries dispositions — one line per disposition under 'RULINGS APPLIED:', each as '<action> — <applied-to> — <note>'. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the verdict is the only requirement.",
       }),
     },
     { description: "The reviewer verdict digested for the owner notification thread." },
@@ -116,7 +116,7 @@ export const gateSurface = cdk.slot.text({
 export const gateAnswer = cdk.slot.text({
   id: "gate-answer",
   description:
-    "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON whose annotations are binding owner rulings.",
+    "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact surface text the owner annotated, an exact substring of the verdict — and `text`, the owner's note. Annotations are binding edits to the verdict: the reviewer applies them and accounts for each in the verdict's dispositions.",
 });
 
 export const ownerRulingMode = cdk.slot.text({

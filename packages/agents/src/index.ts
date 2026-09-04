@@ -12,6 +12,7 @@ export {
   CODE_INTEGRITY_DOCTRINE,
   DEFAULT_VARIANT_DOCTRINE,
   deviationReportSchema,
+  dispositionSchema,
   INTEGRITY_DOCTRINE,
   LEFTOVER_DOCTRINE,
   leftoverSchema,
@@ -29,7 +30,13 @@ export {
   TASK_CHECK_DOCTRINE,
   workerRole,
 } from "@ctx-traits/toolkit";
-export type { BlockerStepValue, BlockerValue, NeedsOwnerValue, ReviewVerdictValue } from "@ctx-traits/toolkit";
+export type {
+  BlockerStepValue,
+  BlockerValue,
+  DispositionValue,
+  NeedsOwnerValue,
+  ReviewVerdictValue,
+} from "@ctx-traits/toolkit";
 export { FEASIBILITY_DOCTRINE, feasibilityGate, feasibilityVerdictSchema } from "./feasibility.ts";
 export type { FeasibilityGateOptions, FeasibilityVerdictValue } from "./feasibility.ts";
 export { commitTail, deriveParkReportStep, familyCommitTail, guardedProduction, reviewerVerdict } from "./process.ts";
