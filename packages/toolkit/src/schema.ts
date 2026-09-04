@@ -85,7 +85,8 @@ export const feasibilityVerdictSchema: SchemaHandle<FeasibilityVerdictValue> = s
 export type BlockerStepValue = {
   readonly step: string;
   readonly status: string;
-  readonly evidence?: string;
+  readonly explanation: string;
+  readonly guidance?: string;
   readonly ruling?: string;
 };
 
@@ -100,10 +101,14 @@ export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
       description:
         '"open", "done", "deferred" or "dropped". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker\'s claim alone. deferred and dropped are set only when the reviewer applies an owner annotation (recorded in the verdict\'s dispositions): deferred is the owner\'s "not now" — kept on record, not executed until the owner or its stage says so; dropped is the owner\'s "no" — kept on record, never executed. Neither blocks approval, and the reviewer never reopens either on its own.',
     }),
-    evidence: schema.field(schema.text(), {
+    explanation: schema.field(schema.text(), {
+      description:
+        "Why the status is what it is, every round, for every step. Done: the proof — file:line, a test name, or a command and its observed result. Open after the worker attempted it: what you verified in the tree and exactly what is still missing or wrong, so the owner reading the surface and the worker reading the verdict see the same reason. Open and never attempted: 'not yet attempted'. Never empty.",
+    }),
+    guidance: schema.field(schema.text(), {
       required: false,
       description:
-        "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open.",
+        "For an open step: how to get it accepted next round — the concrete change and the proof you will look for (a test that must exist and pass, a grep that must come back empty, a call site that must route through X). You are the smarter model here; this is where that goes. Absent for done, deferred and dropped steps.",
     }),
     ruling: schema.field(schema.text(), {
       required: false,
@@ -113,7 +118,7 @@ export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
   },
   {
     description:
-      "One step of a blocker's required fix, with verified progress state and the owner's ruling on it when one exists.",
+      "One step of a blocker's required fix: its frozen text, its verified status, why the status is what it is, how to get it accepted while it is open, and the owner's ruling on it when one exists.",
   },
 );
 
@@ -268,7 +273,7 @@ export const dispositionSchema: SchemaHandle<DispositionValue> = schema.object(
       schema.enum(["deferred", "dropped", "done", "added", "ordered", "ruled", "answered", "unclear"] as const),
       {
         description:
-          "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as evidence); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed).",
+          "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as its explanation); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed).",
       },
     ),
     note: schema.field(schema.text(), {

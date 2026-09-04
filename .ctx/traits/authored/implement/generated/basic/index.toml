@@ -275,11 +275,16 @@ description = "Repo-relative files and paths involved."
 
 [[schema]]
 id = "blocker-step"
-description = "One step of a blocker's required fix, with verified progress state and the owner's ruling on it when one exists."
+description = "One step of a blocker's required fix: its frozen text, its verified status, why the status is what it is, how to get it accepted while it is open, and the owner's ruling on it when one exists."
 
-[schema.fields.evidence]
+[schema.fields.explanation]
 schema = "schema:text"
-description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+required = true
+description = "Why the status is what it is, every round, for every step. Done: the proof — file:line, a test name, or a command and its observed result. Open after the worker attempted it: what you verified in the tree and exactly what is still missing or wrong, so the owner reading the surface and the worker reading the verdict see the same reason. Open and never attempted: 'not yet attempted'. Never empty."
+
+[schema.fields.guidance]
+schema = "schema:text"
+description = "For an open step: how to get it accepted next round — the concrete change and the proof you will look for (a test that must exist and pass, a grep that must come back empty, a call site that must route through X). You are the smarter model here; this is where that goes. Absent for done, deferred and dropped steps."
 
 [schema.fields.ruling]
 schema = "schema:text"
@@ -302,7 +307,7 @@ description = "One owner annotation applied to the verdict by the reviewer: anch
 [schema.fields.action]
 schema = "schema:text"
 required = true
-description = "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as evidence); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed)."
+description = "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as its explanation); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed)."
 allowed = [
     "deferred",
     "dropped",
@@ -394,7 +399,7 @@ description = """Multi-line prose block for the owner's phone, 4096 characters a
 [schema.fields.surface]
 schema = "schema:text"
 required = true
-description = "The owner's annotation surface. The verdict status on the first line. Then, when the verdict carries a stage ledger, one line per stage under 'STAGES:' as '<id> (<status>): <evidence>' with its ruling when present, in ledger order. Then every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (stage, status):'; a step's status and, when present, its ruling follow the step text on the same line. After the blockers: the advisory VERBATIM under a line reading 'ADVISORY:', then — when the verdict carries dispositions — one line per disposition under 'RULINGS APPLIED:', each as '<action> — <applied-to> — <note>'. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the verdict is the only requirement."
+description = "The owner's annotation surface. The verdict status on the first line. Then, when the verdict carries a stage ledger, one line per stage under 'STAGES:' as '<id> (<status>): <evidence>' with its ruling when present, in ledger order. Then every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (stage, status):'; each step line carries the step text, then its status, then its explanation VERBATIM, then its guidance when present, then its ruling when present, separated by ' — '. After the blockers: the advisory VERBATIM under a line reading 'ADVISORY:', then — when the verdict carries dispositions — one line per disposition under 'RULINGS APPLIED:', each as '<action> — <applied-to> — <note>'. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the verdict is the only requirement."
 
 [[schema]]
 id = "owner-item"

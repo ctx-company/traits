@@ -10,7 +10,7 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:e01befc1aef168fce494ee2ec448170c9502440b1102b43f96ad3999ac5ebd3e"
-canonical = "sha256:838beb3a5716d816ea326c99dad488103a6b1a4bd566e7eb79c6b0d5220fe18e"
+source = "sha256:5ba3fa440813b8ba24df8035564e05000b60cfe090e9bf3b500bf6cc0c12420b"
+canonical = "sha256:aee6a127a1b316d55397c3ce7e10430ff5981df9fcd0ba393bb1da5fc4f17746"
 model-visible = "sha256:b37d82bf5641278b6770c058295831018114f13c3b1225f4f43e1f4e3d02b4bc"
 resource-manifest = "sha256:b0906110b53023cd6f85df2d03c990ed9c7140de44f884cc191c395b11896388"

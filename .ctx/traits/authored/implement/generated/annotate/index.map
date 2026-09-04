@@ -41,18 +41,18 @@
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 136,
-    "end": 136
+    "start": 141,
+    "end": 141
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 92,
-    "end": 92
+    "start": 93,
+    "end": 93
   },
   "schema:disposition": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 253,
-    "end": 253
+    "start": 258,
+    "end": 258
   },
   "schema:implementation-draft": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -61,13 +61,13 @@
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 347,
-    "end": 347
+    "start": 352,
+    "end": 352
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 433,
-    "end": 433
+    "start": 438,
+    "end": 438
   },
   "schema:stage": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -76,8 +76,8 @@
   },
   "schema:stage-status": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 212,
-    "end": 212
+    "start": 217,
+    "end": 217
   },
   "sequence:ctx-branch-arm-p-15-owner-annotated-then/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
