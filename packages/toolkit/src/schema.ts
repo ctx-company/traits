@@ -86,6 +86,7 @@ export type BlockerStepValue = {
   readonly step: string;
   readonly status: string;
   readonly evidence?: string;
+  readonly ruling?: string;
 };
 
 export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
@@ -97,15 +98,23 @@ export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
     }),
     status: schema.field(schema.text(), {
       description:
-        '"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker\'s claim alone.',
+        '"open", "done", "deferred" or "dropped". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker\'s claim alone. deferred and dropped are set only when the reviewer applies an owner annotation (recorded in the verdict\'s dispositions): deferred is the owner\'s "not now" — kept on record, not executed until the owner or its stage says so; dropped is the owner\'s "no" — kept on record, never executed. Neither blocks approval, and the reviewer never reopens either on its own.',
     }),
     evidence: schema.field(schema.text(), {
       required: false,
       description:
         "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open.",
     }),
+    ruling: schema.field(schema.text(), {
+      required: false,
+      description:
+        "The owner's annotation note, verbatim, when one applies to this step. The worker executes a ruled step as the ruling says, not as the step text alone says; a ruled step done differently from its ruling is a blocker next round. Carried verbatim while the step survives.",
+    }),
   },
-  { description: "One step of a blocker's required fix, with verified progress state." },
+  {
+    description:
+      "One step of a blocker's required fix, with verified progress state and the owner's ruling on it when one exists.",
+  },
 );
 
 /** One blocking defect, as accepted values. */
@@ -120,6 +129,8 @@ export type BlockerValue = {
   readonly "recurrence-of"?: string;
   readonly "rule-source"?: string;
   readonly "rule-quote"?: string;
+  readonly ruling?: string;
+  readonly stage?: string;
 };
 
 export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
@@ -128,6 +139,11 @@ export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
     id: schema.field(schema.text(), {
       description:
         "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline).",
+    }),
+    stage: schema.field(schema.text(), {
+      required: false,
+      description:
+        "The id of the plan stage this blocker belongs to: the stage whose goal it prevents. A blocker on the first open stage, or a regression of a done stage's goal, is the worker's work now; a blocker on a later stage is filed here and not worked until that stage is the first open one. Absent only when the plan carries no stages.",
     }),
     where: schema.field(schema.text(), {
       description: "Repo-relative files and paths involved.",
@@ -166,10 +182,103 @@ export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
       description:
         "The exact authoritative line(s) the cited rule quotes, verified against the rule-authority resource. Present only when the blocker cites a standing product rule.",
     }),
+    ruling: schema.field(schema.text(), {
+      required: false,
+      description:
+        "The owner's annotation note, verbatim, when one applies to the whole blocker — its order, its scope, its standing. Applied by the reviewer when the annotation was made; carried verbatim while the blocker survives. Blockers are listed in the order the worker executes them, and an owner's ordering ruling is what moves a blocker in that list.",
+    }),
   },
   {
     description:
-      "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it.",
+      "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, the falsifiable check that clears it, and the owner's ruling on it when one exists.",
+  },
+);
+
+/** One plan stage's standing in the verdict's ledger, as accepted values. */
+export type StageStatusValue = {
+  readonly id: string;
+  readonly status: "open" | "done";
+  readonly evidence: string;
+  readonly ruling?: string;
+};
+
+/**
+ * One entry of the verdict's stage ledger: the plan's stage by id, whether
+ * its goal holds, on what evidence, and the owner's ruling on it when one
+ * exists. The ledger is what makes the plan survive past round 1 — the
+ * first open stage is the worker's objective, and nothing outside its goal
+ * and the goals of done stages is required.
+ */
+export const stageStatusSchema: SchemaHandle<StageStatusValue> = schema.object(
+  "stage-status",
+  {
+    id: schema.field(schema.text(), {
+      description: "The stage id exactly as the plan's stages list names it.",
+    }),
+    status: schema.field(schema.enum(["open", "done"] as const), {
+      description:
+        "done only when you verified with your own tools that the stage's goal is observable in the working tree; open otherwise. A done stage whose goal stops holding goes back to open, with the evidence that shows it — that is the only kind of regression there is.",
+    }),
+    evidence: schema.field(schema.text(), {
+      description: "Why the status is what it is: what you ran or read. Empty only for a stage nobody has reached yet.",
+    }),
+    ruling: schema.field(schema.text(), {
+      required: false,
+      description:
+        "The owner's annotation note on this stage, verbatim, when one exists (an order to start it now, to treat it as done, to change its goal). Applied by the reviewer and carried verbatim.",
+    }),
+  },
+  {
+    description:
+      "One plan stage in the verdict's ledger: id, whether its goal holds, the evidence, and the owner's ruling on it when one exists.",
+  },
+);
+
+/** One owner annotation and what the reviewer did with it, as accepted values. */
+export type DispositionValue = {
+  readonly raw: string;
+  readonly text: string;
+  readonly "applied-to": string;
+  readonly action: "deferred" | "dropped" | "done" | "added" | "ordered" | "ruled" | "answered" | "unclear";
+  readonly note: string;
+};
+
+/**
+ * One owner annotation applied to a verdict: the annotated surface text
+ * (the anchor — an exact substring of the verdict's own text, because the
+ * surface is a verbatim copy), the owner's note, where it landed, and what
+ * the reviewer did. The owner reads these on the next surface to check the
+ * application and correct it by annotating again.
+ */
+export const dispositionSchema: SchemaHandle<DispositionValue> = schema.object(
+  "disposition",
+  {
+    raw: schema.field(schema.text(), {
+      description:
+        "The annotated surface text, verbatim from the gate answer's raw field. This is the anchor: it is an exact substring of the verdict's own blocker, step, stage or advisory text.",
+    }),
+    text: schema.field(schema.text(), {
+      description: "The owner's note, verbatim from the gate answer's text field.",
+    }),
+    "applied-to": schema.field(schema.text(), {
+      description:
+        'Where the annotation landed: a blocker id, "<blocker-id>/step <n>", "stage <id>", "advisory", or "plan".',
+    }),
+    action: schema.field(
+      schema.enum(["deferred", "dropped", "done", "added", "ordered", "ruled", "answered", "unclear"] as const),
+      {
+        description:
+          "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as evidence); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed).",
+      },
+    ),
+    note: schema.field(schema.text(), {
+      description:
+        "One sentence: what changed in this verdict because of the annotation, or the question back to the owner when action is unclear.",
+    }),
+  },
+  {
+    description:
+      "One owner annotation applied to the verdict by the reviewer: anchor text, note, target, action taken, and a one-sentence account. Annotations are binding edits, never arguments; where the reviewer disagrees it applies the annotation anyway and records the disagreement in the advisory.",
   },
 );
 
@@ -317,6 +426,8 @@ export type ReviewVerdictValue = {
   readonly "wall-id": string;
   readonly remaining?: string;
   readonly "owner-items"?: readonly unknown[];
+  readonly dispositions?: readonly DispositionValue[];
+  readonly stages?: readonly StageStatusValue[];
 };
 
 export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.object(
@@ -324,11 +435,11 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
   {
     status: schema.field(schema.enum(["approved", "revise"] as const), {
       description:
-        "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty.",
+        "approved when no step in any blocker has status open (advisory notes, deferred steps and dropped steps may still exist); revise when at least one step is open. A step the owner deferred or dropped never keeps status at revise.",
     }),
     blockers: schema.field(schema.list(blockerSchema), {
       description:
-        "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
+        "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Listed in the order the worker executes them — the plan's order, then the owner's ordering rulings; never sorted by how cheap a fix is. Non-empty when status is revise. When approved the list holds no open step: a blocker whose steps are all done or dropped is removed and named in the advisory, a blocker still holding a deferred step stays listed so the deferral is on record. Always return the key (an empty list, never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
     }),
     advisory: schema.field(schema.text(), {
       required: false,
@@ -357,9 +468,19 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
       description:
         "Checklist items of THIS task that no in-run effort can satisfy, accepted per the draft's SCOPE SPLIT (or a verified mid-run wall claim), each with its reason class, the substitute evidence you verified, and the owner close-out. Approving with this list certifies every agent-doable item is 100% implemented. Never doable work — promote any owner-only claim a shell could satisfy to a blocker; an entry with missing or unverified substitute evidence belongs in blockers, not here. Absent when every item is agent-doable.",
     }),
+    dispositions: schema.field(schema.list(dispositionSchema), {
+      required: false,
+      description:
+        "One entry per owner annotation applied to this verdict, in the order annotated. Present exactly when the gate answer carried annotations; absent otherwise. Every annotation gets exactly one entry — none dropped, none merged into another, none reworded — and the edit each entry describes is visible in this same verdict (a status, a ruling, an order, a new step). The next surface shows these lines so the owner can check the application and correct it by annotating again. A later round carries earlier rulings in the items they landed on, not here: this list is this application only.",
+    }),
+    stages: schema.field(schema.list(stageStatusSchema), {
+      required: false,
+      description:
+        "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages.",
+    }),
   },
   {
     description:
-      "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if a blocking defect remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly.",
+      "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer.",
   },
 );

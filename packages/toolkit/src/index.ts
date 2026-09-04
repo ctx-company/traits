@@ -24,19 +24,23 @@ export {
   blockerSchema,
   blockerStepSchema,
   deviationReportSchema,
+  dispositionSchema,
   feasibilityVerdictSchema,
   leftoverSchema,
   ownerItemSchema,
   planAmendmentSchema,
   reviewerVerdict,
   reviewVerdictSchema,
+  stageStatusSchema,
 } from "./schema.ts";
 export type {
   BlockerStepValue,
   BlockerValue,
+  DispositionValue,
   FeasibilityVerdictValue,
   ReviewerVerdictValue,
   ReviewVerdictValue,
+  StageStatusValue,
 } from "./schema.ts";
 export { cargoDiagnosticSchema, cargoFixLoop } from "./sequence/cargo-fix.ts";
 export type { CargoDiagnostic, CargoFixLoopOptions, CargoFixLoopScope } from "./sequence/cargo-fix.ts";

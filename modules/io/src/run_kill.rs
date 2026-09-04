@@ -16,6 +16,14 @@ static ACTIVE_PGID: AtomicI32 = AtomicI32::new(0);
 /// so a `SIGKILL`ed child is classified as deliberately killed rather than a
 /// generic harness failure. Cleared by [`reset`].
 static KILLED: AtomicBool = AtomicBool::new(false);
+/// Set by [`request_stop`] — the CLI's graceful `SIGINT` handler and its
+/// control-socket stop/pause requests mirror their cooperative-stop flag
+/// here — so the local command runner can tell a child that died because the
+/// whole foreground process group received the operator's `SIGINT` (0281.3:
+/// a gate the owner interrupted) from a child that failed on its own. Never
+/// set by [`request_kill`]: the TUI's instant kill stays a kill. Cleared by
+/// [`reset`].
+static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Registers `pgid` (the leader pid of a child spawned with
 /// `process_group(0)`) as the group to signal on a kill request.
@@ -64,8 +72,22 @@ pub fn was_killed() -> bool {
     KILLED.load(Ordering::SeqCst)
 }
 
-/// Clears the killed flag (and the pgid registration) for a fresh drive.
+/// Records a cooperative stop request (graceful `SIGINT`, control-socket
+/// stop or pause). Async-signal-safe: one atomic store, nothing else, so
+/// the CLI's signal handler may call it directly.
+pub fn request_stop() {
+    STOP_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+/// `true` once [`request_stop`] has fired since the last [`reset`].
+pub fn stop_requested() -> bool {
+    STOP_REQUESTED.load(Ordering::SeqCst)
+}
+
+/// Clears the killed and stop flags (and the pgid registration) for a
+/// fresh drive.
 pub fn reset() {
     KILLED.store(false, Ordering::SeqCst);
+    STOP_REQUESTED.store(false, Ordering::SeqCst);
     ACTIVE_PGID.store(0, Ordering::SeqCst);
 }

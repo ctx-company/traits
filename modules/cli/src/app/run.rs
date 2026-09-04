@@ -1555,6 +1555,7 @@ fn human_terminal_failure(
         drive.budget_pause.is_some(),
         drive.disk_full_park.is_some(),
         drive.status == "awaiting-owner",
+        drive.status == "interrupted",
         session.status.clone(),
         drive.final_session_status.clone(),
     )
@@ -1568,12 +1569,22 @@ fn human_terminal_failure(
 /// readiness independent of whether the terminal outcome was actually
 /// recorded. A summons whose evidence failed to write must still report a
 /// failure (P0253.4).
+/// `interrupted` is the drive's own graceful-stop outcome (a cooperative
+/// `SIGINT` or control-socket stop drained to a frame boundary, 0281.3
+/// including a `SIGINT` that ended a waiting gate child): the session is
+/// resumable from the same frame, so it presents as a stop, never as the
+/// failure modal. The TUI's instant kill keeps its own `killed` status and
+/// stays a failure.
+// A pure classification of independent booleans, kept positional so each
+// exemption stays visible at the call site and in its tests.
+#[allow(clippy::too_many_arguments)]
 fn human_terminal_failure_values(
     human_output: bool,
     credits_paused: bool,
     budget_paused: bool,
     disk_full_parked: bool,
     summons_parked: bool,
+    interrupted: bool,
     session_status: ctx_traits_core::procedure::session::Status,
     drive_status: Option<ctx_traits_core::procedure::session::Status>,
 ) -> bool {
@@ -1582,6 +1593,7 @@ fn human_terminal_failure_values(
         && !budget_paused
         && !disk_full_parked
         && !summons_parked
+        && !interrupted
         && !run_completed_status(session_status, drive_status)
 }
 
@@ -2956,22 +2968,15 @@ mod completion_disposition_tests {
             false,
             false,
             false,
-            Status::Failed,
-            Some(Status::Failed),
-        ));
-        assert!(!human_terminal_failure_values(
-            true,
-            true,
-            false,
-            false,
             false,
             Status::Failed,
             Some(Status::Failed),
         ));
         assert!(!human_terminal_failure_values(
             true,
-            false,
             true,
+            false,
+            false,
             false,
             false,
             Status::Failed,
@@ -2979,6 +2984,17 @@ mod completion_disposition_tests {
         ));
         assert!(!human_terminal_failure_values(
             true,
+            false,
+            true,
+            false,
+            false,
+            false,
+            Status::Failed,
+            Some(Status::Failed),
+        ));
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
             false,
             false,
             false,
@@ -2988,6 +3004,7 @@ mod completion_disposition_tests {
         ));
         assert!(human_terminal_failure_values(
             true,
+            false,
             false,
             false,
             false,
@@ -3008,6 +3025,7 @@ mod completion_disposition_tests {
             false,
             true,
             false,
+            false,
             Status::WaitingOnHuman,
             Some(Status::WaitingOnHuman),
         ));
@@ -3018,6 +3036,7 @@ mod completion_disposition_tests {
         // unpersisted summons is a failed run, not a resumable park.
         assert!(human_terminal_failure_values(
             true,
+            false,
             false,
             false,
             false,
@@ -3035,11 +3054,41 @@ mod completion_disposition_tests {
             false,
             true,
             false,
+            false,
             Status::AwaitingAgentOutput,
             Some(Status::AwaitingAgentOutput),
         ));
         assert!(human_terminal_failure_values(
             true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            Status::AwaitingAgentOutput,
+            Some(Status::AwaitingAgentOutput),
+        ));
+    }
+
+    #[test]
+    fn terminal_failure_exempts_a_graceful_interrupt_but_not_a_kill() {
+        // 0281.3: a cooperative SIGINT (including one that ended a waiting
+        // gate child) leaves the session resumable at the same frame — it
+        // presents as a stop, never as the failure modal.
+        assert!(!human_terminal_failure_values(
+            true,
+            false,
+            false,
+            false,
+            false,
+            true,
+            Status::AwaitingAgentOutput,
+            Some(Status::AwaitingAgentOutput),
+        ));
+        // The TUI's instant kill is not an interrupt and stays a failure.
+        assert!(human_terminal_failure_values(
+            true,
+            false,
             false,
             false,
             false,

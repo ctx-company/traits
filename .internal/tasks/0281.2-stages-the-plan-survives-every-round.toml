@@ -1,0 +1,88 @@
+schema-version = "0.2"
+key = "0281.2"
+title = "Stages: the plan survives every round and nothing is restricted unless stated"
+status = "ready"
+raised = "2026-09-04"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`, phase 2, after `0281.1`. Today the draft is prose that cannot
+say where the work is, so from round 2 the reviewer's list becomes the plan
+and a cliff-shaped task never gets its cliff attempted. This child gives the
+draft an ordered list of stages, gives the verdict a ledger of them, and makes
+the first open stage the worker's objective.
+
+## GOALS, binding
+
+1. **The draft carries typed stages.** The draft slot becomes typed with
+   `scope`, `stages`, `approach` and `risks`; `stages` is an ordered list of
+   id and goal, each goal taken from the task's Done-when. The description
+   states the permissive rule: a goal is the only requirement of its stage;
+   whatever a later stage covers may be in any state until then, and that is
+   neither a defect nor a regression; restrictions exist only as goals.
+   Excluded: any allowance or "what may be red" field; commands or checks per
+   stage.
+
+2. **The verdict keeps the stage ledger.** Each verdict carries every stage
+   with `status` (`open` or `done`) and `evidence`, carried verbatim across
+   rounds and flipped to done only on evidence the reviewer verified. A done
+   stage whose goal stops holding is reopened with evidence. Each blocker
+   names its `stage`; a blocker on a later stage is filed, not worked.
+   Excluded: automatic advancement by command; counters of any kind.
+
+3. **The worker's objective is the first open stage.** Its prompt names it;
+   blockers on that stage and regressions of done stages are its work;
+   deferred, dropped and later-stage steps are not.
+
+4. **The draft is checked against the task once.** In the first review round
+   the reviewer reads the task file and blocks, on the last stage, any
+   Done-when goal the stages do not cover.
+
+5. **The surface leads with the ledger.** The annotation surface opens with
+   one line per stage and its status; the journal reads
+   "stage <k>/<n> • <X> open • <Y> closed".
+
+6. **The worker has room for a stage.** The basic variant's frame budget is
+   sixty minutes.
+"""
+scope = """
+## Decisions
+
+- Stage definitions live in the draft and are written once; stage status
+  lives in the verdict and is the reviewer's to move. The owner changes
+  either by annotation (0281.1's apply pass handles a ruling on a stage).
+- Standing properties are goals of the stage that established them; nothing
+  else is needed to keep them.
+
+## APPROACH, suggested route
+
+- `.ctx/traits/authored/implement/source/shared/data.ts`: the typed draft
+  schema and the stage ledger; `.../step/draft.ts` output typed.
+- `packages/toolkit/src/schema.ts`: `stage` on the blocker, optional
+  `stages` ledger on the verdict, `ruling` on a stage.
+- `.../step/work.ts`, `.../step/review.ts`, `.../step/notify.ts`: the
+  objective, the first-round coverage duty, the surface and journal.
+- `.ctx/traits/authored/implement/trait.toml`: `frame-seconds = 3600`.
+"""
+validation = """
+## Watch
+
+- The permissive rule is the whole doctrine; never add an enumeration of what
+  may be broken.
+
+## Done when
+
+- 0011.5 rerun from a fresh worktree attempts its flip stage the round after
+  the resolver stage is marked done, and the reference count moves that
+  round.
+- An annotation deferring a resolver step keeps it deferred across later
+  rounds without repetition.
+- The package builds, exports and passes the workspace gate.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.1"]

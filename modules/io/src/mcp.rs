@@ -577,6 +577,24 @@ fn mcp_error_envelope<T>(error: &crate::Error, call_payload: bool) -> Envelope<T
             .with_detail("floor-mb", disk_full.floor_mb.to_string())
             .with_detail("available-bytes", disk_full.available_bytes.to_string())
             .with_detail("path", disk_full.probed_path.clone()),
+        crate::Error::CommandInterrupted {
+            item_id,
+            argv,
+            signal,
+        } => {
+            let mut response = ResponseError::new(
+                "io.command-interrupted",
+                "command interrupted by the operator's stop",
+            )
+            .with_detail("argv", argv.join(" "));
+            if let Some(item_id) = item_id {
+                response = response.with_detail("item-id", item_id.clone());
+            }
+            if let Some(signal) = signal {
+                response = response.with_detail("signal", signal.to_string());
+            }
+            response
+        }
         crate::Error::Parse(parse) => match parse {
             crate::parse::Error::JsonDeserialize { .. }
             | crate::parse::Error::JsonSerialize { .. } => {
