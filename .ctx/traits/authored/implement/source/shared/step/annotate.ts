@@ -13,7 +13,19 @@
 // unattended runs, and no interpreter beyond sh's own case match.
 import * as cdk from "@ctx-traits/cdk";
 
-import { gateAnswer, gateSurface, notifyDigest, ownerDecisions, ownerGate } from "../data.ts";
+import { scribe } from "../agent.ts";
+import {
+  draft,
+  gateAnswer,
+  gateSurface,
+  notifyDigest,
+  ownerDecisions,
+  ownerGate,
+  planAnswer,
+  planDigest,
+  planGate,
+  planSurface,
+} from "../data.ts";
 
 const GATE_SCRIPT = [
   'if [ "$2" = "off" ]; then',
@@ -54,7 +66,7 @@ export function verdictGate(title: string): void {
 }
 
 /** A ruling (any non-accepted gate answer) joins the run's durable owner
- * record, carried into every later review and the commit message. */
+ * record, carried into the commit message. */
 export function recordRuling(title: string): void {
   cdk.flow.when(
     title,
@@ -63,6 +75,54 @@ export function recordRuling(title: string): void {
       cdk.step.project(`${title}: append`, {
         id: "gate-append-ruling",
         projections: [{ source: gateAnswer, destination: ownerDecisions, operation: "append" }],
+      });
+    },
+  );
+}
+
+// ---- The plan gate (0281.3): the same shape, pointed at the drafted plan.
+
+/** The scribe copies the drafted plan into the owner's annotation surface. */
+export function digestPlan(title: string): void {
+  cdk.step.prompt(title, {
+    id: "plan-digest",
+    agent: scribe,
+    input: cdk.input.prompt`
+      Digest this drafted plan for the owner's annotation pass: ${draft}.
+      Follow the output field's own description exactly.
+    `,
+    output: planDigest,
+  });
+}
+
+/** Carry the plan digest's surface into a text slot the gate argv can address. */
+export function carryPlanSurface(title: string): void {
+  cdk.step.project(title, {
+    id: "plan-carry-surface",
+    projections: [{ source: planDigest, field: "surface", destination: planSurface }],
+  });
+}
+
+export function planApprovalGate(title: string): void {
+  cdk.step.command(title, {
+    id: "owner-plan-gate",
+    argv: ["sh", "-c", GATE_SCRIPT, "_", planSurface, planGate],
+    output: planAnswer,
+    timeoutMs: GATE_CEILING_MS,
+    idleTimeoutMs: GATE_CEILING_MS,
+  });
+}
+
+/** A plan correction (any non-accepted plan-gate answer) joins the owner
+ * record too; the plan itself is redrafted with it as input. */
+export function recordPlanRuling(title: string): void {
+  cdk.flow.when(
+    title,
+    cdk.condition.not(cdk.condition.equals(planAnswer, "accepted")),
+    () => {
+      cdk.step.project(`${title}: append`, {
+        id: "plan-append-ruling",
+        projections: [{ source: planAnswer, destination: ownerDecisions, operation: "append" }],
       });
     },
   );

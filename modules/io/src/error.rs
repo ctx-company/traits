@@ -27,6 +27,18 @@ pub enum Error {
         disk_full: ctx_traits_core::procedure::session::DiskFullPark,
     },
 
+    /// A command frame's child died of the operator's cooperative stop
+    /// (`SIGINT` delivered to the whole foreground group while a stop was
+    /// requested — 0281.3, a waiting gate). Nothing was submitted: the frame
+    /// stays pending and the next drive re-runs it. The drive loop maps this
+    /// to its graceful-stop outcome, never to a frame failure.
+    #[error("command interrupted by the operator's stop (item {item_id:?}, signal {signal:?})")]
+    CommandInterrupted {
+        item_id: Option<String>,
+        argv: Vec<String>,
+        signal: Option<i32>,
+    },
+
     #[error(transparent)]
     Parse(#[from] crate::parse::Error),
 

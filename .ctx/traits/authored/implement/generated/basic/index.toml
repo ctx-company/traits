@@ -68,6 +68,16 @@ description = "Owner summons transport: 'on' (default) parks the run on reviewer
 value = "on"
 
 [[port]]
+id = "plan-gate"
+direction = "input"
+schema = "schema:text"
+optional = true
+description = "Owner annotation transport for the drafted plan before round 1: 'annotate' (default) pipes the plan's surface to ctx-annotate so the owner can accept it or correct it, and the plan is redrafted with the corrections until accepted; 'off' auto-accepts for unattended runs."
+
+[port.default]
+value = "annotate"
+
+[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -155,6 +165,21 @@ hint = "One entry per ruling: a summons entry is the question and the owner's an
 id = "owner-ruling-mode"
 schema = "schema:text"
 description = "The owner-ruling port carried as a slot so the summons branch condition can read it."
+
+[[slot]]
+id = "plan-answer"
+schema = "schema:text"
+description = "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact plan text the owner annotated — and `text`, the owner's note. Annotations are binding corrections: the plan is drafted again with them as input until the owner accepts it."
+
+[[slot]]
+id = "plan-digest"
+schema = "schema:plan-digest"
+description = "Scribe's digest of the drafted plan into the owner's annotation surface."
+
+[[slot]]
+id = "plan-surface"
+schema = "schema:text"
+description = "The plan digest's surface, carried as text for the gate command."
 
 [[slot]]
 id = "review-verdict-1"
@@ -407,6 +432,15 @@ required = true
 description = 'The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); "none possible" only when truly nothing applies.'
 
 [[schema]]
+id = "plan-digest"
+description = "The drafted plan digested for the owner's annotation pass."
+
+[schema.fields.surface]
+schema = "schema:text"
+required = true
+description = "The owner's plan surface: the plan COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines: 'SCOPE:' then the scope text; 'STAGES:' then one line per stage as '<id>: <goal>' in plan order; 'APPROACH:' then the approach text; 'RISKS:' then the risks text. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the plan is the only requirement."
+
+[[schema]]
 id = "review-verdict"
 description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer."
 
@@ -556,7 +590,9 @@ input = [
 output = ["slot:review-verdict-1"]
 
 [prompt.draft-the-implementation-plan]
-text = "Draft the implementation plan for {port:task}, read it and the relevant code with your tools."
+text = """
+Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
+The owner's corrections to the previous draft, when present, are binding: {slot:plan-answer}"""
 input = ["port:task"]
 output = ["slot:draft"]
 
@@ -577,6 +613,13 @@ Follow each output field's own description exactly; the fields feed
 notification commands verbatim."""
 input = ["slot:review-verdict-1"]
 output = ["slot:notify-digest"]
+
+[prompt.plan-digest]
+text = """
+Digest this drafted plan for the owner's annotation pass: {slot:draft}.
+Follow the output field's own description exactly."""
+input = ["slot:draft"]
+output = ["slot:plan-digest"]
 
 [prompt.record-the-owner-s-ruling]
 text = """
@@ -683,6 +726,21 @@ argv = [
     "{slot:commit-message}",
 ]
 
+[[sequence.ctx-branch-arm-s-18-plan-approval-body-34-record-the-owner-s-plan-correction-then.sequence]]
+id = "plan-append-ruling"
+title = "Record the owner's plan correction: append"
+kind = "project"
+input = ["slot:plan-answer"]
+
+[[sequence.ctx-branch-arm-s-18-plan-approval-body-34-record-the-owner-s-plan-correction-then.sequence.projection]]
+source = "slot:plan-answer"
+destination = "slot:owner-decisions"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-18-plan-approval-body-34-record-the-owner-s-plan-correction-then.sequence.output]]
+slot = "slot:owner-decisions"
+operation = "append"
+
 [[sequence.ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then.sequence]]
 id = "owner-reachable"
 title = "Owner reachable"
@@ -738,6 +796,78 @@ input = ["slot:summon-the-owner"]
 [[sequence.ctx-branch-arm-s-65-ctx-branch-arm-s-24-reviewed-refinement-body-12-owner-ruling-then-15-owner-reachable-then.sequence.output]]
 slot = "slot:owner-decisions"
 operation = "append"
+
+[[sequence.plan-approval-body.sequence]]
+id = "draft-the-implementation-plan"
+title = "Draft the implementation plan"
+agent = "agent:smart"
+prompt = "prompt:draft-the-implementation-plan"
+input = [
+    "port:task",
+    { slot = "slot:plan-answer", optional = true },
+]
+output = ["slot:draft"]
+
+[[sequence.plan-approval-body.sequence]]
+id = "plan-digest"
+title = "Digest the plan for annotation"
+agent = "agent:scribe"
+prompt = "prompt:plan-digest"
+input = ["slot:draft"]
+output = ["slot:plan-digest"]
+
+[[sequence.plan-approval-body.sequence]]
+id = "plan-carry-surface"
+title = "Carry the plan surface"
+kind = "project"
+input = ["slot:plan-digest"]
+output = ["slot:plan-surface"]
+
+[[sequence.plan-approval-body.sequence.projection]]
+source = "slot:plan-digest"
+field = "surface"
+destination = "slot:plan-surface"
+
+[[sequence.plan-approval-body.sequence]]
+id = "owner-plan-gate"
+title = "Annotate the plan"
+input = [
+    "slot:plan-surface",
+    "port:plan-gate",
+]
+output = ["slot:plan-answer"]
+
+[sequence.plan-approval-body.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """
+if [ "$2" = "off" ]; then
+  printf accepted
+  exit 0
+fi
+out=$(printf '%s' "$1" | ctx-annotate --stdin --raw)
+case "$out" in
+  *'"annotations":[]'*) printf accepted ;;
+  "") printf 'annotation gate returned no decision; not accepted' ;;
+  *) printf '%s' "$out" ;;
+esac""",
+    "_",
+    "{slot:plan-surface}",
+    "{port:plan-gate}",
+]
+timeout-ms = 14400000
+idle-timeout-ms = 14400000
+
+[[sequence.plan-approval-body.sequence]]
+id = "record-the-owner-s-plan-correction"
+title = "Record the owner's plan correction"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-18-plan-approval-body-34-record-the-owner-s-plan-correction-then"
+
+[sequence.plan-approval-body.sequence.when.not]
+slot = "slot:plan-answer"
+equals = "accepted"
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "notify-implement-pass"
@@ -977,6 +1107,7 @@ description = "Reviewed implementation: implement, review, refine & commit."
 input = [
     "port:owner-gate",
     "port:owner-ruling",
+    "port:plan-gate",
     "port:task",
 ]
 
@@ -1049,12 +1180,14 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "draft-the-implementation-plan"
-title = "Draft the implementation plan"
-agent = "agent:smart"
-prompt = "prompt:draft-the-implementation-plan"
-input = ["port:task"]
-output = ["slot:draft"]
+id = "plan-approval"
+title = "Plan approval"
+kind = "loop"
+sequence = "sequence:plan-approval-body"
+
+[[procedure.sequence.until.all]]
+slot = "slot:plan-answer"
+equals = "accepted"
 
 [[procedure.sequence]]
 id = "reviewed-refinement"

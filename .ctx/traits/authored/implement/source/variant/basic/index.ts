@@ -19,7 +19,17 @@ export default function () {
   shared.step.diff.baseline("Capture the session base");
 
   shared.step.notify.update("Notify: plan drafted", "Draft the implementation plan");
-  shared.step.draft.compose("Draft the implementation plan");
+  // 0281.3: the owner sees the plan before any implement round. The plan
+  // is redrafted with the owner's corrections until accepted; with
+  // plan-gate=off the gate accepts on the first pass.
+  cdk.flow.loop("Plan approval", (loop) => {
+    shared.step.draft.compose("Draft the implementation plan");
+    shared.step.annotate.digestPlan("Digest the plan for annotation");
+    shared.step.annotate.carryPlanSurface("Carry the plan surface");
+    shared.step.annotate.planApprovalGate("Annotate the plan");
+    shared.step.annotate.recordPlanRuling("Record the owner's plan correction");
+    loop.untilAll([cdk.condition.equals(shared.data.planAnswer, "accepted")]);
+  });
 
   cdk.flow.loop("Reviewed refinement", (loop) => {
     shared.step.notify.update("Notify: implement pass", "Implement the task");

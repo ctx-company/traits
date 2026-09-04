@@ -165,6 +165,35 @@ export const ownerRulingMode = cdk.slot.text({
   description: "The owner-ruling port carried as a slot so the summons branch condition can read it.",
 });
 
+// The plan gate (0281.3): the same gate shape as the verdict gate, pointed
+// at the drafted plan before round 1, so the plan is corrected at round 0
+// for free instead of at round 3 for money.
+export const planDigest = cdk.slot({
+  id: "plan-digest",
+  schema: cdk.schema.object(
+    "plan-digest",
+    {
+      surface: cdk.schema.field(cdk.schema.text(), {
+        description:
+          "The owner's plan surface: the plan COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines: 'SCOPE:' then the scope text; 'STAGES:' then one line per stage as '<id>: <goal>' in plan order; 'APPROACH:' then the approach text; 'RISKS:' then the risks text. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the plan is the only requirement.",
+      }),
+    },
+    { description: "The drafted plan digested for the owner's annotation pass." },
+  ),
+  description: "Scribe's digest of the drafted plan into the owner's annotation surface.",
+});
+
+export const planSurface = cdk.slot.text({
+  id: "plan-surface",
+  description: "The plan digest's surface, carried as text for the gate command.",
+});
+
+export const planAnswer = cdk.slot.text({
+  id: "plan-answer",
+  description:
+    "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact plan text the owner annotated — and `text`, the owner's note. Annotations are binding corrections: the plan is drafted again with them as input until the owner accepts it.",
+});
+
 export const notifyLog = cdk.slot.text({
   id: "notify-log",
   description: "The notifier's own JSON receipt for the most recent notification command.",
@@ -196,7 +225,15 @@ export const ownerGate = cdk.port.input.text({
   default: { value: "annotate" },
 });
 
-export const port = { task, ownerGate, ownerRuling };
+export const planGate = cdk.port.input.text({
+  id: "plan-gate",
+  description:
+    "Owner annotation transport for the drafted plan before round 1: 'annotate' (default) pipes the plan's surface to ctx-annotate so the owner can accept it or correct it, and the plan is redrafted with the corrections until accepted; 'off' auto-accepts for unattended runs.",
+  optional: true,
+  default: { value: "annotate" },
+});
+
+export const port = { task, ownerGate, ownerRuling, planGate };
 
 export const slot = {
   draft,
@@ -219,4 +256,7 @@ export const slot = {
   gateSurface,
   gateAnswer,
   notifyLog,
+  planDigest,
+  planSurface,
+  planAnswer,
 };

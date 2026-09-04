@@ -191,7 +191,7 @@ description = "The resolved task's immutable board key."
 
 [[schema]]
 id = "blocker"
-description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, the falsifiable check that clears it, and the owner's ruling on it when one exists."
 
 [schema.fields.done-when]
 schema = "schema:text"
@@ -225,6 +225,14 @@ description = "The exact authoritative line(s) the cited rule quotes, verified a
 schema = "schema:text"
 description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
 
+[schema.fields.ruling]
+schema = "schema:text"
+description = "The owner's annotation note, verbatim, when one applies to the whole blocker — its order, its scope, its standing. Applied by the reviewer when the annotation was made; carried verbatim while the blocker survives. Blockers are listed in the order the worker executes them, and an owner's ordering ruling is what moves a blocker in that list."
+
+[schema.fields.stage]
+schema = "schema:text"
+description = "The id of the plan stage this blocker belongs to: the stage whose goal it prevents. A blocker on the first open stage, or a regression of a done stage's goal, is the worker's work now; a blocker on a later stage is filed here and not worked until that stage is the first open one. Absent only when the plan carries no stages."
+
 [schema.fields.steps]
 schema = "[schema:blocker-step]"
 required = true
@@ -242,21 +250,64 @@ description = "Repo-relative files and paths involved."
 
 [[schema]]
 id = "blocker-step"
-description = "One step of a blocker's required fix, with verified progress state."
+description = "One step of a blocker's required fix, with verified progress state and the owner's ruling on it when one exists."
 
 [schema.fields.evidence]
 schema = "schema:text"
 description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
 
+[schema.fields.ruling]
+schema = "schema:text"
+description = "The owner's annotation note, verbatim, when one applies to this step. The worker executes a ruled step as the ruling says, not as the step text alone says; a ruled step done differently from its ruling is a blocker next round. Carried verbatim while the step survives."
+
 [schema.fields.status]
 schema = "schema:text"
 required = true
-description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+description = """"open", "done", "deferred" or "dropped". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone. deferred and dropped are set only when the reviewer applies an owner annotation (recorded in the verdict's dispositions): deferred is the owner's "not now" — kept on record, not executed until the owner or its stage says so; dropped is the owner's "no" — kept on record, never executed. Neither blocks approval, and the reviewer never reopens either on its own."""
 
 [schema.fields.step]
 schema = "schema:text"
 required = true
 description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
+id = "disposition"
+description = "One owner annotation applied to the verdict by the reviewer: anchor text, note, target, action taken, and a one-sentence account. Annotations are binding edits, never arguments; where the reviewer disagrees it applies the annotation anyway and records the disagreement in the advisory."
+
+[schema.fields.action]
+schema = "schema:text"
+required = true
+description = "What the reviewer did: deferred (the owner said not now — the step keeps status deferred until the owner or its stage brings it back); dropped (the owner said no — the step keeps status dropped, never executed, never reopened); done (the owner accepted it as is — status done with the note as evidence); added (the note asked for something new — a new step or blocker carrying the note as its ruling); ordered (the note changed what comes first — the blocker list is reordered); ruled (the note changes how a step or blocker is done — carried as its ruling and executed as ruled); answered (the note answered or asked something that changes no item — the answer is in note); unclear (the note could not be mapped or understood — note carries a one-sentence question for the owner, and nothing was changed)."
+allowed = [
+    "deferred",
+    "dropped",
+    "done",
+    "added",
+    "ordered",
+    "ruled",
+    "answered",
+    "unclear",
+]
+
+[schema.fields.applied-to]
+schema = "schema:text"
+required = true
+description = 'Where the annotation landed: a blocker id, "<blocker-id>/step <n>", "stage <id>", "advisory", or "plan".'
+
+[schema.fields.note]
+schema = "schema:text"
+required = true
+description = "One sentence: what changed in this verdict because of the annotation, or the question back to the owner when action is unclear."
+
+[schema.fields.raw]
+schema = "schema:text"
+required = true
+description = "The annotated surface text, verbatim from the gate answer's raw field. This is the anchor: it is an exact substring of the verdict's own blocker, step, stage or advisory text."
+
+[schema.fields.text]
+schema = "schema:text"
+required = true
+description = "The owner's note, verbatim from the gate answer's text field."
 
 [[schema]]
 id = "owner-item"
@@ -295,7 +346,7 @@ description = 'The closest in-run verification actually produced and verified by
 
 [[schema]]
 id = "review-verdict"
-description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if a blocking defect remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly."
+description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer."
 
 [schema.fields.advisory]
 schema = "schema:text"
@@ -304,7 +355,11 @@ description = "Non-blocking notes: subjective style, naming, taste, optional imp
 [schema.fields.blockers]
 schema = "[schema:blocker]"
 required = true
-description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Listed in the order the worker executes them — the plan's order, then the owner's ordering rulings; never sorted by how cheap a fix is. Non-empty when status is revise. When approved the list holds no open step: a blocker whose steps are all done or dropped is removed and named in the advisory, a blocker still holding a deferred step stays listed so the deferral is on record. Always return the key (an empty list, never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure."
+
+[schema.fields.dispositions]
+schema = "[schema:disposition]"
+description = "One entry per owner annotation applied to this verdict, in the order annotated. Present exactly when the gate answer carried annotations; absent otherwise. Every annotation gets exactly one entry — none dropped, none merged into another, none reworded — and the edit each entry describes is visible in this same verdict (a status, a ruling, an order, a new step). The next surface shows these lines so the owner can check the application and correct it by annotating again. A later round carries earlier rulings in the items they landed on, not here: this list is this application only."
 
 [schema.fields.escalation]
 schema = "schema:text"
@@ -328,10 +383,14 @@ description = "Checklist items of THIS task that no in-run effort can satisfy, a
 schema = "schema:text"
 description = "Cross-task seam citations ONLY: counterpart work belonging to a DIFFERENT task on the task board, each citing that task's file name. Never in-task scope — an unimplemented item of THIS task's checklist is a blocker, and unimplemented in-task scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-task seam exists."
 
+[schema.fields.stages]
+schema = "[schema:stage-status]"
+description = "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages."
+
 [schema.fields.status]
 schema = "schema:text"
 required = true
-description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
+description = "approved when no step in any blocker has status open (advisory notes, deferred steps and dropped steps may still exist); revise when at least one step is open. A step the owner deferred or dropped never keeps status at revise."
 allowed = [
     "approved",
     "revise",
@@ -341,6 +400,33 @@ allowed = [
 schema = "schema:text"
 required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
+
+[[schema]]
+id = "stage-status"
+description = "One plan stage in the verdict's ledger: id, whether its goal holds, the evidence, and the owner's ruling on it when one exists."
+
+[schema.fields.evidence]
+schema = "schema:text"
+required = true
+description = "Why the status is what it is: what you ran or read. Empty only for a stage nobody has reached yet."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "The stage id exactly as the plan's stages list names it."
+
+[schema.fields.ruling]
+schema = "schema:text"
+description = "The owner's annotation note on this stage, verbatim, when one exists (an order to start it now, to treat it as done, to change its goal). Applied by the reviewer and carried verbatim."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "done only when you verified with your own tools that the stage's goal is observable in the working tree; open otherwise. A done stage whose goal stops holding goes back to open, with the evidence that shows it — that is the only kind of regression there is."
+allowed = [
+    "open",
+    "done",
+]
 
 [[schema]]
 id = "task-unchanged"
@@ -363,7 +449,7 @@ summary = "Review role."
 [prompt.criticize-open-endedness]
 text = """
 Read-only adversarial review of {slot:target} and {slot:receipt} against {slot:grounding}. Inspect the actual task file — and, when the receipt records children, every child file too; edit nothing.
-Split shape (when children exist): block a child whose key is not the parent key plus a positional ordinal in receipt order, whose [relations] parent is not the parent key, or whose depends-on names a non-sibling without code-proven need; block the parent if it still carries an execution plan instead of charter intent and the umbrella stop condition; block a split that is packaging — children with no genuine shared umbrella. Every child is judged by the same Done-when/approach/checks bars as a standalone plan below. Block ONLY these: a Done-when goal that is missing, unobservable, hedged ("or", "either", "consider", "optionally", "TBD", "as appropriate" inside a goal statement), or lacking a runnable existing command (fabricated commands block); approach text presented as binding or restrictive rather than suggested — the plan must state in its own text that files, symbols, edit order, commands, and proof mechanics are the suggested route and that deviation in service of a goal is legitimate and reported, not escalated; pinned internal proof mechanics (exact fixtures, matchers, or literal expected output) that the grounding does not evidence as already occurring; status other than ready; changed filename, key, raised date, or relations without a code-proven correction. Also block unless receipt.key and receipt.file exactly match target, receipt records status-before draft and status-after ready, and relations-correction is present exactly when the task's relations changed and explains that code-proven correction. Do not block on taste, general quality, or hedge words inside approach suggestions.
+Split shape (when children exist): block a child whose key is not the parent key plus a positional ordinal in receipt order, whose [relations] parent is not the parent key, or whose depends-on names a non-sibling without code-proven need; block the parent if it still carries an execution plan instead of charter intent and the umbrella stop condition; block a split that is packaging — children with no genuine shared umbrella. Every child is judged by the same Done-when/approach bars as a standalone plan below. Block ONLY these: a Done-when goal that is missing, unobservable, hedged ("or", "either", "consider", "optionally", "TBD", "as appropriate" inside a goal statement), or lacking a "Source:" line quoting verbatim the parent plan or design line(s) that state it (a quote the grounding cannot find, or one that does not say what the goal says, blocks — that is distillation); Decisions or Watch text that instructs commit granularity, round mechanics, or how a review must block (the process owns those); any [[checks]] table (the reviewer validates the goal; tasks carry no checks); approach text presented as binding or restrictive rather than suggested — the plan must state in its own text that files, symbols, edit order, commands, and proof mechanics are the suggested route and that deviation in service of a goal is legitimate and reported, not escalated; pinned internal proof mechanics (exact fixtures, matchers, or literal expected output) that the grounding does not evidence as already occurring; status other than ready; changed filename, key, raised date, or relations without a code-proven correction. Also block unless receipt.key and receipt.file exactly match target, receipt records status-before draft and status-after ready, and relations-correction is present exactly when the task's relations changed and explains that code-proven correction. Do not block on taste, general quality, or hedge words inside approach suggestions.
 
 Return the typed review verdict: revise only for those blockers, approved when none remain: slot:critic-verdict"""
 input = [
@@ -395,11 +481,7 @@ Architect {slot:target}: judge its scope first, then shape the board accordingly
      SPLIT OF ONE (the parent is already that scope): rewrite only target.file in place from draft to a ready execution plan, exactly as before. Create no other file.
      SPLIT (the parent is materially larger): create child TaskDocument TOML files in .internal/tasks/, keyed positionally as <parent-key>.1, <parent-key>.2, ... in dependency order (ordinals continue .10, .11 — never zero-padded, never renumber existing children), each a complete ready execution plan at the swift-run scope with parent = "<parent-key>" in [relations] and depends-on listing only real prerequisite siblings; then rewrite target.file itself as the charter — the shared intent, the umbrella stop condition no single child owns, and the acceptance shape — carrying no execution plan of its own. Split only when a genuine umbrella exists; never split as packaging.
      In both outcomes: modify no file other than target.file and the child files you create. Preserve the parent's filename, key, and raised date; stamp each child's raised date with today's. Keep the parent's relations unchanged unless code reading proves a dependency is wrong; if changed, explain the proof in relations-correction. Change the parent's status from draft to ready and add no execution-plan header.
-     Use grounding {slot:grounding} and checksum context {slot:task-snapshot}. The plan separates goals from approach, and must say so in its own text. GOALS are explicit and binding: each Done-when states an observable outcome with a runnable existing command that decides it, plus explicit exclusions. APPROACH is the suggested route, never a boundary: expected files, symbols and signatures, edit order, commands to run, and proof mechanics are the architect's best guidance — stated precisely where the grounding supports them — and the run may deviate from any of it whenever a goal requires it, reporting deviations in the work summary rather than treating them as violations or escalating them. Never pin internal proof mechanics (exact fixtures, matchers, or literal expected output) beyond what the grounding evidences as already occurring: state what must be proven and let the run choose how to observe it. Reuse points stay named. [[checks]] must follow this shared doctrine exactly:
-- When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
-- Never fabricate a check: if no existing command verifies the Done-when, or verification is judgment-based, declare no checks — a wrong check that passes is worse than none; check-less tasks fall to the configured [tasks] auto-close policy.
-- At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
-- Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
+     Use grounding {slot:grounding} and checksum context {slot:task-snapshot}. The plan separates goals from approach, and must say so in its own text. GOALS are explicit and binding: each Done-when states an observable outcome plus explicit exclusions, and is followed by a line "Source:" quoting VERBATIM the line(s) of the parent plan or design it comes from — a goal is carried, never distilled, and a goal with no source line to quote is not a goal of this plan. APPROACH is the suggested route, never a boundary: expected files, symbols and signatures, edit order, commands to run, and proof mechanics are the architect's best guidance — stated precisely where the grounding supports them — and the run may deviate from any of it whenever a goal requires it, reporting deviations in the work summary rather than treating them as violations or escalating them. Never pin internal proof mechanics (exact fixtures, matchers, or literal expected output) beyond what the grounding evidences as already occurring: state what must be proven and let the run choose how to observe it. Reuse points stay named. Decisions and Watch state outcome decisions and risks only — never commit granularity, round mechanics, or how a review must block; the process owns those. Emit no [[checks]]: the reviewer validates the work against the goals with its own tools (owner ruling 2026-09-04).
 Prior critic verdict, when present: {slot:critic-verdict}. Fix its blockers only.
 Owner corrections, when present, are the owner's binding instructions for this iteration and override every other consideration: {slot:owner-answer}
 

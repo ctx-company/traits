@@ -4970,6 +4970,64 @@ struct CommandAdvance {
     failure: Option<CommandStepFailure>,
 }
 
+/// One command attempt's identity in the activity journal: item id, source
+/// index, run index, and the serialized position path.
+type CommandAttemptKey = (Option<String>, Option<usize>, Option<usize>, String);
+
+/// The conventional exit status a shell reports after `SIGINT` ended it.
+const SIGINT_EXIT_CODE: i32 = 130;
+/// `SIGINT`'s number on every Unix this runtime targets.
+const SIGINT_SIGNAL: i32 = 2;
+
+/// Whether a failed command was the operator's cooperative stop landing on
+/// the child (0281.3) rather than the command failing on its own: a stop must
+/// have been requested, and the child must have died of `SIGINT` (or exited
+/// with the shell's 128+2 after handling it). A child that dies of `SIGINT`
+/// without any stop requested keeps failing as before, so a command that
+/// signals itself is never misread as an interruption.
+fn command_interrupted_by_stop(
+    stop_requested: bool,
+    child_signal: Option<i32>,
+    exit_code: Option<i32>,
+) -> bool {
+    stop_requested && (child_signal == Some(SIGINT_SIGNAL) || exit_code == Some(SIGINT_EXIT_CODE))
+}
+
+#[cfg(test)]
+mod interrupted_command_tests {
+    use super::{SIGINT_EXIT_CODE, SIGINT_SIGNAL, command_interrupted_by_stop};
+
+    #[test]
+    fn a_stop_that_reached_the_child_is_an_interruption_not_a_failure() {
+        assert!(command_interrupted_by_stop(true, Some(SIGINT_SIGNAL), None));
+        assert!(command_interrupted_by_stop(
+            true,
+            None,
+            Some(SIGINT_EXIT_CODE)
+        ));
+    }
+
+    #[test]
+    fn a_child_dying_of_sigint_without_a_requested_stop_still_fails() {
+        assert!(!command_interrupted_by_stop(
+            false,
+            Some(SIGINT_SIGNAL),
+            None
+        ));
+        assert!(!command_interrupted_by_stop(
+            false,
+            None,
+            Some(SIGINT_EXIT_CODE)
+        ));
+    }
+
+    #[test]
+    fn a_requested_stop_does_not_excuse_an_ordinary_failure() {
+        assert!(!command_interrupted_by_stop(true, None, Some(1)));
+        assert!(!command_interrupted_by_stop(true, Some(9), None));
+    }
+}
+
 fn advance_command_frames(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
@@ -4980,8 +5038,7 @@ fn advance_command_frames(
     tick_observer: Option<&crate::harness::TickObserver>,
 ) -> crate::Result<CommandAdvance> {
     let mut activity_writer = None;
-    let mut attempt_counts: BTreeMap<(Option<String>, Option<usize>, Option<usize>, String), u32> =
-        BTreeMap::new();
+    let mut attempt_counts: BTreeMap<CommandAttemptKey, u32> = BTreeMap::new();
     loop {
         if session.status
             != ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired
@@ -5196,6 +5253,11 @@ fn advance_command_frames(
             output: outcome,
             observation,
         } = observed;
+        // Read before `observation` is partially moved into the sidecar
+        // record below: the terminating signal is what tells an operator's
+        // `SIGINT` (delivered to the whole foreground group, the waiting gate
+        // child included) from the command's own failure.
+        let child_signal = observation.signal;
         if let (Some(writer), Some(attempt)) = (activity_writer.as_mut(), attempt) {
             writer.append_command_attempt_ended(
                 crate::activity_sidecar::ActivityRecord::CommandAttemptEnded {
@@ -5343,6 +5405,24 @@ fn advance_command_frames(
         // it is the only truncation that can corrupt forwarded state. A
         // truncated stderr is reported (both flags ride along in `report`
         // below) but never itself parks the step.
+        if !outcome.success
+            && command_interrupted_by_stop(
+                crate::run_kill::stop_requested(),
+                child_signal,
+                outcome.exit_code,
+            )
+        {
+            // 0281.3: the operator's cooperative stop reached the child too
+            // (one foreground process group), so the command's death is the
+            // interruption, not the frame's verdict. Nothing is submitted:
+            // the frame stays pending and the next drive re-runs it — for a
+            // gate, the owner is simply asked again.
+            return Err(crate::Error::CommandInterrupted {
+                item_id,
+                argv,
+                signal: child_signal,
+            });
+        }
         if !outcome.success || outcome.stdout_truncated {
             let reason = if outcome.stdout_truncated {
                 format!(

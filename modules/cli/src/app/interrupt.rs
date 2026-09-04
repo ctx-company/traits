@@ -183,6 +183,10 @@ extern "C" fn handle_sigterm(signal: i32) {
 /// onto the restored normal screen.
 extern "C" fn handle_sigint(_signal: i32) {
     INTERRUPTED.store(true, Ordering::SeqCst);
+    // 0281.3: mirrored into io so the local command runner can classify a
+    // child the same terminal `SIGINT` killed (a waiting gate) as
+    // interrupted rather than failed. An atomic store, async-signal-safe.
+    ctx_traits_io::run_kill::request_stop();
     let count = SIGINT_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
     if count >= 3 {
         rescue_terminal_signal_safe();
@@ -220,6 +224,7 @@ pub fn reset() {
 /// treated identically by the drive loop from this point on.
 pub fn request_stop() {
     INTERRUPTED.store(true, Ordering::SeqCst);
+    ctx_traits_io::run_kill::request_stop();
 }
 
 /// Pause is a cooperative stop with a distinct durable outcome. Publish its
@@ -228,6 +233,7 @@ pub fn request_stop() {
 pub fn request_pause() {
     PAUSED.store(true, Ordering::SeqCst);
     INTERRUPTED.store(true, Ordering::SeqCst);
+    ctx_traits_io::run_kill::request_stop();
 }
 
 /// P551: the live TUI's ctrl-c meaning — an instant kill of the active

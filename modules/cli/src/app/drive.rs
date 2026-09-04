@@ -2428,6 +2428,38 @@ fn drive_loop(
                     park_for_disk_full_evidence(&mut report, disk_full, &outcome.session.status);
                     return Ok(report);
                 }
+                // 0281.3: the operator's SIGINT reached the command child (a
+                // waiting gate) as well as this drive. Nothing was submitted
+                // for the frame, so this is the same graceful stop the
+                // between-frames checkpoint records — resumable from the
+                // very frame that was interrupted — never a frame failure.
+                Err(ctx_traits_io::Error::CommandInterrupted {
+                    item_id,
+                    argv,
+                    signal,
+                }) => {
+                    report.status = cooperative_stop_status().to_string();
+                    report.events.push(DriveEvent {
+                        event: "command-interrupted".to_string(),
+                        role: None,
+                        harness: Some("command".to_string()),
+                        detail: format!(
+                            "{} ended by the operator's stop (signal {}); argv {}; the frame stays pending and resume re-runs it",
+                            item_id.as_deref().unwrap_or("-"),
+                            signal.map_or_else(|| "-".to_string(), |signal| signal.to_string()),
+                            argv.join(" "),
+                        ),
+                        duration_ms: None,
+                    });
+                    push_capability(
+                        &mut report,
+                        ctx_traits_core::response::CapabilityReport::unsupported(
+                            "runtime.harness-execution",
+                            cooperative_stop_detail(),
+                        ),
+                    );
+                    return Ok(report);
+                }
                 Err(error) => {
                     if ctx_traits_io::environment::error_chain_is_disk_full(&error) {
                         park_for_disk_full(

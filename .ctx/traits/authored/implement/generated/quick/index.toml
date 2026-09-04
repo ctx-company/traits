@@ -80,6 +80,11 @@ description = "Every owner ruling made during this run — one formatted entry p
 hint = "One entry per ruling: a summons entry is the question and the owner's answer in one or two sentences; a gate entry is the ctx-annotate decision JSON verbatim."
 
 [[slot]]
+id = "plan-answer"
+schema = "schema:text"
+description = "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact plan text the owner annotated — and `text`, the owner's note. Annotations are binding corrections: the plan is drafted again with them as input until the owner accepts it."
+
+[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict"
 description = "First reviewer's verdict for the current work state."
@@ -418,7 +423,9 @@ id = "preserve-scope"
 id = "review-before-final"
 
 [prompt.draft-the-implementation-plan]
-text = "Draft the implementation plan for {port:task}, read it and the relevant code with your tools."
+text = """
+Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
+The owner's corrections to the previous draft, when present, are binding: {slot:plan-answer}"""
 input = ["port:task"]
 output = ["slot:draft"]
 
@@ -493,7 +500,10 @@ id = "draft-the-implementation-plan"
 title = "Draft the implementation plan"
 agent = "agent:smart"
 prompt = "prompt:draft-the-implementation-plan"
-input = ["port:task"]
+input = [
+    "port:task",
+    { slot = "slot:plan-answer", optional = true },
+]
 output = ["slot:draft"]
 
 [[procedure.sequence]]

@@ -61,23 +61,33 @@
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 125,
-    "end": 125
+    "start": 136,
+    "end": 136
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 91,
-    "end": 91
+    "start": 92,
+    "end": 92
+  },
+  "schema:disposition": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 253,
+    "end": 253
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 238,
-    "end": 238
+    "start": 347,
+    "end": 347
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 322,
-    "end": 322
+    "start": 433,
+    "end": 433
+  },
+  "schema:stage-status": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 212,
+    "end": 212
   },
   "schema:task-unchanged": {
     "file": ".ctx/traits/authored/architect/source/shared/data.ts",

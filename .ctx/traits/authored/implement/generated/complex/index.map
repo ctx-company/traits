@@ -16,8 +16,8 @@
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 178,
-    "end": 178
+    "start": 207,
+    "end": 207
   },
   "prompt:cross-review-the-implementation": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
@@ -26,8 +26,8 @@
   },
   "prompt:draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
-    "start": 10,
-    "end": 10
+    "start": 13,
+    "end": 13
   },
   "prompt:implement-the-task": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
@@ -184,6 +184,11 @@
     "start": 87,
     "end": 87
   },
+  "slot:plan-answer": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 191,
+    "end": 191
+  },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 70,
@@ -196,8 +201,8 @@
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 173,
-    "end": 173
+    "start": 202,
+    "end": 202
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
