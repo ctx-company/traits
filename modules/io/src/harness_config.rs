@@ -3026,6 +3026,7 @@ fn resolve_runtime_assignments_impl(
         None
     };
     if let Some(trait_ref) = trait_ref {
+        port_defaults = applicable_port_defaults(trait_ref, port_defaults);
         validate_port_defaults(trait_ref, &port_defaults)?;
     }
 
@@ -3518,6 +3519,24 @@ fn validate_seat_overrides(
         validate_assignment(&seat_role, assignment)?;
     }
     Ok(())
+}
+
+/// Keeps only the defaults whose port the selected variant declares. A
+/// `[defaults.port]` entry — the author's in trait.toml or the operator's
+/// in `[trait.<id>.defaults.port]` — names a port family-wide, while ports
+/// are declared per variant; a variant that does not declare the port has
+/// nothing to default, and that is inapplicable, not invalid (implement's
+/// tree lane declares no owner-ruling, owner-gate or task port, yet the
+/// family's defaults name them). [`validate_port_defaults`] stays strict
+/// over what remains.
+fn applicable_port_defaults(
+    trait_ref: &ctx_traits_core::Trait,
+    defaults: BTreeMap<String, ConfiguredPortDefault>,
+) -> BTreeMap<String, ConfiguredPortDefault> {
+    defaults
+        .into_iter()
+        .filter(|(port_id, _)| trait_ref.ports.iter().any(|port| port.id == *port_id))
+        .collect()
 }
 
 /// Overlay one `RunProfileBudget` onto another: only fields present on
@@ -10917,6 +10936,34 @@ mod config_tests {
         let rendered = format!("{error:#}");
         assert!(rendered.contains("$CTX_CONFIG:trait.example.defaults.port.missing"));
         assert!(rendered.contains("unknown input port \"missing\""));
+    }
+
+    #[test]
+    fn port_defaults_for_ports_the_variant_lacks_are_inapplicable_not_invalid() {
+        // A family-wide default (trait.toml `[defaults.port]` or the
+        // operator's `[trait.<id>.defaults.port]`) may name a port only some
+        // variants declare; the others skip it and validation covers the rest.
+        let trait_ref = ctx_traits_core::encoding::decode_trait(
+            ctx_traits_core::encoding::Encoding::Toml,
+            "id = \"example\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Fixture.\"\n\n[[port]]\nid = \"plan\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Plan path\"\n",
+        )
+        .expect("trait decodes");
+        let default = |value: &str, field: &str| ConfiguredPortDefault {
+            value: value.to_string(),
+            layer: ConfigLayer::BuiltIn,
+            evidence: format!("trait.toml:defaults.port.{field}"),
+        };
+        let defaults = BTreeMap::from([
+            ("plan".to_string(), default("x", "plan")),
+            ("owner-ruling".to_string(), default("off", "owner-ruling")),
+        ]);
+
+        let applicable = applicable_port_defaults(&trait_ref, defaults);
+        assert_eq!(
+            applicable.keys().cloned().collect::<Vec<_>>(),
+            vec!["plan".to_string()]
+        );
+        validate_port_defaults(&trait_ref, &applicable).expect("what remains validates");
     }
 
     #[test]
