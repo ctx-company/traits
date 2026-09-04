@@ -27,7 +27,7 @@ pub(crate) struct DependencyEvidence {
     pub(crate) resource_decls: Vec<ctx_traits_core::resource_plan::DependencyResourceDecl>,
     audit_findings: Vec<ctx_traits_core::audit::Finding>,
     warnings: Vec<ctx_traits_core::check::CheckWarning>,
-    drift: Vec<ctx_traits_core::check::DriftSummary>,
+    drift: Vec<ctx_traits_core::drift::DriftSummary>,
 }
 
 struct SequenceReceipt {
@@ -1000,13 +1000,13 @@ fn locked_dependency_drift(
     alias: &str,
     lockfile: Option<&ctx_traits_io::lockfile::Document>,
     loaded: &ctx_traits_io::dependency::LoadedDependency,
-) -> Vec<ctx_traits_core::check::DriftSummary> {
+) -> Vec<ctx_traits_core::drift::DriftSummary> {
     let Some(lockfile) = lockfile else {
         return Vec::new();
     };
     let Some(entry) = lockfile.dependency_entry(alias) else {
-        return vec![ctx_traits_core::check::DriftSummary {
-            layer: ctx_traits_core::check::DriftLayer::Dependency,
+        return vec![ctx_traits_core::drift::DriftSummary {
+            layer: ctx_traits_core::drift::DriftLayer::Dependency,
             expected: format!("dependency lock entry {alias}"),
             actual: None,
             summary: format!("missing dependency lock entry for {alias}"),
@@ -1046,8 +1046,8 @@ fn locked_dependency_drift(
         }
     }
     let ok_text = format!("dependency {alias} digests match lock evidence");
-    vec![ctx_traits_core::check::DriftSummary {
-        layer: ctx_traits_core::check::DriftLayer::Dependency,
+    vec![ctx_traits_core::drift::DriftSummary {
+        layer: ctx_traits_core::drift::DriftLayer::Dependency,
         expected: ok_text.clone(),
         actual: Some(if mismatches.is_empty() {
             ok_text.clone()

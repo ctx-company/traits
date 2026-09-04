@@ -8,8 +8,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::check::DriftLayer;
 use crate::digest::Digest;
+use crate::drift::DriftLayer;
 
 // ---------------------------------------------------------------------------
 // Diff entry and report

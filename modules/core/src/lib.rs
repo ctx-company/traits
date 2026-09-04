@@ -45,6 +45,7 @@ pub mod diff;
 pub mod digest;
 pub mod discovery_index;
 pub mod distribution;
+pub mod drift;
 pub mod encoding;
 pub mod error;
 pub mod eval_run;

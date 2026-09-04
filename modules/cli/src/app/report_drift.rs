@@ -21,9 +21,9 @@ struct PackageImportSourceLayer {
 }
 
 impl PackageImportSourceLayer {
-    fn drift_summary(&self) -> ctx_traits_core::check::DriftSummary {
-        ctx_traits_core::check::DriftSummary {
-            layer: ctx_traits_core::check::DriftLayer::CanonicalSource,
+    fn drift_summary(&self) -> ctx_traits_core::drift::DriftSummary {
+        ctx_traits_core::drift::DriftSummary {
+            layer: ctx_traits_core::drift::DriftLayer::CanonicalSource,
             expected: self.expected.clone(),
             actual: self.actual.clone(),
             summary: self.summary.clone(),
@@ -34,7 +34,7 @@ impl PackageImportSourceLayer {
     fn diff_entry(&self) -> ctx_traits_core::diff::DiffEntry {
         let changed = !self.unsupported && self.actual.as_deref() != Some(self.expected.as_str());
         ctx_traits_core::diff::DiffEntry {
-            layer: ctx_traits_core::check::DriftLayer::CanonicalSource,
+            layer: ctx_traits_core::drift::DriftLayer::CanonicalSource,
             before_digest: Some(report_digest_from_text(&self.expected)),
             after_digest: self.actual.as_deref().map(report_digest_from_text),
             changed,
@@ -302,12 +302,12 @@ pub(crate) fn locked_drift_summaries(
     current: &CurrentDigestEvidence,
     trait_root: &camino::Utf8Path,
     current_canonical_json: &serde_json::Value,
-) -> crate::Result<Vec<ctx_traits_core::check::DriftSummary>> {
+) -> crate::Result<Vec<ctx_traits_core::drift::DriftSummary>> {
     if !locked {
         return Ok(Vec::new());
     }
 
-    use ctx_traits_core::check::{DriftLayer, DriftSummary};
+    use ctx_traits_core::drift::{DriftLayer, DriftSummary};
 
     let mut drift = Vec::new();
     let lock_path = ctx_traits_io::lockfile::lockfile_path(trait_root);
@@ -400,13 +400,13 @@ pub(crate) fn locked_drift_summaries(
 }
 
 fn compare_locked_digest(
-    layer: ctx_traits_core::check::DriftLayer,
+    layer: ctx_traits_core::drift::DriftLayer,
     expected: Option<&str>,
     actual: &str,
     label: &str,
-) -> ctx_traits_core::check::DriftSummary {
+) -> ctx_traits_core::drift::DriftSummary {
     match expected {
-        Some(expected) => ctx_traits_core::check::DriftSummary {
+        Some(expected) => ctx_traits_core::drift::DriftSummary {
             layer,
             expected: expected.to_string(),
             actual: Some(actual.to_string()),
@@ -417,7 +417,7 @@ fn compare_locked_digest(
             },
             unsupported: false,
         },
-        None => ctx_traits_core::check::DriftSummary {
+        None => ctx_traits_core::drift::DriftSummary {
             layer,
             expected: format!("locked {label}"),
             actual: Some(actual.to_string()),
@@ -430,8 +430,8 @@ fn compare_locked_digest(
 fn compare_locked_exports(
     repo_root: &camino::Utf8Path,
     exports: &[ctx_traits_io::lockfile::LockExportEntry],
-) -> crate::Result<ctx_traits_core::check::DriftSummary> {
-    use ctx_traits_core::check::{DriftLayer, DriftSummary};
+) -> crate::Result<ctx_traits_core::drift::DriftSummary> {
+    use ctx_traits_core::drift::{DriftLayer, DriftSummary};
 
     // No exports is the normal state, not drift.
     //
@@ -598,7 +598,7 @@ pub(crate) fn handle_diff(
         )
     };
     entries.push(diff_digest_with_optional_lock(
-        ctx_traits_core::check::DriftLayer::CanonicalSource,
+        ctx_traits_core::drift::DriftLayer::CanonicalSource,
         from_lock,
         source_expected,
         source_current,
@@ -608,7 +608,7 @@ pub(crate) fn handle_diff(
 
     if model_view || include_all_optional_layers {
         entries.push(diff_digest_with_optional_lock(
-            ctx_traits_core::check::DriftLayer::ModelView,
+            ctx_traits_core::drift::DriftLayer::ModelView,
             from_lock,
             lock_entry.and_then(|entry| entry.model_visible_digest()),
             render_plan.model_view.content_digest.as_str(),
@@ -635,7 +635,7 @@ pub(crate) fn handle_diff(
 
     if resources || include_all_optional_layers {
         entries.push(diff_digest_with_optional_lock(
-            ctx_traits_core::check::DriftLayer::ResourceManifest,
+            ctx_traits_core::drift::DriftLayer::ResourceManifest,
             from_lock,
             lock_entry.and_then(|entry| entry.resource_manifest_digest()),
             manifest.manifest_digest.as_str(),
@@ -643,7 +643,7 @@ pub(crate) fn handle_diff(
             "resource manifest digest",
         ));
         entries.push(ctx_traits_core::diff::unsupported_layer(
-            ctx_traits_core::check::DriftLayer::PolicyManifest,
+            ctx_traits_core::drift::DriftLayer::PolicyManifest,
             "policy manifest comparison not yet wired",
         ));
     }
@@ -732,11 +732,11 @@ fn diff_entry_status(entry: &ctx_traits_core::diff::DiffEntry) -> &'static str {
     }
 }
 
-fn is_lock_layer(layer: &ctx_traits_core::check::DriftLayer) -> bool {
+fn is_lock_layer(layer: &ctx_traits_core::drift::DriftLayer) -> bool {
     matches!(
         layer,
-        ctx_traits_core::check::DriftLayer::Lock
-            | ctx_traits_core::check::DriftLayer::ProjectionLock
+        ctx_traits_core::drift::DriftLayer::Lock
+            | ctx_traits_core::drift::DriftLayer::ProjectionLock
     )
 }
 
@@ -840,7 +840,7 @@ pub(crate) fn load_trait_files(paths: &[String]) -> crate::Result<Vec<ctx_traits
 }
 
 fn diff_digest_with_optional_lock(
-    layer: ctx_traits_core::check::DriftLayer,
+    layer: ctx_traits_core::drift::DriftLayer,
     from_lock: bool,
     expected: Option<&str>,
     current: &str,
@@ -885,13 +885,13 @@ fn projection_lock_diff(
     let mut entry = match status {
         ctx_traits_core::lockfile::ProjectionDriftStatus::MissingLock => {
             ctx_traits_core::diff::missing_baseline(
-                ctx_traits_core::check::DriftLayer::ProjectionLock,
+                ctx_traits_core::drift::DriftLayer::ProjectionLock,
                 Some(model_view_digest),
                 "missing projection evidence",
             )
         }
         _ => ctx_traits_core::diff::digest_diff(
-            ctx_traits_core::check::DriftLayer::ProjectionLock,
+            ctx_traits_core::drift::DriftLayer::ProjectionLock,
             before,
             Some(model_view_digest),
         ),
@@ -973,7 +973,7 @@ fn export_diff_with_optional_lock(
     exports: &[ctx_traits_io::lockfile::LockExportEntry],
     missing_lock_reason: Option<&str>,
 ) -> crate::Result<ctx_traits_core::diff::DiffEntry> {
-    use ctx_traits_core::check::DriftLayer;
+    use ctx_traits_core::drift::DriftLayer;
 
     if !from_lock {
         return Ok(ctx_traits_core::diff::unsupported_layer(
@@ -1068,7 +1068,7 @@ fn eval_result_diff_with_optional_lock(
     missing_lock_reason: Option<&str>,
     current_source_digest: &str,
 ) -> crate::Result<ctx_traits_core::diff::DiffEntry> {
-    use ctx_traits_core::check::DriftLayer;
+    use ctx_traits_core::drift::DriftLayer;
 
     if let Some(reason) = missing_lock_reason {
         return Ok(ctx_traits_core::diff::missing_baseline(
@@ -1120,7 +1120,7 @@ fn lock_diff_with_optional_entry(
     entry: Option<&ctx_traits_io::lockfile::LockTraitEntry>,
     missing_lock_reason: Option<&str>,
 ) -> crate::Result<ctx_traits_core::diff::DiffEntry> {
-    use ctx_traits_core::check::DriftLayer;
+    use ctx_traits_core::drift::DriftLayer;
 
     if let Some(reason) = missing_lock_reason {
         return Ok(ctx_traits_core::diff::missing_baseline(
@@ -1152,8 +1152,8 @@ fn lock_diff_with_optional_entry(
     })
 }
 
-pub(crate) fn layer_label(layer: &ctx_traits_core::check::DriftLayer) -> &str {
-    use ctx_traits_core::check::DriftLayer;
+pub(crate) fn layer_label(layer: &ctx_traits_core::drift::DriftLayer) -> &str {
+    use ctx_traits_core::drift::DriftLayer;
     match layer {
         DriftLayer::CanonicalSource => "canonical-source",
         DriftLayer::ModelView => "model-view",
