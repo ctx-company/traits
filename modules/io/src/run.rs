@@ -4830,6 +4830,64 @@ output = ["slot:command-output"]
     }
 
     #[test]
+    fn command_attempts_are_journaled_and_numbered_from_the_sidecar() {
+        let repo = test_repo("command-attempt-journal");
+        let marker = repo.join("command-ran");
+        let ledger_path = repo.join("session-command-attempt.json");
+        let trait_ref = command_trait("command", &marker);
+        for expected_attempt in 1..=2 {
+            let advanced = advance_command_frames(
+                &trait_ref,
+                &repo,
+                start_command_session(&trait_ref),
+                Some(&ledger_path),
+                Some(&repo),
+                &BTreeMap::new(),
+                None,
+            )
+            .expect("command advances");
+            assert!(advanced.failure.is_none());
+            let (records, skipped) = crate::activity_sidecar::read_activity(&ledger_path);
+            assert_eq!(skipped, 0);
+            assert!(matches!(
+                records.last(),
+                Some(crate::activity_sidecar::ActivityRecord::CommandAttemptEnded {
+                    attempt,
+                    exit_code: Some(0),
+                    ..
+                }) if *attempt == expected_attempt
+            ));
+        }
+        let (records, _) = crate::activity_sidecar::read_activity(&ledger_path);
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| matches!(
+                    record,
+                    crate::activity_sidecar::ActivityRecord::CommandAttemptStarted { .. }
+                ))
+                .count(),
+            2
+        );
+        let unpersisted_ledger_path = repo.join("session-unpersisted.json");
+        advance_command_frames(
+            &trait_ref,
+            &repo,
+            start_command_session(&trait_ref),
+            None,
+            Some(&repo),
+            &BTreeMap::new(),
+            None,
+        )
+        .expect("unpersisted command advances");
+        assert!(
+            !crate::activity_sidecar::activity_exists(&unpersisted_ledger_path),
+            "in-memory command advances must not create an activity sidecar"
+        );
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[test]
     fn command_advance_uses_invocation_repo_disk_floor_on_linked_worktree_resume() {
         let repo = test_repo("linked-command-disk-floor");
         let linked = repo.join("linked-worktree");
@@ -4921,6 +4979,9 @@ fn advance_command_frames(
     env_overlay: &BTreeMap<String, String>,
     tick_observer: Option<&crate::harness::TickObserver>,
 ) -> crate::Result<CommandAdvance> {
+    let mut activity_writer = None;
+    let mut attempt_counts: BTreeMap<(Option<String>, Option<usize>, Option<usize>, String), u32> =
+        BTreeMap::new();
     loop {
         if session.status
             != ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired
@@ -5037,7 +5098,58 @@ fn advance_command_frames(
         // the same signal can never retroactively change what this
         // activation's replay sees.
         let signal_emission_ceiling = frame.signal_emission_ceiling;
-        let outcome = match crate::command::run_with_env(
+        let attempt_identity = (
+            item_id.clone(),
+            sequence_index,
+            run_index,
+            serde_json::to_string(&position_path).unwrap_or_default(),
+        );
+        if activity_writer.is_none()
+            && let Some(path) = persist_path
+        {
+            let (records, _) = crate::activity_sidecar::read_activity(path);
+            for record in records {
+                if let crate::activity_sidecar::ActivityRecord::CommandAttemptStarted {
+                    item_id,
+                    source_index,
+                    run_index,
+                    position_path,
+                    ..
+                } = record
+                {
+                    let key = (
+                        item_id,
+                        source_index,
+                        run_index,
+                        serde_json::to_string(&position_path).unwrap_or_default(),
+                    );
+                    let count = attempt_counts.entry(key).or_default();
+                    *count = count.saturating_add(1);
+                }
+            }
+            activity_writer = Some(crate::activity_sidecar::ActivitySidecarWriter::open(path));
+        }
+        let attempt = activity_writer.as_ref().map(|_| {
+            let count = attempt_counts.entry(attempt_identity.clone()).or_default();
+            *count = count.saturating_add(1);
+            *count
+        });
+        if let (Some(writer), Some(attempt)) = (activity_writer.as_mut(), attempt) {
+            writer.append_command_attempt_started(
+                crate::activity_sidecar::ActivityRecord::CommandAttemptStarted {
+                    at_epoch_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_millis() as u64)
+                        .unwrap_or(0),
+                    item_id: item_id.clone(),
+                    source_index: sequence_index,
+                    run_index,
+                    position_path: position_path.clone(),
+                    attempt,
+                },
+            );
+        }
+        let observed = match crate::command::run_observed_with_env(
             crate::command::RunRequest {
                 argv: &process_argv,
                 cwd: cwd.as_deref(),
@@ -5055,7 +5167,7 @@ fn advance_command_frames(
             },
             env_overlay,
         ) {
-            Ok(outcome) => outcome,
+            Ok(observed) => observed,
             Err(error) if crate::environment::error_chain_is_disk_full(&error) => {
                 let observation = crate::environment::dispatch_disk_available(
                     invocation_dir.as_deref(),
@@ -5080,6 +5192,34 @@ fn advance_command_frames(
             }
             Err(error) => return Err(error),
         };
+        let crate::command::ObservedRun {
+            output: outcome,
+            observation,
+        } = observed;
+        if let (Some(writer), Some(attempt)) = (activity_writer.as_mut(), attempt) {
+            writer.append_command_attempt_ended(
+                crate::activity_sidecar::ActivityRecord::CommandAttemptEnded {
+                    at_epoch_ms: observation.ended_at_epoch_ms,
+                    item_id: item_id.clone(),
+                    source_index: sequence_index,
+                    run_index,
+                    position_path: position_path.clone(),
+                    attempt,
+                    started_at_epoch_ms: observation.started_at_epoch_ms,
+                    exit_code: outcome.exit_code,
+                    signal: observation.signal,
+                    killed: observation.killed,
+                    timeout_kind: observation.timeout_kind.map(|kind| match kind {
+                        crate::command::TimeoutKind::Idle => "idle".to_string(),
+                        crate::command::TimeoutKind::Wall => "wall".to_string(),
+                    }),
+                    stdout_tail: observation.stdout_tail,
+                    stdout_tail_truncated: observation.stdout_tail_truncated,
+                    stderr_tail: observation.stderr_tail,
+                    stderr_tail_truncated: observation.stderr_tail_truncated,
+                },
+            );
+        }
         if frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Check {
             let verdict = outcome.success;
             let mut warnings = vec![format!(

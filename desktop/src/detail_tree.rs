@@ -739,6 +739,8 @@ impl ActivityOverlay {
             // attach to a node; deliberately not reused here (see the task's
             // scope decision) and so not attached to anything below.
             ActivityRecord::StepSummary { .. } => {}
+            ActivityRecord::CommandAttemptStarted { .. }
+            | ActivityRecord::CommandAttemptEnded { .. } => {}
         }
     }
 

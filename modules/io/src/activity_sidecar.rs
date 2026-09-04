@@ -16,8 +16,11 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ctx_traits_core::procedure::activity::ActivityEvent;
+use ctx_traits_core::procedure::runtime::PathSegment;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// One line of the sidecar. `at_epoch_ms` is stamped here, at the IO
 /// boundary — core's `ActivityEvent` stays clock-free.
@@ -53,6 +56,33 @@ pub enum ActivityRecord {
         frame_id: String,
         text: String,
     },
+    /// P277: evidence that a local command step is about to be spawned.
+    CommandAttemptStarted {
+        at_epoch_ms: u64,
+        item_id: Option<String>,
+        source_index: Option<usize>,
+        run_index: Option<usize>,
+        position_path: Vec<PathSegment>,
+        attempt: u32,
+    },
+    /// P277: bounded facts captured from a completed local command step.
+    CommandAttemptEnded {
+        at_epoch_ms: u64,
+        item_id: Option<String>,
+        source_index: Option<usize>,
+        run_index: Option<usize>,
+        position_path: Vec<PathSegment>,
+        attempt: u32,
+        started_at_epoch_ms: u64,
+        exit_code: Option<i32>,
+        signal: Option<i32>,
+        killed: bool,
+        timeout_kind: Option<String>,
+        stdout_tail: String,
+        stdout_tail_truncated: bool,
+        stderr_tail: String,
+        stderr_tail_truncated: bool,
+    },
 }
 
 impl ActivityRecord {
@@ -62,6 +92,8 @@ impl ActivityRecord {
             ActivityRecord::StepSummary { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::SessionTitle { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::Narration { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::CommandAttemptStarted { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::CommandAttemptEnded { at_epoch_ms, .. } => *at_epoch_ms,
         }
     }
 
@@ -100,6 +132,7 @@ type ActivityObserver = Box<dyn Fn(&ActivityRecord) + Send + Sync>;
 pub struct ActivitySidecarWriter {
     file: Option<std::fs::File>,
     observer: Option<ActivityObserver>,
+    sync_count: Arc<AtomicU64>,
 }
 
 impl ActivitySidecarWriter {
@@ -111,6 +144,7 @@ impl ActivitySidecarWriter {
             return Self {
                 file: None,
                 observer: None,
+                sync_count: Arc::new(AtomicU64::new(0)),
             };
         }
         let file = std::fs::OpenOptions::new()
@@ -121,6 +155,7 @@ impl ActivitySidecarWriter {
         Self {
             file,
             observer: None,
+            sync_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -143,6 +178,25 @@ impl ActivitySidecarWriter {
             && let Some(observer) = &self.observer
         {
             observer(record);
+        }
+    }
+
+    fn append_durable_line(&mut self, record: &ActivityRecord) {
+        let Some(file) = self.file.as_mut() else {
+            return;
+        };
+        let Ok(mut line) = serde_json::to_string(record) else {
+            return;
+        };
+        line.push('\n');
+        if file.write_all(line.as_bytes()).is_ok()
+            && file.flush().is_ok()
+            && file.sync_all().is_ok()
+        {
+            self.sync_count.fetch_add(1, Ordering::Relaxed);
+            if let Some(observer) = &self.observer {
+                observer(record);
+            }
         }
     }
 
@@ -182,6 +236,24 @@ impl ActivitySidecarWriter {
             frame_id,
             text,
         });
+    }
+
+    pub fn append_command_attempt_started(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(
+            record,
+            ActivityRecord::CommandAttemptStarted { .. }
+        ));
+        self.append_durable_line(&record);
+    }
+
+    pub fn append_command_attempt_ended(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::CommandAttemptEnded { .. }));
+        self.append_durable_line(&record);
+    }
+
+    #[cfg(test)]
+    fn sync_count(&self) -> Arc<AtomicU64> {
+        self.sync_count.clone()
     }
 }
 
@@ -283,6 +355,47 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_durable_command_attempt_records_in_the_existing_envelope() {
+        let dir = scratch_dir("command-attempt-round-trip");
+        let ledger_path = dir.join("session-fixture.json");
+        let started = ActivityRecord::CommandAttemptStarted {
+            at_epoch_ms: 10,
+            item_id: Some("command-item".to_string()),
+            source_index: Some(2),
+            run_index: Some(3),
+            position_path: Vec::new(),
+            attempt: 1,
+        };
+        let ended = ActivityRecord::CommandAttemptEnded {
+            at_epoch_ms: 20,
+            item_id: Some("command-item".to_string()),
+            source_index: Some(2),
+            run_index: Some(3),
+            position_path: Vec::new(),
+            attempt: 1,
+            started_at_epoch_ms: 10,
+            exit_code: Some(1),
+            signal: None,
+            killed: false,
+            timeout_kind: None,
+            stdout_tail: "stdout".to_string(),
+            stdout_tail_truncated: false,
+            stderr_tail: "stderr".to_string(),
+            stderr_tail_truncated: false,
+        };
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        writer.append_command_attempt_started(started.clone());
+        writer.append_command_attempt_ended(ended.clone());
+        let text = std::fs::read_to_string(activity_path(&ledger_path).as_std_path())
+            .expect("read sidecar");
+        assert!(text.contains("\"record\":\"command-attempt-started\""));
+        assert!(text.contains("\"at_epoch_ms\":10"));
+        let (records, skipped) = read_activity(&ledger_path);
+        assert_eq!(skipped, 0);
+        assert_eq!(records, vec![started, ended]);
+    }
+
+    #[test]
     fn as_activity_returns_the_stamp_and_event_only_for_the_activity_variant() {
         let event = fixture_event(1);
         let activity = ActivityRecord::Activity {
@@ -318,8 +431,31 @@ mod tests {
         let dir = scratch_dir("truncated");
         let ledger_path = dir.join("session-fixture.json");
         let mut writer = ActivitySidecarWriter::open(&ledger_path);
-        writer.append_activity(fixture_event(1));
-        writer.append_activity(fixture_event(2));
+        writer.append_command_attempt_started(ActivityRecord::CommandAttemptStarted {
+            at_epoch_ms: 10,
+            item_id: Some("command-item".to_string()),
+            source_index: Some(2),
+            run_index: Some(3),
+            position_path: Vec::new(),
+            attempt: 1,
+        });
+        writer.append_command_attempt_ended(ActivityRecord::CommandAttemptEnded {
+            at_epoch_ms: 20,
+            item_id: Some("command-item".to_string()),
+            source_index: Some(2),
+            run_index: Some(3),
+            position_path: Vec::new(),
+            attempt: 1,
+            started_at_epoch_ms: 10,
+            exit_code: Some(1),
+            signal: None,
+            killed: false,
+            timeout_kind: None,
+            stdout_tail: "stdout".to_string(),
+            stdout_tail_truncated: false,
+            stderr_tail: "stderr".to_string(),
+            stderr_tail_truncated: false,
+        });
         drop(writer);
         // Simulate a process killed mid-write: append a truncated JSON line.
         let path = activity_path(&ledger_path);
@@ -330,7 +466,13 @@ mod tests {
         file.write_all(b"{\"record\":\"activity\",\"at-ep")
             .expect("write truncated line");
         let (records, skipped) = read_activity(&ledger_path);
-        assert_eq!(records.len(), 2);
+        assert!(matches!(
+            records.as_slice(),
+            [
+                ActivityRecord::CommandAttemptStarted { .. },
+                ActivityRecord::CommandAttemptEnded { .. }
+            ]
+        ));
         assert_eq!(skipped, 1);
     }
 
@@ -424,6 +566,35 @@ mod tests {
         });
         writer.append_activity(fixture_event(1));
         assert!(observed_after_write.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn command_attempt_observer_runs_after_sync() {
+        let dir = scratch_dir("command-attempt-observer");
+        let ledger_path = dir.join("session-fixture.json");
+        let observed_after_sync = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        let sync_count = writer.sync_count();
+        let observer_path = ledger_path.clone();
+        let observer_seen = observed_after_sync.clone();
+        writer.set_observer(move |record| {
+            let (records, skipped) = read_activity(&observer_path);
+            observer_seen.store(
+                sync_count.load(Ordering::Relaxed) == 1
+                    && skipped == 0
+                    && records.last() == Some(record),
+                Ordering::Relaxed,
+            );
+        });
+        writer.append_command_attempt_started(ActivityRecord::CommandAttemptStarted {
+            at_epoch_ms: 10,
+            item_id: None,
+            source_index: None,
+            run_index: None,
+            position_path: Vec::new(),
+            attempt: 1,
+        });
+        assert!(observed_after_sync.load(Ordering::Relaxed));
     }
 
     #[test]

@@ -257,6 +257,8 @@ pub(crate) fn load_activity(
                     text,
                 });
             }
+            ctx_traits_io::activity_sidecar::ActivityRecord::CommandAttemptStarted { .. }
+            | ctx_traits_io::activity_sidecar::ActivityRecord::CommandAttemptEnded { .. } => {}
         }
     }
     Some(ctx_traits_core::procedure::story::ActivityInput {
