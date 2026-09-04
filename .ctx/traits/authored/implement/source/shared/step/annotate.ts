@@ -15,6 +15,7 @@ import * as cdk from "@ctx-traits/cdk";
 
 import { scribe } from "../agent.ts";
 import {
+  annotations,
   draft,
   gateAnswer,
   gateSurface,
@@ -108,6 +109,31 @@ export function planApprovalGate(title: string): void {
     id: "owner-plan-gate",
     argv: ["sh", "-c", GATE_SCRIPT, "_", planSurface, planGate],
     output: planAnswer,
+    timeoutMs: GATE_CEILING_MS,
+    idleTimeoutMs: GATE_CEILING_MS,
+  });
+}
+
+// ---- The tree lane (implement:annotate): ctx-annotate opens on the run's
+// working tree — no --stdin, no surface — and the owner's annotations are
+// the task. Same house shape as the gates; no off mode, because in this
+// lane the tree view is the whole point. `none` when the owner closes the
+// tree without annotating, so the variant can skip the loop.
+
+const TREE_SCRIPT = [
+  "out=$(ctx-annotate --raw)",
+  'case "$out" in',
+  '  *\'"annotations":[]\'*) printf none ;;',
+  '  "") printf none ;;',
+  '  *) printf \'%s\' "$out" ;;',
+  "esac",
+].join("\n");
+
+export function treeGate(title: string): void {
+  cdk.step.command(title, {
+    id: "owner-tree-annotate",
+    argv: ["sh", "-c", TREE_SCRIPT, "_"],
+    output: annotations,
     timeoutMs: GATE_CEILING_MS,
     idleTimeoutMs: GATE_CEILING_MS,
   });

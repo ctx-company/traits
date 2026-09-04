@@ -13,4 +13,5 @@ export default function () {
   cdk.useVariant(variant.basic).default();
   cdk.useVariant(variant.quick);
   cdk.useVariant(variant.complex);
+  cdk.useVariant(variant.annotate);
 }

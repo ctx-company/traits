@@ -21,6 +21,10 @@ aliases = ["implement-quick"]
 path = "generated/complex/index.toml"
 aliases = ["implement-complex"]
 
+[family.variant.annotate]
+path = "generated/annotate/index.toml"
+aliases = ["implement-annotate"]
+
 [publish]
 name = "@ctx-traits/implement"
 access = "public"

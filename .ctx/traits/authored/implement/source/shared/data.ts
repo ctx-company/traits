@@ -225,6 +225,15 @@ export const ownerGate = cdk.port.input.text({
   default: { value: "annotate" },
 });
 
+// The tree lane (implement:annotate): the owner's annotations over the
+// working tree are the task. No task port, no plan gate, no verdict gate —
+// ctx-annotate is used once, at the start.
+export const annotations = cdk.slot.text({
+  id: "annotations",
+  description:
+    "The owner's annotations from ctx-annotate's tree view over the run's working tree: the decision JSON, each entry naming a file, its lines, the exact annotated text (raw) and the owner's note (text). In the tree lane this is the task — what to change and where — and the plan's goals are cut from it. The literal 'none' when the owner closed the tree without annotating.",
+});
+
 export const planGate = cdk.port.input.text({
   id: "plan-gate",
   description:
@@ -259,4 +268,5 @@ export const slot = {
   planDigest,
   planSurface,
   planAnswer,
+  annotations,
 };

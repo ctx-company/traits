@@ -5,6 +5,18 @@ generated-at = "not-recorded"
 
 [[trait]]
 id = "implement"
+variant = "annotate"
+requested-version = "0.25.0"
+resolved-version = "0.25.0"
+
+[trait.digests]
+source = "sha256:4145887709d418a1022646118f3dea038d6d376560778f09c951c8a02296dc62"
+canonical = "sha256:95c3fef8fc2a8addbb46ab77f9512ec51b35c09d618a9641d6faef84afa3cbfe"
+model-visible = "sha256:fab0d2dd86ebcaebe3afb39ea78450eeeb645511733f4ac06cfb544f46a676cb"
+resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
+
+[[trait]]
+id = "implement"
 variant = "basic"
 requested-version = "0.25.0"
 resolved-version = "0.25.0"

@@ -34,3 +34,15 @@ export const commitMessage = cdk.defineStep.prompt({
     Return exactly the finished commit message into (${slot.commitMessage}).
   `,
 });
+
+// The tree lane has no task port: the owner's annotations are the task.
+export const commitMessageAnnotated = cdk.defineStep.prompt({
+  agent: scribe,
+  input: cdk.input.prompt`
+    The work for the owner's tree annotations is being committed: ${slot.annotations}.
+    Write a concise commit message from the work summary into ${slot.workSummary}.
+  `,
+  output: cdk.output.prompt`
+    Return exactly the finished commit message into (${slot.commitMessage}).
+  `,
+});
