@@ -259,7 +259,12 @@ pub(crate) fn load_activity(
             }
             ctx_traits_io::activity_sidecar::ActivityRecord::CommandAttemptStarted { .. }
             | ctx_traits_io::activity_sidecar::ActivityRecord::CommandAttemptEnded { .. }
-            | ctx_traits_io::activity_sidecar::ActivityRecord::Verdict { .. } => {}
+            | ctx_traits_io::activity_sidecar::ActivityRecord::Verdict { .. }
+            | ctx_traits_io::activity_sidecar::ActivityRecord::MergeAttemptStarted { .. }
+            | ctx_traits_io::activity_sidecar::ActivityRecord::MergeAttemptEnded { .. }
+            | ctx_traits_io::activity_sidecar::ActivityRecord::TaskCheckStarted { .. }
+            | ctx_traits_io::activity_sidecar::ActivityRecord::TaskCheckEnded { .. }
+            | ctx_traits_io::activity_sidecar::ActivityRecord::TaskCloseAttempt { .. } => {}
         }
     }
     Some(ctx_traits_core::procedure::story::ActivityInput {

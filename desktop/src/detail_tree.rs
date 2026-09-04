@@ -741,7 +741,12 @@ impl ActivityOverlay {
             ActivityRecord::StepSummary { .. } => {}
             ActivityRecord::CommandAttemptStarted { .. }
             | ActivityRecord::CommandAttemptEnded { .. }
-            | ActivityRecord::Verdict { .. } => {}
+            | ActivityRecord::Verdict { .. }
+            | ActivityRecord::MergeAttemptStarted { .. }
+            | ActivityRecord::MergeAttemptEnded { .. }
+            | ActivityRecord::TaskCheckStarted { .. }
+            | ActivityRecord::TaskCheckEnded { .. }
+            | ActivityRecord::TaskCloseAttempt { .. } => {}
         }
     }
 

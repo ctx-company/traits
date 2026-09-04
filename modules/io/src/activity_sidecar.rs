@@ -17,6 +17,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use ctx_traits_core::procedure::activity::ActivityEvent;
 use ctx_traits_core::procedure::runtime::PathSegment;
+use ctx_traits_core::task::CheckRecord;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::sync::Arc;
@@ -97,6 +98,40 @@ pub enum ActivityRecord {
         agent: Option<String>,
         harness: Option<String>,
     },
+    /// Evidence that a resolved-session merge attempt has begun.
+    MergeAttemptStarted {
+        at_epoch_ms: u64,
+        run_id: String,
+        source: String,
+    },
+    /// The result of a resolved-session merge attempt.
+    MergeAttemptEnded {
+        at_epoch_ms: u64,
+        run_id: String,
+        started_at_epoch_ms: u64,
+        status: String,
+        reason: String,
+    },
+    /// Evidence written durably before a declared task check is run.
+    TaskCheckStarted {
+        at_epoch_ms: u64,
+        task_key: String,
+        name: String,
+        command: String,
+    },
+    /// The verdict and execution facts for a declared task check.
+    TaskCheckEnded {
+        at_epoch_ms: u64,
+        task_key: String,
+        check: CheckRecord,
+    },
+    /// A queue close decision and, when declined, its concrete refusal.
+    TaskCloseAttempt {
+        at_epoch_ms: u64,
+        task_key: String,
+        disposition: String,
+        refusal: Option<String>,
+    },
 }
 
 impl ActivityRecord {
@@ -109,6 +144,11 @@ impl ActivityRecord {
             ActivityRecord::CommandAttemptStarted { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::CommandAttemptEnded { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::Verdict { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::MergeAttemptStarted { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::MergeAttemptEnded { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::TaskCheckStarted { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::TaskCheckEnded { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::TaskCloseAttempt { at_epoch_ms, .. } => *at_epoch_ms,
         }
     }
 
@@ -271,6 +311,31 @@ impl ActivitySidecarWriter {
         self.append_durable_line(&record);
     }
 
+    pub fn append_merge_attempt_started(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::MergeAttemptStarted { .. }));
+        self.append_durable_line(&record);
+    }
+
+    pub fn append_merge_attempt_ended(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::MergeAttemptEnded { .. }));
+        self.append_durable_line(&record);
+    }
+
+    pub fn append_task_check_started(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::TaskCheckStarted { .. }));
+        self.append_durable_line(&record);
+    }
+
+    pub fn append_task_check_ended(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::TaskCheckEnded { .. }));
+        self.append_durable_line(&record);
+    }
+
+    pub fn append_task_close_attempt(&mut self, record: ActivityRecord) {
+        debug_assert!(matches!(record, ActivityRecord::TaskCloseAttempt { .. }));
+        self.append_durable_line(&record);
+    }
+
     #[cfg(test)]
     fn sync_count(&self) -> Arc<AtomicU64> {
         self.sync_count.clone()
@@ -330,6 +395,7 @@ pub fn remove_activity_for_ledger(ledger_path: &Utf8Path) {
 mod tests {
     use super::*;
     use ctx_traits_core::procedure::activity::ActivityKind;
+    use ctx_traits_core::task::CheckOutcome;
 
     fn scratch_dir(name: &str) -> Utf8PathBuf {
         let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
@@ -413,6 +479,70 @@ mod tests {
         let (records, skipped) = read_activity(&ledger_path);
         assert_eq!(skipped, 0);
         assert_eq!(records, vec![started, ended]);
+    }
+
+    #[test]
+    fn round_trips_durable_lifecycle_records_in_the_existing_envelope() {
+        let dir = scratch_dir("lifecycle-round-trip");
+        let ledger_path = dir.join("session-fixture.json");
+        let merge_started = ActivityRecord::MergeAttemptStarted {
+            at_epoch_ms: 10,
+            run_id: "run-1".to_string(),
+            source: "queue".to_string(),
+        };
+        let merge_ended = ActivityRecord::MergeAttemptEnded {
+            at_epoch_ms: 20,
+            run_id: "run-1".to_string(),
+            started_at_epoch_ms: 10,
+            status: "merged".to_string(),
+            reason: "all gates passed".to_string(),
+        };
+        let check_started = ActivityRecord::TaskCheckStarted {
+            at_epoch_ms: 30,
+            task_key: "0277".to_string(),
+            name: "unit".to_string(),
+            command: "cargo test".to_string(),
+        };
+        let check_ended = ActivityRecord::TaskCheckEnded {
+            at_epoch_ms: 40,
+            task_key: "0277".to_string(),
+            check: CheckRecord {
+                name: "unit".to_string(),
+                command: "cargo test".to_string(),
+                outcome: CheckOutcome::Passed,
+                detail: "exit 0".to_string(),
+            },
+        };
+        let close_attempt = ActivityRecord::TaskCloseAttempt {
+            at_epoch_ms: 50,
+            task_key: "0277".to_string(),
+            disposition: "auto-close".to_string(),
+            refusal: Some("digest mismatch".to_string()),
+        };
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        writer.append_merge_attempt_started(merge_started.clone());
+        writer.append_merge_attempt_ended(merge_ended.clone());
+        writer.append_task_check_started(check_started.clone());
+        writer.append_task_check_ended(check_ended.clone());
+        writer.append_task_close_attempt(close_attempt.clone());
+
+        let text = std::fs::read_to_string(activity_path(&ledger_path).as_std_path())
+            .expect("read sidecar");
+        assert!(text.contains("\"record\":\"merge-attempt-started\""));
+        assert!(text.contains("\"record\":\"task-close-attempt\""));
+        let (records, skipped) = read_activity(&ledger_path);
+        assert_eq!(skipped, 0);
+        assert_eq!(
+            records,
+            vec![
+                merge_started,
+                merge_ended,
+                check_started,
+                check_ended,
+                close_attempt,
+            ]
+        );
+        assert_eq!(records[4].at_epoch_ms(), 50);
     }
 
     #[test]

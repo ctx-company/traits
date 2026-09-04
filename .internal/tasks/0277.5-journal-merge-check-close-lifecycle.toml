@@ -149,23 +149,26 @@ calling checks again would change observable behavior and timing.
 """
 
 [relations]
+depends-on = [
+    "0277.1",
+    "0277.2",
+]
 parent = "0277"
-depends-on = ["0277.1", "0277.2"]
 
 [[checks]]
 name = "io suite passes with lifecycle record plumbing"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "cli suite passes with incident 4 proofs"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
-expect = "test result: ok"
 timeout-ms = 1800000
+expect = "test result: ok"
 
 [[checks]]
 name = "desktop compiles ignoring lifecycle record variants"
 command = "just desktop-test"
-expect = "test result: ok"
 timeout-ms = 3600000
+expect = "test result: ok"
