@@ -3,7 +3,7 @@ key = "0266"
 title = "The Tasks (Board) screen"
 status = "ready"
 raised = "2026-08-29"
-content = '''
+content = """
 The visual charter (`.internal/docs/gpui-desktop-face-design.md`, 2026-08-28) adds four v1 screens after the plan document's item 3, and Tasks is the first of them. It has no board representation: `0256`-`0260` are a one-to-one image of the plan document's items 1-5 and none of them renders a board. This charter is that screen — state sections, task rows, the board bar and its `new task` action, and the selected-task preview — built per `.internal/docs/design/screens/tasks.md` on the vocabulary `0265` extracted while rendering Sessions.
 
 The screen is small and fully specified, and its spec tags every leaf. The main pane is a counts-from-data header with a placeholder-phrased italic summary, three state sections (`In progress`, `Ready`, `Draft`) of mono-11 muted headings over task rows, and a bottom bar reading `synced` in ok with `.internal/tasks @ <sha>` provenance and a `new task` action that creates a draft. The 380-wide preview is a headerless lede plus four blocks — `details`, `facts`, `checks`, `landing` — and a footer citing `.internal/tasks` with a sync time. The committed reference export carries literal pixel values, hex colours and font declarations, so no pencil access is needed.
@@ -92,8 +92,8 @@ Wire lines are bounded at 1 MiB (`center.rs:48-52`). This repository's own board
 - **The landing line's close policy.** By the time `0266.5` runs, `0265.15` is expected to have landed one shared root-taking auto-close resolution where a task override wins over `[tasks] auto-close`. HEAD still carries two CLI-private copies (`modules/cli/src/app/task_proposals.rs:473-495`, `tasks.rs:300-305`). Extend the landed one; a third copy is a defect.
 - **`frame N of M`.** By the time `0266.4` runs, `0265.14` is expected to have extracted the structural progress derivation from run reconstruction (currently CLI-private in `run_view`'s `projection.rs` / `planned.rs:600-661`). Extend that; never derive progress from `current_run_index` or from a row count.
 - **`in review` is not a task state**, per `0265` Correction 2 — stored status is the closed enum and `blocked` is derived for open leaves only. `screens/tasks.md` writes `0243.4 · in review` as an example. Render the served state word; the design example strings (`0243.4`, `run-ab12ef`, `implement`, the narrated summary sentence) are illustrations and are never hardcoded.
-'''
-scope = '''
+"""
+scope = """
 ## Binding constraints and exclusions
 
 These bound the outcome regardless of the route taken.
@@ -156,8 +156,8 @@ After the last child lands, and before this charter is called done, one review p
 - Apply the export's known content conflicts as resolutions, not as requirements: no rail counts (grammar rule 10), no menu entry for a screen that does not exist yet, no `ctx-logo-white.png` assumption, `→` on the landing line, no `in review` state text, and no extra row metadata such as `implement · 42m` that `screens/tasks.md` does not specify.
 - Exercise the boundaries the leaves depend on: an absent board directory, an unparseable document, a duplicate key, a dangling edge, a board with no runs, a task claimed by a live run and by a pending one, a draft created and observed by a second face, a refused creation, an accepted and a rejected snapshot projection, and center loss and recovery.
 - Run the workspace gates below (`just test-full` and the root-resolution check), and, if `0256.1` has by then established a desktop lane command, that command too as supplementary proof of the rendered screen.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - **`grammar.md` and `screens/tasks.md` are the specification; the export is measurement.** Copying a value out of `reference/tasks.html` is right for geometry and wrong for content; the conflicts are listed in the closing pass and a further one found during implementation is resolved the same way and reported.
@@ -192,18 +192,22 @@ Exclusions, restated so they are checkable by reading the diff: no light-theme v
 Children run in the three stages listed in `scope`; within a stage, the encoded edges are the only ordering that binds. When the last child lands, the suggested closing route is: leaf-by-leaf review against `screens/tasks.md`, then the literal geometry comparison against `reference/tasks.html`, then the boundary exercises, then `just test-full` and the root-resolution check, with the desktop lane command added once `0256.1` has landed one. The reason for that shape is cheap evidence first, so a rendering defect surfaces next to the leaf that owns it rather than inside a long gate. The sequence is guidance, not a boundary: a pass that reorders it, folds steps together, or reaches the same evidence another way is legitimate and reports the deviation in its work summary.
 
 The stop condition binds. Permit at most one targeted repair-and-rerun round at this level: a round repairs one named defect in the child that owns it, then reruns whatever closing evidence is needed to show the repair holds and broke nothing already proven. If a second round would be needed, stop and report the failing command or the failing leaf with its evidence rather than iterating; that is the stop condition, not a judgement call.
-'''
+"""
+
 [relations]
-depends-on = ["0265", "0258"]
+depends-on = [
+    "0265",
+    "0258",
+]
 
 [[checks]]
 name = "workspace landing gate remains green and gpui-free in cost"
 command = "just test-full"
-expect = "test result: ok\\. [1-9][0-9]* passed"
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "root Cargo resolution, workspace membership and lockfile remain gpui-free"
-command = '''m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc'''
-expect = "gpui absent from root resolution and lockfile"
+command = """m="$(mktemp)" && cargo metadata --format-version 1 >"$m" 2>/dev/null && grep -q '"name":"ctx-traits-cli"' "$m" && ! grep -q '"name":"gpui"' "$m" && grep -q '^name = "ctx-traits-cli"$' Cargo.lock && ! grep -q '^name = "gpui"$' Cargo.lock && echo "gpui absent from root resolution and lockfile"; rc=$?; rm -f "$m"; exit $rc"""
 timeout-ms = 300000
+expect = "gpui absent from root resolution and lockfile"

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0266.9"
 title = "Deliver 0266.1's unmet contract remainder — shared run-state functions, board edge cases, and the missing proofs"
-status = "ready"
+status = "done"
 raised = "2026-09-01"
+closed = "2026-09-03"
+origin = "run run-d897f9d55713d3b3d806c421927ee32b16308fa2742e83a5c2f6edbe909e15c2 merged as ef787028c43d73864e092d67c6dcb8b736c6a8f5"
 content = """
 Owner order 2026-09-01. Task 0266.1 closed done under the three-round
 review cap with fifteen of its reviewer's twenty-six contract cells
@@ -111,3 +113,19 @@ name = "cli suites including proof_center pass"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
 timeout-ms = 1800000
 expect = "test result: ok"
+
+[closure]
+mode = "merge"
+commit = "ef787028c43d73864e092d67c6dcb8b736c6a8f5"
+
+[[closure.checks]]
+name = "core and io suites pass with the new proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core -p ctx-traits-io"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "cli suites including proof_center pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+outcome = "failed"
+detail = "exited 101"

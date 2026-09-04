@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0280.5"
 title = "Dashboard, queue, and run report disk-full as a park, never a failure"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
+closed = "2026-09-03"
+origin = "run run-d2ce84362bcac96c7bd6eec9d5128fac71fb40dfc7fbcd36da5edaa6247a4e77 merged as 58b6d7361db5a328aeaa10ea2bd02794458cc855"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
@@ -135,3 +137,25 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "workspace gate is green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "58b6d7361db5a328aeaa10ea2bd02794458cc855"
+
+[[closure.checks]]
+name = "queue classification unit tests are green including the disk-full park"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli task_queue_drive"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "dashboard classification unit tests are green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli dashboard"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "workspace gate is green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

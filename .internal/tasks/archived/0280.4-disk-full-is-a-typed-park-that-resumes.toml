@@ -1,9 +1,11 @@
 schema-version = "0.2"
 key = "0280.4"
 title = "Disk-full is a typed park at the dispatch boundary, and it resumes"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
-content = '''
+closed = "2026-09-03"
+origin = "run run-b7dc92b9176c03e2d95c7e6f73568505db7262980b274906ad60f123dbf7630c merged as ee0749432b1dedddedbae4801f9d599c8788979b"
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one
 names an observable outcome, what decides it, and what it excludes. The APPROACH
 section is the architect's suggested route — files, symbols, edit order,
@@ -147,8 +149,8 @@ auto-executed command/check) is gated by the same shared preflight.
    proofs are unchanged.
    Decided by: the declared `proof_budget_pause`, `proof_center`, and
    `just test` checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Conservative gating: every dispatch site preflights; the cost is one or two
@@ -208,8 +210,8 @@ scope = '''
    test -p ctx-traits-cli --test proof_center`; `just sdk-check`; `just
    test`. Isolate the build cache (`CARGO_TARGET_DIR=target`) before
    trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - The center must never rewrite a disk-full park to `interrupted` — settled
@@ -237,10 +239,11 @@ validation = '''
 - The same retained session resumes to completion once observed available
   space satisfies its configured floor — behaviorally proven.
 - `proof_budget_pause`, `proof_center`, and `just test` green.
-'''
+"""
+
 [relations]
-parent = "0280"
 depends-on = ["0280.1"]
+parent = "0280"
 
 [[checks]]
 name = "typed disk-full wire value exists in the session outcome model"
@@ -255,16 +258,50 @@ timeout-ms = 1800000
 [[checks]]
 name = "budget-pause boundary suite is green"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_budget_pause"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "center proof suite is green including orphan-repair behavior"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "workspace gate is green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "ee0749432b1dedddedbae4801f9d599c8788979b"
+
+[[closure.checks]]
+name = "typed disk-full wire value exists in the session outcome model"
+command = "grep -n 'disk-full' modules/core/src/procedure/session.rs"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "generated config carries the retention disk floor without drift"
+command = "just sdk-check"
+outcome = "passed"
+detail = "exit 0"
+
+[[closure.checks]]
+name = "budget-pause boundary suite is green"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_budget_pause"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "center proof suite is green including orphan-repair behavior"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_center"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "workspace gate is green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

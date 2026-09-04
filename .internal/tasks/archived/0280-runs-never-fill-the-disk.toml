@@ -3,7 +3,7 @@ key = "0280"
 title = "Runs never fill the disk: reclaim on landed and killed, park on disk-full"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 Charter. This file carries the shared intent, the family-wide decisions, and
 the umbrella stop condition. It lands no code of its own: every execution plan
 lives in the children, each of which separates binding goals from suggested
@@ -118,8 +118,8 @@ Behavioral proofs in scratch homes observing real disk, registry, and ledger
 state — no frozen-inventory or behavior-freezing tests. Each child carries
 its own checks; the charter's checks below verify the family's joined
 artifacts and gates.
-'''
-scope = '''
+"""
+scope = """
 Goals 1-6 of the original draft are distributed as follows, binding in the
 children: goal 1 (landed/killed reclaim before queue advancement, in the
 ledger) → 0280.3; goal 2 (parked/failed preserve everything) → 0280.1 with
@@ -136,8 +136,8 @@ Out of scope for the whole family: making failed/interrupted runs resumable
 landing-flow changes; automatic space watching or resumption; lease or
 reference-count infrastructure for shared named caches (last-run-out,
 decided above, is the family's model and needs neither).
-'''
-validation = '''
+"""
+validation = """
 ## Done when
 
 1. All five children are status done.
@@ -153,7 +153,8 @@ validation = '''
    disk-full outcome write is reconstructed by the next reader rather than
    left as bare `interrupted` (0280.4/0280.5).
 5. `just test-full` is green on the family's final state.
-'''
+"""
+
 [[checks]]
 name = "all five children are done"
 command = 'for f in .internal/tasks/0280.1-*.toml .internal/tasks/0280.2-*.toml .internal/tasks/0280.3-*.toml .internal/tasks/0280.4-*.toml .internal/tasks/0280.5-*.toml; do grep -l "^status = \"done\"" $f || exit 1; done'
@@ -167,14 +168,14 @@ expect = "disk-full"
 [[checks]]
 name = "slot release behavior is unit-proven"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io target_slot"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 900000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "merge-completion proof suite is green on the joined family"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_merge_on_completion"
-expect = 'test result: ok\. [1-9][0-9]* passed'
 timeout-ms = 1800000
+expect = 'test result: ok\. [1-9][0-9]* passed'
 
 [[checks]]
 name = "workspace gate is green"

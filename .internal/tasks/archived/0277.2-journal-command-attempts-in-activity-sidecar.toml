@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0277.2"
 title = "Journal every command-step attempt through the activity sidecar"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
+closed = "2026-09-04"
+origin = "run run-f5058fe11b3a6d752651f8f76842188fa6007b2002073dcd4ef9c38f047fc3d1 merged as 5e98e76994400e1f4e5378a1c177c7ad4d575c6b"
 content = """
 Second child of 0277. The session activity sidecar
 (session-*.json.activity.jsonl) already journals model frames with
@@ -153,3 +155,25 @@ name = "desktop compiles ignoring new record variants"
 command = "just desktop-test"
 timeout-ms = 3600000
 expect = "test result: ok"
+
+[closure]
+mode = "merge"
+commit = "5e98e76994400e1f4e5378a1c177c7ad4d575c6b"
+
+[[closure.checks]]
+name = "io suite passes with sidecar record tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "cli suite passes with attempt journaling proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "desktop compiles ignoring new record variants"
+command = "just desktop-test"
+outcome = "passed"
+detail = "exit 0, expect matched"
