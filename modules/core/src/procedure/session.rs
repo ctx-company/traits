@@ -3225,7 +3225,7 @@ impl CheckEvidence {
     }
 }
 
-/// How much of a failed check's output travels in its verdict record.
+/// How many bytes of a failed check's output travel in its verdict record.
 ///
 /// Enough for a missing-recipe line, a compiler error, or a failed assertion;
 /// far short of the capture limit, because this lands in a rendered frame.
@@ -3259,40 +3259,24 @@ fn failure_tail(evidence: &CommandExecutionEvidence) -> Option<String> {
             // Split the budget: stderr gets first claim on half, stdout the
             // remainder — a short recipe stub on stderr leaves nearly the
             // whole budget to the stream that actually explains.
-            let stderr_tail = clipped_tail(stderr, CHECK_TAIL_LIMIT / 2, evidence.stderr_truncated);
-            let remaining = CHECK_TAIL_LIMIT.saturating_sub(stderr_tail.chars().count());
-            let stdout_tail = clipped_tail(stdout, remaining, evidence.stdout_truncated);
+            let stderr_tail =
+                crate::text::tail_clipped(stderr, CHECK_TAIL_LIMIT / 2, evidence.stderr_truncated);
+            let remaining = CHECK_TAIL_LIMIT.saturating_sub(stderr_tail.len());
+            let stdout_tail =
+                crate::text::tail_clipped(stdout, remaining, evidence.stdout_truncated);
             Some(format!("{stderr_tail}\n--- stdout ---\n{stdout_tail}"))
         }
-        (Some(stderr), None) => Some(clipped_tail(
+        (Some(stderr), None) => Some(crate::text::tail_clipped(
             stderr,
             CHECK_TAIL_LIMIT,
             evidence.stderr_truncated,
         )),
-        (None, Some(stdout)) => Some(clipped_tail(
+        (None, Some(stdout)) => Some(crate::text::tail_clipped(
             stdout,
             CHECK_TAIL_LIMIT,
             evidence.stdout_truncated,
         )),
         (None, None) => None,
-    }
-}
-
-/// The last `limit` characters of `text`, marked when anything was clipped —
-/// by this cut or by the capture that produced `text` — so a reader never
-/// mistakes a partial tail for the whole output.
-fn clipped_tail(text: &str, limit: usize, capture_truncated: bool) -> String {
-    let trimmed = text.trim_end();
-    let characters: Vec<char> = trimmed.chars().collect();
-    if characters.len() <= limit {
-        if capture_truncated {
-            format!("[earlier output truncated]\n{trimmed}")
-        } else {
-            trimmed.to_string()
-        }
-    } else {
-        let tail: String = characters[characters.len() - limit..].iter().collect();
-        format!("[earlier output truncated]\n{tail}")
     }
 }
 

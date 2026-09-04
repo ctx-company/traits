@@ -5285,6 +5285,65 @@ fn board_answer_over_the_real_socket_is_repository_anchored_compact_and_honest()
     assert!(resolved.contains("\"kind\":\"response\""));
     assert!(resolved.contains("board-answer"));
 
+    // The held-socket proof below needs a snapshot wider than one outbound
+    // channel (`SUBSCRIBER_QUEUE` = 64 rows) so the board mutation genuinely
+    // races a backpressured, multi-credit snapshot. The 1000 liveness rows
+    // seeded above reach the center's corpus only as its scan ingests them,
+    // and under host load that ingest runs at tens of rows per second — a
+    // subscription opened on a fixed sleep saw 48 rows and failed the
+    // precondition 5/5 times. Wait for the fact instead of assuming it: drain
+    // eager probe subscriptions until the snapshot is wider than one channel,
+    // bounded by the same process deadline every other wait here uses.
+    let ingest_deadline = std::time::Instant::now() + PROCESS_DEADLINE;
+    loop {
+        let mut probe = await_socket(&socket);
+        probe
+            .write_all(b"{\"kind\":\"hello\",\"id\":\"ingest-probe\"}\n")
+            .expect("write ingest-probe hello");
+        let mut probe_reader = BufReader::new(probe.try_clone().expect("clone ingest probe"));
+        let mut ready = String::new();
+        probe_reader
+            .read_line(&mut ready)
+            .expect("read ingest-probe ready");
+        probe
+            .write_all(
+                format!(
+                    "{{\"kind\":\"subscribe\",\"id\":\"ingest-probe\",\"repo_key\":{}}}\n",
+                    serde_json::to_string(&repo_key).expect("encode repository key")
+                )
+                .as_bytes(),
+            )
+            .expect("subscribe ingest probe");
+        let mut ingested = 0usize;
+        loop {
+            let mut line = String::new();
+            if probe_reader
+                .read_line(&mut line)
+                .expect("read ingest-probe event")
+                == 0
+            {
+                break;
+            }
+            let event: serde_json::Value =
+                serde_json::from_str(&line).expect("decode ingest-probe event");
+            match event["kind"].as_str() {
+                Some("snapshot-row") => ingested += 1,
+                Some("snapshot-end") => break,
+                _ => {}
+            }
+        }
+        drop(probe_reader);
+        drop(probe);
+        if ingested > 64 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < ingest_deadline,
+            "the center ingested only {ingested} of the seeded liveness rows within the process deadline"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
     // Hold the raw socket after SnapshotStart so the writer remains inside the
     // real snapshot across several 20ms board scans before the mutation is
     // published. `CenterSubscription` has a reader thread, so it cannot prove

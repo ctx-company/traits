@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0277.1"
 title = "Command runner observes execution facts: true byte-bounded tails, timing, and termination cause"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
 content = """
 First child of 0277 (runs journal every execution fact). Every later
@@ -121,22 +121,21 @@ code point in the serialized string while never exceeding 4096 bytes.
 
 [relations]
 parent = "0277"
-depends-on = []
 
 [[checks]]
 name = "io suite passes with runner observation tests"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "core suite green after tail extraction"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
-expect = "test result: ok"
 timeout-ms = 1200000
+expect = "test result: ok"
 
 [[checks]]
 name = "cli suite green with unchanged consumer behavior"
 command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
-expect = "test result: ok"
 timeout-ms = 1800000
+expect = "test result: ok"

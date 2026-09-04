@@ -6,6 +6,28 @@
 
 pub const PASSTHROUGH_PREVIEW_CHARS: usize = 100;
 
+/// Last `byte_limit` bytes of `text`, cut on a UTF-8 boundary and marked when
+/// this cut or an upstream capture omitted earlier output.
+pub fn tail_clipped(text: &str, byte_limit: usize, earlier_truncated: bool) -> String {
+    let trimmed = text.trim_end();
+    let clipped = trimmed.len() > byte_limit;
+    let start = if clipped {
+        let mut start = trimmed.len() - byte_limit;
+        while !trimmed.is_char_boundary(start) {
+            start += 1;
+        }
+        start
+    } else {
+        0
+    };
+    let tail = &trimmed[start..];
+    if clipped || earlier_truncated {
+        format!("[earlier output truncated]\n{tail}")
+    } else {
+        tail.to_string()
+    }
+}
+
 /// Wrap a raw model text delta as a one-line quoted preview for the passthrough
 /// panel: control characters collapsed to spaces, head-truncated with an ellipsis.
 pub fn quote_line(text: &str) -> String {
@@ -124,5 +146,26 @@ mod tests {
     #[test]
     fn clean_live_text_strips_bidi_overrides() {
         assert_eq!(clean_live_text("a\u{202E}b"), "a b");
+    }
+
+    #[test]
+    fn tail_clipped_preserves_short_text_and_marks_upstream_truncation() {
+        assert_eq!(tail_clipped("hello\n", 10, false), "hello");
+        assert_eq!(
+            tail_clipped("hello", 10, true),
+            "[earlier output truncated]\nhello"
+        );
+    }
+
+    #[test]
+    fn tail_clipped_keeps_a_byte_bounded_utf8_tail() {
+        assert_eq!(
+            tail_clipped("ab\u{e9}cd", 4, false),
+            "[earlier output truncated]\n\u{e9}cd"
+        );
+        assert_eq!(
+            tail_clipped("abcdef", 3, false),
+            "[earlier output truncated]\ndef"
+        );
     }
 }

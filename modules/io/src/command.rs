@@ -10,7 +10,7 @@ use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -39,6 +39,10 @@ pub const DEFAULT_COMMAND_WALL_MS: u64 = 14_400_000;
 /// `capture_limit` instead of relying on this fallback; the sentinel exists
 /// for callers (interactive/status probes) that only ever inspect success.
 const DEFAULT_CAPTURE_LIMIT: usize = 16_384;
+const TAIL_CAPTURE_LIMIT: usize = 4_096;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 /// Run a literal command with interactive stdin. JSON-mode callers reserve
 /// stdout for their own document, while npm's prompts and diagnostics remain
@@ -147,6 +151,28 @@ pub struct RunOutput {
     pub capture_limit: usize,
 }
 
+/// Execution facts collected by the shared command engine without changing the
+/// captured output contract of [`RunOutput`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunObservation {
+    pub started_at_epoch_ms: u64,
+    pub ended_at_epoch_ms: u64,
+    pub signal: Option<i32>,
+    pub killed: bool,
+    pub timeout_kind: Option<TimeoutKind>,
+    pub stdout_tail: String,
+    pub stdout_tail_truncated: bool,
+    pub stderr_tail: String,
+    pub stderr_tail_truncated: bool,
+}
+
+/// Captured command output together with additive execution observations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedRun {
+    pub output: RunOutput,
+    pub observation: RunObservation,
+}
+
 /// Build the one truncation-refusal error every capture-consuming call site
 /// shares — same message vocabulary regardless of which output type observed
 /// the truncation.
@@ -198,10 +224,18 @@ pub fn run_with_env(
     request: RunRequest<'_>,
     env_overlay: &BTreeMap<String, String>,
 ) -> crate::Result<RunOutput> {
+    run_observed_with_env(request, env_overlay).map(|run| run.output)
+}
+
+/// Run a command and return its existing capture plus additive execution facts.
+pub fn run_observed_with_env(
+    request: RunRequest<'_>,
+    env_overlay: &BTreeMap<String, String>,
+) -> crate::Result<ObservedRun> {
     let raw = run_raw(&request, env_overlay)?;
     let (stdout, stdout_truncated) = lossy_utf8(raw.stdout, raw.stdout_truncated);
     let (stderr, stderr_truncated) = lossy_utf8(raw.stderr, raw.stderr_truncated);
-    Ok(RunOutput {
+    let output = RunOutput {
         timeout_reason: raw.timeout_kind.map(TimeoutKind::reason),
         timeout_kind: raw.timeout_kind,
         exit_code: raw.exit_code,
@@ -212,11 +246,39 @@ pub fn run_with_env(
         timed_out: raw.timed_out,
         success: raw.success,
         capture_limit: raw.capture_limit,
+    };
+    let (stdout_tail, stdout_tail_truncated) =
+        tail_string(raw.stdout_tail, raw.stdout_tail_truncated);
+    let (stderr_tail, stderr_tail_truncated) =
+        tail_string(raw.stderr_tail, raw.stderr_tail_truncated);
+    let observation = RunObservation {
+        started_at_epoch_ms: raw.started_at_epoch_ms,
+        ended_at_epoch_ms: raw.ended_at_epoch_ms,
+        signal: raw.signal,
+        killed: raw.killed,
+        timeout_kind: raw.timeout_kind,
+        stdout_tail,
+        stdout_tail_truncated,
+        stderr_tail,
+        stderr_tail_truncated,
+    };
+    Ok(ObservedRun {
+        output,
+        observation,
     })
 }
 
 fn lossy_utf8(bytes: Vec<u8>, truncated: bool) -> (String, bool) {
     (String::from_utf8_lossy(&bytes).to_string(), truncated)
+}
+
+fn tail_string(bytes: Vec<u8>, omitted_earlier: bool) -> (String, bool) {
+    let decoded = String::from_utf8_lossy(&bytes);
+    let truncated = omitted_earlier || decoded.trim_end().len() > TAIL_CAPTURE_LIMIT;
+    (
+        ctx_traits_core::text::tail_clipped(&decoded, TAIL_CAPTURE_LIMIT, omitted_earlier),
+        truncated,
+    )
 }
 
 /// Byte-exact output from [`run_raw`], the one process-execution engine
@@ -236,6 +298,14 @@ struct RawOutput {
     timeout_kind: Option<TimeoutKind>,
     success: bool,
     capture_limit: usize,
+    started_at_epoch_ms: u64,
+    ended_at_epoch_ms: u64,
+    signal: Option<i32>,
+    killed: bool,
+    stdout_tail: Vec<u8>,
+    stdout_tail_truncated: bool,
+    stderr_tail: Vec<u8>,
+    stderr_tail_truncated: bool,
 }
 
 /// Which bound ended a command step (0058).
@@ -267,19 +337,29 @@ impl TimeoutKind {
 /// far into the run output last arrived, measured against the SAME clock the
 /// waiting loop uses, so the loop can tell a working command from a hung one
 /// (0058). `None` keeps the plain capture behaviour.
+struct CappedRead {
+    prefix: Vec<u8>,
+    truncated: bool,
+    tail: Vec<u8>,
+    tail_omits_earlier: bool,
+}
+
 fn read_capped_observed<R: Read>(
     mut reader: R,
     limit: usize,
     last_output: Option<Arc<AtomicU64>>,
     started: Instant,
-) -> std::io::Result<(Vec<u8>, bool)> {
+) -> std::io::Result<CappedRead> {
     let mut buf = Vec::new();
+    let mut tail = Vec::with_capacity(TAIL_CAPTURE_LIMIT);
+    let mut total_bytes = 0u64;
     let mut chunk = [0u8; 8192];
     let mut truncated = false;
     loop {
         match reader.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
+                total_bytes += n as u64;
                 if let Some(stamp) = last_output.as_ref() {
                     stamp.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
                 }
@@ -293,11 +373,29 @@ fn read_capped_observed<R: Read>(
                 } else {
                     truncated = true;
                 }
+                if n >= TAIL_CAPTURE_LIMIT {
+                    tail.clear();
+                    tail.extend_from_slice(&chunk[n - TAIL_CAPTURE_LIMIT..n]);
+                } else {
+                    let overflow = tail
+                        .len()
+                        .saturating_add(n)
+                        .saturating_sub(TAIL_CAPTURE_LIMIT);
+                    if overflow > 0 {
+                        tail.drain(..overflow);
+                    }
+                    tail.extend_from_slice(&chunk[..n]);
+                }
             }
             Err(source) => return Err(source),
         }
     }
-    Ok((buf, truncated))
+    Ok(CappedRead {
+        prefix: buf,
+        truncated,
+        tail_omits_earlier: total_bytes > tail.len() as u64,
+        tail,
+    })
 }
 
 /// Argv sentinel for the fork-free session-detach shim (2026-08-10). A spawn
@@ -483,6 +581,13 @@ fn kill_command_group(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
+fn epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 /// The one spawn/wait/timeout/capture engine every command edge routes
 /// through. Stdout and stderr are drained concurrently on dedicated threads
 /// while the main thread polls `try_wait`, so a child that writes more than
@@ -492,6 +597,7 @@ fn run_raw(
     request: &RunRequest<'_>,
     env_overlay: &BTreeMap<String, String>,
 ) -> crate::Result<RawOutput> {
+    let started_at_epoch_ms = epoch_millis();
     let mut child = spawn_piped(request, env_overlay)?;
     let pgid = child.id() as i32;
     crate::run_kill::register(pgid);
@@ -574,16 +680,17 @@ fn run_raw(
                 source: e,
             })?,
     };
+    let ended_at_epoch_ms = epoch_millis();
     crate::run_kill::clear(pgid);
 
-    let (stdout, stdout_truncated) = stdout_handle
+    let stdout = stdout_handle
         .join()
         .expect("stdout reader thread panicked")
         .map_err(|source| crate::environment::Error::Filesystem {
             path: format!("{} (stdout)", request.argv.join(" ")),
             source,
         })?;
-    let (stderr, stderr_truncated) = stderr_handle
+    let stderr = stderr_handle
         .join()
         .expect("stderr reader thread panicked")
         .map_err(|source| crate::environment::Error::Filesystem {
@@ -592,6 +699,10 @@ fn run_raw(
         })?;
 
     let exit_code = status.code();
+    #[cfg(unix)]
+    let signal = status.signal();
+    #[cfg(not(unix))]
+    let signal = None;
     let success_codes = if request.success_exit_code.is_empty() {
         &[0][..]
     } else {
@@ -600,14 +711,22 @@ fn run_raw(
     let success = !timed_out && exit_code.is_some_and(|code| success_codes.contains(&code));
     Ok(RawOutput {
         exit_code,
-        stdout,
-        stdout_truncated,
-        stderr,
-        stderr_truncated,
+        stdout: stdout.prefix,
+        stdout_truncated: stdout.truncated,
+        stderr: stderr.prefix,
+        stderr_truncated: stderr.truncated,
         timed_out,
         timeout_kind,
         success,
         capture_limit: limit,
+        started_at_epoch_ms,
+        ended_at_epoch_ms,
+        signal,
+        killed: crate::run_kill::was_killed(),
+        stdout_tail: stdout.tail,
+        stdout_tail_truncated: stdout.tail_omits_earlier,
+        stderr_tail: stderr.tail,
+        stderr_tail_truncated: stderr.tail_omits_earlier,
     })
 }
 
@@ -823,10 +942,11 @@ mod tests {
     #[test]
     fn read_capped_reads_exact_bytes_under_limit() {
         let reader = std::io::Cursor::new(b"hello world".to_vec());
-        let (bytes, truncated) =
-            read_capped_observed(reader, 1024, None, Instant::now()).expect("read succeeds");
-        assert_eq!(bytes, b"hello world");
-        assert!(!truncated);
+        let read = read_capped_observed(reader, 1024, None, Instant::now()).expect("read succeeds");
+        assert_eq!(read.prefix, b"hello world");
+        assert!(!read.truncated);
+        assert_eq!(read.tail, b"hello world");
+        assert!(!read.tail_omits_earlier);
     }
 
     /// Binary stdout larger than any OS pipe buffer (well past the ~64KiB a
@@ -904,13 +1024,14 @@ mod tests {
             capture_limit: 1024,
             tick_observer: None,
         };
-        let output = run_with_env(request, &EMPTY_ENV_OVERLAY).expect("sleep runs");
-        assert!(output.timed_out);
+        let run = run_observed_with_env(request, &EMPTY_ENV_OVERLAY).expect("sleep runs");
+        assert!(run.output.timed_out);
         assert_eq!(
-            output.timeout_reason,
+            run.output.timeout_reason,
             Some(TimeoutKind::Wall.reason()),
             "a tight wall under a generous idle window must be named as the wall bound"
         );
+        assert_eq!(run.observation.timeout_kind, Some(TimeoutKind::Wall));
     }
 
     /// [`RunOutput::refuse_if_truncated`] fires on a genuinely truncated
@@ -1007,5 +1128,98 @@ mod tests {
             message.contains("100"),
             "expected the refusal to name the applied 100-byte cap: {message}"
         );
+    }
+
+    fn request<'a>(argv: &'a [String], capture_limit: usize) -> RunRequest<'a> {
+        RunRequest {
+            argv,
+            cwd: None,
+            exec_dir: None,
+            success_exit_code: &[0],
+            timeout_ms: Some(30_000),
+            idle_timeout_ms: Some(10_000),
+            capture_limit,
+            tick_observer: None,
+        }
+    }
+
+    fn tail_content(tail: &str) -> &str {
+        tail.strip_prefix("[earlier output truncated]\n")
+            .unwrap_or(tail)
+    }
+
+    #[test]
+    fn observed_run_keeps_the_true_tail_after_prefix_capture_truncates() {
+        let argv = vec!["seq".to_string(), "1".to_string(), "100000".to_string()];
+        let run =
+            run_observed_with_env(request(&argv, 1024), &EMPTY_ENV_OVERLAY).expect("seq runs");
+        assert!(run.output.stdout_truncated);
+        assert!(run.observation.stdout_tail_truncated);
+        assert!(
+            run.observation
+                .stdout_tail
+                .starts_with("[earlier output truncated]\n")
+        );
+        assert!(run.observation.stdout_tail.ends_with("100000"));
+        assert!(tail_content(&run.observation.stdout_tail).len() <= TAIL_CAPTURE_LIMIT);
+    }
+
+    #[test]
+    fn observed_run_reports_an_unmarked_short_tail_and_timing() {
+        let argv = vec!["printf".to_string(), "hello".to_string()];
+        let run =
+            run_observed_with_env(request(&argv, 1024), &EMPTY_ENV_OVERLAY).expect("printf runs");
+        assert_eq!(run.observation.stdout_tail, "hello");
+        assert!(!run.observation.stdout_tail_truncated);
+        assert!(run.observation.started_at_epoch_ms > 0);
+        assert!(run.observation.ended_at_epoch_ms > 0);
+    }
+
+    #[test]
+    fn observed_run_serializes_a_utf8_boundary_tail_within_the_byte_ceiling() {
+        let argv = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "i=0; while [ $i -lt 3000 ]; do printf '\u{e9}'; i=$((i + 1)); done; printf x"
+                .to_string(),
+        ];
+        let run =
+            run_observed_with_env(request(&argv, 1024), &EMPTY_ENV_OVERLAY).expect("shell runs");
+        assert!(run.observation.stdout_tail_truncated);
+        assert!(run.observation.stdout_tail.ends_with('x'));
+        assert!(tail_content(&run.observation.stdout_tail).len() <= TAIL_CAPTURE_LIMIT);
+    }
+
+    #[test]
+    fn tail_string_marks_lossy_decode_expansion_as_truncated() {
+        let (tail, truncated) = tail_string(vec![0xff; 2048], false);
+        assert!(truncated);
+        assert!(tail.starts_with("[earlier output truncated]\n"));
+        assert!(tail_content(&tail).len() <= TAIL_CAPTURE_LIMIT);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observed_run_records_a_terminating_signal() {
+        let argv = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "kill -KILL $$".to_string(),
+        ];
+        let run =
+            run_observed_with_env(request(&argv, 1024), &EMPTY_ENV_OVERLAY).expect("shell runs");
+        assert_eq!(run.output.exit_code, None);
+        assert_eq!(run.observation.signal, Some(libc::SIGKILL));
+    }
+
+    #[test]
+    fn observed_run_records_an_idle_timeout() {
+        let argv = vec!["sleep".to_string(), "5".to_string()];
+        let mut request = request(&argv, 1024);
+        request.idle_timeout_ms = Some(50);
+        request.timeout_ms = Some(10_000);
+        let run = run_observed_with_env(request, &EMPTY_ENV_OVERLAY).expect("sleep runs");
+        assert!(run.output.timed_out);
+        assert_eq!(run.observation.timeout_kind, Some(TimeoutKind::Idle));
     }
 }
