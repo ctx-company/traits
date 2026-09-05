@@ -276,6 +276,7 @@ mod tests {
             branch: "ctx/run/wt-ab12ef".to_string(),
             seed_snapshots: Vec::new(),
             path: Some("/tmp/wt-ab12ef".to_string()),
+            base: None,
         };
         assert_eq!(
             worktree_line(Some(&provenance)).text,

@@ -573,6 +573,25 @@ pub struct WorktreeProvenance {
     /// list`, so callers must treat absence as unresolvable rather than guess.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Where the worktree's `ctx/run/<id>` branch was created from (runs
+    /// resume the task branch, 0281): the task's own `ctx/task/<key>` branch
+    /// when one existed at run start, otherwise the invocation checkout's
+    /// `HEAD`. `None` for a resumed worktree (nothing was created) and for
+    /// legacy ledgers recorded before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<WorktreeBaseProvenance>,
+}
+
+/// The revision a run worktree was branched from. Data-only — the ref
+/// resolution lives in `ctx-traits-io::worktree`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct WorktreeBaseProvenance {
+    /// The ref the run branch was created from: `HEAD`, or `ctx/task/<key>`.
+    pub reference: String,
+    /// The commit that ref named at creation time.
+    pub sha: String,
 }
 
 /// Seed-time file digests for one declared `[worktree] seed` root, captured
@@ -917,6 +936,7 @@ argv = ["git", "commit", "-m", "fixture"]
             branch: "ctx/run/wt-fixture".to_string(),
             seed_snapshots: Vec::new(),
             path: None,
+            base: None,
         });
         session.ledger.slot_revisions.push(commit_revision(
             &["git", "commit", "-m", "msg"],

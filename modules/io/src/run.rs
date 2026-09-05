@@ -1293,6 +1293,9 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                     worktree_add_timeout_ms: Some(
                         crate::harness_config::resolve_git_long_timeout_ms(Utf8Path::new(".")),
                     ),
+                    task_key: dispatch_task
+                        .as_ref()
+                        .map(|task| task.resolved.document.key.as_str()),
                     progress: if request.narrate_progress {
                         Some(&narrate as &dyn Fn(&str))
                     } else if request.startup_observer.is_some() {
@@ -1359,6 +1362,12 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                     branch: prepared.branch,
                     seed_snapshots: prepared.seed_snapshots,
                     path: Some(prepared_path),
+                    base: prepared.base.map(|base| {
+                        ctx_traits_core::procedure::session::WorktreeBaseProvenance {
+                            reference: base.reference,
+                            sha: base.sha,
+                        }
+                    }),
                 }),
             )
         }

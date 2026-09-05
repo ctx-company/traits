@@ -9735,6 +9735,7 @@ mod tests {
             branch: branch.to_string(),
             seed_snapshots: Vec::new(),
             path: worktree_path.map(str::to_string),
+            base: None,
         });
         session.ledger.slot_revisions.push(SlotRevision {
             slot_ref: Reference::parse("slot:commit-output").expect("slot ref parses"),
@@ -9872,6 +9873,7 @@ argv = ["git", "commit", "-m", "fixture"]
             branch: branch.to_string(),
             seed_snapshots: Vec::new(),
             path: None,
+            base: None,
         });
         session.ledger.slot_revisions.push(SlotRevision {
             slot_ref: Reference::parse("slot:commit-output").expect("slot ref parses"),
@@ -11182,6 +11184,7 @@ argv = ["git", "commit", "-m", "fixture"]
             branch: "unregistered-branch".to_string(),
             seed_snapshots: Vec::new(),
             path: None,
+            base: None,
         });
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write failed session");
