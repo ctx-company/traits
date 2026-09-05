@@ -8043,6 +8043,9 @@ fn tasks_preview_title(state: &State) -> String {
 /// preview never draws a title row for a suffix to reach otherwise.
 fn sessions_preview_pane_lines(state: &State) -> (Vec<tui::Line>, Vec<run_view::JourneyRow>) {
     let Some(preview) = state.session_preview.as_ref() else {
+        if state.preview_pending {
+            return (vec![labeled_dim_line("(loading preview…)")], Vec::new());
+        }
         return (Vec::new(), Vec::new());
     };
     let mut progress_lines = preview.progress_lines.clone();
@@ -9648,6 +9651,35 @@ mod tests {
             assert!(!progress_lines.is_empty());
             assert!(!journey_lines.is_empty());
         }
+    }
+
+    #[test]
+    fn pending_session_preview_renders_a_loading_marker() {
+        let mut state = State::new_without_worker();
+        state.preview_pending = true;
+
+        let (progress_lines, journey_lines) = sessions_preview_pane_lines(&state);
+
+        assert_eq!(progress_lines, vec![labeled_dim_line("(loading preview…)")]);
+        assert!(journey_lines.is_empty());
+
+        state.preview_pending = false;
+        let (progress_lines, journey_lines) = sessions_preview_pane_lines(&state);
+
+        assert!(progress_lines.is_empty());
+        assert!(journey_lines.is_empty());
+    }
+
+    #[test]
+    fn retained_session_preview_does_not_render_a_loading_marker() {
+        let mut state = State::new_without_worker();
+        state.preview_pending = true;
+        state.session_preview = Some(attached_view_for("selected"));
+
+        let (progress_lines, _) = sessions_preview_pane_lines(&state);
+
+        assert!(!progress_lines.is_empty());
+        assert_ne!(progress_lines, vec![labeled_dim_line("(loading preview…")]);
     }
 
     #[test]
