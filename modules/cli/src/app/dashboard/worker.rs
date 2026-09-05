@@ -636,7 +636,7 @@ fn wait_for_retry(
                 state,
                 rows,
                 clear_refresh_error,
-                sessions_cache.as_deref_mut(),
+                sessions_cache,
             )?,
             Err(mpsc::RecvTimeoutError::Timeout) => return Ok(()),
             Err(mpsc::RecvTimeoutError::Disconnected) => return Err(()),
