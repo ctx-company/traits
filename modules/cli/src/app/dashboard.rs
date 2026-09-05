@@ -450,8 +450,8 @@ struct MergePreview {
 }
 
 /// Pure facts [`merge_preview_lines`] renders from — no IO in this type or in
-/// the function that renders it; [`build_merge_preview`] is the only place
-/// that shells out to Git or reads the ledger.
+/// the function that renders it; worker requests are the only place that
+/// shells out to Git or reads the ledger.
 struct MergePreviewFacts {
     run_id: String,
     phase: Option<String>,
@@ -1554,7 +1554,7 @@ impl State {
                 continue;
             }
             let Some(row) = selected else { continue };
-            self.merge_preview = Some(build_merge_preview(
+            self.merge_preview = Some(render_merge_preview(
                 row,
                 result.cache_key,
                 result.worktree_path,
@@ -4345,7 +4345,7 @@ fn refresh_merge_preview_for_selection(state: &mut State) {
         return;
     }
     if !same_selection {
-        state.merge_preview = Some(build_merge_preview(
+        state.merge_preview = Some(render_merge_preview(
             row,
             cache_key.clone(),
             None,
@@ -4380,7 +4380,7 @@ fn merge_preview_cache_key(row: &MergeRow) -> (String, String) {
 }
 
 /// Renders a row from pure facts delivered by the worker.
-fn build_merge_preview(
+fn render_merge_preview(
     row: &MergeRow,
     cache_key: (String, String),
     worktree_path: Option<camino::Utf8PathBuf>,
