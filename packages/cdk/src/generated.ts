@@ -623,6 +623,7 @@ export type CanonicalCondition = {
   readonly "iteration"?: number | undefined;
   readonly "iteration-at-least"?: number | undefined;
   readonly "less-than"?: JsonValue | undefined;
+  readonly "loop-elapsed-seconds-at-least"?: JsonValue | undefined;
   readonly "not"?: CanonicalGuardExpr | undefined;
   readonly "output"?: string | undefined;
   readonly "present"?: string | undefined;
@@ -879,6 +880,16 @@ export type CanonicalGuardPredicate = {
   readonly "iteration"?: number | undefined;
   readonly "iteration-at-least"?: number | undefined;
   readonly "less-than"?: JsonValue | undefined;
+  /**
+   * Active-drive elapsed seconds since the innermost enclosing loop's
+   * first iteration began (runtime-supplied evidence) at least this
+   * threshold — the per-loop counterpart of `elapsed-seconds-at-least`,
+   * so a loop can bound its own effort in time ("work until the claim
+   * holds OR this loop has spent its budget") without counting
+   * iterations. Same threshold forms as `elapsed-seconds-at-least`; valid
+   * only inside loop guards.
+   */
+  readonly "loop-elapsed-seconds-at-least"?: JsonValue | undefined;
   readonly "not"?: CanonicalGuardExpr | undefined;
   readonly "output"?: string | undefined;
   /**

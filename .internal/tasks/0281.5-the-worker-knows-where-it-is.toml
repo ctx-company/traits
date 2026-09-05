@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0281.5"
 title = "The worker knows where it is: loop position and budget in the envelope, the stage as the unit of completeness"
-status = "ready"
+status = "done"
 raised = "2026-09-04"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each one

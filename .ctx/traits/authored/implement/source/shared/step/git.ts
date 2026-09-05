@@ -27,7 +27,7 @@ export const commitMessage = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     The work for ${port.task} is being committed.
-    Write a concise commit message from the worker's report into ${slot.report}.
+    Write a concise commit message from the worker's latest report, when there is one: ${slot.report.optional()}.
     Owner rulings made during this run (if any): ${slot.ownerDecisions.optional()} — when one shaped the work, cite what the owner decided in the message body.
   `,
   output: cdk.output.prompt`
@@ -40,7 +40,7 @@ export const commitMessageAnnotated = cdk.defineStep.prompt({
   agent: scribe,
   input: cdk.input.prompt`
     The work for the owner's tree annotations is being committed: ${slot.annotations}.
-    Write a concise commit message from the worker's report into ${slot.report}.
+    Write a concise commit message from the worker's latest report, when there is one: ${slot.report.optional()}.
   `,
   output: cdk.output.prompt`
     Return exactly the finished commit message into (${slot.commitMessage}).

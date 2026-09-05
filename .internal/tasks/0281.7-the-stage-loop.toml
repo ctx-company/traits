@@ -1,0 +1,114 @@
+schema-version = "0.2"
+key = "0281.7"
+title = "The stage loop: the contract is fixed before work, the worker works until it claims, a proof screens the claim, the reviewer grades claims"
+status = "done"
+raised = "2026-09-05"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`. Landed by hand on 2026-09-05 after the second live run of
+the annotation-steered loop (0011.5, session 0002f0ae, 39 rounds, 9h47m):
+the resolver stage flipped after 33 rounds, then the worker sliced around
+the Context flip for six rounds — closing the cheapest open step each
+round, never starting the rewrite, using a median of 7 minutes of its
+60-minute frame — while the reviewer reopened the step it had just closed
+with new demands. The owner's diagnosis, confirmed against the ledger: the
+round was graded, so the worker protected it; the harness ends its turn on
+the first green unit; the reviewer refilled the queue faster than the
+worker emptied it; tests were the reviewer's reflex, not the plan's
+decision.
+
+## GOALS, binding
+
+1. **The contract is fixed before work.** A plan stage carries its `proof`
+   (the one command line that says what green means for that stage, or
+   `none`) and its `commit` flag; every blocker step carries its own
+   `done-when`, written when the step is created and frozen by the runtime:
+   a verdict that changes a carried step's done-when is rejected like a
+   schema violation and the reviewer resubmits. A changed acceptance is a
+   new step, appended in plan order.
+   Excluded: freezing anything else; a reviewer-side counter of any kind.
+
+2. **The worker works until it claims.** The work step runs in its own loop
+   on the worker's typed report (`claim` complete or in-progress, `next`,
+   `blocked`): dispatches chain until the claim holds and the stage's proof
+   passed, the worker reports itself blocked, or the loop's own clock says
+   the stage's time is spent (`loop-elapsed-seconds-at-least`, a new guard
+   subject measured from the loop's first iteration). A dispatch that does
+   not claim runs no proof and reaches no reviewer.
+   Excluded: harness-level continuity; a per-dispatch review.
+
+3. **The worker sees the brief.** The reviewer's verdict carries a `brief`
+   — first open stage with goal, proof and commit flag verbatim from the
+   plan, the front step with its frozen done-when — and a deterministic
+   project step copies it into the worker's input; the worker never reads
+   the verdict. Typed input field descriptions are rendered in the frame's
+   `<spec>` beside the values, so the brief's conventions arrive with it.
+   Excluded: any model between the verdict and the worker's brief.
+
+4. **The reviewer grades claims.** A baseline review before any work opens
+   the ledger and writes the first brief; afterwards the reviewer runs once
+   per claim that passed proof (or once per blocked / timed-out stage),
+   grades every open step of the stage against its done-when as written,
+   appends discoveries with prerequisites first, names the stage it flipped
+   in `closed-stage`, and moves the brief. A step whose done-when is met is
+   never kept open for anything else.
+
+5. **A stage lands when it flips.** When the verdict's `closed-stage` has
+   `commit = true`, the loop commits the tree with a stage-named message
+   and fast-forwards `ctx/task/<task>`; the runtime bases a later run of
+   the same task on that branch and releases it when the task merges.
+
+6. **Guards read ports.** `port:*` refs are comparison subjects like slots;
+   the `carry-owner-ruling` printf step is gone.
+
+7. **A gate survives Ctrl-C** (0281.4) and **rounds are measured**
+   (0281.6): `ctx traits sessions report <session>` renders the per-loop,
+   per-iteration table from the ledger and the activity sidecar.
+"""
+scope = """
+## Decisions
+
+- Field refs in argv and prompt interpolation were NOT added: the runtime's
+  project step already resolves dotted field paths, so the brief and the
+  proof command are carried by projections (deterministic, no grammar
+  change). Recorded as a deviation from the 2026-09-05 plan.
+- The seat asymmetry (Fable reviewer, Sonnet worker) is intended and stays:
+  the freeze and the brief are what keep a smarter reviewer from
+  out-specifying the worker.
+- Proof runs on claims only, so an expensive suite costs one run per claim,
+  never one per dispatch.
+- Complex and annotate lanes carry the same stage loop; quick stays
+  unreviewed (plan, one dispatch, commit).
+- Stage time before a forced review: 4 hours on the loop's clock, a
+  constant in each variant; each dispatch stays bounded by the seat's
+  frame budget.
+
+## Landed
+
+- Runtime: modules/core (guard grammar, loop clock, frozen fields,
+  ledger replay), modules/io (killed gate classification, task branch),
+  modules/cli (frame spec field guides, pane pump pause on command frames,
+  sessions report).
+- Contract: packages/toolkit/src/schema.ts (blocker-step done-when frozen,
+  brief, closed-stage, work-report), packages/cdk (schema.object frozen
+  option, condition.loopElapsedAtLeast).
+- Trait: .ctx/traits/authored/implement 0.26.0 (stage loop in basic,
+  annotate, complex; quick unreviewed).
+"""
+validation = """
+## Done when
+
+- `just test-full` is green on the landed tree.
+- The implement trait builds and checks under the landed binary.
+- A restart of 0011.5 shows, in `ctx traits sessions report`, dispatches
+  chaining inside "Work the stage" and a reviewer frame only after a
+  claim, a block, or the stage clock.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.4", "0281.5", "0281.6"]

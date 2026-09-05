@@ -283,7 +283,8 @@ export const briefSchema: SchemaHandle<BriefValue> = schema.object(
         "That stage's proof command, verbatim from the plan ('none' when the plan names none). The runtime runs it whenever the worker claims the stage complete; a failing proof sends the worker back with the failure output and costs no review.",
     }),
     commit: schema.field(schema.boolean(), {
-      description: "That stage's commit flag, verbatim from the plan: whether the tree is committed when the stage is done.",
+      description:
+        "That stage's commit flag, verbatim from the plan: whether the tree is committed when the stage is done.",
     }),
     step: schema.field(schema.text(), {
       description:
