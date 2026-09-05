@@ -65,9 +65,13 @@ decision.
 6. **Guards read ports.** `port:*` refs are comparison subjects like slots;
    the `carry-owner-ruling` printf step is gone.
 
-7. **A gate survives Ctrl-C** (0281.4) and **rounds are measured**
-   (0281.6): `ctx traits sessions report <session>` renders the per-loop,
-   per-iteration table from the ledger and the activity sidecar.
+7. **A gate survives Ctrl-C** (0281.4): a command step that declares
+   `terminal = true` (the annotate gates) takes the keyboard — the run
+   pane parks its input pump for that frame only — and a killed command
+   frame is a typed interruption. An ordinary command frame (a proof, a
+   test suite) keeps the pane's quit/detach/kill keys live. **Rounds are
+   measured** (0281.6): `ctx traits sessions report <session>` renders the
+   per-loop, per-iteration table from the ledger and the activity sidecar.
 """
 scope = """
 ## Decisions
