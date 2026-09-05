@@ -1438,7 +1438,7 @@ pub(crate) enum CompletionDisposition {
 /// names (0151) — extracted once so story, the run TUI, and the plain drive
 /// report render the same fact instead of drifting apart across three
 /// separate renderers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct NotMergedFact {
     pub(crate) branch: String,
     pub(crate) merge_command: String,

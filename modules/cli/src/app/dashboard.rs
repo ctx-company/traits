@@ -63,6 +63,7 @@ use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
 use ctx_traits_io::task_files::{self, BoardFingerprint, FilesTaskBoard};
 
 mod keymap;
+mod sessions_cache;
 mod worker;
 
 const TICK: Duration = Duration::from_millis(250);
@@ -197,7 +198,7 @@ impl Screen {
 /// than re-deriving it. `Held` (any status) always wins as `Live`; otherwise
 /// a readable ledger's own `Status` decides `Terminal` vs `Resumable`; an
 /// unparseable ledger is `Unreadable`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 enum SessionClass {
     Live,
     Resumable,
@@ -215,7 +216,7 @@ impl SessionClass {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SessionRow {
     session_id: String,
     ledger_path: camino::Utf8PathBuf,
@@ -375,7 +376,7 @@ enum ProcedureShape {
 /// `Failed`/`Landed` classify the last terminal frame, with
 /// `PostMergeCleanupFailure`/`RecoveryFailure` always `Failed`, never
 /// `Parked` (`session.rs`'s own doc comment on `MergeStatus`).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 enum MergeClass {
     Mergeable,
     Parked,
@@ -408,7 +409,7 @@ impl MergeClass {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct MergeRow {
     session_id: String,
     run_id: String,
@@ -8746,7 +8747,7 @@ mod tests {
         }
     }
 
-    fn row(class: SessionClass) -> SessionRow {
+    pub(super) fn row(class: SessionClass) -> SessionRow {
         row_with_id("s1", class)
     }
 
@@ -8784,7 +8785,7 @@ mod tests {
         }
     }
 
-    fn merges_test_row(id: &str, class: MergeClass) -> MergeRow {
+    pub(super) fn merges_test_row(id: &str, class: MergeClass) -> MergeRow {
         MergeRow {
             session_id: id.to_string(),
             run_id: format!("r-{id}"),
