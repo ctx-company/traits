@@ -9201,27 +9201,69 @@ mod tests {
     }
 
     #[test]
-    fn story_and_answer_results_apply_only_to_the_requesting_selected_session() {
+    fn story_and_answer_requests_deduplicate_while_pending() {
         let mut state = State::new_without_worker();
         state.sessions = vec![row_with_id("selected", SessionClass::Live)];
         rebuild_visible_sessions(&mut state);
         state.list_sessions.set_selected(1);
+        state.worker = Some(worker::Handle::for_tests());
+
+        open_story_view(&mut state);
+        open_story_view(&mut state);
+        open_answer_modal(&mut state);
+        open_answer_modal(&mut state);
+
+        assert_eq!(
+            state.story_view_pending,
+            HashSet::from(["selected".to_string()])
+        );
+        assert_eq!(
+            state.answer_question_pending,
+            HashSet::from(["selected".to_string()])
+        );
+    }
+
+    #[test]
+    fn story_and_answer_results_open_selected_flows_and_preserve_refusals() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+
+        let ledger_path = scratch_ledger_path("async-story-result");
+        let mut session = unresolvable_trait_session_fixture("async-story-result", Some(0));
+        session.session_id =
+            ctx_traits_core::procedure::session::SessionId::new("selected".to_string())
+                .expect("session id");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write story session");
+        let story_view = build_story_view_from_ledger(&ledger_path).expect("build story view");
         state.story_view_pending.insert("selected".to_string());
-        state.answer_question_pending.insert("selected".to_string());
-
         state.apply_story_view_results([worker::StoryViewResult {
-            session_id: "other".to_string(),
-            result: Err("stale failure".to_string()),
+            session_id: "selected".to_string(),
+            result: Ok(story_view),
         }]);
-        state.apply_answer_question_results([worker::AnswerQuestionResult {
-            session_id: "other".to_string(),
-            result: Err(worker::AnswerQuestionFailure::Missing),
-        }]);
-        assert!(state.story_view.is_none());
-        assert!(state.message.is_none());
-        assert!(state.story_view_pending.contains("selected"));
-        assert!(state.answer_question_pending.contains("selected"));
+        assert_eq!(
+            state
+                .story_view
+                .as_ref()
+                .map(|view| view.session.session_id.as_str()),
+            Some("selected")
+        );
+        assert!(!state.story_view_pending.contains("selected"));
 
+        state.answer_question_pending.insert("selected".to_string());
+        state.apply_answer_question_results([worker::AnswerQuestionResult {
+            session_id: "selected".to_string(),
+            result: Err(worker::AnswerQuestionFailure::NotWaiting),
+        }]);
+        assert_eq!(
+            state.message.as_deref(),
+            Some("answer refused: selected is not waiting for a human")
+        );
+        assert!(!state.answer_question_pending.contains("selected"));
+
+        state.answer_question_pending.insert("selected".to_string());
         state.apply_answer_question_results([worker::AnswerQuestionResult {
             session_id: "selected".to_string(),
             result: Ok(worker::AnswerQuestionPayload {
@@ -9233,13 +9275,34 @@ mod tests {
         }]);
         assert!(state.modal_host.is_open());
         assert!(!state.answer_question_pending.contains("selected"));
+    }
+
+    #[test]
+    fn story_and_answer_results_reject_a_changed_selection() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            row_with_id("selected", SessionClass::Live),
+            row_with_id("other", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.story_view_pending.insert("selected".to_string());
+        state.answer_question_pending.insert("selected".to_string());
+        state.list_sessions.set_selected(2);
 
         state.apply_story_view_results([worker::StoryViewResult {
             session_id: "selected".to_string(),
-            result: Err("ledger unavailable".to_string()),
+            result: Err("stale failure".to_string()),
         }]);
-        assert_eq!(state.message.as_deref(), Some("story: ledger unavailable"));
+        state.apply_answer_question_results([worker::AnswerQuestionResult {
+            session_id: "selected".to_string(),
+            result: Err(worker::AnswerQuestionFailure::Missing),
+        }]);
+        assert!(state.story_view.is_none());
+        assert!(!state.modal_host.is_open());
+        assert!(state.message.is_none());
         assert!(!state.story_view_pending.contains("selected"));
+        assert!(!state.answer_question_pending.contains("selected"));
     }
 
     #[test]
