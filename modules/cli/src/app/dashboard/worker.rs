@@ -819,6 +819,14 @@ fn run(
                         }
                         continue;
                     }
+                    if let ctx_traits_io::center::CenterDelta::ActivityLine { row, .. } = &delta {
+                        if refresh_activity_preview(&mut state, &previews, &row.ledger_path)
+                            .is_err()
+                        {
+                            return;
+                        }
+                        continue;
+                    }
                     if snapshotting {
                         let _ = apply_delta(&mut staged_rows, delta);
                         continue;
@@ -904,6 +912,22 @@ fn apply_delta(
     delta: ctx_traits_io::center::CenterDelta,
 ) -> Option<String> {
     Some(delta.apply_to(rows))
+}
+
+fn refresh_activity_preview(
+    state: &mut State,
+    previews: &mpsc::Sender<PreviewResult>,
+    ledger_path: &str,
+) -> Result<(), ()> {
+    let Some(view) = state
+        .session_preview
+        .as_mut()
+        .filter(|view| view.ledger_path.as_str() == ledger_path)
+    else {
+        return Ok(());
+    };
+    refresh_attached_view(view);
+    previews.send(view.clone()).map_err(|_| ())
 }
 
 fn center_unreachable(last_snapshot_at: Option<std::time::SystemTime>, detail: &str) -> String {
@@ -2123,41 +2147,40 @@ mod tests {
     }
 
     #[test]
-    fn activity_delta_requests_an_unchanged_selected_preview_refresh() {
+    fn activity_delta_refreshes_only_the_cached_preview_without_a_snapshot() {
         let _lock = crate::app::test_support::center_environment_lock();
-        let mut rows = HashMap::new();
         let center_row = row("awaiting-agent-output", "activity title");
-
-        let changed_ledger_path = apply_delta(
-            &mut rows,
-            ctx_traits_io::center::CenterDelta::ActivityLine {
-                row: Box::new(center_row.clone()),
-                activity: ctx_traits_io::activity_sidecar::ActivityRecord::SessionTitle {
-                    at_epoch_ms: 0,
-                    title: "activity title".to_string(),
-                },
+        let (_snapshots, results) = mpsc::channel::<RefreshResult>();
+        let (previews, preview_results) = mpsc::channel();
+        let mut state = State::new_without_worker();
+        let cached = preview(
+            &mut state,
+            SessionPreviewRequest {
+                session_id: center_row.summary.session_id.clone(),
+                ledger_path: camino::Utf8PathBuf::from(center_row.ledger_path.as_str()),
+                run_id: center_row.summary.run_id.clone(),
             },
         );
-        assert_eq!(
-            changed_ledger_path.as_deref(),
-            Some(center_row.ledger_path.as_str())
-        );
-        assert!(rows.is_empty(), "activity does not alter the row model");
 
-        let (snapshots, results) = mpsc::channel();
-        let mut state = State::new_without_worker();
-        emit_subscription_snapshot(&snapshots, &mut state, &rows, changed_ledger_path, None)
-            .expect("emit activity snapshot");
+        refresh_activity_preview(&mut state, &previews, &center_row.ledger_path)
+            .expect("refresh cached preview");
         assert_eq!(
-            results
+            preview_results
                 .recv()
-                .expect("activity result")
-                .expect("activity snapshot")
-                .changed_ledger_path
-                .as_deref(),
-            Some(center_row.ledger_path.as_str()),
-            "activity reports the changed ledger path to the renderer"
+                .expect("activity preview result")
+                .session_id,
+            cached.session_id,
+            "activity refreshes the cached selected preview"
         );
+        assert!(matches!(results.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+        refresh_activity_preview(&mut state, &previews, "/runs/other/session.json")
+            .expect("ignore other ledger activity");
+        assert!(matches!(results.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(matches!(
+            preview_results.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
     }
 
     #[test]
