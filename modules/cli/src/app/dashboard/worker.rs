@@ -5,11 +5,13 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
-    AttachedView, DashboardSnapshot, Screen, SessionPreviewRequest, State, build_attached_view,
-    refresh_attached_view, sessions_cache, sessions_cache_root,
+    AttachedView, DashboardSnapshot, Screen, SessionPreviewRequest, State, TasksBoardSnapshot,
+    build_attached_view, persist_board_snapshot, read_board_snapshot, refresh_attached_view,
+    sessions_cache, sessions_cache_root,
 };
 
 use ctx_traits_io::center::{ControlAction, StartResult};
+use ctx_traits_io::task_files::{self, BoardFingerprint};
 
 pub(super) type RefreshResult = Result<Arc<DashboardSnapshot>, String>;
 pub(super) type PreviewResult = AttachedView;
@@ -18,11 +20,29 @@ pub(super) struct TraitDetailResult {
     pub(super) result: Result<ctx_traits_io::library::LibraryDetailResolution, String>,
 }
 
+#[derive(Clone)]
+pub(super) struct BoardRefreshRequest {
+    pub(super) board_dir: camino::Utf8PathBuf,
+    pub(super) cache_root: Option<camino::Utf8PathBuf>,
+    pub(super) last_known_fingerprint: Option<BoardFingerprint>,
+    pub(super) force: bool,
+    pub(super) report_sync: bool,
+    pub(super) generation: u64,
+}
+
+pub(super) struct BoardRefreshResult {
+    pub(super) generation: u64,
+    pub(super) report_sync: bool,
+    /// `Ok(None)` means the worker's fingerprint sweep found no board change.
+    pub(super) result: Result<Option<TasksBoardSnapshot>, String>,
+}
+
 pub(super) struct Handle {
     commands: mpsc::Sender<Command>,
     snapshots: mpsc::Receiver<RefreshResult>,
     previews: mpsc::Receiver<PreviewResult>,
     trait_details: mpsc::Receiver<TraitDetailResult>,
+    board_refreshes: mpsc::Receiver<BoardRefreshResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
     actions: mpsc::Receiver<ActionResult>,
     action_sender: mpsc::Sender<ActionResult>,
@@ -115,6 +135,7 @@ enum Command {
     },
     Preview(SessionPreviewRequest),
     TraitDetail(ctx_traits_io::library::LibraryDetailSelector),
+    BoardRefresh(BoardRefreshRequest),
     /// Kept for test-only command projections; it never reads library files.
     #[cfg(test)]
     Refresh,
@@ -127,6 +148,7 @@ impl Handle {
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (preview_tx, previews) = mpsc::channel();
         let (trait_detail_tx, trait_details) = mpsc::channel();
+        let (board_refresh_tx, board_refreshes) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
         std::thread::spawn(move || {
@@ -135,6 +157,7 @@ impl Handle {
                 snapshot_tx,
                 preview_tx,
                 trait_detail_tx,
+                board_refresh_tx,
                 explanation_tx,
             )
         });
@@ -143,6 +166,7 @@ impl Handle {
             snapshots,
             previews,
             trait_details,
+            board_refreshes,
             explanations,
             actions,
             action_sender,
@@ -155,6 +179,7 @@ impl Handle {
         let (_snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
         let (_trait_detail_tx, trait_details) = mpsc::channel();
+        let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
         Self {
@@ -162,6 +187,7 @@ impl Handle {
             snapshots,
             previews,
             trait_details,
+            board_refreshes,
             explanations,
             actions,
             action_sender,
@@ -254,6 +280,10 @@ impl Handle {
         let _ = self.commands.send(Command::TraitDetail(selector));
     }
 
+    pub(super) fn refresh_board(&self, request: BoardRefreshRequest) {
+        let _ = self.commands.send(Command::BoardRefresh(request));
+    }
+
     pub(super) fn notify_library_changed(&self) {
         std::thread::spawn(|| {
             if let Ok(repo_key) = ctx_traits_io::state::current_repo_key() {
@@ -265,6 +295,14 @@ impl Handle {
     pub(super) fn trait_detail_results(&self) -> Vec<TraitDetailResult> {
         let mut results = Vec::new();
         while let Ok(result) = self.trait_details.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
+    pub(super) fn board_refresh_results(&self) -> Vec<BoardRefreshResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.board_refreshes.try_recv() {
             results.push(result);
         }
         results
@@ -353,6 +391,7 @@ fn run(
     snapshots: mpsc::Sender<RefreshResult>,
     previews: mpsc::Sender<PreviewResult>,
     trait_details: mpsc::Sender<TraitDetailResult>,
+    board_refreshes: mpsc::Sender<BoardRefreshResult>,
     explanations: mpsc::Sender<ExplanationResult>,
 ) {
     let mut state = State::new_without_worker();
@@ -377,6 +416,7 @@ fn run(
                     &snapshots,
                     &previews,
                     &trait_details,
+                    &board_refreshes,
                     &explanations,
                     &mut state,
                     &rows,
@@ -402,6 +442,7 @@ fn run(
                             &snapshots,
                             &previews,
                             &trait_details,
+                            &board_refreshes,
                             &explanations,
                             &mut state,
                             &rows,
@@ -553,6 +594,7 @@ fn run(
             &snapshots,
             &previews,
             &trait_details,
+            &board_refreshes,
             &explanations,
             &mut state,
             &rows,
@@ -614,6 +656,7 @@ fn wait_for_retry(
     snapshots: &mpsc::Sender<RefreshResult>,
     previews: &mpsc::Sender<PreviewResult>,
     trait_details: &mpsc::Sender<TraitDetailResult>,
+    board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
@@ -632,6 +675,7 @@ fn wait_for_retry(
                 snapshots,
                 previews,
                 trait_details,
+                board_refreshes,
                 explanations,
                 state,
                 rows,
@@ -650,6 +694,7 @@ fn handle_one_command(
     snapshots: &mpsc::Sender<RefreshResult>,
     previews: &mpsc::Sender<PreviewResult>,
     trait_details: &mpsc::Sender<TraitDetailResult>,
+    board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
@@ -670,6 +715,9 @@ fn handle_one_command(
                 let _ = sender.send(TraitDetailResult { selector, result });
             });
             Ok(())
+        }
+        Command::BoardRefresh(request) => {
+            board_refreshes.send(refresh_board(request)).map_err(|_| ())
         }
         #[cfg(test)]
         Command::Refresh => {
@@ -696,6 +744,30 @@ fn handle_one_command(
             }
             Ok(())
         }
+    }
+}
+
+fn refresh_board(request: BoardRefreshRequest) -> BoardRefreshResult {
+    let result = (|| {
+        if !request.force
+            && let Some(last_known) = &request.last_known_fingerprint
+            && task_files::board_fingerprint(&request.board_dir)
+                .map_err(|error| error.to_string())?
+                == *last_known
+        {
+            return Ok(None);
+        }
+
+        let board = read_board_snapshot(&request.board_dir)?;
+        if let Some(cache_root) = &request.cache_root {
+            persist_board_snapshot(cache_root, &request.board_dir, &board);
+        }
+        Ok(Some(board))
+    })();
+    BoardRefreshResult {
+        generation: request.generation,
+        report_sync: request.report_sync,
+        result,
     }
 }
 
@@ -893,6 +965,60 @@ mod tests {
         assert_eq!(result.task_key.as_deref(), Some("task"));
     }
 
+    #[test]
+    fn board_refresh_skips_unchanged_reads_but_forces_and_persists_requested_reads() {
+        let board_dir = sessions_cache_scratch_root();
+        let cache_root = sessions_cache_scratch_root();
+        std::fs::create_dir_all(board_dir.as_std_path()).expect("create board directory");
+        std::fs::write(
+            board_dir.join("0001-task.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"task\"\nstatus = \"ready\"\n",
+        )
+        .expect("write task");
+
+        let first = refresh_board(BoardRefreshRequest {
+            board_dir: board_dir.clone(),
+            cache_root: Some(cache_root.clone()),
+            last_known_fingerprint: None,
+            force: false,
+            report_sync: false,
+            generation: 7,
+        });
+        assert_eq!(first.generation, 7);
+        assert!(!first.report_sync);
+        let board = first
+            .result
+            .expect("initial board read")
+            .expect("initial board changed");
+        assert_eq!(board.summaries.len(), 1);
+        assert!(ctx_traits_io::task_board_cache::read_snapshot(&cache_root, &board_dir).is_some());
+
+        let unchanged = refresh_board(BoardRefreshRequest {
+            board_dir: board_dir.clone(),
+            cache_root: Some(cache_root.clone()),
+            last_known_fingerprint: Some(board.fingerprint.clone()),
+            force: false,
+            report_sync: false,
+            generation: 8,
+        });
+        assert!(matches!(unchanged.result, Ok(None)));
+
+        let forced = refresh_board(BoardRefreshRequest {
+            board_dir: board_dir.clone(),
+            cache_root: Some(cache_root.clone()),
+            last_known_fingerprint: Some(board.fingerprint),
+            force: true,
+            report_sync: true,
+            generation: 9,
+        });
+        assert_eq!(forced.generation, 9);
+        assert!(forced.report_sync);
+        assert!(matches!(forced.result, Ok(Some(_))));
+
+        std::fs::remove_dir_all(board_dir).ok();
+        std::fs::remove_dir_all(cache_root).ok();
+    }
+
     /// Own the worker channels and join its thread after dropping the command
     /// sender, so live protocol tests cannot leave a reconnecting worker behind.
     struct WorkerLoop {
@@ -911,6 +1037,7 @@ mod tests {
             let (snapshot_tx, snapshots) = mpsc::channel();
             let (preview_tx, _preview_rx) = mpsc::channel();
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
+            let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             let (explanation_tx, _explanation_rx) = mpsc::channel();
             let worker = std::thread::Builder::new()
                 .name(name.to_string())
@@ -920,6 +1047,7 @@ mod tests {
                         snapshot_tx,
                         preview_tx,
                         trait_detail_tx,
+                        board_refresh_tx,
                         explanation_tx,
                     )
                 })
@@ -1096,6 +1224,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         let rows = HashMap::new();
@@ -1105,6 +1234,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &board_refreshes,
             &explanations,
             &mut state,
             &rows,
@@ -1130,6 +1260,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         state.all_repos = true;
@@ -1148,6 +1279,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &board_refreshes,
             &explanations,
             &mut state,
             &rows,
@@ -1170,6 +1302,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         let rows = HashMap::new();
@@ -1185,6 +1318,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &board_refreshes,
             &explanations,
             &mut state,
             &rows,
@@ -1207,6 +1341,7 @@ mod tests {
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
         let (_trait_detail_tx, trait_details) = mpsc::channel();
+        let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
         let handle = Handle {
@@ -1214,6 +1349,7 @@ mod tests {
             snapshots,
             previews,
             trait_details,
+            board_refreshes,
             explanations,
             actions,
             action_sender,
@@ -1409,6 +1545,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
         state.all_repos = true;
@@ -1427,6 +1564,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &board_refreshes,
             &explanations,
             &mut state,
             &rows,
@@ -1981,11 +2119,13 @@ mod tests {
         let (exited_tx, exited_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
+            let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             run(
                 command_rx,
                 snapshot_tx,
                 preview_tx,
                 trait_detail_tx,
+                board_refresh_tx,
                 explanation_tx,
             );
             let _ = exited_tx.send(());
