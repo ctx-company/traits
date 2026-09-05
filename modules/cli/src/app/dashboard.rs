@@ -6461,6 +6461,7 @@ fn sync_tasks_board(state: &mut State) {
 /// `resync_tasks_board_after_write_in` (which must not touch
 /// `state.message`, since the write that triggered it already set the
 /// confirmation the owner needs to see).
+#[cfg(test)]
 fn apply_board_snapshot(state: &mut State, dir: &camino::Utf8Path) -> Result<bool, String> {
     match read_board_snapshot(dir) {
         Ok(board) => {
@@ -6493,6 +6494,7 @@ fn apply_board_snapshot(state: &mut State, dir: &camino::Utf8Path) -> Result<boo
 /// silent no-op or an outright failure on the dashboard footer. A resync
 /// failure here is appended to the existing message instead of replacing
 /// it, so the write confirmation always survives.
+#[cfg(test)]
 fn resync_tasks_board_after_write_in(state: &mut State, dir: &camino::Utf8Path) {
     if let Err(error) = apply_board_snapshot(state, dir) {
         let prefix = state.message.take().unwrap_or_default();
@@ -7806,6 +7808,7 @@ fn append_check_disposition(
 /// `closure` recording whatever check results are in hand, whether they all
 /// passed or not — the disposition decided only whether this keypress was
 /// needed, never whether it is honored.
+#[cfg(test)]
 fn apply_task_mark_done_in(
     state: &mut State,
     dir: &camino::Utf8Path,
@@ -7823,6 +7826,7 @@ fn apply_task_mark_done_in(
 /// folding the newest evidence into `origin` when the document has none yet
 /// (0063.8), plus `closure` when 0144's policy resolved. `self_closed` only
 /// changes the reported message's verb.
+#[cfg(test)]
 fn write_task_close(
     state: &mut State,
     dir: &camino::Utf8Path,
