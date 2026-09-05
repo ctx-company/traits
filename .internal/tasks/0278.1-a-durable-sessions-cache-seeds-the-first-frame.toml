@@ -3,7 +3,7 @@ key = "0278.1"
 title = "A durable sessions cache seeds the first frame"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -69,8 +69,8 @@ exactly the needed disk-cache pattern.
    Decided by: dashboard lib suite.
 
 4. **Existing suites stay green.** Decided by the declared checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - The sessions subscription is machine-wide (`subscribe(None)`) and rows span
@@ -103,8 +103,8 @@ scope = '''
 5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
    dashboard`, then `just test`. In a run worktree, isolate the build cache
    (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Cache is evidence, never authority: cached rows keep a stale/syncing
@@ -119,7 +119,7 @@ validation = '''
   seed-to-live reconciliation are each asserted by suites the declared checks
   run.
 - The dashboard lib suite and `just test` are green.
-'''
+"""
 
 [relations]
 parent = "0278"
