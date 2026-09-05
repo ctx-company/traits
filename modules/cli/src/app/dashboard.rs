@@ -1027,6 +1027,9 @@ struct State {
     /// set this to a scratch directory so `cargo test` never touches
     /// `~/.config/ctx/cache`.
     tasks_cache_root: Option<camino::Utf8PathBuf>,
+    /// Repository identity captured before the render loop starts. Task/session
+    /// joins use this rather than discovering the root while refreshing UI.
+    repo_root: Option<camino::Utf8PathBuf>,
     /// The newest queued board request. Superseded results are discarded.
     tasks_refresh_generation: u64,
     tasks_refresh_pending: bool,
@@ -1227,6 +1230,7 @@ impl State {
     fn new() -> Self {
         let mut state = Self::new_without_worker_for_session(None);
         seed_sessions_from_cache(&mut state);
+        state.repo_root = super::command_handlers::resolve_repo_root(None).ok();
         state.worker = Some(worker::Handle::new());
         load_tasks_board_at_startup(&mut state);
         state
@@ -1239,6 +1243,7 @@ impl State {
         let mut state =
             Self::new_without_worker_for_session_with_guide(Some(session_id), guide_chat);
         seed_sessions_from_cache(&mut state);
+        state.repo_root = super::command_handlers::resolve_repo_root(None).ok();
         state.worker = Some(worker::Handle::new());
         load_tasks_board_at_startup(&mut state);
         state
@@ -1287,6 +1292,7 @@ impl State {
             tasks_board: None,
             tasks_refresh_error: None,
             tasks_cache_root: None,
+            repo_root: None,
             tasks_refresh_generation: 0,
             tasks_refresh_pending: false,
             sessions_cache_root: None,
@@ -5949,9 +5955,7 @@ fn task_group(derived: DerivedStatus, joined: &[&SessionRow]) -> TaskGroup {
 /// its own `repo_path` is `None` (the default, current-repository-only scope)
 /// or matches the current repository root exactly).
 fn task_session_join(state: &State) -> std::collections::HashMap<String, Vec<usize>> {
-    let repo_root = super::command_handlers::resolve_repo_root(None)
-        .ok()
-        .map(|path| path.to_string());
+    let repo_root = state.repo_root.as_deref().map(camino::Utf8Path::as_str);
     let mut map: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
     for (idx, row) in state.sessions.iter().enumerate() {
         let Some(key) = &row.task_key else { continue };
@@ -14217,6 +14221,31 @@ argv = ["git", "commit", "-m", "fixture"]
         let join = task_session_join(&state);
         assert_eq!(join.get("0010").map(Vec::len), Some(3));
         assert!(!join.contains_key("0010.1"));
+    }
+
+    #[test]
+    fn task_session_join_uses_the_carried_repository_root() {
+        let mut state = State::new_without_worker();
+        state.repo_root = Some(camino::Utf8PathBuf::from("/repo/current"));
+        let mut current = row_with_id("current", SessionClass::Live);
+        current.task_key = Some("0001".to_string());
+        current.repo_path = Some("/repo/current".to_string());
+        let mut other = row_with_id("other", SessionClass::Live);
+        other.task_key = Some("0002".to_string());
+        other.repo_path = Some("/repo/other".to_string());
+        state.sessions = vec![current, other];
+
+        let join = task_session_join(&state);
+
+        assert_eq!(join.get("0001").map(Vec::len), Some(1));
+        assert!(!join.contains_key("0002"));
+    }
+
+    #[test]
+    fn new_without_worker_leaves_repository_root_unresolved() {
+        let state = State::new_without_worker();
+
+        assert!(state.repo_root.is_none());
     }
 
     #[test]
