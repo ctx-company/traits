@@ -1147,6 +1147,11 @@ struct State {
     /// the screen's tree. Read-only and never advances a run — a keypress
     /// must not spend tokens, so this always resolves the free level.
     story_view: Option<StoryView>,
+    /// Session ids with a story read queued on the worker. Keeping identities
+    /// rather than one boolean permits a late result to be rejected safely.
+    story_view_pending: HashSet<String>,
+    /// Session ids with an answer-question read queued on the worker.
+    answer_question_pending: HashSet<String>,
     /// P552 review `live-run-pane-contract-absent`: while attached, pane-cycle
     /// (`Tab`/`BackTab`) and scroll keys are queued here and drained by the
     /// shared [`run_view::render_pane_body`] itself — the SAME mechanism a
@@ -1168,10 +1173,10 @@ struct State {
     optimistic_dispatched: HashMap<String, String>,
 }
 
-/// P550 dashboard `S`-key state: a snapshot of one session's story, built
-/// synchronously from local ledger + best-effort plan reads at keypress
-/// time (never a live view — a still-running session's story is exactly
-/// that: a snapshot, stated in its own disposition line).
+/// P550 dashboard `S`-key state: a snapshot of one session's story, built by
+/// the worker from local ledger + best-effort plan reads (never a live view —
+/// a still-running session's story is exactly that: a snapshot, stated in its
+/// own disposition line).
 struct StoryView {
     session: ctx_traits_core::procedure::session::Session,
     report: ctx_traits_core::procedure::story::StoryReport,
@@ -1333,6 +1338,8 @@ impl State {
             loading: false,
             refresh_error: None,
             story_view: None,
+            story_view_pending: HashSet::new(),
+            answer_question_pending: HashSet::new(),
             pending_keys: Vec::new(),
             guide_chat,
             guide_chat_session_id,
@@ -1463,6 +1470,8 @@ impl State {
         let preview_results = worker.preview_results();
         let trait_detail_results = worker.trait_detail_results();
         let merge_detail_results = worker.merge_detail_results();
+        let story_view_results = worker.story_view_results();
+        let answer_question_results = worker.answer_question_results();
         let board_refresh_results = worker.board_refresh_results();
         let refresh_results = worker.refresh_results();
         for result in explanation_results {
@@ -1493,6 +1502,8 @@ impl State {
         self.apply_preview_results(preview_results);
         self.apply_trait_detail_results(trait_detail_results);
         self.apply_merge_detail_results(merge_detail_results);
+        self.apply_story_view_results(story_view_results);
+        self.apply_answer_question_results(answer_question_results);
         self.apply_board_results(board_refresh_results);
         self.apply_refresh_results(refresh_results);
     }
@@ -1561,6 +1572,97 @@ impl State {
                 result.produced,
                 false,
             ));
+        }
+    }
+
+    fn apply_story_view_results(
+        &mut self,
+        results: impl IntoIterator<Item = worker::StoryViewResult>,
+    ) {
+        for result in results {
+            self.story_view_pending.remove(&result.session_id);
+            if self.screen != Screen::Sessions
+                || !selected_session(self).is_some_and(|row| row.session_id == result.session_id)
+            {
+                continue;
+            }
+            match result.result {
+                Ok(view) => self.story_view = Some(view),
+                Err(error) => self.message = Some(format!("story: {error}")),
+            }
+        }
+    }
+
+    fn apply_answer_question_results(
+        &mut self,
+        results: impl IntoIterator<Item = worker::AnswerQuestionResult>,
+    ) {
+        for result in results {
+            self.answer_question_pending.remove(&result.session_id);
+            if self.screen != Screen::Sessions {
+                continue;
+            }
+            let Some(row) = selected_session(self) else {
+                continue;
+            };
+            if row.session_id != result.session_id {
+                continue;
+            }
+            let display_id = state_short_session(self, &result.session_id);
+            match result.result {
+                Ok(payload) => {
+                    let question = format!(
+                        "{}\n---\nanswer slot: {} (schema: {})",
+                        payload.question_body,
+                        payload.slot_ref,
+                        payload.schema_ref.as_deref().unwrap_or("schema:any")
+                    );
+                    self.modal_host.open(
+                        Action::Session(SessionAction::Answer {
+                            session_id: result.session_id,
+                            state_digest: payload.state_digest,
+                            target: payload.slot_ref,
+                            schema_ref: payload.schema_ref,
+                        }),
+                        Modal::text_input_with_body("answer question", question, "", true),
+                    );
+                }
+                Err(worker::AnswerQuestionFailure::Missing) => {
+                    self.message = Some(format!(
+                        "answer refused: {display_id} is no longer available from the center"
+                    ))
+                }
+                Err(worker::AnswerQuestionFailure::Ambiguous) => {
+                    self.message = Some(format!(
+                        "answer refused: {display_id} is ambiguous in the center"
+                    ))
+                }
+                Err(worker::AnswerQuestionFailure::Center(error)) => {
+                    self.message = Some(format!(
+                        "answer refused: center could not load {display_id}: {error}"
+                    ));
+                }
+                Err(worker::AnswerQuestionFailure::Cancelled) => {
+                    self.message = Some(format!(
+                        "answer refused: {display_id}'s question was cancelled"
+                    ))
+                }
+                Err(worker::AnswerQuestionFailure::NotWaiting) => {
+                    self.message = Some(format!(
+                        "answer refused: {display_id} is not waiting for a human"
+                    ))
+                }
+                Err(worker::AnswerQuestionFailure::NoAnswerSlot) => {
+                    self.message = Some(format!(
+                        "answer refused: {display_id}'s question has no answer slot"
+                    ))
+                }
+                Err(worker::AnswerQuestionFailure::Unavailable(error)) => {
+                    self.message = Some(format!(
+                        "answer unavailable: could not resolve question for {display_id}: {error}"
+                    ));
+                }
+            }
         }
     }
 
@@ -2340,12 +2442,9 @@ fn selected_session(state: &State) -> Option<&SessionRow> {
     }
 }
 
-/// P550 `S`: opens the story view for the selected SESSIONS row. Loading is
-/// synchronous — a ledger read plus a best-effort `load_plan` that degrades
-/// to ledger-only enrichment on any failure (both local file reads) — and
-/// NEVER makes a model call: the free `StoryLevel::Default` is the only
-/// level a keypress can ever resolve to (`draw_screen`'s story branch, not
-/// this function, is where that level is fixed).
+/// P550 `S`: queues the selected SESSIONS row's story read. It NEVER makes a
+/// model call: the free `StoryLevel::Default` is the only level a keypress can
+/// ever resolve to (`draw_screen`'s story branch, not this function, fixes it).
 fn open_story_view(state: &mut State) {
     let Some(row) = selected_session(state) else {
         state.message = Some("no session selected".to_string());
@@ -2355,33 +2454,18 @@ fn open_story_view(state: &mut State) {
         state.message = Some("story: no run-id recorded for this session".to_string());
         return;
     }
-    match build_story_view_from_center(row) {
-        Ok(view) => state.story_view = Some(view),
-        Err(err) => state.message = Some(format!("story: {err}")),
-    }
-}
-
-/// The `StoryView` builder factored out so [`open_story_view`]'s `S`
-/// keypress and the P552 review `terminal-attach-story-identity-lost` fix
-/// (an attached run becoming terminal) construct the exact same P550 story
-/// instead of the attach path growing its own ending — and, critically,
-/// from the SAME authoritative `ledger_path` both callers already hold
-/// rather than a fresh `run_id` lookup through the current repository's
-/// default session store, which a foreign-repository attachment (or a
-/// same-run-id collision within the current store) can resolve to the wrong
-/// session entirely.
-fn build_story_view_from_center(row: &SessionRow) -> crate::Result<StoryView> {
-    let session = match ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref())? {
-        ctx_traits_io::center::GetResult::Session(session) => *session,
-        ctx_traits_io::center::GetResult::Missing
-        | ctx_traits_io::center::GetResult::Ambiguous(_) => {
-            return Err(crate::app::error::Error::Command {
-                message: "selected session is no longer uniquely available from the center"
-                    .to_string(),
-            });
-        }
+    let request = worker::StoryViewRequest {
+        session_id: row.session_id.clone(),
+        repo_key: row.repo_key.clone(),
+        ledger_path: row.ledger_path.clone(),
     };
-    build_story_view(session, &row.ledger_path)
+    if state.story_view_pending.insert(request.session_id.clone()) {
+        if let Some(worker) = &state.worker {
+            worker.story_view(request.clone());
+        } else {
+            state.story_view_pending.remove(&request.session_id);
+        }
+    }
 }
 
 fn build_story_view(
@@ -4636,108 +4720,21 @@ fn open_answer_modal(state: &mut State) {
     let Some(row) = selected_session(state) else {
         return;
     };
-    let display_id = state_short_session(state, &row.session_id);
-    let session = match ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref()) {
-        Ok(ctx_traits_io::center::GetResult::Session(session)) => session,
-        Ok(ctx_traits_io::center::GetResult::Missing) => {
-            state.message = Some(format!(
-                "answer refused: {display_id} is no longer available from the center"
-            ));
-            return;
-        }
-        Ok(ctx_traits_io::center::GetResult::Ambiguous(_)) => {
-            state.message = Some(format!(
-                "answer refused: {display_id} is ambiguous in the center"
-            ));
-            return;
-        }
-        Err(error) => {
-            state.message = Some(format!(
-                "answer refused: center could not load {display_id}: {error}"
-            ));
-            return;
-        }
+    let request = worker::AnswerQuestionRequest {
+        session_id: row.session_id.clone(),
+        repo_key: row.repo_key.clone(),
+        repo_path: row.repo_path.clone(),
     };
-    // Derived state, not raw `Status::WaitingOnHuman` (P0253.4, mirrors the
-    // Answer applier's own TOCTOU re-check below): `record_interrupted_outcome`
-    // never rewrites `status` away from `WaitingOnHuman`, so a raw-status
-    // check would open the modal on an already-cancelled question.
-    let session_outcome = session.last_drive_outcome.as_ref().map(|o| &o.outcome);
-    let session_state = ctx_traits_core::procedure::activity::SessionState::derive(
-        &session.status,
-        session_outcome,
-        false,
-    );
-    if session_state == ctx_traits_core::procedure::activity::SessionState::Cancelled {
-        state.message = Some(format!(
-            "answer refused: {display_id}'s question was cancelled"
-        ));
-        return;
+    if state
+        .answer_question_pending
+        .insert(request.session_id.clone())
+    {
+        if let Some(worker) = &state.worker {
+            worker.answer_question(request.clone());
+        } else {
+            state.answer_question_pending.remove(&request.session_id);
+        }
     }
-    let Some(frame) = session
-        .next_frame
-        .as_ref()
-        .filter(|frame| super::frame_prompt::is_live_summons(&session, frame))
-    else {
-        state.message = Some(format!(
-            "answer refused: {display_id} is not waiting for a human"
-        ));
-        return;
-    };
-    let Some(output) = frame.requested_outputs.first() else {
-        state.message = Some(format!(
-            "answer refused: {display_id}'s question has no answer slot"
-        ));
-        return;
-    };
-    // Stored evidence first (P0253.4 blocker 1): a durable summons record
-    // opens the modal without resolving the trait at all, so a summons still
-    // answers even when the trait source is unavailable (moved, deleted
-    // dependency, unreadable package) — only a ledger parked before that
-    // field existed falls back to resolving and re-rendering the trait.
-    let question_body = match super::frame_prompt::stored_summons_question(&session, frame) {
-        Some(question) => question,
-        None => {
-            let trait_file = resolve_answer_trait_file(&session, row.repo_path.as_deref());
-            let loaded = match ctx_traits_io::run::load_trait_for_session(
-                trait_file.as_deref(),
-                None,
-                &session,
-                "dashboard",
-            ) {
-                Ok(loaded) => loaded,
-                Err(error) => {
-                    state.message = Some(format!(
-                        "answer unavailable: could not resolve question for {display_id}: {error}"
-                    ));
-                    return;
-                }
-            };
-            match summons_question(&loaded, &session, frame) {
-                Ok(body) => body,
-                Err(error) => {
-                    state.message = Some(format!(
-                        "answer unavailable: could not resolve question for {display_id}: {error}"
-                    ));
-                    return;
-                }
-            }
-        }
-    };
-    let question = format!(
-        "{question_body}\n---\nanswer slot: {} (schema: {})",
-        output.slot_ref,
-        output.schema_ref.as_deref().unwrap_or("schema:any")
-    );
-    state.modal_host.open(
-        Action::Session(SessionAction::Answer {
-            session_id: row.session_id.clone(),
-            state_digest: session.state_digest.as_str().to_string(),
-            target: output.slot_ref.to_string(),
-            schema_ref: output.schema_ref.clone(),
-        }),
-        Modal::text_input_with_body("answer question", question, "", true),
-    );
 }
 
 /// `s`: opens the RESUME confirm modal for the selected row. Refuses outright
@@ -9201,6 +9198,48 @@ mod tests {
             Some("second")
         );
         assert!(!state.preview_pending);
+    }
+
+    #[test]
+    fn story_and_answer_results_apply_only_to_the_requesting_selected_session() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.story_view_pending.insert("selected".to_string());
+        state.answer_question_pending.insert("selected".to_string());
+
+        state.apply_story_view_results([worker::StoryViewResult {
+            session_id: "other".to_string(),
+            result: Err("stale failure".to_string()),
+        }]);
+        state.apply_answer_question_results([worker::AnswerQuestionResult {
+            session_id: "other".to_string(),
+            result: Err(worker::AnswerQuestionFailure::Missing),
+        }]);
+        assert!(state.story_view.is_none());
+        assert!(state.message.is_none());
+        assert!(state.story_view_pending.contains("selected"));
+        assert!(state.answer_question_pending.contains("selected"));
+
+        state.apply_answer_question_results([worker::AnswerQuestionResult {
+            session_id: "selected".to_string(),
+            result: Ok(worker::AnswerQuestionPayload {
+                question_body: "What changed?".to_string(),
+                state_digest: "digest".to_string(),
+                slot_ref: "answer".to_string(),
+                schema_ref: None,
+            }),
+        }]);
+        assert!(state.modal_host.is_open());
+        assert!(!state.answer_question_pending.contains("selected"));
+
+        state.apply_story_view_results([worker::StoryViewResult {
+            session_id: "selected".to_string(),
+            result: Err("ledger unavailable".to_string()),
+        }]);
+        assert_eq!(state.message.as_deref(), Some("story: ledger unavailable"));
+        assert!(!state.story_view_pending.contains("selected"));
     }
 
     #[test]

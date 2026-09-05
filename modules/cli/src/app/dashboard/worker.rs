@@ -35,6 +35,47 @@ pub(super) struct MergeDetailResult {
 }
 
 #[derive(Clone)]
+pub(super) struct StoryViewRequest {
+    pub(super) session_id: String,
+    pub(super) repo_key: Option<String>,
+    pub(super) ledger_path: camino::Utf8PathBuf,
+}
+
+pub(super) struct StoryViewResult {
+    pub(super) session_id: String,
+    pub(super) result: Result<super::StoryView, String>,
+}
+
+#[derive(Clone)]
+pub(super) struct AnswerQuestionRequest {
+    pub(super) session_id: String,
+    pub(super) repo_key: Option<String>,
+    pub(super) repo_path: Option<String>,
+}
+
+pub(super) struct AnswerQuestionPayload {
+    pub(super) question_body: String,
+    pub(super) state_digest: String,
+    pub(super) slot_ref: String,
+    pub(super) schema_ref: Option<String>,
+}
+
+pub(super) enum AnswerQuestionFailure {
+    Missing,
+    Ambiguous,
+    Center(String),
+    Cancelled,
+    NotWaiting,
+    NoAnswerSlot,
+    Unavailable(String),
+}
+
+pub(super) struct AnswerQuestionResult {
+    pub(super) session_id: String,
+    pub(super) result: Result<AnswerQuestionPayload, AnswerQuestionFailure>,
+}
+
+#[derive(Clone)]
 pub(super) struct BoardRefreshRequest {
     pub(super) board_dir: camino::Utf8PathBuf,
     pub(super) cache_root: Option<camino::Utf8PathBuf>,
@@ -57,6 +98,8 @@ pub(super) struct Handle {
     previews: mpsc::Receiver<PreviewResult>,
     trait_details: mpsc::Receiver<TraitDetailResult>,
     merge_details: mpsc::Receiver<MergeDetailResult>,
+    story_views: mpsc::Receiver<StoryViewResult>,
+    answer_questions: mpsc::Receiver<AnswerQuestionResult>,
     board_refreshes: mpsc::Receiver<BoardRefreshResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
     actions: mpsc::Receiver<ActionResult>,
@@ -151,6 +194,8 @@ enum Command {
     Preview(SessionPreviewRequest),
     TraitDetail(ctx_traits_io::library::LibraryDetailSelector),
     MergeDetail(MergeDetailRequest),
+    StoryView(StoryViewRequest),
+    AnswerQuestion(AnswerQuestionRequest),
     BoardRefresh(BoardRefreshRequest),
     /// Kept for test-only command projections; it never reads library files.
     #[cfg(test)]
@@ -165,6 +210,8 @@ impl Handle {
         let (preview_tx, previews) = mpsc::channel();
         let (trait_detail_tx, trait_details) = mpsc::channel();
         let (merge_detail_tx, merge_details) = mpsc::channel();
+        let (story_view_tx, story_views) = mpsc::channel();
+        let (answer_question_tx, answer_questions) = mpsc::channel();
         let (board_refresh_tx, board_refreshes) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -175,6 +222,8 @@ impl Handle {
                 preview_tx,
                 trait_detail_tx,
                 merge_detail_tx,
+                story_view_tx,
+                answer_question_tx,
                 board_refresh_tx,
                 explanation_tx,
             )
@@ -185,6 +234,8 @@ impl Handle {
             previews,
             trait_details,
             merge_details,
+            story_views,
+            answer_questions,
             board_refreshes,
             explanations,
             actions,
@@ -199,6 +250,8 @@ impl Handle {
         let (_preview_tx, previews) = mpsc::channel();
         let (_trait_detail_tx, trait_details) = mpsc::channel();
         let (_merge_detail_tx, merge_details) = mpsc::channel();
+        let (_story_view_tx, story_views) = mpsc::channel();
+        let (_answer_question_tx, answer_questions) = mpsc::channel();
         let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -208,6 +261,8 @@ impl Handle {
             previews,
             trait_details,
             merge_details,
+            story_views,
+            answer_questions,
             board_refreshes,
             explanations,
             actions,
@@ -305,6 +360,14 @@ impl Handle {
         let _ = self.commands.send(Command::MergeDetail(request));
     }
 
+    pub(super) fn story_view(&self, request: StoryViewRequest) {
+        let _ = self.commands.send(Command::StoryView(request));
+    }
+
+    pub(super) fn answer_question(&self, request: AnswerQuestionRequest) {
+        let _ = self.commands.send(Command::AnswerQuestion(request));
+    }
+
     pub(super) fn refresh_board(&self, request: BoardRefreshRequest) {
         let _ = self.commands.send(Command::BoardRefresh(request));
     }
@@ -328,6 +391,22 @@ impl Handle {
     pub(super) fn merge_detail_results(&self) -> Vec<MergeDetailResult> {
         let mut results = Vec::new();
         while let Ok(result) = self.merge_details.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
+    pub(super) fn story_view_results(&self) -> Vec<StoryViewResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.story_views.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
+    pub(super) fn answer_question_results(&self) -> Vec<AnswerQuestionResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.answer_questions.try_recv() {
             results.push(result);
         }
         results
@@ -425,6 +504,8 @@ fn run(
     previews: mpsc::Sender<PreviewResult>,
     trait_details: mpsc::Sender<TraitDetailResult>,
     merge_details: mpsc::Sender<MergeDetailResult>,
+    story_views: mpsc::Sender<StoryViewResult>,
+    answer_questions: mpsc::Sender<AnswerQuestionResult>,
     board_refreshes: mpsc::Sender<BoardRefreshResult>,
     explanations: mpsc::Sender<ExplanationResult>,
 ) {
@@ -451,6 +532,8 @@ fn run(
                     &previews,
                     &trait_details,
                     &merge_details,
+                    &story_views,
+                    &answer_questions,
                     &board_refreshes,
                     &explanations,
                     &mut state,
@@ -478,6 +561,8 @@ fn run(
                             &previews,
                             &trait_details,
                             &merge_details,
+                            &story_views,
+                            &answer_questions,
                             &board_refreshes,
                             &explanations,
                             &mut state,
@@ -631,6 +716,8 @@ fn run(
             &previews,
             &trait_details,
             &merge_details,
+            &story_views,
+            &answer_questions,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -694,6 +781,8 @@ fn wait_for_retry(
     previews: &mpsc::Sender<PreviewResult>,
     trait_details: &mpsc::Sender<TraitDetailResult>,
     merge_details: &mpsc::Sender<MergeDetailResult>,
+    story_views: &mpsc::Sender<StoryViewResult>,
+    answer_questions: &mpsc::Sender<AnswerQuestionResult>,
     board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
@@ -714,6 +803,8 @@ fn wait_for_retry(
                 previews,
                 trait_details,
                 merge_details,
+                story_views,
+                answer_questions,
                 board_refreshes,
                 explanations,
                 state,
@@ -734,6 +825,8 @@ fn handle_one_command(
     previews: &mpsc::Sender<PreviewResult>,
     trait_details: &mpsc::Sender<TraitDetailResult>,
     merge_details: &mpsc::Sender<MergeDetailResult>,
+    story_views: &mpsc::Sender<StoryViewResult>,
+    answer_questions: &mpsc::Sender<AnswerQuestionResult>,
     board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
@@ -777,6 +870,10 @@ fn handle_one_command(
                 })
                 .map_err(|_| ())
         }
+        Command::StoryView(request) => story_views.send(story_view(request)).map_err(|_| ()),
+        Command::AnswerQuestion(request) => answer_questions
+            .send(answer_question(request))
+            .map_err(|_| ()),
         Command::BoardRefresh(request) => {
             board_refreshes.send(refresh_board(request)).map_err(|_| ())
         }
@@ -830,6 +927,90 @@ fn refresh_board(request: BoardRefreshRequest) -> BoardRefreshResult {
         report_sync: request.report_sync,
         result,
     }
+}
+
+fn story_view(request: StoryViewRequest) -> StoryViewResult {
+    let session_id = request.session_id.clone();
+    let result = (|| {
+        let session =
+            match ctx_traits_io::center::get(&request.session_id, request.repo_key.as_deref())
+                .map_err(|error| error.to_string())?
+            {
+                ctx_traits_io::center::GetResult::Session(session) => *session,
+                ctx_traits_io::center::GetResult::Missing
+                | ctx_traits_io::center::GetResult::Ambiguous(_) => {
+                    return Err(
+                        "selected session is no longer uniquely available from the center"
+                            .to_string(),
+                    );
+                }
+            };
+        super::build_story_view(session, &request.ledger_path).map_err(|error| error.to_string())
+    })();
+    StoryViewResult { session_id, result }
+}
+
+fn answer_question(request: AnswerQuestionRequest) -> AnswerQuestionResult {
+    let session_id = request.session_id.clone();
+    let result = (|| {
+        let session =
+            match ctx_traits_io::center::get(&request.session_id, request.repo_key.as_deref()) {
+                Ok(ctx_traits_io::center::GetResult::Session(session)) => session,
+                Ok(ctx_traits_io::center::GetResult::Missing) => {
+                    return Err(AnswerQuestionFailure::Missing);
+                }
+                Ok(ctx_traits_io::center::GetResult::Ambiguous(_)) => {
+                    return Err(AnswerQuestionFailure::Ambiguous);
+                }
+                Err(error) => return Err(AnswerQuestionFailure::Center(error.to_string())),
+            };
+        let session_outcome = session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| &outcome.outcome);
+        let session_state = ctx_traits_core::procedure::activity::SessionState::derive(
+            &session.status,
+            session_outcome,
+            false,
+        );
+        if session_state == ctx_traits_core::procedure::activity::SessionState::Cancelled {
+            return Err(AnswerQuestionFailure::Cancelled);
+        }
+        let Some(frame) = session
+            .next_frame
+            .as_ref()
+            .filter(|frame| super::super::frame_prompt::is_live_summons(&session, frame))
+        else {
+            return Err(AnswerQuestionFailure::NotWaiting);
+        };
+        let Some(output) = frame.requested_outputs.first() else {
+            return Err(AnswerQuestionFailure::NoAnswerSlot);
+        };
+        let question_body =
+            match super::super::frame_prompt::stored_summons_question(&session, frame) {
+                Some(question) => question,
+                None => {
+                    let trait_file =
+                        super::resolve_answer_trait_file(&session, request.repo_path.as_deref());
+                    let loaded = ctx_traits_io::run::load_trait_for_session(
+                        trait_file.as_deref(),
+                        None,
+                        &session,
+                        "dashboard",
+                    )
+                    .map_err(|error| AnswerQuestionFailure::Unavailable(error.to_string()))?;
+                    super::summons_question(&loaded, &session, frame)
+                        .map_err(|error| AnswerQuestionFailure::Unavailable(error.to_string()))?
+                }
+            };
+        Ok(AnswerQuestionPayload {
+            question_body,
+            state_digest: session.state_digest.as_str().to_string(),
+            slot_ref: output.slot_ref.to_string(),
+            schema_ref: output.schema_ref.clone(),
+        })
+    })();
+    AnswerQuestionResult { session_id, result }
 }
 
 fn emit_subscription_snapshot(
@@ -1099,6 +1280,8 @@ mod tests {
             let (preview_tx, _preview_rx) = mpsc::channel();
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
             let (merge_detail_tx, _merge_detail_rx) = mpsc::channel();
+            let (story_view_tx, _story_view_rx) = mpsc::channel();
+            let (answer_question_tx, _answer_question_rx) = mpsc::channel();
             let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             let (explanation_tx, _explanation_rx) = mpsc::channel();
             let worker = std::thread::Builder::new()
@@ -1110,6 +1293,8 @@ mod tests {
                         preview_tx,
                         trait_detail_tx,
                         merge_detail_tx,
+                        story_view_tx,
+                        answer_question_tx,
                         board_refresh_tx,
                         explanation_tx,
                     )
@@ -1288,6 +1473,8 @@ mod tests {
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
         let (merge_details, _merge_detail_results) = mpsc::channel();
+        let (story_views, _story_view_results) = mpsc::channel();
+        let (answer_questions, _answer_question_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1299,6 +1486,8 @@ mod tests {
             &previews,
             &trait_details,
             &merge_details,
+            &story_views,
+            &answer_questions,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1326,6 +1515,8 @@ mod tests {
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
         let (merge_details, _merge_detail_results) = mpsc::channel();
+        let (story_views, _story_view_results) = mpsc::channel();
+        let (answer_questions, _answer_question_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1346,6 +1537,8 @@ mod tests {
             &previews,
             &trait_details,
             &merge_details,
+            &story_views,
+            &answer_questions,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1370,6 +1563,8 @@ mod tests {
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
         let (merge_details, _merge_detail_results) = mpsc::channel();
+        let (story_views, _story_view_results) = mpsc::channel();
+        let (answer_questions, _answer_question_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1387,6 +1582,8 @@ mod tests {
             &previews,
             &trait_details,
             &merge_details,
+            &story_views,
+            &answer_questions,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1411,6 +1608,8 @@ mod tests {
         let (_preview_tx, previews) = mpsc::channel();
         let (_trait_detail_tx, trait_details) = mpsc::channel();
         let (_merge_detail_tx, merge_details) = mpsc::channel();
+        let (_story_view_tx, story_views) = mpsc::channel();
+        let (_answer_question_tx, answer_questions) = mpsc::channel();
         let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -1420,6 +1619,8 @@ mod tests {
             previews,
             trait_details,
             merge_details,
+            story_views,
+            answer_questions,
             board_refreshes,
             explanations,
             actions,
@@ -1617,6 +1818,8 @@ mod tests {
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
         let (merge_details, _merge_detail_results) = mpsc::channel();
+        let (story_views, _story_view_results) = mpsc::channel();
+        let (answer_questions, _answer_question_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1637,6 +1840,8 @@ mod tests {
             &previews,
             &trait_details,
             &merge_details,
+            &story_views,
+            &answer_questions,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -2193,6 +2398,8 @@ mod tests {
         let worker = std::thread::spawn(move || {
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
             let (merge_detail_tx, _merge_detail_rx) = mpsc::channel();
+            let (story_view_tx, _story_view_rx) = mpsc::channel();
+            let (answer_question_tx, _answer_question_rx) = mpsc::channel();
             let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             run(
                 command_rx,
@@ -2200,6 +2407,8 @@ mod tests {
                 preview_tx,
                 trait_detail_tx,
                 merge_detail_tx,
+                story_view_tx,
+                answer_question_tx,
                 board_refresh_tx,
                 explanation_tx,
             );
