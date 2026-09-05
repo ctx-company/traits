@@ -814,15 +814,55 @@ enum TaskAction {
     },
 }
 
+/// Identifies a modal-open request while its worker read is in flight. Keeping
+/// this distinct from the eventual [`TaskAction`] prevents repeated keypresses
+/// from opening duplicate modals when a slow store or check is still running.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum TaskActionOpenRequest {
+    Archive(String),
+    Edit(String),
+    Split(String),
+    MarkDone(String),
+    Reconcile(Option<String>),
+    ReconcileStep(Option<String>),
+}
+
+pub(super) enum TaskModalPayload {
+    Modal {
+        title: String,
+        body: String,
+        digest: String,
+        evidence: Vec<super::task_proposals::MergedRunEvidence>,
+        closure: Option<Closure>,
+    },
+    SelfClosed(String),
+}
+
+pub(super) struct ReconcileModalPayload {
+    pub(super) queue: Vec<super::task_proposals::ReconcileProposal>,
+    pub(super) ambiguous: Vec<super::task_proposals::AmbiguousFinding>,
+}
+
+pub(super) enum ReconcileStepPayload {
+    Modal {
+        proposal: super::task_proposals::ReconcileProposal,
+        title: String,
+        body: String,
+        digest: String,
+        closure: Option<Closure>,
+    },
+    SelfClosed(String),
+}
+
 /// One split child proposed from a park report's open blocker (or an
 /// oversized feasibility verdict's `missing` entry), pending the owner's
 /// individual confirmation (0064).
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingSplitChild {
-    title: String,
-    content: String,
-    validation: String,
-    steps: Vec<ctx_traits_core::task::Step>,
+pub(super) struct PendingSplitChild {
+    pub(super) title: String,
+    pub(super) content: String,
+    pub(super) validation: String,
+    pub(super) steps: Vec<ctx_traits_core::task::Step>,
 }
 
 fn archive_buttons(dependents: usize) -> Vec<Button> {
@@ -1070,6 +1110,12 @@ struct State {
     /// 0064: the ambiguous findings from the last `R` pass, surfaced in the
     /// completion message once the queue drains.
     reconcile_ambiguous: Vec<super::task_proposals::AmbiguousFinding>,
+    /// Selection identity captured when a reconcile pass starts. Results for
+    /// its background checks must not open a modal after selection changes.
+    reconcile_selection_key: Option<String>,
+    /// Task modal-open reads currently owned by the worker. A repeated action
+    /// key while one is pending is intentionally a no-op.
+    task_action_open_pending: HashSet<TaskActionOpenRequest>,
     /// 0064: the split-from-park-report queue — one confirm modal per open
     /// blocker (or oversized feasibility `missing` entry), stepped through
     /// the same way as `reconcile_queue`.
@@ -1310,6 +1356,8 @@ impl State {
             task_awaiting_merge: HashMap::new(),
             reconcile_queue: Vec::new(),
             reconcile_ambiguous: Vec::new(),
+            reconcile_selection_key: None,
+            task_action_open_pending: HashSet::new(),
             split_queue: Vec::new(),
             message: None,
             quit: false,
@@ -1472,6 +1520,7 @@ impl State {
         let merge_detail_results = worker.merge_detail_results();
         let story_view_results = worker.story_view_results();
         let answer_question_results = worker.answer_question_results();
+        let task_action_open_results = worker.task_action_open_results();
         let board_refresh_results = worker.board_refresh_results();
         let refresh_results = worker.refresh_results();
         for result in explanation_results {
@@ -1504,8 +1553,177 @@ impl State {
         self.apply_merge_detail_results(merge_detail_results);
         self.apply_story_view_results(story_view_results);
         self.apply_answer_question_results(answer_question_results);
+        self.apply_task_action_open_results(task_action_open_results);
         self.apply_board_results(board_refresh_results);
         self.apply_refresh_results(refresh_results);
+    }
+
+    fn apply_task_action_open_results(
+        &mut self,
+        results: impl IntoIterator<Item = worker::TaskActionOpenResult>,
+    ) {
+        for result in results {
+            match result {
+                worker::TaskActionOpenResult::Archive {
+                    task_key,
+                    dependents,
+                    result,
+                } => {
+                    self.task_action_open_pending
+                        .remove(&TaskActionOpenRequest::Archive(task_key.clone()));
+                    if selected_task(self).is_none_or(|task| task.key != task_key) {
+                        continue;
+                    }
+                    match result {
+                        Ok(digest) => self.modal_host.open(
+                            Action::Task(TaskAction::Archive {
+                                key: task_key.clone(),
+                                digest,
+                            }),
+                            Modal::buttons(
+                                format!("archive {task_key}"),
+                                if dependents > 0 {
+                                    format!("{dependents} task(s) depend on this; release also clears them.")
+                                } else {
+                                    format!("No other task depends on {task_key}.")
+                                },
+                                archive_buttons(dependents),
+                            ),
+                        ),
+                        Err(error) => self.message = Some(format!("archive refused: {error}")),
+                    }
+                }
+                worker::TaskActionOpenResult::Edit { task_key, result } => {
+                    self.task_action_open_pending
+                        .remove(&TaskActionOpenRequest::Edit(task_key.clone()));
+                    if selected_task(self).is_none_or(|task| task.key != task_key) {
+                        continue;
+                    }
+                    match result {
+                        Ok(digest) => self.modal_host.open(
+                            Action::Task(TaskAction::Edit {
+                                key: task_key.clone(),
+                                digest,
+                            }),
+                            Modal::text_input(
+                                format!("edit {task_key} — status <s> | dep +<k> | dep -<k> | dep <old> <new>"),
+                                "",
+                                false,
+                            ),
+                        ),
+                        Err(error) => self.message = Some(format!("edit refused: {error}")),
+                    }
+                }
+                worker::TaskActionOpenResult::Split { parent, result } => {
+                    self.task_action_open_pending
+                        .remove(&TaskActionOpenRequest::Split(parent.clone()));
+                    if selected_task(self).is_none_or(|task| task.key != parent) {
+                        continue;
+                    }
+                    match result {
+                        Ok(children) if children.is_empty() => self.modal_host.open(
+                            Action::Task(TaskAction::Split {
+                                parent: parent.clone(),
+                            }),
+                            Modal::text_input(format!("split {parent} — child title"), "", false),
+                        ),
+                        Ok(children) => {
+                            self.split_queue = children;
+                            open_next_split_step(self, &parent);
+                        }
+                        Err(error) => self.message = Some(format!("split refused: {error}")),
+                    }
+                }
+                worker::TaskActionOpenResult::MarkDone { task_key, result } => {
+                    self.task_action_open_pending
+                        .remove(&TaskActionOpenRequest::MarkDone(task_key.clone()));
+                    if selected_task(self).is_none_or(|task| task.key != task_key) {
+                        continue;
+                    }
+                    match result {
+                        Ok(TaskModalPayload::Modal {
+                            title,
+                            body,
+                            digest,
+                            evidence,
+                            closure,
+                        }) => {
+                            self.modal_host.open(
+                                Action::Task(TaskAction::MarkDone {
+                                    key: task_key,
+                                    digest,
+                                    evidence,
+                                    closure,
+                                }),
+                                Modal::confirm(title, body),
+                            );
+                        }
+                        Ok(TaskModalPayload::SelfClosed(message)) => {
+                            self.message = Some(message);
+                            queue_tasks_board_refresh(self, true, false);
+                        }
+                        Err(error) => self.message = Some(format!("mark done refused: {error}")),
+                    }
+                }
+                worker::TaskActionOpenResult::Reconcile { task_key, result } => {
+                    self.task_action_open_pending
+                        .remove(&TaskActionOpenRequest::Reconcile(task_key.clone()));
+                    if let Some(key) = task_key.as_ref()
+                        && selected_task(self).is_none_or(|task| task.key != *key)
+                    {
+                        continue;
+                    }
+                    match result {
+                        Ok(payload) => {
+                            self.reconcile_ambiguous = payload.ambiguous;
+                            self.reconcile_queue = payload.queue;
+                            self.reconcile_selection_key = task_key;
+                            open_next_reconcile_step(self);
+                        }
+                        Err(error) => self.message = Some(format!("reconcile failed: {error}")),
+                    }
+                }
+                worker::TaskActionOpenResult::ReconcileStep {
+                    selection_key,
+                    result,
+                } => {
+                    self.task_action_open_pending
+                        .remove(&TaskActionOpenRequest::ReconcileStep(selection_key.clone()));
+                    if selection_key != self.reconcile_selection_key
+                        || selection_key.as_ref().is_some_and(|key| {
+                            selected_task(self).is_none_or(|task| task.key != *key)
+                        })
+                    {
+                        continue;
+                    }
+                    match result {
+                        Ok(ReconcileStepPayload::Modal {
+                            proposal,
+                            title,
+                            body,
+                            digest,
+                            closure,
+                        }) => self.modal_host.open(
+                            Action::Task(TaskAction::ReconcileStep {
+                                proposal,
+                                digest,
+                                closure,
+                            }),
+                            Modal::confirm(title, body),
+                        ),
+                        Ok(ReconcileStepPayload::SelfClosed(message)) => {
+                            self.message = Some(message);
+                            queue_tasks_board_refresh(self, true, false);
+                            open_next_reconcile_step(self);
+                        }
+                        Err(error) => {
+                            self.message = Some(format!("reconcile step refused: {error}"));
+                            open_next_reconcile_step(self);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn apply_board_results(
@@ -5919,6 +6137,11 @@ fn apply_action_results(state: &mut State) {
     let results = worker.action_results();
     for result in results {
         state.message = Some(result.message);
+        if result.refresh_board {
+            // The write outcome owns the footer; its replacement board arrives
+            // later without replacing that confirmation.
+            queue_tasks_board_refresh(state, true, false);
+        }
         if let Some(key) = result.task_key {
             if let Some(session_id) = result.session_id {
                 state.optimistic_dispatched.insert(key, session_id);
@@ -6270,12 +6493,6 @@ fn apply_board_snapshot(state: &mut State, dir: &camino::Utf8Path) -> Result<boo
 /// silent no-op or an outright failure on the dashboard footer. A resync
 /// failure here is appended to the existing message instead of replacing
 /// it, so the write confirmation always survives.
-fn resync_tasks_board_after_write(state: &mut State) -> crate::Result<()> {
-    let dir = super::tasks::board_dir(None)?;
-    resync_tasks_board_after_write_in(state, &dir);
-    Ok(())
-}
-
 fn resync_tasks_board_after_write_in(state: &mut State, dir: &camino::Utf8Path) {
     if let Err(error) = apply_board_snapshot(state, dir) {
         let prefix = state.message.take().unwrap_or_default();
@@ -6603,24 +6820,26 @@ fn open_task_split_modal(state: &mut State) {
         return;
     };
     let parent = summary.key.clone();
-    let children = match latest_blocked_split_source(state, &parent) {
-        Some(SplitSource::Park(report)) => split_children_from_park(&report),
-        Some(SplitSource::OversizedFeasibility(verdict)) => {
-            split_children_from_feasibility(&verdict)
-        }
-        None => Vec::new(),
-    };
-    if children.is_empty() {
-        state.modal_host.open(
-            Action::Task(TaskAction::Split {
-                parent: parent.clone(),
-            }),
-            Modal::text_input(format!("split {parent} — child title"), "", false),
-        );
-        return;
+    let repo_root = state.repo_root.as_deref().map(camino::Utf8Path::as_str);
+    let sessions = state
+        .sessions
+        .iter()
+        .filter(|row| {
+            row.task_key.as_deref() == Some(parent.as_str())
+                && row.status == Some(ctx_traits_core::procedure::session::Status::Blocked)
+                && same_repository(repo_root, row.repo_path.as_deref())
+        })
+        .map(|row| worker::TaskSplitSession {
+            session_id: row.session_id.clone(),
+            repo_key: row.repo_key.clone(),
+        })
+        .collect();
+    let pending = TaskActionOpenRequest::Split(parent.clone());
+    if let Some(worker) = &state.worker
+        && state.task_action_open_pending.insert(pending)
+    {
+        worker.task_split(worker::TaskSplitRequest { parent, sessions });
     }
-    state.split_queue = children;
-    open_next_split_step(state, &parent);
 }
 
 /// `a`: archive — a fixed-answer modal for the closing status. Reads the task
@@ -6632,32 +6851,21 @@ fn open_task_archive_modal(state: &mut State) {
         return;
     };
     let key = summary.key.clone();
-    let digest = match fetch_task_digest(&key) {
-        Ok(digest) => digest,
-        Err(error) => {
-            state.message = Some(format!("archive refused: {error}"));
-            return;
-        }
-    };
     let dependents = state
         .tasks_board
         .as_ref()
         .and_then(|board| board.resolved.get(&key))
         .map(|resolved| resolved.relations.blocks.len())
         .unwrap_or(0);
-    let prompt = format!("archive {key}");
-    let body = if dependents > 0 {
-        format!("{dependents} task(s) depend on this; release also clears them.")
-    } else {
-        format!("No other task depends on {key}.")
-    };
-    state.modal_host.open(
-        Action::Task(TaskAction::Archive {
-            key: key.clone(),
-            digest,
-        }),
-        Modal::buttons(prompt, body, archive_buttons(dependents)),
-    );
+    let pending = TaskActionOpenRequest::Archive(key.clone());
+    if let Some(worker) = &state.worker
+        && state.task_action_open_pending.insert(pending)
+    {
+        worker.task_archive(worker::TaskArchiveRequest {
+            task_key: key,
+            dependents,
+        });
+    }
 }
 
 /// `e`: edit — a text-input modal for the mini-grammar
@@ -6668,25 +6876,13 @@ fn open_task_edit_modal(state: &mut State) {
         state.message = Some("no task selected".to_string());
         return;
     };
-    let key = summary.key.clone();
-    let digest = match fetch_task_digest(&key) {
-        Ok(digest) => digest,
-        Err(error) => {
-            state.message = Some(format!("edit refused: {error}"));
-            return;
-        }
-    };
-    state.modal_host.open(
-        Action::Task(TaskAction::Edit {
-            key: key.clone(),
-            digest,
-        }),
-        Modal::text_input(
-            format!("edit {key} — status <s> | dep +<k> | dep -<k> | dep <old> <new>"),
-            "",
-            false,
-        ),
-    );
+    let task_key = summary.key.clone();
+    let pending = TaskActionOpenRequest::Edit(task_key.clone());
+    if let Some(worker) = &state.worker
+        && state.task_action_open_pending.insert(pending)
+    {
+        worker.task_edit(worker::TaskEditRequest { task_key });
+    }
 }
 
 /// `y`: mark the selected task done. When a merge-time done-proposal
@@ -6701,20 +6897,214 @@ fn open_task_edit_modal(state: &mut State) {
 /// eventual write is validated against) and opens a confirm showing
 /// whatever evidence exists plus the task's own `validation` prose — the
 /// owner judges against the contract, not the commit's existence.
-fn open_task_mark_done_modal(state: &mut State) {
-    let Ok(dir) = super::tasks::board_dir(None) else {
-        state.message =
-            Some("mark done refused: could not resolve the board directory".to_string());
-        return;
-    };
-    let Ok(repo_root) = super::command_handlers::resolve_repo_root(None) else {
-        state.message =
-            Some("mark done refused: could not resolve the repository root".to_string());
-        return;
-    };
-    open_task_mark_done_modal_in(state, &dir, &repo_root);
+fn task_mark_done_modal_payload(
+    request: worker::TaskMarkDoneRequest,
+) -> Result<TaskModalPayload, String> {
+    let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+    let repo_root = request
+        .repo_root
+        .as_deref()
+        .ok_or_else(|| "repository root unavailable".to_string())?;
+    let provider = FilesTaskBoard::open_read(dir.clone());
+    let resolved = provider
+        .get(&request.task_key)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("{}: not resolvable at the last sync", request.task_key))?;
+    let digest = resolved.digest.clone();
+    let evaluation = request.evidence.last().and_then(|latest| {
+        super::task_proposals::evaluate_task_close(
+            &resolved.document,
+            &dashboard_config_root(),
+            repo_root,
+            &latest.sha,
+        )
+    });
+    if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) = &evaluation
+    {
+        let latest = request.evidence.last();
+        super::task_proposals::write_task_close_core(
+            &FilesTaskBoard::open_read_write(dir),
+            &request.task_key,
+            digest,
+            latest.map(|latest| super::task_proposals::TaskCloseOrigin {
+                run_id: &latest.run_id,
+                sha: &latest.sha,
+            }),
+            Some(closure.clone()),
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(TaskModalPayload::SelfClosed(format!(
+            "{} closed itself",
+            request.task_key
+        )));
+    }
+    let mut body = String::new();
+    if request.evidence.is_empty() {
+        body.push_str(&format!(
+            "no merge-time evidence on file for {} — mark done anyway?\n",
+            request.task_key
+        ));
+    } else {
+        for item in &request.evidence {
+            body.push_str(&format!(
+                "run {} for {} merged as {} — mark done?\n",
+                item.run_id, request.task_key, item.sha
+            ));
+        }
+    }
+    if !resolved.document.validation.trim().is_empty() {
+        body.push_str("\ndone-when:\n");
+        body.push_str(resolved.document.validation.trim());
+    }
+    match &evaluation {
+        Some((closure, disposition)) => append_check_disposition(&mut body, closure, disposition),
+        None if request.evidence.is_empty() => {
+            append_declared_checks_skipped_notice(&mut body, &resolved.document.checks)
+        }
+        None => append_declared_checks_notice(&mut body, &resolved.document.checks),
+    }
+    Ok(TaskModalPayload::Modal {
+        title: format!("mark {} done", request.task_key),
+        body,
+        digest,
+        evidence: request.evidence,
+        closure: evaluation.map(|(closure, _)| closure),
+    })
 }
 
+fn task_reconcile_modal_payload(
+    _request: worker::TaskReconcileRequest,
+) -> Result<ReconcileModalPayload, String> {
+    let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+    let provider = FilesTaskBoard::open_read(dir);
+    let summaries = provider.list(true).map_err(|error| error.to_string())?;
+    let sync_report = provider.sync().unwrap_or_default();
+    let mut resolved = BTreeMap::new();
+    for summary in &summaries {
+        if let Ok(Some(task)) = provider.get(&summary.key) {
+            resolved.insert(summary.key.clone(), task);
+        }
+    }
+    let repo_key = ctx_traits_io::state::current_repo_key().map_err(|error| error.to_string())?;
+    let rows = ctx_traits_io::center::list(Some(&repo_key)).map_err(|error| error.to_string())?;
+    let facts = super::tasks::session_facts_from_center(&rows);
+    let report = super::task_proposals::derive_reconcile_report(
+        &facts,
+        &summaries,
+        &resolved,
+        &sync_report.duplicate_keys,
+    );
+    Ok(ReconcileModalPayload {
+        queue: report.proposals,
+        ambiguous: report.ambiguous,
+    })
+}
+
+fn task_reconcile_step_payload(
+    request: worker::TaskReconcileStepRequest,
+) -> Result<ReconcileStepPayload, String> {
+    let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+    let repo_root = request
+        .repo_root
+        .as_deref()
+        .ok_or_else(|| "repository root unavailable".to_string())?;
+    let task_key = request.proposal.task_key().to_string();
+    let provider = FilesTaskBoard::open_read(dir.clone());
+    let resolved = provider
+        .get(&task_key)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("task {task_key} not found"))?;
+    let digest = resolved.digest.clone();
+    let mut evaluation = None;
+    if let super::task_proposals::ReconcileProposal::MarkDone { evidence, .. } = &request.proposal
+        && let Some(latest) = evidence.last()
+    {
+        evaluation = super::task_proposals::evaluate_task_close(
+            &resolved.document,
+            &dashboard_config_root(),
+            repo_root,
+            &latest.sha,
+        );
+        if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) =
+            &evaluation
+        {
+            super::task_proposals::write_task_close_core(
+                &FilesTaskBoard::open_read_write(dir),
+                &task_key,
+                digest,
+                evidence
+                    .last()
+                    .map(|latest| super::task_proposals::TaskCloseOrigin {
+                        run_id: &latest.run_id,
+                        sha: &latest.sha,
+                    }),
+                Some(closure.clone()),
+            )
+            .map_err(|error| error.to_string())?;
+            return Ok(ReconcileStepPayload::SelfClosed(format!(
+                "{task_key} closed itself"
+            )));
+        }
+    }
+    let (title, body) = match &request.proposal {
+        super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
+            let mut body = String::new();
+            for evidence in evidence {
+                body.push_str(&format!(
+                    "run {} for {task_key} merged as {} (verified ancestor of main) — mark done?\n",
+                    evidence.run_id, evidence.sha
+                ));
+            }
+            match &evaluation {
+                Some((closure, disposition)) => {
+                    append_check_disposition(&mut body, closure, disposition)
+                }
+                None => append_declared_checks_notice(&mut body, &resolved.document.checks),
+            }
+            (format!("reconcile: mark {task_key} done"), body)
+        }
+        super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => (
+            format!("reconcile: {}", remove.from),
+            format!(
+                "remove depends-on {} ({}) — {}?",
+                remove.to,
+                super::tasks::status_text(remove.to_status),
+                remove.evidence
+            ),
+        ),
+    };
+    Ok(ReconcileStepPayload::Modal {
+        proposal: request.proposal,
+        title,
+        body,
+        digest,
+        closure: evaluation.map(|(closure, _)| closure),
+    })
+}
+
+fn open_task_mark_done_modal(state: &mut State) {
+    let Some(summary) = selected_task(state) else {
+        state.message = Some("no task selected".to_string());
+        return;
+    };
+    let request = worker::TaskMarkDoneRequest {
+        task_key: summary.key.clone(),
+        evidence: state
+            .task_proposals
+            .get(&summary.key)
+            .map(|proposal| proposal.evidence.clone())
+            .unwrap_or_default(),
+        repo_root: state.repo_root.clone(),
+    };
+    let pending = TaskActionOpenRequest::MarkDone(request.task_key.clone());
+    if let Some(worker) = &state.worker
+        && state.task_action_open_pending.insert(pending)
+    {
+        worker.task_mark_done(request);
+    }
+}
+
+#[cfg(test)]
 fn open_task_mark_done_modal_in(
     state: &mut State,
     dir: &camino::Utf8Path,
@@ -6843,9 +7233,9 @@ fn append_declared_checks_skipped_notice(
 /// The snapshot digest a modal-open captures for a task, by a fresh read —
 /// not the (possibly stale) board cache — so the write it eventually backs
 /// is validated against what is on disk right now.
-fn fetch_task_digest(key: &str) -> crate::Result<String> {
-    let dir = super::tasks::board_dir(None)?;
-    fetch_task_digest_in(&dir, key)
+fn task_digest_payload(key: &str) -> Result<String, String> {
+    let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+    fetch_task_digest_in(&dir, key).map_err(|error| error.to_string())
 }
 
 fn fetch_task_digest_in(dir: &camino::Utf8Path, key: &str) -> crate::Result<String> {
@@ -6867,56 +7257,13 @@ fn fetch_task_digest_in(dir: &camino::Utf8Path, key: &str) -> crate::Result<Stri
 /// first proposal's review modal. An empty report reports so inline, no
 /// modal opened.
 fn open_task_reconcile(state: &mut State) {
-    let dir = match super::tasks::board_dir(None) {
-        Ok(dir) => dir,
-        Err(error) => {
-            state.message = Some(format!("reconcile failed: {error}"));
-            return;
-        }
-    };
-    let provider = FilesTaskBoard::open_read(dir.clone());
-    let summaries = match provider.list(true) {
-        Ok(summaries) => summaries,
-        Err(error) => {
-            state.message = Some(format!("reconcile failed: {error}"));
-            return;
-        }
-    };
-    let sync_report = provider.sync().unwrap_or_default();
-    let mut resolved = BTreeMap::new();
-    for summary in &summaries {
-        if let Ok(Some(task)) = provider.get(&summary.key) {
-            resolved.insert(summary.key.clone(), task);
-        }
+    let task_key = selected_task(state).map(|task| task.key.clone());
+    let pending = TaskActionOpenRequest::Reconcile(task_key.clone());
+    if let Some(worker) = &state.worker
+        && state.task_action_open_pending.insert(pending)
+    {
+        worker.task_reconcile(worker::TaskReconcileRequest { task_key });
     }
-    let repo_key = match ctx_traits_io::state::current_repo_key() {
-        Ok(repo_key) => repo_key,
-        Err(error) => {
-            state.message = Some(format!("reconcile failed: {error}"));
-            return;
-        }
-    };
-    let rows = match ctx_traits_io::center::list(Some(&repo_key)) {
-        Ok(rows) => rows,
-        Err(error) => {
-            state.message = Some(format!("reconcile failed: {error}"));
-            return;
-        }
-    };
-    let facts = super::tasks::session_facts_from_center(&rows);
-    let report = super::task_proposals::derive_reconcile_report(
-        &facts,
-        &summaries,
-        &resolved,
-        &sync_report.duplicate_keys,
-    );
-    state.reconcile_ambiguous = report.ambiguous;
-    state.reconcile_queue = report.proposals;
-    if state.reconcile_queue.is_empty() {
-        state.message = Some(reconcile_completion_message(state));
-        return;
-    }
-    open_next_reconcile_step(state);
 }
 
 /// Pops the next queued reconcile proposal (if any) and opens its review
@@ -6925,108 +7272,22 @@ fn open_task_reconcile(state: &mut State) {
 /// (`Confirmed` or `Cancelled` alike), so the queue always ends either
 /// empty or on an open modal.
 fn open_next_reconcile_step(state: &mut State) {
-    let Ok(dir) = super::tasks::board_dir(None) else {
-        state.message =
-            Some("reconcile refused: could not resolve the board directory".to_string());
+    let Some(proposal) = state.reconcile_queue.first().cloned() else {
+        state.reconcile_selection_key = None;
+        state.message = Some(reconcile_completion_message(state));
         return;
     };
-    let Ok(repo_root) = super::command_handlers::resolve_repo_root(None) else {
-        state.message =
-            Some("reconcile refused: could not resolve the repository root".to_string());
-        return;
-    };
-    open_next_reconcile_step_in(state, &dir, &repo_root);
-}
-
-fn open_next_reconcile_step_in(
-    state: &mut State,
-    dir: &camino::Utf8Path,
-    repo_root: &camino::Utf8Path,
-) {
-    while !state.reconcile_queue.is_empty() {
-        let proposal = state.reconcile_queue.remove(0);
-        let task_key = proposal.task_key().to_string();
-        let digest = match fetch_task_digest_in(dir, &task_key) {
-            Ok(digest) => digest,
-            Err(error) => {
-                state.message = Some(format!("reconcile: skipping {task_key} — {error}"));
-                continue;
-            }
-        };
-        // 0144: evaluate once per `MarkDone` step, reused for both the
-        // self-close decision and the modal body below — an `AutoClose`
-        // disposition closes right here, no modal, and the loop moves to
-        // the next queued proposal; `RemoveDependsOn` never has one.
-        let mut evaluation = None;
-        if let super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } = &proposal
-            && let Ok(Some(resolved)) = FilesTaskBoard::open_read(dir.to_owned()).get(task_key)
-            && let Some(latest) = evidence.last()
-        {
-            evaluation = super::task_proposals::evaluate_task_close(
-                &resolved.document,
-                &dashboard_config_root(),
-                repo_root,
-                &latest.sha,
-            );
-            if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) =
-                &evaluation
-            {
-                let _ = write_task_close(
-                    state,
-                    dir,
-                    task_key,
-                    digest,
-                    evidence,
-                    Some(closure.clone()),
-                    true,
-                );
-                continue;
-            }
-        }
-        let (title, body) = match &proposal {
-            super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
-                let mut body = String::new();
-                for e in evidence {
-                    body.push_str(&format!(
-                        "run {} for {task_key} merged as {} (verified ancestor of main) — mark done?\n",
-                        e.run_id, e.sha
-                    ));
-                }
-                match &evaluation {
-                    Some((closure, disposition)) => {
-                        append_check_disposition(&mut body, closure, disposition)
-                    }
-                    None => {
-                        if let Ok(Some(resolved)) =
-                            FilesTaskBoard::open_read(dir.to_owned()).get(task_key)
-                        {
-                            append_declared_checks_notice(&mut body, &resolved.document.checks);
-                        }
-                    }
-                }
-                (format!("reconcile: mark {task_key} done"), body)
-            }
-            super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => (
-                format!("reconcile: {}", remove.from),
-                format!(
-                    "remove depends-on {} ({}) — {}?",
-                    remove.to,
-                    super::tasks::status_text(remove.to_status),
-                    remove.evidence
-                ),
-            ),
-        };
-        state.modal_host.open(
-            Action::Task(TaskAction::ReconcileStep {
-                proposal,
-                digest,
-                closure: evaluation.map(|(closure, _)| closure),
-            }),
-            Modal::confirm(title, body),
-        );
-        return;
+    state.reconcile_queue.remove(0);
+    let pending = TaskActionOpenRequest::ReconcileStep(state.reconcile_selection_key.clone());
+    if let Some(worker) = &state.worker
+        && state.task_action_open_pending.insert(pending)
+    {
+        worker.task_reconcile_step(worker::TaskReconcileStepRequest {
+            selection_key: state.reconcile_selection_key.clone(),
+            proposal,
+            repo_root: state.repo_root.clone(),
+        });
     }
-    state.message = Some(reconcile_completion_message(state));
 }
 
 fn reconcile_completion_message(state: &State) -> String {
@@ -7061,31 +7322,22 @@ fn apply_reconcile_step(
     if outcome == ModalOutcome::Confirmed {
         match proposal {
             super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
-                apply_task_mark_done(state, task_key, digest, evidence, closure)?;
+                if let Some(worker) = &state.worker {
+                    worker.task_mutation(worker::TaskMutation::MarkDone {
+                        key: task_key,
+                        digest,
+                        evidence,
+                        closure,
+                    });
+                }
             }
             super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => {
-                let dir = super::tasks::board_dir(None)?;
-                let provider = FilesTaskBoard::open_read_write(dir);
-                match provider.update(
-                    &remove.from,
-                    TaskUpdate {
-                        remove_depends_on: vec![remove.to.clone()],
-                        expected_digest: Some(digest),
-                        ..Default::default()
-                    },
-                ) {
-                    Ok(outcome) => {
-                        state.message = Some(format!(
-                            "reconcile: removed depends-on {} from {}{}",
-                            remove.to,
-                            remove.from,
-                            effects_summary(&outcome.effects)
-                        ));
-                        resync_tasks_board_after_write(state)?;
-                    }
-                    Err(error) => {
-                        state.message = Some(format!("reconcile step refused: {error}"));
-                    }
+                if let Some(worker) = &state.worker {
+                    worker.task_mutation(worker::TaskMutation::RemoveDependsOn {
+                        from: remove.from,
+                        to: remove.to,
+                        digest,
+                    });
                 }
             }
         }
@@ -7109,16 +7361,11 @@ enum SplitSource {
 /// `Blocked` `implement-*` session, if any — read fresh from each
 /// candidate's ledger (never cached), since this only runs on an `S`
 /// keypress, not the tick path.
-fn latest_blocked_split_source(state: &State, task_key: &str) -> Option<SplitSource> {
-    let join = task_session_join(state);
+fn latest_blocked_split_source_from_sessions(
+    sessions: Vec<worker::TaskSplitSession>,
+) -> Option<SplitSource> {
     let mut best: Option<(u64, SplitSource)> = None;
-    for row in join
-        .get(task_key)
-        .into_iter()
-        .flatten()
-        .filter_map(|idx| state.sessions.get(*idx))
-        .filter(|row| row.status == Some(ctx_traits_core::procedure::session::Status::Blocked))
-    {
+    for row in sessions {
         let Ok(ctx_traits_io::center::GetResult::Session(session)) =
             ctx_traits_io::center::get(&row.session_id, row.repo_key.as_deref())
         else {
@@ -7147,6 +7394,20 @@ fn latest_blocked_split_source(state: &State, task_key: &str) -> Option<SplitSou
         }
     }
     best.map(|(_, source)| source)
+}
+
+fn task_split_children(
+    request: worker::TaskSplitRequest,
+) -> Result<Vec<PendingSplitChild>, String> {
+    Ok(
+        match latest_blocked_split_source_from_sessions(request.sessions) {
+            Some(SplitSource::Park(report)) => split_children_from_park(&report),
+            Some(SplitSource::OversizedFeasibility(verdict)) => {
+                split_children_from_feasibility(&verdict)
+            }
+            None => Vec::new(),
+        },
+    )
 }
 
 /// Blocker `what` truncated to a title-sized prefix (task titles are
@@ -7252,6 +7513,123 @@ fn submit_task_creation(new_task: NewTask) -> Result<TaskSummary, String> {
     }
 }
 
+/// Worker-side task mutation entrypoint. Modal opens capture the digest and
+/// all renderer work is reduced to dispatching this request and applying its
+/// returned message.
+fn execute_task_mutation(mutation: worker::TaskMutation) -> worker::ActionResult {
+    let result: Result<String, String> = (|| match mutation {
+        worker::TaskMutation::Archive {
+            key,
+            digest,
+            status,
+            release_dependents,
+        } => {
+            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+            FilesTaskBoard::open_read_write(dir)
+                .update(
+                    &key,
+                    TaskUpdate {
+                        status: Some(status),
+                        expected_digest: Some(digest),
+                        release_dependents,
+                        ..Default::default()
+                    },
+                )
+                .map(|outcome| format!("archived {key}{}", effects_summary(&outcome.effects)))
+                .map_err(|error| format!("archive refused: {error}"))
+        }
+        worker::TaskMutation::Edit { key, update } => {
+            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+            FilesTaskBoard::open_read_write(dir)
+                .update(&key, update)
+                .map(|outcome| format!("edited {key}{}", effects_summary(&outcome.effects)))
+                .map_err(|error| format!("edit refused: {error}"))
+        }
+        worker::TaskMutation::MarkDone {
+            key,
+            digest,
+            evidence,
+            closure,
+        } => {
+            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+            let latest = evidence.last();
+            super::task_proposals::write_task_close_core(
+                &FilesTaskBoard::open_read_write(dir),
+                &key,
+                digest,
+                latest.map(|item| super::task_proposals::TaskCloseOrigin {
+                    run_id: &item.run_id,
+                    sha: &item.sha,
+                }),
+                closure.clone(),
+            )
+            .map(|outcome| {
+                let checks = closure
+                    .as_ref()
+                    .map(|closure| {
+                        if closure.checks.is_empty() {
+                            "unchecked".to_string()
+                        } else {
+                            format!(
+                                "{}/{} checks passed",
+                                closure
+                                    .checks
+                                    .iter()
+                                    .filter(|check| check.outcome == CheckOutcome::Passed)
+                                    .count(),
+                                closure.checks.len()
+                            )
+                        }
+                    })
+                    .map(|summary| format!(" — {summary}"))
+                    .unwrap_or_default();
+                match latest {
+                    Some(item) => format!(
+                        "{key} marked done — run {} merged as {}{checks}{}",
+                        item.run_id,
+                        item.sha,
+                        effects_summary(&outcome.effects)
+                    ),
+                    None => format!(
+                        "{key} marked done — no merge evidence on file{checks}{}",
+                        effects_summary(&outcome.effects)
+                    ),
+                }
+            })
+            .map_err(|error| format!("mark done refused: {error}"))
+        }
+        worker::TaskMutation::RemoveDependsOn { from, to, digest } => {
+            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
+            FilesTaskBoard::open_read_write(dir)
+                .update(
+                    &from,
+                    TaskUpdate {
+                        remove_depends_on: vec![to.clone()],
+                        expected_digest: Some(digest),
+                        ..Default::default()
+                    },
+                )
+                .map(|outcome| {
+                    format!(
+                        "reconcile: removed depends-on {to} from {from}{}",
+                        effects_summary(&outcome.effects)
+                    )
+                })
+                .map_err(|error| format!("reconcile step refused: {error}"))
+        }
+        worker::TaskMutation::Create { parent, task } => submit_task_creation(task)
+            .map(|created| format!("created {} under {parent}", created.key))
+            .map_err(|error| format!("split refused: {error}")),
+    })();
+    let refresh_board = result.is_ok();
+    worker::ActionResult {
+        message: result.unwrap_or_else(|error| error),
+        session_id: None,
+        task_key: None,
+        refresh_board,
+    }
+}
+
 /// `Confirmed`/`Cancelled` alike for a split-queue step: a reject skips this
 /// child with no write; an accept creates it through the center with `parent`
 /// set, carrying `validation`/`steps` through. Either way, advances to the
@@ -7263,22 +7641,19 @@ fn apply_split_step(
     outcome: ModalOutcome,
 ) -> crate::Result<()> {
     if outcome == ModalOutcome::Confirmed {
-        match submit_task_creation(NewTask {
-            title: child.title.clone(),
-            content: child.content.clone(),
-            status: None,
-            depends_on: Vec::new(),
-            parent: Some(parent.clone()),
-            validation: child.validation.clone(),
-            steps: child.steps.clone(),
-        }) {
-            Ok(created) => {
-                state.message = Some(format!("created {} under {parent}", created.key));
-                resync_tasks_board_after_write(state)?;
-            }
-            Err(error) => {
-                state.message = Some(format!("split refused: {error}"));
-            }
+        if let Some(worker) = &state.worker {
+            worker.task_mutation(worker::TaskMutation::Create {
+                parent: parent.clone(),
+                task: NewTask {
+                    title: child.title.clone(),
+                    content: child.content.clone(),
+                    status: None,
+                    depends_on: Vec::new(),
+                    parent: Some(parent.clone()),
+                    validation: child.validation.clone(),
+                    steps: child.steps.clone(),
+                },
+            });
         }
     } else {
         state.message = Some(format!("split: skipped {:?}", child.title));
@@ -7306,7 +7681,15 @@ fn apply_task_action(
         if outcome != ModalOutcome::Confirmed {
             return Ok(());
         }
-        return apply_task_mark_done(state, key, digest, evidence, closure);
+        if let Some(worker) = &state.worker {
+            worker.task_mutation(worker::TaskMutation::MarkDone {
+                key,
+                digest,
+                evidence,
+                closure,
+            });
+        }
+        return Ok(());
     }
     if let TaskAction::Archive { key, digest } = action {
         let ModalOutcome::Chosen(choice) = outcome else {
@@ -7316,27 +7699,13 @@ fn apply_task_action(
             state.message = Some("archive refused: unknown choice".to_string());
             return Ok(());
         };
-        let dir = super::tasks::board_dir(None)?;
-        let provider = FilesTaskBoard::open_read_write(dir);
-        match provider.update(
-            &key,
-            TaskUpdate {
-                status: Some(status),
-                expected_digest: Some(digest),
+        if let Some(worker) = &state.worker {
+            worker.task_mutation(worker::TaskMutation::Archive {
+                key,
+                digest,
+                status,
                 release_dependents,
-                ..Default::default()
-            },
-        ) {
-            Ok(outcome) => {
-                state.message = Some(format!(
-                    "archived {key}{}",
-                    effects_summary(&outcome.effects)
-                ));
-                resync_tasks_board_after_write(state)?;
-            }
-            Err(error) => {
-                state.message = Some(format!("archive refused: {error}"));
-            }
+            });
         }
         return Ok(());
     }
@@ -7354,18 +7723,15 @@ fn apply_task_action(
                 state.message = Some("split refused: a title is required".to_string());
                 return Ok(());
             }
-            match submit_task_creation(NewTask {
-                title: title.to_string(),
-                parent: Some(parent.clone()),
-                ..Default::default()
-            }) {
-                Ok(created) => {
-                    state.message = Some(format!("created {} under {parent}", created.key));
-                    resync_tasks_board_after_write(state)?;
-                }
-                Err(error) => {
-                    state.message = Some(format!("split refused: {error}"));
-                }
+            if let Some(worker) = &state.worker {
+                worker.task_mutation(worker::TaskMutation::Create {
+                    parent: parent.clone(),
+                    task: NewTask {
+                        title: title.to_string(),
+                        parent: Some(parent),
+                        ..Default::default()
+                    },
+                });
             }
             Ok(())
         }
@@ -7378,17 +7744,8 @@ fn apply_task_action(
                 }
             };
             update.expected_digest = Some(digest);
-            let dir = super::tasks::board_dir(None)?;
-            let provider = FilesTaskBoard::open_read_write(dir);
-            match provider.update(&key, update) {
-                Ok(outcome) => {
-                    state.message =
-                        Some(format!("edited {key}{}", effects_summary(&outcome.effects)));
-                    resync_tasks_board_after_write(state)?;
-                }
-                Err(error) => {
-                    state.message = Some(format!("edit refused: {error}"));
-                }
+            if let Some(worker) = &state.worker {
+                worker.task_mutation(worker::TaskMutation::Edit { key, update });
             }
             Ok(())
         }
@@ -7449,17 +7806,6 @@ fn append_check_disposition(
 /// `closure` recording whatever check results are in hand, whether they all
 /// passed or not — the disposition decided only whether this keypress was
 /// needed, never whether it is honored.
-fn apply_task_mark_done(
-    state: &mut State,
-    key: String,
-    digest: String,
-    evidence: Vec<super::task_proposals::MergedRunEvidence>,
-    closure: Option<Closure>,
-) -> crate::Result<()> {
-    let dir = super::tasks::board_dir(None)?;
-    apply_task_mark_done_in(state, &dir, key, digest, evidence, closure)
-}
-
 fn apply_task_mark_done_in(
     state: &mut State,
     dir: &camino::Utf8Path,
@@ -8750,6 +9096,7 @@ mod tests {
                 message: "started".to_string(),
                 session_id: Some("session".to_string()),
                 task_key: Some("0243.5".to_string()),
+                refresh_board: false,
             })
             .expect("send completed start");
         apply_action_results(&mut state);
@@ -8775,6 +9122,7 @@ mod tests {
                 message: "joined".to_string(),
                 session_id: None,
                 task_key: None,
+                refresh_board: false,
             })
             .expect("send action result");
         apply_action_results(&mut state);
@@ -8794,6 +9142,7 @@ mod tests {
                 message: "start failed".to_string(),
                 session_id: None,
                 task_key: Some("0243.5".to_string()),
+                refresh_board: false,
             })
             .expect("send failed start");
         apply_action_results(&mut state);
@@ -15244,10 +15593,80 @@ argv = ["git", "commit", "-m", "fixture"]
         state.list_tasks.set_selected(index);
 
         open_task_mark_done_modal(&mut state);
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::MarkDone {
+            task_key: "0001".to_string(),
+            result: Ok(TaskModalPayload::Modal {
+                title: "mark 0001 done".to_string(),
+                body: "no merge-time evidence on file for 0001 — mark done anyway?\n".to_string(),
+                digest: "digest".to_string(),
+                evidence: Vec::new(),
+                closure: None,
+            }),
+        }]);
 
         assert!(
             state.modal_host.is_open(),
             "the confirm modal must open even absent a merge-time proposal"
+        );
+    }
+
+    #[test]
+    fn task_action_open_result_rejects_a_changed_selection() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        write_task_toml(&dir, "0002-second.toml", "0002");
+        let mut state = state_with_scratch_cache();
+        seed_tasks_board(&mut state, &dir);
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0002"))
+            .expect("second task row");
+        state.list_tasks.set_selected(index);
+
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::Archive {
+            task_key: "0001".to_string(),
+            dependents: 0,
+            result: Ok("digest".to_string()),
+        }]);
+
+        assert!(
+            !state.modal_host.is_open(),
+            "an archive response must not open for a task selected after its request"
+        );
+    }
+
+    #[test]
+    fn task_modal_open_deduplicates_pending_requests_and_releases_the_result_key() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        seed_tasks_board(&mut state, &dir);
+        select_task_row(&mut state, "0001");
+        state.worker = Some(worker::Handle::for_tests());
+
+        open_task_mark_done_modal(&mut state);
+        open_task_mark_done_modal(&mut state);
+        assert_eq!(
+            state.task_action_open_pending,
+            HashSet::from([TaskActionOpenRequest::MarkDone("0001".to_string())]),
+            "a repeated keypress must leave one worker modal-open request pending"
+        );
+
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::MarkDone {
+            task_key: "0001".to_string(),
+            result: Err("read failed".to_string()),
+        }]);
+        assert!(
+            state.task_action_open_pending.is_empty(),
+            "the delivered result must permit a later retry"
+        );
+
+        open_task_mark_done_modal(&mut state);
+        assert!(
+            state
+                .task_action_open_pending
+                .contains(&TaskActionOpenRequest::MarkDone("0001".to_string()))
         );
     }
 
@@ -15273,6 +15692,26 @@ argv = ["git", "commit", "-m", "fixture"]
         state.list_tasks.set_selected(index);
 
         open_task_mark_done_modal(&mut state);
+        let mut body = "no merge-time evidence on file for 0001 — mark done anyway?\n".to_string();
+        append_declared_checks_skipped_notice(
+            &mut body,
+            &[ctx_traits_core::task::Check {
+                name: "unit tests".to_string(),
+                command: "cargo test -p ctx-traits-core".to_string(),
+                timeout_ms: None,
+                expect: None,
+            }],
+        );
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::MarkDone {
+            task_key: "0001".to_string(),
+            result: Ok(TaskModalPayload::Modal {
+                title: "mark 0001 done".to_string(),
+                body,
+                digest: "digest".to_string(),
+                evidence: Vec::new(),
+                closure: None,
+            }),
+        }]);
 
         let body = match state.modal_host.modal() {
             Some(Modal::Confirm { body, .. }) => body.clone(),
@@ -15789,6 +16228,41 @@ argv = ["git", "commit", "-m", "fixture"]
         assert_eq!(
             reconcile_completion_message(&state),
             "reconcile: no ambiguous findings"
+        );
+    }
+
+    #[test]
+    fn reconcile_step_result_is_ignored_after_the_requesting_selection_moves() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        write_task_toml(&dir, "0002-second.toml", "0002");
+        let mut state = state_with_scratch_cache();
+        seed_tasks_board(&mut state, &dir);
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0001"))
+            .expect("task row");
+        state.list_tasks.set_selected(index);
+        state.reconcile_selection_key = Some("0002".to_string());
+
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::ReconcileStep {
+            selection_key: Some("0002".to_string()),
+            result: Ok(ReconcileStepPayload::Modal {
+                proposal: super::super::task_proposals::ReconcileProposal::MarkDone {
+                    task_key: "0002".to_string(),
+                    evidence: Vec::new(),
+                },
+                title: "reconcile: mark 0002 done".to_string(),
+                body: "stale".to_string(),
+                digest: "digest".to_string(),
+                closure: None,
+            }),
+        }]);
+
+        assert!(
+            !state.modal_host.is_open(),
+            "a result for the previous task selection must not open a modal"
         );
     }
 

@@ -76,6 +76,76 @@ pub(super) struct AnswerQuestionResult {
 }
 
 #[derive(Clone)]
+pub(super) struct TaskMarkDoneRequest {
+    pub(super) task_key: String,
+    pub(super) evidence: Vec<super::super::task_proposals::MergedRunEvidence>,
+    pub(super) repo_root: Option<camino::Utf8PathBuf>,
+}
+
+#[derive(Clone)]
+pub(super) struct TaskReconcileRequest {
+    pub(super) task_key: Option<String>,
+}
+
+#[derive(Clone)]
+pub(super) struct TaskReconcileStepRequest {
+    pub(super) selection_key: Option<String>,
+    pub(super) proposal: super::super::task_proposals::ReconcileProposal,
+    pub(super) repo_root: Option<camino::Utf8PathBuf>,
+}
+
+#[derive(Clone)]
+pub(super) struct TaskArchiveRequest {
+    pub(super) task_key: String,
+    pub(super) dependents: usize,
+}
+
+#[derive(Clone)]
+pub(super) struct TaskEditRequest {
+    pub(super) task_key: String,
+}
+
+#[derive(Clone)]
+pub(super) struct TaskSplitRequest {
+    pub(super) parent: String,
+    pub(super) sessions: Vec<TaskSplitSession>,
+}
+
+#[derive(Clone)]
+pub(super) struct TaskSplitSession {
+    pub(super) session_id: String,
+    pub(super) repo_key: Option<String>,
+}
+
+pub(super) enum TaskActionOpenResult {
+    Archive {
+        task_key: String,
+        dependents: usize,
+        result: Result<String, String>,
+    },
+    Edit {
+        task_key: String,
+        result: Result<String, String>,
+    },
+    Split {
+        parent: String,
+        result: Result<Vec<super::PendingSplitChild>, String>,
+    },
+    MarkDone {
+        task_key: String,
+        result: Result<super::TaskModalPayload, String>,
+    },
+    Reconcile {
+        task_key: Option<String>,
+        result: Result<super::ReconcileModalPayload, String>,
+    },
+    ReconcileStep {
+        selection_key: Option<String>,
+        result: Result<super::ReconcileStepPayload, String>,
+    },
+}
+
+#[derive(Clone)]
 pub(super) struct BoardRefreshRequest {
     pub(super) board_dir: camino::Utf8PathBuf,
     pub(super) cache_root: Option<camino::Utf8PathBuf>,
@@ -100,6 +170,7 @@ pub(super) struct Handle {
     merge_details: mpsc::Receiver<MergeDetailResult>,
     story_views: mpsc::Receiver<StoryViewResult>,
     answer_questions: mpsc::Receiver<AnswerQuestionResult>,
+    task_action_opens: mpsc::Receiver<TaskActionOpenResult>,
     board_refreshes: mpsc::Receiver<BoardRefreshResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
     actions: mpsc::Receiver<ActionResult>,
@@ -123,6 +194,36 @@ pub(super) struct ActionResult {
     pub(super) message: String,
     pub(super) session_id: Option<String>,
     pub(super) task_key: Option<String>,
+    pub(super) refresh_board: bool,
+}
+
+#[derive(Clone)]
+pub(super) enum TaskMutation {
+    Archive {
+        key: String,
+        digest: String,
+        status: ctx_traits_core::task::TaskStatus,
+        release_dependents: bool,
+    },
+    Edit {
+        key: String,
+        update: ctx_traits_core::task::provider::TaskUpdate,
+    },
+    MarkDone {
+        key: String,
+        digest: String,
+        evidence: Vec<super::super::task_proposals::MergedRunEvidence>,
+        closure: Option<super::Closure>,
+    },
+    RemoveDependsOn {
+        from: String,
+        to: String,
+        digest: String,
+    },
+    Create {
+        parent: String,
+        task: ctx_traits_core::task::provider::NewTask,
+    },
 }
 
 /// Worker-local policy and payload tracking for the derived warm-start cache.
@@ -196,6 +297,12 @@ enum Command {
     MergeDetail(MergeDetailRequest),
     StoryView(StoryViewRequest),
     AnswerQuestion(AnswerQuestionRequest),
+    TaskMarkDone(TaskMarkDoneRequest),
+    TaskArchive(TaskArchiveRequest),
+    TaskEdit(TaskEditRequest),
+    TaskSplit(TaskSplitRequest),
+    TaskReconcile(TaskReconcileRequest),
+    TaskReconcileStep(TaskReconcileStepRequest),
     BoardRefresh(BoardRefreshRequest),
     /// Kept for test-only command projections; it never reads library files.
     #[cfg(test)]
@@ -212,6 +319,7 @@ impl Handle {
         let (merge_detail_tx, merge_details) = mpsc::channel();
         let (story_view_tx, story_views) = mpsc::channel();
         let (answer_question_tx, answer_questions) = mpsc::channel();
+        let (task_action_open_tx, task_action_opens) = mpsc::channel();
         let (board_refresh_tx, board_refreshes) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -224,6 +332,7 @@ impl Handle {
                 merge_detail_tx,
                 story_view_tx,
                 answer_question_tx,
+                task_action_open_tx,
                 board_refresh_tx,
                 explanation_tx,
             )
@@ -236,6 +345,7 @@ impl Handle {
             merge_details,
             story_views,
             answer_questions,
+            task_action_opens,
             board_refreshes,
             explanations,
             actions,
@@ -252,6 +362,7 @@ impl Handle {
         let (_merge_detail_tx, merge_details) = mpsc::channel();
         let (_story_view_tx, story_views) = mpsc::channel();
         let (_answer_question_tx, answer_questions) = mpsc::channel();
+        let (_task_action_open_tx, task_action_opens) = mpsc::channel();
         let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -263,6 +374,7 @@ impl Handle {
             merge_details,
             story_views,
             answer_questions,
+            task_action_opens,
             board_refreshes,
             explanations,
             actions,
@@ -338,7 +450,16 @@ impl Handle {
                 message,
                 session_id: None,
                 task_key: None,
+                refresh_board: false,
             });
+        });
+    }
+
+    pub(super) fn task_mutation(&self, mutation: TaskMutation) {
+        let sender = self.action_sender.clone();
+        std::thread::spawn(move || {
+            let result = super::execute_task_mutation(mutation);
+            let _ = sender.send(result);
         });
     }
 
@@ -366,6 +487,30 @@ impl Handle {
 
     pub(super) fn answer_question(&self, request: AnswerQuestionRequest) {
         let _ = self.commands.send(Command::AnswerQuestion(request));
+    }
+
+    pub(super) fn task_mark_done(&self, request: TaskMarkDoneRequest) {
+        let _ = self.commands.send(Command::TaskMarkDone(request));
+    }
+
+    pub(super) fn task_archive(&self, request: TaskArchiveRequest) {
+        let _ = self.commands.send(Command::TaskArchive(request));
+    }
+
+    pub(super) fn task_edit(&self, request: TaskEditRequest) {
+        let _ = self.commands.send(Command::TaskEdit(request));
+    }
+
+    pub(super) fn task_split(&self, request: TaskSplitRequest) {
+        let _ = self.commands.send(Command::TaskSplit(request));
+    }
+
+    pub(super) fn task_reconcile(&self, request: TaskReconcileRequest) {
+        let _ = self.commands.send(Command::TaskReconcile(request));
+    }
+
+    pub(super) fn task_reconcile_step(&self, request: TaskReconcileStepRequest) {
+        let _ = self.commands.send(Command::TaskReconcileStep(request));
     }
 
     pub(super) fn refresh_board(&self, request: BoardRefreshRequest) {
@@ -407,6 +552,14 @@ impl Handle {
     pub(super) fn answer_question_results(&self) -> Vec<AnswerQuestionResult> {
         let mut results = Vec::new();
         while let Ok(result) = self.answer_questions.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
+    pub(super) fn task_action_open_results(&self) -> Vec<TaskActionOpenResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.task_action_opens.try_recv() {
             results.push(result);
         }
         results
@@ -481,6 +634,7 @@ fn start_action_result(
             message: format!("started {label} as {session_id}"),
             session_id: Some(session_id),
             task_key,
+            refresh_board: false,
         },
         Ok(StartResult::Exited { code, stderr }) => ActionResult {
             message: format!(
@@ -489,11 +643,13 @@ fn start_action_result(
             ),
             session_id: None,
             task_key,
+            refresh_board: false,
         },
         Err(error) => ActionResult {
             message: format!("start failed for {label}: {error}"),
             session_id: None,
             task_key,
+            refresh_board: false,
         },
     }
 }
@@ -506,6 +662,7 @@ fn run(
     merge_details: mpsc::Sender<MergeDetailResult>,
     story_views: mpsc::Sender<StoryViewResult>,
     answer_questions: mpsc::Sender<AnswerQuestionResult>,
+    task_action_opens: mpsc::Sender<TaskActionOpenResult>,
     board_refreshes: mpsc::Sender<BoardRefreshResult>,
     explanations: mpsc::Sender<ExplanationResult>,
 ) {
@@ -534,6 +691,7 @@ fn run(
                     &merge_details,
                     &story_views,
                     &answer_questions,
+                    &task_action_opens,
                     &board_refreshes,
                     &explanations,
                     &mut state,
@@ -563,6 +721,7 @@ fn run(
                             &merge_details,
                             &story_views,
                             &answer_questions,
+                            &task_action_opens,
                             &board_refreshes,
                             &explanations,
                             &mut state,
@@ -718,6 +877,7 @@ fn run(
             &merge_details,
             &story_views,
             &answer_questions,
+            &task_action_opens,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -783,6 +943,7 @@ fn wait_for_retry(
     merge_details: &mpsc::Sender<MergeDetailResult>,
     story_views: &mpsc::Sender<StoryViewResult>,
     answer_questions: &mpsc::Sender<AnswerQuestionResult>,
+    task_action_opens: &mpsc::Sender<TaskActionOpenResult>,
     board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
@@ -805,6 +966,7 @@ fn wait_for_retry(
                 merge_details,
                 story_views,
                 answer_questions,
+                task_action_opens,
                 board_refreshes,
                 explanations,
                 state,
@@ -827,6 +989,7 @@ fn handle_one_command(
     merge_details: &mpsc::Sender<MergeDetailResult>,
     story_views: &mpsc::Sender<StoryViewResult>,
     answer_questions: &mpsc::Sender<AnswerQuestionResult>,
+    task_action_opens: &mpsc::Sender<TaskActionOpenResult>,
     board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
@@ -873,6 +1036,43 @@ fn handle_one_command(
         Command::StoryView(request) => story_views.send(story_view(request)).map_err(|_| ()),
         Command::AnswerQuestion(request) => answer_questions
             .send(answer_question(request))
+            .map_err(|_| ()),
+        Command::TaskMarkDone(request) => task_action_opens
+            .send(TaskActionOpenResult::MarkDone {
+                task_key: request.task_key.clone(),
+                result: super::task_mark_done_modal_payload(request),
+            })
+            .map_err(|_| ()),
+        Command::TaskArchive(request) => task_action_opens
+            .send(TaskActionOpenResult::Archive {
+                task_key: request.task_key.clone(),
+                dependents: request.dependents,
+                result: super::task_digest_payload(&request.task_key),
+            })
+            .map_err(|_| ()),
+        Command::TaskEdit(request) => task_action_opens
+            .send(TaskActionOpenResult::Edit {
+                task_key: request.task_key.clone(),
+                result: super::task_digest_payload(&request.task_key),
+            })
+            .map_err(|_| ()),
+        Command::TaskSplit(request) => task_action_opens
+            .send(TaskActionOpenResult::Split {
+                parent: request.parent.clone(),
+                result: super::task_split_children(request),
+            })
+            .map_err(|_| ()),
+        Command::TaskReconcile(request) => task_action_opens
+            .send(TaskActionOpenResult::Reconcile {
+                task_key: request.task_key.clone(),
+                result: super::task_reconcile_modal_payload(request),
+            })
+            .map_err(|_| ()),
+        Command::TaskReconcileStep(request) => task_action_opens
+            .send(TaskActionOpenResult::ReconcileStep {
+                selection_key: request.selection_key.clone(),
+                result: super::task_reconcile_step_payload(request),
+            })
             .map_err(|_| ()),
         Command::BoardRefresh(request) => {
             board_refreshes.send(refresh_board(request)).map_err(|_| ())
@@ -1282,6 +1482,7 @@ mod tests {
             let (merge_detail_tx, _merge_detail_rx) = mpsc::channel();
             let (story_view_tx, _story_view_rx) = mpsc::channel();
             let (answer_question_tx, _answer_question_rx) = mpsc::channel();
+            let (task_action_open_tx, _task_action_open_rx) = mpsc::channel();
             let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             let (explanation_tx, _explanation_rx) = mpsc::channel();
             let worker = std::thread::Builder::new()
@@ -1295,6 +1496,7 @@ mod tests {
                         merge_detail_tx,
                         story_view_tx,
                         answer_question_tx,
+                        task_action_open_tx,
                         board_refresh_tx,
                         explanation_tx,
                     )
@@ -1475,6 +1677,7 @@ mod tests {
         let (merge_details, _merge_detail_results) = mpsc::channel();
         let (story_views, _story_view_results) = mpsc::channel();
         let (answer_questions, _answer_question_results) = mpsc::channel();
+        let (task_action_opens, _task_action_open_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1488,6 +1691,7 @@ mod tests {
             &merge_details,
             &story_views,
             &answer_questions,
+            &task_action_opens,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1517,6 +1721,7 @@ mod tests {
         let (merge_details, _merge_detail_results) = mpsc::channel();
         let (story_views, _story_view_results) = mpsc::channel();
         let (answer_questions, _answer_question_results) = mpsc::channel();
+        let (task_action_opens, _task_action_open_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1539,6 +1744,7 @@ mod tests {
             &merge_details,
             &story_views,
             &answer_questions,
+            &task_action_opens,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1565,6 +1771,7 @@ mod tests {
         let (merge_details, _merge_detail_results) = mpsc::channel();
         let (story_views, _story_view_results) = mpsc::channel();
         let (answer_questions, _answer_question_results) = mpsc::channel();
+        let (task_action_opens, _task_action_open_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1584,6 +1791,7 @@ mod tests {
             &merge_details,
             &story_views,
             &answer_questions,
+            &task_action_opens,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1610,6 +1818,7 @@ mod tests {
         let (_merge_detail_tx, merge_details) = mpsc::channel();
         let (_story_view_tx, story_views) = mpsc::channel();
         let (_answer_question_tx, answer_questions) = mpsc::channel();
+        let (_task_action_open_tx, task_action_opens) = mpsc::channel();
         let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -1621,6 +1830,7 @@ mod tests {
             merge_details,
             story_views,
             answer_questions,
+            task_action_opens,
             board_refreshes,
             explanations,
             actions,
@@ -1820,6 +2030,7 @@ mod tests {
         let (merge_details, _merge_detail_results) = mpsc::channel();
         let (story_views, _story_view_results) = mpsc::channel();
         let (answer_questions, _answer_question_results) = mpsc::channel();
+        let (task_action_opens, _task_action_open_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1842,6 +2053,7 @@ mod tests {
             &merge_details,
             &story_views,
             &answer_questions,
+            &task_action_opens,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -2400,6 +2612,7 @@ mod tests {
             let (merge_detail_tx, _merge_detail_rx) = mpsc::channel();
             let (story_view_tx, _story_view_rx) = mpsc::channel();
             let (answer_question_tx, _answer_question_rx) = mpsc::channel();
+            let (task_action_open_tx, _task_action_open_rx) = mpsc::channel();
             let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             run(
                 command_rx,
@@ -2409,6 +2622,7 @@ mod tests {
                 merge_detail_tx,
                 story_view_tx,
                 answer_question_tx,
+                task_action_open_tx,
                 board_refresh_tx,
                 explanation_tx,
             );
