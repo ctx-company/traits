@@ -904,295 +904,133 @@ argv = [
     "{port:task}",
 ]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "carry-brief"
-title = "Carry the brief"
-kind = "project"
-input = ["slot:review-verdict-1"]
-output = ["slot:brief"]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:review-verdict-1"
-field = "brief"
-destination = "slot:brief"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "carry-proof-command"
-title = "Carry the brief: proof command"
-kind = "project"
-input = ["slot:brief"]
-output = ["slot:proof-command"]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:brief"
-field = "proof"
-destination = "slot:proof-command"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-working-the-stage"
-title = "Notify: working the stage"
-input = ["slot:notify-id"]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
-argv = [
-    "ctx-notify",
-    "update",
-    "{slot:notify-id}",
-    "--status",
-    "Working the stage",
-]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "work-the-stage"
-title = "Work the stage"
+[[sequence.ctx-branch-arm-p-12-work-remains-then.sequence]]
+id = "stage-loop"
+title = "Stage loop"
 kind = "loop"
-sequence = "sequence:work-the-stage-body"
+sequence = "sequence:stage-loop-body"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all]]
+[[sequence.ctx-branch-arm-p-12-work-remains-then.sequence.until.all]]
+slot = "slot:review-verdict-1"
+field = "status"
+equals = "approved"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any]]
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then.sequence]]
+id = "owner-reachable"
+title = "Owner reachable"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-56-ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then-15-owner-reachable-then"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any.all]]
-slot = "slot:work-report"
-field = "claim"
-equals = "complete"
+[sequence.ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then.sequence.when.not]
+slot = "port:owner-ruling"
+equals = "off"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any.all]]
-slot = "slot:proof-result"
-equals = "pass"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any]]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any.not]
-slot = "slot:work-report"
-field = "blocked"
-equals = ""
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any]]
-loop-elapsed-seconds-at-least = 14400
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "capture-the-changed-files"
-title = "Capture the changed files"
-input = ["slot:diff-base"]
-output = ["slot:changed-files"]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
-argv = [
-    "git",
-    "diff",
-    "--name-status",
-    "{slot:diff-base}",
-]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "review-the-claim"
-title = "Review the claim"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-owner-annotated-then.sequence]]
+id = "apply-the-owner-s-annotations"
+title = "Apply the owner's annotations"
 agent = "agent:smart"
-prompt = "prompt:review-the-claim"
+prompt = "prompt:apply-the-owner-s-annotations"
 input = [
+    "slot:gate-answer",
     "slot:draft",
-    "slot:work-report",
-    { slot = "slot:proof-result", optional = true },
-    "slot:changed-files",
     { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:review-verdict-2", optional = true },
-    { slot = "slot:owner-decisions", optional = true },
 ]
 output = ["slot:review-verdict-1"]
-on-complete = ["signal:needs-owner"]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-digest-verdict"
-title = "Notify: review verdict: digest the verdict"
-agent = "agent:scribe"
-prompt = "prompt:notify-digest-verdict"
-input = [
-    "slot:review-verdict-1",
-    "slot:work-report",
-]
-output = ["slot:notify-digest"]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-carry-digest"
-title = "Notify: review verdict: carry the digest"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "carry-closed-stage"
+title = "Carry the closed stage"
 kind = "project"
-input = ["slot:notify-digest"]
-output = [
-    "slot:notify-badge",
-    "slot:notify-summary",
-    "slot:notify-journal",
-]
+input = ["slot:review-verdict-1"]
+output = ["slot:closed-stage"]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:notify-digest"
-field = "badge"
-destination = "slot:notify-badge"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.projection]]
+source = "slot:review-verdict-1"
+field = "closed-stage"
+destination = "slot:closed-stage"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:notify-digest"
-field = "summary"
-destination = "slot:notify-summary"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:notify-digest"
-field = "journal"
-destination = "slot:notify-journal"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-review-update"
-title = "Notify: review verdict"
-input = [
-    "slot:notify-id",
-    "slot:notify-badge",
-    "slot:notify-summary",
-]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
-argv = [
-    "ctx-notify",
-    "update",
-    "{slot:notify-id}",
-    "--status",
-    "{slot:notify-badge}",
-    "--summary",
-    "{slot:notify-summary}",
-]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-review-journal"
-title = "Notify: review verdict: journal"
-input = [
-    "slot:notify-id",
-    "slot:notify-journal",
-]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
-argv = [
-    "ctx-notify",
-    "log",
-    "{slot:notify-id}",
-    "{slot:notify-journal}",
-]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-awaiting-annotations"
-title = "Notify: awaiting annotations"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "notify-stage-committed"
+title = "Notify: stage committed"
 input = ["slot:notify-id"]
 output = ["slot:notify-log"]
 
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
+[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.command]
 argv = [
     "ctx-notify",
     "update",
     "{slot:notify-id}",
     "--status",
-    "awaiting owner annotations",
+    "Commit the stage",
 ]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "gate-carry-surface"
-title = "Carry the annotation surface"
-kind = "project"
-input = ["slot:notify-digest"]
-output = ["slot:gate-surface"]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:notify-digest"
-field = "surface"
-destination = "slot:gate-surface"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "owner-verdict-gate"
-title = "Annotate the verdict"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "write-the-stage-commit-message"
+title = "Write the stage commit message"
+agent = "agent:scribe"
+prompt = "prompt:write-the-stage-commit-message"
 input = [
-    "slot:gate-surface",
-    "port:owner-gate",
+    "slot:closed-stage",
+    "slot:work-report",
 ]
-output = ["slot:gate-answer"]
+output = ["slot:commit-message"]
 
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "stage-all-changes"
+title = "Stage all changes"
+output = ["slot:stage-output"]
+
+[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
+
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "commit-the-stage"
+title = "Commit the stage"
+input = ["slot:commit-message"]
+output = ["slot:commit-log"]
+
+[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.command]
 argv = [
     "sh",
     "-c",
-    """
-if [ "$2" = "off" ]; then
-  printf accepted
-  exit 0
-fi
-out=$(printf '%s' "$1" | ctx-annotate --stdin --raw)
-case "$out" in
-  *'"annotations":[]'*) printf accepted ;;
-  "") printf 'annotation gate returned no decision; not accepted' ;;
-  *) printf '%s' "$out" ;;
-esac""",
+    'if git diff --quiet && git diff --cached --quiet; then echo "nothing to commit"; else git commit -m "$1" && echo committed; fi',
     "_",
-    "{slot:gate-surface}",
-    "{port:owner-gate}",
+    "{slot:commit-message}",
 ]
-timeout-ms = 14400000
-idle-timeout-ms = 14400000
-terminal = true
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "record-the-owner-ruling"
-title = "Record the owner ruling"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-23-record-the-owner-ruling-then"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "move-the-task-branch"
+title = "Move the task branch"
+input = ["port:task"]
+output = ["slot:commit-log"]
 
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.when.not]
-slot = "slot:gate-answer"
-equals = "accepted"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "notify-gate-result"
-title = "Notify: owner ruling"
-input = [
-    "slot:notify-id",
-    "slot:gate-answer",
-]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
+[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.command]
 argv = [
-    "ctx-notify",
-    "log",
-    "{slot:notify-id}",
-    "{slot:gate-answer}",
+    "sh",
+    "-c",
+    'git branch -f "ctx/task/$1" HEAD && echo "ctx/task/$1 -> $(git rev-parse --short HEAD)"',
+    "_",
+    "{port:task}",
 ]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "owner-annotated"
-title = "Owner annotated"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-owner-annotated-then"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-23-record-the-owner-ruling-then.sequence]]
+id = "gate-append-ruling"
+title = "Record the owner ruling: append"
+kind = "project"
+input = ["slot:gate-answer"]
 
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.when.not]
-slot = "slot:gate-answer"
-equals = "accepted"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-23-record-the-owner-ruling-then.sequence.projection]]
+source = "slot:gate-answer"
+destination = "slot:owner-decisions"
+operation = "append"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "owner-ruling"
-title = "Owner ruling"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then"
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.when]
-signal = "signal:needs-owner"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "stage-committed"
-title = "Stage committed"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then"
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.when]
-slot = "slot:review-verdict-1"
-field = "closed-stage.commit"
-equals = true
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-23-record-the-owner-ruling-then.sequence.output]]
+slot = "slot:owner-decisions"
+operation = "append"
 
 [[sequence.ctx-branch-arm-s-18-plan-approval-body-34-record-the-owner-s-plan-correction-then.sequence]]
 id = "plan-append-ruling"
@@ -1236,124 +1074,7 @@ fi''',
 timeout-ms = 2700000
 idle-timeout-ms = 2700000
 
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then.sequence]]
-id = "owner-reachable"
-title = "Owner reachable"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-95-ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then-15-owner-reachable-then"
-
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then.sequence.when.not]
-slot = "port:owner-ruling"
-equals = "off"
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-owner-annotated-then.sequence]]
-id = "apply-the-owner-s-annotations"
-title = "Apply the owner's annotations"
-agent = "agent:smart"
-prompt = "prompt:apply-the-owner-s-annotations"
-input = [
-    "slot:gate-answer",
-    "slot:draft",
-    { slot = "slot:review-verdict-1", optional = true },
-]
-output = ["slot:review-verdict-1"]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "carry-closed-stage"
-title = "Carry the closed stage"
-kind = "project"
-input = ["slot:review-verdict-1"]
-output = ["slot:closed-stage"]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.projection]]
-source = "slot:review-verdict-1"
-field = "closed-stage"
-destination = "slot:closed-stage"
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "notify-stage-committed"
-title = "Notify: stage committed"
-input = ["slot:notify-id"]
-output = ["slot:notify-log"]
-
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.command]
-argv = [
-    "ctx-notify",
-    "update",
-    "{slot:notify-id}",
-    "--status",
-    "Commit the stage",
-]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "write-the-stage-commit-message"
-title = "Write the stage commit message"
-agent = "agent:scribe"
-prompt = "prompt:write-the-stage-commit-message"
-input = [
-    "slot:closed-stage",
-    "slot:work-report",
-]
-output = ["slot:commit-message"]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "stage-all-changes"
-title = "Stage all changes"
-output = ["slot:stage-output"]
-
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.command]
-argv = [
-    "git",
-    "add",
-    "-A",
-]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "commit-the-stage"
-title = "Commit the stage"
-input = ["slot:commit-message"]
-output = ["slot:commit-log"]
-
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'if git diff --quiet && git diff --cached --quiet; then echo "nothing to commit"; else git commit -m "$1" && echo committed; fi',
-    "_",
-    "{slot:commit-message}",
-]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "move-the-task-branch"
-title = "Move the task branch"
-input = ["port:task"]
-output = ["slot:commit-log"]
-
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'git branch -f "ctx/task/$1" HEAD && echo "ctx/task/$1 -> $(git rev-parse --short HEAD)"',
-    "_",
-    "{port:task}",
-]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-23-record-the-owner-ruling-then.sequence]]
-id = "gate-append-ruling"
-title = "Record the owner ruling: append"
-kind = "project"
-input = ["slot:gate-answer"]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-23-record-the-owner-ruling-then.sequence.projection]]
-source = "slot:gate-answer"
-destination = "slot:owner-decisions"
-operation = "append"
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-23-record-the-owner-ruling-then.sequence.output]]
-slot = "slot:owner-decisions"
-operation = "append"
-
-[[sequence.ctx-branch-arm-s-95-ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then-15-owner-reachable-then.sequence]]
+[[sequence.ctx-branch-arm-s-56-ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then-15-owner-reachable-then.sequence]]
 id = "summon-the-owner"
 title = "Summon the owner"
 kind = "ask"
@@ -1361,14 +1082,14 @@ prompt = "prompt:summon-the-owner"
 output = ["slot:summon-the-owner"]
 when = "signal:needs-owner"
 
-[[sequence.ctx-branch-arm-s-95-ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then-15-owner-reachable-then.sequence]]
+[[sequence.ctx-branch-arm-s-56-ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then-15-owner-reachable-then.sequence]]
 id = "record-the-owner-s-ruling"
 title = "Record the owner's ruling"
 agent = "agent:scribe"
 prompt = "prompt:record-the-owner-s-ruling"
 input = ["slot:summon-the-owner"]
 
-[[sequence.ctx-branch-arm-s-95-ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then-15-owner-reachable-then.sequence.output]]
+[[sequence.ctx-branch-arm-s-56-ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then-15-owner-reachable-then.sequence.output]]
 slot = "slot:owner-decisions"
 operation = "append"
 
@@ -1446,15 +1167,294 @@ slot = "slot:plan-answer"
 equals = "accepted"
 
 [[sequence.stage-loop-body.sequence]]
-id = "stage-open"
-title = "Stage open"
+id = "carry-brief"
+title = "Carry the brief"
+kind = "project"
+input = ["slot:review-verdict-1"]
+output = ["slot:brief"]
+
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:review-verdict-1"
+field = "brief"
+destination = "slot:brief"
+
+[[sequence.stage-loop-body.sequence]]
+id = "carry-proof-command"
+title = "Carry the brief: proof command"
+kind = "project"
+input = ["slot:brief"]
+output = ["slot:proof-command"]
+
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:brief"
+field = "proof"
+destination = "slot:proof-command"
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-working-the-stage"
+title = "Notify: working the stage"
+input = ["slot:notify-id"]
+output = ["slot:notify-log"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "update",
+    "{slot:notify-id}",
+    "--status",
+    "Working the stage",
+]
+
+[[sequence.stage-loop-body.sequence]]
+id = "work-the-stage"
+title = "Work the stage"
+kind = "loop"
+sequence = "sequence:work-the-stage-body"
+
+[[sequence.stage-loop-body.sequence.until.all]]
+
+[[sequence.stage-loop-body.sequence.until.all.any]]
+
+[[sequence.stage-loop-body.sequence.until.all.any.all]]
+slot = "slot:work-report"
+field = "claim"
+equals = "complete"
+
+[[sequence.stage-loop-body.sequence.until.all.any.all]]
+slot = "slot:proof-result"
+equals = "pass"
+
+[[sequence.stage-loop-body.sequence.until.all.any]]
+
+[sequence.stage-loop-body.sequence.until.all.any.not]
+slot = "slot:work-report"
+field = "blocked"
+equals = ""
+
+[[sequence.stage-loop-body.sequence.until.all.any]]
+loop-elapsed-seconds-at-least = 14400
+
+[[sequence.stage-loop-body.sequence]]
+id = "capture-the-changed-files"
+title = "Capture the changed files"
+input = ["slot:diff-base"]
+output = ["slot:changed-files"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "git",
+    "diff",
+    "--name-status",
+    "{slot:diff-base}",
+]
+
+[[sequence.stage-loop-body.sequence]]
+id = "review-the-claim"
+title = "Review the claim"
+agent = "agent:smart"
+prompt = "prompt:review-the-claim"
+input = [
+    "slot:draft",
+    "slot:work-report",
+    { slot = "slot:proof-result", optional = true },
+    "slot:changed-files",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
+    { slot = "slot:owner-decisions", optional = true },
+]
+output = ["slot:review-verdict-1"]
+on-complete = ["signal:needs-owner"]
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-digest-verdict"
+title = "Notify: review verdict: digest the verdict"
+agent = "agent:scribe"
+prompt = "prompt:notify-digest-verdict"
+input = [
+    "slot:review-verdict-1",
+    "slot:work-report",
+]
+output = ["slot:notify-digest"]
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-carry-digest"
+title = "Notify: review verdict: carry the digest"
+kind = "project"
+input = ["slot:notify-digest"]
+output = [
+    "slot:notify-badge",
+    "slot:notify-summary",
+    "slot:notify-journal",
+]
+
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:notify-digest"
+field = "badge"
+destination = "slot:notify-badge"
+
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:notify-digest"
+field = "summary"
+destination = "slot:notify-summary"
+
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:notify-digest"
+field = "journal"
+destination = "slot:notify-journal"
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-review-update"
+title = "Notify: review verdict"
+input = [
+    "slot:notify-id",
+    "slot:notify-badge",
+    "slot:notify-summary",
+]
+output = ["slot:notify-log"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "update",
+    "{slot:notify-id}",
+    "--status",
+    "{slot:notify-badge}",
+    "--summary",
+    "{slot:notify-summary}",
+]
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-review-journal"
+title = "Notify: review verdict: journal"
+input = [
+    "slot:notify-id",
+    "slot:notify-journal",
+]
+output = ["slot:notify-log"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "log",
+    "{slot:notify-id}",
+    "{slot:notify-journal}",
+]
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-awaiting-annotations"
+title = "Notify: awaiting annotations"
+input = ["slot:notify-id"]
+output = ["slot:notify-log"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "update",
+    "{slot:notify-id}",
+    "--status",
+    "awaiting owner annotations",
+]
+
+[[sequence.stage-loop-body.sequence]]
+id = "gate-carry-surface"
+title = "Carry the annotation surface"
+kind = "project"
+input = ["slot:notify-digest"]
+output = ["slot:gate-surface"]
+
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:notify-digest"
+field = "surface"
+destination = "slot:gate-surface"
+
+[[sequence.stage-loop-body.sequence]]
+id = "owner-verdict-gate"
+title = "Annotate the verdict"
+input = [
+    "slot:gate-surface",
+    "port:owner-gate",
+]
+output = ["slot:gate-answer"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """
+if [ "$2" = "off" ]; then
+  printf accepted
+  exit 0
+fi
+out=$(printf '%s' "$1" | ctx-annotate --stdin --raw)
+case "$out" in
+  *'"annotations":[]'*) printf accepted ;;
+  "") printf 'annotation gate returned no decision; not accepted' ;;
+  *) printf '%s' "$out" ;;
+esac""",
+    "_",
+    "{slot:gate-surface}",
+    "{port:owner-gate}",
+]
+timeout-ms = 14400000
+idle-timeout-ms = 14400000
+terminal = true
+
+[[sequence.stage-loop-body.sequence]]
+id = "record-the-owner-ruling"
+title = "Record the owner ruling"
 kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then"
+sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-23-record-the-owner-ruling-then"
+
+[sequence.stage-loop-body.sequence.when.not]
+slot = "slot:gate-answer"
+equals = "accepted"
+
+[[sequence.stage-loop-body.sequence]]
+id = "notify-gate-result"
+title = "Notify: owner ruling"
+input = [
+    "slot:notify-id",
+    "slot:gate-answer",
+]
+output = ["slot:notify-log"]
+
+[sequence.stage-loop-body.sequence.command]
+argv = [
+    "ctx-notify",
+    "log",
+    "{slot:notify-id}",
+    "{slot:gate-answer}",
+]
+
+[[sequence.stage-loop-body.sequence]]
+id = "owner-annotated"
+title = "Owner annotated"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-15-owner-annotated-then"
+
+[sequence.stage-loop-body.sequence.when.not]
+slot = "slot:gate-answer"
+equals = "accepted"
+
+[[sequence.stage-loop-body.sequence]]
+id = "owner-ruling"
+title = "Owner ruling"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-12-owner-ruling-then"
+
+[sequence.stage-loop-body.sequence.when]
+signal = "signal:needs-owner"
+
+[[sequence.stage-loop-body.sequence]]
+id = "stage-committed"
+title = "Stage committed"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then"
 
 [sequence.stage-loop-body.sequence.when]
 slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
+field = "closed-stage.commit"
+equals = true
 
 [[sequence.work-the-stage-body.sequence]]
 id = "implement-the-stage"
@@ -1581,15 +1581,15 @@ input = [
 output = ["slot:review-verdict-1"]
 
 [[procedure.sequence]]
-id = "stage-loop"
-title = "Stage loop"
-kind = "loop"
-sequence = "sequence:stage-loop-body"
+id = "work-remains"
+title = "Work remains"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-12-work-remains-then"
 
-[[procedure.sequence.until.all]]
+[procedure.sequence.when]
 slot = "slot:review-verdict-1"
 field = "status"
-equals = "approved"
+equals = "revise"
 
 [[procedure.sequence]]
 id = "check-working-tree-status"

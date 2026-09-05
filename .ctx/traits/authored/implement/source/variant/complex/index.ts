@@ -17,8 +17,11 @@ export default function () {
   shared.step.draft.compose("Draft the implementation plan");
   shared.step.review.baseline("Review the tree before any work");
 
-  cdk.flow.loop("Stage loop", (stage) => {
-    cdk.flow.when("Stage open", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
+  // Read once on the baseline verdict; the loop body itself is
+  // unconditional (see the basic variant for why a body guard on the
+  // previous iteration's verdict cannot work).
+  cdk.flow.when("Work remains", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
+    cdk.flow.loop("Stage loop", (stage) => {
       shared.step.carry.carryBrief("Carry the brief");
 
       cdk.flow.loop("Work the stage", (work) => {
@@ -53,12 +56,12 @@ export default function () {
           shared.step.git.taskBranch("Move the task branch");
         },
       );
-    });
 
-    stage.untilAll([
-      cdk.condition.equals(shared.data.verdict1.status, "approved"),
-      cdk.condition.equals(shared.data.verdict2.status, "approved"),
-    ]);
+      stage.untilAll([
+        cdk.condition.equals(shared.data.verdict1.status, "approved"),
+        cdk.condition.equals(shared.data.verdict2.status, "approved"),
+      ]);
+    });
   });
 
   shared.step.git.status("Check working tree status");

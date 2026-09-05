@@ -21,13 +21,13 @@
   },
   "prompt:implement-the-stage": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 35,
-    "end": 35
+    "start": 38,
+    "end": 38
   },
   "prompt:review-the-claim": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 52,
-    "end": 52
+    "start": 55,
+    "end": 55
   },
   "prompt:review-the-tree-before-any-work": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
@@ -36,13 +36,13 @@
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 70,
-    "end": 70
+    "start": 73,
+    "end": 73
   },
   "prompt:write-the-stage-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 59,
-    "end": 59
+    "start": 62,
+    "end": 62
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
@@ -106,8 +106,8 @@
   },
   "sequence:ctx-branch-arm-p-15-owner-annotated-then/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 68,
-    "end": 68
+    "start": 71,
+    "end": 71
   },
   "sequence:ctx-branch-arm-p-15-owner-annotated-then/draft-the-implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
@@ -116,48 +116,38 @@
   },
   "sequence:ctx-branch-arm-p-15-owner-annotated-then/maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 69,
-    "end": 69
+    "start": 72,
+    "end": 72
   },
   "sequence:ctx-branch-arm-p-15-owner-annotated-then/review-the-tree-before-any-work": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
     "start": 28,
     "end": 28
   },
-  "sequence:ctx-branch-arm-p-15-owner-annotated-then/stage-loop": {
+  "sequence:ctx-branch-arm-p-15-owner-annotated-then/work-remains": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 33,
+    "end": 33
   },
-  "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/capture-the-changed-files": {
+  "sequence:ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then/carry-closed-stage": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/git.ts",
+    "start": 69,
+    "end": 69
+  },
+  "sequence:ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then/commit-the-stage": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 64,
+    "end": 64
   },
-  "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/carry-brief": {
-    "file": ".ctx/traits/authored/implement/source/shared/step/carry.ts",
-    "start": 15,
-    "end": 15
-  },
-  "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/carry-proof-command": {
-    "file": ".ctx/traits/authored/implement/source/shared/step/carry.ts",
-    "start": 19,
-    "end": 19
-  },
-  "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/review-the-claim": {
+  "sequence:ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 52,
-    "end": 52
+    "start": 63,
+    "end": 63
   },
-  "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/stage-committed": {
+  "sequence:ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then/write-the-stage-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 54,
-    "end": 54
-  },
-  "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/work-the-stage": {
-    "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 34,
-    "end": 34
+    "start": 62,
+    "end": 62
   },
   "sequence:ctx-branch-arm-s-19-work-the-stage-body-7-claimed-then/prove-the-claim": {
     "file": ".ctx/traits/authored/implement/source/shared/step/proof.ts",
@@ -166,38 +156,23 @@
   },
   "sequence:ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 72,
-    "end": 72
+    "start": 75,
+    "end": 75
   },
   "sequence:ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 71,
-    "end": 71
+    "start": 74,
+    "end": 74
   },
   "sequence:ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 70,
-    "end": 70
+    "start": 73,
+    "end": 73
   },
-  "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then/carry-closed-stage": {
-    "file": ".ctx/traits/authored/implement/source/shared/step/git.ts",
-    "start": 69,
-    "end": 69
-  },
-  "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then/commit-the-stage": {
+  "sequence:ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-work-remains-then/stage-loop": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 61,
-    "end": 61
-  },
-  "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then/stage-all-changes": {
-    "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 60,
-    "end": 60
-  },
-  "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then/write-the-stage-commit-message": {
-    "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 59,
-    "end": 59
+    "start": 34,
+    "end": 34
   },
   "sequence:procedure/capture-the-session-base": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
@@ -214,20 +189,45 @@
     "start": 135,
     "end": 135
   },
-  "sequence:stage-loop-body/stage-open": {
+  "sequence:stage-loop-body/capture-the-changed-files": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 31,
-    "end": 31
+    "start": 54,
+    "end": 54
+  },
+  "sequence:stage-loop-body/carry-brief": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/carry.ts",
+    "start": 15,
+    "end": 15
+  },
+  "sequence:stage-loop-body/carry-proof-command": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/carry.ts",
+    "start": 19,
+    "end": 19
+  },
+  "sequence:stage-loop-body/review-the-claim": {
+    "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
+    "start": 55,
+    "end": 55
+  },
+  "sequence:stage-loop-body/stage-committed": {
+    "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
+    "start": 57,
+    "end": 57
+  },
+  "sequence:stage-loop-body/work-the-stage": {
+    "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
+    "start": 37,
+    "end": 37
   },
   "sequence:work-the-stage-body/claimed": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 36,
-    "end": 36
+    "start": 39,
+    "end": 39
   },
   "sequence:work-the-stage-body/implement-the-stage": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",
-    "start": 35,
-    "end": 35
+    "start": 38,
+    "end": 38
   },
   "slot:annotations": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",

@@ -114,7 +114,9 @@ fn narration_sits_at_the_contract_sites_in_order() {
     assert_eq!(top_ids[plan - 1], "notify-plan-drafted");
     let review_baseline = index_of(&top_ids, "review-the-tree-before-any-work");
     assert_eq!(top_ids[review_baseline - 1], "notify-baseline-review");
-    assert!(index_of(&top_ids, "stage-loop") > review_baseline);
+    // The stage loop sits under the once-evaluated "work remains" branch.
+    assert!(index_of(&top_ids, "work-remains") > review_baseline);
+    assert!(pool_containing(&canonical, "stage-loop").contains(&"stage-loop"));
     let finish = index_of(&top_ids, "notify-finish");
     assert!(finish > index_of(&top_ids, "maybe-commit"));
     assert_eq!(

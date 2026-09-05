@@ -47,8 +47,15 @@ export default function () {
   shared.step.notify.update("Notify: baseline review", "Review the tree before any work");
   shared.step.review.baseline("Review the tree before any work");
 
-  cdk.flow.loop("Stage loop", (stage) => {
-    cdk.flow.when("Stage open", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
+  // Read once, on the baseline verdict: a tree that already meets the plan
+  // skips the loop. Inside the loop the body is unconditional — a guard on
+  // the loop body that read the previous iteration's verdict would see a
+  // stale value (a loop-body slot from an earlier iteration never satisfies
+  // this loop's guards) and skip every iteration after the first, spinning
+  // the loop to its control budget. The `until` at the end of an iteration
+  // reads the verdict that iteration's review wrote, so it stays fresh.
+  cdk.flow.when("Work remains", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
+    cdk.flow.loop("Stage loop", (stage) => {
       shared.step.carry.carryBrief("Carry the brief");
       shared.step.notify.update("Notify: working the stage", "Working the stage");
 
@@ -118,12 +125,12 @@ export default function () {
           shared.step.git.taskBranch("Move the task branch");
         },
       );
-    });
 
-    // The exit reads the APPLIED verdict (0281.1): an approved verdict the
-    // owner annotated with new work comes back as revise and the loop
-    // continues; a revise verdict the owner overruled to approved ends it.
-    stage.untilAll([cdk.condition.equals(shared.data.verdict1.status, "approved")]);
+      // The exit reads the APPLIED verdict (0281.1): an approved verdict the
+      // owner annotated with new work comes back as revise and the loop
+      // continues; a revise verdict the owner overruled to approved ends it.
+      stage.untilAll([cdk.condition.equals(shared.data.verdict1.status, "approved")]);
+    });
   });
 
   shared.step.git.status("Check working tree status");

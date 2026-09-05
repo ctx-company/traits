@@ -652,15 +652,15 @@ input = [
 output = ["slot:review-verdict-1"]
 
 [[sequence.ctx-branch-arm-p-15-owner-annotated-then.sequence]]
-id = "stage-loop"
-title = "Stage loop"
-kind = "loop"
-sequence = "sequence:stage-loop-body"
+id = "work-remains"
+title = "Work remains"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-work-remains-then"
 
-[[sequence.ctx-branch-arm-p-15-owner-annotated-then.sequence.until.all]]
+[sequence.ctx-branch-arm-p-15-owner-annotated-then.sequence.when]
 slot = "slot:review-verdict-1"
 field = "status"
-equals = "approved"
+equals = "revise"
 
 [[sequence.ctx-branch-arm-p-15-owner-annotated-then.sequence]]
 id = "check-working-tree-status"
@@ -683,98 +683,55 @@ sequence = "sequence:ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-the
 [sequence.ctx-branch-arm-p-15-owner-annotated-then.sequence.when.not]
 empty = "slot:git-status"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "carry-brief"
-title = "Carry the brief"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "carry-closed-stage"
+title = "Carry the closed stage"
 kind = "project"
 input = ["slot:review-verdict-1"]
-output = ["slot:brief"]
+output = ["slot:closed-stage"]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.projection]]
 source = "slot:review-verdict-1"
-field = "brief"
-destination = "slot:brief"
+field = "closed-stage"
+destination = "slot:closed-stage"
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "carry-proof-command"
-title = "Carry the brief: proof command"
-kind = "project"
-input = ["slot:brief"]
-output = ["slot:proof-command"]
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "write-the-stage-commit-message"
+title = "Write the stage commit message"
+agent = "agent:scribe"
+prompt = "prompt:write-the-stage-commit-message"
+input = [
+    "slot:closed-stage",
+    "slot:work-report",
+]
+output = ["slot:commit-message"]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.projection]]
-source = "slot:brief"
-field = "proof"
-destination = "slot:proof-command"
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "stage-all-changes"
+title = "Stage all changes"
+output = ["slot:stage-output"]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "work-the-stage"
-title = "Work the stage"
-kind = "loop"
-sequence = "sequence:work-the-stage-body"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all]]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any]]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any.all]]
-slot = "slot:work-report"
-field = "claim"
-equals = "complete"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any.all]]
-slot = "slot:proof-result"
-equals = "pass"
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any]]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any.not]
-slot = "slot:work-report"
-field = "blocked"
-equals = ""
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.until.all.any]]
-loop-elapsed-seconds-at-least = 14400
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "capture-the-changed-files"
-title = "Capture the changed files"
-input = ["slot:diff-base"]
-output = ["slot:changed-files"]
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.command]
+[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.command]
 argv = [
     "git",
-    "diff",
-    "--name-status",
-    "{slot:diff-base}",
+    "add",
+    "-A",
 ]
 
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "review-the-claim"
-title = "Review the claim"
-agent = "agent:smart"
-prompt = "prompt:review-the-claim"
-input = [
-    "slot:draft",
-    "slot:annotations",
-    "slot:work-report",
-    { slot = "slot:proof-result", optional = true },
-    "slot:changed-files",
-    { slot = "slot:review-verdict-1", optional = true },
+[[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence]]
+id = "commit-the-stage"
+title = "Commit the stage"
+input = ["slot:commit-message"]
+output = ["slot:commit-log"]
+
+[sequence.ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'if git diff --quiet && git diff --cached --quiet; then echo "nothing to commit"; else git commit -m "$1" && echo committed; fi',
+    "_",
+    "{slot:commit-message}",
 ]
-output = ["slot:review-verdict-1"]
-
-[[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
-id = "stage-committed"
-title = "Stage committed"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then"
-
-[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence.when]
-slot = "slot:review-verdict-1"
-field = "closed-stage.commit"
-equals = true
 
 [[sequence.ctx-branch-arm-s-19-work-the-stage-body-7-claimed-then.sequence]]
 id = "prove-the-claim"
@@ -841,66 +798,109 @@ argv = [
     "{slot:commit-message}",
 ]
 
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "carry-closed-stage"
-title = "Carry the closed stage"
+[[sequence.ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-work-remains-then.sequence]]
+id = "stage-loop"
+title = "Stage loop"
+kind = "loop"
+sequence = "sequence:stage-loop-body"
+
+[[sequence.ctx-branch-arm-s-40-ctx-branch-arm-p-15-owner-annotated-then-12-work-remains-then.sequence.until.all]]
+slot = "slot:review-verdict-1"
+field = "status"
+equals = "approved"
+
+[[sequence.stage-loop-body.sequence]]
+id = "carry-brief"
+title = "Carry the brief"
 kind = "project"
 input = ["slot:review-verdict-1"]
-output = ["slot:closed-stage"]
+output = ["slot:brief"]
 
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.projection]]
+[[sequence.stage-loop-body.sequence.projection]]
 source = "slot:review-verdict-1"
-field = "closed-stage"
-destination = "slot:closed-stage"
+field = "brief"
+destination = "slot:brief"
 
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "write-the-stage-commit-message"
-title = "Write the stage commit message"
-agent = "agent:scribe"
-prompt = "prompt:write-the-stage-commit-message"
-input = [
-    "slot:closed-stage",
-    "slot:work-report",
-]
-output = ["slot:commit-message"]
+[[sequence.stage-loop-body.sequence]]
+id = "carry-proof-command"
+title = "Carry the brief: proof command"
+kind = "project"
+input = ["slot:brief"]
+output = ["slot:proof-command"]
 
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "stage-all-changes"
-title = "Stage all changes"
-output = ["slot:stage-output"]
+[[sequence.stage-loop-body.sequence.projection]]
+source = "slot:brief"
+field = "proof"
+destination = "slot:proof-command"
 
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.command]
+[[sequence.stage-loop-body.sequence]]
+id = "work-the-stage"
+title = "Work the stage"
+kind = "loop"
+sequence = "sequence:work-the-stage-body"
+
+[[sequence.stage-loop-body.sequence.until.all]]
+
+[[sequence.stage-loop-body.sequence.until.all.any]]
+
+[[sequence.stage-loop-body.sequence.until.all.any.all]]
+slot = "slot:work-report"
+field = "claim"
+equals = "complete"
+
+[[sequence.stage-loop-body.sequence.until.all.any.all]]
+slot = "slot:proof-result"
+equals = "pass"
+
+[[sequence.stage-loop-body.sequence.until.all.any]]
+
+[sequence.stage-loop-body.sequence.until.all.any.not]
+slot = "slot:work-report"
+field = "blocked"
+equals = ""
+
+[[sequence.stage-loop-body.sequence.until.all.any]]
+loop-elapsed-seconds-at-least = 14400
+
+[[sequence.stage-loop-body.sequence]]
+id = "capture-the-changed-files"
+title = "Capture the changed files"
+input = ["slot:diff-base"]
+output = ["slot:changed-files"]
+
+[sequence.stage-loop-body.sequence.command]
 argv = [
     "git",
-    "add",
-    "-A",
-]
-
-[[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence]]
-id = "commit-the-stage"
-title = "Commit the stage"
-input = ["slot:commit-message"]
-output = ["slot:commit-log"]
-
-[sequence.ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-15-stage-committed-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'if git diff --quiet && git diff --cached --quiet; then echo "nothing to commit"; else git commit -m "$1" && echo committed; fi',
-    "_",
-    "{slot:commit-message}",
+    "diff",
+    "--name-status",
+    "{slot:diff-base}",
 ]
 
 [[sequence.stage-loop-body.sequence]]
-id = "stage-open"
-title = "Stage open"
+id = "review-the-claim"
+title = "Review the claim"
+agent = "agent:smart"
+prompt = "prompt:review-the-claim"
+input = [
+    "slot:draft",
+    "slot:annotations",
+    "slot:work-report",
+    { slot = "slot:proof-result", optional = true },
+    "slot:changed-files",
+    { slot = "slot:review-verdict-1", optional = true },
+]
+output = ["slot:review-verdict-1"]
+
+[[sequence.stage-loop-body.sequence]]
+id = "stage-committed"
+title = "Stage committed"
 kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then"
+sequence = "sequence:ctx-branch-arm-s-15-stage-loop-body-15-stage-committed-then"
 
 [sequence.stage-loop-body.sequence.when]
 slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
+field = "closed-stage.commit"
+equals = true
 
 [[sequence.work-the-stage-body.sequence]]
 id = "implement-the-stage"
