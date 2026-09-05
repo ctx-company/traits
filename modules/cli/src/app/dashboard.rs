@@ -6456,52 +6456,6 @@ fn sync_tasks_board(state: &mut State) {
     queue_tasks_board_refresh(state, true, true);
 }
 
-/// Re-reads `dir` into `state.tasks_board` and its dependents, returning
-/// whether the sync report was clean. Shared by
-/// `resync_tasks_board_after_write_in` (which must not touch
-/// `state.message`, since the write that triggered it already set the
-/// confirmation the owner needs to see).
-#[cfg(test)]
-fn apply_board_snapshot(state: &mut State, dir: &camino::Utf8Path) -> Result<bool, String> {
-    match read_board_snapshot(dir) {
-        Ok(board) => {
-            let clean = board.sync_report.dangling_edges.is_empty()
-                && board.sync_report.parse_failures.is_empty()
-                && board.sync_report.duplicate_keys.is_empty();
-            if let Some(cache_root) = tasks_cache_root(state) {
-                persist_board_snapshot(&cache_root, dir, &board);
-            }
-            state.tasks_board = Some(board);
-            state.tasks_refresh_error = None;
-            rebuild_visible_tasks(state);
-            refresh_task_preview_for_selection(state);
-            Ok(clean)
-        }
-        Err(error) => {
-            state.tasks_refresh_error = Some(error.clone());
-            Err(error)
-        }
-    }
-}
-
-/// Resyncs the board after a write whose own success/refusal message is
-/// already in `state.message` (e.g. "0146 marked done — …") — unlike
-/// `sync_tasks_board`, this never overwrites that message with "synced".
-/// Previously every write handler called `sync_tasks_board` right after
-/// setting its confirmation, which synchronous refresh immediately
-/// clobbered with "synced" (or, worse, "sync failed: …" on a transient
-/// re-read race), making a write that had just succeeded look like a
-/// silent no-op or an outright failure on the dashboard footer. A resync
-/// failure here is appended to the existing message instead of replacing
-/// it, so the write confirmation always survives.
-#[cfg(test)]
-fn resync_tasks_board_after_write_in(state: &mut State, dir: &camino::Utf8Path) {
-    if let Err(error) = apply_board_snapshot(state, dir) {
-        let prefix = state.message.take().unwrap_or_default();
-        state.message = Some(format!("{prefix} (resync failed: {error})"));
-    }
-}
-
 /// Queues a worker-owned board operation. The renderer keeps its accepted
 /// snapshot while the operation is pending.
 fn queue_tasks_board_refresh(state: &mut State, force: bool, report_sync: bool) {
@@ -6907,13 +6861,22 @@ fn task_mark_done_modal_payload(
         .repo_root
         .as_deref()
         .ok_or_else(|| "repository root unavailable".to_string())?;
-    let provider = FilesTaskBoard::open_read(dir.clone());
+    task_mark_done_modal_payload_in(&dir, repo_root, request.task_key, request.evidence)
+}
+
+fn task_mark_done_modal_payload_in(
+    dir: &camino::Utf8Path,
+    repo_root: &camino::Utf8Path,
+    task_key: String,
+    evidence: Vec<super::task_proposals::MergedRunEvidence>,
+) -> Result<TaskModalPayload, String> {
+    let provider = FilesTaskBoard::open_read(dir);
     let resolved = provider
-        .get(&request.task_key)
+        .get(&task_key)
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("{}: not resolvable at the last sync", request.task_key))?;
+        .ok_or_else(|| format!("{task_key}: not resolvable at the last sync"))?;
     let digest = resolved.digest.clone();
-    let evaluation = request.evidence.last().and_then(|latest| {
+    let evaluation = evidence.last().and_then(|latest| {
         super::task_proposals::evaluate_task_close(
             &resolved.document,
             &dashboard_config_root(),
@@ -6923,10 +6886,10 @@ fn task_mark_done_modal_payload(
     });
     if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) = &evaluation
     {
-        let latest = request.evidence.last();
+        let latest = evidence.last();
         super::task_proposals::write_task_close_core(
-            &FilesTaskBoard::open_read_write(dir),
-            &request.task_key,
+            &FilesTaskBoard::open_read_write(dir.to_owned()),
+            &task_key,
             digest,
             latest.map(|latest| super::task_proposals::TaskCloseOrigin {
                 run_id: &latest.run_id,
@@ -6936,21 +6899,19 @@ fn task_mark_done_modal_payload(
         )
         .map_err(|error| error.to_string())?;
         return Ok(TaskModalPayload::SelfClosed(format!(
-            "{} closed itself",
-            request.task_key
+            "{task_key} closed itself"
         )));
     }
     let mut body = String::new();
-    if request.evidence.is_empty() {
+    if evidence.is_empty() {
         body.push_str(&format!(
-            "no merge-time evidence on file for {} — mark done anyway?\n",
-            request.task_key
+            "no merge-time evidence on file for {task_key} — mark done anyway?\n"
         ));
     } else {
-        for item in &request.evidence {
+        for item in &evidence {
             body.push_str(&format!(
-                "run {} for {} merged as {} — mark done?\n",
-                item.run_id, request.task_key, item.sha
+                "run {} for {task_key} merged as {} — mark done?\n",
+                item.run_id, item.sha
             ));
         }
     }
@@ -6960,16 +6921,16 @@ fn task_mark_done_modal_payload(
     }
     match &evaluation {
         Some((closure, disposition)) => append_check_disposition(&mut body, closure, disposition),
-        None if request.evidence.is_empty() => {
+        None if evidence.is_empty() => {
             append_declared_checks_skipped_notice(&mut body, &resolved.document.checks)
         }
         None => append_declared_checks_notice(&mut body, &resolved.document.checks),
     }
     Ok(TaskModalPayload::Modal {
-        title: format!("mark {} done", request.task_key),
+        title: format!("mark {task_key} done"),
         body,
         digest,
-        evidence: request.evidence,
+        evidence,
         closure: evaluation.map(|(closure, _)| closure),
     })
 }
@@ -7106,100 +7067,6 @@ fn open_task_mark_done_modal(state: &mut State) {
     }
 }
 
-#[cfg(test)]
-fn open_task_mark_done_modal_in(
-    state: &mut State,
-    dir: &camino::Utf8Path,
-    repo_root: &camino::Utf8Path,
-) {
-    let Some(summary) = selected_task(state) else {
-        state.message = Some("no task selected".to_string());
-        return;
-    };
-    let key = summary.key.clone();
-    // 4086d63e (task 0149): no proposal gate — a task with no merge-time
-    // done-proposal still opens the confirm modal, with empty evidence.
-    let evidence = state
-        .task_proposals
-        .get(&key)
-        .map(|proposal| proposal.evidence.clone())
-        .unwrap_or_default();
-    let Some(document) = state
-        .tasks_board
-        .as_ref()
-        .and_then(|board| board.resolved.get(&key))
-        .map(|resolved| resolved.document.clone())
-    else {
-        state.message = Some(format!("{key}: not resolvable at the last sync"));
-        return;
-    };
-    let digest = match fetch_task_digest_in(dir, &key) {
-        Ok(digest) => digest,
-        Err(error) => {
-            state.message = Some(format!("mark done refused: {error}"));
-            return;
-        }
-    };
-    // 0144: evaluate once against the latest cited sha — self-close skips
-    // the modal entirely; a `Proposal` disposition strengthens it below.
-    let evaluation = evidence.last().and_then(|latest| {
-        super::task_proposals::evaluate_task_close(
-            &document,
-            &dashboard_config_root(),
-            repo_root,
-            &latest.sha,
-        )
-    });
-    if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) = &evaluation
-    {
-        let _ = write_task_close(
-            state,
-            dir,
-            &key,
-            digest,
-            &evidence,
-            Some(closure.clone()),
-            true,
-        );
-        return;
-    }
-    let mut body = String::new();
-    if evidence.is_empty() {
-        body.push_str(&format!(
-            "no merge-time evidence on file for {key} — mark done anyway?\n"
-        ));
-    } else {
-        for item in &evidence {
-            body.push_str(&format!(
-                "run {} for {key} merged as {} — mark done?\n",
-                item.run_id, item.sha
-            ));
-        }
-    }
-    if !document.validation.trim().is_empty() {
-        body.push_str("\ndone-when:\n");
-        body.push_str(document.validation.trim());
-    }
-    match &evaluation {
-        Some((closure, disposition)) => append_check_disposition(&mut body, closure, disposition),
-        // 4086d63e: with no merge-time evidence the declared checks cannot
-        // run at confirm — say so instead of promising they will.
-        None if evidence.is_empty() => {
-            append_declared_checks_skipped_notice(&mut body, &document.checks)
-        }
-        None => append_declared_checks_notice(&mut body, &document.checks),
-    }
-    state.modal_host.open(
-        Action::Task(TaskAction::MarkDone {
-            key: key.clone(),
-            digest,
-            evidence,
-            closure: evaluation.map(|(closure, _)| closure),
-        }),
-        Modal::confirm(format!("mark {key} done"), body),
-    );
-}
-
 /// 0144 trust surfacing: name the exact declared-check commands in the
 /// confirm modal body, before `Confirmed` ever runs them — the same posture
 /// as dispatching a trait per the task's own Watch. A task with no declared
@@ -7216,7 +7083,7 @@ fn append_declared_checks_notice(body: &mut String, checks: &[ctx_traits_core::t
 
 /// The no-evidence counterpart of [`append_declared_checks_notice`] — with
 /// no merge-time proposal there is no cited sha to check declared checks
-/// against, so `apply_task_mark_done_in` skips the 0144 closure branch
+/// against, so the mark-done mutation skips the 0144 closure branch
 /// entirely (mirrors the CLI's `tasks update`, which never runs checks
 /// either). The body must say so, never claim a gate the apply path skips.
 fn append_declared_checks_skipped_notice(
@@ -7519,30 +7386,44 @@ fn submit_task_creation(new_task: NewTask) -> Result<TaskSummary, String> {
 /// all renderer work is reduced to dispatching this request and applying its
 /// returned message.
 fn execute_task_mutation(mutation: worker::TaskMutation) -> worker::ActionResult {
+    if matches!(&mutation, worker::TaskMutation::Create { .. }) {
+        return execute_task_mutation_in(camino::Utf8Path::new("."), mutation);
+    }
+    match super::tasks::board_dir(None) {
+        Ok(dir) => execute_task_mutation_in(&dir, mutation),
+        Err(error) => worker::ActionResult {
+            message: error.to_string(),
+            session_id: None,
+            task_key: None,
+            refresh_board: false,
+        },
+    }
+}
+
+fn execute_task_mutation_in(
+    dir: &camino::Utf8Path,
+    mutation: worker::TaskMutation,
+) -> worker::ActionResult {
     let result: Result<String, String> = (|| match mutation {
         worker::TaskMutation::Archive {
             key,
             digest,
             status,
             release_dependents,
-        } => {
-            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
-            FilesTaskBoard::open_read_write(dir)
-                .update(
-                    &key,
-                    TaskUpdate {
-                        status: Some(status),
-                        expected_digest: Some(digest),
-                        release_dependents,
-                        ..Default::default()
-                    },
-                )
-                .map(|outcome| format!("archived {key}{}", effects_summary(&outcome.effects)))
-                .map_err(|error| format!("archive refused: {error}"))
-        }
+        } => FilesTaskBoard::open_read_write(dir.to_owned())
+            .update(
+                &key,
+                TaskUpdate {
+                    status: Some(status),
+                    expected_digest: Some(digest),
+                    release_dependents,
+                    ..Default::default()
+                },
+            )
+            .map(|outcome| format!("archived {key}{}", effects_summary(&outcome.effects)))
+            .map_err(|error| format!("archive refused: {error}")),
         worker::TaskMutation::Edit { key, update } => {
-            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
-            FilesTaskBoard::open_read_write(dir)
+            FilesTaskBoard::open_read_write(dir.to_owned())
                 .update(&key, update)
                 .map(|outcome| format!("edited {key}{}", effects_summary(&outcome.effects)))
                 .map_err(|error| format!("edit refused: {error}"))
@@ -7553,10 +7434,9 @@ fn execute_task_mutation(mutation: worker::TaskMutation) -> worker::ActionResult
             evidence,
             closure,
         } => {
-            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
             let latest = evidence.last();
             super::task_proposals::write_task_close_core(
-                &FilesTaskBoard::open_read_write(dir),
+                &FilesTaskBoard::open_read_write(dir.to_owned()),
                 &key,
                 digest,
                 latest.map(|item| super::task_proposals::TaskCloseOrigin {
@@ -7601,8 +7481,7 @@ fn execute_task_mutation(mutation: worker::TaskMutation) -> worker::ActionResult
             .map_err(|error| format!("mark done refused: {error}"))
         }
         worker::TaskMutation::RemoveDependsOn { from, to, digest } => {
-            let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
-            FilesTaskBoard::open_read_write(dir)
+            FilesTaskBoard::open_read_write(dir.to_owned())
                 .update(
                     &from,
                     TaskUpdate {
@@ -7808,89 +7687,6 @@ fn append_check_disposition(
 /// `closure` recording whatever check results are in hand, whether they all
 /// passed or not — the disposition decided only whether this keypress was
 /// needed, never whether it is honored.
-#[cfg(test)]
-fn apply_task_mark_done_in(
-    state: &mut State,
-    dir: &camino::Utf8Path,
-    key: String,
-    digest: String,
-    evidence: Vec<super::task_proposals::MergedRunEvidence>,
-    closure: Option<Closure>,
-) -> crate::Result<()> {
-    write_task_close(state, dir, &key, digest, &evidence, closure, false)
-}
-
-/// The single write both a self-close ([`open_task_mark_done_modal`],
-/// [`open_next_reconcile_step`], 0144's keypress-free lane) and a confirmed
-/// mark-done keypress ([`apply_task_mark_done_in`]) share: `status: done`,
-/// folding the newest evidence into `origin` when the document has none yet
-/// (0063.8), plus `closure` when 0144's policy resolved. `self_closed` only
-/// changes the reported message's verb.
-#[cfg(test)]
-fn write_task_close(
-    state: &mut State,
-    dir: &camino::Utf8Path,
-    key: &str,
-    digest: String,
-    evidence: &[super::task_proposals::MergedRunEvidence],
-    closure: Option<Closure>,
-    self_closed: bool,
-) -> crate::Result<()> {
-    let latest = evidence.last();
-    let provider = FilesTaskBoard::open_read_write(dir.to_owned());
-    let checks_summary = closure.as_ref().map(|closure| {
-        if closure.checks.is_empty() {
-            "unchecked".to_string()
-        } else {
-            let passed = closure
-                .checks
-                .iter()
-                .filter(|check| check.outcome == CheckOutcome::Passed)
-                .count();
-            format!("{passed}/{} checks passed", closure.checks.len())
-        }
-    });
-
-    match super::task_proposals::write_task_close_core(
-        &provider,
-        key,
-        digest,
-        latest.map(|latest| super::task_proposals::TaskCloseOrigin {
-            run_id: &latest.run_id,
-            sha: &latest.sha,
-        }),
-        closure,
-    ) {
-        Ok(outcome) => {
-            let verb = if self_closed {
-                "closed itself"
-            } else {
-                "marked done"
-            };
-            let checks_clause = checks_summary
-                .map(|summary| format!(" — {summary}"))
-                .unwrap_or_default();
-            state.message = Some(match latest {
-                Some(latest) => format!(
-                    "{key} {verb} — run {} merged as {}{checks_clause}{}",
-                    latest.run_id,
-                    latest.sha,
-                    effects_summary(&outcome.effects)
-                ),
-                None => format!(
-                    "{key} {verb} — no merge evidence on file{checks_clause}{}",
-                    effects_summary(&outcome.effects)
-                ),
-            });
-            resync_tasks_board_after_write_in(state, dir);
-        }
-        Err(error) => {
-            state.message = Some(format!("mark done refused: {error}"));
-        }
-    }
-    Ok(())
-}
-
 /// Fold recorded effects (0063.6) into the trailing clause of a dashboard
 /// status message — "" when nothing beyond the field write happened, else
 /// "; moved to archived/; released 0071, 0072; 0074 failed: <reason>".
@@ -15496,6 +15292,23 @@ argv = ["git", "commit", "-m", "fixture"]
     // clobbered by the resync that follows it.
     // -----------------------------------------------------------------
 
+    fn apply_task_mutation_result(
+        state: &mut State,
+        dir: &camino::Utf8Path,
+        mutation: worker::TaskMutation,
+    ) {
+        state.worker = Some(worker::Handle::for_tests());
+        let sender = state
+            .worker
+            .as_ref()
+            .expect("test worker")
+            .test_action_sender();
+        sender
+            .send(execute_task_mutation_in(dir, mutation))
+            .expect("test action result sends");
+        apply_action_results(state);
+    }
+
     #[test]
     fn mark_done_reports_the_confirmation_and_applies_status_and_archive() {
         let dir = tasks_board_tempdir();
@@ -15506,18 +15319,19 @@ argv = ["git", "commit", "-m", "fixture"]
         let provider = FilesTaskBoard::open_read_write(dir.clone());
         let digest = provider.get("0001").unwrap().expect("task resolves").digest;
 
-        apply_task_mark_done_in(
+        apply_task_mutation_result(
             &mut state,
             &dir,
-            "0001".to_string(),
-            digest,
-            vec![super::super::task_proposals::MergedRunEvidence {
-                run_id: "run-1".to_string(),
-                sha: "deadbeef".to_string(),
-            }],
-            None,
-        )
-        .unwrap();
+            worker::TaskMutation::MarkDone {
+                key: "0001".to_string(),
+                digest,
+                evidence: vec![super::super::task_proposals::MergedRunEvidence {
+                    run_id: "run-1".to_string(),
+                    sha: "deadbeef".to_string(),
+                }],
+                closure: None,
+            },
+        );
 
         // The write's own confirmation must survive the resync that follows
         // it — not be overwritten with "synced" (the bug this test guards).
@@ -15537,6 +15351,39 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
+    fn silent_board_resync_preserves_a_task_mutation_confirmation() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        seed_tasks_board(&mut state, &dir);
+        let digest = FilesTaskBoard::open_read(dir.clone())
+            .get("0001")
+            .unwrap()
+            .expect("task resolves")
+            .digest;
+
+        apply_task_mutation_result(
+            &mut state,
+            &dir,
+            worker::TaskMutation::MarkDone {
+                key: "0001".to_string(),
+                digest,
+                evidence: Vec::new(),
+                closure: None,
+            },
+        );
+        let confirmation = state.message.clone().expect("write confirmation");
+
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: state.tasks_refresh_generation,
+            report_sync: false,
+            result: Ok(Some(read_board_snapshot(&dir).expect("replacement board"))),
+        }]);
+
+        assert_eq!(state.message.as_deref(), Some(confirmation.as_str()));
+    }
+
+    #[test]
     fn mark_done_with_no_evidence_still_applies_status_and_archive() {
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
@@ -15550,15 +15397,16 @@ argv = ["git", "commit", "-m", "fixture"]
         // no live merged run for it. `y` must still be able to mark it
         // done, matching what the CLI's `tasks update --status done`
         // already does end to end (0149).
-        apply_task_mark_done_in(
+        apply_task_mutation_result(
             &mut state,
             &dir,
-            "0001".to_string(),
-            digest,
-            Vec::new(),
-            None,
-        )
-        .unwrap();
+            worker::TaskMutation::MarkDone {
+                key: "0001".to_string(),
+                digest,
+                evidence: Vec::new(),
+                closure: None,
+            },
+        );
 
         let message = state.message.as_deref().unwrap_or("");
         assert!(
@@ -15738,18 +15586,19 @@ argv = ["git", "commit", "-m", "fixture"]
         let mut state = state_with_scratch_cache();
         seed_tasks_board(&mut state, &dir);
 
-        apply_task_mark_done_in(
+        apply_task_mutation_result(
             &mut state,
             &dir,
-            "0001".to_string(),
-            "sha256:stale-digest-that-never-matches".to_string(),
-            vec![super::super::task_proposals::MergedRunEvidence {
-                run_id: "run-1".to_string(),
-                sha: "deadbeef".to_string(),
-            }],
-            None,
-        )
-        .unwrap();
+            worker::TaskMutation::MarkDone {
+                key: "0001".to_string(),
+                digest: "sha256:stale-digest-that-never-matches".to_string(),
+                evidence: vec![super::super::task_proposals::MergedRunEvidence {
+                    run_id: "run-1".to_string(),
+                    sha: "deadbeef".to_string(),
+                }],
+                closure: None,
+            },
+        );
 
         let message = state.message.as_deref().unwrap_or("");
         assert!(
@@ -15836,7 +15685,7 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
-    fn open_task_mark_done_modal_in_self_closes_under_checked_policy_when_all_checks_pass() {
+    fn mark_done_payload_self_closes_under_checked_policy_when_all_checks_pass() {
         let board_dir = tasks_board_tempdir();
         let (repo_root, sha) = scratch_git_repo();
         write_task_toml_with_checks(
@@ -15851,7 +15700,17 @@ argv = ["git", "commit", "-m", "fixture"]
         select_task_row(&mut state, "0001");
         insert_proposal(&mut state, "0001", &sha);
 
-        open_task_mark_done_modal_in(&mut state, &board_dir, &repo_root);
+        let payload = task_mark_done_modal_payload_in(
+            &board_dir,
+            &repo_root,
+            "0001".to_string(),
+            state.task_proposals["0001"].evidence.clone(),
+        )
+        .expect("worker modal payload");
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::MarkDone {
+            task_key: "0001".to_string(),
+            result: Ok(payload),
+        }]);
 
         assert!(
             !state.modal_host.is_open(),
@@ -15876,8 +15735,8 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
-    fn open_task_mark_done_modal_in_downgrades_to_a_modal_naming_the_failing_check_and_a_confirm_still_closes()
-     {
+    fn mark_done_payload_downgrades_to_a_modal_naming_the_failing_check_and_a_confirm_still_closes()
+    {
         let board_dir = tasks_board_tempdir();
         let (repo_root, sha) = scratch_git_repo();
         write_task_toml_with_checks(
@@ -15892,7 +15751,17 @@ argv = ["git", "commit", "-m", "fixture"]
         select_task_row(&mut state, "0001");
         insert_proposal(&mut state, "0001", &sha);
 
-        open_task_mark_done_modal_in(&mut state, &board_dir, &repo_root);
+        let payload = task_mark_done_modal_payload_in(
+            &board_dir,
+            &repo_root,
+            "0001".to_string(),
+            state.task_proposals["0001"].evidence.clone(),
+        )
+        .expect("worker modal payload");
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::MarkDone {
+            task_key: "0001".to_string(),
+            result: Ok(payload),
+        }]);
 
         assert!(
             state.modal_host.is_open(),
@@ -15908,9 +15777,6 @@ argv = ["git", "commit", "-m", "fixture"]
 
         // G1: the confirm keypress is the human authority — it must still
         // close, recording the failing check, never refuse the write.
-        // `apply_task_mark_done_in` (not `apply_task_action`, which resolves
-        // the board dir via the real repository root) is the testable
-        // counterpart, same precedent as every other write test here.
         let (tag, outcome) = state
             .modal_host
             .handle_key(&crossterm::event::KeyEvent::new(
@@ -15928,7 +15794,16 @@ argv = ["git", "commit", "-m", "fixture"]
         else {
             panic!("expected a mark-done task action")
         };
-        apply_task_mark_done_in(&mut state, &board_dir, key, digest, evidence, closure).unwrap();
+        apply_task_mutation_result(
+            &mut state,
+            &board_dir,
+            worker::TaskMutation::MarkDone {
+                key,
+                digest,
+                evidence,
+                closure,
+            },
+        );
 
         let provider = FilesTaskBoard::open_read(board_dir);
         let resolved = provider.get("0001").unwrap().expect("task still resolves");
@@ -15941,7 +15816,7 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
-    fn open_task_mark_done_modal_in_self_closes_under_merge_policy_recording_unchecked() {
+    fn mark_done_payload_self_closes_under_merge_policy_recording_unchecked() {
         let board_dir = tasks_board_tempdir();
         let (repo_root, sha) = scratch_git_repo();
         write_task_toml_with_checks(&board_dir, "0001-first.toml", "0001", "merge", "");
@@ -15950,7 +15825,17 @@ argv = ["git", "commit", "-m", "fixture"]
         select_task_row(&mut state, "0001");
         insert_proposal(&mut state, "0001", &sha);
 
-        open_task_mark_done_modal_in(&mut state, &board_dir, &repo_root);
+        let payload = task_mark_done_modal_payload_in(
+            &board_dir,
+            &repo_root,
+            "0001".to_string(),
+            state.task_proposals["0001"].evidence.clone(),
+        )
+        .expect("worker modal payload");
+        state.apply_task_action_open_results([worker::TaskActionOpenResult::MarkDone {
+            task_key: "0001".to_string(),
+            result: Ok(payload),
+        }]);
 
         assert!(
             !state.modal_host.is_open(),
