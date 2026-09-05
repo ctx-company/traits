@@ -282,6 +282,21 @@ struct PumpControl {
     owner_thread: Mutex<Option<std::thread::ThreadId>>,
 }
 
+/// RAII handle from [`RatatuiPane::pause_input`]: the pane's input pump stays
+/// parked until this drops, which restores the switch to its prior state.
+/// Holds only the pump's `Arc`, never the pane, so a caller can keep it
+/// across a blocking wait without holding any pane lock.
+pub(crate) struct InputPause {
+    pump: Arc<PumpControl>,
+    was_paused: bool,
+}
+
+impl Drop for InputPause {
+    fn drop(&mut self) {
+        self.pump.paused.store(self.was_paused, Ordering::SeqCst);
+    }
+}
+
 /// Process-global registry of every pump ever spawned, `Weak` so a torn-down
 /// pane's `PumpControl` is freed normally once nothing else holds it. Paired
 /// with [`PUMP_CONDVAR`] and a dummy [`PUMP_WAIT_LOCK`] so
@@ -823,6 +838,30 @@ impl RatatuiPane {
         self.detached || TORN_DOWN_GENERATION.load(Ordering::SeqCst) == self.generation
     }
 
+    /// 0281.4: park the input pump for as long as the returned guard lives —
+    /// the same switch [`Self::suspend`] throws around `$EDITOR`, without
+    /// leaving raw/alternate-screen mode. While a command frame's child (an
+    /// annotate gate) shares the tty, a reading pump would steal its
+    /// keystrokes, and under P551 a ctrl-c it happened to read is an instant
+    /// `SIGKILL` of that child. Paused, every key reaches the child and
+    /// ctrl-c means whatever the child makes of it. The guard restores the
+    /// switch to what it was, so a pause nested inside another never
+    /// un-parks the outer one early.
+    pub(crate) fn pause_input(&self) -> InputPause {
+        let was_paused = self.pump.paused.swap(true, Ordering::SeqCst);
+        InputPause {
+            pump: Arc::clone(&self.pump),
+            was_paused,
+        }
+    }
+
+    /// Whether the input pump is currently parked (by [`Self::pause_input`]
+    /// or [`Self::suspend`]) — the observable the pause proofs assert on.
+    #[cfg(test)]
+    pub(crate) fn input_paused(&self) -> bool {
+        self.pump.paused.load(Ordering::SeqCst)
+    }
+
     /// Generation eligible for a signal-safe rescue panel. Ownership is by
     /// generation equality, not screen mode.
     pub(crate) fn rescue_generation(&self) -> Option<u64> {
@@ -1308,6 +1347,29 @@ fn style_for(tone: Tone) -> Style {
         Tone::Fail => Style::default().fg(Color::Red),
         Tone::Warn => Style::default().fg(Color::Yellow),
         Tone::Bold => Style::default().add_modifier(Modifier::BOLD),
+    }
+}
+
+#[cfg(test)]
+mod input_pause_tests {
+    use super::RatatuiPane;
+
+    #[test]
+    fn pause_input_parks_the_pump_until_the_guard_drops() {
+        let pane = RatatuiPane::new_detached_for_test();
+        assert!(!pane.input_paused());
+        let outer = pane.pause_input();
+        assert!(pane.input_paused());
+        {
+            // A nested pause restores only its own prior state (paused), so
+            // the outer pause survives it.
+            let inner = pane.pause_input();
+            assert!(pane.input_paused());
+            drop(inner);
+            assert!(pane.input_paused());
+        }
+        drop(outer);
+        assert!(!pane.input_paused());
     }
 }
 
