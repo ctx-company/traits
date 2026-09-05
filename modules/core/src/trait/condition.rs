@@ -538,6 +538,19 @@ pub struct ConditionEvaluation {
     pub outcome: Option<GuardOutcome>,
     pub matched: bool,
     pub reason: String,
+    /// The runtime position the guard was evaluated at — every enclosing
+    /// control segment with its iteration (0281.7). `scope` names only the
+    /// innermost loop, which repeats its ids and iterations every time an
+    /// enclosing loop re-activates it, so ledger replay cannot tell a slot
+    /// written in an earlier activation of the same inner loop from one
+    /// written in this activation; the full path can. Empty on ledgers
+    /// written before the field existed.
+    #[serde(
+        default,
+        rename = "position-path",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub position_path: Vec<crate::procedure::runtime::PathSegment>,
 }
 
 /// The authored LHS form of a ref-backed comparison.

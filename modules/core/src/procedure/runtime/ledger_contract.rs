@@ -3197,6 +3197,7 @@ mod present_replay_boundary_tests {
             outcome: Some(GuardOutcome::Unmeasurable),
             matched: false,
             reason: "container was not supplied; field presence is unmeasurable".to_string(),
+            position_path: Vec::new(),
         }
     }
 
@@ -3642,19 +3643,140 @@ fn validate_comparison_freshness(
     let revision = recorded_slot_revisions(ledger)
         .into_iter()
         .find(|revision| revision.acceptance_order == order);
-    let replayed_stale = match (revision, boundary, evaluation.scope.as_ref()) {
-        (Some(revision), Some((decision_path, _)), _) => {
-            slot_revision_stale_at_path(revision, decision_path)
-        }
-        (Some(revision), None, Some(scope)) => {
-            revision.loop_id.as_deref() == Some(scope.loop_id.as_str())
-                && revision.iteration_index != Some(scope.iteration_index)
-        }
-        _ => false,
-    };
+    let replayed_stale = revision.is_some_and(|revision| {
+        replayed_comparison_stale(
+            revision,
+            boundary.map(|(decision_path, _)| decision_path),
+            evaluation.scope.as_ref(),
+            &evaluation.position_path,
+        )
+    });
     if replayed_stale != evidence.stale {
         diagnostics.push(format!(
             "guard-evaluations[{index}] comparison stale state does not match its exact slot revision"
+        ));
+    }
+}
+
+/// Recompute, from the ledger alone, whether the slot revision a comparison
+/// read was stale for the guard that read it — the same rule
+/// `stale_repeated_slot` applied live: a revision written by an earlier
+/// activation of any repeated control the guard sits in. The exact
+/// activation is known from a branch decision's own path (`boundary`) or,
+/// for a loop's `until`, from the evaluation's recorded position path
+/// (0281.7). Only a ledger written before evaluations carried their path
+/// falls back to the innermost loop's id and iteration, which cannot see an
+/// enclosing loop re-activating the inner one.
+fn replayed_comparison_stale(
+    revision: &SlotRevision,
+    boundary: Option<&[PathSegment]>,
+    scope: Option<&crate::r#trait::condition::ConditionEvaluationScope>,
+    position_path: &[PathSegment],
+) -> bool {
+    if let Some(decision_path) = boundary {
+        return slot_revision_stale_at_path(revision, decision_path);
+    }
+    if !position_path.is_empty() {
+        return slot_revision_stale_at_path(revision, position_path);
+    }
+    scope.is_some_and(|scope| {
+        revision.loop_id.as_deref() == Some(scope.loop_id.as_str())
+            && revision.iteration_index != Some(scope.iteration_index)
+    })
+}
+
+#[cfg(test)]
+mod replayed_stale_tests {
+    use super::*;
+
+    fn segment(kind: &str, id: &str, index: usize, iteration: Option<usize>) -> PathSegment {
+        PathSegment {
+            kind: kind.to_string(),
+            id: Some(id.to_string()),
+            index,
+            iteration,
+            item_index: None,
+        }
+    }
+
+    /// A stage loop re-activating a work loop: the inner loop's id and
+    /// iteration repeat every time the outer loop comes round.
+    fn nested_path(outer: usize, inner: usize, leaf: &str) -> Vec<PathSegment> {
+        vec![
+            segment("procedure", "work-remains", 7, None),
+            segment("branch", "work-remains-then", 0, None),
+            segment("loop", "stage-loop-body", 3, Some(outer)),
+            segment("loop", "work-the-stage-body", 0, Some(inner)),
+            segment("item", leaf, 1, Some(inner)),
+        ]
+    }
+
+    fn revision_at(path: Vec<PathSegment>) -> SlotRevision {
+        let value = serde_json::json!("pass");
+        SlotRevision {
+            slot_ref: Reference::parse("slot:proof-result").expect("valid ref"),
+            value_digest: crate::digest::canonical_digest(&value).expect("digest"),
+            acceptance_order: 15,
+            operation: Some(WriteOperation::Replace),
+            submitted_payload: Some(RevisionValue { value }),
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: None,
+            runtime_binding: false,
+            projection: None,
+            position_path: path,
+            loop_id: Some("work-the-stage".to_string()),
+            iteration_index: Some(0),
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    fn inner_scope() -> crate::r#trait::condition::ConditionEvaluationScope {
+        crate::r#trait::condition::ConditionEvaluationScope {
+            loop_id: "work-the-stage".to_string(),
+            sequence_id: Some("work-the-stage-body".to_string()),
+            iteration_index: 0,
+            max_iterations: None,
+        }
+    }
+
+    /// The 0278.1 / 0011.5 stop of 2026-09-05 11:50: the proof result
+    /// written in the work loop's first activation, read by the work loop's
+    /// exit guard in its second activation (same inner iteration 0, outer
+    /// iteration 1). The live evaluator called it stale; replay must agree.
+    #[test]
+    fn a_reactivated_inner_loop_sees_its_earlier_activation_as_stale() {
+        let revision = revision_at(nested_path(0, 0, "prove-the-claim"));
+        let scope = inner_scope();
+        assert!(replayed_comparison_stale(
+            &revision,
+            None,
+            Some(&scope),
+            &nested_path(1, 0, "implement-the-stage"),
+        ));
+        // The innermost-scope fallback (a ledger with no evaluation path)
+        // cannot see the outer loop move and reads the value as fresh —
+        // exactly the disagreement the recorded path removes.
+        assert!(!replayed_comparison_stale(&revision, None, Some(&scope), &[]));
+    }
+
+    #[test]
+    fn the_same_activation_reads_fresh_and_a_decision_path_wins() {
+        let revision = revision_at(nested_path(0, 0, "prove-the-claim"));
+        let scope = inner_scope();
+        assert!(!replayed_comparison_stale(
+            &revision,
+            None,
+            Some(&scope),
+            &nested_path(0, 0, "implement-the-stage"),
+        ));
+        assert!(replayed_comparison_stale(
+            &revision,
+            Some(&nested_path(1, 0, "claimed")),
+            Some(&scope),
+            &nested_path(0, 0, "implement-the-stage"),
         ));
     }
 }

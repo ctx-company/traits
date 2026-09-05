@@ -235,7 +235,7 @@ fn evaluate_guard_expr(
         repeated_scope: &repeated_scope,
         current_outputs,
     };
-    let (outcome, evaluations) = evaluate_guard_expr_with_seen(
+    let (outcome, mut evaluations) = evaluate_guard_expr_with_seen(
         trait_ref,
         state,
         guard,
@@ -244,6 +244,15 @@ fn evaluate_guard_expr(
         0,
         &mut BTreeSet::new(),
     )?;
+    // Every leaf and combinator of this guard was evaluated at the same
+    // runtime position; stamp it once here so ledger replay can rebuild the
+    // exact activation scope (all enclosing loops, not just the innermost)
+    // that the staleness rule above was applied under.
+    for evaluation in &mut evaluations {
+        if evaluation.position_path.is_empty() {
+            evaluation.position_path = position_path.to_vec();
+        }
+    }
     Ok((outcome.routes_true(), evaluations))
 }
 
@@ -1053,6 +1062,9 @@ fn condition_evaluation_outcome(
         outcome: matches!(outcome, GuardOutcome::Unmeasurable).then_some(outcome),
         matched: outcome.routes_true(),
         reason: reason.to_string(),
+        // Stamped by `evaluate_guard_expr`, the one place that knows the
+        // runtime position the whole guard was evaluated at.
+        position_path: Vec::new(),
     }
 }
 
