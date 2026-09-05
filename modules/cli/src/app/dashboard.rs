@@ -9017,6 +9017,74 @@ mod tests {
     }
 
     #[test]
+    fn live_snapshot_supersedes_sessions_cache_seed() {
+        let cache_root = sessions_cache_tempdir();
+        let repo_key = ctx_traits_io::state::current_repo_key().expect("repository key");
+        let cached_session = row_with_id("cached-selected", SessionClass::Live);
+        let cached_only = row_with_id("cached-only", SessionClass::Resumable);
+        let record = sessions_cache::SessionsSnapshotRecord::new(
+            1_000,
+            repo_key,
+            false,
+            vec![cached_session.clone(), cached_only],
+            vec![
+                merges_test_row("cached-selected", MergeClass::Mergeable),
+                merges_test_row("cached-only", MergeClass::Mergeable),
+            ],
+        );
+        sessions_cache::write_snapshot(&cache_root, &record).expect("write warm cache");
+
+        let mut state = State::new_without_worker();
+        state.sessions_cache_root = Some(cache_root);
+        seed_sessions_from_cache(&mut state);
+        state.loading = true;
+        let selected = state
+            .sessions_visible
+            .iter()
+            .position(|row| matches!(row, VisibleRow::Session(index) if state.sessions[*index].session_id == cached_session.session_id))
+            .expect("cached session is visible");
+        state.list_sessions.set_selected(selected);
+
+        assert!(!state.sessions.is_empty());
+        assert!(!state.merges.is_empty());
+        assert!(format!("{:?}", footer_line(&state)).contains("syncing..."));
+
+        let mut live_state = State::new_without_worker();
+        live_state.sessions = vec![
+            cached_session.clone(),
+            row_with_id("live-new", SessionClass::Live),
+        ];
+        live_state.merges = vec![
+            merges_test_row("cached-selected", MergeClass::Mergeable),
+            merges_test_row("live-new", MergeClass::Mergeable),
+        ];
+        state.apply_snapshot(&DashboardSnapshot::from_state(&live_state));
+
+        assert!(!state.sessions.is_empty());
+        assert!(!state.merges.is_empty());
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("cached-selected")
+        );
+        assert!(state.has_snapshot);
+        let footer = format!("{:?}", footer_line(&state));
+        assert!(!footer.contains("syncing..."));
+        assert!(!footer.contains("loading..."));
+        assert!(
+            state
+                .sessions
+                .iter()
+                .all(|row| row.session_id != "cached-only")
+        );
+        assert!(
+            state
+                .merges
+                .iter()
+                .all(|row| row.session_id != "cached-only")
+        );
+    }
+
+    #[test]
     fn first_snapshot_dispatches_its_selected_preview() {
         let mut state = State::new_without_worker();
         state.worker = Some(worker::Handle::for_tests());
