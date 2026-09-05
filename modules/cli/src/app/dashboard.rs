@@ -2126,9 +2126,11 @@ impl State {
                             .as_ref()
                             .is_some_and(|request| request.ledger_path.as_str() == changed)
                     });
-            if current_preview != previous_preview || changed_selection {
+            if current_preview != previous_preview {
                 self.session_preview = None;
                 self.set_session_follow_all(false);
+                self.dispatch_session_preview();
+            } else if changed_selection {
                 self.dispatch_session_preview();
             }
             if current_preview.is_none() {
@@ -9555,17 +9557,97 @@ mod tests {
     #[test]
     fn selected_center_event_refreshes_the_retained_preview() {
         let mut state = State::new_without_worker();
+        state.worker = Some(worker::Handle::for_tests());
         state.sessions = vec![row_with_id("selected", SessionClass::Live)];
         rebuild_visible_sessions(&mut state);
         state.list_sessions.set_selected(1);
         state.session_preview = Some(attached_view_for("selected"));
+        state.session_progress_follow = true;
+        state.session_journey_follow = true;
+        state.session_history_follow = true;
+        state.session_current_follow = true;
         let mut snapshot =
             snapshot_with_sessions(vec![row_with_id("selected", SessionClass::Live)]);
         snapshot.changed_ledger_path = Some("/tmp/selected.json".to_string());
 
         state.apply_snapshot(&snapshot);
 
+        assert_eq!(
+            state
+                .session_preview
+                .as_ref()
+                .map(|view| view.progress_lines.clone()),
+            Some(vec![labeled_dim_line("stub")])
+        );
+        assert!(state.preview_pending);
+        assert!(state.session_progress_follow);
+        assert!(state.session_journey_follow);
+        assert!(state.session_history_follow);
+        assert!(state.session_current_follow);
+
+        let mut replacement = attached_view_for("selected");
+        replacement.progress_lines = vec![labeled_dim_line("replacement")];
+        state.apply_preview_results([replacement]);
+
+        assert_eq!(
+            state
+                .session_preview
+                .as_ref()
+                .map(|view| view.progress_lines.clone()),
+            Some(vec![labeled_dim_line("replacement")])
+        );
+        assert!(!state.preview_pending);
+    }
+
+    #[test]
+    fn changed_preview_identity_clears_content_and_resets_follow_state() {
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker::Handle::for_tests());
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.session_preview = Some(attached_view_for("selected"));
+        state.set_session_follow_all(true);
+        let mut updated = row_with_id("selected", SessionClass::Live);
+        updated.ledger_path = camino::Utf8PathBuf::from("/tmp/replaced.json");
+
+        state.apply_snapshot(&snapshot_with_sessions(vec![updated]));
+
         assert!(state.session_preview.is_none());
+        assert!(state.preview_pending);
+        assert!(!state.session_progress_follow);
+        assert!(!state.session_journey_follow);
+        assert!(!state.session_history_follow);
+        assert!(!state.session_current_follow);
+    }
+
+    #[test]
+    fn selected_center_events_keep_preview_panes_populated_until_replacement() {
+        let mut state = State::new_without_worker();
+        state.worker = Some(worker::Handle::for_tests());
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.session_preview = Some(attached_view_for("selected"));
+
+        for round in 0..3 {
+            let mut snapshot =
+                snapshot_with_sessions(vec![row_with_id("selected", SessionClass::Live)]);
+            snapshot.changed_ledger_path = Some("/tmp/selected.json".to_string());
+
+            state.apply_snapshot(&snapshot);
+            assert!(state.preview_pending);
+            let (progress_lines, journey_lines) = sessions_preview_pane_lines(&state);
+            assert!(!progress_lines.is_empty());
+            assert!(!journey_lines.is_empty());
+
+            let mut replacement = attached_view_for("selected");
+            replacement.progress_lines = vec![labeled_dim_line(&format!("replacement {round}"))];
+            state.apply_preview_results([replacement]);
+            let (progress_lines, journey_lines) = sessions_preview_pane_lines(&state);
+            assert!(!progress_lines.is_empty());
+            assert!(!journey_lines.is_empty());
+        }
     }
 
     #[test]
