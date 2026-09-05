@@ -9252,6 +9252,14 @@ mod tests {
         );
         assert!(!state.story_view_pending.contains("selected"));
 
+        state.story_view_pending.insert("selected".to_string());
+        state.apply_story_view_results([worker::StoryViewResult {
+            session_id: "selected".to_string(),
+            result: Err("ledger unavailable".to_string()),
+        }]);
+        assert_eq!(state.message.as_deref(), Some("story: ledger unavailable"));
+        assert!(!state.story_view_pending.contains("selected"));
+
         state.answer_question_pending.insert("selected".to_string());
         state.apply_answer_question_results([worker::AnswerQuestionResult {
             session_id: "selected".to_string(),
