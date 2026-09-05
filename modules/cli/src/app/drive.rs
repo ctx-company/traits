@@ -1635,6 +1635,27 @@ fn drive_report_exit_code(status: &str) -> u8 {
 }
 
 #[cfg(test)]
+mod input_pause_tests {
+    use super::with_input_paused;
+
+    /// 0281.4 proof: a pane-live command frame runs with the pane's input
+    /// pump parked, and the pump is live again the moment the frame returns.
+    #[test]
+    fn a_pane_live_command_frame_runs_with_the_input_pump_paused() {
+        let panel = crate::app::run_view::tests::detached_panel_for_test();
+        assert!(!panel.input_paused());
+        let paused_during_frame = with_input_paused(Some(&panel), || panel.input_paused());
+        assert!(paused_during_frame);
+        assert!(!panel.input_paused());
+    }
+
+    #[test]
+    fn without_a_pane_the_frame_simply_runs() {
+        assert_eq!(with_input_paused(None, || 7), 7);
+    }
+}
+
+#[cfg(test)]
 mod disk_full_tests {
     use super::drive_report_exit_code;
 
@@ -2413,8 +2434,14 @@ fn drive_loop(
             refresh_run_panel(&mut run_panel.0, &mut input, &outcome.session);
             command_started_event(&outcome.session, run_panel.0.is_some());
             let revisions_before = outcome.session.slot_revisions.len();
-            outcome = match ctx_traits_io::run::advance_commands(
-                ctx_traits_io::run::AdvanceCommandsRequest {
+            // 0281.4: the command child owns the terminal's keys for as long
+            // as it runs — the pane's input pump is parked (the `$EDITOR`
+            // switch), so an interactive gate reads every keystroke itself
+            // and a ctrl-c typed into it is the child's own cancel, never
+            // P551's instant kill of the child. Harness frames keep the
+            // live pump and the instant-kill rule.
+            let advanced = with_input_paused(run_panel.0.as_ref(), || {
+                ctx_traits_io::run::advance_commands(ctx_traits_io::run::AdvanceCommandsRequest {
                     trait_file: input.file,
                     trait_id: None,
                     session: input.session,
@@ -2423,8 +2450,9 @@ fn drive_loop(
                     execution_env: &worktree_env,
                     elapsed_seconds: current_elapsed_seconds(),
                     tick_observer: run_panel.0.as_ref().map(run_view::RunPanel::tick_observer),
-                },
-            ) {
+                })
+            });
+            outcome = match advanced {
                 Ok(outcome) => outcome,
                 Err(ctx_traits_io::Error::DiskFull { disk_full }) => {
                     park_for_disk_full_evidence(&mut report, disk_full, &outcome.session.status);
@@ -2440,14 +2468,26 @@ fn drive_loop(
                     argv,
                     signal,
                 }) => {
-                    report.status = cooperative_stop_status().to_string();
+                    // 0281.4: a kill request that landed on the child (a
+                    // control-socket kill, a pump ctrl-c on a pane that was
+                    // not parked) is the same interruption — nothing
+                    // submitted, the frame pending — and the drive reports
+                    // it as the kill it was, exactly like a killed harness
+                    // frame.
+                    let killed = ctx_traits_io::run_kill::was_killed();
+                    report.status = if killed {
+                        "killed".to_string()
+                    } else {
+                        cooperative_stop_status().to_string()
+                    };
                     report.events.push(DriveEvent {
                         event: "command-interrupted".to_string(),
                         role: None,
                         harness: Some("command".to_string()),
                         detail: format!(
-                            "{} ended by the operator's stop (signal {}); argv {}; the frame stays pending and resume re-runs it",
+                            "{} ended by the operator's {} (signal {}); argv {}; the frame stays pending and resume re-runs it",
                             item_id.as_deref().unwrap_or("-"),
+                            if killed { "kill" } else { "stop" },
                             signal.map_or_else(|| "-".to_string(), |signal| signal.to_string()),
                             argv.join(" "),
                         ),
@@ -10463,6 +10503,17 @@ fn record_out_of_tree_mutation(
 /// on the command frame (retryable by a later drive) with all prior
 /// acceptances persisted, so the drive ends with the real cause instead of a
 /// bubbled process error that skips outcome recording.
+/// 0281.4: run `body` (a blocking command frame) with the live run pane's
+/// input pump parked, so the command's child owns every keystroke on the
+/// shared terminal for the duration. Without a pane there is nothing to
+/// park. The pump resumes the instant `body` returns — on every path,
+/// including a panic unwinding through it — so the very next harness frame
+/// gets the live pump and P551's instant-kill rule back unchanged.
+fn with_input_paused<R>(run_panel: Option<&run_view::RunPanel>, body: impl FnOnce() -> R) -> R {
+    let _input_pause = run_panel.and_then(run_view::RunPanel::pause_input);
+    body()
+}
+
 /// Announce a command frame before its blocking execution: the TUI panel
 /// already renders the running step, so print a status line only when no
 /// panel exists (status/stream modes) — interactive commands can hold the

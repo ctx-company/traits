@@ -1073,6 +1073,26 @@ impl RunPanel {
         let panel = self.clone();
         std::sync::Arc::new(move || panel.tick())
     }
+
+    /// 0281.4: park the pane's input pump for the life of the returned guard
+    /// — around a command frame whose child shares the terminal (an annotate
+    /// gate), so its keys are never read by this pane and a ctrl-c typed
+    /// into it is never P551's instant kill. Only the pump's handle is kept:
+    /// the panel lock is released before the caller blocks. `None` when the
+    /// panel state is poisoned, in which case there is nothing to pause.
+    pub(crate) fn pause_input(&self) -> Option<super::tui_ratatui::InputPause> {
+        let _handoff = self.handoff_driver();
+        let state = self.state.lock().ok()?;
+        Some(state.repaint.pause_input())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn input_paused(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.repaint.input_paused())
+            .unwrap_or(false)
+    }
 }
 
 fn resolved_title(
