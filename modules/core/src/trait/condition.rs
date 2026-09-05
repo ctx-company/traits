@@ -100,6 +100,19 @@ pub struct GuardPredicate {
         skip_serializing_if = "Option::is_none"
     )]
     pub elapsed_seconds_at_least: Option<Value>,
+    /// Active-drive elapsed seconds since the innermost enclosing loop's
+    /// first iteration began (runtime-supplied evidence) at least this
+    /// threshold — the per-loop counterpart of `elapsed-seconds-at-least`,
+    /// so a loop can bound its own effort in time ("work until the claim
+    /// holds OR this loop has spent its budget") without counting
+    /// iterations. Same threshold forms as `elapsed-seconds-at-least`; valid
+    /// only inside loop guards.
+    #[serde(
+        default,
+        rename = "loop-elapsed-seconds-at-least",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub loop_elapsed_seconds_at_least: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not: Option<Box<GuardExpr>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,6 +196,9 @@ impl GuardPredicate {
         }
         if let Some(threshold) = self.elapsed_seconds_at_least.as_ref() {
             return format!("elapsed-seconds >= {threshold}");
+        }
+        if let Some(threshold) = self.loop_elapsed_seconds_at_least.as_ref() {
+            return format!("loop-elapsed-seconds >= {threshold}");
         }
         let subject = if let Some(count) = self.count.as_deref() {
             match (self.field.as_deref(), self.field_equals.as_ref()) {
@@ -314,6 +330,12 @@ pub struct Condition {
         skip_serializing_if = "Option::is_none"
     )]
     pub elapsed_seconds_at_least: Option<Value>,
+    #[serde(
+        default,
+        rename = "loop-elapsed-seconds-at-least",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub loop_elapsed_seconds_at_least: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not: Option<Box<GuardExpr>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -352,6 +374,7 @@ impl Condition {
             iteration: self.iteration,
             iteration_at_least: self.iteration_at_least,
             elapsed_seconds_at_least: self.elapsed_seconds_at_least.clone(),
+            loop_elapsed_seconds_at_least: self.loop_elapsed_seconds_at_least.clone(),
             not: self.not.clone(),
             empty: self.empty.clone(),
             present: self.present.clone(),
@@ -514,6 +537,11 @@ pub enum ConditionComparisonSubject {
     /// backing ref — the LHS operand is the exact evidence value observed at
     /// evaluation time, embedded as a literal so ledger replay can verify it.
     Elapsed,
+    /// Runtime-supplied active-drive elapsed seconds since the innermost
+    /// enclosing loop's first iteration began. Same literal-LHS rule as
+    /// `Elapsed`; unlike it, the value restarts with every loop activation,
+    /// so replay never expects it to be monotonic across the run.
+    LoopElapsed,
 }
 
 /// Closed comparison operators stored in runtime evidence.
@@ -766,6 +794,7 @@ fn guard_directly_uses_iteration(guard: &GuardExpr) -> bool {
         GuardExpr::Predicate(predicate) => {
             predicate.iteration.is_some()
                 || predicate.iteration_at_least.is_some()
+                || predicate.loop_elapsed_seconds_at_least.is_some()
                 || predicate
                     .not
                     .as_deref()
@@ -980,6 +1009,7 @@ fn validate_guard_predicate(
     forms += usize::from(predicate.iteration.is_some());
     forms += usize::from(predicate.iteration_at_least.is_some());
     forms += usize::from(predicate.elapsed_seconds_at_least.is_some());
+    forms += usize::from(predicate.loop_elapsed_seconds_at_least.is_some());
     forms += usize::from(predicate.not.is_some());
     forms += usize::from(predicate.empty.is_some());
     forms += usize::from(predicate.present.is_some());
@@ -989,7 +1019,7 @@ fn validate_guard_predicate(
     if forms != 1 {
         return Err(crate::manifest::Error::InvalidField {
             field_path: field_path.to_string(),
-            message: "guard predicate must declare exactly one of signal, condition, slot, output, iteration, iteration-at-least, elapsed-seconds-at-least, not, empty, present, count, all, or any".to_string(),
+            message: "guard predicate must declare exactly one of signal, condition, slot, output, iteration, iteration-at-least, elapsed-seconds-at-least, loop-elapsed-seconds-at-least, not, empty, present, count, all, or any".to_string(),
         }.into());
     }
 
@@ -1027,12 +1057,15 @@ fn validate_guard_predicate(
             validation.allow_iteration,
         )?;
     }
-    if (predicate.iteration.is_some() || predicate.iteration_at_least.is_some())
+    if (predicate.iteration.is_some()
+        || predicate.iteration_at_least.is_some()
+        || predicate.loop_elapsed_seconds_at_least.is_some())
         && !validation.allow_iteration
     {
         return Err(crate::manifest::Error::InvalidField {
             field_path: field_path.to_string(),
-            message: "iteration predicates are valid only inside loop guards".to_string(),
+            message: "iteration and loop-elapsed predicates are valid only inside loop guards"
+                .to_string(),
         }
         .into());
     }
@@ -1091,6 +1124,13 @@ fn validate_guard_predicate(
             validation.trait_ref,
             threshold,
             &format!("{field_path}.elapsed-seconds-at-least"),
+        )?;
+        validate_no_modifiers(predicate, field_path)?;
+    } else if let Some(threshold) = predicate.loop_elapsed_seconds_at_least.as_ref() {
+        validate_elapsed_predicate(
+            validation.trait_ref,
+            threshold,
+            &format!("{field_path}.loop-elapsed-seconds-at-least"),
         )?;
         validate_no_modifiers(predicate, field_path)?;
     } else if predicate.field.is_some() {
@@ -1169,27 +1209,50 @@ fn validate_slot_predicate(
         field_path: format!("{field_path}.slot"),
         message: format!("invalid slot ref {slot_ref:?}"),
     })?;
-    if parsed.kind() != Kind::Slot || parsed.is_qualified() {
+    if parsed.is_qualified() || !matches!(parsed.kind(), Kind::Slot | Kind::Port) {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{field_path}.slot"),
-            message: "condition slot predicate must use a local slot:* ref".to_string(),
+            message: "condition slot predicate must use a local slot:* or input port:* ref"
+                .to_string(),
         }
         .into());
     }
-    if !slot_ids.contains(parsed.id()) {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{field_path}.slot"),
-            message: format!("unresolved local slot ref {slot_ref:?}"),
+    // A local input port is a comparison subject like a slot (0281.7): the
+    // runtime resolves both through the same accepted-value lookup, so a
+    // guard reads a port's value directly instead of a trait copying the
+    // port into a slot first.
+    let schema_ref: Option<String> = match parsed.kind() {
+        Kind::Port => {
+            let Some(port) = trait_ref.ports.iter().find(|port| {
+                port.id == parsed.id()
+                    && matches!(port.direction, crate::r#trait::PortDirection::Input)
+            }) else {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("{field_path}.slot"),
+                    message: format!("unresolved local input port ref {slot_ref:?}"),
+                }
+                .into());
+            };
+            Some(port.schema.clone())
         }
-        .into());
-    }
-    let Some(slot) = trait_ref.slots.iter().find(|slot| slot.id == parsed.id()) else {
-        return Ok(());
+        _ => {
+            if !slot_ids.contains(parsed.id()) {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("{field_path}.slot"),
+                    message: format!("unresolved local slot ref {slot_ref:?}"),
+                }
+                .into());
+            }
+            let Some(slot) = trait_ref.slots.iter().find(|slot| slot.id == parsed.id()) else {
+                return Ok(());
+            };
+            slot.schema.as_ref().map(ToString::to_string)
+        }
     };
     if let Some((name, value)) = ordered_modifier(predicate) {
         validate_numeric_comparison(
             trait_ref,
-            slot.schema.as_ref().map(ToString::to_string).as_deref(),
+            schema_ref.as_deref(),
             predicate.field.as_deref(),
             name,
             value,
@@ -1197,7 +1260,7 @@ fn validate_slot_predicate(
         )?;
     }
     if let Some(equals) = predicate.equals.as_ref() {
-        let Some(schema_ref) = slot.schema.as_ref().map(ToString::to_string) else {
+        let Some(schema_ref) = schema_ref else {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: format!("{field_path}.slot"),
                 message: "slot equality requires the slot to declare a schema".to_string(),

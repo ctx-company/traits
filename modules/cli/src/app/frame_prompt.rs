@@ -2100,11 +2100,102 @@ fn input_spec_entries(loaded: &ctx_traits_io::run::LoadedTrait, refs: &[String])
         if seen.insert(id.clone(), ()).is_some() {
             continue;
         }
-        if let Some(entry) = spec_entry(loaded, ref_text, id) {
+        if let Some(entry) = spec_entry(loaded, ref_text, id.clone()) {
             entries.push(entry);
         }
+        // 0281.7: a typed input's field descriptions are where a trait keeps
+        // the conventions for that value (what a brief's front step is, what
+        // a verdict's done-when means). They reached the model only on the
+        // step that PRODUCED the value, through its output schema; the step
+        // that consumed it saw the bare JSON. Now the consumer sees them
+        // too, one `<spec>` child per field, named `<value>.<field>`.
+        input_field_spec_entries(loaded, ref_text, &id, &mut entries);
     }
     entries
+}
+
+/// How deep the field guide follows nested object schemas: the value's own
+/// fields and one level of object-valued fields under them. Deeper shapes
+/// and list items keep their descriptions on the producing step's output
+/// contract, where the full schema already rides.
+const INPUT_FIELD_SPEC_DEPTH: usize = 2;
+
+/// Appends one `<spec>` child per described field of `ref_text`'s declared
+/// object schema (a `slot:*` or `port:*` whose schema is a local inline
+/// object declaration), recursing into object-valued fields up to
+/// [`INPUT_FIELD_SPEC_DEPTH`]. Fields without a description or hint are
+/// silent, like a value without one.
+fn input_field_spec_entries(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    ref_text: &str,
+    id: &str,
+    entries: &mut Vec<SpecEntry>,
+) {
+    let Some((kind, local_id)) = ref_text.split_once(':') else {
+        return;
+    };
+    let trait_ref = &loaded.trait_ref;
+    let schema_ref = match kind {
+        "slot" => trait_ref
+            .slots
+            .iter()
+            .find(|slot| slot.id == local_id)
+            .and_then(|slot| slot.schema.as_ref().map(ToString::to_string)),
+        "port" => trait_ref
+            .ports
+            .iter()
+            .find(|port| port.id == local_id)
+            .map(|port| port.schema.clone()),
+        _ => None,
+    };
+    let Some(schema_ref) = schema_ref else {
+        return;
+    };
+    push_schema_field_spec_entries(trait_ref, &schema_ref, id, INPUT_FIELD_SPEC_DEPTH, entries);
+}
+
+fn push_schema_field_spec_entries(
+    trait_ref: &ctx_traits_core::r#trait::Trait,
+    schema_ref: &str,
+    prefix: &str,
+    depth: usize,
+    entries: &mut Vec<SpecEntry>,
+) {
+    if depth == 0 {
+        return;
+    }
+    let Some(schema_id) = schema_ref.strip_prefix("schema:") else {
+        return;
+    };
+    let Some(fields) = trait_ref
+        .schemas
+        .iter()
+        .find(|schema| schema.id == schema_id)
+        .and_then(|schema| schema.fields.as_ref())
+    else {
+        return;
+    };
+    for (name, field) in fields {
+        let id = format!("{prefix}.{name}");
+        let description = field
+            .description
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .map(sanitize_spec_text);
+        let hint = field
+            .hint
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .map(sanitize_spec_text);
+        if description.is_some() || hint.is_some() {
+            entries.push(SpecEntry {
+                id: id.clone(),
+                description: description.unwrap_or_default(),
+                hint,
+            });
+        }
+        push_schema_field_spec_entries(trait_ref, &field.schema, &id, depth - 1, entries);
+    }
 }
 
 /// Spec entries for the values a frame is asked to produce.

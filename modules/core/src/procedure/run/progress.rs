@@ -740,6 +740,7 @@ mod tests {
             iteration_index: Some(0),
             max_iterations: None,
             unbounded: false,
+            loop_started_elapsed_seconds: None,
             max_items: None,
             item_index: None,
             item_total: None,

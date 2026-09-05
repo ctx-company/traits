@@ -4,12 +4,15 @@ import * as shared from "#trait/shared/index.ts";
 // The tree lane (owner order 2026-09-04): ctx-annotate opens once, at the
 // start, on the run's working tree. The owner walks the codebase and
 // annotates the places to change; those annotations are the task. From
-// there the lane is the basic one — draft, then implement / review /
-// refine, then commit — with no plan gate, no verdict gate and no summons.
+// there the lane is the basic stage loop — draft, baseline, then per stage
+// work until claimed, prove, review, commit — with no plan gate, no
+// verdict gate and no summons. No task port, so no task branch.
+const STAGE_SECONDS = 4 * 60 * 60;
+
 export default function () {
   cdk.defineVariant("Annotate", {
     description:
-      "Tree-annotated implementation: the owner marks places in ctx-annotate's tree view, the run drafts a plan from the annotations, then implements, reviews, refines and commits.",
+      "Tree-annotated implementation: the owner marks places in ctx-annotate's tree view, the run drafts a plan from the annotations, then works it stage by stage — claim, prove, review, commit.",
     metadata: { tag: [...shared.metadata.tag, "annotate"] },
   });
 
@@ -22,16 +25,44 @@ export default function () {
     cdk.condition.not(cdk.condition.equals(shared.data.annotations, "none")),
     () => {
       shared.step.draft.composeFromAnnotations("Draft the implementation plan");
+      shared.step.review.baselineAnnotated("Review the tree before any work");
 
-      cdk.flow.loop("Reviewed refinement", (loop) => {
-        // No owner gate in this lane, so the loop carries its own ceiling;
-        // exhaustion continues to the commit with the last verdict unresolved,
-        // the same policy as the complex lane.
-        loop.maxIterations(5, { onExhausted: cdk.signal.Continue });
-        shared.step.work.implement("Implement the task");
-        shared.step.diff.capture("Capture the changed files");
-        shared.step.review.primaryAnnotated("Review the implementation");
-        loop.untilAll([cdk.condition.equals(shared.data.verdict1.status, "approved")]);
+      cdk.flow.loop("Stage loop", (stage) => {
+        cdk.flow.when("Stage open", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
+          shared.step.carry.carryBrief("Carry the brief");
+
+          cdk.flow.loop("Work the stage", (work) => {
+            shared.step.work.implement("Implement the stage");
+            cdk.flow.when("Claimed", cdk.condition.fieldEquals(shared.data.report, "claim", "complete"), () => {
+              shared.step.proof.run("Prove the claim");
+            });
+            work.untilAll([
+              cdk.condition.any([
+                cdk.condition.all([
+                  cdk.condition.fieldEquals(shared.data.report, "claim", "complete"),
+                  cdk.condition.equals(shared.data.proofResult, "pass"),
+                ]),
+                cdk.condition.not(cdk.condition.fieldEquals(shared.data.report, "blocked", "")),
+                cdk.condition.loopElapsedAtLeast(STAGE_SECONDS),
+              ]),
+            ]);
+          });
+
+          shared.step.diff.capture("Capture the changed files");
+          shared.step.review.primaryAnnotated("Review the claim");
+
+          cdk.flow.when(
+            "Stage committed",
+            cdk.condition.fieldEquals(shared.data.verdict1, "closed-stage.commit", true),
+            () => {
+              shared.step.git.carryClosedStage("Carry the closed stage");
+              shared.step.git.stageCommitMessage("Write the stage commit message");
+              shared.step.git.commitStage("Stage all changes");
+              shared.step.git.commitSubmit("Commit the stage");
+            },
+          );
+        });
+        stage.untilAll([cdk.condition.equals(shared.data.verdict1.status, "approved")]);
       });
 
       shared.step.git.status("Check working tree status");

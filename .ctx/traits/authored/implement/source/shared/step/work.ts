@@ -3,21 +3,38 @@ import * as cdk from "@ctx-traits/cdk";
 import { worker } from "../agent.ts";
 import { slot } from "../data.ts";
 
-// The worker's inputs, in order of authority (0281.1): the plan is what to
-// do; the verdict is the reviewer's measurement of the current state with
-// the owner's annotations already applied to it (rulings, deferred and
-// dropped steps, order); nothing else instructs the worker. The
-// conventions — blockers in listed order, ruled steps as ruled, deferred
-// and dropped steps untouched — live in the verdict schema's own field
-// descriptions, not here.
+// The worker's inputs (0281.7): the plan is what to do; the brief is where
+// to do it now — the first open stage, its goal and proof, and the front
+// step with its frozen done-when — copied out of the reviewer's verdict by
+// a deterministic step, so the worker never sees the rest of the queue;
+// its own previous report is its memory of the previous dispatch; the
+// proof result is what the stage's proof command said about its last
+// claim. The conventions (one unit of attention, the stage as the unit of
+// completeness, what a claim means) live in the brief's and the report's
+// field descriptions, which the runtime renders beside the values.
 export const implement = cdk.defineStep.prompt({
   agent: worker,
   input: cdk.input.prompt`
-    Implement the plan: ${slot.draft}. Your objective this round is the first open stage of the verdict's stage ledger — before any verdict exists, the plan's first stage.
-    The reviewer's verdict on the current state, with the owner's annotations applied (if any): ${slot.verdict1.optional()} & ${slot.verdict2.optional()}
-    Don't discard your progress if you can't finish the stage to completion.
+    Implement the plan: ${slot.draft}.
+    Your work now: ${slot.brief}.
+    Your previous report on this stage, if any: ${slot.report.optional()}.
+    What the stage's proof said about your last claim, if you made one: ${slot.proofResult.optional()}.
   `,
   output: cdk.output.prompt`
-    Return this round's work summary: ${slot.workSummary}
+    Return your report on this dispatch: ${slot.report}
+  `,
+});
+
+// The unreviewed lane (quick): no verdict and so no brief — the plan's
+// first open stage is the objective, and the worker keeps its own ledger
+// through its report.
+export const implementPlan = cdk.defineStep.prompt({
+  agent: worker,
+  input: cdk.input.prompt`
+    Implement the plan: ${slot.draft}, stage by stage in plan order; each stage's goal is its only requirement and its proof says what green means for it.
+    Your previous report, if any: ${slot.report.optional()}.
+  `,
+  output: cdk.output.prompt`
+    Return your report on this dispatch: ${slot.report}
   `,
 });

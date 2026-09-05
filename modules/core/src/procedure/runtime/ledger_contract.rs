@@ -2623,8 +2623,27 @@ fn replay_declared_predicate(
         );
     }
     if let Some(threshold) = predicate.elapsed_seconds_at_least.as_ref() {
-        return replay_declared_elapsed_comparison(context, cursor, threshold, diagnostics)
-            .map(GuardOutcome::from_bool);
+        return replay_declared_elapsed_comparison(
+            context,
+            cursor,
+            threshold,
+            ConditionComparisonSubject::Elapsed,
+            diagnostics,
+        )
+        .map(GuardOutcome::from_bool);
+    }
+    if let Some(threshold) = predicate.loop_elapsed_seconds_at_least.as_ref() {
+        // Evaluation records an unmeasurable outcome (no started-elapsed
+        // reading on the loop frame) without comparison evidence; replay
+        // accepts that leaf on its recorded outcome like any other leaf.
+        return replay_declared_elapsed_comparison(
+            context,
+            cursor,
+            threshold,
+            ConditionComparisonSubject::LoopElapsed,
+            diagnostics,
+        )
+        .map(GuardOutcome::from_bool);
     }
     if let Some(slot_ref) = predicate.empty.as_deref() {
         return replay_guard_leaf(context, cursor, &format!("empty({slot_ref})"), diagnostics);
@@ -2753,12 +2772,13 @@ fn replay_declared_comparison(
                 declared.expected,
             )
         }
-        // `replay_declared_predicate` routes `elapsed-seconds-at-least` to
+        // `replay_declared_predicate` routes `elapsed-seconds-at-least` and
+        // `loop-elapsed-seconds-at-least` to
         // `replay_declared_elapsed_comparison` before this function is ever
-        // called with that subject.
-        ConditionComparisonSubject::Elapsed => unreachable!(
-            "elapsed comparisons are replayed by replay_declared_elapsed_comparison"
-        ),
+        // called with those subjects.
+        ConditionComparisonSubject::Elapsed | ConditionComparisonSubject::LoopElapsed => {
+            unreachable!("elapsed comparisons are replayed by replay_declared_elapsed_comparison")
+        }
     };
     validate_guard_label(index, evaluation, &expected_predicate, diagnostics);
     let Some(evidence) = evaluation.comparison_evidence.as_ref() else {
@@ -2803,24 +2823,43 @@ fn replay_declared_comparison(
     ))
 }
 
+/// The predicate-label spelling of a clock subject, shared by evaluation
+/// (`guards.rs`) and replay so the two can never disagree on the label a
+/// clock guard records.
+fn elapsed_subject_label(subject: ConditionComparisonSubject) -> &'static str {
+    match subject {
+        ConditionComparisonSubject::LoopElapsed => "loop-elapsed-seconds",
+        ConditionComparisonSubject::Elapsed
+        | ConditionComparisonSubject::Slot
+        | ConditionComparisonSubject::Output => "elapsed-seconds",
+    }
+}
+
 fn replay_declared_elapsed_comparison(
     context: GuardReplayContext<'_>,
     cursor: &mut usize,
     expected: &JsonValue,
+    subject: ConditionComparisonSubject,
     diagnostics: &mut Vec<String>,
 ) -> Option<bool> {
     let (index, evaluation) = take_branch_guard_evaluation(context, cursor, diagnostics)?;
-    let expected_predicate = format!("elapsed-seconds >= {expected}");
+    let expected_predicate = format!("{} >= {expected}", elapsed_subject_label(subject));
     validate_guard_label(index, evaluation, &expected_predicate, diagnostics);
     let Some(evidence) = evaluation.comparison_evidence.as_ref() else {
+        if subject == ConditionComparisonSubject::LoopElapsed
+            && evaluation.outcome == Some(GuardOutcome::Unmeasurable)
+        {
+            // A loop clock nobody started: evaluation recorded the leaf as
+            // unmeasurable with no operands to verify. Its routed result is
+            // false by construction.
+            return Some(false);
+        }
         diagnostics.push(format!(
             "guard-evaluations[{index}] comparison atom is missing exact operand evidence"
         ));
         return Some(evaluation.matched);
     };
-    if evidence.subject != ConditionComparisonSubject::Elapsed
-        || evidence.operator != ConditionComparisonOperator::AtLeast
-    {
+    if evidence.subject != subject || evidence.operator != ConditionComparisonOperator::AtLeast {
         diagnostics.push(format!(
             "guard-evaluations[{index}] comparison subject/operator does not match the declared guard"
         ));
@@ -3339,7 +3378,7 @@ fn validate_comparison_guard_evidence(
         }
         // The elapsed LHS has no backing ref — it is the exact runtime
         // evidence value embedded as a literal at evaluation time.
-        ConditionComparisonSubject::Elapsed => {
+        ConditionComparisonSubject::Elapsed | ConditionComparisonSubject::LoopElapsed => {
             matches!(&evidence.lhs, ComparisonOperandEvidence::Literal { value } if value.as_u64().is_some())
         }
     };
@@ -3348,8 +3387,10 @@ fn validate_comparison_guard_evidence(
             "guard-evaluations[{index}] comparison LHS ref does not match its subject"
         ));
     }
-    if evidence.subject != ConditionComparisonSubject::Elapsed
-        && evaluation.scope.is_some()
+    if !matches!(
+        evidence.subject,
+        ConditionComparisonSubject::Elapsed | ConditionComparisonSubject::LoopElapsed
+    ) && evaluation.scope.is_some()
         && evaluation.evidence_ref.as_deref() != Some(lhs_ref)
     {
         diagnostics.push(format!(
@@ -3416,7 +3457,9 @@ fn validate_comparison_guard_evidence(
             format!("output({lhs_ref}).{field}")
         }
         (ConditionComparisonSubject::Output, None) => format!("output({lhs_ref})"),
-        (ConditionComparisonSubject::Elapsed, _) => "elapsed-seconds".to_string(),
+        (subject @ (ConditionComparisonSubject::Elapsed | ConditionComparisonSubject::LoopElapsed), _) => {
+            elapsed_subject_label(subject).to_string()
+        }
     };
     let rhs_label = match &evidence.rhs {
         ComparisonOperandEvidence::Ref { ref_text, .. }
@@ -3572,7 +3615,9 @@ fn validate_comparison_freshness(
         "accepted slot evidence is stale (written in an earlier iteration of this loop)";
     if matches!(
         evidence.subject,
-        ConditionComparisonSubject::Output | ConditionComparisonSubject::Elapsed
+        ConditionComparisonSubject::Output
+            | ConditionComparisonSubject::Elapsed
+            | ConditionComparisonSubject::LoopElapsed
     ) {
         if evidence.stale {
             diagnostics.push(format!(

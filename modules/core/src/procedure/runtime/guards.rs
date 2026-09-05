@@ -608,6 +608,76 @@ fn evaluate_guard_predicate(
         evaluation.comparison_evidence = Some(comparison_evidence);
         return Ok((GuardOutcome::from_bool(result), vec![evaluation]));
     }
+    if let Some(threshold) = predicate.loop_elapsed_seconds_at_least.as_ref() {
+        let label = format!("loop-elapsed-seconds >= {threshold}");
+        // The innermost loop frame's own clock: the run's cumulative elapsed
+        // seconds minus the reading taken when that frame was activated. A
+        // frame that carries no reading (a ledger written before the clock
+        // existed) is missing evidence, not a false fact: unmeasurable,
+        // routes false, so an old ledger's loop keeps running on its other
+        // exits rather than ending on a clock nobody started.
+        let started = state
+            .control_stack
+            .iter()
+            .rev()
+            .find(|frame| frame.kind == ControlKind::Loop)
+            .and_then(|frame| frame.loop_started_elapsed_seconds);
+        let Some(started) = started else {
+            return Ok((
+                GuardOutcome::Unmeasurable,
+                vec![condition_evaluation_outcome(
+                    &label,
+                    None,
+                    loop_context,
+                    GuardOutcome::Unmeasurable,
+                    "no enclosing loop frame carries a started-elapsed reading — unmeasurable, routes false",
+                )],
+            ));
+        };
+        let lhs = ComparisonOperandEvidence::Literal {
+            value: JsonValue::from(state.elapsed_seconds.saturating_sub(started)),
+        };
+        let rhs = if let Some(ref_text) = crate::r#trait::condition::numeric_comparison_ref(threshold)
+        {
+            comparison_ref_operand(state, accepted_value(state, ref_text), ref_text, None, false)
+        } else {
+            ComparisonOperandEvidence::Literal {
+                value: threshold.clone(),
+            }
+        };
+        let rhs_negative = operand_selected_value(&rhs)
+            .and_then(JsonValue::as_f64)
+            .is_some_and(f64::is_sign_negative);
+        let result = comparison_result(
+            ConditionComparisonOperator::AtLeast,
+            &lhs,
+            &rhs,
+            ConditionComparisonSubject::LoopElapsed,
+        );
+        let comparison_evidence = ConditionComparisonEvidence {
+            subject: ConditionComparisonSubject::LoopElapsed,
+            lhs,
+            operator: ConditionComparisonOperator::AtLeast,
+            rhs,
+            result,
+            stale: false,
+        };
+        let mut evaluation = condition_evaluation(
+            &label,
+            None,
+            loop_context,
+            result,
+            if rhs_negative {
+                "loop-elapsed-seconds-at-least threshold resolved to a negative runtime value; guard fails closed"
+            } else if result {
+                "loop-elapsed-seconds evidence matched"
+            } else {
+                "loop-elapsed-seconds evidence did not match"
+            },
+        );
+        evaluation.comparison_evidence = Some(comparison_evidence);
+        return Ok((GuardOutcome::from_bool(result), vec![evaluation]));
+    }
     if let Some(slot_ref) = predicate.empty.as_deref() {
         let accepted = accepted_value(state, slot_ref);
         let stale = accepted.is_some()
@@ -1348,7 +1418,11 @@ fn comparison_result(
     // `condition_comparison_evidence` for the elapsed guard, and
     // `validate_comparison_guard_evidence` in ledger_contract.rs, which both
     // route through this one function so evaluation and replay always agree).
-    if subject == ConditionComparisonSubject::Elapsed && rhs.as_f64().is_some_and(f64::is_sign_negative) {
+    if matches!(
+        subject,
+        ConditionComparisonSubject::Elapsed | ConditionComparisonSubject::LoopElapsed
+    ) && rhs.as_f64().is_some_and(f64::is_sign_negative)
+    {
         return false;
     }
     lhs.as_number()

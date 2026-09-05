@@ -492,6 +492,18 @@ pub struct ControlFrame {
     /// rather than reusing the ambiguous value.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unbounded: bool,
+    /// The run's cumulative active-drive elapsed seconds when this `Loop`
+    /// frame was activated — the zero point of the loop's own clock, which
+    /// the `loop-elapsed-seconds-at-least` guard measures against. Absent on
+    /// every other frame kind and on ledgers written before the guard
+    /// existed (such a loop's clock reads as never started, and the guard
+    /// fails closed).
+    #[serde(
+        default,
+        rename = "loop-started-elapsed-seconds",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub loop_started_elapsed_seconds: Option<u64>,
     #[serde(default, rename = "max-items", skip_serializing_if = "Option::is_none")]
     pub max_items: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -10,7 +10,18 @@
 import * as cdk from "@ctx-traits/cdk";
 
 import { scribe } from "../agent.ts";
-import { gateAnswer, notifyBadge, notifyDigest, notifyId, notifyJournal, notifyLog, notifySummary, task, verdict1 } from "../data.ts";
+import {
+  gateAnswer,
+  notifyBadge,
+  notifyDigest,
+  notifyId,
+  notifyJournal,
+  notifyLog,
+  notifySummary,
+  report,
+  task,
+  verdict1,
+} from "../data.ts";
 
 export function begin(title: string): void {
   cdk.step.command(title, {
@@ -34,6 +45,7 @@ export function reviewUpdate(title: string): void {
     agent: scribe,
     input: cdk.input.prompt`
       Digest this review verdict for the owner's phone: ${verdict1}.
+      The worker's report the verdict graded: ${report}.
       Follow each output field's own description exactly; the fields feed
       notification commands verbatim.
     `,

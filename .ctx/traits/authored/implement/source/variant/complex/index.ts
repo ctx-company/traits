@@ -1,27 +1,61 @@
 import * as cdk from "@ctx-traits/cdk";
 import * as shared from "#trait/shared/index.ts";
 
+// The doubly-reviewed lane: the basic stage loop without owner gates or
+// summons, with a second, independent reviewer grading every claim beside
+// the first. Both must approve. No iteration ceiling (0281 rulings: no
+// round fuses); the run's total budget is the bound.
+const STAGE_SECONDS = 4 * 60 * 60;
+
 export default function () {
   cdk.defineVariant("Complex", {
-    description: "Reviewed implementation: implement, review, refine & commit.",
+    description: "Doubly-reviewed implementation: plan, then stage by stage — work until claimed, prove, two reviews, commit.",
     metadata: { tag: [...shared.metadata.tag, "multi-agent"] },
   });
 
   shared.step.diff.baseline("Capture the session base");
   shared.step.draft.compose("Draft the implementation plan");
+  shared.step.review.baseline("Review the tree before any work");
 
-  cdk.flow.loop("Doubly-reviewed refinement", (loop) => {
-    // Owner ruling 2026-09-01: three review rounds, then stop refining.
-    // Exhaustion continues past the loop — the work proceeds to commit with
-    // the last verdicts unresolved, and the task's own checks plus the merge
-    // gate remain the landing authority. Abort here would strand the work.
-    loop.maxIterations(3, { onExhausted: cdk.signal.Continue });
-    shared.step.work.implement("Implement the task");
-    shared.step.diff.capture("Capture the changed files");
-    shared.step.review.primary("Review the implementation");
-    shared.step.review.secondary("Cross-review the implementation");
+  cdk.flow.loop("Stage loop", (stage) => {
+    cdk.flow.when("Stage open", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
+      shared.step.carry.carryBrief("Carry the brief");
 
-    loop.untilAll([
+      cdk.flow.loop("Work the stage", (work) => {
+        shared.step.work.implement("Implement the stage");
+        cdk.flow.when("Claimed", cdk.condition.fieldEquals(shared.data.report, "claim", "complete"), () => {
+          shared.step.proof.run("Prove the claim");
+        });
+        work.untilAll([
+          cdk.condition.any([
+            cdk.condition.all([
+              cdk.condition.fieldEquals(shared.data.report, "claim", "complete"),
+              cdk.condition.equals(shared.data.proofResult, "pass"),
+            ]),
+            cdk.condition.not(cdk.condition.fieldEquals(shared.data.report, "blocked", "")),
+            cdk.condition.loopElapsedAtLeast(STAGE_SECONDS),
+          ]),
+        ]);
+      });
+
+      shared.step.diff.capture("Capture the changed files");
+      shared.step.review.primary("Review the claim");
+      shared.step.review.secondary("Cross-review the claim");
+
+      cdk.flow.when(
+        "Stage committed",
+        cdk.condition.fieldEquals(shared.data.verdict1, "closed-stage.commit", true),
+        () => {
+          shared.step.git.carryClosedStage("Carry the closed stage");
+          shared.step.git.stageCommitMessage("Write the stage commit message");
+          shared.step.git.commitStage("Stage all changes");
+          shared.step.git.commitSubmit("Commit the stage");
+          shared.step.git.taskBranch("Move the task branch");
+        },
+      );
+    });
+
+    stage.untilAll([
       cdk.condition.equals(shared.data.verdict1.status, "approved"),
       cdk.condition.equals(shared.data.verdict2.status, "approved"),
     ]);
@@ -32,6 +66,6 @@ export default function () {
     shared.step.git.commitMessage("Write the commit message");
     shared.step.git.commitStage("Stage all changes");
     shared.step.git.commitSubmit("Commit the work");
+    shared.step.git.taskBranch("Move the task branch");
   });
-
 }

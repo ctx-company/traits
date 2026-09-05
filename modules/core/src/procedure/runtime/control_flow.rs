@@ -801,6 +801,8 @@ fn enter_control_frame(
         }
     }
 
+    let loop_started_elapsed_seconds =
+        (control_kind == ControlKind::Loop).then_some(state.elapsed_seconds);
     let mut frame = ControlFrame {
         kind: control_kind,
         parent_run_index,
@@ -810,6 +812,7 @@ fn enter_control_frame(
         iteration_index: None,
         max_iterations: None,
         unbounded: false,
+        loop_started_elapsed_seconds,
         max_items: None,
         item_index: None,
         item_total: None,
@@ -1384,6 +1387,7 @@ fn enter_parallel_frame(
         iteration_index: Some(0),
         max_iterations: Some(branch_total),
         unbounded: false,
+        loop_started_elapsed_seconds: None,
         max_items: None,
         item_index: None,
         item_total: None,

@@ -206,6 +206,17 @@ export interface ConditionFunction {
    * @example `condition.elapsedAtLeast(timeLimitSeconds)`
    */
   elapsedAtLeast(value: NumericComparisonValue): GuardHandle;
+  /**
+   * Guards that active-drive elapsed seconds since the innermost enclosing
+   * loop's first iteration began — the loop's own clock, runtime-supplied
+   * like {@link ConditionFunction.elapsedAtLeast} but restarting with every
+   * loop activation — is at least `value`. Valid only inside a loop's
+   * `until`/`abortIf`; the everyday "work until the claim holds OR this
+   * loop has spent its time" exit, paired with a target-reached guard in
+   * `condition.any`.
+   * @example `condition.loopElapsedAtLeast(4 * 60 * 60)`
+   */
+  loopElapsedAtLeast(value: NumericComparisonValue): GuardHandle;
   /** Ordered comparison over one top-level numeric field of an inline object-schema slot. The Rust validator checks the named field and RHS ref schemas. */
   fieldLt(
     slotRef: string | SlotHandle | SettingHandle | RefHandle,
@@ -470,6 +481,13 @@ export const condition: ConditionFunction = {
   elapsedAtLeast: (value: NumericComparisonValue): GuardHandle =>
     guardHandle(
       { "elapsed-seconds-at-least": comparisonValue(value) },
+      {
+        declarations: collectMany([value]),
+      },
+    ),
+  loopElapsedAtLeast: (value: NumericComparisonValue): GuardHandle =>
+    guardHandle(
+      { "loop-elapsed-seconds-at-least": comparisonValue(value) },
       {
         declarations: collectMany([value]),
       },

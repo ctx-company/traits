@@ -84,6 +84,7 @@ export const feasibilityVerdictSchema: SchemaHandle<FeasibilityVerdictValue> = s
 /** One step of a blocker's required fix, as accepted values. */
 export type BlockerStepValue = {
   readonly step: string;
+  readonly "done-when": string;
   readonly status: string;
   readonly explanation: string;
   readonly guidance?: string;
@@ -95,20 +96,24 @@ export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
   {
     step: schema.field(schema.text(), {
       description:
-        "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds.",
+        "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds; it is the key the runtime matches this step by from one verdict to the next.",
+    }),
+    "done-when": schema.field(schema.text(), {
+      description:
+        "The falsifiable check that closes THIS step, written when the step is created and frozen for the life of the step — the runtime rejects a verdict that changes it. A command the worker can run itself wherever one can say it (a grep that must come back empty, a test that must exist and pass, a call site that must route through X); otherwise one precise observable sentence. The worker's claim is graded against this text as written and against nothing else: what it does not ask for cannot be asked for here. When the acceptance turns out to need more, that more is a NEW step with its own done-when, appended after this one.",
     }),
     status: schema.field(schema.text(), {
       description:
-        '"open", "done", "deferred" or "dropped". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker\'s claim alone. deferred and dropped are set only when the reviewer applies an owner annotation (recorded in the verdict\'s dispositions): deferred is the owner\'s "not now" — kept on record, not executed until the owner or its stage says so; dropped is the owner\'s "no" — kept on record, never executed. Neither blocks approval, and the reviewer never reopens either on its own.',
+        '"open", "done", "deferred" or "dropped". Flips to done only when the reviewer has verified done-when against the working tree — never on the worker\'s claim alone, and never for less than done-when as written. deferred and dropped are set only when the reviewer applies an owner annotation (recorded in the verdict\'s dispositions): deferred is the owner\'s "not now" — kept on record, not executed until the owner or its stage says so; dropped is the owner\'s "no" — kept on record, never executed. Neither blocks approval, and the reviewer never reopens either on its own.',
     }),
     explanation: schema.field(schema.text(), {
       description:
-        "Why the status is what it is, every round, for every step. Done: the proof — file:line, a test name, or a command and its observed result. Open after the worker attempted it: what you verified in the tree and exactly what is still missing or wrong, so the owner reading the surface and the worker reading the verdict see the same reason. Open and never attempted: 'not yet attempted'. Never empty.",
+        "Why the status is what it is, every round, for every step. Done: the proof that done-when holds — file:line, a test name, or the command and its observed result. Open after the worker attempted it: which clause of done-when you verified fails, and exactly what is missing or wrong in the tree, so the owner reading the surface and the worker reading the brief see the same reason. Open and never attempted: 'not yet attempted'. Never empty, and never a reason that done-when does not contain.",
     }),
     guidance: schema.field(schema.text(), {
       required: false,
       description:
-        "For an open step: how to get it accepted next round — the concrete change and the proof you will look for (a test that must exist and pass, a grep that must come back empty, a call site that must route through X). You are the smarter model here; this is where that goes. Absent for done, deferred and dropped steps.",
+        "For an open step: how to satisfy done-when — the concrete change and where, from the smarter model to the worker. Never a new requirement: a demand done-when does not make belongs in a new step, not here. Absent for done, deferred and dropped steps.",
     }),
     ruling: schema.field(schema.text(), {
       required: false,
@@ -118,7 +123,8 @@ export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
   },
   {
     description:
-      "One step of a blocker's required fix: its frozen text, its verified status, why the status is what it is, how to get it accepted while it is open, and the owner's ruling on it when one exists.",
+      "One step of a blocker's required fix: its frozen text, the frozen check that closes it, its verified status, why the status is what it is, how to satisfy the check while it is open, and the owner's ruling on it when one exists.",
+    frozen: { key: "step", fields: ["done-when"] },
   },
 );
 
@@ -166,11 +172,11 @@ export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
     }),
     steps: schema.field(schema.list(blockerStepSchema), {
       description:
-        "The fix as an ordered list of typed steps — you are the smarter model here, and this list exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). Each step is one operation: what to create and what it owns, what must cease to exist or shrink to a delegate, which call sites to route. A destination (\"replace the separate paths with one renderer\") is not a step; the operations that reach it are. THIS LIST IS CUMULATIVE STATE, not a fresh derivation: when this blocker appeared in your prior verdict (attached), carry its steps forward VERBATIM — same order, same text — flipping status to done only where you verified the evidence with your own tools, and appending genuinely new findings as new steps at the end. Never renumber, reword, drop, or re-derive a carried step: a vanished step erases the worker's credit, a reworded one moves the target, and both teach the worker that completing steps is pointless — the four-day stall this field exists to end.",
+        "The fix as an ordered list of typed steps — you are the smarter model here, and this list exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). Each step is one operation with its own frozen done-when: what to create and what it owns, what must cease to exist or shrink to a delegate, which call sites to route. A destination (\"replace the separate paths with one renderer\") is not a step; the operations that reach it are. THIS LIST IS CUMULATIVE STATE, not a fresh derivation: when this blocker appeared in your prior verdict (attached), carry its steps forward VERBATIM — same order, same text, same done-when — flipping status to done only where you verified done-when with your own tools, and appending genuinely new findings as new steps at the end, prerequisites of the front step first. Never renumber, reword, drop, or re-derive a carried step: a vanished step erases the worker's credit, a reworded one moves the target, and both teach the worker that completing steps is pointless — the four-day stall this field exists to end. The runtime enforces the freeze: a verdict that changes a carried step's done-when is rejected.",
     }),
     "done-when": schema.field(schema.text(), {
       description:
-        "A falsifiable check the reviewer will apply next round to declare this blocker fixed. Wherever the check can be a COMMAND, state it as one the worker can run itself (a grep proving a function has exactly one caller, a test invocation) — the worker iterates against build-and-test signals, and a structural requirement stated only as prose is invisible to that loop: the worker stops where its own instruments read green, honestly believing the blocker addressed.",
+        "A falsifiable check the reviewer will apply to declare this blocker fixed as a whole — the sum of its steps' done-when clauses, never more. Wherever the check can be a COMMAND, state it as one the worker can run itself (a grep proving a function has exactly one caller, a test invocation) — the worker iterates against build-and-test signals, and a structural requirement stated only as prose is invisible to that loop: the worker stops where its own instruments read green, honestly believing the blocker addressed.",
     }),
     "recurrence-of": schema.field(schema.text(), {
       required: false,
@@ -196,6 +202,10 @@ export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
   {
     description:
       "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, the falsifiable check that clears it, and the owner's ruling on it when one exists.",
+    // Identity only: the runtime matches blockers by id across revisions so
+    // that the frozen done-when of the steps inside them is compared within
+    // the same blocker.
+    frozen: { key: "id" },
   },
 );
 
@@ -222,7 +232,7 @@ export const stageStatusSchema: SchemaHandle<StageStatusValue> = schema.object(
     }),
     status: schema.field(schema.enum(["open", "done"] as const), {
       description:
-        "done only when you verified with your own tools that the stage's goal is observable in the working tree; open otherwise. A done stage whose goal stops holding goes back to open, with the evidence that shows it — that is the only kind of regression there is.",
+        "done only when the worker claimed the stage complete, the stage's proof passed, and you verified with your own tools that the stage's goal is observable in the working tree; open otherwise. A done stage whose goal stops holding goes back to open, with the evidence that shows it — that is the only kind of regression there is.",
     }),
     evidence: schema.field(schema.text(), {
       description: "Why the status is what it is: what you ran or read. Empty only for a stage nobody has reached yet.",
@@ -236,6 +246,135 @@ export const stageStatusSchema: SchemaHandle<StageStatusValue> = schema.object(
   {
     description:
       "One plan stage in the verdict's ledger: id, whether its goal holds, the evidence, and the owner's ruling on it when one exists.",
+  },
+);
+
+/** The worker's next unit of work, as accepted values. */
+export type BriefValue = {
+  readonly stage: string;
+  readonly goal: string;
+  readonly proof: string;
+  readonly commit: boolean;
+  readonly step: string;
+  readonly "done-when": string;
+  readonly guidance?: string;
+  readonly ruling?: string;
+  readonly remaining: number;
+};
+
+/**
+ * The brief (0281.7): the one part of a verdict the worker sees. The first
+ * open stage with its goal, proof and commit flag verbatim from the plan,
+ * and the front step with its frozen done-when. One unit of attention, one
+ * unit of completeness; the rest of the queue stays with the reviewer.
+ */
+export const briefSchema: SchemaHandle<BriefValue> = schema.object(
+  "brief",
+  {
+    stage: schema.field(schema.text(), {
+      description: "The id of the first open stage in the stage ledger, verbatim from the plan.",
+    }),
+    goal: schema.field(schema.text(), {
+      description:
+        "That stage's goal, verbatim from the plan. The worker's objective: the stage is the unit of completeness, so the worker keeps working toward this goal until it can claim it — never until one step is closed. Nothing outside this goal and the goals of done stages is required.",
+    }),
+    proof: schema.field(schema.text(), {
+      description:
+        "That stage's proof command, verbatim from the plan ('none' when the plan names none). The runtime runs it whenever the worker claims the stage complete; a failing proof sends the worker back with the failure output and costs no review.",
+    }),
+    commit: schema.field(schema.boolean(), {
+      description: "That stage's commit flag, verbatim from the plan: whether the tree is committed when the stage is done.",
+    }),
+    step: schema.field(schema.text(), {
+      description:
+        "The front step: the first open step of the first listed blocker of this stage — where the worker starts. Verbatim from the blocker's step text. When the stage has no open step (nothing attempted, no blocker filed), the stage goal restated as the first operation.",
+    }),
+    "done-when": schema.field(schema.text(), {
+      description:
+        "The front step's done-when, verbatim — the text the claim is graded against. For a stage with no open step, the stage's proof restated.",
+    }),
+    guidance: schema.field(schema.text(), {
+      required: false,
+      description: "The front step's guidance, verbatim, when present.",
+    }),
+    ruling: schema.field(schema.text(), {
+      required: false,
+      description: "The front step's ruling, verbatim, when present.",
+    }),
+    remaining: schema.field(schema.integer(), {
+      description:
+        "How many open steps this stage holds beyond the front one. A count, never their text: the worker sees one step at a time and the stage goal; the rest of the queue is the reviewer's.",
+    }),
+  },
+  {
+    description:
+      "The worker's next unit of work: the first open stage with its goal, proof and commit flag verbatim from the plan, and the front step with its frozen done-when. The only part of the verdict the worker sees, so it must stand on its own.",
+  },
+);
+
+/** The stage a verdict marked done, as accepted values. */
+export type ClosedStageValue = {
+  readonly id: string;
+  readonly commit: boolean;
+};
+
+/**
+ * The stage this verdict flipped to done, when it flipped one: the loop
+ * commits the tree on it when the plan says the stage commits.
+ */
+export const closedStageSchema: SchemaHandle<ClosedStageValue> = schema.object(
+  "closed-stage",
+  {
+    id: schema.field(schema.text(), {
+      description: "The id of the stage this verdict marked done, verbatim from the plan.",
+    }),
+    commit: schema.field(schema.boolean(), {
+      description: "That stage's commit flag, verbatim from the plan.",
+    }),
+  },
+  {
+    description:
+      "The stage this verdict flipped from open to done: its id and its commit flag, both verbatim from the plan.",
+  },
+);
+
+/** The worker's report on one dispatch, as accepted values. */
+export type WorkReportValue = {
+  readonly summary: string;
+  readonly claim: "complete" | "in-progress";
+  readonly next: string;
+  readonly blocked: string;
+};
+
+/**
+ * The typed work report (0281.7): what a dispatch did, whether it claims the
+ * stage, what the next dispatch does first, and what blocks it. The loop
+ * reads `claim` and `blocked`; the reviewer reads the rest beside the diff;
+ * the next dispatch reads it as its only memory of this one.
+ */
+export const workReportSchema: SchemaHandle<WorkReportValue> = schema.object(
+  "work-report",
+  {
+    summary: schema.field(schema.text(), {
+      description:
+        "What this dispatch changed and what it verified: files and symbols, commands run and their observed results, deviations from the plan's approach and why. The reviewer reads this beside the diff; the next dispatch reads it as its only memory of this one.",
+    }),
+    claim: schema.field(schema.enum(["complete", "in-progress"] as const), {
+      description:
+        "complete when you verified with your own tools that the stage goal in your brief holds in the working tree: the runtime then runs the stage's proof and, when it passes, the reviewer grades the claim. in-progress when the goal does not yet hold: the next dispatch continues from your report, and nothing is graded. A red tree is not a reason to stop or to claim — the brief's proof says what green means for this stage. Claim only what you verified: a false claim costs a proof run and a review and comes back as the same open step.",
+    }),
+    next: schema.field(schema.text(), {
+      description:
+        "For the next dispatch: what to do first, in one or two sentences — the handoff note that lets a fresh dispatch continue instead of re-deriving. The empty string when the claim is complete.",
+    }),
+    blocked: schema.field(schema.text(), {
+      description:
+        "The one thing you cannot resolve from inside this run — a contradiction between the plan and the code, a decision only the owner can make, a missing credential — in one or two sentences; the empty string when nothing blocks you. A non-empty value ends the work loop early and goes to the reviewer, who answers it or puts it to the owner. Never difficulty, size, or a red tree: those are the work.",
+    }),
+  },
+  {
+    description:
+      "The worker's report on one dispatch: what changed and was verified, whether the stage is claimed complete, what the next dispatch does first, and what blocks the work.",
   },
 );
 
@@ -433,6 +572,8 @@ export type ReviewVerdictValue = {
   readonly "owner-items"?: readonly unknown[];
   readonly dispositions?: readonly DispositionValue[];
   readonly stages?: readonly StageStatusValue[];
+  readonly brief?: BriefValue;
+  readonly "closed-stage"?: ClosedStageValue;
 };
 
 export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.object(
@@ -444,7 +585,7 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
     }),
     blockers: schema.field(schema.list(blockerSchema), {
       description:
-        "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Listed in the order the worker executes them — the plan's order, then the owner's ordering rulings; never sorted by how cheap a fix is. Non-empty when status is revise. When approved the list holds no open step: a blocker whose steps are all done or dropped is removed and named in the advisory, a blocker still holding a deferred step stays listed so the deferral is on record. Always return the key (an empty list, never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
+        "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and steps with frozen done-when checks. Listed in the order the worker executes them — the plan's order, then the owner's ordering rulings; never sorted by how cheap a fix is. This verdict grades a CLAIM or a partial: when the work report claims the stage complete, every open step of that stage is graded against its own done-when as written — met is done, not met is open with the explanation citing the failing clause. A step whose done-when is met is never kept open for anything else: what its done-when did not ask for is a new step (appended, in plan order, prerequisites of the front step first) or an advisory. When the report is in-progress, nothing is regraded against the worker: carry the ledger, record what moved. Non-empty when status is revise. When approved the list holds no open step: a blocker whose steps are all done or dropped is removed and named in the advisory, a blocker still holding a deferred step stays listed so the deferral is on record. Always return the key (an empty list, never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
     }),
     advisory: schema.field(schema.text(), {
       required: false,
@@ -453,7 +594,7 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
     }),
     escalation: schema.field(schema.enum(["none", "needs-owner"] as const), {
       description:
-        "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise.",
+        "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; a required gate fails for reasons outside the task's scope (tooling conflict); a step cannot be graded from its frozen done-when plus the tree; the plan is wrong for a step (it cannot be done as planned in this code); or the work report's blocked field names something only the owner can settle. Raised the first time the case appears, never after repeating the same rejection. Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise.",
     }),
     "escalation-reason": schema.field(schema.text(), {
       description:
@@ -481,11 +622,21 @@ export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.obje
     stages: schema.field(schema.list(stageStatusSchema), {
       required: false,
       description:
-        "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. The stage is the unit of completeness: this verdict grades the stage, never the round — a round is one attempt at finishing the current stage, and a worker that could not finish reports what is left. In the first round, also verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages.",
+        "The plan's stage ledger: every stage of the plan's stages list, in plan order, carried verbatim across rounds with only status, evidence and ruling moving. The first open stage is the worker's objective; blockers name the stage they belong to; nothing outside the first open stage's goal and the goals of done stages is required, so a red suite or a failing gate a later stage covers is neither a defect nor a regression and never a blocker. The stage is the unit of completeness: this verdict grades the stage, never the dispatch — the worker dispatches again and again until it claims the stage or its time is spent, and only a claim that passed the stage's proof reaches you. A stage flips to done only on such a claim, verified in the tree; then closed-stage names it and the brief moves to the next open stage. In the baseline review (before any work), verify that the stages cover every Done-when goal of the task file (read it with your tools) and block any uncovered goal as a blocker on the last stage. Absent only when the plan carries no stages.",
+    }),
+    brief: schema.field(briefSchema, {
+      required: false,
+      description:
+        "The worker's next unit of work, derived from this verdict: the first open stage with its goal, proof and commit flag copied verbatim from the plan, and the front step (first open step of the first listed blocker of that stage) with its frozen done-when, guidance and ruling. Present whenever status is revise; absent when approved. It is the only part of the verdict the worker sees, so it must stand on its own.",
+    }),
+    "closed-stage": schema.field(closedStageSchema, {
+      required: false,
+      description:
+        "Present exactly when this verdict flipped a stage from open to done: that stage's id and commit flag verbatim from the plan. The loop commits the tree on it when commit is true. Absent otherwise.",
     }),
   },
   {
     description:
-      "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer.",
+      "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; every step carries a frozen done-when the runtime keeps from moving, and a claim is graded against it as written; the brief is what the worker sees next; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer.",
   },
 );
