@@ -6193,25 +6193,8 @@ fn sync_tasks_board(state: &mut State) {
     queue_tasks_board_refresh(state, true, true);
 }
 
-#[cfg(test)]
-fn sync_tasks_board_in(state: &mut State, dir: &camino::Utf8Path) {
-    match apply_board_snapshot(state, dir) {
-        Ok(clean) => {
-            state.message = Some(if clean {
-                "synced".to_string()
-            } else {
-                "synced — sync issues found, see task detail".to_string()
-            });
-        }
-        Err(error) => {
-            state.message = Some(format!("sync failed: {error}"));
-        }
-    }
-}
-
 /// Re-reads `dir` into `state.tasks_board` and its dependents, returning
-/// whether the sync report was clean. Shared by `sync_tasks_board_in` (the
-/// `s`-keypress path, which reports "synced" on top) and
+/// whether the sync report was clean. Shared by
 /// `resync_tasks_board_after_write_in` (which must not touch
 /// `state.message`, since the write that triggered it already set the
 /// confirmation the owner needs to see).
@@ -6241,7 +6224,7 @@ fn apply_board_snapshot(state: &mut State, dir: &camino::Utf8Path) -> Result<boo
 /// already in `state.message` (e.g. "0146 marked done — …") — unlike
 /// `sync_tasks_board`, this never overwrites that message with "synced".
 /// Previously every write handler called `sync_tasks_board` right after
-/// setting its confirmation, which `sync_tasks_board_in` immediately
+/// setting its confirmation, which synchronous refresh immediately
 /// clobbered with "synced" (or, worse, "sync failed: …" on a transient
 /// re-read race), making a write that had just succeeded look like a
 /// silent no-op or an outright failure on the dashboard footer. A resync
@@ -6314,34 +6297,6 @@ fn begin_tasks_board_refresh(state: &mut State, force: bool) -> Option<u64> {
 /// worker. A pending request absorbs later ticks until its result arrives.
 fn refresh_tasks_board_if_stale(state: &mut State) {
     queue_tasks_board_refresh(state, false, false);
-}
-
-#[cfg(test)]
-fn refresh_tasks_board_if_stale_in(state: &mut State, dir: &camino::Utf8Path) {
-    let current_fingerprint = task_files::board_fingerprint(dir);
-    let stale = match (&state.tasks_board, &current_fingerprint) {
-        (Some(board), Ok(fingerprint)) => &board.fingerprint != fingerprint,
-        _ => true,
-    };
-    if !stale {
-        return;
-    }
-    match read_board_snapshot(dir) {
-        Ok(board) => {
-            if let Some(cache_root) = tasks_cache_root(state) {
-                persist_board_snapshot(&cache_root, dir, &board);
-            }
-            state.tasks_board = Some(board);
-            state.tasks_refresh_error = None;
-            rebuild_visible_tasks(state);
-            if state.screen == Screen::Tasks {
-                refresh_task_preview_for_selection(state);
-            }
-        }
-        Err(error) => {
-            state.tasks_refresh_error = Some(error);
-        }
-    }
 }
 
 /// Startup population uses only the persisted snapshot cache before the loop.
@@ -14759,6 +14714,18 @@ argv = ["git", "commit", "-m", "fixture"]
         state
     }
 
+    /// Install a board as though the worker had just returned it. Other task
+    /// action tests use this only to establish their board fixture.
+    fn seed_tasks_board(state: &mut State, dir: &camino::Utf8Path) {
+        state.tasks_refresh_generation = state.tasks_refresh_generation.wrapping_add(1);
+        state.tasks_refresh_pending = true;
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: state.tasks_refresh_generation,
+            report_sync: false,
+            result: Ok(Some(read_board_snapshot(dir).expect("board fixture"))),
+        }]);
+    }
+
     fn write_task_toml(dir: &camino::Utf8Path, file_name: &str, key: &str) {
         std::fs::write(
             dir.join(file_name).as_std_path(),
@@ -14770,63 +14737,60 @@ argv = ["git", "commit", "-m", "fixture"]
     }
 
     #[test]
-    fn tick_refresh_applies_a_changed_board() {
+    fn worker_delivered_changed_board_refresh_replaces_the_prior_snapshot() {
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
 
         write_task_toml(&dir, "0002-second.toml", "0002");
-        refresh_tasks_board_if_stale_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 2);
         assert!(state.tasks_refresh_error.is_none());
     }
 
     #[test]
-    fn tick_refresh_is_a_no_op_when_the_fingerprint_is_unchanged() {
+    fn worker_delivered_unchanged_fingerprint_leaves_the_snapshot_untouched() {
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         let captured_at = state.tasks_board.as_ref().unwrap().captured_at;
 
-        // A second sweep with nothing changed on disk must not disturb the
-        // already-captured snapshot (same fingerprint => no re-read).
-        refresh_tasks_board_if_stale_in(&mut state, &dir);
+        state.tasks_refresh_generation = state.tasks_refresh_generation.wrapping_add(1);
+        state.tasks_refresh_pending = true;
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: state.tasks_refresh_generation,
+            report_sync: false,
+            result: Ok(None),
+        }]);
         assert_eq!(state.tasks_board.as_ref().unwrap().captured_at, captured_at);
+        assert!(!state.tasks_refresh_pending);
     }
 
     #[test]
-    fn failed_re_read_keeps_the_prior_snapshot_and_sets_the_error() {
-        use std::os::unix::fs::PermissionsExt;
-
+    fn worker_delivered_refresh_failure_retains_the_prior_snapshot() {
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
 
-        let archived = dir.join("archived");
-        std::fs::create_dir_all(archived.as_std_path()).unwrap();
-        std::fs::set_permissions(
-            archived.as_std_path(),
-            std::fs::Permissions::from_mode(0o000),
-        )
-        .unwrap();
-
-        refresh_tasks_board_if_stale_in(&mut state, &dir);
-
-        // Restore permissions before any assertion can panic and leak an
-        // unreadable directory into the temp root's cleanup.
-        std::fs::set_permissions(
-            archived.as_std_path(),
-            std::fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
+        state.tasks_refresh_generation = state.tasks_refresh_generation.wrapping_add(1);
+        state.tasks_refresh_pending = true;
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: state.tasks_refresh_generation,
+            report_sync: false,
+            result: Err("worker could not read board".to_string()),
+        }]);
 
         assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
-        assert!(state.tasks_refresh_error.is_some());
+        assert_eq!(
+            state.tasks_refresh_error.as_deref(),
+            Some("worker could not read board")
+        );
+        assert!(!state.tasks_refresh_pending);
     }
 
     #[test]
@@ -14926,6 +14890,31 @@ argv = ["git", "commit", "-m", "fixture"]
         assert_eq!(state.message.as_deref(), Some("synced"));
     }
 
+    #[test]
+    fn manual_board_sync_failure_reports_only_with_its_matching_result() {
+        let mut state = state_with_scratch_cache();
+        state.tasks_refresh_generation = 4;
+        state.tasks_refresh_pending = true;
+
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: 3,
+            report_sync: true,
+            result: Err("obsolete failure".to_string()),
+        }]);
+        assert!(state.message.is_none());
+        assert!(state.tasks_refresh_pending);
+
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: 4,
+            report_sync: true,
+            result: Err("worker could not read board".to_string()),
+        }]);
+        assert_eq!(
+            state.message.as_deref(),
+            Some("sync failed: worker could not read board")
+        );
+    }
+
     // -----------------------------------------------------------------
     // 0149: `y`'s mark-done write must not have its own confirmation
     // clobbered by the resync that follows it.
@@ -14936,7 +14925,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
 
         let provider = FilesTaskBoard::open_read_write(dir.clone());
         let digest = provider.get("0001").unwrap().expect("task resolves").digest;
@@ -14976,7 +14965,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
 
         let provider = FilesTaskBoard::open_read_write(dir.clone());
         let digest = provider.get("0001").unwrap().expect("task resolves").digest;
@@ -15019,7 +15008,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         assert!(
             state.task_proposals.is_empty(),
             "no run inventory was joined, so no proposal should be derived"
@@ -15048,7 +15037,7 @@ argv = ["git", "commit", "-m", "fixture"]
         )
         .unwrap();
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         assert!(
             state.task_proposals.is_empty(),
             "no run inventory was joined, so no proposal should be derived"
@@ -15081,7 +15070,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
 
         apply_task_mark_done_in(
             &mut state,
@@ -15192,7 +15181,7 @@ argv = ["git", "commit", "-m", "fixture"]
             "[[checks]]\nname = \"t\"\ncommand = \"true\"\n",
         );
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &board_dir);
+        seed_tasks_board(&mut state, &board_dir);
         select_task_row(&mut state, "0001");
         insert_proposal(&mut state, "0001", &sha);
 
@@ -15233,7 +15222,7 @@ argv = ["git", "commit", "-m", "fixture"]
             "[[checks]]\nname = \"t\"\ncommand = \"false\"\n",
         );
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &board_dir);
+        seed_tasks_board(&mut state, &board_dir);
         select_task_row(&mut state, "0001");
         insert_proposal(&mut state, "0001", &sha);
 
@@ -15291,7 +15280,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let (repo_root, sha) = scratch_git_repo();
         write_task_toml_with_checks(&board_dir, "0001-first.toml", "0001", "merge", "");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &board_dir);
+        seed_tasks_board(&mut state, &board_dir);
         select_task_row(&mut state, "0001");
         insert_proposal(&mut state, "0001", &sha);
 
@@ -15363,7 +15352,7 @@ argv = ["git", "commit", "-m", "fixture"]
         write_task_toml(&dir, "0001-first.toml", "0001");
         write_task_toml(&dir, "0002-second.toml", "0002");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
 
         let index = state
             .tasks_visible
@@ -15377,7 +15366,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let doc_0001 =
             "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"title 0001\"\nstatus = \"done\"\n";
         std::fs::write(dir.join("0001-first.toml").as_std_path(), doc_0001).unwrap();
-        refresh_tasks_board_if_stale_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
 
         match state.tasks_visible.get(state.list_tasks.selected()) {
             Some(TaskVisibleRow::Task(key)) => assert_eq!(key, "0002"),
@@ -15473,7 +15462,7 @@ argv = ["git", "commit", "-m", "fixture"]
         let dir = tasks_board_tempdir();
         write_task_toml(&dir, "0001-first.toml", "0001");
         let mut state = state_with_scratch_cache();
-        sync_tasks_board_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
         assert_eq!(
             task_group(
                 state.tasks_board.as_ref().unwrap().summaries[0].derived_status,
@@ -15487,7 +15476,7 @@ argv = ["git", "commit", "-m", "fixture"]
             "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"title 0001\"\nstatus = \"done\"\n",
         )
         .unwrap();
-        refresh_tasks_board_if_stale_in(&mut state, &dir);
+        seed_tasks_board(&mut state, &dir);
 
         let summary = &state.tasks_board.as_ref().unwrap().summaries[0];
         assert_eq!(summary.derived_status, DerivedStatus::Done);
