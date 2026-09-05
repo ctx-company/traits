@@ -86,6 +86,40 @@ const MAX_KEY_BATCH: usize = 128;
 /// inlined) so tightening it later is a one-line change.
 const RELOAD_WARN_THRESHOLD: Duration = Duration::from_millis(50);
 
+#[cfg(debug_assertions)]
+static RENDERER_THREAD: std::sync::Mutex<Option<std::thread::ThreadId>> =
+    std::sync::Mutex::new(None);
+
+/// Records the TUI thread so shared I/O helpers catch accidental renderer use.
+fn register_renderer_thread() {
+    #[cfg(debug_assertions)]
+    {
+        *RENDERER_THREAD
+            .lock()
+            .expect("renderer thread lock poisoned") = Some(std::thread::current().id());
+    }
+}
+
+fn assert_off_renderer_thread() {
+    #[cfg(debug_assertions)]
+    {
+        let renderer_thread = *RENDERER_THREAD
+            .lock()
+            .expect("renderer thread lock poisoned");
+        debug_assert_ne!(Some(std::thread::current().id()), renderer_thread);
+    }
+}
+
+#[cfg(test)]
+fn set_renderer_thread_for_test(renderer_thread: Option<std::thread::ThreadId>) {
+    #[cfg(debug_assertions)]
+    {
+        *RENDERER_THREAD
+            .lock()
+            .expect("renderer thread lock poisoned") = renderer_thread;
+    }
+}
+
 // Narrow-terminal degradation thresholds (P506 §3.2): below `left_min +
 // right_min`, a screen's pane tree collapses to the list alone — `PaneTree`
 // itself deliberately has no floor/cap policy (`tui_panes.rs`'s own doc), so
@@ -2690,6 +2724,7 @@ fn build_story_view(
     session: ctx_traits_core::procedure::session::Session,
     ledger_path: &camino::Utf8Path,
 ) -> crate::Result<StoryView> {
+    assert_off_renderer_thread();
     let plan = super::story::load_plan(&session);
     let activity = super::story::load_activity(ledger_path);
     let report =
@@ -3261,6 +3296,7 @@ fn run_with_initial_session(
     // every tree (even the narrow-terminal single-leaf one) includes; the
     // first `draw_screen` call reconciles it against the real tree.
     let mut last_reload = std::time::Instant::now();
+    register_renderer_thread();
     while !state.quit && !pane.detached() {
         if let Some(request) = state.attach_request.take() {
             // P081: tears down this process's own alt-screen pane before the
@@ -4730,6 +4766,7 @@ pub(super) fn merge_produced(
     worktree_path: &camino::Utf8Path,
     branch: Option<&str>,
 ) -> Option<MergeProduced> {
+    assert_off_renderer_thread();
     let branch = branch?;
     let repo_root = ctx_traits_io::repository::discover_repo_root().ok()?;
     let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
@@ -6365,6 +6402,7 @@ fn wall_clock_now_secs() -> u64 {
 /// One worker-owned board read: `list` + `get` per key + `sync`, plus the
 /// fingerprint the renderer will supply on its next request.
 fn read_board_snapshot(dir: &camino::Utf8Path) -> Result<TasksBoardSnapshot, String> {
+    assert_off_renderer_thread();
     let provider = FilesTaskBoard::open_read(dir.to_owned());
     // One loader contract for worker requests and test fixtures: it must
     // include archived done tasks like the reconcile path already does.
@@ -6376,7 +6414,7 @@ fn read_board_snapshot(dir: &camino::Utf8Path) -> Result<TasksBoardSnapshot, Str
         }
     }
     let sync_report = provider.sync().unwrap_or_default();
-    let fingerprint = task_files::board_fingerprint(dir).map_err(|error| error.to_string())?;
+    let fingerprint = board_fingerprint(dir).map_err(|error| error.to_string())?;
     Ok(TasksBoardSnapshot {
         summaries,
         resolved,
@@ -6384,6 +6422,11 @@ fn read_board_snapshot(dir: &camino::Utf8Path) -> Result<TasksBoardSnapshot, Str
         captured_at: wall_clock_now_secs(),
         fingerprint,
     })
+}
+
+pub(super) fn board_fingerprint(dir: &camino::Utf8Path) -> Result<BoardFingerprint, String> {
+    assert_off_renderer_thread();
+    task_files::board_fingerprint(dir).map_err(|error| error.to_string())
 }
 
 /// The persisted snapshot's cache root: `state.tasks_cache_root` if a test
@@ -6938,6 +6981,7 @@ fn task_mark_done_modal_payload_in(
 fn task_reconcile_modal_payload(
     _request: worker::TaskReconcileRequest,
 ) -> Result<ReconcileModalPayload, String> {
+    assert_off_renderer_thread();
     let dir = super::tasks::board_dir(None).map_err(|error| error.to_string())?;
     let provider = FilesTaskBoard::open_read(dir);
     let summaries = provider.list(true).map_err(|error| error.to_string())?;
@@ -7108,6 +7152,7 @@ fn task_digest_payload(key: &str) -> Result<String, String> {
 }
 
 fn fetch_task_digest_in(dir: &camino::Utf8Path, key: &str) -> crate::Result<String> {
+    assert_off_renderer_thread();
     let provider = FilesTaskBoard::open_read(dir.to_owned());
     let resolved = provider
         .get(key)
@@ -16195,5 +16240,16 @@ fn dashboard_guide_tokens_compact_labels_survive_token_column_width() {
     assert_eq!(
         list_field(&dashboard_tokens_text(Some(&usage)), 15),
         "W:1k N:1k G:1k "
+    );
+}
+#[cfg(debug_assertions)]
+#[test]
+fn renderer_thread_guard_rejects_a_registered_thread() {
+    set_renderer_thread_for_test(Some(std::thread::current().id()));
+    let result = std::panic::catch_unwind(assert_off_renderer_thread);
+    set_renderer_thread_for_test(None);
+    assert!(
+        result.is_err(),
+        "the registered renderer must not read I/O helpers"
     );
 }

@@ -6,13 +6,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
     AttachedView, DashboardSnapshot, MergeProduced, MergeRow, Screen, SessionPreviewRequest, State,
-    TasksBoardSnapshot, build_attached_view, merge_produced, persist_board_snapshot,
-    read_board_snapshot, refresh_attached_view, resolve_merge_worktree_path, sessions_cache,
-    sessions_cache_root,
+    TasksBoardSnapshot, board_fingerprint, build_attached_view, merge_produced,
+    persist_board_snapshot, read_board_snapshot, refresh_attached_view,
+    resolve_merge_worktree_path, sessions_cache, sessions_cache_root,
 };
 
 use ctx_traits_io::center::{ControlAction, StartResult};
-use ctx_traits_io::task_files::{self, BoardFingerprint};
+use ctx_traits_io::task_files::BoardFingerprint;
 
 pub(super) type RefreshResult = Result<Arc<DashboardSnapshot>, String>;
 pub(super) type PreviewResult = AttachedView;
@@ -1109,8 +1109,7 @@ fn refresh_board(request: BoardRefreshRequest) -> BoardRefreshResult {
     let result = (|| {
         if !request.force
             && let Some(last_known) = &request.last_known_fingerprint
-            && task_files::board_fingerprint(&request.board_dir)
-                .map_err(|error| error.to_string())?
+            && board_fingerprint(&request.board_dir).map_err(|error| error.to_string())?
                 == *last_known
         {
             return Ok(None);
@@ -1130,6 +1129,7 @@ fn refresh_board(request: BoardRefreshRequest) -> BoardRefreshResult {
 }
 
 fn story_view(request: StoryViewRequest) -> StoryViewResult {
+    super::assert_off_renderer_thread();
     let session_id = request.session_id.clone();
     let result = (|| {
         let session =
@@ -1151,6 +1151,7 @@ fn story_view(request: StoryViewRequest) -> StoryViewResult {
 }
 
 fn answer_question(request: AnswerQuestionRequest) -> AnswerQuestionResult {
+    super::assert_off_renderer_thread();
     let session_id = request.session_id.clone();
     let result = (|| {
         let session =
