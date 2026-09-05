@@ -363,6 +363,14 @@ pub fn global_cache_root(repo_key: &str) -> crate::Result<Utf8PathBuf> {
     Ok(global_trait_root()?.join("cache").join(repo_key))
 }
 
+/// Machine-wide dashboard sessions cache, separate from the `<slug>-<8hex>`
+/// repository-key namespace under `cache/`.
+pub fn global_sessions_cache_root() -> crate::Result<Utf8PathBuf> {
+    Ok(global_trait_root()?
+        .join("cache")
+        .join("__machine-sessions"))
+}
+
 /// Shared build-slot root for a repository and all of its linked worktrees.
 pub fn build_slots_root(repo_root: &Utf8Path) -> crate::Result<Utf8PathBuf> {
     let main_root = crate::repository::discover_main_repo_root(repo_root)?;

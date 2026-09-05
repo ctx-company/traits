@@ -1034,6 +1034,10 @@ struct State {
     /// set this to a scratch directory so `cargo test` never touches
     /// `~/.config/ctx/cache`.
     tasks_cache_root: Option<camino::Utf8PathBuf>,
+    /// Override for the machine-wide SESSIONS/MERGES snapshot cache root.
+    /// Tests set this to a scratch directory so they never access the user's
+    /// persisted cache.
+    sessions_cache_root: Option<camino::Utf8PathBuf>,
     /// TASKS' visible list projection (group headers + task rows), mirroring
     /// [`State::sessions_visible`]/[`rebuild_visible_sessions`] — rebuilt on
     /// every sync and every collapse toggle, never in the draw path.
@@ -1130,6 +1134,9 @@ struct State {
     /// True after the renderer has accepted one complete worker snapshot.
     /// Refreshes after that point retain the existing view while work runs.
     has_snapshot: bool,
+    /// True when compatible persisted SESSIONS/MERGES rows seeded this state
+    /// before the worker's first live snapshot.
+    cache_seeded: bool,
     loading: bool,
     /// The most recent refresh failure. It remains visible until a later
     /// complete snapshot arrives, without replacing the prior snapshot.
@@ -1223,6 +1230,7 @@ fn fail_center_projection_for_row(worker: &str, ledger_path: &str, title: &str) 
 impl State {
     fn new() -> Self {
         let mut state = Self::new_without_worker_for_session(None);
+        seed_sessions_from_cache(&mut state);
         state.worker = Some(worker::Handle::new());
         load_tasks_board_at_startup(&mut state);
         state
@@ -1234,6 +1242,7 @@ impl State {
     ) -> Self {
         let mut state =
             Self::new_without_worker_for_session_with_guide(Some(session_id), guide_chat);
+        seed_sessions_from_cache(&mut state);
         state.worker = Some(worker::Handle::new());
         load_tasks_board_at_startup(&mut state);
         state
@@ -1282,6 +1291,7 @@ impl State {
             tasks_board: None,
             tasks_refresh_error: None,
             tasks_cache_root: None,
+            sessions_cache_root: None,
             tasks_visible: Vec::new(),
             collapsed_task_groups: HashSet::from([TaskGroup::Done]),
             task_preview: None,
@@ -1313,6 +1323,7 @@ impl State {
             reload_duration: None,
             worker: None,
             has_snapshot: false,
+            cache_seeded: false,
             loading: false,
             refresh_error: None,
             story_view: None,
@@ -6080,6 +6091,39 @@ fn tasks_cache_root(state: &State) -> Option<camino::Utf8PathBuf> {
     ctx_traits_io::state::current_global_cache_root().ok()
 }
 
+/// The SESSIONS/MERGES cache root: a scratch override in tests, otherwise the
+/// reserved machine-wide cache location.
+fn sessions_cache_root(state: &State) -> Option<camino::Utf8PathBuf> {
+    if let Some(root) = &state.sessions_cache_root {
+        return Some(root.clone());
+    }
+    ctx_traits_io::state::global_sessions_cache_root().ok()
+}
+
+/// Seeds the initial dashboard frame only from a current-repository snapshot.
+/// Any unavailable, malformed, foreign, or all-repositories record remains a
+/// silent miss until the worker supplies live rows.
+fn seed_sessions_from_cache(state: &mut State) {
+    let Some(cache_root) = sessions_cache_root(state) else {
+        return;
+    };
+    let Some(record) = sessions_cache::read_snapshot(&cache_root) else {
+        return;
+    };
+    let Ok(repo_key) = ctx_traits_io::state::current_repo_key() else {
+        return;
+    };
+    if record.all_repos || record.repo_key != repo_key {
+        return;
+    }
+
+    state.sessions = record.sessions;
+    state.merges = record.merges;
+    state.cache_seeded = true;
+    rebuild_visible_sessions(state);
+    state.list_merges.set_len(state.merges.len());
+}
+
 /// Persist `board` to `cache_root` (0063.7). Best-effort: a write failure
 /// never surfaces to the user — the cache is derived evidence, not
 /// authority, and the in-memory board just read is what the screen renders
@@ -8514,8 +8558,17 @@ fn footer_line(state: &State) -> Paragraph<'static> {
                 .err()
                 .map(|message| explanation_task_text(message, started.elapsed()))
         });
-    let task = if (state.loading && !state.has_snapshot) || state.preview_pending {
+    let task = if state.preview_pending {
         Some("loading...".to_string())
+    } else if state.loading && !state.has_snapshot {
+        Some(
+            if state.cache_seeded {
+                "syncing..."
+            } else {
+                "loading..."
+            }
+            .to_string(),
+        )
     } else if let Some(error) = state.refresh_error.as_deref() {
         Some(format!("stale: {error}"))
     } else if let Some(task) = generated_task.as_deref() {
@@ -8864,11 +8917,103 @@ mod tests {
         state.loading = true;
         assert!(format!("{:?}", footer_line(&state)).contains("loading..."));
 
+        state.cache_seeded = true;
+        let seeded = format!("{:?}", footer_line(&state));
+        assert!(seeded.contains("syncing..."));
+        assert!(!seeded.contains("loading..."));
+
         state.has_snapshot = true;
         assert!(!format!("{:?}", footer_line(&state)).contains("loading..."));
 
         state.preview_pending = true;
         assert!(format!("{:?}", footer_line(&state)).contains("loading..."));
+    }
+
+    fn sessions_cache_tempdir() -> camino::Utf8PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "dashboard-sessions-cache-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        camino::Utf8PathBuf::from_path_buf(dir).unwrap()
+    }
+
+    #[test]
+    fn compatible_sessions_cache_seeds_the_first_dashboard_frame() {
+        let cache_root = sessions_cache_tempdir();
+        let repo_key = ctx_traits_io::state::current_repo_key().expect("repository key");
+        let cached_session = row_with_id("cached", SessionClass::Live);
+        let cached_merge = merges_test_row("cached", MergeClass::Mergeable);
+        let record = sessions_cache::SessionsSnapshotRecord::new(
+            1_000,
+            repo_key,
+            false,
+            vec![cached_session],
+            vec![cached_merge],
+        );
+        sessions_cache::write_snapshot(&cache_root, &record).expect("write warm cache");
+
+        let mut state = State::new_without_worker();
+        state.sessions_cache_root = Some(cache_root);
+        seed_sessions_from_cache(&mut state);
+
+        assert!(state.cache_seeded);
+        assert!(!state.has_snapshot);
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(state.merges.len(), 1);
+        assert_eq!(state.list_merges.position_text(), "1/1");
+        assert!(
+            state
+                .sessions_visible
+                .iter()
+                .any(|row| matches!(row, VisibleRow::Session(0)))
+        );
+        state.loading = true;
+        assert!(format!("{:?}", footer_line(&state)).contains("syncing..."));
+    }
+
+    #[test]
+    fn absent_sessions_cache_keeps_the_empty_start() {
+        let mut state = State::new_without_worker();
+        state.sessions_cache_root = Some(sessions_cache_tempdir());
+        seed_sessions_from_cache(&mut state);
+
+        assert!(!state.cache_seeded);
+        assert!(!state.has_snapshot);
+        assert!(state.sessions.is_empty());
+        assert!(state.merges.is_empty());
+        assert_eq!(state.list_merges.position_text(), "0/0");
+        assert_eq!(state.sessions_visible.len(), 0);
+    }
+
+    #[test]
+    fn incompatible_sessions_cache_scope_keeps_the_empty_start() {
+        let current_repo = ctx_traits_io::state::current_repo_key().expect("repository key");
+        for (repo_key, all_repos) in [
+            (format!("{current_repo}-other"), false),
+            (current_repo, true),
+        ] {
+            let cache_root = sessions_cache_tempdir();
+            let record = sessions_cache::SessionsSnapshotRecord::new(
+                1_000,
+                repo_key,
+                all_repos,
+                vec![row_with_id("foreign", SessionClass::Live)],
+                vec![merges_test_row("foreign", MergeClass::Mergeable)],
+            );
+            sessions_cache::write_snapshot(&cache_root, &record).expect("write scoped cache");
+
+            let mut state = State::new_without_worker();
+            state.sessions_cache_root = Some(cache_root);
+            seed_sessions_from_cache(&mut state);
+
+            assert!(!state.cache_seeded);
+            assert!(state.sessions.is_empty());
+            assert!(state.merges.is_empty());
+        }
     }
 
     #[test]
